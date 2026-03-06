@@ -2,18 +2,24 @@ import os
 import base64
 from contextlib import asynccontextmanager
 from datetime import datetime
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from telegram import Update
 from models import FileRequest, FileResponse
 from extractor import extract_cbd_data
 from filer import file_cbd_to_kaizen
 from credentials import init_db
+from bot import build_application
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    bot_application = build_application()
+    await bot_application.initialize()
+    app.state.bot_application = bot_application
     yield
+    await bot_application.shutdown()
 
 
 app = FastAPI(title="Portfolio Guru API", version="0.2.0", lifespan=lifespan)
@@ -29,6 +35,14 @@ app.add_middleware(
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "portfolio-guru"}
+
+
+@app.post("/webhook")
+async def webhook(request: Request):
+    data = await request.json()
+    update = Update.de_json(data, app.state.bot_application.bot)
+    await app.state.bot_application.process_update(update)
+    return {"ok": True}
 
 
 @app.post("/api/file", response_model=FileResponse)

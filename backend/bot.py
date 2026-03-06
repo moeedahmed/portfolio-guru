@@ -160,13 +160,13 @@ async def handle_case(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await ack.edit_text(msg)
 
 
-def main():
-    init_db()
+def build_application() -> Application:
+    """Build and return the Telegram bot Application with all handlers registered."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN env var not set")
 
-    app = Application.builder().token(token).build()
+    application = Application.builder().token(token).build()
 
     # /setup conversation
     setup_conv = ConversationHandler(
@@ -178,14 +178,9 @@ def main():
         fallbacks=[CommandHandler("cancel", setup_cancel)],
     )
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("status", status))
-    app.add_handler(setup_conv)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_case))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("status", status))
+    application.add_handler(setup_conv)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_case))
 
-    logger.info("Portfolio Guru bot starting...")
-    app.run_polling(drop_pending_updates=True)
-
-
-if __name__ == "__main__":
-    main()
+    return application
