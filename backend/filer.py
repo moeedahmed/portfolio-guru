@@ -25,7 +25,7 @@ async def file_cbd_to_kaizen(
     """
     from browser_use import Agent
     from browser_use.browser import BrowserProfile, BrowserSession
-    from browser_use.llm import ChatAnthropic as BUChatAnthropic
+    from langchain_google_genai import ChatGoogleGenerativeAI
 
     action_log: List[ActionStep] = []
     screenshot_b64: Optional[str] = None
@@ -111,9 +111,9 @@ CRITICAL RULES:
     browser_profile = BrowserProfile(headless=True)
     browser_session = BrowserSession(browser_profile=browser_profile)
 
-    llm = BUChatAnthropic(
-        model="claude-opus-4-5",
-        api_key=os.environ.get("ANTHROPIC_API_KEY"),
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-2.0-flash",
+        google_api_key=os.environ.get("GOOGLE_API_KEY"),
     )
 
     agent = Agent(
