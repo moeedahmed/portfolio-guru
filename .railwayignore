@@ -1,0 +1,5 @@
+backend/.venv
+backend/__pycache__
+backend/*.pyc
+backend/portfolio_guru.db
+*.log

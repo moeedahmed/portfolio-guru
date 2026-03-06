@@ -1,36 +1,44 @@
-# TASK.md — Portfolio Guru Phase 1
+# TASK.md — Portfolio Guru Phase 2
 
-## Objective
-Build the Portfolio Guru filing engine. Text description of a clinical case → LLM extracts structured CBD data → browser-use logs into Kaizen → fills CBD form → saves as draft → returns screenshot proof.
+## Context
+Read CLAUDE.md first. Phase 1 built the FastAPI filing engine. Phase 2 adds the Telegram bot
+layer and upgrades the extraction/filing engine with real Kaizen field mappings.
 
-Phase 1 is backend only. No frontend. Validate the engine works end-to-end.
-
-## Read CLAUDE.md first for project context and credentials pattern.
+## Decisions (locked — do not change)
+- Default stage of training: "Higher/ST4-ST6"
+- Curriculum Links: always infer best match from case content — never leave blank unless truly impossible
+- Credentials: Fernet-encrypted, stored in SQLite keyed by telegram_user_id
+- Bot: new standalone bot (token will be in TELEGRAM_BOT_TOKEN env var)
+- Hosting target: Railway (Docker)
 
 ---
 
-## Step 1: models.py
+## Task 1 — Upgrade models.py
 
-Create `backend/models.py` with these Pydantic models:
+Replace the existing CBDData model with the upgraded version. Add new models.
 
 ```python
 from pydantic import BaseModel
-from typing import Optional, List, Any
+from typing import Optional, List, Literal
 
 class CBDData(BaseModel):
-    patient_age: str
-    patient_presentation: str   # presenting complaint / chief complaint
-    clinical_setting: str       # e.g. "Emergency Department - Resus"
-    trainee_role: str           # e.g. "Primary clinician with indirect supervision"
-    clinical_reasoning: str     # what the trainee thought/did/why
-    learning_points: str        # what was learned from this case
-    level_of_supervision: str   # "Direct" | "Indirect" | "Distant"
-    supervisor_name: Optional[str] = None
-    date_of_encounter: str      # ISO date string YYYY-MM-DD
+    form_type: Literal["CBD"] = "CBD"
+    date_of_encounter: str           # YYYY-MM-DD
+    patient_age: str                 # e.g. "45-year-old"
+    patient_presentation: str        # chief complaint
+    clinical_setting: str            # e.g. "Emergency Department - Resus"
+    stage_of_training: str           # "Intermediate/ST3" | "Higher/ST4-ST6" | "PEM" | "ACCS"
+    trainee_role: str                # what the trainee did
+    clinical_reasoning: str          # maps to "Case to be discussed" field
+    reflection: str                  # maps to "Reflection of event" field
+    level_of_supervision: str        # "Direct" | "Indirect" | "Distant"
+    supervisor_name: Optional[str] = None   # name or email
+    curriculum_links: List[str] = []        # SLO labels e.g. ["SLO3", "SLO6"]
 
 class FileRequest(BaseModel):
     case_description: str
-    dry_run: bool = False       # if True: extract only, no browser
+    telegram_user_id: Optional[int] = None  # if set, fetch creds from credential store
+    dry_run: bool = False
 
 class ActionStep(BaseModel):
     step: int
@@ -39,451 +47,614 @@ class ActionStep(BaseModel):
     detail: Optional[str] = None
 
 class FileResponse(BaseModel):
-    status: str                 # "success" | "partial" | "failed" | "dry_run"
+    status: str   # "success" | "partial" | "failed" | "dry_run"
     extracted_data: Optional[CBDData] = None
     action_log: List[ActionStep] = []
     screenshot_url: Optional[str] = None
     error: Optional[str] = None
+    assessor_warning: Optional[str] = None  # set if assessor lookup failed
 ```
 
 ---
 
-## Step 2: config.py
+## Task 2 — Upgrade extractor.py
 
-Create `backend/config.py`:
+Replace extract_cbd_data() with upgraded version that returns the new CBDData schema.
 
-```python
-import os
-import subprocess
-import json
+Key changes:
+- Add stage_of_training to extracted fields (default: "Higher/ST4-ST6" if not inferable)
+- Rename learning_points → reflection (maps to Kaizen "Reflection of event" field)
+- Add curriculum_links extraction
 
-KAIZEN_USERNAME_ID = "6e14d32b-6fff-480d-87b0-b3f300ee30f6"
-KAIZEN_PASSWORD_ID = "f311d41a-fa77-44f8-be42-b3f300ee3e08"
+The SLO inference rules (include in system prompt):
+```
+Curriculum Links — select the most relevant SLOs from this list (pick 1-3):
+SLO1: Managing stable patients with undifferentiated presentations
+SLO2: Formulating clinical questions and finding answers
+SLO3: Resuscitating and stabilising patients
+SLO4: Managing patients with injuries
+SLO5: Managing children and young people
+SLO6: Performing procedural skills
+SLO7: Managing complex situations
+SLO8: Leading a shift
+SLO9: Supervising and educating others
+SLO10: Conducting research and managing data
+SLO11: Improving quality and patient safety
+SLO12: Leading and managing the department
 
-def get_bws_secret(secret_id: str) -> str:
-    """Fetch a secret from Bitwarden Secrets Manager."""
-    bws_token_path = os.path.expanduser("~/.openclaw/.bws-token")
-    
-    # In production (Railway), BWS_ACCESS_TOKEN is set as env var
-    bws_token = os.environ.get("BWS_ACCESS_TOKEN")
-    if not bws_token and os.path.exists(bws_token_path):
-        with open(bws_token_path) as f:
-            bws_token = f.read().strip()
-    
-    if not bws_token:
-        raise ValueError("BWS_ACCESS_TOKEN not available")
-    
-    result = subprocess.run(
-        ["/usr/local/bin/bws", "secret", "get", secret_id, "--output", "json"],
-        env={**os.environ, "BWS_ACCESS_TOKEN": bws_token},
-        capture_output=True, text=True, check=True
-    )
-    return json.loads(result.stdout)["value"]
-
-def get_kaizen_credentials() -> tuple[str, str]:
-    """Returns (username, password) for Kaizen."""
-    username = os.environ.get("KAIZEN_USERNAME") or get_bws_secret(KAIZEN_USERNAME_ID)
-    password = os.environ.get("KAIZEN_PASSWORD") or get_bws_secret(KAIZEN_PASSWORD_ID)
-    return username, password
+Inference rules:
+- Resus/arrest/critical care → SLO3
+- Paediatric case → SLO5
+- Procedure performed → SLO6
+- Trauma/injury → SLO4
+- Teaching/supervision → SLO9
+- Quality improvement/audit → SLO11
+- Management/leadership → SLO8 or SLO12
+- Diagnostic uncertainty / stable presentations → SLO1 or SLO2
+Return SLO labels only (e.g. ["SLO3", "SLO4"]) — max 3.
 ```
 
----
-
-## Step 3: extractor.py
-
-Create `backend/extractor.py`:
-
-Use the Anthropic SDK (anthropic package) with claude-haiku-4-5.
-Make a structured extraction call that takes the raw case description and returns a CBDData object.
-
-The system prompt should instruct the LLM to:
-- Extract structured data from a doctor's free-text clinical case description
-- Return ONLY valid JSON matching the CBDData schema
-- For any field not mentioned in the text, make a reasonable inference or use "Not specified"
-- For date_of_encounter: if not mentioned, use today's date (ISO format)
-- For level_of_supervision: infer from context (junior doctor = likely Direct; senior = Indirect/Distant)
-- Never fabricate clinical details — only extract or note as unspecified
-
-Use instructor or json_repair for robust JSON parsing from LLM output.
-If instructor is not available, use raw JSON parsing with a fallback retry.
-
-Return CBDData on success. Raise a clear ValueError with missing fields on failure.
-
-```python
-import anthropic
-import json
-import os
-from datetime import date
-from models import CBDData
-
-def extract_cbd_data(case_description: str) -> CBDData:
-    """Extract structured CBD data from free-text case description."""
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-    
-    system_prompt = """You are a medical portfolio assistant. Extract structured data from a doctor's clinical case description for a Case-Based Discussion (CBD) WPBA entry.
-
-Return ONLY a JSON object with these exact fields:
+The updated JSON schema to extract:
+```json
 {
-  "patient_age": "age as string e.g. '45-year-old'",
-  "patient_presentation": "presenting complaint / chief complaint",
-  "clinical_setting": "e.g. 'Emergency Department - Resus', 'Majors', 'Minors'",
-  "trainee_role": "e.g. 'Primary clinician with indirect supervision'",
-  "clinical_reasoning": "what the trainee thought, investigated, and did — and why",
-  "learning_points": "what was learned from this case",
-  "level_of_supervision": "Direct" or "Indirect" or "Distant",
-  "supervisor_name": null or "Name if mentioned",
-  "date_of_encounter": "YYYY-MM-DD — today if not mentioned"
+  "form_type": "CBD",
+  "date_of_encounter": "YYYY-MM-DD",
+  "patient_age": "...",
+  "patient_presentation": "...",
+  "clinical_setting": "...",
+  "stage_of_training": "Higher/ST4-ST6",
+  "trainee_role": "...",
+  "clinical_reasoning": "...",
+  "reflection": "...",
+  "level_of_supervision": "Direct|Indirect|Distant",
+  "supervisor_name": null,
+  "curriculum_links": ["SLO3"]
 }
-
-Rules:
-- Extract only what is stated or clearly implied. Do not fabricate clinical details.
-- For unspecified fields, use a reasonable placeholder like "Not specified in description".
-- Today's date: """ + str(date.today()) + """
-- Return ONLY the JSON. No explanation."""
-
-    message = client.messages.create(
-        model="claude-haiku-4-5",
-        max_tokens=1024,
-        system=system_prompt,
-        messages=[{"role": "user", "content": case_description}]
-    )
-    
-    raw = message.content[0].text.strip()
-    # Strip markdown code fences if present
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    raw = raw.strip()
-    
-    data = json.loads(raw)
-    return CBDData(**data)
 ```
+
+Keep the retry-on-parse-failure logic from Phase 1.
 
 ---
 
-## Step 4: filer.py
+## Task 3 — Create credentials.py
 
-This is the critical module. Use browser-use to automate Kaizen.
+New file: `backend/credentials.py`
 
-Install: `pip install browser-use`
-browser-use uses Playwright and an LLM to navigate the browser.
+Fernet-encrypted credential store using SQLite (via SQLModel).
 
 ```python
-import asyncio
+"""
+Credential store for Portfolio Guru.
+Stores Kaizen username/password encrypted with Fernet, keyed by telegram_user_id.
+"""
 import os
-import base64
+from typing import Optional
 from datetime import datetime
-from typing import List, Optional
-from models import CBDData, ActionStep
-from config import get_kaizen_credentials
+from cryptography.fernet import Fernet
+from sqlmodel import Field, Session, SQLModel, create_engine, select
 
-async def file_cbd_to_kaizen(cbd_data: CBDData) -> tuple[str, List[ActionStep], Optional[str]]:
-    """
-    File a CBD entry to Kaizen using browser-use.
-    
-    Returns: (status, action_log, screenshot_base64)
-    status: "success" | "partial" | "failed"
-    """
-    from browser_use import Agent, Browser, BrowserConfig
-    from langchain_anthropic import ChatAnthropic
-    
-    username, password = get_kaizen_credentials()
-    action_log: List[ActionStep] = []
-    screenshot_b64: Optional[str] = None
-    
-    # Build the task description for the browser-use agent
-    task = f"""
-    Complete the following steps on the Kaizen ePortfolio website (https://eportfolio.rcem.ac.uk):
-    
-    1. Go to https://eportfolio.rcem.ac.uk and log in with:
-       - Username: {username}
-       - Password: {password}
-    
-    2. Navigate to create a new Case-Based Discussion (CBD) assessment/entry.
-       Look for "New Entry", "Add Entry", "CBD", or similar in the navigation.
-    
-    3. Fill in the CBD form with these values:
-       - Patient age / details: {cbd_data.patient_age}
-       - Presenting complaint: {cbd_data.patient_presentation}
-       - Clinical setting: {cbd_data.clinical_setting}
-       - Your role: {cbd_data.trainee_role}
-       - Clinical reasoning / discussion: {cbd_data.clinical_reasoning}
-       - Learning points: {cbd_data.learning_points}
-       - Level of supervision: {cbd_data.level_of_supervision}
-       - Date of encounter: {cbd_data.date_of_encounter}
-       {f"- Supervisor name: {cbd_data.supervisor_name}" if cbd_data.supervisor_name else "- Leave supervisor field blank or as 'TBC'"}
-    
-    4. IMPORTANT: Save as DRAFT only. Do NOT submit. Do NOT send to supervisor.
-       Look for a "Save as Draft", "Save Draft", or "Save" button (not "Submit" or "Send").
-    
-    5. After saving, take a screenshot of the saved draft confirmation page.
-    
-    CRITICAL RULES:
-    - Never click Submit or Send to Supervisor
-    - If you cannot find the CBD form, report exactly what you see on the navigation menu
-    - If a field doesn't exist exactly as described, find the closest matching field
-    - If you see a CAPTCHA or MFA challenge, stop and report it
-    """
-    
-    browser_config = BrowserConfig(headless=True)
-    browser = Browser(config=browser_config)
-    
-    llm = ChatAnthropic(
-        model="claude-opus-4-5",  # Use Opus for reliable browser navigation
-        api_key=os.environ.get("ANTHROPIC_API_KEY")
-    )
-    
-    agent = Agent(
-        task=task,
-        llm=llm,
-        browser=browser,
-    )
-    
-    try:
-        result = await agent.run(max_steps=30)
-        
-        # Extract action history from result
-        # browser-use result contains action history
-        if hasattr(result, 'history'):
-            for i, step in enumerate(result.history):
-                action_log.append(ActionStep(
-                    step=i+1,
-                    action=str(step.model_output) if hasattr(step, 'model_output') else str(step),
-                    success=True
-                ))
-        
-        # Take final screenshot
-        try:
-            page = await browser.get_current_page()
-            screenshot_bytes = await page.screenshot(full_page=False)
-            screenshot_b64 = base64.b64encode(screenshot_bytes).decode()
-        except Exception as ss_err:
-            pass
-        
-        # Check if draft was saved (look for success indicators in result)
-        result_str = str(result).lower()
-        if any(word in result_str for word in ['draft', 'saved', 'success', 'created']):
-            status = "success"
+
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./portfolio_guru.db")
+FERNET_KEY = os.environ.get("FERNET_SECRET_KEY", "").encode()
+
+engine = create_engine(DATABASE_URL)
+
+
+class UserCredential(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    telegram_user_id: int = Field(unique=True, index=True)
+    kaizen_username_enc: bytes
+    kaizen_password_enc: bytes
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+def init_db():
+    SQLModel.metadata.create_all(engine)
+
+
+def _fernet() -> Fernet:
+    if not FERNET_KEY:
+        raise ValueError("FERNET_SECRET_KEY env var not set")
+    return Fernet(FERNET_KEY)
+
+
+def store_credentials(telegram_user_id: int, username: str, password: str) -> None:
+    """Encrypt and store credentials for a user. Upsert."""
+    f = _fernet()
+    enc_user = f.encrypt(username.encode())
+    enc_pass = f.encrypt(password.encode())
+    with Session(engine) as session:
+        existing = session.exec(
+            select(UserCredential).where(UserCredential.telegram_user_id == telegram_user_id)
+        ).first()
+        if existing:
+            existing.kaizen_username_enc = enc_user
+            existing.kaizen_password_enc = enc_pass
+            existing.updated_at = datetime.utcnow()
+            session.add(existing)
         else:
-            status = "partial"
-            
-    except Exception as e:
-        action_log.append(ActionStep(
-            step=len(action_log)+1,
-            action="agent_error",
-            success=False,
-            detail=str(e)
-        ))
-        status = "failed"
-        # Still try to get screenshot
-        try:
-            page = await browser.get_current_page()
-            screenshot_bytes = await page.screenshot()
-            screenshot_b64 = base64.b64encode(screenshot_bytes).decode()
-        except:
-            pass
-    finally:
-        await browser.close()
-    
-    return status, action_log, screenshot_b64
+            cred = UserCredential(
+                telegram_user_id=telegram_user_id,
+                kaizen_username_enc=enc_user,
+                kaizen_password_enc=enc_pass,
+            )
+            session.add(cred)
+        session.commit()
+
+
+def get_credentials(telegram_user_id: int) -> Optional[tuple[str, str]]:
+    """Return (username, password) or None if not found."""
+    f = _fernet()
+    with Session(engine) as session:
+        cred = session.exec(
+            select(UserCredential).where(UserCredential.telegram_user_id == telegram_user_id)
+        ).first()
+        if not cred:
+            return None
+        username = f.decrypt(cred.kaizen_username_enc).decode()
+        password = f.decrypt(cred.kaizen_password_enc).decode()
+        return username, password
+
+
+def has_credentials(telegram_user_id: int) -> bool:
+    with Session(engine) as session:
+        cred = session.exec(
+            select(UserCredential).where(UserCredential.telegram_user_id == telegram_user_id)
+        ).first()
+        return cred is not None
 ```
 
 ---
 
-## Step 5: main.py
+## Task 4 — Upgrade filer.py
 
-Create `backend/main.py`:
+Major upgrade. Key changes:
+
+### 4a — Accept credentials as parameters (not fetched from BWS)
+Change signature:
+```python
+async def file_cbd_to_kaizen(
+    cbd_data: CBDData,
+    username: str,
+    password: str,
+) -> tuple[str, List[ActionStep], Optional[str], Optional[str]]:
+    # Returns: (status, action_log, screenshot_b64, assessor_warning)
+```
+
+Remove the call to get_kaizen_credentials(). Credentials passed in from caller.
+
+### 4b — Direct UUID navigation
+The task prompt must use direct URL navigation instead of menu-based navigation:
+
+```
+Login URL: https://eportfolio.rcem.ac.uk → wait for kaizenep.com redirect
+After login, navigate DIRECTLY to: https://kaizenep.com/events/new-section/3ce5989a-b61c-4c24-ab12-711bf928b181
+Do NOT try to find the CBD option in menus. Go directly to that URL.
+```
+
+### 4c — Full field mapping in task prompt
+
+Build the task prompt using this exact field mapping:
+
+```
+KAIZEN FIELD                    | VALUE TO FILL
+--------------------------------|------------------------------------------
+"Date occurred on" (date)       | {date_uk}  ← convert YYYY-MM-DD to d/m/yyyy
+"Stage of training" (dropdown)  | {cbd_data.stage_of_training}
+"Date of event" (date)          | {date_uk}  ← same value, appears twice
+"Case to be discussed" (textarea)| {cbd_data.clinical_reasoning}
+"Reflection of event" (textarea) | {cbd_data.reflection}
+"Curriculum Links" (multi-select)| Click each: {', '.join(cbd_data.curriculum_links)}
+"Assessor invite" (type-ahead)  | {cbd_data.supervisor_name or 'SKIP'}
+```
+
+Date conversion helper (add to filer.py):
+```python
+def _to_uk_date(iso_date: str) -> str:
+    """Convert YYYY-MM-DD to d/m/yyyy for Kaizen."""
+    from datetime import datetime
+    dt = datetime.strptime(iso_date, "%Y-%m-%d")
+    return f"{dt.day}/{dt.month}/{dt.year}"
+```
+
+### 4d — Assessor lookup handling
+In the task prompt, instruct the agent:
+```
+For the "Assessor invite" field:
+- If supervisor_name contains '@': type the full email, wait 2s, click the first result
+- If supervisor_name is a name: type first 3+ characters, wait 2s, click the closest match
+- If no results appear after typing: leave the field blank and note "ASSESSOR_NOT_FOUND"
+- If supervisor_name is null/empty: skip this field entirely
+```
+
+Return the assessor warning in the response if ASSESSOR_NOT_FOUND appears in the result.
+
+### 4e — Result detection
+Check for success more robustly:
+```python
+result_str = str(result).lower()
+if any(w in result_str for w in ["draft saved", "saved as draft", "draft created", "successfully saved"]):
+    status = "success"
+elif any(w in result_str for w in ["saved", "created", "draft"]):
+    status = "partial"
+else:
+    status = "failed"
+
+assessor_warning = None
+if "assessor_not_found" in result_str:
+    assessor_warning = f"Assessor '{cbd_data.supervisor_name}' not found in Kaizen — add manually before submitting."
+```
+
+---
+
+## Task 5 — Create bot.py
+
+New file: `backend/bot.py`
+
+Telegram bot using python-telegram-bot (v21+, async). Handles:
+- /start — welcome + onboarding prompt
+- /setup — collect credentials (2-step: username then password)
+- /status — show whether credentials are stored
+- Any non-command text message → trigger filing pipeline
 
 ```python
+"""
+Portfolio Guru Telegram Bot
+Run: python bot.py  (or as part of main FastAPI app via lifespan)
+"""
 import asyncio
+import logging
 import os
-import base64
-import tempfile
-from datetime import datetime
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from models import FileRequest, FileResponse, ActionStep
+from telegram import Update
+from telegram.ext import (
+    Application, CommandHandler, MessageHandler,
+    filters, ContextTypes, ConversationHandler,
+)
+from credentials import init_db, store_credentials, get_credentials, has_credentials
 from extractor import extract_cbd_data
 from filer import file_cbd_to_kaizen
 
-app = FastAPI(title="Portfolio Guru API", version="0.1.0")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Tighten in production
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# ConversationHandler states
+AWAIT_USERNAME, AWAIT_PASSWORD = range(2)
 
-@app.get("/health")
-def health():
-    return {"status": "ok", "service": "portfolio-guru"}
+WELCOME_MSG = """👋 Welcome to Portfolio Guru!
 
+I'll file your clinical cases to Kaizen automatically.
+
+First, run /setup to store your Kaizen credentials securely.
+Then just send me a text description of any case — I'll handle the rest.
+
+Commands:
+/setup — Store your Kaizen credentials
+/status — Check if credentials are saved"""
+
+SETUP_START_MSG = """🔐 Let's store your Kaizen credentials.
+
+These are encrypted and stored securely on the server.
+
+What's your Kaizen username (usually your email)?"""
+
+SETUP_PASSWORD_MSG = "Got it. Now send your Kaizen password:"
+
+SETUP_DONE_MSG = """✅ Credentials saved securely.
+
+Now just send me a description of any clinical case and I'll file it to Kaizen as a CBD draft.
+
+Example: "67yo male with STEMI in resus. I was the ST5 on shift, took the call from triage, recognised the STEMI on ECG and activated the cath lab with SpR supervision from Dr Ahmed. Learning point: always get ECG within 10 minutes of arrival.\"
+"""
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(WELCOME_MSG)
+
+
+async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text(SETUP_START_MSG)
+    return AWAIT_USERNAME
+
+
+async def setup_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data["setup_username"] = update.message.text.strip()
+    await update.message.reply_text(SETUP_PASSWORD_MSG)
+    return AWAIT_PASSWORD
+
+
+async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    username = context.user_data.get("setup_username", "")
+    password = update.message.text.strip()
+    user_id = update.effective_user.id
+    # Delete the password message immediately for security
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+    store_credentials(user_id, username, password)
+    context.user_data.clear()
+    await update.effective_chat.send_message(SETUP_DONE_MSG)
+    return ConversationHandler.END
+
+
+async def setup_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data.clear()
+    await update.message.reply_text("Setup cancelled.")
+    return ConversationHandler.END
+
+
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    if has_credentials(user_id):
+        await update.message.reply_text("✅ Credentials are stored. Ready to file cases.")
+    else:
+        await update.message.reply_text("❌ No credentials stored. Run /setup first.")
+
+
+async def handle_case(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+
+    # Check credentials
+    creds = get_credentials(user_id)
+    if not creds:
+        await update.message.reply_text(
+            "❌ No credentials stored. Run /setup first."
+        )
+        return
+
+    username, password = creds
+    case_text = update.message.text.strip()
+
+    # Acknowledge immediately
+    ack = await update.message.reply_text("⏳ Filing your case to Kaizen...")
+
+    try:
+        # Step 1: Extract
+        cbd_data = extract_cbd_data(case_text)
+    except Exception as e:
+        await ack.edit_text(
+            f"❌ Could not extract case data from your description.\n\n"
+            f"Try rephrasing with more detail.\n\nError: {str(e)[:200]}"
+        )
+        return
+
+    try:
+        # Step 2: File
+        status_result, action_log, screenshot_b64, assessor_warning = await file_cbd_to_kaizen(
+            cbd_data, username, password
+        )
+    except Exception as e:
+        await ack.edit_text(
+            f"❌ Filing failed: {str(e)[:300]}\n\n"
+            f"Your case description has been received. Reply /retry to try again."
+        )
+        # Store last CBD data for retry
+        context.user_data["last_cbd"] = cbd_data
+        return
+
+    # Build reply
+    if status_result == "success":
+        msg = (
+            f"✅ CBD draft saved to Kaizen!\n\n"
+            f"📅 Date: {cbd_data.date_of_encounter}\n"
+            f"🏥 Case: {cbd_data.patient_presentation[:80]}...\n"
+            f"📚 SLOs: {', '.join(cbd_data.curriculum_links) or 'None selected'}\n\n"
+            f"Review your draft in Kaizen before submitting."
+        )
+    elif status_result == "partial":
+        msg = (
+            f"⚠️ Draft saved but some fields may be incomplete. "
+            f"Please review in Kaizen before submitting.\n\n"
+            f"📅 Date: {cbd_data.date_of_encounter}"
+        )
+    else:
+        msg = (
+            f"❌ Filing failed at the save step. "
+            f"Screenshot attached for debugging.\n\n"
+            f"Try again or check Kaizen manually."
+        )
+
+    if assessor_warning:
+        msg += f"\n\n⚠️ {assessor_warning}"
+
+    await ack.edit_text(msg)
+
+
+def main():
+    init_db()
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not token:
+        raise ValueError("TELEGRAM_BOT_TOKEN env var not set")
+
+    app = Application.builder().token(token).build()
+
+    # /setup conversation
+    setup_conv = ConversationHandler(
+        entry_points=[CommandHandler("setup", setup_start)],
+        states={
+            AWAIT_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_username)],
+            AWAIT_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_password)],
+        },
+        fallbacks=[CommandHandler("cancel", setup_cancel)],
+    )
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("status", status))
+    app.add_handler(setup_conv)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_case))
+
+    logger.info("Portfolio Guru bot starting...")
+    app.run_polling(drop_pending_updates=True)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+## Task 6 — Update main.py
+
+Update the filing endpoint to use credentials from the credential store when telegram_user_id is provided:
+
+```python
 @app.post("/api/file", response_model=FileResponse)
 async def file_entry(request: FileRequest):
-    # Step 1: Extract structured data
+    # Step 1: Extract
     try:
         cbd_data = extract_cbd_data(request.case_description)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Extraction failed: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM error: {str(e)}")
-    
-    # Dry run: return extracted data only
+
     if request.dry_run:
-        return FileResponse(
-            status="dry_run",
-            extracted_data=cbd_data,
-        )
-    
-    # Step 2: File to Kaizen via browser-use
+        return FileResponse(status="dry_run", extracted_data=cbd_data)
+
+    # Step 2: Get credentials
+    if request.telegram_user_id:
+        from credentials import get_credentials
+        creds = get_credentials(request.telegram_user_id)
+        if not creds:
+            raise HTTPException(status_code=401, detail="No credentials stored for this user. Run /setup.")
+        username, password = creds
+    else:
+        # Fall back to env var / BWS credentials (for local testing)
+        from config import get_kaizen_credentials
+        username, password = get_kaizen_credentials()
+
+    # Step 3: File
     try:
-        status, action_log, screenshot_b64 = await file_cbd_to_kaizen(cbd_data)
-    except Exception as e:
-        return FileResponse(
-            status="failed",
-            extracted_data=cbd_data,
-            error=str(e)
+        status_val, action_log, screenshot_b64, assessor_warning = await file_cbd_to_kaizen(
+            cbd_data, username, password
         )
-    
-    # Step 3: Store screenshot (save locally for MVP, Supabase in V2)
+    except Exception as e:
+        return FileResponse(status="failed", extracted_data=cbd_data, error=str(e))
+
+    # Step 4: Save screenshot
     screenshot_url = None
     if screenshot_b64:
+        import base64
+        from datetime import datetime
         screenshot_dir = "/tmp/portfolio-guru-screenshots"
         os.makedirs(screenshot_dir, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        screenshot_path = f"{screenshot_dir}/cbd-draft-{timestamp}.png"
-        with open(screenshot_path, "wb") as f:
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        path = f"{screenshot_dir}/cbd-draft-{ts}.png"
+        with open(path, "wb") as f:
             f.write(base64.b64decode(screenshot_b64))
-        screenshot_url = f"file://{screenshot_path}"  # local for MVP
-    
+        screenshot_url = f"file://{path}"
+
     return FileResponse(
-        status=status,
+        status=status_val,
         extracted_data=cbd_data,
         action_log=action_log,
         screenshot_url=screenshot_url,
+        assessor_warning=assessor_warning,
     )
+```
+
+Also add startup event to init DB:
+```python
+from contextlib import asynccontextmanager
+from credentials import init_db
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
+
+app = FastAPI(title="Portfolio Guru API", version="0.2.0", lifespan=lifespan)
 ```
 
 ---
 
-## Step 6: requirements.txt
+## Task 7 — Update requirements.txt
 
-Create `backend/requirements.txt`:
+Replace the existing file with:
 ```
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 anthropic>=0.40.0
-langchain-anthropic>=0.3.0
 browser-use>=0.1.40
 playwright>=1.49.0
 pydantic>=2.0.0
 httpx>=0.27.0
+python-telegram-bot>=21.0
+cryptography>=42.0
+sqlmodel>=0.0.18
+```
+
+Remove langchain-anthropic (no longer needed — we use browser-use's own ChatAnthropic import).
+
+---
+
+## Task 8 — Update .env.example
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
+TELEGRAM_BOT_TOKEN=...
+FERNET_SECRET_KEY=...   # generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+DATABASE_URL=sqlite:///./portfolio_guru.db
+# Optional (falls back to BWS if not set):
+# KAIZEN_USERNAME=your@email.com
+# KAIZEN_PASSWORD=yourpassword
 ```
 
 ---
 
-## Step 7: Dockerfile
+## Verification Steps
 
-Create `backend/Dockerfile`:
+Run in order from `backend/` directory with venv activated:
 
-```dockerfile
-FROM python:3.12-slim
+1. Install new deps:
+   ```
+   pip install python-telegram-bot cryptography sqlmodel
+   ```
 
-# System deps for Playwright/Chromium
-RUN apt-get update && apt-get install -y \
-    wget gnupg curl \
-    libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 \
-    libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
-    libasound2 fonts-liberation libx11-6 libxext6 libxfixes3 \
-    && rm -rf /var/lib/lib/apt/lists/*
+2. Verify extraction still works with new schema:
+   ```
+   python test_extraction.py
+   ```
+   Expected: JSON now includes `stage_of_training`, `reflection`, `curriculum_links` fields.
 
-WORKDIR /app
+3. Test credentials store:
+   ```python
+   python -c "
+   import os; os.environ['FERNET_SECRET_KEY'] = 'test-key-32bytes-padded-padding123='
+   from cryptography.fernet import Fernet
+   key = Fernet.generate_key().decode()
+   os.environ['FERNET_SECRET_KEY'] = key
+   from credentials import init_db, store_credentials, get_credentials, has_credentials
+   init_db()
+   store_credentials(12345, 'test@test.com', 'password123')
+   print(get_credentials(12345))
+   print(has_credentials(12345))
+   print('✅ Credential store OK')
+   "
+   ```
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-RUN playwright install --with-deps chromium
+4. Test dry_run API with new schema:
+   ```
+   uvicorn main:app --port 8001 &
+   curl -X POST http://localhost:8001/api/file \
+     -H "Content-Type: application/json" \
+     -d '{"case_description": "67yo male STEMI in resus. ST5 on shift. Recognised ECG changes, activated cath lab. SpR Dr Ahmed supervising from distance. Learning: ECG interpretation speed matters.", "dry_run": true}'
+   ```
+   Expected: response includes `stage_of_training`, `curriculum_links`, `reflection`.
 
-COPY . .
-
-EXPOSE 8000
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
-
----
-
-## Step 8: Test script
-
-Create `backend/test_extraction.py` — a standalone script to test the extraction without browser:
-
-```python
-#!/usr/bin/env python3
-"""Test CBD extraction without browser. Run: python test_extraction.py"""
-import sys
-import os
-sys.path.insert(0, os.path.dirname(__file__))
-
-os.environ.setdefault("ANTHROPIC_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
-
-from extractor import extract_cbd_data
-import json
-
-TEST_CASE = """
-I saw a 67 year old man in resus last night. He came in with sudden onset chest pain, 
-8/10, radiating to his left arm, started about 2 hours before arrival. 
-He was pale and diaphoretic. I was the FY2 on shift, worked with the SpR who was 
-in the department but supervising from a distance. I took the history, examined him,
-requested ECG and troponin, spotted the STEMI on ECG and immediately called the SpR
-who activated the cath lab. I stayed with the patient while we waited for the team.
-The learning point for me was the importance of quick ECG interpretation in chest pain —
-I need to be faster at spotting STEMI patterns. The consultant Dr. Ahmed was on call.
-"""
-
-if __name__ == "__main__":
-    print("Testing CBD extraction...")
-    result = extract_cbd_data(TEST_CASE)
-    print(json.dumps(result.model_dump(), indent=2))
-    print("\n✅ Extraction successful")
-```
-
----
-
-## Step 9: .env.example
-
-Create `backend/.env.example`:
-```
-ANTHROPIC_API_KEY=your_key_here
-# In production: BWS_ACCESS_TOKEN set as Railway env var
-# Or set directly:
-# KAIZEN_USERNAME=your_kaizen_email
-# KAIZEN_PASSWORD=your_kaizen_password
-```
-
----
-
-## Verification Steps (run in order)
-
-1. `cd /home/moeed/projects/portfolio-guru/backend`
-2. `pip install -r requirements.txt`
-3. `playwright install chromium`
-4. `python test_extraction.py` — should print extracted CBDData as JSON
-5. `uvicorn main:app --port 8001 --reload`
-6. In another terminal: `curl -X POST http://localhost:8001/api/file -H "Content-Type: application/json" -d '{"case_description": "67yo male STEMI in resus, FY2 role, SpR supervision, spotted ECG changes and activated cath lab, learning: ECG interpretation speed", "dry_run": true}'`
-7. Verify dry_run returns extracted CBDData correctly
-8. Then test without dry_run (requires real Kaizen credentials)
-
-## Important Notes
-
-- ANTHROPIC_API_KEY must be set in env. Check ~/.openclaw/.bws-token or ask Moeed for the key.
-- Kaizen credentials fetched from BWS using IDs in config.py
-- For the real Kaizen test, browser-use will navigate to eportfolio.rcem.ac.uk — this is a live NHS system, so the draft save is real. Test carefully.
-- If browser-use fails to find the CBD form, capture the screenshot and action log — that's valuable debug info for the next iteration.
-- Do not worry about Supabase screenshot upload for Phase 1 — local file storage is fine. Add URL to response.
+5. Verify bot.py imports cleanly:
+   ```
+   python -c "import bot; print('✅ bot.py imports OK')"
+   ```
 
 ## Done Criteria
-- [ ] test_extraction.py runs and returns valid CBDData
-- [ ] /api/file with dry_run=true returns 200 with CBDData
-- [ ] /api/file with dry_run=false navigates Kaizen and saves CBD draft
-- [ ] Screenshot saved and URL returned in response
-- [ ] Report back with screenshot of the draft
+- [ ] models.py has upgraded CBDData with stage_of_training, reflection, curriculum_links
+- [ ] extractor.py returns all new fields including curriculum_links SLO inference
+- [ ] credentials.py created and working (encrypt/decrypt round-trip verified)
+- [ ] filer.py uses direct UUID navigation, full field mapping, date conversion, assessor warning
+- [ ] bot.py created with /start, /setup, /status, and free-text case handler
+- [ ] main.py updated to use credential store when telegram_user_id provided
+- [ ] requirements.txt updated (langchain-anthropic removed, new deps added)
+- [ ] dry_run API returns new schema fields correctly
+- [ ] All imports clean — no missing modules
