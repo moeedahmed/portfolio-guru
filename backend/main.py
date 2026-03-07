@@ -8,13 +8,13 @@ from telegram import Update
 from models import FileRequest, FileResponse
 from extractor import extract_cbd_data
 from filer import file_cbd_to_kaizen
-from render_store import init_store
+from store import init
 from bot import build_application
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_store()
+    init()
     bot_application = build_application()
     await bot_application.initialize()
     app.state.bot_application = bot_application

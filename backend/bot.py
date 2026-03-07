@@ -10,7 +10,7 @@ from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     filters, ContextTypes, ConversationHandler,
 )
-from render_store import store_credentials, get_credentials, has_credentials, init_store
+from store import store_credentials, get_credentials, has_credentials, init
 from extractor import extract_cbd_data
 from filer import file_cbd_to_kaizen
 
@@ -180,3 +180,23 @@ def build_application() -> Application:
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_case))
 
     return application
+
+
+def main():
+    """Entry point for local development — runs in polling mode."""
+    import requests as _req
+
+    init()
+
+    # Clear any existing webhook so polling works
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    _req.post(f"https://api.telegram.org/bot{token}/deleteWebhook", json={"drop_pending_updates": True})
+    logger.info("Webhook cleared — polling mode active")
+
+    application = build_application()
+    logger.info("Portfolio Guru starting in POLLING mode (local dev)...")
+    application.run_polling(drop_pending_updates=True)
+
+
+if __name__ == "__main__":
+    main()
