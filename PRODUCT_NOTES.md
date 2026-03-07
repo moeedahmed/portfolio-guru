@@ -1,5 +1,19 @@
 
-## v2.1 Product Vision (captured 2026-03-07)
+## Versioning Standard (adopted 2026-03-07)
+
+**Major versions (v1, v2, v3)** — complete rebuilds or fundamental architecture shifts.
+- v1: initial bot (basic filing, no multimodal, no intent classifier)
+- v2: current — multimodal input, intent classifier, form type recommendations, approval gate
+
+**Minor versions (v2.1, v2.2, ...)** — a coherent batch of features, incremented only when that batch is fully shipped and verified end-to-end. Never used as a label for "future stuff" or "backlog".
+
+**No patch versions** — bug fixes are part of the current minor version until it ships.
+
+**Rule:** "v2.1 scope" or "next batch" = not yet shipped. "v2.1" = shipped and verified.
+
+---
+
+## v2.1 Scope (not yet shipped — captured 2026-03-07)
 
 ### Portfolio type selection
 - First-time users select which portfolio system they use (Kaizen, SOAR, LLP, etc.)
