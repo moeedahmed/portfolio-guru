@@ -45,7 +45,11 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
 
 async def setup_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data["setup_username"] = update.message.text.strip()
+    text = update.message.text.strip()
+    if "@" not in text or "." not in text:
+        await update.message.reply_text("That doesn't look like an email. What's your Kaizen username?")
+        return AWAIT_USERNAME
+    context.user_data["setup_username"] = text
     await update.message.reply_text(SETUP_PASSWORD_MSG)
     return AWAIT_PASSWORD
 

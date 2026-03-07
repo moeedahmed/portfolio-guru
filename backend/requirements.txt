@@ -8,3 +8,4 @@ python-telegram-bot>=21.0
 cryptography>=42.0
 sqlmodel>=0.0.18
 langchain-google-genai>=2.0.0
+google-generativeai>=0.8.0

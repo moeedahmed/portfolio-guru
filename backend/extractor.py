@@ -1,13 +1,15 @@
-import anthropic
+import google.generativeai as genai
 import json
 import os
 from datetime import date
 from models import CBDData
 
+genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
+
 
 def extract_cbd_data(case_description: str) -> CBDData:
     """Extract structured CBD data from free-text case description."""
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    model = genai.GenerativeModel("gemini-2.0-flash")
 
     system_prompt = f"""You are a medical portfolio assistant. Extract structured data from a doctor's clinical case description for a Case-Based Discussion (CBD) WPBA entry.
 
@@ -65,14 +67,10 @@ Rules:
 - Today's date: {date.today()}
 - Return ONLY the JSON. No explanation."""
 
-    message = client.messages.create(
-        model="claude-haiku-4-5",
-        max_tokens=1024,
-        system=system_prompt,
-        messages=[{"role": "user", "content": case_description}],
-    )
+    prompt = f"{system_prompt}\n\nCase description:\n{case_description}"
+    response = model.generate_content(prompt)
+    raw = response.text.strip()
 
-    raw = message.content[0].text.strip()
     # Strip markdown code fences if present
     if raw.startswith("```"):
         raw = raw.split("```")[1]
@@ -85,15 +83,9 @@ Rules:
         return CBDData(**data)
     except (json.JSONDecodeError, ValueError) as e:
         # Retry once with explicit instruction
-        retry_message = client.messages.create(
-            model="claude-haiku-4-5",
-            max_tokens=1024,
-            system="Fix the JSON and return ONLY valid JSON. No explanation.",
-            messages=[
-                {"role": "user", "content": f"Parse error: {e}\n\nOriginal output:\n{raw}"},
-            ],
-        )
-        retry_raw = retry_message.content[0].text.strip()
+        retry_prompt = f"Fix the JSON and return ONLY valid JSON. No explanation.\n\nParse error: {e}\n\nOriginal output:\n{raw}"
+        retry_response = model.generate_content(retry_prompt)
+        retry_raw = retry_response.text.strip()
         if retry_raw.startswith("```"):
             retry_raw = retry_raw.split("```")[1]
             if retry_raw.startswith("json"):
