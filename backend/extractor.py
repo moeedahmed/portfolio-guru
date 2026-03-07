@@ -27,11 +27,17 @@ def _gemini_call_with_retry(fn: Callable[..., Any], *args, retries: int = 3, del
     raise last_error  # All retries exhausted
 
 FORM_UUIDS = {
-    "CBD":  "3ce5989a-b61c-4c24-ab12-711bf928b181",
-    "ACAT": None,  # TODO: verify UUID from Kaizen
-    "DOPS": None,  # TODO: verify UUID from Kaizen
-    "LAT":  None,  # TODO: verify UUID from Kaizen
-    "STAT": None,  # TODO: verify UUID from Kaizen
+    # 2025 update versions (preferred)
+    "CBD":  "3ce5989a-b61c-4c24-ab12-711bf928b181",  # CBD 2025 update
+    "DOPS": "159831f9-6d22-4e77-851b-87e30aee37a2",  # DOPS ST3-ST6 2025 update
+    "LAT":  "eb1c7547-0f41-49e7-95de-8adffd849924",  # LAT 2025 update v9
+    "ACAT": "6577ab06-8340-47e3-952a-708a5f800dcc",  # ACAT ACCS 2025 update
+    "ACAF": "15e67ae8-868b-4358-9b96-30a4a272f02c",  # ACAF 2025 update
+    "STAT": "41ff54b8-35a7-414b-9bd6-97fb1c3eb189",  # STAT 2025 update
+    "MSF":  "5f71ac04-ff45-44d2-b7a1-f8b921a8a4c8",  # MSF
+    "MINI_CEX": "647665f4-a992-4541-9e17-33ba6fd1d347",  # Mini-CEX 2025 update
+    "JCF":  "3daa9559-3c31-4ab4-883c-9a991632a9ca",  # Journal Club 2025 update
+    "QIAT": "a0aa5cfc-57be-4622-b974-51d334268d57",  # EM QIAT 2025 update
 }
 
 # Words/phrases to remove from reflection (humanizer)
