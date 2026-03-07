@@ -25,7 +25,7 @@ async def file_cbd_to_kaizen(
     """
     from browser_use import Agent
     from browser_use.browser import BrowserProfile, BrowserSession
-    from langchain_google_genai import ChatGoogleGenerativeAI
+    from browser_use.llm.google.chat import ChatGoogle
 
     action_log: List[ActionStep] = []
     screenshot_b64: Optional[str] = None
@@ -111,9 +111,9 @@ CRITICAL RULES:
     browser_profile = BrowserProfile(headless=True)
     browser_session = BrowserSession(browser_profile=browser_profile)
 
-    llm = ChatGoogleGenerativeAI(
+    llm = ChatGoogle(
         model="gemini-3-flash-preview",
-        google_api_key=os.environ.get("GOOGLE_API_KEY"),
+        api_key=os.environ.get("GOOGLE_API_KEY"),
     )
 
     agent = Agent(

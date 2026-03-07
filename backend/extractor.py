@@ -1,15 +1,21 @@
-import google.generativeai as genai
+from google import genai
 import json
 import os
 from datetime import date
 from models import CBDData
 
-genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
+_client = None
+
+def _get_client():
+    global _client
+    if _client is None:
+        _client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
+    return _client
 
 
 def extract_cbd_data(case_description: str) -> CBDData:
     """Extract structured CBD data from free-text case description."""
-    model = genai.GenerativeModel("gemini-3-flash-preview")
+    client = _get_client()
 
     system_prompt = f"""You are a medical portfolio assistant. Extract structured data from a doctor's clinical case description for a Case-Based Discussion (CBD) WPBA entry.
 
@@ -68,7 +74,7 @@ Rules:
 - Return ONLY the JSON. No explanation."""
 
     prompt = f"{system_prompt}\n\nCase description:\n{case_description}"
-    response = model.generate_content(prompt)
+    response = client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
     raw = response.text.strip()
 
     # Strip markdown code fences if present
@@ -84,7 +90,7 @@ Rules:
     except (json.JSONDecodeError, ValueError) as e:
         # Retry once with explicit instruction
         retry_prompt = f"Fix the JSON and return ONLY valid JSON. No explanation.\n\nParse error: {e}\n\nOriginal output:\n{raw}"
-        retry_response = model.generate_content(retry_prompt)
+        retry_response = client.models.generate_content(model="gemini-3-flash-preview", contents=retry_prompt)
         retry_raw = retry_response.text.strip()
         if retry_raw.startswith("```"):
             retry_raw = retry_raw.split("```")[1]
