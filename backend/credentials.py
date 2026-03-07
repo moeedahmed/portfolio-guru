@@ -9,7 +9,8 @@ from cryptography.fernet import Fernet
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./portfolio_guru.db")
+_DEFAULT_DB = os.path.expanduser("~/.openclaw/data/portfolio-guru/portfolio_guru.db")
+DATABASE_URL = os.environ.get("DATABASE_URL", f"sqlite:///{_DEFAULT_DB}")
 FERNET_KEY = os.environ.get("FERNET_SECRET_KEY", "").encode()
 
 engine = create_engine(DATABASE_URL)
@@ -25,6 +26,9 @@ class UserCredential(SQLModel, table=True):
 
 
 def init_db():
+    import pathlib
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    pathlib.Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     SQLModel.metadata.create_all(engine)
 
 
