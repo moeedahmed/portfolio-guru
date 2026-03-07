@@ -1,46 +1,155 @@
 """
-Portfolio Guru Telegram Bot
-Run: python bot.py  (or as part of main FastAPI app via lifespan)
+Portfolio Guru Telegram Bot — v2
+Multimodal input (text/voice/image) with approval flow before filing.
 """
 import asyncio
 import logging
 import os
-from telegram import Update
+import tempfile
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler,
+    Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     filters, ContextTypes, ConversationHandler,
 )
 from store import store_credentials, get_credentials, has_credentials, init
-from extractor import extract_cbd_data
+from extractor import extract_cbd_data, recommend_form_types, classify_intent, answer_question
 from filer import file_cbd_to_kaizen
+from whisper import transcribe_voice
+from vision import extract_from_image
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ConversationHandler states
-AWAIT_USERNAME, AWAIT_PASSWORD = range(2)
+(AWAIT_USERNAME, AWAIT_PASSWORD,
+ AWAIT_FORM_CHOICE, AWAIT_APPROVAL,
+ AWAIT_EDIT_FIELD, AWAIT_EDIT_VALUE) = range(6)
 
-WELCOME_MSG = """Welcome to Portfolio Guru.
+WELCOME_MSG = """Portfolio Guru helps you file clinical cases to your RCEM Kaizen e-portfolio - in seconds.
 
-Run /setup to connect your Kaizen account.
-Then send me a case description — I'll file it as a CBD draft.
+Share a case by text, voice note, or photo. I'll draft the entry, show you exactly what will be filed, and only submit when you approve.
 
-/setup — connect Kaizen
-/status — check connection"""
+Your Kaizen credentials are encrypted and never shared."""
 
-SETUP_START_MSG = "What's your Kaizen username?"
+WHAT_IS_THIS_MSG = """A CBD (Case-Based Discussion) is a workplace-based assessment where you discuss a clinical case you managed with a supervisor.
 
-SETUP_PASSWORD_MSG = "What's your Kaizen password?"
+Portfolio Guru extracts the key information from your case description and creates a draft CBD in Kaizen - ready for you to review and submit to your supervisor.
 
-SETUP_DONE_MSG = "Done. Send me a case description and I'll file it to Kaizen."
+You stay in control: nothing is submitted until you approve it."""
 
+FILE_CASE_PROMPT = "Send me a case description - text, voice note, or photo."
+
+
+def _build_welcome_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("What is this?", callback_data="INFO|what"),
+            InlineKeyboardButton("Connect Kaizen", callback_data="ACTION|setup"),
+        ],
+        [InlineKeyboardButton("File a case", callback_data="ACTION|file")],
+    ])
+
+
+def _build_form_choice_keyboard(recommendations):
+    """Build inline keyboard for form type selection."""
+    buttons = []
+    for rec in recommendations:
+        if rec.uuid:
+            label = rec.form_type
+            buttons.append(InlineKeyboardButton(label, callback_data=f"FORM|{rec.form_type}"))
+        else:
+            # UUID not verified - show as coming soon
+            buttons.append(InlineKeyboardButton(f"{rec.form_type} (coming soon)", callback_data="FORM|disabled"))
+    # Add cancel button
+    buttons.append(InlineKeyboardButton("Cancel", callback_data="CANCEL|form"))
+    # Arrange in rows of 2
+    rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
+    return InlineKeyboardMarkup(rows)
+
+
+def _build_approval_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("File this draft", callback_data="APPROVE|draft"),
+            InlineKeyboardButton("Edit", callback_data="EDIT|draft"),
+        ],
+        [InlineKeyboardButton("Cancel", callback_data="CANCEL|draft")],
+    ])
+
+
+def _build_edit_field_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Date", callback_data="FIELD|date_of_encounter"),
+            InlineKeyboardButton("Setting", callback_data="FIELD|clinical_setting"),
+        ],
+        [
+            InlineKeyboardButton("Presentation", callback_data="FIELD|patient_presentation"),
+            InlineKeyboardButton("Case discussion", callback_data="FIELD|clinical_reasoning"),
+        ],
+        [
+            InlineKeyboardButton("Reflection", callback_data="FIELD|reflection"),
+            InlineKeyboardButton("SLOs", callback_data="FIELD|curriculum_links"),
+        ],
+        [InlineKeyboardButton("Cancel edit", callback_data="CANCEL|edit")],
+    ])
+
+
+def _format_draft_preview(cbd_data) -> str:
+    """Format CBD data as a preview message."""
+    # Format date as d/m/yyyy for display
+    date_str = cbd_data.date_of_encounter
+    try:
+        from datetime import datetime
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        date_display = dt.strftime("%-d %b %Y")
+    except (ValueError, AttributeError):
+        date_display = date_str
+
+    slos = ", ".join(cbd_data.curriculum_links) if cbd_data.curriculum_links else "None"
+    kcs = ", ".join(cbd_data.key_capabilities) if cbd_data.key_capabilities else "None"
+
+    return f"""Draft CBD
+
+Date: {date_display}
+Setting: {cbd_data.clinical_setting}
+Presentation: {cbd_data.patient_presentation}
+
+Case to be discussed:
+{cbd_data.clinical_reasoning}
+
+Reflection:
+{cbd_data.reflection}
+
+Curriculum links: {slos}
+Key capabilities: {kcs}"""
+
+
+# === COMMAND HANDLERS ===
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(WELCOME_MSG)
+    await update.message.reply_text(WELCOME_MSG, reply_markup=_build_welcome_keyboard())
 
+
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    if has_credentials(user_id):
+        await update.message.reply_text("Credentials stored. Ready to file cases.")
+    else:
+        await update.message.reply_text("No credentials stored.", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Connect Kaizen", callback_data="ACTION|setup")]
+        ]))
+
+
+# === SETUP FLOW ===
 
 async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text(SETUP_START_MSG)
+    # Can be triggered by command or callback
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.message.reply_text("What's your Kaizen username (email)?")
+    else:
+        await update.message.reply_text("What's your Kaizen username (email)?")
     return AWAIT_USERNAME
 
 
@@ -50,7 +159,7 @@ async def setup_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text("That doesn't look like an email. What's your Kaizen username?")
         return AWAIT_USERNAME
     context.user_data["setup_username"] = text
-    await update.message.reply_text(SETUP_PASSWORD_MSG)
+    await update.message.reply_text("What's your Kaizen password?")
     return AWAIT_PASSWORD
 
 
@@ -59,102 +168,332 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     password = update.message.text.strip()
     user_id = update.effective_user.id
 
-    # Delete password message immediately for security
+    # Delete password message for security
     try:
         await update.message.delete()
     except Exception:
         pass
 
     store_credentials(user_id, username, password)
-    context.user_data.clear()
+    context.user_data.pop("setup_username", None)
     await update.effective_chat.send_message(
-        "Connected. Send me a case description and I'll file it to Kaizen."
+        "Connected. Send me a case description and I'll draft it for review."
     )
     return ConversationHandler.END
 
 
 async def setup_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data.clear()
-    await update.message.reply_text("Setup cancelled.")
+    context.user_data.pop("setup_username", None)
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.message.reply_text("Setup cancelled.")
+    else:
+        await update.message.reply_text("Setup cancelled.")
     return ConversationHandler.END
 
 
-async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = update.effective_user.id
-    if has_credentials(user_id):
-        await update.message.reply_text("Credentials are stored. Ready to file cases.")
-    else:
-        await update.message.reply_text("No credentials stored. Run /setup first.")
+# === CALLBACK QUERY HANDLERS ===
+
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Route callback queries based on prefix."""
+    query = update.callback_query
+    data = query.data
+
+    if data.startswith("INFO|"):
+        await query.answer()
+        await query.message.reply_text(WHAT_IS_THIS_MSG)
+
+    elif data == "ACTION|setup":
+        return await setup_start(update, context)
+
+    elif data == "ACTION|file":
+        await query.answer()
+        user_id = update.effective_user.id
+        if not has_credentials(user_id):
+            await query.message.reply_text(
+                "Connect your Kaizen account first.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("Connect Kaizen", callback_data="ACTION|setup")]
+                ])
+            )
+        else:
+            await query.message.reply_text(FILE_CASE_PROMPT)
+
+    elif data.startswith("FORM|"):
+        return await handle_form_choice(update, context)
+
+    elif data.startswith("APPROVE|"):
+        return await handle_approval_approve(update, context)
+
+    elif data.startswith("EDIT|"):
+        return await handle_approval_edit(update, context)
+
+    elif data.startswith("FIELD|"):
+        return await handle_edit_field(update, context)
+
+    elif data.startswith("CANCEL|"):
+        await query.answer()
+        context.user_data.clear()
+        await query.message.reply_text("Cancelled.")
+        return ConversationHandler.END
 
 
-async def handle_case(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+# === CASE INPUT HANDLER ===
+
+async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle text, voice, or photo input for case description."""
     user_id = update.effective_user.id
 
     # Check credentials
+    if not has_credentials(user_id):
+        await update.message.reply_text(
+            "Connect your Kaizen account first.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Connect Kaizen", callback_data="ACTION|setup")]
+            ])
+        )
+        return ConversationHandler.END
+
+    # Determine input type and extract text
+    case_text = None
+
+    if update.message.text:
+        raw_text = update.message.text.strip()
+
+        # Classify intent for text messages
+        try:
+            intent = classify_intent(raw_text)
+        except Exception:
+            intent = "case"  # Default to case on error
+
+        if intent == "chitchat":
+            await update.message.reply_text(
+                "Hey! Ready when you are. Send me a clinical case and I'll draft it for your portfolio."
+            )
+            return ConversationHandler.END
+
+        if intent == "question":
+            try:
+                answer = answer_question(raw_text)
+                await update.message.reply_text(answer)
+            except Exception:
+                await update.message.reply_text(
+                    "I help you file clinical cases to your Kaizen e-portfolio. "
+                    "Send me a case description by text, voice note, or photo."
+                )
+            return ConversationHandler.END
+
+        # Intent is 'case' - proceed with filing flow
+        case_text = raw_text
+
+    elif update.message.voice:
+        ack = await update.message.reply_text("Transcribing voice note...")
+        try:
+            voice_file = await update.message.voice.get_file()
+            with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+                await voice_file.download_to_drive(tmp.name)
+                case_text = await transcribe_voice(tmp.name)
+                os.unlink(tmp.name)
+            await ack.edit_text(f"Transcribed:\n\n{case_text[:500]}...")
+        except Exception as e:
+            await ack.edit_text(f"Could not transcribe voice note: {str(e)[:200]}")
+            return ConversationHandler.END
+
+    elif update.message.photo:
+        ack = await update.message.reply_text("Reading image...")
+        try:
+            # Get largest photo
+            photo = update.message.photo[-1]
+            photo_file = await photo.get_file()
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                await photo_file.download_to_drive(tmp.name)
+                case_text = await extract_from_image(tmp.name)
+                os.unlink(tmp.name)
+            await ack.edit_text(f"Extracted:\n\n{case_text[:500]}...")
+        except Exception as e:
+            await ack.edit_text(f"Could not extract text from image: {str(e)[:200]}")
+            return ConversationHandler.END
+
+    if not case_text:
+        await update.message.reply_text("Send a text message, voice note, or photo.")
+        return ConversationHandler.END
+
+    # Store case text
+    context.user_data["case_text"] = case_text
+
+    # Get form recommendations
+    try:
+        recommendations = recommend_form_types(case_text)
+        context.user_data["form_recommendations"] = recommendations
+    except Exception as e:
+        logger.error(f"Form recommendation failed: {e}")
+        from models import FormTypeRecommendation
+        from extractor import FORM_UUIDS
+        recommendations = [FormTypeRecommendation(
+            form_type="CBD",
+            rationale="Clinical case",
+            uuid=FORM_UUIDS["CBD"]
+        )]
+        context.user_data["form_recommendations"] = recommendations
+
+    # Build rationale text
+    rationale_lines = [f"- {r.form_type}: {r.rationale}" for r in recommendations if r.uuid]
+    rationale_text = "\n".join(rationale_lines) if rationale_lines else "- CBD: Clinical case"
+
+    await update.message.reply_text(
+        f"From this case I can create:\n\n{rationale_text}",
+        reply_markup=_build_form_choice_keyboard(recommendations)
+    )
+    return AWAIT_FORM_CHOICE
+
+
+async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle form type selection."""
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    if data == "FORM|disabled":
+        await query.message.reply_text("This form type is coming soon. Choose another or cancel.")
+        return AWAIT_FORM_CHOICE
+
+    form_type = data.split("|")[1]
+    context.user_data["chosen_form"] = form_type
+
+    # Extract CBD data
+    case_text = context.user_data.get("case_text", "")
+    ack = await query.message.reply_text("Extracting case data...")
+
+    try:
+        cbd_data = extract_cbd_data(case_text)
+        context.user_data["draft_data"] = cbd_data
+    except Exception as e:
+        await ack.edit_text(f"Could not extract case data: {str(e)[:200]}")
+        return ConversationHandler.END
+
+    # Show draft preview
+    preview = _format_draft_preview(cbd_data)
+    await ack.edit_text(preview)
+
+    # Send approval buttons in separate message
+    await query.message.reply_text(
+        "Review the draft above. File it, edit fields, or cancel.",
+        reply_markup=_build_approval_keyboard()
+    )
+    return AWAIT_APPROVAL
+
+
+async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle 'File this draft' approval."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
     creds = get_credentials(user_id)
     if not creds:
-        await update.message.reply_text(
-            "No credentials stored. Run /setup first."
-        )
-        return
+        await query.message.reply_text("Credentials not found. Run /setup again.")
+        return ConversationHandler.END
 
     username, password = creds
-    case_text = update.message.text.strip()
+    cbd_data = context.user_data.get("draft_data")
+    if not cbd_data:
+        await query.message.reply_text("No draft data found. Start over.")
+        return ConversationHandler.END
 
-    # Acknowledge immediately
-    ack = await update.message.reply_text("Filing your case to Kaizen...")
-
-    try:
-        # Step 1: Extract
-        cbd_data = extract_cbd_data(case_text)
-    except Exception as e:
-        await ack.edit_text(
-            f"Could not extract case data from your description.\n\n"
-            f"Try rephrasing with more detail.\n\nError: {str(e)[:200]}"
-        )
-        return
+    ack = await query.message.reply_text("Filing to Kaizen...")
 
     try:
-        # Step 2: File
         status_result, action_log, screenshot_b64, assessor_warning = await file_cbd_to_kaizen(
             cbd_data, username, password
         )
     except Exception as e:
-        await ack.edit_text(
-            f"Filing failed: {str(e)[:300]}\n\n"
-            f"Your case description has been received. Reply /retry to try again."
-        )
-        # Store last CBD data for retry
-        context.user_data["last_cbd"] = cbd_data
-        return
+        await ack.edit_text(f"Filing failed: {str(e)[:300]}")
+        return ConversationHandler.END
 
-    # Build reply
+    # Build confirmation
+    slos = ", ".join(cbd_data.curriculum_links) if cbd_data.curriculum_links else "None"
+
     if status_result == "success":
-        msg = (
-            f"CBD draft saved to Kaizen!\n\n"
-            f"Date: {cbd_data.date_of_encounter}\n"
-            f"Case: {cbd_data.patient_presentation[:80]}...\n"
-            f"SLOs: {', '.join(cbd_data.curriculum_links) or 'None selected'}\n\n"
-            f"Review your draft in Kaizen before submitting."
-        )
+        msg = f"Saved as draft in Kaizen. Not submitted to supervisor.\n\nDate: {cbd_data.date_of_encounter}\nForm: CBD\nSLOs: {slos}"
     elif status_result == "partial":
-        msg = (
-            f"Draft saved but some fields may be incomplete. "
-            f"Please review in Kaizen before submitting.\n\n"
-            f"Date: {cbd_data.date_of_encounter}"
-        )
+        msg = f"Draft saved but some fields may be incomplete. Review in Kaizen.\n\nDate: {cbd_data.date_of_encounter}"
     else:
-        msg = (
-            f"Filing failed at the save step. "
-            f"Screenshot attached for debugging.\n\n"
-            f"Try again or check Kaizen manually."
-        )
+        msg = "Filing failed. Check Kaizen manually or try again."
 
     if assessor_warning:
         msg += f"\n\n{assessor_warning}"
 
     await ack.edit_text(msg)
+    context.user_data.clear()
+    return ConversationHandler.END
 
+
+async def handle_approval_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle 'Edit' button - show field selection."""
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text(
+        "Which field do you want to edit?",
+        reply_markup=_build_edit_field_keyboard()
+    )
+    return AWAIT_EDIT_FIELD
+
+
+async def handle_edit_field(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle field selection for editing."""
+    query = update.callback_query
+    await query.answer()
+
+    field = query.data.split("|")[1]
+    context.user_data["edit_field"] = field
+
+    field_labels = {
+        "date_of_encounter": "date (YYYY-MM-DD)",
+        "clinical_setting": "clinical setting",
+        "patient_presentation": "presentation",
+        "clinical_reasoning": "case discussion",
+        "reflection": "reflection",
+        "curriculum_links": "SLOs (comma-separated, e.g. SLO1, SLO3)",
+    }
+    label = field_labels.get(field, field)
+    await query.message.reply_text(f"Enter the new {label}:")
+    return AWAIT_EDIT_VALUE
+
+
+async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle new value for edited field."""
+    new_value = update.message.text.strip()
+    field = context.user_data.get("edit_field")
+    cbd_data = context.user_data.get("draft_data")
+
+    if not field or not cbd_data:
+        await update.message.reply_text("Edit failed. Start over.")
+        return ConversationHandler.END
+
+    # Update the field
+    if field == "curriculum_links":
+        # Parse comma-separated SLOs
+        slos = [s.strip().upper() for s in new_value.split(",") if s.strip()]
+        cbd_data.curriculum_links = slos
+    else:
+        setattr(cbd_data, field, new_value)
+
+    context.user_data["draft_data"] = cbd_data
+    context.user_data.pop("edit_field", None)
+
+    # Show updated preview
+    preview = _format_draft_preview(cbd_data)
+    await update.message.reply_text(preview)
+
+    # Re-send approval buttons
+    await update.message.reply_text(
+        "Review the updated draft. File it, edit more, or cancel.",
+        reply_markup=_build_approval_keyboard()
+    )
+    return AWAIT_APPROVAL
+
+
+# === APPLICATION BUILDER ===
 
 def build_application() -> Application:
     """Build and return the Telegram bot Application with all handlers registered."""
@@ -164,7 +503,39 @@ def build_application() -> Application:
 
     application = Application.builder().token(token).build()
 
-    # /setup conversation
+    # Main conversation handler for case filing flow
+    case_conv = ConversationHandler(
+        entry_points=[
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_case_input),
+            MessageHandler(filters.VOICE, handle_case_input),
+            MessageHandler(filters.PHOTO, handle_case_input),
+        ],
+        states={
+            AWAIT_FORM_CHOICE: [
+                CallbackQueryHandler(handle_form_choice, pattern=r"^FORM\|"),
+                CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
+            ],
+            AWAIT_APPROVAL: [
+                CallbackQueryHandler(handle_approval_approve, pattern=r"^APPROVE\|"),
+                CallbackQueryHandler(handle_approval_edit, pattern=r"^EDIT\|"),
+                CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
+            ],
+            AWAIT_EDIT_FIELD: [
+                CallbackQueryHandler(handle_edit_field, pattern=r"^FIELD\|"),
+                CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
+            ],
+            AWAIT_EDIT_VALUE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_value),
+            ],
+        },
+        fallbacks=[
+            CommandHandler("cancel", setup_cancel),
+            CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
+        ],
+        per_message=False,
+    )
+
+    # Setup conversation handler
     setup_conv = ConversationHandler(
         entry_points=[CommandHandler("setup", setup_start)],
         states={
@@ -174,16 +545,20 @@ def build_application() -> Application:
         fallbacks=[CommandHandler("cancel", setup_cancel)],
     )
 
+    # Register handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("status", status))
     application.add_handler(setup_conv)
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_case))
+    application.add_handler(case_conv)
+
+    # Callback handler for inline buttons outside conversation
+    application.add_handler(CallbackQueryHandler(handle_callback))
 
     return application
 
 
 def main():
-    """Entry point for local development — runs in polling mode."""
+    """Entry point for local development - runs in polling mode."""
     import requests as _req
 
     init()
@@ -191,10 +566,10 @@ def main():
     # Clear any existing webhook so polling works
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     _req.post(f"https://api.telegram.org/bot{token}/deleteWebhook", json={"drop_pending_updates": True})
-    logger.info("Webhook cleared — polling mode active")
+    logger.info("Webhook cleared - polling mode active")
 
     application = build_application()
-    logger.info("Portfolio Guru starting in POLLING mode (local dev)...")
+    logger.info("Portfolio Guru v2 starting in POLLING mode...")
     application.run_polling(drop_pending_updates=True)
 
 
