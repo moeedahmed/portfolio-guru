@@ -10,7 +10,7 @@ from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     filters, ContextTypes, ConversationHandler,
 )
-from credentials import init_db, store_credentials, get_credentials, has_credentials
+from render_store import store_credentials, get_credentials, has_credentials, init_store
 from extractor import extract_cbd_data
 from filer import file_cbd_to_kaizen
 

@@ -20,3 +20,9 @@ services:
         value: sqlite:////data/portfolio_guru.db
       - key: DB_PATH
         value: /data/portfolio_guru.db
+      - key: CREDENTIALS_JSON
+        value: "{}"
+      - key: RENDER_API_KEY
+        sync: false
+      - key: RENDER_SERVICE_ID
+        value: srv-d6llr2v5gffc73avihcg
