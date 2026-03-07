@@ -5,6 +5,10 @@ services:
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
     plan: free
+    disk:
+      name: portfolio-guru-data
+      mountPath: /data
+      sizeGB: 1
     envVars:
       - key: TELEGRAM_BOT_TOKEN
         sync: false
@@ -13,4 +17,6 @@ services:
       - key: FERNET_SECRET_KEY
         sync: false
       - key: DATABASE_URL
-        value: sqlite:///./portfolio_guru.db
+        value: sqlite:////data/portfolio_guru.db
+      - key: DB_PATH
+        value: /data/portfolio_guru.db
