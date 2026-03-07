@@ -23,7 +23,8 @@ logger = logging.getLogger(__name__)
 # ConversationHandler states
 (AWAIT_USERNAME, AWAIT_PASSWORD,
  AWAIT_FORM_CHOICE, AWAIT_APPROVAL,
- AWAIT_EDIT_FIELD, AWAIT_EDIT_VALUE) = range(6)
+ AWAIT_EDIT_FIELD, AWAIT_EDIT_VALUE,
+ AWAIT_CASE_INPUT) = range(7)
 
 WELCOME_MSG = """Portfolio Guru helps you file clinical cases to your RCEM Kaizen e-portfolio - in seconds.
 
@@ -233,8 +234,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     [InlineKeyboardButton("Connect Kaizen", callback_data="ACTION|setup")]
                 ])
             )
+            return ConversationHandler.END
         else:
             await query.message.reply_text(FILE_CASE_PROMPT)
+            return AWAIT_CASE_INPUT
 
     elif data.startswith("FORM|"):
         return await handle_form_choice(update, context)
@@ -568,11 +571,17 @@ def build_application() -> Application:
     # Main conversation handler for case filing flow
     case_conv = ConversationHandler(
         entry_points=[
+            CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|file$"),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_case_input),
             MessageHandler(filters.VOICE, handle_case_input),
             MessageHandler(filters.PHOTO, handle_case_input),
         ],
         states={
+            AWAIT_CASE_INPUT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_case_input),
+                MessageHandler(filters.VOICE, handle_case_input),
+                MessageHandler(filters.PHOTO, handle_case_input),
+            ],
             AWAIT_FORM_CHOICE: [
                 CallbackQueryHandler(handle_form_choice, pattern=r"^FORM\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
