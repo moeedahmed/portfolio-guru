@@ -13,4 +13,4 @@ export FERNET_SECRET_KEY=$(BWS_ACCESS_TOKEN=$BWS_ACCESS_TOKEN /usr/local/bin/bws
 
 echo "Secrets loaded. Starting bot in polling mode..."
 cd "$(dirname "$0")"
-python3 bot.py
+.venv/bin/python3 bot.py

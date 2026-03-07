@@ -272,13 +272,5 @@ FORM_UUIDS = {
 
 ---
 
-## Pending (next batch — v2.1 scope, not yet built)
-
-- [ ] "Are we done?" end screen after successful filing
-- [ ] Case history in SQLite — edit previously filed drafts (Flow 4)
-- [ ] Deterministic button structure at every state (AI populates text only, never button labels)
-- [ ] Portfolio type selector (Kaizen default; SOAR/LLP later)
-- [ ] Usage limits per user + Stripe gate
-- [ ] Settings menu (change portfolio, update credentials, view usage)
-- [ ] Postgres migration path (for scale beyond ~50 concurrent users)
-- [ ] browser-use task queue (Celery + Redis) for concurrent filers
+## Pending scope
+See Notion → Portfolio Guru → Current State → v2.1 scope section.
