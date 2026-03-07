@@ -63,9 +63,24 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.delete()
     except Exception:
         pass
+
+    # Verify credentials before saving
+    checking_msg = await update.effective_chat.send_message("Checking your credentials...")
+
+    from credentials import verify_kaizen_credentials
+    valid = await asyncio.to_thread(verify_kaizen_credentials, username, password)
+
+    if not valid:
+        await checking_msg.edit_text(
+            "Those credentials didn't work. Check your Kaizen username and password and run /setup again."
+        )
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    # Save only if valid
     store_credentials(user_id, username, password)
     context.user_data.clear()
-    await update.effective_chat.send_message(SETUP_DONE_MSG)
+    await checking_msg.edit_text("Connected. Send me a case description and I'll file it to Kaizen.")
     return ConversationHandler.END
 
 
