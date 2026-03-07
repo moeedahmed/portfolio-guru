@@ -183,12 +183,19 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def setup_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data.pop("setup_username", None)
+    context.user_data.clear()
     if update.callback_query:
         await update.callback_query.answer()
         await update.callback_query.message.reply_text("Setup cancelled.")
     else:
         await update.message.reply_text("Setup cancelled.")
+    return ConversationHandler.END
+
+
+async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Reset conversation state and clear user data."""
+    context.user_data.clear()
+    await update.message.reply_text("Conversation reset. Send me a case whenever you are ready.")
     return ConversationHandler.END
 
 
@@ -246,6 +253,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     # Check credentials
     if not has_credentials(user_id):
+        context.user_data.clear()
         await update.message.reply_text(
             "Connect your Kaizen account first.",
             reply_markup=InlineKeyboardMarkup([
@@ -267,12 +275,14 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             intent = "case"  # Default to case on error
 
         if intent == "chitchat":
+            context.user_data.clear()
             await update.message.reply_text(
                 "Hey! Ready when you are. Send me a clinical case and I'll draft it for your portfolio."
             )
             return ConversationHandler.END
 
         if intent == "question":
+            context.user_data.clear()
             try:
                 answer = answer_question(raw_text)
                 await update.message.reply_text(answer)
@@ -296,6 +306,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 os.unlink(tmp.name)
             await ack.edit_text(f"Transcribed:\n\n{case_text[:500]}...")
         except Exception as e:
+            context.user_data.clear()
             await ack.edit_text(f"Could not transcribe voice note: {str(e)[:200]}")
             return ConversationHandler.END
 
@@ -311,10 +322,12 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 os.unlink(tmp.name)
             await ack.edit_text(f"Extracted:\n\n{case_text[:500]}...")
         except Exception as e:
+            context.user_data.clear()
             await ack.edit_text(f"Could not extract text from image: {str(e)[:200]}")
             return ConversationHandler.END
 
     if not case_text:
+        context.user_data.clear()
         await update.message.reply_text("Send a text message, voice note, or photo.")
         return ConversationHandler.END
 
@@ -368,6 +381,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         cbd_data = extract_cbd_data(case_text)
         context.user_data["draft_data"] = cbd_data
     except Exception as e:
+        context.user_data.clear()
         await ack.edit_text(f"Could not extract case data: {str(e)[:200]}")
         return ConversationHandler.END
 
@@ -391,12 +405,14 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     user_id = update.effective_user.id
     creds = get_credentials(user_id)
     if not creds:
+        context.user_data.clear()
         await query.message.reply_text("Credentials not found. Run /setup again.")
         return ConversationHandler.END
 
     username, password = creds
     cbd_data = context.user_data.get("draft_data")
     if not cbd_data:
+        context.user_data.clear()
         await query.message.reply_text("No draft data found. Start over.")
         return ConversationHandler.END
 
@@ -407,6 +423,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             cbd_data, username, password
         )
     except Exception as e:
+        context.user_data.clear()
         await ack.edit_text(f"Filing failed: {str(e)[:300]}")
         return ConversationHandler.END
 
@@ -467,6 +484,7 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     cbd_data = context.user_data.get("draft_data")
 
     if not field or not cbd_data:
+        context.user_data.clear()
         await update.message.reply_text("Edit failed. Start over.")
         return ConversationHandler.END
 
@@ -493,6 +511,40 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return AWAIT_APPROVAL
 
 
+async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle unexpected text messages mid-conversation."""
+    raw_text = update.message.text.strip()
+
+    try:
+        intent = classify_intent(raw_text)
+    except Exception:
+        intent = "case"
+
+    if intent == "chitchat":
+        await update.message.reply_text(
+            "Hey! Ready when you are. Send me a clinical case and I'll draft it for your portfolio."
+        )
+        # Stay in current state - don't return anything to preserve state
+
+    elif intent == "question":
+        try:
+            answer = answer_question(raw_text)
+            await update.message.reply_text(answer)
+        except Exception:
+            await update.message.reply_text(
+                "I help you file clinical cases to your Kaizen e-portfolio. "
+                "Send me a case description by text, voice note, or photo."
+            )
+        # Stay in current state
+
+    else:
+        # Intent is 'case' - looks like a new case
+        await update.message.reply_text(
+            "It looks like you want to file a new case. Send /reset to start fresh, or /cancel to exit."
+        )
+        # Stay in current state
+
+
 # === APPLICATION BUILDER ===
 
 def build_application() -> Application:
@@ -514,21 +566,25 @@ def build_application() -> Application:
             AWAIT_FORM_CHOICE: [
                 CallbackQueryHandler(handle_form_choice, pattern=r"^FORM\|"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
             ],
             AWAIT_APPROVAL: [
                 CallbackQueryHandler(handle_approval_approve, pattern=r"^APPROVE\|"),
                 CallbackQueryHandler(handle_approval_edit, pattern=r"^EDIT\|"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
             ],
             AWAIT_EDIT_FIELD: [
                 CallbackQueryHandler(handle_edit_field, pattern=r"^FIELD\|"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
             ],
             AWAIT_EDIT_VALUE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_value),
             ],
         },
         fallbacks=[
+            CommandHandler("reset", reset),
             CommandHandler("cancel", setup_cancel),
             CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
         ],
@@ -548,6 +604,7 @@ def build_application() -> Application:
     # Register handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("status", status))
+    application.add_handler(CommandHandler("reset", reset))
     application.add_handler(setup_conv)
     application.add_handler(case_conv)
 
