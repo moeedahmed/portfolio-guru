@@ -112,7 +112,7 @@ CRITICAL RULES:
     browser_session = BrowserSession(browser_profile=browser_profile)
 
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.0-flash",
+        model="gemini-1.5-flash",
         google_api_key=os.environ.get("GOOGLE_API_KEY"),
     )
 

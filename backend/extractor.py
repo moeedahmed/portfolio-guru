@@ -9,7 +9,7 @@ genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
 
 def extract_cbd_data(case_description: str) -> CBDData:
     """Extract structured CBD data from free-text case description."""
-    model = genai.GenerativeModel("gemini-2.0-flash")
+    model = genai.GenerativeModel("gemini-1.5-flash")
 
     system_prompt = f"""You are a medical portfolio assistant. Extract structured data from a doctor's clinical case description for a Case-Based Discussion (CBD) WPBA entry.
 
