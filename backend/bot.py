@@ -251,10 +251,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("FIELD|"):
         return await handle_edit_field(update, context)
 
-    elif data.startswith("CANCEL|"):
+    elif data.startswith("CANCEL|") or data == "ACTION|reset":
         await query.answer()
         context.user_data.clear()
-        await query.message.reply_text("Cancelled.")
+        await query.message.reply_text("Cancelled. Send me a case whenever you're ready.")
         return ConversationHandler.END
 
 
@@ -462,6 +462,14 @@ async def handle_approval_edit(update: Update, context: ContextTypes.DEFAULT_TYP
     """Handle 'Edit' button - show field selection."""
     query = update.callback_query
     await query.answer()
+
+    if not context.user_data.get("draft_data"):
+        await query.message.reply_text(
+            "This draft has expired (bot was restarted). Send /reset and file a new case.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Reset", callback_data="ACTION|reset")]])
+        )
+        return ConversationHandler.END
+
     await query.message.reply_text(
         "Which field do you want to edit?",
         reply_markup=_build_edit_field_keyboard()
@@ -566,7 +574,15 @@ def build_application() -> Application:
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN env var not set")
 
-    application = Application.builder().token(token).build()
+    application = (
+        Application.builder()
+        .token(token)
+        .read_timeout(30)
+        .write_timeout(30)
+        .connect_timeout(30)
+        .pool_timeout(30)
+        .build()
+    )
 
     # Main conversation handler for case filing flow
     case_conv = ConversationHandler(
