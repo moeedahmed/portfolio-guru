@@ -253,6 +253,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("CANCEL|") or data == "ACTION|reset":
         await query.answer()
+        # Disarm buttons immediately — prevents double-tap
+        await query.edit_message_reply_markup(reply_markup=None)
         context.user_data.clear()
         await query.message.reply_text("Cancelled. Send me a case whenever you're ready.")
         return ConversationHandler.END
@@ -386,6 +388,12 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
     form_type = data.split("|")[1]
     context.user_data["chosen_form"] = form_type
 
+    # Disarm buttons immediately — show selection, prevent double-tap
+    await query.edit_message_text(
+        f"✅ {form_type} selected\n\nGenerating draft...",
+        reply_markup=None
+    )
+
     # Extract CBD data
     case_text = context.user_data.get("case_text", "")
     ack = await query.message.reply_text("Extracting case data...")
@@ -414,6 +422,9 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     """Handle 'File this draft' approval."""
     query = update.callback_query
     await query.answer()
+
+    # Disarm buttons immediately — prevents double-tap filing
+    await query.edit_message_reply_markup(reply_markup=None)
 
     user_id = update.effective_user.id
     creds = get_credentials(user_id)
@@ -462,6 +473,9 @@ async def handle_approval_edit(update: Update, context: ContextTypes.DEFAULT_TYP
     """Handle 'Edit' button - show field selection."""
     query = update.callback_query
     await query.answer()
+
+    # Disarm approval buttons immediately — prevents double-tap
+    await query.edit_message_reply_markup(reply_markup=None)
 
     if not context.user_data.get("draft_data"):
         await query.message.reply_text(
