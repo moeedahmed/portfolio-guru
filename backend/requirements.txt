@@ -10,4 +10,3 @@ sqlmodel>=0.0.18
 langchain-google-genai>=2.0.0
 google-generativeai>=0.8.0
 requests>=2.31.0
-beautifulsoup4>=4.12.0
