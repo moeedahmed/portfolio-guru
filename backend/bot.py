@@ -211,6 +211,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(WHAT_IS_THIS_MSG)
 
     elif data == "ACTION|setup":
+        await query.answer()
+        user_id = update.effective_user.id
+        if has_credentials(user_id):
+            await query.message.reply_text(
+                "Your Kaizen account is already connected. Send me a case to get started.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("File a case", callback_data="ACTION|file")]
+                ])
+            )
+            return None
         return await setup_start(update, context)
 
     elif data == "ACTION|file":
@@ -565,18 +575,15 @@ def build_application() -> Application:
         states={
             AWAIT_FORM_CHOICE: [
                 CallbackQueryHandler(handle_form_choice, pattern=r"^FORM\|"),
-                CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
             ],
             AWAIT_APPROVAL: [
                 CallbackQueryHandler(handle_approval_approve, pattern=r"^APPROVE\|"),
                 CallbackQueryHandler(handle_approval_edit, pattern=r"^EDIT\|"),
-                CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
             ],
             AWAIT_EDIT_FIELD: [
                 CallbackQueryHandler(handle_edit_field, pattern=r"^FIELD\|"),
-                CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
             ],
             AWAIT_EDIT_VALUE: [
@@ -586,7 +593,7 @@ def build_application() -> Application:
         fallbacks=[
             CommandHandler("reset", reset),
             CommandHandler("cancel", setup_cancel),
-            CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
+            CallbackQueryHandler(handle_callback),  # Handle all callbacks in fallback
         ],
         per_message=False,
     )
@@ -608,8 +615,8 @@ def build_application() -> Application:
     application.add_handler(setup_conv)
     application.add_handler(case_conv)
 
-    # Callback handler for inline buttons outside conversation
-    application.add_handler(CallbackQueryHandler(handle_callback))
+    # NOTE: CallbackQueryHandler already registered in case_conv fallbacks.
+    # Do NOT add a second one here — causes duplicate message delivery.
 
     return application
 
