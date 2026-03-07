@@ -15,6 +15,13 @@ class CBDData(BaseModel):
     level_of_supervision: str        # "Direct" | "Indirect" | "Distant"
     supervisor_name: Optional[str] = None   # name or email
     curriculum_links: List[str] = []        # SLO labels e.g. ["SLO3", "SLO6"]
+    key_capabilities: List[str] = []        # KC strings e.g. ["SLO1 KC1", "SLO6 KC2"]
+
+
+class FormTypeRecommendation(BaseModel):
+    form_type: str          # "CBD", "DOPS", "LAT", etc.
+    rationale: str          # one-line reason why this form fits
+    uuid: Optional[str]     # Kaizen form UUID (None if not yet verified)
 
 
 class FileRequest(BaseModel):
