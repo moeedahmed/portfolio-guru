@@ -20,31 +20,19 @@ logger = logging.getLogger(__name__)
 # ConversationHandler states
 AWAIT_USERNAME, AWAIT_PASSWORD = range(2)
 
-WELCOME_MSG = """Welcome to Portfolio Guru!
+WELCOME_MSG = """Welcome to Portfolio Guru.
 
-I'll file your clinical cases to Kaizen automatically.
+Run /setup to connect your Kaizen account.
+Then send me a case description — I'll file it as a CBD draft.
 
-First, run /setup to store your Kaizen credentials securely.
-Then just send me a text description of any case - I'll handle the rest.
+/setup — connect Kaizen
+/status — check connection"""
 
-Commands:
-/setup - Store your Kaizen credentials
-/status - Check if credentials are saved"""
+SETUP_START_MSG = "What's your Kaizen username?"
 
-SETUP_START_MSG = """Let's store your Kaizen credentials.
+SETUP_PASSWORD_MSG = "What's your Kaizen password?"
 
-These are encrypted and stored securely on the server.
-
-What's your Kaizen username (usually your email)?"""
-
-SETUP_PASSWORD_MSG = "Got it. Now send your Kaizen password:"
-
-SETUP_DONE_MSG = """Credentials saved securely.
-
-Now just send me a description of any clinical case and I'll file it to Kaizen as a CBD draft.
-
-Example: "67yo male with STEMI in resus. I was the ST5 on shift, took the call from triage, recognised the STEMI on ECG and activated the cath lab with SpR supervision from Dr Ahmed. Learning point: always get ECG within 10 minutes of arrival."
-"""
+SETUP_DONE_MSG = "Done. Send me a case description and I'll file it to Kaizen."
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
