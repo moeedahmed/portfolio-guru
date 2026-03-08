@@ -56,7 +56,7 @@ Return ONLY the extracted/described text, no additional commentary."""
     ]
 
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3-flash-preview",
         contents=contents,
     )
 
