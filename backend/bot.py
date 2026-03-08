@@ -164,26 +164,50 @@ FORM_EMOJIS = {
 }
 
 FIELD_EMOJIS = {
-    "date_of_encounter":    "📅",
-    "date":                 "📅",
-    "clinical_setting":     "🏥",
-    "setting":              "🏥",
-    "patient_presentation": "🩺",
-    "presentation":         "🩺",
-    "procedure":            "🔪",
-    "procedure_performed":  "🔪",
-    "clinical_reasoning":   "🗒️",
-    "case_discussion":      "🗒️",
-    "reflection":           "💭",
-    "supervisor_name":      "👤",
-    "assessor":             "👤",
-    "level_of_supervision": "🎚️",
-    "stage_of_training":    "📈",
-    "trainee_role":         "👨‍⚕️",
-    "leadership_context":   "🧭",
-    "journal":              "📰",
-    "article_title":        "📰",
-    "qi_project":           "📊",
+    "date_of_encounter":      "📅",
+    "date":                   "📅",
+    "clinical_setting":       "🏥",
+    "setting":                "🏥",
+    "patient_presentation":   "🩺",
+    "presentation":           "🩺",
+    "procedure":              "🔪",
+    "procedure_performed":    "🔪",
+    "clinical_reasoning":     "🗒️",
+    "case_discussion":        "🗒️",
+    "reflection":             "💭",
+    "supervisor_name":        "👤",
+    "assessor":               "👤",
+    "level_of_supervision":   "🎚️",
+    "stage_of_training":      "📈",
+    "trainee_role":           "👨‍⚕️",
+    "leadership_context":     "🧭",
+    "journal":                "📰",
+    "article_title":          "📰",
+    "qi_project":             "📊",
+    "reflection_title":       "📝",
+    "learning_activity_type": "📋",
+    "resource_details":       "📎",
+    "teaching_topic":         "📖",
+    "teaching_setting":       "🏫",
+    "teaching_methods":       "🧑‍🏫",
+    "audience":               "👥",
+    "learning_objectives":    "🎯",
+    "feedback_received":      "💬",
+    "course_name":            "📋",
+    "course_provider":        "🏛️",
+    "course_duration":        "⏱️",
+    "learning_points":        "💡",
+    "complaint_summary":      "📝",
+    "incident_summary":       "📝",
+    "actions_taken":          "✅",
+    "lessons_learned":        "💡",
+    "esle_description":       "📝",
+    "us_findings":            "🔊",
+    "us_indication":          "🔊",
+    "procedure_type":         "🔬",
+    "complications":          "⚠️",
+    "outcome":                "📊",
+    "description":            "📝",
 }
 
 def _form_display_name(form_type: str) -> str:
@@ -404,8 +428,8 @@ def _format_generic_draft(draft: FormDraft) -> str:
             continue
 
         # Prefix label with emoji if available
-        fe = FIELD_EMOJIS.get(key, "")
-        label_str = f"{fe} *{label}:*" if fe else f"*{label}:*"
+        fe = FIELD_EMOJIS.get(key, "📌")
+        label_str = f"{fe} *{label}:*"
 
         # Format other lists (multi_select)
         if isinstance(value, list):
@@ -417,7 +441,7 @@ def _format_generic_draft(draft: FormDraft) -> str:
         elif len(str(value)) > 100:
             lines.append(f"{label_str}\n{value}\n")
         else:
-            lines.append(f"{label_str} {value}")
+            lines.append(f"{label_str} {value}\n")
 
     return "\n".join(lines)
 
