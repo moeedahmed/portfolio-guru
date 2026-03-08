@@ -785,15 +785,18 @@ def build_application() -> Application:
             ],
             AWAIT_FORM_CHOICE: [
                 CallbackQueryHandler(handle_form_choice, pattern=r"^FORM\|"),
+                CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
             ],
             AWAIT_APPROVAL: [
                 CallbackQueryHandler(handle_approval_approve, pattern=r"^APPROVE\|"),
                 CallbackQueryHandler(handle_approval_edit, pattern=r"^EDIT\|"),
+                CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
             ],
             AWAIT_EDIT_FIELD: [
                 CallbackQueryHandler(handle_edit_field, pattern=r"^FIELD\|"),
+                CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
             ],
             AWAIT_EDIT_VALUE: [
