@@ -450,6 +450,18 @@ Write the reflection in direct, first-person clinical language:
         retry_raw = retry_raw.strip()
         data = json.loads(retry_raw)
 
+    # Coerce null required-ish fields to sensible defaults
+    if not data.get("date_of_encounter"):
+        data["date_of_encounter"] = str(date.today())
+    if not data.get("patient_presentation"):
+        data["patient_presentation"] = "Not specified"
+    if not data.get("trainee_role"):
+        data["trainee_role"] = "Primary clinician"
+    if not data.get("clinical_reasoning"):
+        data["clinical_reasoning"] = data.get("reflection", "See reflection")
+    if not data.get("reflection"):
+        data["reflection"] = "Reflection not extracted — please edit"
+
     # Apply humanizer to reflection
     if "reflection" in data:
         data["reflection"] = _humanize_reflection(data["reflection"])

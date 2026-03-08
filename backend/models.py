@@ -4,14 +4,14 @@ from typing import Optional, List, Literal
 
 class CBDData(BaseModel):
     form_type: Literal["CBD"] = "CBD"
-    date_of_encounter: str           # YYYY-MM-DD
-    patient_age: str                 # e.g. "45-year-old"
-    patient_presentation: str        # chief complaint
-    clinical_setting: str            # e.g. "Emergency Department - Resus"
+    date_of_encounter: str = ""              # YYYY-MM-DD
+    patient_age: Optional[str] = None        # e.g. "45-year-old"
+    patient_presentation: str = ""           # chief complaint
+    clinical_setting: Optional[str] = None   # e.g. "Emergency Department - Resus"
     stage_of_training: Optional[str] = None  # "Intermediate/ST3" | "Higher/ST4-ST6" | "PEM" | "ACCS" | None if unknown
-    trainee_role: str                # what the trainee did
-    clinical_reasoning: str          # maps to "Case to be discussed" field
-    reflection: str                  # maps to "Reflection of event" field
+    trainee_role: str = ""                   # what the trainee did
+    clinical_reasoning: str = ""             # maps to "Case to be discussed" field
+    reflection: str = ""                     # maps to "Reflection of event" field
     level_of_supervision: Optional[str] = None  # "Direct" | "Indirect" | "Distant"
     supervisor_name: Optional[str] = None   # name or email
     curriculum_links: List[str] = []        # SLO labels e.g. ["SLO3", "SLO6"]
