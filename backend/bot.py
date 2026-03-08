@@ -13,7 +13,7 @@ from telegram.ext import (
 )
 from store import store_credentials, get_credentials, has_credentials, init
 from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, answer_question, extract_explicit_form_type
-from filer import file_cbd_to_kaizen
+from kaizen_filer import file_to_kaizen, FORM_UUIDS
 from form_schemas import FORM_SCHEMAS
 from models import FormDraft, CBDData
 from whisper import transcribe_voice
@@ -962,63 +962,50 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         return ConversationHandler.END
 
     # Handle FormDraft (non-CBD forms)
+    # Unified filing for ALL forms (CBD and non-CBD)
     if isinstance(draft, FormDraft):
-        schema = FORM_SCHEMAS.get(draft.form_type, {})
-        form_name = schema.get("name", draft.form_type)
-        form_emoji = FORM_EMOJIS.get(draft.form_type, "📋")
+        form_type = draft.form_type
+        fields = draft.fields
+        curriculum_links = draft.fields.get("curriculum_links", [])
+    else:
+        # CBDData
+        form_type = "CBD"
+        fields = {
+            "date_of_encounter": draft.date_of_encounter,
+            "date_of_event": draft.date_of_encounter,
+            "stage_of_training": draft.stage_of_training,
+            "clinical_reasoning": draft.clinical_reasoning,
+            "reflection": draft.reflection,
+        }
+        curriculum_links = draft.curriculum_links or []
 
-        # Save draft to JSON file
-        import json
-        import pathlib
-        from datetime import date
-        drafts_dir = pathlib.Path.home() / ".openclaw/data/portfolio-guru/drafts"
-        drafts_dir.mkdir(parents=True, exist_ok=True)
-        filename = f"{user_id}_{draft.form_type}_{date.today()}.json"
-        draft_path = drafts_dir / filename
-        with open(draft_path, "w") as f:
-            json.dump({"form_type": draft.form_type, "uuid": draft.uuid, "fields": draft.fields}, f, indent=2)
+    schema = FORM_SCHEMAS.get(form_type, {})
+    form_name = schema.get("name", form_type)
+    form_emoji = FORM_EMOJIS.get(form_type, "📋")
 
-        context.user_data.clear()
-        end_keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📂 File another case", callback_data="ACTION|file")],
-        ])
-        kaizen_url = f"https://kaizenep.com/events/new-section/{draft.uuid}"
-        # Build a compact summary of the key fields
-        summary_lines = []
-        for key, val in draft.fields.items():
-            if key in ("date_of_encounter", "date_of_event") and val:
-                summary_lines.append(f"📅 {val}")
-            elif key == "curriculum_links" and val:
-                slo_str = ", ".join(val) if isinstance(val, list) else val
-                summary_lines.append(f"📚 {slo_str}")
-        summary = "\n".join(summary_lines)
-        if summary:
-            summary = f"\n\n{summary}"
+    # Save local JSON backup
+    import json as _json
+    import pathlib
+    from datetime import date
+    drafts_dir = pathlib.Path.home() / ".openclaw/data/portfolio-guru/drafts"
+    drafts_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{user_id}_{form_type}_{date.today()}.json"
+    with open(drafts_dir / filename, "w") as f:
+        _json.dump({"form_type": form_type, "fields": fields}, f, indent=2)
 
-        await query.message.reply_text(
-            f"{form_emoji} *{form_name} — draft ready.*{summary}\n\n"
-            f"👉 Tap below to open a blank {form_name} in Kaizen, then copy the details from your draft.\n\n"
-            f"[Open {form_name} in Kaizen]({kaizen_url})",
-            reply_markup=end_keyboard,
-            parse_mode="Markdown"
-        )
-        return ConversationHandler.END
-
-    # CBD form — use filer
-    cbd_data = draft
-    ack = await query.message.reply_text("📤 Filing to Kaizen…")
+    ack = await query.message.reply_text(f"📤 Filing {form_name} to Kaizen…")
 
     try:
-        status_result, action_log, screenshot_b64, assessor_warning = await asyncio.wait_for(
-            file_cbd_to_kaizen(cbd_data, username, password),
-            timeout=180,  # 3 min max — Kaizen is slow but not THAT slow
+        result = await asyncio.wait_for(
+            file_to_kaizen(form_type, fields, username, password, curriculum_links),
+            timeout=180,
         )
     except asyncio.TimeoutError:
         context.user_data.clear()
         await ack.edit_text("⏱ Filing timed out (3 min). The draft may have saved — check Kaizen directly.")
         return ConversationHandler.END
     except Exception as e:
-        logger.error(f"CBD filer error: {e}", exc_info=True)
+        logger.error(f"Filer error for {form_type}: {e}", exc_info=True)
         context.user_data.clear()
         await ack.edit_text("❌ Filing failed. Try again or check Kaizen directly.")
         return ConversationHandler.END
@@ -1028,18 +1015,29 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         [InlineKeyboardButton("📂 File another case", callback_data="ACTION|file")],
     ])
 
-    if status_result == "success":
-        slos = ", ".join(cbd_data.curriculum_links) if cbd_data.curriculum_links else "None"
-        msg = f"✅ *CBD draft saved in Kaizen.*\n\nNot submitted to assessor — open Kaizen to assign one when ready.\n\n📅 {cbd_data.date_of_encounter}  ·  📚 {slos}"
-    elif status_result == "partial":
-        msg = f"⚠️ *Draft saved but some fields may be incomplete.*\n\nReview in Kaizen before sending to assessor.\n\n📅 {cbd_data.date_of_encounter}"
+    status = result["status"]
+    filled = result.get("filled", [])
+    skipped = result.get("skipped", [])
+    error = result.get("error")
+
+    if status == "success":
+        date_val = fields.get("date_of_encounter", fields.get("date_of_event", ""))
+        slo_str = ", ".join(curriculum_links) if curriculum_links else ""
+        summary = f"\n\n📅 {date_val}" if date_val else ""
+        if slo_str:
+            summary += f"  ·  📚 {slo_str}"
+        msg = f"✅ *{form_name} draft saved in Kaizen.*\n\nNot submitted to assessor — open Kaizen to assign one when ready.{summary}"
+    elif status == "partial":
+        msg = (
+            f"⚠️ *{form_name} draft saved but some fields may be incomplete.*\n\n"
+            f"Filled: {len(filled)} · Skipped: {len(skipped)}\n"
+            f"Review in Kaizen before sending to assessor."
+        )
     else:
-        msg = "❌ Filing failed. Check Kaizen manually or try again."
+        kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS.get(form_type, '')}"
+        msg = f"❌ *Filing failed.* {error or ''}\n\n[Open {form_name} manually in Kaizen]({kaizen_url})"
 
-    if assessor_warning:
-        msg += f"\n\n{assessor_warning}"
-
-    await ack.edit_text(msg, reply_markup=end_keyboard, parse_mode="Markdown")
+    await _safe_edit_text(ack, msg, reply_markup=end_keyboard, parse_mode="Markdown")
     return ConversationHandler.END
 
 

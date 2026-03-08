@@ -1,0 +1,2418 @@
+{
+  "CBD": {
+    "uuid": "3ce5989a-b61c-4c24-ab12-711bf928b181",
+    "fields": [
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "startDate",
+        "name": "",
+        "label": "Date occurred on",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "endDate",
+        "name": "",
+        "label": "End date",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "event-description",
+        "name": "event-description",
+        "label": "Description (optional)",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
+        "name": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
+        "label": "Stage of training",
+        "placeholder": "Stage of training"
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "5391f8de-de63-4db3-9e08-baaa2a380cfe",
+        "name": "",
+        "label": "Date of event",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "60772a97-92eb-4dbe-a813-6a5293be82f9",
+        "name": "60772a97-92eb-4dbe-a813-6a5293be82f9",
+        "label": "Case to be discussed",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "610b5c60-99ac-4902-9407-22974d6a5799",
+        "name": "610b5c60-99ac-4902-9407-22974d6a5799",
+        "label": "Reflection of event",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "invites",
+        "name": "a2840ba1-c938-4675-b719-f2fcab20ed61:invites",
+        "label": "Who would you like to fill in the next section of this form?",
+        "placeholder": "Start typing to search"
+      },
+      {
+        "tag": "INPUT",
+        "type": "checkbox",
+        "id": "filledOnSameDevice",
+        "name": "filledOnSameDevice",
+        "label": "Fill in on the same device",
+        "placeholder": ""
+      }
+    ]
+  },
+  "DOPS": {
+    "uuid": "159831f9-6d22-4e77-851b-87e30aee37a2",
+    "fields": [
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "startDate",
+        "name": "",
+        "label": "Date occurred on",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "endDate",
+        "name": "",
+        "label": "End date",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "event-description",
+        "name": "event-description",
+        "label": "Description (optional)",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "286d64f5-2aa0-41eb-aba6-a7bc523f133c",
+        "name": "286d64f5-2aa0-41eb-aba6-a7bc523f133c",
+        "label": "Placement",
+        "placeholder": "Placement"
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "5391f8de-de63-4db3-9e08-baaa2a380cfe",
+        "name": "",
+        "label": "Date of event",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "60772a97-92eb-4dbe-a813-6a5293be82f9",
+        "name": "60772a97-92eb-4dbe-a813-6a5293be82f9",
+        "label": "Case observed",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
+        "name": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
+        "label": "Stage of Training",
+        "placeholder": "Stage of Training"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "610b5c60-99ac-4902-9407-22974d6a5799",
+        "name": "610b5c60-99ac-4902-9407-22974d6a5799",
+        "label": "Reflection of event",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "invites",
+        "name": "a2840ba1-c938-4675-b719-f2fcab20ed61:invites",
+        "label": "Who would you like to fill in the next section of this form?",
+        "placeholder": "Start typing to search"
+      },
+      {
+        "tag": "INPUT",
+        "type": "checkbox",
+        "id": "filledOnSameDevice",
+        "name": "filledOnSameDevice",
+        "label": "Fill in on the same device",
+        "placeholder": ""
+      }
+    ]
+  },
+  "LAT": {
+    "uuid": "eb1c7547-0f41-49e7-95de-8adffd849924",
+    "fields": [
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "startDate",
+        "name": "",
+        "label": "Date occurred on",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "endDate",
+        "name": "",
+        "label": "End date",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "event-description",
+        "name": "event-description",
+        "label": "Description (optional)",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "ebccdd92-bfac-44b4-abde-d7958118ff05",
+        "name": "",
+        "label": "Date",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "b4b62e33-3359-4504-9877-17f2e38e9fd0",
+        "name": "b4b62e33-3359-4504-9877-17f2e38e9fd0",
+        "label": "Trainee Post (current position)",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "325c4423-ff20-4667-918b-c2f2a323acd0",
+        "name": "325c4423-ff20-4667-918b-c2f2a323acd0",
+        "label": "Please review leadership priorities for the year:",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "kzt-search-query",
+        "name": "kz-search-query",
+        "label": "",
+        "placeholder": "Search..."
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "kzt-search-query",
+        "name": "kz-search-query",
+        "label": "",
+        "placeholder": "Search..."
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "kzt-search-query",
+        "name": "kz-search-query",
+        "label": "",
+        "placeholder": "Search..."
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "4c88f4f8-32bb-43c6-905b-411b7915affd",
+        "name": "4c88f4f8-32bb-43c6-905b-411b7915affd",
+        "label": "Please describe what happened in as much detail as possible:",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "invites",
+        "name": "bcebf7fc-fdbc-4b88-966e-e290837afe89:invites",
+        "label": "Who would you like to fill in the next section of this form?",
+        "placeholder": "Start typing to search"
+      },
+      {
+        "tag": "INPUT",
+        "type": "checkbox",
+        "id": "filledOnSameDevice",
+        "name": "filledOnSameDevice",
+        "label": "Fill in on the same device",
+        "placeholder": ""
+      }
+    ]
+  },
+  "ACAT": {
+    "uuid": "6577ab06-8340-47e3-952a-708a5f800dcc",
+    "fields": [
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "startDate",
+        "name": "",
+        "label": "Date occurred on",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "endDate",
+        "name": "",
+        "label": "End date",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "event-description",
+        "name": "event-description",
+        "label": "Description (optional)",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "5391f8de-de63-4db3-9e08-baaa2a380cfe",
+        "name": "",
+        "label": "Date of event",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "286d64f5-2aa0-41eb-aba6-a7bc523f133c",
+        "name": "286d64f5-2aa0-41eb-aba6-a7bc523f133c",
+        "label": "Placement",
+        "placeholder": "Placement"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "60772a97-92eb-4dbe-a813-6a5293be82f9",
+        "name": "60772a97-92eb-4dbe-a813-6a5293be82f9",
+        "label": "Cases observed",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "eed0e8dc-075d-4661-aea5-2c3238af4c5b",
+        "name": "eed0e8dc-075d-4661-aea5-2c3238af4c5b",
+        "label": "ACCS Procedural List (2025 Update)",
+        "placeholder": "ACCS Procedural List (2025 Update)"
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "e1ae9b5b-85b2-45e4-9c1f-f322c7a6dc31",
+        "name": "e1ae9b5b-85b2-45e4-9c1f-f322c7a6dc31",
+        "label": "Which clinical setting did this assessment occur in?",
+        "placeholder": "Which clinical setting did this assessment occur in?"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "610b5c60-99ac-4902-9407-22974d6a5799",
+        "name": "610b5c60-99ac-4902-9407-22974d6a5799",
+        "label": "Reflection of event",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "kzt-search-query",
+        "name": "kz-search-query",
+        "label": "",
+        "placeholder": "Search..."
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "invites",
+        "name": "a2840ba1-c938-4675-b719-f2fcab20ed61:invites",
+        "label": "Who would you like to fill in the next section of this form?",
+        "placeholder": "Start typing to search"
+      },
+      {
+        "tag": "INPUT",
+        "type": "checkbox",
+        "id": "filledOnSameDevice",
+        "name": "filledOnSameDevice",
+        "label": "Fill in on the same device",
+        "placeholder": ""
+      }
+    ]
+  },
+  "ACAF": {
+    "uuid": "15e67ae8-868b-4358-9b96-30a4a272f02c",
+    "fields": [
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "startDate",
+        "name": "",
+        "label": "Date occurred on",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "endDate",
+        "name": "",
+        "label": "End date",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "event-description",
+        "name": "event-description",
+        "label": "Description (optional)",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "4ea8380a-86dc-4483-926e-c0deb4a7e021",
+        "name": "4ea8380a-86dc-4483-926e-c0deb4a7e021",
+        "label": "Write a focused description of the WBPA/clinical/non-clinical situation which formed the basis for this ACAF",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "eaaffbe3-1bbe-4600-92ec-ecad6d6483bb",
+        "name": "eaaffbe3-1bbe-4600-92ec-ecad6d6483bb",
+        "label": "Population or Problem",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "66ce86c5-086c-485c-a46b-76e259ee3f77",
+        "name": "66ce86c5-086c-485c-a46b-76e259ee3f77",
+        "label": "Intervention",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "3f2ca5b6-b65e-48b2-b2e4-53130ce2951d",
+        "name": "3f2ca5b6-b65e-48b2-b2e4-53130ce2951d",
+        "label": "Comparison",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "b1013e86-5e07-47e0-ac01-ecc332601b8c",
+        "name": "b1013e86-5e07-47e0-ac01-ecc332601b8c",
+        "label": "Outcome",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "0e54dd77-dcae-449d-9d90-3f2b345b42ef",
+        "name": "0e54dd77-dcae-449d-9d90-3f2b345b42ef",
+        "label": "Other:",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "e68164a5-435e-472f-a2d3-5880eb5eae14",
+        "name": "e68164a5-435e-472f-a2d3-5880eb5eae14",
+        "label": "Search for evidence to answer your question and summarise your search methodology",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "ae5f23c6-3ea1-4836-b1f4-db664f6d5d95",
+        "name": "ae5f23c6-3ea1-4836-b1f4-db664f6d5d95",
+        "label": "Evaluate current evidence",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "a277f5d6-9d68-4408-ac45-20ccc97dd746",
+        "name": "a277f5d6-9d68-4408-ac45-20ccc97dd746",
+        "label": "Apply the evidence to answer your question. Explain the impact on your practice and wider EM care.",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "eda3bc11-3115-475e-93ba-5f186f6f2ecc",
+        "name": "eda3bc11-3115-475e-93ba-5f186f6f2ecc",
+        "label": "Communicate these findings to a patient",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "8fb576f7-aa62-496d-ac40-0cc5d7e9649e",
+        "name": "8fb576f7-aa62-496d-ac40-0cc5d7e9649e",
+        "label": "Recommend future research ideas",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "e5b279ff-63fc-46cf-a0a0-c87c8dfcc78b",
+        "name": "e5b279ff-63fc-46cf-a0a0-c87c8dfcc78b",
+        "label": "Comment:",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "kzt-search-query",
+        "name": "kz-search-query",
+        "label": "",
+        "placeholder": "Search..."
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "invites",
+        "name": "84e36320-a8f2-406e-8ca0-7829ecdb89b4:invites",
+        "label": "Who would you like to fill in the next section of this form?",
+        "placeholder": "Start typing to search"
+      },
+      {
+        "tag": "INPUT",
+        "type": "checkbox",
+        "id": "filledOnSameDevice",
+        "name": "filledOnSameDevice",
+        "label": "Fill in on the same device",
+        "placeholder": ""
+      }
+    ]
+  },
+  "STAT": {
+    "uuid": "41ff54b8-35a7-414b-9bd6-97fb1c3eb189",
+    "fields": [
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "startDate",
+        "name": "",
+        "label": "Date occurred on",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "endDate",
+        "name": "",
+        "label": "End date",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "event-description",
+        "name": "event-description",
+        "label": "Description (optional)",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "9d48100e-9647-4c67-8d39-24bbe8e5e3fa",
+        "name": "",
+        "label": "Date",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
+        "name": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
+        "label": "Stage of training",
+        "placeholder": "Stage of training"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "d00ac11e-528f-494d-b1ff-6835fb989995",
+        "name": "d00ac11e-528f-494d-b1ff-6835fb989995",
+        "label": "Learner Group:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "bf181d9c-4875-4010-805e-f675aaeb4e72",
+        "name": "bf181d9c-4875-4010-805e-f675aaeb4e72",
+        "label": "Setting:",
+        "placeholder": "Setting:"
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "2a417a1c-351f-47f2-abe0-e46ee452d8ae",
+        "name": "2a417a1c-351f-47f2-abe0-e46ee452d8ae",
+        "label": "Delivery:",
+        "placeholder": "Delivery:"
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "55ca2e2a-53ae-46a2-ac9f-3ee693bb6440",
+        "name": "55ca2e2a-53ae-46a2-ac9f-3ee693bb6440",
+        "label": "Number of Learners:",
+        "placeholder": "Number of Learners:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "94398bfe-970c-456c-9cf4-618f51a0becc",
+        "name": "94398bfe-970c-456c-9cf4-618f51a0becc",
+        "label": "Length of Session:",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "8b19c437-be46-4ef9-be67-97a1b8d7e200",
+        "name": "8b19c437-be46-4ef9-be67-97a1b8d7e200",
+        "label": "Title of Teaching Session:",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "kzt-search-query",
+        "name": "kz-search-query",
+        "label": "",
+        "placeholder": "Search..."
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "invites",
+        "name": "84e36320-a8f2-406e-8ca0-7829ecdb89b4:invites",
+        "label": "Who would you like to fill in the next section of this form?",
+        "placeholder": "Start typing to search"
+      },
+      {
+        "tag": "INPUT",
+        "type": "checkbox",
+        "id": "filledOnSameDevice",
+        "name": "filledOnSameDevice",
+        "label": "Fill in on the same device",
+        "placeholder": ""
+      }
+    ]
+  },
+  "MSF": {
+    "uuid": "5f71ac04-ff45-44d2-b7a1-f8b921a8a4c8",
+    "fields": [
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "startDate",
+        "name": "",
+        "label": "Date occurred on",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "endDate",
+        "name": "",
+        "label": "End date",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "event-description",
+        "name": "event-description",
+        "label": "Description (optional)",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "b699e57a-6f7d-463e-a5a3-f78c2bdbe50c",
+        "name": "",
+        "label": "Date",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "0d9c69df-2514-4ac7-8776-b3d1037e0e51",
+        "name": "0d9c69df-2514-4ac7-8776-b3d1037e0e51",
+        "label": "Medical knowledge and clinical skills:",
+        "placeholder": "Medical knowledge and clinical skills:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "8de9d148-2105-4b8b-bf5b-2e85c0bfa082",
+        "name": "8de9d148-2105-4b8b-bf5b-2e85c0bfa082",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "24677f0f-b345-4d6c-a79f-934bcc9f1536",
+        "name": "24677f0f-b345-4d6c-a79f-934bcc9f1536",
+        "label": "Problem-solving skills:",
+        "placeholder": "Problem-solving skills:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "1ebc2730-c245-480c-a3da-db6ed4bcef69",
+        "name": "1ebc2730-c245-480c-a3da-db6ed4bcef69",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "461875da-67a3-4415-80e6-82a1ad483a77",
+        "name": "461875da-67a3-4415-80e6-82a1ad483a77",
+        "label": "Note-keeping - clarity; legibility and completeness:",
+        "placeholder": "Note-keeping - clarity; legibility and completeness:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "c20d75fc-567f-49b6-bc74-b1cd3cc62e63",
+        "name": "c20d75fc-567f-49b6-bc74-b1cd3cc62e63",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "adfee495-7172-4933-949a-fa76765f18c3",
+        "name": "adfee495-7172-4933-949a-fa76765f18c3",
+        "label": "Emergency Care Skills:",
+        "placeholder": "Emergency Care Skills:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "27f47f6e-7c89-4c83-89a2-7262644f77b1",
+        "name": "27f47f6e-7c89-4c83-89a2-7262644f77b1",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "21eaf63d-9cf5-41bc-92d4-0cf912eea240",
+        "name": "21eaf63d-9cf5-41bc-92d4-0cf912eea240",
+        "label": "Comments on your clinical care:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "c06ef500-bcb7-4abf-8b09-af1428e99729",
+        "name": "c06ef500-bcb7-4abf-8b09-af1428e99729",
+        "label": "Empathy and sensitivity:",
+        "placeholder": "Empathy and sensitivity:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "38105ea5-1316-4313-89f7-87f84210734f",
+        "name": "38105ea5-1316-4313-89f7-87f84210734f",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "97e34377-43c8-45b6-bb22-dc89ae068bb5",
+        "name": "97e34377-43c8-45b6-bb22-dc89ae068bb5",
+        "label": "Communicates well with all patient groups:",
+        "placeholder": "Communicates well with all patient groups:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "5c7e1ed3-703d-4e9b-9872-6f7cb14ec9f8",
+        "name": "5c7e1ed3-703d-4e9b-9872-6f7cb14ec9f8",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "667066ff-4f3e-412b-a836-b4e5b1f6d54b",
+        "name": "667066ff-4f3e-412b-a836-b4e5b1f6d54b",
+        "label": "Treats patients and relatives with respect:",
+        "placeholder": "Treats patients and relatives with respect:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "ad947db7-2f5b-42cf-8732-f3eed48503a0",
+        "name": "ad947db7-2f5b-42cf-8732-f3eed48503a0",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "c371fa8e-ece1-44b4-95dc-16c93ae46ce1",
+        "name": "c371fa8e-ece1-44b4-95dc-16c93ae46ce1",
+        "label": "Appreciates the psycho-social aspects of patient care:",
+        "placeholder": "Appreciates the psycho-social aspects of patient care:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "aece333b-6468-4957-af6b-055a7efb95e2",
+        "name": "aece333b-6468-4957-af6b-055a7efb95e2",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "34f30a5f-c78b-456d-a147-96b47d3d94eb",
+        "name": "34f30a5f-c78b-456d-a147-96b47d3d94eb",
+        "label": "Offers explanations:",
+        "placeholder": "Offers explanations:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "13fa6652-cc17-4738-bdf4-ea83d32cb222",
+        "name": "13fa6652-cc17-4738-bdf4-ea83d32cb222",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "37d84160-410d-40c8-ad63-a6b1f919fc19",
+        "name": "37d84160-410d-40c8-ad63-a6b1f919fc19",
+        "label": "Comments on your relationship with patients:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "b3b5854c-7bd1-4bd5-8e77-7ae65b3c6127",
+        "name": "b3b5854c-7bd1-4bd5-8e77-7ae65b3c6127",
+        "label": "Is a team-player:",
+        "placeholder": "Is a team-player:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "7a9e5773-43f8-442c-9794-0820ba150e5b",
+        "name": "7a9e5773-43f8-442c-9794-0820ba150e5b",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "c1540ce8-e2d8-429f-9e98-06a83b455790",
+        "name": "c1540ce8-e2d8-429f-9e98-06a83b455790",
+        "label": "Asks for others' point of view and advice:",
+        "placeholder": "Asks for others' point of view and advice:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "02f71da9-3ca8-4847-8f29-5f4bacde13e1",
+        "name": "02f71da9-3ca8-4847-8f29-5f4bacde13e1",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "d3837087-6d48-4e6c-bf61-e94fa345a1ae",
+        "name": "d3837087-6d48-4e6c-bf61-e94fa345a1ae",
+        "label": "Encourages discussion, empathy and sensibility:",
+        "placeholder": "Encourages discussion, empathy and sensibility:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "82d1922c-3d37-4639-831c-9470e3cc8921",
+        "name": "82d1922c-3d37-4639-831c-9470e3cc8921",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "eab610fa-73f7-4662-81d3-4de59ecdc062",
+        "name": "eab610fa-73f7-4662-81d3-4de59ecdc062",
+        "label": "Is clear and precise with instructions:",
+        "placeholder": "Is clear and precise with instructions:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "cd3a508a-15f3-4017-bc3d-5861657c8ac6",
+        "name": "cd3a508a-15f3-4017-bc3d-5861657c8ac6",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "30cd661e-e769-43f7-ac0c-621cc6459625",
+        "name": "30cd661e-e769-43f7-ac0c-621cc6459625",
+        "label": "Treats colleagues with respect:",
+        "placeholder": "Treats colleagues with respect:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "09fc23b3-fffb-4295-9255-865b397d3d92",
+        "name": "09fc23b3-fffb-4295-9255-865b397d3d92",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "e274ee13-a731-4aa8-aa5c-e271655e84a7",
+        "name": "e274ee13-a731-4aa8-aa5c-e271655e84a7",
+        "label": "Communicates well (includes non-verbal communication):",
+        "placeholder": "Communicates well (includes non-verbal communication):"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "17f7a7f2-17cd-4c96-ba63-2ee57ad52255",
+        "name": "17f7a7f2-17cd-4c96-ba63-2ee57ad52255",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "3015b9f8-3f0d-41e0-ae14-eed6a1d44d19",
+        "name": "3015b9f8-3f0d-41e0-ae14-eed6a1d44d19",
+        "label": "Is reliable:",
+        "placeholder": "Is reliable:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "9fdf0000-2a90-4c41-8c3a-f4d839e33d80",
+        "name": "9fdf0000-2a90-4c41-8c3a-f4d839e33d80",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "83511f96-7b69-44e3-aa4b-3986704d9e2b",
+        "name": "83511f96-7b69-44e3-aa4b-3986704d9e2b",
+        "label": "Can lead a team well:",
+        "placeholder": "Can lead a team well:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "49b0fd37-cfb8-4dea-8cd9-afa4a024ef67",
+        "name": "49b0fd37-cfb8-4dea-8cd9-afa4a024ef67",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "d0676b0f-d549-497f-b3eb-00c9d3fc5b1e",
+        "name": "d0676b0f-d549-497f-b3eb-00c9d3fc5b1e",
+        "label": "Takes responsibility:",
+        "placeholder": "Takes responsibility:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "a1ef2b8e-afe2-4ed7-b2dc-708ee309cafe",
+        "name": "a1ef2b8e-afe2-4ed7-b2dc-708ee309cafe",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "3a928d94-e2a2-430b-a700-c62f4eb4a6b8",
+        "name": "3a928d94-e2a2-430b-a700-c62f4eb4a6b8",
+        "label": "Comments on your relationship with colleagues:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "0f04464e-f6e9-4fda-8665-ad40bff4d71d",
+        "name": "0f04464e-f6e9-4fda-8665-ad40bff4d71d",
+        "label": "Teaching is structured:",
+        "placeholder": "Teaching is structured:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "68944099-b85c-4cd7-8246-ec5ee63321ad",
+        "name": "68944099-b85c-4cd7-8246-ec5ee63321ad",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "ffe0befd-a903-4c73-a83a-b52e4a885e00",
+        "name": "ffe0befd-a903-4c73-a83a-b52e4a885e00",
+        "label": "Is enthusiastic about teaching:",
+        "placeholder": "Is enthusiastic about teaching:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "7e129c69-0095-4a86-ad7a-bbf34024c527",
+        "name": "7e129c69-0095-4a86-ad7a-bbf34024c527",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "376f291d-4750-4b1d-9b03-5734b4cfadc2",
+        "name": "376f291d-4750-4b1d-9b03-5734b4cfadc2",
+        "label": "This clinician's teaching sessions are beneficial:",
+        "placeholder": "This clinician's teaching sessions are beneficial:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "f196bebf-0563-47a5-a569-1c845fb6af78",
+        "name": "f196bebf-0563-47a5-a569-1c845fb6af78",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "71f615cb-e393-49f6-b8a5-9baf7cd1b1bb",
+        "name": "71f615cb-e393-49f6-b8a5-9baf7cd1b1bb",
+        "label": "Teaching is presented well:",
+        "placeholder": "Teaching is presented well:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "97b5ffef-9bf4-4c58-9372-5e6db1183705",
+        "name": "97b5ffef-9bf4-4c58-9372-5e6db1183705",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "1d3d7816-ed3c-438b-b1c0-bdb7ee4c7109",
+        "name": "1d3d7816-ed3c-438b-b1c0-bdb7ee4c7109",
+        "label": "Uses varied teaching skills:",
+        "placeholder": "Uses varied teaching skills:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "4b4278d5-d99a-4685-ae10-d4353b0325b9",
+        "name": "4b4278d5-d99a-4685-ae10-d4353b0325b9",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "9af0ba57-7a78-4cc4-b830-682537826d77",
+        "name": "9af0ba57-7a78-4cc4-b830-682537826d77",
+        "label": "Comments on this clinician's teaching and training skills:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "ae01a0b0-0288-4404-9ffd-82c5e0fca947",
+        "name": "ae01a0b0-0288-4404-9ffd-82c5e0fca947",
+        "label": "Overall, how do you rate yourself compared to other clinicians at your level?:",
+        "placeholder": "Overall, how do you rate yourself compared to other clinicians at your level?:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "588dd6e4-a6c5-4f4b-a141-8bcd7c86ce7e",
+        "name": "588dd6e4-a6c5-4f4b-a141-8bcd7c86ce7e",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "f1a6e224-c3d0-45fe-9dc1-5560e7b03f09",
+        "name": "f1a6e224-c3d0-45fe-9dc1-5560e7b03f09",
+        "label": "How would you rate your performance at this stage of training?:",
+        "placeholder": "How would you rate your performance at this stage of training?:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "0ea5221f-f0aa-4bee-8af7-4b936887cd03",
+        "name": "0ea5221f-f0aa-4bee-8af7-4b936887cd03",
+        "label": "Comments:",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "3086f426-a0e2-459e-baf8-58577c04af55",
+        "name": "3086f426-a0e2-459e-baf8-58577c04af55",
+        "label": "Any general comments:",
+        "placeholder": ""
+      }
+    ]
+  },
+  "MINI_CEX": {
+    "uuid": "647665f4-a992-4541-9e17-33ba6fd1d347",
+    "fields": [
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "startDate",
+        "name": "",
+        "label": "Date occurred on",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "endDate",
+        "name": "",
+        "label": "End date",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "event-description",
+        "name": "event-description",
+        "label": "Description (optional)",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
+        "name": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
+        "label": "Stage of training",
+        "placeholder": "Stage of training"
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "5391f8de-de63-4db3-9e08-baaa2a380cfe",
+        "name": "",
+        "label": "Date of event",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "f091f9c5-6c77-48be-9b96-05ebe1b56a07",
+        "name": "f091f9c5-6c77-48be-9b96-05ebe1b56a07",
+        "label": "Clinical setting",
+        "placeholder": "Clinical setting"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "60772a97-92eb-4dbe-a813-6a5293be82f9",
+        "name": "60772a97-92eb-4dbe-a813-6a5293be82f9",
+        "label": "Case observed",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "610b5c60-99ac-4902-9407-22974d6a5799",
+        "name": "610b5c60-99ac-4902-9407-22974d6a5799",
+        "label": "Reflection of event",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "invites",
+        "name": "a2840ba1-c938-4675-b719-f2fcab20ed61:invites",
+        "label": "Who would you like to fill in the next section of this form?",
+        "placeholder": "Start typing to search"
+      },
+      {
+        "tag": "INPUT",
+        "type": "checkbox",
+        "id": "filledOnSameDevice",
+        "name": "filledOnSameDevice",
+        "label": "Fill in on the same device",
+        "placeholder": ""
+      }
+    ]
+  },
+  "JCF": {
+    "uuid": "3daa9559-3c31-4ab4-883c-9a991632a9ca",
+    "fields": [
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "startDate",
+        "name": "",
+        "label": "Date occurred on",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "endDate",
+        "name": "",
+        "label": "End date",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "event-description",
+        "name": "event-description",
+        "label": "Description (optional)",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "9d48100e-9647-4c67-8d39-24bbe8e5e3fa",
+        "name": "",
+        "label": "Date",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "d00ac11e-528f-494d-b1ff-6835fb989995",
+        "name": "d00ac11e-528f-494d-b1ff-6835fb989995",
+        "label": "Learner Group:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "bf181d9c-4875-4010-805e-f675aaeb4e72",
+        "name": "bf181d9c-4875-4010-805e-f675aaeb4e72",
+        "label": "Setting:",
+        "placeholder": "Setting:"
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "2a417a1c-351f-47f2-abe0-e46ee452d8ae",
+        "name": "2a417a1c-351f-47f2-abe0-e46ee452d8ae",
+        "label": "Delivery:",
+        "placeholder": "Delivery:"
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "55ca2e2a-53ae-46a2-ac9f-3ee693bb6440",
+        "name": "55ca2e2a-53ae-46a2-ac9f-3ee693bb6440",
+        "label": "Number of Learners:",
+        "placeholder": "Number of Learners:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "94398bfe-970c-456c-9cf4-618f51a0becc",
+        "name": "94398bfe-970c-456c-9cf4-618f51a0becc",
+        "label": "Length of Session:",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "8b19c437-be46-4ef9-be67-97a1b8d7e200",
+        "name": "8b19c437-be46-4ef9-be67-97a1b8d7e200",
+        "label": "Title of Paper:",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "kzt-search-query",
+        "name": "kz-search-query",
+        "label": "",
+        "placeholder": "Search..."
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "invites",
+        "name": "84e36320-a8f2-406e-8ca0-7829ecdb89b4:invites",
+        "label": "Who would you like to fill in the next section of this form?",
+        "placeholder": "Start typing to search"
+      },
+      {
+        "tag": "INPUT",
+        "type": "checkbox",
+        "id": "filledOnSameDevice",
+        "name": "filledOnSameDevice",
+        "label": "Fill in on the same device",
+        "placeholder": ""
+      }
+    ]
+  },
+  "QIAT": {
+    "uuid": "a0aa5cfc-57be-4622-b974-51d334268d57",
+    "fields": [
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "startDate",
+        "name": "",
+        "label": "Date occurred on",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "endDate",
+        "name": "",
+        "label": "End date",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "event-description",
+        "name": "event-description",
+        "label": "Description (optional)",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "415a72f2-7cf3-420a-bee4-9a7aed746612",
+        "name": "415a72f2-7cf3-420a-bee4-9a7aed746612",
+        "label": "Stage of training",
+        "placeholder": "Stage of training"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "9ba2f736-84a4-41eb-b7da-695734d4ec62",
+        "name": "9ba2f736-84a4-41eb-b7da-695734d4ec62",
+        "label": "Placement",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "c00175cc-4b38-4ff4-b7c2-2c00f1bee840",
+        "name": "",
+        "label": "Date of completion",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "99bfcd58-1cc3-4f79-9832-32c9d315e1a5",
+        "name": "99bfcd58-1cc3-4f79-9832-32c9d315e1a5",
+        "label": "1.1 PDP - Please summarise your QI PDP for this year in broad terms and list specific objectives below",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "fd738d73-9b88-4bfb-8c67-a7d7a0defa57",
+        "name": "fd738d73-9b88-4bfb-8c67-a7d7a0defa57",
+        "label": "2.1 Involvement- Please describe your engagement with QI education over the past year. This can include online learning or attendance at local/national courses.",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "dab68d71-46ca-46a6-97e8-e2f2a6b29a82",
+        "name": "dab68d71-46ca-46a6-97e8-e2f2a6b29a82",
+        "label": "2.2 Learning - How has this developed your understanding of QI? How do you feel this will help your future QI work? Please map to the QI journey\u00a0in section 4.1 where relevant.",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "2e2096f3-f65e-465c-bdd6-effadbe743dc",
+        "name": "2e2096f3-f65e-465c-bdd6-effadbe743dc",
+        "label": "3.0 Were you involved in a QI project in any way?",
+        "placeholder": "3.0 Were you involved in a QI project in any way?"
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "kzt-search-query",
+        "name": "kz-search-query",
+        "label": "",
+        "placeholder": "Search..."
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "8a8f2bce-26fa-4baa-81d3-5b567ce9d45c",
+        "name": "8a8f2bce-26fa-4baa-81d3-5b567ce9d45c",
+        "label": "\u200b4.2 Reflections and Learning - Please outline what this year has contributed to your development and knowledge of QI.",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "09a89221-ab2c-42f6-8462-1333540f8cf8",
+        "name": "09a89221-ab2c-42f6-8462-1333540f8cf8",
+        "label": "\u200b4.3 Next Year\u2019s PDP- Please describe your plans for next year in QI.",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "kzt-search-query",
+        "name": "kz-search-query",
+        "label": "",
+        "placeholder": "Search..."
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "invites",
+        "name": "a4cde9b4-b8a2-4880-9fe0-61a1fff33198:invites",
+        "label": "Who would you like to fill in the next section of this form?",
+        "placeholder": "Start typing to search"
+      },
+      {
+        "tag": "INPUT",
+        "type": "checkbox",
+        "id": "filledOnSameDevice",
+        "name": "filledOnSameDevice",
+        "label": "Fill in on the same device",
+        "placeholder": ""
+      }
+    ]
+  },
+  "TEACH": {
+    "uuid": "1ffbd272-8447-439c-aa03-ff99e2dbc04d",
+    "fields": [
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "startDate",
+        "name": "",
+        "label": "Date occurred on",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "endDate",
+        "name": "",
+        "label": "End date",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "event-description",
+        "name": "event-description",
+        "label": "Description (optional)",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "e90d9f84-68fc-4dbf-a8be-977180ffc2cb",
+        "name": "",
+        "label": "Date of teaching activity:",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "6b62a9ef-b0bf-498c-b10b-410fa97766c3",
+        "name": "6b62a9ef-b0bf-498c-b10b-410fa97766c3",
+        "label": "Title of session:",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "17d7899f-0564-4e51-9817-54444e43822c",
+        "name": "17d7899f-0564-4e51-9817-54444e43822c",
+        "label": "Recognised courses:",
+        "placeholder": "Recognised courses:"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "ddd8c881-91c6-46fd-84e9-32e89f617877",
+        "name": "ddd8c881-91c6-46fd-84e9-32e89f617877",
+        "label": "Learning outcomes used in session:",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "kzt-search-query",
+        "name": "kz-search-query",
+        "label": "",
+        "placeholder": "Search..."
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "eed0e8dc-075d-4661-aea5-2c3238af4c5b",
+        "name": "eed0e8dc-075d-4661-aea5-2c3238af4c5b",
+        "label": "ACCS Procedural skills (Update 2025)",
+        "placeholder": "ACCS Procedural skills (Update 2025)"
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "31bd55b7-0e32-4918-8cc0-4ba33af83772",
+        "name": "31bd55b7-0e32-4918-8cc0-4ba33af83772",
+        "label": "Intermediate Procedural skills (2025 Update)",
+        "placeholder": "Intermediate Procedural skills (2025 Update)"
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "8def931e-3a00-43ac-8529-44cdaf34be2d",
+        "name": "8def931e-3a00-43ac-8529-44cdaf34be2d",
+        "label": "ST4-ST6 Higher EM Procedural skill",
+        "placeholder": "ST4-ST6 Higher EM Procedural skill"
+      }
+    ],
+    "checkboxes": []
+  },
+  "PROC_LOG": {
+    "uuid": "2d6ebac1-4633-49d1-9dc0-fa0d39a98afc",
+    "fields": [
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "startDate",
+        "name": "",
+        "label": "Date occurred on",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "endDate",
+        "name": "",
+        "label": "End date",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "event-description",
+        "name": "event-description",
+        "label": "Description (optional)",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "8f76bc6b-68b7-4654-9116-75e421fceccd",
+        "name": "",
+        "label": "Date of Activity",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
+        "name": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
+        "label": "Stage of training",
+        "placeholder": "Stage of training"
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "036fe50f-5357-4da5-9fd6-d5c2e8d96ba4",
+        "name": "036fe50f-5357-4da5-9fd6-d5c2e8d96ba4",
+        "label": "Year of training",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "ca4f531c-ea4b-4587-a964-ee471abf1193",
+        "name": "ca4f531c-ea4b-4587-a964-ee471abf1193",
+        "label": "Age of patient",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "f4557928-23fa-40b0-9f14-9357f5e7e1f3",
+        "name": "f4557928-23fa-40b0-9f14-9357f5e7e1f3",
+        "label": "Reflective comments on procedure",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "kzt-search-query",
+        "name": "kz-search-query",
+        "label": "",
+        "placeholder": "Search..."
+      }
+    ],
+    "checkboxes": []
+  },
+  "SDL": {
+    "uuid": "743885d8-c1b8-4566-bc09-8ed9b0e09829",
+    "fields": [
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "startDate",
+        "name": "",
+        "label": "Date occurred on",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "endDate",
+        "name": "",
+        "label": "End date",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "event-description",
+        "name": "event-description",
+        "label": "Description (optional)",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "d7d43710-117b-4cae-8903-203b82c72f58",
+        "name": "d7d43710-117b-4cae-8903-203b82c72f58",
+        "label": "Reflection Title",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "kzt-search-query",
+        "name": "kz-search-query",
+        "label": "",
+        "placeholder": "Search..."
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "a732400a-6f84-439a-938c-eae849459fa7",
+        "name": "a732400a-6f84-439a-938c-eae849459fa7",
+        "label": "Please specify details of the learning resource (e.g. title, author, website etc.)",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "e99119c8-7cff-4d04-a2ad-0246dddfdac1",
+        "name": "e99119c8-7cff-4d04-a2ad-0246dddfdac1",
+        "label": "Reflection",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "kzt-search-query",
+        "name": "kz-search-query",
+        "label": "",
+        "placeholder": "Search..."
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "eed0e8dc-075d-4661-aea5-2c3238af4c5b",
+        "name": "eed0e8dc-075d-4661-aea5-2c3238af4c5b",
+        "label": "ACCS Procedural Skills (2025 Update)",
+        "placeholder": "ACCS Procedural Skills (2025 Update)"
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "31bd55b7-0e32-4918-8cc0-4ba33af83772",
+        "name": "31bd55b7-0e32-4918-8cc0-4ba33af83772",
+        "label": "Intermediate Procedural Skills (2025 Update)",
+        "placeholder": "Intermediate Procedural Skills (2025 Update)"
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "8def931e-3a00-43ac-8529-44cdaf34be2d",
+        "name": "8def931e-3a00-43ac-8529-44cdaf34be2d",
+        "label": "ST4-ST6 Higher training EM Procedural Skills (2025 Update)",
+        "placeholder": "ST4-ST6 Higher training EM Procedural Skills (2025 Update)"
+      }
+    ],
+    "checkboxes": []
+  },
+  "US_CASE": {
+    "uuid": "558b196a-8168-4cc6-b363-6f6e4b08397a",
+    "fields": [
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "startDate",
+        "name": "",
+        "label": "Date occurred on",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "endDate",
+        "name": "",
+        "label": "End date",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "event-description",
+        "name": "event-description",
+        "label": "Description (optional)",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "3d201298-05a3-4d5a-862a-0a079ee11f77",
+        "name": "3d201298-05a3-4d5a-862a-0a079ee11f77",
+        "label": "Case reflection title",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "a2777351-37e3-4568-9cac-a822f82092c4",
+        "name": "",
+        "label": "Date of case",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "c7a9f5dd-fd2b-4b02-bb4d-a254e65504cb",
+        "name": "c7a9f5dd-fd2b-4b02-bb4d-a254e65504cb",
+        "label": "Location",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "13808567-1775-4efb-a364-4b0a453b7992",
+        "name": "13808567-1775-4efb-a364-4b0a453b7992",
+        "label": "Patient's Gender",
+        "placeholder": "Patient's Gender"
+      },
+      {
+        "tag": "INPUT",
+        "type": "number",
+        "id": "8720bd82-f350-46ff-9696-b8be5490a4c8",
+        "name": "8720bd82-f350-46ff-9696-b8be5490a4c8",
+        "label": "Patient's Age",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "cfe23d74-2a38-4e3e-9636-913651898777",
+        "name": "cfe23d74-2a38-4e3e-9636-913651898777",
+        "label": "Equipment Used",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "kzt-search-query",
+        "name": "kz-search-query",
+        "label": "",
+        "placeholder": "Search..."
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "bbab795a-fe08-4599-ad2d-3c34c4c6b240",
+        "name": "bbab795a-fe08-4599-ad2d-3c34c4c6b240",
+        "label": "Describe the clinical scenario",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "05d2c806-ef77-49f1-b582-61e6dff50273",
+        "name": "05d2c806-ef77-49f1-b582-61e6dff50273",
+        "label": "How was ultrasound used in this case?",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "1e402c8c-4b79-4ee1-9162-3b9cb9cef780",
+        "name": "1e402c8c-4b79-4ee1-9162-3b9cb9cef780",
+        "label": "Were you able to obtain usable images?",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "e8b5b356-f813-4ee0-b69a-a2034c4edd2b",
+        "name": "e8b5b356-f813-4ee0-b69a-a2034c4edd2b",
+        "label": "Were you able to interpret the images?",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "e9419598-3230-4e50-810f-29893a6a8c42",
+        "name": "e9419598-3230-4e50-810f-29893a6a8c42",
+        "label": "Did the use of ultrasound change management of the patient?",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "df24a5de-14a4-4d25-9c93-b93ac76991b9",
+        "name": "df24a5de-14a4-4d25-9c93-b93ac76991b9",
+        "label": "What did you learn from this case?",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "317ddbf2-a3dc-4ee7-a53c-fa1369d2c929",
+        "name": "317ddbf2-a3dc-4ee7-a53c-fa1369d2c929",
+        "label": "Other comments",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "kzt-search-query",
+        "name": "kz-search-query",
+        "label": "",
+        "placeholder": "Search..."
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "eed0e8dc-075d-4661-aea5-2c3238af4c5b",
+        "name": "eed0e8dc-075d-4661-aea5-2c3238af4c5b",
+        "label": "ACCS Procedural Skills (2025 Update)",
+        "placeholder": "ACCS Procedural Skills (2025 Update)"
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "31bd55b7-0e32-4918-8cc0-4ba33af83772",
+        "name": "31bd55b7-0e32-4918-8cc0-4ba33af83772",
+        "label": "Intermediate Procedural Skills (2025 Update)",
+        "placeholder": "Intermediate Procedural Skills (2025 Update)"
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "8def931e-3a00-43ac-8529-44cdaf34be2d",
+        "name": "8def931e-3a00-43ac-8529-44cdaf34be2d",
+        "label": "ST4-ST6 Higher training Procedural Skills (2025 Update)",
+        "placeholder": "ST4-ST6 Higher training Procedural Skills (2025 Update)"
+      }
+    ],
+    "checkboxes": []
+  },
+  "ESLE": {
+    "uuid": "cbc7a42f-a2f0-436b-813e-bbf97cce0a34",
+    "fields": [
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "startDate",
+        "name": "",
+        "label": "Date occurred on",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "endDate",
+        "name": "",
+        "label": "End date",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "event-description",
+        "name": "event-description",
+        "label": "Description (optional)",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "a525d382-30ea-48d2-b3ee-e325473eeb5c",
+        "name": "a525d382-30ea-48d2-b3ee-e325473eeb5c",
+        "label": "Title of reflection",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "c00e55ce-0eec-4725-9044-70317bafb75d",
+        "name": "",
+        "label": "Date of ESLE",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "750468a4-7f96-481d-99fa-8c5af70958fd",
+        "name": "750468a4-7f96-481d-99fa-8c5af70958fd",
+        "label": "Describe the circumstances. What did you do? What did others do?",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "be609110-389a-4411-969e-ee4289f691ed",
+        "name": "be609110-389a-4411-969e-ee4289f691ed",
+        "label": "If you could replay the event, what would you have done differently?",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "761354f7-908a-4101-b7d8-66d324a62658",
+        "name": "761354f7-908a-4101-b7d8-66d324a62658",
+        "label": "Why?",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "5998869f-feb1-4cc4-865c-19ac975b7e0e",
+        "name": "5998869f-feb1-4cc4-865c-19ac975b7e0e",
+        "label": "How would the outcome be different if you replayed this event? How would you feel? How would others feel?",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "54bb61c4-dc39-4e56-9e22-b1acd21edabb",
+        "name": "54bb61c4-dc39-4e56-9e22-b1acd21edabb",
+        "label": "Focussing on what you would have done differently, what do you need to change for the future? OR what did you do well that you would do again in the future?",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "0a463c2f-f443-45b7-bd21-eb7c77b4e3f2",
+        "name": "0a463c2f-f443-45b7-bd21-eb7c77b4e3f2",
+        "label": "What have you learned from the experience?",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "bfa0ce31-71d0-48de-bfdf-4f28304b94dc",
+        "name": "bfa0ce31-71d0-48de-bfdf-4f28304b94dc",
+        "label": "Outline any further learning or development needs highlighted by the activity. How do you intend to address these? If necessary reflect any actions in your personal development plan",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "26a715e1-c956-4c23-9d85-ee09539458ce",
+        "name": "26a715e1-c956-4c23-9d85-ee09539458ce",
+        "label": "Procedural skills list (2025)",
+        "placeholder": "Procedural skills list (2025)"
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "kzt-search-query",
+        "name": "kz-search-query",
+        "label": "",
+        "placeholder": "Search..."
+      }
+    ],
+    "checkboxes": []
+  },
+  "COMPLAINT": {
+    "uuid": "f7c0ba98-5a47-4e37-b76a-ca3c5c8484cc",
+    "fields": [
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "startDate",
+        "name": "",
+        "label": "Date occurred on",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "endDate",
+        "name": "",
+        "label": "End date",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "event-description",
+        "name": "event-description",
+        "label": "Description (optional)",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "fe902ad2-a932-489f-bb01-2ae6dda100f4",
+        "name": "fe902ad2-a932-489f-bb01-2ae6dda100f4",
+        "label": "Title of reflection:",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "dbc66064-26b7-4d96-93d0-fced3a9fc998",
+        "name": "",
+        "label": "Date of complaint:",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "99d5b202-bf78-4f34-884a-f5c91d4539d0",
+        "name": "99d5b202-bf78-4f34-884a-f5c91d4539d0",
+        "label": "Key features of complaint:",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "6dee7933-3979-4c13-afc7-914f1514c8e7",
+        "name": "6dee7933-3979-4c13-afc7-914f1514c8e7",
+        "label": "Key aspects of case and care given by trainee:",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "552bb938-8929-40c3-ad3c-428dd4f114e7",
+        "name": "552bb938-8929-40c3-ad3c-428dd4f114e7",
+        "label": "What are the learning points from this case?:",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "88ffd062-b49f-4af2-aa1b-913b94906570",
+        "name": "88ffd062-b49f-4af2-aa1b-913b94906570",
+        "label": "Further action required:",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "kzt-search-query",
+        "name": "kz-search-query",
+        "label": "",
+        "placeholder": "Search..."
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "eed0e8dc-075d-4661-aea5-2c3238af4c5b",
+        "name": "eed0e8dc-075d-4661-aea5-2c3238af4c5b",
+        "label": "ACCS Procedural Skills (2025 Update)",
+        "placeholder": "ACCS Procedural Skills (2025 Update)"
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "31bd55b7-0e32-4918-8cc0-4ba33af83772",
+        "name": "31bd55b7-0e32-4918-8cc0-4ba33af83772",
+        "label": "Intermediate EM Procedural Skills (2025 Update)",
+        "placeholder": "Intermediate EM Procedural Skills (2025 Update)"
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "8def931e-3a00-43ac-8529-44cdaf34be2d",
+        "name": "8def931e-3a00-43ac-8529-44cdaf34be2d",
+        "label": "ST4-ST6 Higher Procedural Skills (2025 Update)",
+        "placeholder": "ST4-ST6 Higher Procedural Skills (2025 Update)"
+      }
+    ],
+    "checkboxes": []
+  },
+  "SERIOUS_INC": {
+    "uuid": "9d4a7912-a615-4ae4-9fae-6be966bcf254",
+    "fields": [
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "startDate",
+        "name": "",
+        "label": "Date occurred on",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "endDate",
+        "name": "",
+        "label": "End date",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "event-description",
+        "name": "event-description",
+        "label": "Description (optional)",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "53009feb-16b4-4335-a81c-f5f5b4d93917",
+        "name": "53009feb-16b4-4335-a81c-f5f5b4d93917",
+        "label": "Title of reflection:",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "f9e0bf51-a74e-4c6c-8fc8-9d627ebf318b",
+        "name": "",
+        "label": "Date of incident:",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "a4feee19-b600-4c42-a286-15a81f8835c2",
+        "name": "a4feee19-b600-4c42-a286-15a81f8835c2",
+        "label": "Description of case including adverse events:",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "c5d0833f-db51-4dd2-9f4c-0972c1b7c54d",
+        "name": "c5d0833f-db51-4dd2-9f4c-0972c1b7c54d",
+        "label": "Root causes of events:",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "898a8f93-6651-4bd8-a0f9-940ac60d908d",
+        "name": "898a8f93-6651-4bd8-a0f9-940ac60d908d",
+        "label": "Contributing factors:",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "b4b852e9-dbf3-4e6b-b3db-a309a6cf9f68",
+        "name": "b4b852e9-dbf3-4e6b-b3db-a309a6cf9f68",
+        "label": "What are the learning points from this case?:",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "49b3a49c-5e69-4c87-9786-562777f6744b",
+        "name": "49b3a49c-5e69-4c87-9786-562777f6744b",
+        "label": "Further action required:",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "kzt-search-query",
+        "name": "kz-search-query",
+        "label": "",
+        "placeholder": "Search..."
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "eed0e8dc-075d-4661-aea5-2c3238af4c5b",
+        "name": "eed0e8dc-075d-4661-aea5-2c3238af4c5b",
+        "label": "ACCS Procedural Skills (2025 Update)",
+        "placeholder": "ACCS Procedural Skills (2025 Update)"
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "31bd55b7-0e32-4918-8cc0-4ba33af83772",
+        "name": "31bd55b7-0e32-4918-8cc0-4ba33af83772",
+        "label": "Intermediate Procedural Skills (2025 Update)",
+        "placeholder": "Intermediate Procedural Skills (2025 Update)"
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "8def931e-3a00-43ac-8529-44cdaf34be2d",
+        "name": "8def931e-3a00-43ac-8529-44cdaf34be2d",
+        "label": "ST4-ST6 Higher EM Procedural Skills (2025 Update)",
+        "placeholder": "ST4-ST6 Higher EM Procedural Skills (2025 Update)"
+      }
+    ],
+    "checkboxes": []
+  },
+  "EDU_ACT": {
+    "uuid": "868dc0e7-f4e9-4283-ac52-d9c8b246024b",
+    "fields": [
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "startDate",
+        "name": "",
+        "label": "Date occurred on",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "endDate",
+        "name": "",
+        "label": "End date",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "event-description",
+        "name": "event-description",
+        "label": "Description (optional)",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "7c8be633-06f2-41c6-a7d2-dcc75c6036d5",
+        "name": "",
+        "label": "Date of education:",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "772f10f2-f292-4bc8-b349-bd6fff6679b7",
+        "name": "772f10f2-f292-4bc8-b349-bd6fff6679b7",
+        "label": "Title of education:",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "0120a77c-d1bb-4c8c-9155-1460e0778613",
+        "name": "0120a77c-d1bb-4c8c-9155-1460e0778613",
+        "label": "Who delivered the education:",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "83dd2eb4-bf25-4d79-8001-59a76f7c2cc3",
+        "name": "83dd2eb4-bf25-4d79-8001-59a76f7c2cc3",
+        "label": "Main learning points:",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "bdd2ee0c-07ab-4001-ae6b-8eccdc706a4b",
+        "name": "bdd2ee0c-07ab-4001-ae6b-8eccdc706a4b",
+        "label": "Section of Curriculum covered in the teaching:",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "kzt-search-query",
+        "name": "kz-search-query",
+        "label": "",
+        "placeholder": "Search..."
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "eed0e8dc-075d-4661-aea5-2c3238af4c5b",
+        "name": "eed0e8dc-075d-4661-aea5-2c3238af4c5b",
+        "label": "ACCS Procedural Skills (2025 Update)",
+        "placeholder": "ACCS Procedural Skills (2025 Update)"
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "31bd55b7-0e32-4918-8cc0-4ba33af83772",
+        "name": "31bd55b7-0e32-4918-8cc0-4ba33af83772",
+        "label": "Intermediate procedural list (2025 Update)",
+        "placeholder": "Intermediate procedural list (2025 Update)"
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "8def931e-3a00-43ac-8529-44cdaf34be2d",
+        "name": "8def931e-3a00-43ac-8529-44cdaf34be2d",
+        "label": "ST4-ST6 Higher EM Procedural skills (2025 Update)",
+        "placeholder": "ST4-ST6 Higher EM Procedural skills (2025 Update)"
+      }
+    ],
+    "checkboxes": []
+  },
+  "FORMAL_COURSE": {
+    "uuid": "c7cd9a95-e2aa-4f61-a441-b663f3c933c6",
+    "fields": [
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "startDate",
+        "name": "",
+        "label": "Date occurred on",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "INPUT",
+        "type": "",
+        "id": "endDate",
+        "name": "",
+        "label": "End date",
+        "placeholder": "d/m/yyyy"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "event-description",
+        "name": "event-description",
+        "label": "Description (optional)",
+        "placeholder": ""
+      },
+      {
+        "tag": "SELECT",
+        "type": "",
+        "id": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
+        "name": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
+        "label": "Stage of training",
+        "placeholder": "Stage of training"
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "f6b7732d-3bdc-496f-bde9-4a103f3f77f8",
+        "name": "f6b7732d-3bdc-496f-bde9-4a103f3f77f8",
+        "label": "Project Description:",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "a3a5ee55-b018-4b73-a347-dd69595f4598",
+        "name": "a3a5ee55-b018-4b73-a347-dd69595f4598",
+        "label": "Reflective notes from experience:",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "4b99584e-6fea-48f9-9cfb-317c6de5223b",
+        "name": "4b99584e-6fea-48f9-9cfb-317c6de5223b",
+        "label": "Resources Used:",
+        "placeholder": ""
+      },
+      {
+        "tag": "TEXTAREA",
+        "type": "",
+        "id": "310b69ab-6738-4eac-9b1f-6dfb1ed810b6",
+        "name": "310b69ab-6738-4eac-9b1f-6dfb1ed810b6",
+        "label": "Lessons learned:",
+        "placeholder": ""
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "kzt-search-query",
+        "name": "kz-search-query",
+        "label": "",
+        "placeholder": "Search..."
+      },
+      {
+        "tag": "INPUT",
+        "type": "text",
+        "id": "invites",
+        "name": "a299b2ec-4cf4-4846-94c9-e6784b6def69:invites",
+        "label": "Who would you like to fill in the next section of this form?",
+        "placeholder": "Start typing to search"
+      },
+      {
+        "tag": "INPUT",
+        "type": "checkbox",
+        "id": "filledOnSameDevice",
+        "name": "filledOnSameDevice",
+        "label": "Fill in on the same device",
+        "placeholder": ""
+      }
+    ],
+    "checkboxes": []
+  }
+}
