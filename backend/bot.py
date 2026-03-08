@@ -507,14 +507,14 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
     form_type = data.split("|")[1]
     context.user_data["chosen_form"] = form_type
 
-    # Disarm buttons immediately — show selection, prevent double-tap
+    # Disarm buttons, show single working status — updated in-place throughout
+    emoji = FORM_EMOJIS.get(form_type, "📋")
     await query.edit_message_text(
-        f"✅ {form_type} selected\n\nGenerating draft...",
+        f"{emoji} Generating {form_type} draft…",
         reply_markup=None
     )
 
     case_text = context.user_data.get("case_text", "")
-    ack = await query.message.reply_text("Extracting case data...")
 
     try:
         if form_type == "CBD":
@@ -524,12 +524,12 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data["draft_data"] = draft
     except Exception as e:
         context.user_data.clear()
-        await ack.edit_text(f"Could not extract case data: {str(e)[:200]}")
+        await query.edit_message_text(f"⚠️ Could not generate draft. Try again or /reset.")
         return ConversationHandler.END
 
-    # Show draft preview with approval buttons in one message
+    # Replace status with draft preview + approval buttons — same message, no new bubble
     preview = _format_draft_preview(draft)
-    await ack.edit_text(preview, reply_markup=_build_approval_keyboard(), parse_mode="Markdown")
+    await query.edit_message_text(preview, reply_markup=_build_approval_keyboard(), parse_mode="Markdown")
     return AWAIT_APPROVAL
 
 
