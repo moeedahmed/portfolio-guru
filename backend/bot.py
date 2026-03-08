@@ -12,8 +12,10 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler,
 )
 from store import store_credentials, get_credentials, has_credentials, init
-from extractor import extract_cbd_data, recommend_form_types, classify_intent, answer_question
+from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, answer_question
 from filer import file_cbd_to_kaizen
+from form_schemas import FORM_SCHEMAS
+from models import FormDraft
 from whisper import transcribe_voice
 from vision import extract_from_image
 
@@ -84,7 +86,22 @@ def _build_approval_keyboard():
     ])
 
 
-def _build_edit_field_keyboard():
+def _build_edit_field_keyboard(draft=None):
+    """Build edit field keyboard. For FormDraft, generates buttons dynamically from schema."""
+    if draft and isinstance(draft, FormDraft):
+        schema = FORM_SCHEMAS.get(draft.form_type, {})
+        fields = schema.get("fields", [])
+        # Only editable fields (text/date, skip kc_tick)
+        editable = [f for f in fields if f["type"] in ("text", "date", "dropdown")][:6]
+        buttons = []
+        for field in editable:
+            label = field["label"][:20]
+            buttons.append(InlineKeyboardButton(label, callback_data=f"FIELD|{field['key']}"))
+        # Arrange in rows of 2
+        rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
+        rows.append([InlineKeyboardButton("↩️ Cancel edit", callback_data="CANCEL|edit")])
+        return InlineKeyboardMarkup(rows)
+    # Default CBD keyboard
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📅 Date", callback_data="FIELD|date_of_encounter"),
@@ -102,7 +119,14 @@ def _build_edit_field_keyboard():
     ])
 
 
-def _format_draft_preview(cbd_data) -> str:
+def _format_draft_preview(draft) -> str:
+    """Format draft data as a preview message. Dispatches based on type."""
+    if isinstance(draft, FormDraft):
+        return _format_generic_draft(draft)
+    return _format_cbd_draft(draft)
+
+
+def _format_cbd_draft(cbd_data) -> str:
     """Format CBD data as a preview message."""
     date_str = cbd_data.date_of_encounter
     try:
@@ -127,6 +151,51 @@ def _format_draft_preview(cbd_data) -> str:
         f"📚 *Curriculum links:*\n{slos}\n\n"
         f"⚡ *Key capabilities:*\n{kcs}"
     )
+
+
+def _format_generic_draft(draft: FormDraft) -> str:
+    """Format a generic FormDraft as a preview message."""
+    schema = FORM_SCHEMAS.get(draft.form_type, {})
+    form_name = schema.get("name", draft.form_type)
+    emoji = FORM_EMOJIS.get(draft.form_type, "📋")
+
+    lines = [
+        f"{emoji} *Draft {form_name} — Review before filing*",
+        f"{'─' * 30}",
+        ""
+    ]
+
+    fields = schema.get("fields", [])
+    for field in fields:
+        key = field["key"]
+        value = draft.fields.get(key)
+        if not value:
+            continue
+        label = field["label"]
+        field_type = field["type"]
+
+        # Format date nicely
+        if field_type == "date" and isinstance(value, str):
+            try:
+                from datetime import datetime
+                dt = datetime.strptime(value, "%Y-%m-%d")
+                value = dt.strftime("%-d %b %Y")
+            except (ValueError, AttributeError):
+                pass
+
+        # Format lists (kc_tick, multi_select)
+        if isinstance(value, list):
+            if value:
+                value = "\n".join(f"  • {v}" for v in value)
+            else:
+                value = "  • None"
+            lines.append(f"*{label}:*\n{value}\n")
+        elif len(str(value)) > 100:
+            lines.append(f"*{label}:*\n{value}\n")
+        else:
+            lines.append(f"*{label}:* {value}")
+
+    return "\n".join(lines)
 
 
 # === COMMAND HANDLERS ===
@@ -432,20 +501,22 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup=None
     )
 
-    # Extract CBD data
     case_text = context.user_data.get("case_text", "")
     ack = await query.message.reply_text("Extracting case data...")
 
     try:
-        cbd_data = await extract_cbd_data(case_text)
-        context.user_data["draft_data"] = cbd_data
+        if form_type == "CBD":
+            draft = await extract_cbd_data(case_text)
+        else:
+            draft = await extract_form_data(case_text, form_type)
+        context.user_data["draft_data"] = draft
     except Exception as e:
         context.user_data.clear()
         await ack.edit_text(f"Could not extract case data: {str(e)[:200]}")
         return ConversationHandler.END
 
     # Show draft preview
-    preview = _format_draft_preview(cbd_data)
+    preview = _format_draft_preview(draft)
     await ack.edit_text(preview)
 
     # Send approval buttons in separate message
@@ -472,12 +543,38 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         return ConversationHandler.END
 
     username, password = creds
-    cbd_data = context.user_data.get("draft_data")
-    if not cbd_data:
+    draft = context.user_data.get("draft_data")
+    if not draft:
         context.user_data.clear()
         await query.message.reply_text("No draft data found. Start over.")
         return ConversationHandler.END
 
+    # Handle FormDraft (non-CBD forms)
+    if isinstance(draft, FormDraft):
+        schema = FORM_SCHEMAS.get(draft.form_type, {})
+        form_name = schema.get("name", draft.form_type)
+
+        # Save draft to JSON file
+        import json
+        import pathlib
+        from datetime import date
+        drafts_dir = pathlib.Path.home() / ".openclaw/data/portfolio-guru/drafts"
+        drafts_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"{user_id}_{draft.form_type}_{date.today()}.json"
+        draft_path = drafts_dir / filename
+        with open(draft_path, "w") as f:
+            json.dump({"form_type": draft.form_type, "uuid": draft.uuid, "fields": draft.fields}, f, indent=2)
+
+        await query.message.reply_text(
+            f"✅ Draft saved locally.\n\n"
+            f"Auto-filing for {form_name} is coming in a future update. "
+            f"Your draft has been stored and can be copied into Kaizen manually."
+        )
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    # CBD form — use filer
+    cbd_data = draft
     ack = await query.message.reply_text("Filing to Kaizen...")
 
     try:
@@ -515,7 +612,8 @@ async def handle_approval_edit(update: Update, context: ContextTypes.DEFAULT_TYP
     # Disarm approval buttons immediately — prevents double-tap
     await query.edit_message_reply_markup(reply_markup=None)
 
-    if not context.user_data.get("draft_data"):
+    draft = context.user_data.get("draft_data")
+    if not draft:
         await query.message.reply_text(
             "This draft has expired (bot was restarted). Send /reset and file a new case.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Reset", callback_data="ACTION|reset")]])
@@ -524,7 +622,7 @@ async def handle_approval_edit(update: Update, context: ContextTypes.DEFAULT_TYP
 
     await query.message.reply_text(
         "Which field do you want to edit?",
-        reply_markup=_build_edit_field_keyboard()
+        reply_markup=_build_edit_field_keyboard(draft)
     )
     return AWAIT_EDIT_FIELD
 
@@ -537,15 +635,31 @@ async def handle_edit_field(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     field = query.data.split("|")[1]
     context.user_data["edit_field"] = field
 
-    field_labels = {
-        "date_of_encounter": "date (YYYY-MM-DD)",
-        "clinical_setting": "clinical setting",
-        "patient_presentation": "presentation",
-        "clinical_reasoning": "case discussion",
-        "reflection": "reflection",
-        "curriculum_links": "SLOs (comma-separated, e.g. SLO1, SLO3)",
-    }
-    label = field_labels.get(field, field)
+    draft = context.user_data.get("draft_data")
+
+    # Get label from schema for FormDraft, or use CBD defaults
+    if isinstance(draft, FormDraft):
+        schema = FORM_SCHEMAS.get(draft.form_type, {})
+        field_def = next((f for f in schema.get("fields", []) if f["key"] == field), None)
+        if field_def:
+            label = field_def["label"]
+            if field_def["type"] in ("kc_tick", "multi_select"):
+                label += " (comma-separated)"
+            elif field_def["type"] == "date":
+                label += " (YYYY-MM-DD)"
+        else:
+            label = field
+    else:
+        field_labels = {
+            "date_of_encounter": "date (YYYY-MM-DD)",
+            "clinical_setting": "clinical setting",
+            "patient_presentation": "presentation",
+            "clinical_reasoning": "case discussion",
+            "reflection": "reflection",
+            "curriculum_links": "SLOs (comma-separated, e.g. SLO1, SLO3)",
+        }
+        label = field_labels.get(field, field)
+
     await query.message.reply_text(f"Enter the new {label}:")
     return AWAIT_EDIT_VALUE
 
@@ -554,26 +668,36 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     """Handle new value for edited field."""
     new_value = update.message.text.strip()
     field = context.user_data.get("edit_field")
-    cbd_data = context.user_data.get("draft_data")
+    draft = context.user_data.get("draft_data")
 
-    if not field or not cbd_data:
+    if not field or not draft:
         context.user_data.clear()
         await update.message.reply_text("Edit failed. Start over.")
         return ConversationHandler.END
 
-    # Update the field
-    if field == "curriculum_links":
-        # Parse comma-separated SLOs
-        slos = [s.strip().upper() for s in new_value.split(",") if s.strip()]
-        cbd_data.curriculum_links = slos
+    # Update the field based on draft type
+    if isinstance(draft, FormDraft):
+        # For FormDraft, check field type from schema
+        schema = FORM_SCHEMAS.get(draft.form_type, {})
+        field_def = next((f for f in schema.get("fields", []) if f["key"] == field), None)
+        if field_def and field_def["type"] in ("kc_tick", "multi_select"):
+            # Parse comma-separated values
+            draft.fields[field] = [s.strip() for s in new_value.split(",") if s.strip()]
+        else:
+            draft.fields[field] = new_value
     else:
-        setattr(cbd_data, field, new_value)
+        # CBDData - use setattr
+        if field == "curriculum_links":
+            slos = [s.strip().upper() for s in new_value.split(",") if s.strip()]
+            draft.curriculum_links = slos
+        else:
+            setattr(draft, field, new_value)
 
-    context.user_data["draft_data"] = cbd_data
+    context.user_data["draft_data"] = draft
     context.user_data.pop("edit_field", None)
 
     # Show updated preview
-    preview = _format_draft_preview(cbd_data)
+    preview = _format_draft_preview(draft)
     await update.message.reply_text(preview)
 
     # Re-send approval buttons
