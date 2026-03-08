@@ -381,7 +381,7 @@ async def _fill_stage_of_training(page: Page, dom_id: str, value: Any) -> bool:
         el = page.locator(f'[id="{dom_id}"]')
         if await el.count() > 0:
             await el.select_option(value=select_value)
-            await asyncio.sleep(3)  # Wait for curriculum section to load after stage selection
+            await asyncio.sleep(5)  # Wait for curriculum section to load after stage selection
             logger.info(f"Selected stage of training: {select_value}")
             return True
     except Exception as e:
@@ -412,8 +412,11 @@ async def _tick_curriculum(page: Page, slo_codes: List[str]) -> int:
     """Tick SLO checkboxes via Angular scope node IDs.
 
     2025 Update forms use flat SLO-level checkboxes (no KC sub-tree).
-    CBD starts with ALL SLOs checked; other forms start unchecked.
-    We tick the desired SLOs and untick the rest.
+    CBD starts with ALL SLOs unchecked.
+    We tick only the desired SLOs.
+
+    Retries up to 3 times with increasing waits because the curriculum
+    section loads asynchronously after stage_of_training selection.
     """
     if not slo_codes:
         return 0
@@ -430,52 +433,97 @@ async def _tick_curriculum(page: Page, slo_codes: List[str]) -> int:
     if not wanted:
         return 0
 
-    # Use Angular scope to find and toggle checkboxes by node._id
-    result = await page.evaluate("""(args) => {
-        const wanted = new Set(args.wanted);
-        const sloIds = args.sloIds;
-        let ticked = 0;
-        let unticked = 0;
+    # Retry loop — curriculum section loads async after stage selection
+    for attempt in range(3):
+        # Wait for checkboxes to appear in the DOM
+        wait_secs = 3 + (attempt * 3)  # 3s, 6s, 9s
+        if attempt > 0:
+            logger.info(f"Curriculum retry {attempt + 1}/3 — waiting {wait_secs}s for checkboxes…")
+        await asyncio.sleep(wait_secs)
 
-        const checkboxes = document.querySelectorAll('input[type="checkbox"]');
-        for (const cb of checkboxes) {
-            if (cb.id === 'filledOnSameDevice') continue;
+        # First check: how many checkboxes exist at all?
+        checkbox_count = await page.evaluate("""() => {
+            const cbs = document.querySelectorAll('input[type="checkbox"]');
+            let count = 0;
+            let ids = [];
+            for (const cb of cbs) {
+                if (cb.id === 'filledOnSameDevice') continue;
+                count++;
+                try {
+                    const scope = angular.element(cb).scope();
+                    if (scope && scope.node) ids.push(scope.node._id);
+                } catch(e) {}
+            }
+            return {count, ids};
+        }""")
+        logger.info(f"Curriculum attempt {attempt + 1}: found {checkbox_count.get('count', 0)} checkboxes, "
+                     f"Angular node IDs: {checkbox_count.get('ids', [])[:5]}…")
 
-            try {
-                const scope = angular.element(cb).scope();
-                if (!scope || !scope.node) continue;
-                const nodeId = scope.node._id;
+        if checkbox_count.get("count", 0) == 0:
+            continue  # No checkboxes yet — retry
 
-                // Find which SLO this checkbox represents
-                let sloKey = null;
-                for (const [key, id] of Object.entries(sloIds)) {
-                    if (id === nodeId) {
-                        sloKey = key;
-                        break;
+        # Use Angular scope to find and toggle checkboxes by node._id
+        result = await page.evaluate("""(args) => {
+            const wanted = new Set(args.wanted);
+            const sloIds = args.sloIds;
+            let ticked = 0;
+            let unticked = 0;
+            let matched = [];
+            let unmatched = [];
+
+            const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+            for (const cb of checkboxes) {
+                if (cb.id === 'filledOnSameDevice') continue;
+
+                try {
+                    const scope = angular.element(cb).scope();
+                    if (!scope || !scope.node) continue;
+                    const nodeId = scope.node._id;
+
+                    // Find which SLO this checkbox represents
+                    let sloKey = null;
+                    for (const [key, id] of Object.entries(sloIds)) {
+                        if (id === nodeId) {
+                            sloKey = key;
+                            break;
+                        }
                     }
-                }
 
-                if (!sloKey || sloKey === 'header') continue;
+                    if (sloKey) {
+                        matched.push(sloKey);
+                    } else {
+                        unmatched.push(nodeId);
+                    }
 
-                const isWanted = wanted.has(sloKey);
-                const isChecked = cb.checked;
+                    if (!sloKey || sloKey === 'header') continue;
 
-                if (isWanted && !isChecked) {
-                    cb.click();
-                    ticked++;
-                } else if (!isWanted && isChecked) {
-                    cb.click();
-                    unticked++;
-                }
-            } catch(e) { /* skip non-Angular checkboxes */ }
-        }
-        return {ticked, unticked, wanted: Array.from(wanted)};
-    }""", {"wanted": list(wanted), "sloIds": SLO_CHECKBOX_IDS})
+                    const isWanted = wanted.has(sloKey);
+                    const isChecked = cb.checked;
 
-    ticked = result.get("ticked", 0)
-    unticked = result.get("unticked", 0)
-    logger.info(f"Curriculum: ticked {ticked}, unticked {unticked} for SLOs: {list(wanted)}")
-    return ticked
+                    if (isWanted && !isChecked) {
+                        cb.click();
+                        ticked++;
+                    } else if (!isWanted && isChecked) {
+                        cb.click();
+                        unticked++;
+                    }
+                } catch(e) { /* skip non-Angular checkboxes */ }
+            }
+            return {ticked, unticked, wanted: Array.from(wanted), matched, unmatched};
+        }""", {"wanted": list(wanted), "sloIds": SLO_CHECKBOX_IDS})
+
+        ticked = result.get("ticked", 0)
+        unticked = result.get("unticked", 0)
+        matched = result.get("matched", [])
+        unmatched = result.get("unmatched", [])
+        logger.info(f"Curriculum: ticked {ticked}, unticked {unticked} for SLOs: {list(wanted)}")
+        logger.info(f"Curriculum: matched IDs: {matched}, unmatched node IDs: {unmatched[:5]}")
+
+        if ticked > 0 or matched:
+            return ticked  # Success — found and processed checkboxes
+
+    logger.warning(f"Curriculum: failed to tick any checkboxes after 3 attempts for SLOs: {list(wanted)}")
+    return 0
 
 
 async def _save_draft(page: Page) -> bool:
