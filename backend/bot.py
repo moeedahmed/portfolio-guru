@@ -153,14 +153,12 @@ def _format_cbd_draft(cbd_data) -> str:
     kcs = "\n".join(f"  • {k}" for k in cbd_data.key_capabilities) if cbd_data.key_capabilities else "  • None"
 
     return (
-        f"📋 *Draft CBD — Review before filing*\n"
-        f"{'─' * 30}\n\n"
+        f"📋 *Draft CBD — Review before filing*\n\n"
         f"📅 *Date:* {date_display}\n"
         f"🏥 *Setting:* {cbd_data.clinical_setting}\n"
         f"🩺 *Presentation:* {cbd_data.patient_presentation}\n\n"
         f"*Case narrative:*\n{cbd_data.clinical_reasoning}\n\n"
         f"*Reflection:*\n{cbd_data.reflection}\n\n"
-        f"{'─' * 30}\n"
         f"📚 *Curriculum links:*\n{slos}\n\n"
         f"⚡ *Key capabilities:*\n{kcs}"
     )
@@ -174,7 +172,6 @@ def _format_generic_draft(draft: FormDraft) -> str:
 
     lines = [
         f"{emoji} *Draft {form_name} — Review before filing*",
-        f"{'─' * 30}",
         ""
     ]
 
@@ -530,15 +527,9 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await ack.edit_text(f"Could not extract case data: {str(e)[:200]}")
         return ConversationHandler.END
 
-    # Show draft preview
+    # Show draft preview with approval buttons in one message
     preview = _format_draft_preview(draft)
-    await ack.edit_text(preview)
-
-    # Send approval buttons in separate message
-    await query.message.reply_text(
-        "Review the draft above. File it, edit fields, or cancel.",
-        reply_markup=_build_approval_keyboard()
-    )
+    await ack.edit_text(preview, reply_markup=_build_approval_keyboard(), parse_mode="Markdown")
     return AWAIT_APPROVAL
 
 
@@ -568,6 +559,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     if isinstance(draft, FormDraft):
         schema = FORM_SCHEMAS.get(draft.form_type, {})
         form_name = schema.get("name", draft.form_type)
+        form_emoji = FORM_EMOJIS.get(draft.form_type, "📋")
 
         # Save draft to JSON file
         import json
@@ -580,12 +572,18 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         with open(draft_path, "w") as f:
             json.dump({"form_type": draft.form_type, "uuid": draft.uuid, "fields": draft.fields}, f, indent=2)
 
-        await query.message.reply_text(
-            f"✅ Draft saved locally.\n\n"
-            f"Auto-filing for {form_name} is coming in a future update. "
-            f"Your draft has been stored and can be copied into Kaizen manually."
-        )
         context.user_data.clear()
+        end_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📂 File another case", callback_data="ACTION|file")],
+        ])
+        kaizen_url = f"https://kaizenep.com/events/new-section/{draft.uuid}"
+        await query.message.reply_text(
+            f"{form_emoji} *{form_name} draft saved.*\n\n"
+            f"Open Kaizen to review and assign an assessor — auto-filing for this form type is coming soon.\n\n"
+            f"[Open in Kaizen]({kaizen_url})",
+            reply_markup=end_keyboard,
+            parse_mode="Markdown"
+        )
         return ConversationHandler.END
 
     # CBD form — use filer
@@ -598,24 +596,26 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         )
     except Exception as e:
         context.user_data.clear()
-        await ack.edit_text(f"Filing failed: {str(e)[:300]}")
+        await ack.edit_text(f"Filing failed. Try again or check Kaizen directly.")
         return ConversationHandler.END
 
-    # Build confirmation
-    slos = ", ".join(cbd_data.curriculum_links) if cbd_data.curriculum_links else "None"
+    context.user_data.clear()
+    end_keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📂 File another case", callback_data="ACTION|file")],
+    ])
 
     if status_result == "success":
-        msg = f"Saved as draft in Kaizen. Not submitted to assessor.\n\nDate: {cbd_data.date_of_encounter}\nForm: CBD\nSLOs: {slos}"
+        slos = ", ".join(cbd_data.curriculum_links) if cbd_data.curriculum_links else "None"
+        msg = f"✅ *CBD draft saved in Kaizen.*\n\nNot submitted to assessor — open Kaizen to assign one when ready.\n\n📅 {cbd_data.date_of_encounter}  ·  📚 {slos}"
     elif status_result == "partial":
-        msg = f"Draft saved but some fields may be incomplete. Review in Kaizen.\n\nDate: {cbd_data.date_of_encounter}"
+        msg = f"⚠️ *Draft saved but some fields may be incomplete.*\n\nReview in Kaizen before sending to assessor.\n\n📅 {cbd_data.date_of_encounter}"
     else:
-        msg = "Filing failed. Check Kaizen manually or try again."
+        msg = "❌ Filing failed. Check Kaizen manually or try again."
 
     if assessor_warning:
         msg += f"\n\n{assessor_warning}"
 
-    await ack.edit_text(msg)
-    context.user_data.clear()
+    await ack.edit_text(msg, reply_markup=end_keyboard, parse_mode="Markdown")
     return ConversationHandler.END
 
 
@@ -711,15 +711,9 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     context.user_data["draft_data"] = draft
     context.user_data.pop("edit_field", None)
 
-    # Show updated preview
+    # Show updated preview with approval buttons in one message
     preview = _format_draft_preview(draft)
-    await update.message.reply_text(preview)
-
-    # Re-send approval buttons
-    await update.message.reply_text(
-        "Review the updated draft. File it, edit more, or cancel.",
-        reply_markup=_build_approval_keyboard()
-    )
+    await update.message.reply_text(preview, reply_markup=_build_approval_keyboard(), parse_mode="Markdown")
     return AWAIT_APPROVAL
 
 
