@@ -131,19 +131,19 @@ FIELD_EMOJIS = {
 }
 
 def _build_form_choice_keyboard(recommendations):
-    """Build inline keyboard for form type selection."""
+    """Build inline keyboard for form type selection — AI suggestions + See all forms escape hatch."""
     buttons = []
     for rec in recommendations:
         emoji = FORM_EMOJIS.get(rec.form_type, "📄")
         if rec.uuid:
-            label = f"{emoji} {rec.form_type}"
-            buttons.append(InlineKeyboardButton(label, callback_data=f"FORM|{rec.form_type}"))
+            buttons.append(InlineKeyboardButton(f"{emoji} {rec.form_type}", callback_data=f"FORM|{rec.form_type}"))
         else:
-            buttons.append(InlineKeyboardButton(f"{emoji} {rec.form_type} (coming soon)", callback_data="FORM|disabled"))
-    # Add cancel button
-    buttons.append(InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|form"))
-    # Arrange in rows of 2
+            buttons.append(InlineKeyboardButton(f"{emoji} {rec.form_type} (soon)", callback_data="FORM|disabled"))
     rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
+    rows.append([
+        InlineKeyboardButton("📋 See all forms", callback_data="FORM|show_all"),
+        InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|form"),
+    ])
     return InlineKeyboardMarkup(rows)
 
 
@@ -730,7 +730,30 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     data = query.data
     if data == "FORM|disabled":
-        await query.message.reply_text("This form type is coming soon. Choose another or cancel.")
+        await query.answer("Coming soon — choose another form.", show_alert=False)
+        return AWAIT_FORM_CHOICE
+
+    if data == "FORM|show_all":
+        # Show full form list for this user's training level
+        from extractor import FORM_UUIDS
+        from models import FormTypeRecommendation
+        user_id = update.effective_user.id
+        training_level = get_training_level(user_id) or "ST5"
+        allowed = TRAINING_LEVEL_FORMS.get(training_level, TRAINING_LEVEL_FORMS["ST5"])
+        all_recs = [
+            FormTypeRecommendation(form_type=ft, rationale="", uuid=FORM_UUIDS.get(ft))
+            for ft in allowed if FORM_UUIDS.get(ft)
+        ]
+        buttons = []
+        for rec in all_recs:
+            emoji = FORM_EMOJIS.get(rec.form_type, "📄")
+            buttons.append(InlineKeyboardButton(f"{emoji} {rec.form_type}", callback_data=f"FORM|{rec.form_type}"))
+        rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
+        rows.append([InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|form")])
+        await query.edit_message_text(
+            f"All forms available for {training_level} — pick one:",
+            reply_markup=InlineKeyboardMarkup(rows)
+        )
         return AWAIT_FORM_CHOICE
 
     form_type = data.split("|")[1]
