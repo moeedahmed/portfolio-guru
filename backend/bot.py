@@ -551,6 +551,10 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     """Handle text, voice, or photo input for case description."""
     user_id = update.effective_user.id
 
+    # Clear any stale status message state from previous sessions
+    context.user_data.pop("status_msg_id", None)
+    context.user_data.pop("status_msg_chat", None)
+
     # Check credentials
     if not has_credentials(user_id):
         context.user_data.clear()
@@ -637,11 +641,13 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text("Send a text message, voice note, or photo.")
         return ConversationHandler.END
 
-    # Store case text
+    # Store case text and input source
     context.user_data["case_text"] = case_text
+    input_source = "photo" if update.message.photo else ("voice" if update.message.voice else "text")
 
-    # Check if user explicitly named a form type — skip selection if so
-    explicit_form = extract_explicit_form_type(case_text)
+    # Only check for explicit form type in text/voice input — never for photos
+    # (photo descriptions should always go to user-selected form, never auto-routed)
+    explicit_form = extract_explicit_form_type(case_text) if input_source != "photo" else None
     if explicit_form:
         context.user_data["chosen_form"] = explicit_form
         emoji = FORM_EMOJIS.get(explicit_form, "📋")
