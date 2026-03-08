@@ -56,6 +56,40 @@ async def _transcribe_local(file_path: str) -> str:
         return stdout.decode().strip() or "Transcription unavailable"
 
 
+async def _transcribe_gemini(file_path: str) -> str:
+    """Transcribe using Gemini's native audio understanding."""
+    from google import genai
+    from google.genai import types
+
+    api_key = os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        raise RuntimeError("GOOGLE_API_KEY not set")
+
+    client = genai.Client(api_key=api_key)
+
+    with open(file_path, "rb") as f:
+        audio_data = f.read()
+
+    ext = os.path.splitext(file_path)[1].lower()
+    mime_map = {".ogg": "audio/ogg", ".mp3": "audio/mp3", ".wav": "audio/wav",
+                ".m4a": "audio/mp4", ".webm": "audio/webm"}
+    mime_type = mime_map.get(ext, "audio/ogg")
+
+    loop = asyncio.get_event_loop()
+
+    def _call():
+        return client.models.generate_content(
+            model="gemini-3-flash-preview",
+            contents=[
+                "Transcribe this voice note exactly as spoken. Return only the transcribed text, no commentary.",
+                types.Part.from_bytes(data=audio_data, mime_type=mime_type),
+            ]
+        )
+
+    response = await loop.run_in_executor(None, _call)
+    return response.text.strip()
+
+
 async def _transcribe_openai(file_path: str) -> str:
     """Transcribe using OpenAI Whisper API."""
     try:
