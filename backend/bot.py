@@ -189,11 +189,15 @@ def _format_curriculum_hierarchy(curriculum_links, key_capabilities) -> str:
     for slo in curriculum_links:
         lines.append(f"• *{slo_label(slo)}*")
         for kc in slo_kcs.get(slo, []):
-            # Strip the code prefix ("SLO8 KC1: " or "SLO6_PROC KC2: ") for clean display
+            # Extract KC number
+            num_match = _re.search(r'KC(\d+)', kc, _re.IGNORECASE)
+            kc_num = f"KC{num_match.group(1)}" if num_match else "KC"
+            # Strip code prefix, get full description
             kc_text = _re.sub(r'^SLO\w+\s+KC\d+:\s*', '', kc, flags=_re.IGNORECASE).strip()
-            # Escape any remaining underscores to prevent Markdown italics
-            kc_text = kc_text.replace('_', '\\_')
-            lines.append(f"  ↳ {kc_text}")
+            # Summarise: first 6 words + ellipsis
+            words = kc_text.split()
+            summary = " ".join(words[:6]) + ("…" if len(words) > 6 else "")
+            lines.append(f"  ↳ {kc_num}: {summary}")
     return "\n".join(lines)
 
 
