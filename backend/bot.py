@@ -139,6 +139,33 @@ def _format_draft_preview(draft) -> str:
     return _format_cbd_draft(draft)
 
 
+def _format_curriculum_hierarchy(curriculum_links, key_capabilities) -> str:
+    """Render SLOs with their KCs nested underneath as a hierarchy."""
+    if not curriculum_links:
+        return "  • None"
+
+    # Group KCs by their parent SLO prefix
+    slo_kcs: dict = {slo: [] for slo in curriculum_links}
+    for kc in (key_capabilities or []):
+        # KC format: "SLO8 KC1: description" or "SLO8_PROC KC1: description"
+        for slo in curriculum_links:
+            slo_prefix = slo.split("_")[0]  # "SLO8" from "SLO8_PROC"
+            if kc.upper().startswith(slo_prefix + " ") or kc.upper().startswith(slo_prefix + "_"):
+                slo_kcs[slo].append(kc)
+                break
+
+    lines = []
+    for slo in curriculum_links:
+        lines.append(f"• *{slo}*")
+        for kc in slo_kcs.get(slo, []):
+            # Strip the "SLO8 KC1: " prefix for cleaner display
+            kc_text = kc
+            import re
+            kc_text = re.sub(r'^SLO\w+\s+KC\d+:\s*', '', kc, flags=re.IGNORECASE)
+            lines.append(f"  ↳ {kc_text}")
+    return "\n".join(lines)
+
+
 def _format_cbd_draft(cbd_data) -> str:
     """Format CBD data as a preview message."""
     date_str = cbd_data.date_of_encounter
@@ -149,8 +176,7 @@ def _format_cbd_draft(cbd_data) -> str:
     except (ValueError, AttributeError):
         date_display = date_str
 
-    slos = "\n".join(f"  • {s}" for s in cbd_data.curriculum_links) if cbd_data.curriculum_links else "  • None"
-    kcs = "\n".join(f"  • {k}" for k in cbd_data.key_capabilities) if cbd_data.key_capabilities else "  • None"
+    curriculum = _format_curriculum_hierarchy(cbd_data.curriculum_links, cbd_data.key_capabilities)
 
     return (
         f"📋 *Draft CBD — Review before filing*\n\n"
@@ -159,8 +185,7 @@ def _format_cbd_draft(cbd_data) -> str:
         f"🩺 *Presentation:* {cbd_data.patient_presentation}\n\n"
         f"*Case narrative:*\n{cbd_data.clinical_reasoning}\n\n"
         f"*Reflection:*\n{cbd_data.reflection}\n\n"
-        f"📚 *Curriculum links:*\n{slos}\n\n"
-        f"⚡ *Key capabilities:*\n{kcs}"
+        f"📚 *Curriculum:*\n{curriculum}"
     )
 
 
@@ -195,11 +220,23 @@ def _format_generic_draft(draft: FormDraft) -> str:
 
         # Format lists (kc_tick, multi_select)
         if isinstance(value, list):
-            if value:
+            if field_type == "kc_tick" and value:
+                # Extract SLOs from KC strings for hierarchy display
+                import re
+                slos_seen = []
+                for kc in value:
+                    m = re.match(r'^(SLO\w+)', kc, re.IGNORECASE)
+                    if m:
+                        slo = m.group(1).upper()
+                        if slo not in slos_seen:
+                            slos_seen.append(slo)
+                formatted = _format_curriculum_hierarchy(slos_seen, value)
+                lines.append(f"*{label}:*\n{formatted}\n")
+            elif value:
                 value = "\n".join(f"  • {v}" for v in value)
+                lines.append(f"*{label}:*\n{value}\n")
             else:
-                value = "  • None"
-            lines.append(f"*{label}:*\n{value}\n")
+                lines.append(f"*{label}:*\n  • None\n")
         elif len(str(value)) > 100:
             lines.append(f"*{label}:*\n{value}\n")
         else:
@@ -620,100 +657,68 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def handle_approval_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle 'Edit' button - show field selection."""
+    """Handle 'Edit' button — ask for free-text feedback to improve the draft."""
     query = update.callback_query
     await query.answer()
 
-    # Disarm approval buttons immediately — prevents double-tap
     await query.edit_message_reply_markup(reply_markup=None)
 
     draft = context.user_data.get("draft_data")
     if not draft:
         await query.message.reply_text(
-            "This draft has expired (bot was restarted). Send /reset and file a new case.",
+            "This draft has expired. Send /reset and file a new case.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Reset", callback_data="ACTION|reset")]])
         )
         return ConversationHandler.END
 
     await query.message.reply_text(
-        "Which field do you want to edit?",
-        reply_markup=_build_edit_field_keyboard(draft)
+        "What would you like to change? Describe it in plain English — e.g. \"the reflection needs more learning points\" or \"add the SLO for shift leadership\".\n\nI'll regenerate the draft with your feedback."
     )
-    return AWAIT_EDIT_FIELD
+    return AWAIT_EDIT_VALUE
 
 
 async def handle_edit_field(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle field selection for editing."""
-    query = update.callback_query
-    await query.answer()
-
-    field = query.data.split("|")[1]
-    context.user_data["edit_field"] = field
-
-    draft = context.user_data.get("draft_data")
-
-    # Get label from schema for FormDraft, or use CBD defaults
-    if isinstance(draft, FormDraft):
-        schema = FORM_SCHEMAS.get(draft.form_type, {})
-        field_def = next((f for f in schema.get("fields", []) if f["key"] == field), None)
-        if field_def:
-            label = field_def["label"]
-            if field_def["type"] in ("kc_tick", "multi_select"):
-                label += " (comma-separated)"
-            elif field_def["type"] == "date":
-                label += " (YYYY-MM-DD)"
-        else:
-            label = field
-    else:
-        field_labels = {
-            "date_of_encounter": "date (YYYY-MM-DD)",
-            "clinical_setting": "clinical setting",
-            "patient_presentation": "presentation",
-            "clinical_reasoning": "case discussion",
-            "reflection": "reflection",
-            "curriculum_links": "SLOs (comma-separated, e.g. SLO1, SLO3)",
-        }
-        label = field_labels.get(field, field)
-
-    await query.message.reply_text(f"Enter the new {label}:")
+    """Unused — kept for state compatibility."""
     return AWAIT_EDIT_VALUE
 
 
 async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle new value for edited field."""
-    new_value = update.message.text.strip()
-    field = context.user_data.get("edit_field")
+    """Handle free-text feedback — regenerate draft using original case + feedback."""
+    feedback = update.message.text.strip()
     draft = context.user_data.get("draft_data")
+    case_text = context.user_data.get("case_text", "")
 
-    if not field or not draft:
+    if not draft:
         context.user_data.clear()
-        await update.message.reply_text("Edit failed. Start over.")
+        await update.message.reply_text("Edit failed — draft expired. Send /reset.")
         return ConversationHandler.END
 
-    # Update the field based on draft type
-    if isinstance(draft, FormDraft):
-        # For FormDraft, check field type from schema
-        schema = FORM_SCHEMAS.get(draft.form_type, {})
-        field_def = next((f for f in schema.get("fields", []) if f["key"] == field), None)
-        if field_def and field_def["type"] in ("kc_tick", "multi_select"):
-            # Parse comma-separated values
-            draft.fields[field] = [s.strip() for s in new_value.split(",") if s.strip()]
-        else:
-            draft.fields[field] = new_value
-    else:
-        # CBDData - use setattr
-        if field == "curriculum_links":
-            slos = [s.strip().upper() for s in new_value.split(",") if s.strip()]
-            draft.curriculum_links = slos
-        else:
-            setattr(draft, field, new_value)
+    ack = await update.message.reply_text("✏️ Regenerating draft with your feedback…")
 
-    context.user_data["draft_data"] = draft
-    context.user_data.pop("edit_field", None)
+    try:
+        form_type = draft.form_type if isinstance(draft, FormDraft) else "CBD"
+        current_draft_text = _format_draft_preview(draft)
 
-    # Show updated preview with approval buttons in one message
-    preview = _format_draft_preview(draft)
-    await update.message.reply_text(preview, reply_markup=_build_approval_keyboard(), parse_mode="Markdown")
+        if form_type == "CBD":
+            updated = await extract_cbd_data(
+                case_text,
+                edit_feedback=feedback,
+                current_draft=current_draft_text
+            )
+        else:
+            updated = await extract_form_data(
+                case_text,
+                form_type,
+                edit_feedback=feedback,
+                current_draft=current_draft_text
+            )
+        context.user_data["draft_data"] = updated
+    except Exception as e:
+        await ack.edit_text("⚠️ Couldn't regenerate. Try again or /reset.")
+        return AWAIT_APPROVAL
+
+    preview = _format_draft_preview(updated)
+    await ack.edit_text(preview, reply_markup=_build_approval_keyboard(), parse_mode="Markdown")
     return AWAIT_APPROVAL
 
 

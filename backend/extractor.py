@@ -266,7 +266,7 @@ Only include forms that clearly apply. CBD is almost always applicable."""
     return recommendations
 
 
-async def extract_cbd_data(case_description: str) -> CBDData:
+async def extract_cbd_data(case_description: str, edit_feedback: str = "", current_draft: str = "") -> CBDData:
     """Extract structured CBD data from free-text case description."""
     client = _get_client()
 
@@ -364,6 +364,11 @@ Write the reflection in direct, first-person clinical language:
 - Return ONLY the JSON. No explanation."""
 
     prompt = f"{system_prompt}\n\nCase description:\n{case_description}"
+    if edit_feedback and current_draft:
+        prompt += f"\n\nCurrent draft (improve this based on the feedback below):\n{current_draft}\n\nUser feedback:\n{edit_feedback}"
+    elif edit_feedback:
+        prompt += f"\n\nUser feedback to apply:\n{edit_feedback}"
+
     response = await _gemini_call_with_retry(
         lambda: client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
     )
@@ -403,7 +408,7 @@ Write the reflection in direct, first-person clinical language:
     return CBDData(**data)
 
 
-async def extract_form_data(case_description: str, form_type: str) -> FormDraft:
+async def extract_form_data(case_description: str, form_type: str, edit_feedback: str = "", current_draft: str = "") -> FormDraft:
     """Extract structured data for any non-CBD form type."""
     if form_type not in FORM_SCHEMAS:
         raise ValueError(f"Unknown form type: {form_type}")
@@ -447,6 +452,11 @@ Rules:
 
 Case description:
 {case_description}"""
+
+    if edit_feedback and current_draft:
+        system_prompt += f"\n\nCurrent draft (improve based on feedback below):\n{current_draft}\n\nUser feedback:\n{edit_feedback}"
+    elif edit_feedback:
+        system_prompt += f"\n\nUser feedback to apply:\n{edit_feedback}"
 
     response = await _gemini_call_with_retry(
         lambda: client.models.generate_content(model="gemini-3-flash-preview", contents=system_prompt)
