@@ -9,7 +9,7 @@ import tempfile
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
-    filters, ContextTypes, ConversationHandler,
+    filters, ContextTypes, ConversationHandler, PicklePersistence,
 )
 from store import store_credentials, get_credentials, has_credentials, init
 from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, answer_question, extract_explicit_form_type
@@ -866,9 +866,14 @@ def build_application() -> Application:
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN env var not set")
 
+    persistence_path = os.path.expanduser("~/.openclaw/data/portfolio-guru/bot_persistence")
+    os.makedirs(os.path.dirname(persistence_path), exist_ok=True)
+    persistence = PicklePersistence(filepath=persistence_path)
+
     application = (
         Application.builder()
         .token(token)
+        .persistence(persistence)
         .read_timeout(30)
         .write_timeout(30)
         .connect_timeout(30)
@@ -918,6 +923,8 @@ def build_application() -> Application:
         ],
         per_message=False,
         allow_reentry=True,
+        persistent=True,
+        name="case_conv",
     )
 
     # Setup conversation handler
