@@ -213,10 +213,9 @@ Return ONLY a JSON object with these exact fields:
   "supervisor_name": null or "Name if mentioned",
   "curriculum_links": ["SLO1", "SLO3"],
   "key_capabilities": [
-    "SLO1 KC1: Assess and manage all adult patients attending the ED (physical and psychological ill health)",
-    "SLO1 KC2: Assess and formulate a management plan for patients with complex medical and social needs or frailty syndromes",
-    "SLO3 KC3: Manage all life-threatening conditions including peri-arrest and cardiac arrest situations in the ED",
-    "SLO3 KC5: Effectively lead and support resuscitation teams"
+    "SLO1 KC1: to be expert in assessing and managing all adult patients attending the ED. These capabilities will apply to patients attending with both physical and psychological ill health (2025 Update)",
+    "SLO3 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)",
+    "SLO3 KC2: aware of when it is appropriate to review patients remotely or directly and able to teach these principles to others (2025 Update)"
   ]
 }}
 
@@ -229,91 +228,94 @@ Stage of Training mapping:
 
 ===== CURRICULUM LINKS — STRICT RULES =====
 
-RCEM 2021 EM Curriculum (2025 Update) — Full SLO and KC List:
-Source: rcemcurriculum.co.uk (official RCEM curriculum website)
+RCEM Higher EM Curriculum (2025 Update) — Exact Kaizen Checkbox Labels:
+Source: Live Kaizen CBD form screenshot (verified 2026-03-08)
+IMPORTANT: Use these EXACT SLO numbers and KC texts — Kaizen's numbering differs from the curriculum website.
 
-SLO1: Care for physiologically stable adult patients presenting to acute care across the full range of complexity
-  KC1: Assess and manage all adult patients attending the ED (physical and psychological ill health)
-  KC2: Assess and formulate a management plan for patients with complex medical and social needs or frailty syndromes
-  KC3: Work with supervisor on-call from home; provide directions via phone; attend bedside for direct supervision when required
+SLO1: Care for acutely physiologically stable adult patients presenting to acute care across the full range of complexity (2025 Update)
+  KC1: to be expert in assessing and managing all adult patients attending the ED. These capabilities will apply to patients attending with both physical and psychological ill health (2025 Update)
 
-SLO2: Support the ED team by answering clinical questions and making safe decisions
-  KC1: Support the pre-hospital, medical, nursing and administrative team in answering clinical questions and making safe decisions for discharge
-  KC2: Apply clinical guidelines and use diagnostic tests to rule out key pathology; describe a safe management plan including discharge where appropriate
-  KC3: Understand when it is appropriate to review patients remotely or directly; teach these principles to others
-  KC4: Understand human factors in clinical decision making and their impact on patient safety
+SLO3: Support the ED team by answering clinical questions and making safe decisions (2025 Update)
+  KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)
+  KC2: aware of when it is appropriate to review patients remotely or directly and able to teach these principles to others (2025 Update)
 
-SLO3: Identify sick adult patients, be able to resuscitate and stabilise and know when it is appropriate to stop
-  KC1: Provide airway management and ventilatory support to critically ill patients
-  KC2: Expert in fluid management and circulatory support in critically ill patients
-  KC3: Manage all life-threatening conditions including peri-arrest and cardiac arrest situations in the ED
-  KC4: Expert in caring for ED patients and their relatives and loved ones at the end of the patient's life
-  KC5: Effectively lead and support resuscitation teams
+SLO4: Care for acutely injured patients across the full range of complexity (2025 Update)
+  KC1: be expert in assessment, investigation and clinical management of patients attending with all injuries, regardless of complexity (2025 Update)
+  KC2: provide expert leadership of the Major Trauma Team (2025 Update)
 
-SLO4: Care for injured patients across the full range of complexity
-  KC1: Expert in assessment, investigation and initial management of patients attending with all injuries, regardless of complexity
-  KC2: Provide expert leadership of the Major Trauma Team; manage with no supervisor involvement
+SLO5: Resuscitate and stabilise patients in the ED knowing when it is appropriate to stop (2025 Update)
+  KC1: provide airway management & ventilatory support to critically ill patients (2025 Update)
+  KC2: be expert in fluid management and circulatory support in critically ill patients (2025 Update)
+  KC3: manage all the life-threatening conditions including peri-arrest & arrest situations in the ED (2025 Update)
+  KC4: be expert in caring for ED patients and their relatives and loved ones at the end of the patient's life (2025 Update)
+  KC5: effectively lead and support resuscitation teams (2025 Update)
 
-SLO5: Care for children of all ages in the ED, at all stages of development and children with complex needs
-  KC1: Expert in assessing and managing all children and young adult patients (physical and psychological ill health, including those with complex needs)
-  KC2: Lead and support a multidisciplinary paediatric resuscitation including trauma
-  KC3: Provide airway management and ventilatory support to critically ill paediatric patients
-  KC4: Expert in fluid management and circulatory support in critically ill paediatric patients
-  KC5: Manage all life-threatening paediatric conditions including peri-arrest and arrest situations in the ED
-  KC6: Assess and formulate a management plan for children and young adults with complex medical and social needs
-  KC7: Identify the sick child and initiate appropriate management steps; know how paediatric resuscitation differs from adult
+SLO6 (Paeds): Care for children of all ages, at all stages of development and with complex needs (2025 Update)
+  KC1: be expert in assessing and managing all children and young adult patients attending the ED. These capabilities will apply to patients attending with both physical and psychological ill health and social concerns (2025 Update)
+  KC2: be able to provide airway management & ventilatory support to critically ill paediatric patients (2025 Update)
+  KC3: be able to lead and support a multidisciplinary paediatric resuscitation including trauma (2025 Update)
+  KC4: be expert in fluid management and circulatory support in critically ill paediatric patients (2025 Update)
+  KC5: be able to manage all the life-threatening paediatric conditions including peri-arrest & arrest situations in the ED (2025 Update)
+  KC6: be able to assess and formulate a management plan for children and young adults who present with complex medical and social needs (2025 Update)
 
-SLO6: Deliver key procedural skills
-  KC1: Clinical knowledge to identify when key EM procedural skills are indicated
-  KC2: Knowledge and psychomotor skills to perform EM procedural skills safely and in a timely fashion
-  KC3: Supervise and guide colleagues in delivering procedural skills
+SLO6 (Procedures): Deliver key procedural skills needed in EM (2025 Update)
+  KC1: the clinical knowledge to identify when key EM practical/emergency skills are indicated (2025 Update)
+  KC2: the knowledge and psychomotor skills to perform EM procedural skills safely and in a timely fashion (2025 Update)
+  KC3: be able to supervise and guide colleagues in delivering procedural skills (2025 Update)
 
-SLO7: Deal with complex or challenging situations in the workplace
-  KC1: Expert communication skills to negotiate and manage complicated or troubling interactions
-  KC2: Behave professionally in dealings with colleagues and team members within the ED
-  KC3: Work professionally and effectively with those outside the ED
-  KC4: Manage challenging interactions with patients who appear angry or distressed
+SLO7: Deal with complex or challenging situations in the workplace (2025 Update)
+  KC1: have expert communication skills to negotiate, manage complicated or evolving interactions (2025 Update)
+  KC2: behave professionally in dealings with colleagues and team members within the ED (2025 Update)
+  KC3: work professionally and effectively with those outside the ED (2025 Update)
 
-SLO8: Lead the ED shift
-  KC1: Provide support to ED staff of all levels and disciplines on the ED shift
-  KC2: Liaise with the rest of the acute/urgent care team and wider hospital as shift leader
-  KC3: Maintain situational awareness throughout the shift to ensure safety is optimised
-  KC4: Anticipate challenges, generate options, make decisions and communicate these effectively to the team as lead clinician
+SLO8: Lead the ED shift (2025 Update)
+  KC1: will provide support to ED staff at all levels and disciplines on the ED shift (2025 Update)
+  KC2: will be able to liaise with the rest of the acute/urgent care team and wider hospital as shift leader (2025 Update)
+  KC3: will maintain situational awareness throughout the shift to ensure safety is optimised (2025 Update)
+  KC4: will anticipate challenges, generate options, make decisions and communicate these effectively to the team as lead clinician (2025 Update)
 
-SLO9: Support, supervise and educate
-  KC1: Undertake training and supervision of members of the ED team in the clinical environment
-  KC2: Prepare and deliver teaching sessions outside of the clinical environment (simulation, small-group work, didactic teaching)
-  KC3: Provide effective constructive feedback to colleagues including debrief
-  KC4: Understand the principles necessary to mentor and appraise junior doctors
+SLO9 (Teaching): Support, supervise & educate others working in the ED (2025 Update)
+  KC1: be able to undertake training and supervision of members of the ED team in the clinical environment (2025 Update)
+  KC2: be able to prepare and deliver teaching sessions outside of the clinical environment, including simulation, small group work, and didactic presentations (2025 Update)
+  KC3: be able to provide effective constructive feedback to colleagues, including debrief (2025 Update)
+  KC4: understand the principles necessary to mentor and appraise junior doctors (2025 Update)
 
-SLO10: Participate in research and managing data appropriately
-  KC1: Appraise, synthesise, communicate and use research evidence to develop EM care
-  KC2: Actively participate in research
-  KC3: Search the medical literature effectively and critically appraise studies
+SLO9 (Research): Participate in research and manage data appropriately (2025 Update)
+  KC1: be able to appraise, synthesise, communicate and use research evidence to develop EM care (2025 Update)
+  KC2: be able to actively participate in research (2025 Update)
 
-SLO11: Participate in and promote activity to improve the quality and safety of patient care
-  KC1: Provide clinical leadership on effective Quality Improvement work
-  KC2: Support and develop a culture of departmental safety and good clinical governance
-  KC3: Describe involvement and show understanding of QI methods; reflect on a Quality Improvement Project
+SLO10: Participate in & promote activity to improve quality & safety of patient care (2025 Update)
+  KC1: be able to provide clinical leadership on effective Quality Improvement work (2025 Update)
+  KC2: be able to support and develop a culture of departmental safety, and good clinical governance (2025 Update)
 
-SLO12: Lead and manage
-  KC1: Demonstrate involvement in a range of management activities and understanding of relevant medicolegal directives
-  KC2: Investigate a patient safety incident; participate and contribute effectively to departmental clinical governance activities and risk reduction projects
-  KC3: Manage the staff rota; understand relevant employment law and recruitment activities
-  KC4: Effectively represent the ED at inter-specialty meetings
-  KC5: Demonstrate how effective Emergency Medicine Leadership positively impacts on standards of patient care and patient safety
-  KC6: Demonstrate a positive impact on the culture of the Emergency Department through attitudes and behaviours that impact positively on colleagues, patients and their relatives
+SLO12: Lead & Manage (2025 Update)
+  KC1: be able to demonstrate their involvement in a range of management activities and show an understanding of the relevant medicolegal directives (elements not completed in Intermediate) (2025 Update)
+  KC2: be able to investigate a patient safety incident, participate and contribute effectively to department clinical governance activities and risk reduction processes (2025 Update)
+  KC3: be able to manage the staff rota being aware of relevant employment law and recruitment activities including interviews and involvement in workforce planning (2025 Update)
+  KC4: be able to effectively represent the ED at inter-specialty meetings (2025 Update)
+  KC5: demonstrate an understanding of how effective Emergency Medicine Leadership positively impacts on standards of patient care and patient safety (2025 Update)
+  KC6: demonstrate a positive impact on the culture of the Emergency Department through attitudes and behaviours that impact positively on colleagues, patients and their relatives (2025 Update)
 
-CRITICAL — Only select SLOs if the case DIRECTLY DEMONSTRATES that capability:
+CRITICAL — Only select SLOs if the case DIRECTLY DEMONSTRATES that capability.
+Use Kaizen's SLO numbering (above) — NOT the curriculum website numbering.
 
-✅ SELECT SLO3 if: Patient was actually resuscitated, intubated, had cardiac arrest, airway emergency, or required immediate stabilisation
-❌ DO NOT select SLO3 if: Patient was GCS 15, stable, or just "in resus" for observation
+✅ SELECT SLO5 if: Patient was actually resuscitated, intubated, had cardiac arrest, airway emergency, or required immediate stabilisation
+❌ DO NOT select SLO5 if: Patient was GCS 15, stable, or just "in resus" for observation
 
-✅ SELECT SLO6 if: Trainee personally performed a procedure (LP, central line, chest drain, intubation, etc.)
-❌ DO NOT select SLO6 if: Procedure was indicated but not performed, or performed by someone else
+✅ SELECT SLO6 (Procedures) if: Trainee personally performed a procedure (LP, central line, chest drain, intubation, etc.)
+❌ DO NOT select SLO6 (Procedures) if: Procedure was indicated but not performed, or performed by someone else
 
 ✅ SELECT SLO4 if: Patient had trauma/injury that trainee managed
 ❌ DO NOT select SLO4 if: Medical patient with incidental minor injury
+
+✅ SELECT SLO6 (Paeds) if: Patient was a child/young person under 16
+❌ DO NOT select SLO6 (Paeds) if: Adult patient
+
+✅ SELECT SLO8 if: Trainee led the shift, coordinated the department
+❌ DO NOT select SLO8 if: Trainee just saw patients on a shift
+
+✅ SELECT SLO9 (Teaching) if: Trainee delivered teaching or supervised a junior colleague
+❌ DO NOT select SLO9 (Teaching) if: Trainee was taught BY a consultant
 
 ✅ SELECT SLO5 if: Patient was a child/young person under 16
 ❌ DO NOT select SLO5 if: Adult patient
