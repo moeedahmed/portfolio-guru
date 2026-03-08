@@ -248,11 +248,16 @@ def _format_generic_draft(draft: FormDraft) -> str:
     fields = schema.get("fields", [])
     for field in fields:
         key = field["key"]
+        field_type = field["type"]
+
+        # key_capabilities is merged into curriculum_links hierarchy — never render separately
+        if key == "key_capabilities":
+            continue
+
         value = draft.fields.get(key)
         if not value:
             continue
         label = field["label"]
-        field_type = field["type"]
 
         # Format date nicely
         if field_type == "date" and isinstance(value, str):
@@ -263,21 +268,25 @@ def _format_generic_draft(draft: FormDraft) -> str:
             except (ValueError, AttributeError):
                 pass
 
-        # Format lists (kc_tick, multi_select)
+        # curriculum_links: render as unified SLO→KC hierarchy (pull key_capabilities too)
+        if key == "curriculum_links" and isinstance(value, list):
+            import re as _re
+            key_caps = draft.fields.get("key_capabilities") or []
+            # Derive parent SLO list from curriculum_links values
+            slos_seen = []
+            all_kcs = list(value) + list(key_caps)
+            for item in value:
+                m = _re.match(r'^(SLO\w+)', item, _re.IGNORECASE)
+                slo = m.group(1).upper() if m else item.upper()
+                if slo not in slos_seen:
+                    slos_seen.append(slo)
+            formatted = _format_curriculum_hierarchy(slos_seen, all_kcs)
+            lines.append(f"📚 *Curriculum:*\n{formatted}\n")
+            continue
+
+        # Format other lists (multi_select)
         if isinstance(value, list):
-            if field_type == "kc_tick" and value:
-                # Extract SLOs from KC strings for hierarchy display
-                import re
-                slos_seen = []
-                for kc in value:
-                    m = re.match(r'^(SLO\w+)', kc, re.IGNORECASE)
-                    if m:
-                        slo = m.group(1).upper()
-                        if slo not in slos_seen:
-                            slos_seen.append(slo)
-                formatted = _format_curriculum_hierarchy(slos_seen, value)
-                lines.append(f"*{label}:*\n{formatted}\n")
-            elif value:
+            if value:
                 value = "\n".join(f"  • {v}" for v in value)
                 lines.append(f"*{label}:*\n{value}\n")
             else:
