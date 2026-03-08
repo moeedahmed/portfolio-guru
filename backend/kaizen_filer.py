@@ -107,6 +107,8 @@ FORM_UUIDS = {
 FORM_FIELD_MAP = {
     "CBD": {
         "date_of_encounter": "startDate",
+        "end_date": "endDate",
+        "date_of_event": "5391f8de-de63-4db3-9e08-baaa2a380cfe",
         "stage_of_training": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
         "clinical_reasoning": "60772a97-92eb-4dbe-a813-6a5293be82f9",
         "reflection": "610b5c60-99ac-4902-9407-22974d6a5799",
@@ -317,9 +319,11 @@ async def _fill_field(page: Page, dom_id: str, value: Any, field_key: str) -> bo
         if field_key == "stage_of_training":
             return await _fill_stage_of_training(page, dom_id, value)
 
-        el = page.locator(f"#{dom_id}")
+        # Use attribute selector [id="..."] instead of #id — UUID-style IDs
+        # starting with digits are invalid CSS selectors with # prefix
+        el = page.locator(f'[id="{dom_id}"]')
         if not await el.count():
-            logger.warning(f"Field not found: #{dom_id} ({field_key})")
+            logger.warning(f"Field not found: [id=\"{dom_id}\"] ({field_key})")
             return False
 
         tag = await el.evaluate("el => el.tagName")
@@ -374,7 +378,7 @@ async def _fill_stage_of_training(page: Page, dom_id: str, value: Any) -> bool:
         logger.info(f"Defaulting stage to Higher for value: '{value}'")
 
     try:
-        el = page.locator(f"#{dom_id}")
+        el = page.locator(f'[id="{dom_id}"]')
         if await el.count() > 0:
             await el.select_option(value=select_value)
             await asyncio.sleep(3)  # Wait for curriculum section to load after stage selection

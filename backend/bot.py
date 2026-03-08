@@ -1094,6 +1094,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         form_type = "CBD"
         fields = {
             "date_of_encounter": draft.date_of_encounter,
+            "end_date": draft.date_of_encounter,
             "date_of_event": draft.date_of_encounter,
             "stage_of_training": draft.stage_of_training,
             "clinical_reasoning": draft.clinical_reasoning,
