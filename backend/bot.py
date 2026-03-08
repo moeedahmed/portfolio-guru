@@ -134,15 +134,22 @@ FIELD_EMOJIS = {
     "qi_project":           "📊",
 }
 
+def _form_display_name(form_type: str) -> str:
+    """Human-readable form name from schema, falling back to code if not found."""
+    schema = FORM_SCHEMAS.get(form_type, {})
+    return schema.get("name", form_type)
+
+
 def _build_form_choice_keyboard(recommendations):
     """Build inline keyboard for form type selection — AI suggestions + See all forms escape hatch."""
     buttons = []
     for rec in recommendations:
         emoji = FORM_EMOJIS.get(rec.form_type, "📄")
+        label = _form_display_name(rec.form_type)
         if rec.uuid:
-            buttons.append(InlineKeyboardButton(f"{emoji} {rec.form_type}", callback_data=f"FORM|{rec.form_type}"))
+            buttons.append(InlineKeyboardButton(f"{emoji} {label}", callback_data=f"FORM|{rec.form_type}"))
         else:
-            buttons.append(InlineKeyboardButton(f"{emoji} {rec.form_type} (soon)", callback_data="FORM|disabled"))
+            buttons.append(InlineKeyboardButton(f"{emoji} {label} (soon)", callback_data="FORM|disabled"))
     rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
     rows.append([
         InlineKeyboardButton("📋 See all forms", callback_data="FORM|show_all"),
@@ -663,7 +670,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if explicit_form:
         context.user_data["chosen_form"] = explicit_form
         emoji = FORM_EMOJIS.get(explicit_form, "📋")
-        ack = await update.message.reply_text(f"{emoji} Generating {explicit_form} draft…")
+        ack = await update.message.reply_text(f"{emoji} Generating {_form_display_name(explicit_form)} draft…")
         try:
             if explicit_form == "CBD":
                 draft = await extract_cbd_data(case_text)
@@ -758,7 +765,8 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         buttons = []
         for rec in all_recs:
             emoji = FORM_EMOJIS.get(rec.form_type, "📄")
-            buttons.append(InlineKeyboardButton(f"{emoji} {rec.form_type}", callback_data=f"FORM|{rec.form_type}"))
+            label = _form_display_name(rec.form_type)
+            buttons.append(InlineKeyboardButton(f"{emoji} {label}", callback_data=f"FORM|{rec.form_type}"))
         rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
         rows.append([
             InlineKeyboardButton("⬅️ Back", callback_data="FORM|back"),
@@ -783,7 +791,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # Disarm buttons, show single working status — updated in-place throughout
     emoji = FORM_EMOJIS.get(form_type, "📋")
     await query.edit_message_text(
-        f"{emoji} Generating {form_type} draft…",
+        f"{emoji} Generating {_form_display_name(form_type)} draft…",
         reply_markup=None
     )
 
