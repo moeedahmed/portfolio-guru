@@ -98,7 +98,6 @@ def _build_edit_field_keyboard():
 
 def _format_draft_preview(cbd_data) -> str:
     """Format CBD data as a preview message."""
-    # Format date as d/m/yyyy for display
     date_str = cbd_data.date_of_encounter
     try:
         from datetime import datetime
@@ -107,23 +106,21 @@ def _format_draft_preview(cbd_data) -> str:
     except (ValueError, AttributeError):
         date_display = date_str
 
-    slos = ", ".join(cbd_data.curriculum_links) if cbd_data.curriculum_links else "None"
-    kcs = ", ".join(cbd_data.key_capabilities) if cbd_data.key_capabilities else "None"
+    slos = "\n".join(f"  • {s}" for s in cbd_data.curriculum_links) if cbd_data.curriculum_links else "  • None"
+    kcs = "\n".join(f"  • {k}" for k in cbd_data.key_capabilities) if cbd_data.key_capabilities else "  • None"
 
-    return f"""Draft CBD
-
-Date: {date_display}
-Setting: {cbd_data.clinical_setting}
-Presentation: {cbd_data.patient_presentation}
-
-Case to be discussed:
-{cbd_data.clinical_reasoning}
-
-Reflection:
-{cbd_data.reflection}
-
-Curriculum links: {slos}
-Key capabilities: {kcs}"""
+    return (
+        f"📋 *Draft CBD — Review before filing*\n"
+        f"{'─' * 30}\n\n"
+        f"📅 *Date:* {date_display}\n"
+        f"🏥 *Setting:* {cbd_data.clinical_setting}\n"
+        f"🩺 *Presentation:* {cbd_data.patient_presentation}\n\n"
+        f"*Case narrative:*\n{cbd_data.clinical_reasoning}\n\n"
+        f"*Reflection:*\n{cbd_data.reflection}\n\n"
+        f"{'─' * 30}\n"
+        f"📚 *Curriculum links:*\n{slos}\n\n"
+        f"⚡ *Key capabilities:*\n{kcs}"
+    )
 
 
 # === COMMAND HANDLERS ===
@@ -196,7 +193,12 @@ async def setup_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Reset conversation state and clear user data."""
     context.user_data.clear()
-    await update.message.reply_text("Conversation reset. Send me a case whenever you are ready.")
+    await update.message.reply_text(
+        "✅ Reset done — all clear.\n\nSend a case by text, voice, or photo whenever you're ready.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📂 File a case", callback_data="ACTION|file")]
+        ])
+    )
     return ConversationHandler.END
 
 
