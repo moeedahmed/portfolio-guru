@@ -12,12 +12,13 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler,
 )
 from store import store_credentials, get_credentials, has_credentials, init
-from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, answer_question
+from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, answer_question, extract_explicit_form_type
 from filer import file_cbd_to_kaizen
 from form_schemas import FORM_SCHEMAS
 from models import FormDraft
 from whisper import transcribe_voice
 from vision import extract_from_image
+from profile_store import init_profile_db, store_training_level, get_training_level
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -26,7 +27,16 @@ logger = logging.getLogger(__name__)
 (AWAIT_USERNAME, AWAIT_PASSWORD,
  AWAIT_FORM_CHOICE, AWAIT_APPROVAL,
  AWAIT_EDIT_FIELD, AWAIT_EDIT_VALUE,
- AWAIT_CASE_INPUT) = range(7)
+ AWAIT_CASE_INPUT, AWAIT_TRAINING_LEVEL) = range(8)
+
+# Training level → form types available
+TRAINING_LEVEL_FORMS = {
+    "ST3": ["CBD", "DOPS", "MINI_CEX", "ACAT", "MSF"],
+    "ST4": ["CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "MSF", "QIAT"],
+    "ST5": ["CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "STAT", "MSF", "QIAT", "JCF"],
+    "ST6": ["CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "STAT", "MSF", "QIAT", "JCF"],
+    "SAS": ["CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "STAT", "MSF", "QIAT", "JCF"],
+}
 
 WELCOME_MSG = """Portfolio Guru helps you file clinical cases to your RCEM Kaizen e-portfolio - in seconds.
 
@@ -333,8 +343,31 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     store_credentials(user_id, username, password)
     context.user_data.pop("setup_username", None)
+
+    # Ask training level before finishing setup
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("ST3", callback_data="LEVEL|ST3"),
+         InlineKeyboardButton("ST4", callback_data="LEVEL|ST4")],
+        [InlineKeyboardButton("ST5", callback_data="LEVEL|ST5"),
+         InlineKeyboardButton("ST6", callback_data="LEVEL|ST6")],
+        [InlineKeyboardButton("SAS / Fellow", callback_data="LEVEL|SAS")],
+    ])
     await update.effective_chat.send_message(
-        "Connected. Send me a case description and I'll draft it for review."
+        "Kaizen connected ✅\n\nOne more thing — what's your training level? This helps me show you the right form types.",
+        reply_markup=keyboard
+    )
+    return AWAIT_TRAINING_LEVEL
+
+
+async def setup_training_level(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle training level selection during setup."""
+    query = update.callback_query
+    await query.answer()
+    level = query.data.split("|")[1]
+    user_id = update.effective_user.id
+    store_training_level(user_id, level)
+    await query.edit_message_text(
+        f"All set — training level saved as {level}.\n\nSend me a case whenever you're ready."
     )
     return ConversationHandler.END
 
@@ -540,9 +573,35 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     # Store case text
     context.user_data["case_text"] = case_text
 
-    # Get form recommendations
+    # Check if user explicitly named a form type — skip selection if so
+    explicit_form = extract_explicit_form_type(case_text)
+    if explicit_form:
+        context.user_data["chosen_form"] = explicit_form
+        emoji = FORM_EMOJIS.get(explicit_form, "📋")
+        ack = await update.message.reply_text(f"{emoji} Generating {explicit_form} draft…")
+        try:
+            if explicit_form == "CBD":
+                draft = await extract_cbd_data(case_text)
+            else:
+                draft = await extract_form_data(case_text, explicit_form)
+            context.user_data["draft_data"] = draft
+        except Exception as e:
+            context.user_data.clear()
+            await ack.edit_text("⚠️ Could not generate draft. Try again or /reset.")
+            return ConversationHandler.END
+        preview = _format_draft_preview(draft)
+        await ack.edit_text(preview, reply_markup=_build_approval_keyboard(), parse_mode="Markdown")
+        return AWAIT_APPROVAL
+
+    # No explicit form — get AI recommendations filtered by training level
+    user_id = update.effective_user.id
+    training_level = get_training_level(user_id) or "ST5"
+    allowed_forms = TRAINING_LEVEL_FORMS.get(training_level, TRAINING_LEVEL_FORMS["ST5"])
+
     try:
         recommendations = await recommend_form_types(case_text)
+        # Filter to forms appropriate for this training level
+        recommendations = [r for r in recommendations if r.form_type in allowed_forms]
         context.user_data["form_recommendations"] = recommendations
     except Exception as e:
         logger.error(f"Form recommendation failed: {e}")
@@ -555,7 +614,6 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )]
         context.user_data["form_recommendations"] = recommendations
 
-    # Build rationale text
     rationale_lines = [f"- {r.form_type}: {r.rationale}" for r in recommendations if r.uuid]
     rationale_text = "\n".join(rationale_lines) if rationale_lines else "- CBD: Clinical case"
 
@@ -859,6 +917,7 @@ def build_application() -> Application:
         states={
             AWAIT_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_username)],
             AWAIT_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_password)],
+            AWAIT_TRAINING_LEVEL: [CallbackQueryHandler(setup_training_level, pattern=r"^LEVEL\|")],
         },
         fallbacks=[CommandHandler("cancel", setup_cancel)],
         allow_reentry=True,
@@ -895,6 +954,7 @@ def main():
     import requests as _req
 
     init()
+    init_profile_db()
 
     # Clear any existing webhook so polling works
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")

@@ -140,6 +140,31 @@ def _get_client():
     return _client
 
 
+def extract_explicit_form_type(text: str) -> str | None:
+    """
+    Check if the user explicitly named a form type in their message.
+    Returns the short form key (e.g. "CBD", "DOPS") or None.
+    No AI call — pure pattern match for speed.
+    """
+    text_lower = text.lower()
+    patterns = {
+        "CBD":      ["cbd", "case-based discussion", "case based discussion"],
+        "DOPS":     ["dops", "directly observed procedural", "procedural skill"],
+        "MINI_CEX": ["mini cex", "mini-cex", "minicex", "clinical evaluation exercise"],
+        "LAT":      ["lat", "acute care assessment", "acute assessment tool"],
+        "ACAT":     ["acat", "acute care assessment"],
+        "ACAF":     ["acaf", "acute care assessment form"],
+        "STAT":     ["stat", "structured assessment"],
+        "MSF":      ["msf", "multi source feedback", "multi-source feedback", "360"],
+        "QIAT":     ["qiat", "quality improvement"],
+        "JCF":      ["jcf", "journal club"],
+    }
+    for form_type, keywords in patterns.items():
+        if any(kw in text_lower for kw in keywords):
+            return form_type
+    return None
+
+
 async def classify_intent(text: str) -> str:
     """Classify user message intent: 'chitchat', 'question', or 'case'."""
     client = _get_client()
