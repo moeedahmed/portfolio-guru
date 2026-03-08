@@ -103,16 +103,26 @@ async def _gemini_call_with_retry(fn: Callable[..., Any], *args, retries: int = 
 
 FORM_UUIDS = {
     # 2025 update versions (preferred)
-    "CBD":  "3ce5989a-b61c-4c24-ab12-711bf928b181",  # CBD 2025 update
-    "DOPS": "159831f9-6d22-4e77-851b-87e30aee37a2",  # DOPS ST3-ST6 2025 update
-    "LAT":  "eb1c7547-0f41-49e7-95de-8adffd849924",  # LAT 2025 update v9
-    "ACAT": "6577ab06-8340-47e3-952a-708a5f800dcc",  # ACAT ACCS 2025 update
-    "ACAF": "15e67ae8-868b-4358-9b96-30a4a272f02c",  # ACAF 2025 update
-    "STAT": "41ff54b8-35a7-414b-9bd6-97fb1c3eb189",  # STAT 2025 update
-    "MSF":  "5f71ac04-ff45-44d2-b7a1-f8b921a8a4c8",  # MSF
+    "CBD":      "3ce5989a-b61c-4c24-ab12-711bf928b181",  # CBD 2025 update
+    "DOPS":     "159831f9-6d22-4e77-851b-87e30aee37a2",  # DOPS ST3-ST6 2025 update
+    "LAT":      "eb1c7547-0f41-49e7-95de-8adffd849924",  # LAT 2025 update v9
+    "ACAT":     "6577ab06-8340-47e3-952a-708a5f800dcc",  # ACAT ACCS 2025 update
+    "ACAF":     "15e67ae8-868b-4358-9b96-30a4a272f02c",  # ACAF 2025 update
+    "STAT":     "41ff54b8-35a7-414b-9bd6-97fb1c3eb189",  # STAT 2025 update
+    "MSF":      "5f71ac04-ff45-44d2-b7a1-f8b921a8a4c8",  # MSF
     "MINI_CEX": "647665f4-a992-4541-9e17-33ba6fd1d347",  # Mini-CEX 2025 update
-    "JCF":  "3daa9559-3c31-4ab4-883c-9a991632a9ca",  # Journal Club 2025 update
-    "QIAT": "a0aa5cfc-57be-4622-b974-51d334268d57",  # EM QIAT 2025 update
+    "JCF":      "3daa9559-3c31-4ab4-883c-9a991632a9ca",  # Journal Club 2025 update
+    "QIAT":     "a0aa5cfc-57be-4622-b974-51d334268d57",  # EM QIAT 2025 update
+    # New forms — 9 added
+    "TEACH":        "1ffbd272-8447-439c-aa03-ff99e2dbc04d",  # Teaching Delivered By Trainee 2025
+    "PROC_LOG":     "2d6ebac1-4633-49d1-9dc0-fa0d39a98afc",  # Procedural Log ST3-ST6 2025
+    "SDL":          "743885d8-c1b8-4566-bc09-8ed9b0e09829",  # Self-directed Learning Reflection 2025
+    "US_CASE":      "558b196a-8168-4cc6-b363-6f6e4b08397a",  # Ultrasound Case Reflection 2025
+    "ESLE":         "cbc7a42f-a2f0-436b-813e-bbf97cce0a34",  # Reflection on ESLE 2025
+    "COMPLAINT":    "f7c0ba98-5a47-4e37-b76a-ca3c5c8484cc",  # Reflection on Complaints 2025
+    "SERIOUS_INC":  "9d4a7912-a615-4ae4-9fae-6be966bcf254",  # Reflection on Serious Incident 2025
+    "EDU_ACT":      "868dc0e7-f4e9-4283-ac52-d9c8b246024b",  # Educational Activity Attended 2025
+    "FORMAL_COURSE":"c7cd9a95-e2aa-4f61-a441-b663f3c933c6",  # Attendance at Formal Course 2025
 }
 
 # Words/phrases to remove from reflection (humanizer)
@@ -236,13 +246,13 @@ async def recommend_form_types(case_description: str) -> List[FormTypeRecommenda
 
 Rules:
 - CBD: Always if trainee managed a clinical case (retrospective reasoning discussion)
-- LAT: If resus leadership, leading a shift, coordinating the department, managing a major incident
-- DOPS: If trainee personally performed a procedure
+- LAT: ONLY if the trainee was explicitly the shift leader or shift co-ordinator, or managed a major incident as lead. Advising a junior colleague or teaching a colleague does NOT qualify for LAT.
+- DOPS: If trainee personally performed a hands-on procedure (intubation, central line, LP, chest drain, etc.)
 - ACAT: If description covers a full shift or multiple patients observed
 - MINI_CEX: If someone directly observed the trainee seeing a patient (real-time bedside observation)
 - ACAF: If trainee searched literature or critically appraised evidence
 - JCF: If trainee presented at a journal club
-- STAT: If trainee delivered a structured teaching session
+- STAT: If trainee delivered a structured teaching session to a group
 - QIAT: If trainee completed or is presenting a QI project
 - MSF: If trainee is requesting 360-degree colleague feedback
 - Never recommend more than 3 forms
@@ -250,7 +260,8 @@ Rules:
 Return ONLY a JSON array:
 [{"form_type": "CBD", "rationale": "one-line reason"}, ...]
 
-Only include forms that clearly apply. CBD is almost always applicable."""
+Only include forms that clearly apply. CBD is almost always applicable.
+Be conservative — do not recommend a form unless the case description clearly demonstrates that activity."""
 
     prompt = f"{system_prompt}\n\nCase description:\n{case_description}"
     response = await _gemini_call_with_retry(
@@ -453,8 +464,18 @@ async def extract_form_data(case_description: str, form_type: str, edit_feedback
     field_keys = [f['key'] for f in schema["fields"]]
     json_template = "{\n" + ",\n".join([f'  "{k}": "<extracted value>"' for k in field_keys]) + "\n}"
 
-    system_prompt = f"""You are a medical portfolio assistant. Extract data for a {schema['name']} ({form_type}) WPBA entry.
+    # Check if this is a reflection-style form
+    reflection_forms = {"SDL", "US_CASE", "ESLE", "COMPLAINT", "SERIOUS_INC", "EDU_ACT", "FORMAL_COURSE"}
+    is_reflection = form_type in reflection_forms
 
+    reflection_instruction = """
+This is a self-reflection form. The trainee is reflecting on their own experience.
+Write all text fields in first person ("I managed...", "I reflected on...", "I learned...").
+Use British English spelling. Write professionally but naturally.
+""" if is_reflection else ""
+
+    system_prompt = f"""You are a medical portfolio assistant. Extract data for a {schema['name']} ({form_type}) WPBA entry.
+{reflection_instruction}
 Return ONLY a JSON object with these exact keys:
 {json_template}
 

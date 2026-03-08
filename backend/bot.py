@@ -56,11 +56,11 @@ def _load_draft(context):
 
 # Training level → form types available
 TRAINING_LEVEL_FORMS = {
-    "ST3": ["CBD", "DOPS", "MINI_CEX", "ACAT", "MSF"],
-    "ST4": ["CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "MSF", "QIAT"],
-    "ST5": ["CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "STAT", "MSF", "QIAT", "JCF"],
-    "ST6": ["CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "STAT", "MSF", "QIAT", "JCF"],
-    "SAS": ["CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "STAT", "MSF", "QIAT", "JCF"],
+    "ST3": ["CBD", "DOPS", "MINI_CEX", "ACAT", "MSF", "PROC_LOG", "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH", "COMPLAINT", "SERIOUS_INC", "ESLE"],
+    "ST4": ["CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "MSF", "QIAT", "PROC_LOG", "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH", "US_CASE", "COMPLAINT", "SERIOUS_INC", "ESLE"],
+    "ST5": ["CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "STAT", "MSF", "QIAT", "JCF", "PROC_LOG", "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH", "US_CASE", "COMPLAINT", "SERIOUS_INC", "ESLE"],
+    "ST6": ["CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "STAT", "MSF", "QIAT", "JCF", "PROC_LOG", "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH", "US_CASE", "COMPLAINT", "SERIOUS_INC", "ESLE"],
+    "SAS": ["CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "STAT", "MSF", "QIAT", "JCF", "PROC_LOG", "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH", "US_CASE", "COMPLAINT", "SERIOUS_INC", "ESLE"],
 }
 
 WELCOME_MSG = """Portfolio Guru helps you file clinical cases to your RCEM Kaizen e-portfolio - in seconds.
@@ -105,6 +105,10 @@ FORM_EMOJIS = {
     "CBD": "🩺", "DOPS": "🔪", "MINI_CEX": "🏥", "ACAT": "📋",
     "MSF": "👥", "QIAT": "🎓", "LAT": "📖", "JCF": "💼",
     "ACAF": "✅", "STAT": "📊",
+    # New forms
+    "TEACH": "👨‍🏫", "PROC_LOG": "🔬", "SDL": "📖", "US_CASE": "🔊",
+    "ESLE": "⚠️", "COMPLAINT": "📝", "SERIOUS_INC": "🚨",
+    "EDU_ACT": "🎓", "FORMAL_COURSE": "📋",
 }
 
 FIELD_EMOJIS = {
