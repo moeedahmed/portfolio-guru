@@ -34,6 +34,10 @@ Share a case by text, voice note, or photo. I'll draft the entry, show you exact
 
 Your Kaizen credentials are encrypted and never shared."""
 
+WELCOME_MSG_CONNECTED = """Portfolio Guru — ready to go.
+
+Send a case by text, voice note, or photo and I'll handle the rest."""
+
 WHAT_IS_THIS_MSG = """Portfolio Guru files your WPBA entries to Kaizen — in seconds.
 
 Describe a clinical case by text, voice note, or photo. The bot works out which form fits (CBD, DOPS, LAT, Mini-CEX, ACAT, and more), extracts the right fields, and shows you a draft to review before anything is saved.
@@ -45,14 +49,21 @@ Supported forms: CBD · DOPS · Mini-CEX · ACAT · LAT · ACAF · STAT · MSF �
 FILE_CASE_PROMPT = "Send me a case description - text, voice note, or photo."
 
 
-def _build_welcome_keyboard():
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("❓ What is this?", callback_data="INFO|what"),
-            InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup"),
-        ],
-        [InlineKeyboardButton("📂 File a case", callback_data="ACTION|file")],
-    ])
+def _build_welcome_keyboard(connected: bool = False):
+    if connected:
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("❓ What is this?", callback_data="INFO|what"),
+                InlineKeyboardButton("📂 File a case", callback_data="ACTION|file"),
+            ],
+        ])
+    else:
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("❓ What is this?", callback_data="INFO|what"),
+                InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup"),
+            ],
+        ])
 
 
 FORM_EMOJIS = {
@@ -203,7 +214,9 @@ def _format_generic_draft(draft: FormDraft) -> str:
 # === COMMAND HANDLERS ===
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(WELCOME_MSG, reply_markup=_build_welcome_keyboard())
+    connected = has_credentials(update.effective_user.id)
+    msg = WELCOME_MSG_CONNECTED if connected else WELCOME_MSG
+    await update.message.reply_text(msg, reply_markup=_build_welcome_keyboard(connected=connected))
 
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
