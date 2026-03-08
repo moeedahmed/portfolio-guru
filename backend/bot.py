@@ -1497,8 +1497,7 @@ async def handle_approval_edit(update: Update, context: ContextTypes.DEFAULT_TYP
     if not draft:
         await query.message.reply_text(
             "This draft has expired.",
-            reply_markup=_KB_FILE_RESET,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Reset", callback_data="ACTION|reset")]])
+            reply_markup=_KB_FILE_RESET
         )
         return ConversationHandler.END
 
