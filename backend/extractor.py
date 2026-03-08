@@ -162,22 +162,70 @@ FORM_UUIDS = {
     "FORMAL_COURSE":"c7cd9a95-e2aa-4f61-a441-b663f3c933c6",  # Attendance at Formal Course 2025
 }
 
-# Words/phrases to remove from reflection (humanizer)
+# AI-tell patterns to strip from ALL narrative text (humanizer)
+# Applied before the user sees any draft — not post-approval
 SLOP_PATTERNS = [
-    r"\s*—\s*",  # em dashes -> regular dashes or remove
+    r"\s*—\s*",  # em dashes -> " - "
+    # Single words
     r"\bdelve\b",
     r"\bnavigate\b",
     r"\bcrucial\b",
-    r"\bit's worth noting\b",
     r"\bimportantly\b",
     r"\bcomprehensive\b",
+    r"\bmoreover\b",
+    r"\bfurthermore\b",
+    r"\bunderscore[sd]?\b",
+    r"\bpivotal\b",
+    r"\bseamless(?:ly)?\b",
+    r"\bholistic(?:ally)?\b",
+    r"\brobust\b",
+    r"\binstrumental\b",
+    r"\bmultifaceted\b",
+    r"\blandscape\b",
+    r"\brealm\b",
+    r"\bparadigm\b",
+    r"\bfacilitate[sd]?\b",
+    r"\bleverag(?:e[sd]?|ing)\b",
+    r"\bunlock(?:s|ed|ing)?\b",
+    r"\btapestry\b",
+    r"\bcommenc(?:e[sd]?|ing)\b",
+    r"\bembark(?:s|ed|ing)?\b",
+    r"\bmeticulous(?:ly)?\b",
+    r"\boverarch(?:ing)?\b",
+    # Phrases
+    r"\bit's worth noting\b",
+    r"\bit is worth noting\b",
     r"\bon the other hand\b",
     r"\bin summary\b",
     r"\bto summarise\b",
     r"\bto summarize\b",
-    r"\bmoreover\b",
-    r"\bfurthermore\b",
+    r"\bin conclusion\b",
+    r"\bthis case highlights\b",
+    r"\bthis experience underscored\b",
+    r"\bthis encounter reinforced\b",
+    r"\bmoving forward\b",
+    r"\bin this context\b",
+    r"\bit is important to note\b",
+    r"\bplayed a (?:key|vital|critical|crucial) role\b",
+    r"\ba testament to\b",
+    r"\bgame.?changer\b",
 ]
+
+# Fields that should be humanized (narrative text, not dates/dropdowns/names)
+_HUMANIZE_FIELDS = {
+    "clinical_reasoning", "reflection", "trainee_role", "patient_presentation",
+    "case_to_be_discussed", "reflective_comments", "learning_points",
+    "circumstances", "replay_differently", "why", "different_outcome",
+    "focussing_on", "learned", "further_action", "description",
+    "root_causes", "contributing_factors", "resource_details",
+    "clinical_scenario", "how_used", "learning_outcomes",
+    "key_features", "key_aspects", "pdp_summary", "qi_engagement",
+    "qi_understanding", "qi_journey_aspects", "next_pdp",
+    "situation", "evidence_evaluation", "apply_to_practice",
+    "search_methodology", "communicate_to_patient", "future_research",
+    "project_description", "reflective_notes", "resources_used",
+    "lessons_learned", "other_comments",
+}
 
 
 def _get_client():
@@ -266,18 +314,39 @@ Question: """
     return response.text.strip()
 
 
-def _humanize_reflection(text: str) -> str:
-    """Remove AI-sounding phrases from reflection text."""
+def _humanize_text(text: str) -> str:
+    """Remove AI-sounding phrases from any narrative text field.
+    Applied to all narrative fields BEFORE the user sees the draft."""
+    if not text or len(text) < 20:
+        return text
     result = text
     # Replace em dashes with regular dashes
     result = re.sub(r"\s*—\s*", " - ", result)
     # Remove slop words/phrases
     for pattern in SLOP_PATTERNS[1:]:  # skip em dash pattern (already handled)
         result = re.sub(pattern, "", result, flags=re.IGNORECASE)
-    # Clean up double spaces
+    # Fix orphaned commas and double spaces from removals
+    result = re.sub(r",\s*,", ",", result)
+    result = re.sub(r"\.\s*\.", ".", result)
     result = re.sub(r"  +", " ", result)
+    # Fix sentences starting with lowercase after removal
+    result = re.sub(r"\.\s+([a-z])", lambda m: ". " + m.group(1).upper(), result)
     result = result.strip()
     return result
+
+
+def _humanize_reflection(text: str) -> str:
+    """Legacy alias — calls _humanize_text."""
+    return _humanize_text(text)
+
+
+def _humanize_all_fields(data: dict) -> dict:
+    """Apply humanizer to all narrative text fields in a draft dict.
+    Non-narrative fields (dates, dropdowns, names, lists) are left untouched."""
+    for key, value in data.items():
+        if key in _HUMANIZE_FIELDS and isinstance(value, str) and len(value) > 20:
+            data[key] = _humanize_text(value)
+    return data
 
 
 async def recommend_form_types(case_description: str) -> List[FormTypeRecommendation]:
@@ -466,11 +535,10 @@ Write the reflection in direct, first-person clinical language:
     if not data.get("clinical_reasoning"):
         data["clinical_reasoning"] = data.get("reflection", "See reflection")
     if not data.get("reflection"):
-        data["reflection"] = "Reflection not extracted — please edit"
+        data["reflection"] = "Reflection not extracted - please edit"
 
-    # Apply humanizer to reflection
-    if "reflection" in data:
-        data["reflection"] = _humanize_reflection(data["reflection"])
+    # Apply humanizer to ALL narrative fields before user sees the draft
+    data = _humanize_all_fields(data)
 
     # Ensure key_capabilities exists
     if "key_capabilities" not in data:
@@ -531,6 +599,8 @@ Rules:
   If the form has a kc_tick field, always include "key_capabilities" in the JSON too.
 - For date fields: return YYYY-MM-DD. Use today if not mentioned: {date.today()}
 - For text fields: extract directly from the case, be concise and clinical
+- Write in direct, first-person clinical language ("I assessed...", "I managed...")
+- NEVER use: em dashes, "delve", "navigate", "crucial", "importantly", "comprehensive", "moreover", "furthermore", "holistic", "robust", "multifaceted", "pivotal", "seamless", "facilitate", "leverage", "unlock", "embark", "meticulous", "overarching", "in summary", "it's worth noting", "this case highlights", "moving forward"
 - Do not fabricate details not present in the case
 - Return ONLY the JSON object. No explanation.
 
@@ -568,9 +638,8 @@ Case description:
         retry_raw = retry_raw.strip()
         data = json.loads(retry_raw)
 
-    # Apply humanizer to reflection if present
-    if "reflection" in data and data["reflection"]:
-        data["reflection"] = _humanize_reflection(data["reflection"])
+    # Apply humanizer to ALL narrative fields before user sees the draft
+    data = _humanize_all_fields(data)
 
     return FormDraft(
         form_type=form_type,
