@@ -840,8 +840,7 @@ async def handle_edit_field(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle free-text feedback — regenerate draft using original case + feedback."""
-    feedback = update.message.text.strip()
+    """Handle text, voice, or photo feedback — regenerate draft using original case + feedback."""
     draft = _load_draft(context)
     case_text = context.user_data.get("case_text", "")
 
@@ -850,7 +849,34 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text("Edit failed — draft expired. Send /reset.")
         return ConversationHandler.END
 
-    ack = await update.message.reply_text("✏️ Regenerating draft with your feedback…")
+    # Resolve feedback from any input modality
+    if update.message.voice:
+        ack = await update.message.reply_text("🎙️ Transcribing…")
+        try:
+            voice_file = await update.message.voice.get_file()
+            with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+                await voice_file.download_to_drive(tmp.name)
+                feedback = await transcribe_voice(tmp.name)
+                os.unlink(tmp.name)
+            await ack.edit_text("✏️ Regenerating draft with your feedback…")
+        except Exception:
+            await ack.edit_text("⚠️ Couldn't transcribe voice note. Type your feedback instead.")
+            return AWAIT_EDIT_VALUE
+    elif update.message.photo:
+        ack = await update.message.reply_text("📷 Reading image…")
+        try:
+            photo_file = await update.message.photo[-1].get_file()
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                await photo_file.download_to_drive(tmp.name)
+                feedback = await extract_from_image(tmp.name)
+                os.unlink(tmp.name)
+            await ack.edit_text("✏️ Regenerating draft with your feedback…")
+        except Exception:
+            await ack.edit_text("⚠️ Couldn't read image. Type your feedback instead.")
+            return AWAIT_EDIT_VALUE
+    else:
+        feedback = update.message.text.strip()
+        ack = await update.message.reply_text("✏️ Regenerating draft with your feedback…")
 
     try:
         form_type = draft.form_type if isinstance(draft, FormDraft) else "CBD"
@@ -968,6 +994,8 @@ def build_application() -> Application:
             ],
             AWAIT_EDIT_VALUE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_value),
+                MessageHandler(filters.VOICE, handle_edit_value),
+                MessageHandler(filters.PHOTO, handle_edit_value),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
             ],
         },
