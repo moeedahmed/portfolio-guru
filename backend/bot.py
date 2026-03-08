@@ -997,12 +997,18 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     ack = await query.message.reply_text("📤 Filing to Kaizen…")
 
     try:
-        status_result, action_log, screenshot_b64, assessor_warning = await file_cbd_to_kaizen(
-            cbd_data, username, password
+        status_result, action_log, screenshot_b64, assessor_warning = await asyncio.wait_for(
+            file_cbd_to_kaizen(cbd_data, username, password),
+            timeout=180,  # 3 min max — Kaizen is slow but not THAT slow
         )
-    except Exception as e:
+    except asyncio.TimeoutError:
         context.user_data.clear()
-        await ack.edit_text(f"Filing failed. Try again or check Kaizen directly.")
+        await ack.edit_text("⏱ Filing timed out (3 min). The draft may have saved — check Kaizen directly.")
+        return ConversationHandler.END
+    except Exception as e:
+        logger.error(f"CBD filer error: {e}", exc_info=True)
+        context.user_data.clear()
+        await ack.edit_text("❌ Filing failed. Try again or check Kaizen directly.")
         return ConversationHandler.END
 
     context.user_data.clear()
