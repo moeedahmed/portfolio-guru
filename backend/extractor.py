@@ -315,7 +315,7 @@ Return ONLY a JSON object with these exact fields:
   "patient_age": "age as string e.g. '45-year-old'",
   "patient_presentation": "presenting complaint / chief complaint",
   "clinical_setting": "e.g. 'Emergency Department - Resus', 'Majors', 'Minors'",
-  "stage_of_training": "Higher/ST4-ST6",
+  "stage_of_training": null,
   "trainee_role": "e.g. 'Primary clinician with indirect supervision'",
   "clinical_reasoning": "what the trainee thought, investigated, and did — and why",
   "reflection": "what was learned from this case / learning points — write in direct, first-person clinical language",
@@ -324,17 +324,19 @@ Return ONLY a JSON object with these exact fields:
   "curriculum_links": ["SLO1", "SLO3"],
   "key_capabilities": [
     "SLO1 KC1: to be expert in assessing and managing all adult patients attending the ED. These capabilities will apply to patients attending with both physical and psychological ill health (2025 Update)",
+    "SLO1 KC2: competent in the assessment and management of adult patients who present with undifferentiated conditions (2025 Update)",
     "SLO3 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)",
-    "SLO3 KC2: aware of when it is appropriate to review patients remotely or directly and able to teach these principles to others (2025 Update)"
+    "SLO3 KC3: able to formulate safe and appropriate management plans for adult patients (2025 Update)"
   ]
 }}
 
 Stage of Training mapping:
 - FY1/FY2/CT1/CT2 → "Intermediate/ST3"
-- ST3/ST4/ST5/ST6/SpR/registrar → "Higher/ST4-ST6"
-- Paediatric EM trainee → "PEM"
-- ACCS trainee → "ACCS"
-- If unclear, default to "Higher/ST4-ST6"
+- ST3 → "Intermediate/ST3"
+- ST4/ST5/ST6/SpR/registrar → "Higher/ST4-ST6"
+- Paediatric EM trainee → "PEM Sub-specialty"
+- ACCS trainee → "ACCS ST1-ST2/CT1-CT2"
+- If unclear or not mentioned → null (leave blank — do NOT guess)
 
 ===== CURRICULUM LINKS — STRICT RULES =====
 
