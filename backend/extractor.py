@@ -213,9 +213,10 @@ Return ONLY a JSON object with these exact fields:
   "supervisor_name": null or "Name if mentioned",
   "curriculum_links": ["SLO1", "SLO3"],
   "key_capabilities": [
-    "SLO1 KC1: Competent in ECG, clinical image, and biochemical assay interpretation",
-    "SLO1 KC3: Recognise and reduce cognitive error (metacognition, debiasing)",
-    "SLO3 KC1: Provide airway management and ventilatory support to critically ill patients"
+    "SLO1 KC1: Assess and manage all adult patients attending the ED (physical and psychological ill health)",
+    "SLO1 KC2: Assess and formulate a management plan for patients with complex medical and social needs or frailty syndromes",
+    "SLO3 KC3: Manage all life-threatening conditions including peri-arrest and cardiac arrest situations in the ED",
+    "SLO3 KC5: Effectively lead and support resuscitation teams"
   ]
 }}
 
@@ -229,71 +230,79 @@ Stage of Training mapping:
 ===== CURRICULUM LINKS — STRICT RULES =====
 
 RCEM 2021 EM Curriculum (2025 Update) — Full SLO and KC List:
+Source: rcemcurriculum.co.uk (official RCEM curriculum website)
 
-SLO1: Care for physiologically stable adult patients presenting across the full range of complexity
-  KC1: Competent in ECG, clinical image, and biochemical assay interpretation
-  KC2: Understand diagnostic test methodology and decision rules
-  KC3: Recognise and reduce cognitive error (metacognition, debiasing)
-  KC4: Manage uncertainty and complexity in undifferentiated presentations
+SLO1: Care for physiologically stable adult patients presenting to acute care across the full range of complexity
+  KC1: Assess and manage all adult patients attending the ED (physical and psychological ill health)
+  KC2: Assess and formulate a management plan for patients with complex medical and social needs or frailty syndromes
+  KC3: Work with supervisor on-call from home; provide directions via phone; attend bedside for direct supervision when required
 
 SLO2: Support the ED team by answering clinical questions and making safe decisions
-  KC1: Formulate clinical questions and find best evidence
-  KC2: Critically appraise and apply evidence to practice
-  KC3: Support safe discharge decisions with appropriate advice
+  KC1: Support the pre-hospital, medical, nursing and administrative team in answering clinical questions and making safe decisions for discharge
+  KC2: Apply clinical guidelines and use diagnostic tests to rule out key pathology; describe a safe management plan including discharge where appropriate
+  KC3: Understand when it is appropriate to review patients remotely or directly; teach these principles to others
+  KC4: Understand human factors in clinical decision making and their impact on patient safety
 
-SLO3: Identify sick adult patients, resuscitate and stabilise, and know when to stop
+SLO3: Identify sick adult patients, be able to resuscitate and stabilise and know when it is appropriate to stop
   KC1: Provide airway management and ventilatory support to critically ill patients
   KC2: Expert in fluid management and circulatory support in critically ill patients
-  KC3: Manage all life-threatening conditions including peri-arrest and cardiac arrest
-  KC4: Expert in caring for patients and relatives at end of life in the ED
+  KC3: Manage all life-threatening conditions including peri-arrest and cardiac arrest situations in the ED
+  KC4: Expert in caring for ED patients and their relatives and loved ones at the end of the patient's life
   KC5: Effectively lead and support resuscitation teams
 
-SLO4: Care for acutely injured patients across the full range of complexity
-  KC1: Assessment, investigation, and management of all injuries regardless of complexity
-  KC2: Lead the Major Trauma Team and manage with no supervisor involvement
+SLO4: Care for injured patients across the full range of complexity
+  KC1: Expert in assessment, investigation and initial management of patients attending with all injuries, regardless of complexity
+  KC2: Provide expert leadership of the Major Trauma Team; manage with no supervisor involvement
 
-SLO5: Care for children of all ages in the ED, at all stages of development
-  KC1: Assess and manage all paediatric presentations including complex needs
-  KC2: Lead multidisciplinary paediatric resuscitation including trauma
-  KC3: Identify the sick child and initiate appropriate management
-  KC4: Manage safeguarding concerns and complex social situations in children
+SLO5: Care for children of all ages in the ED, at all stages of development and children with complex needs
+  KC1: Expert in assessing and managing all children and young adult patients (physical and psychological ill health, including those with complex needs)
+  KC2: Lead and support a multidisciplinary paediatric resuscitation including trauma
+  KC3: Provide airway management and ventilatory support to critically ill paediatric patients
+  KC4: Expert in fluid management and circulatory support in critically ill paediatric patients
+  KC5: Manage all life-threatening paediatric conditions including peri-arrest and arrest situations in the ED
+  KC6: Assess and formulate a management plan for children and young adults with complex medical and social needs
+  KC7: Identify the sick child and initiate appropriate management steps; know how paediatric resuscitation differs from adult
 
 SLO6: Deliver key procedural skills
-  KC1: Clinical knowledge to identify when procedural skills are indicated
-  KC2: Knowledge and psychomotor skills to perform EM procedures safely and in a timely fashion
+  KC1: Clinical knowledge to identify when key EM procedural skills are indicated
+  KC2: Knowledge and psychomotor skills to perform EM procedural skills safely and in a timely fashion
   KC3: Supervise and guide colleagues in delivering procedural skills
-  KC4: Deliver effective feedback to colleagues on procedural performance
 
-SLO7: Deal with complex and challenging situations in the workplace
-  KC1: Manage patients with complex medical, social, or psychiatric needs
-  KC2: Manage conflict and challenging behaviour in the ED
-  KC3: Manage clinical uncertainty and make decisions under pressure
+SLO7: Deal with complex or challenging situations in the workplace
+  KC1: Expert communication skills to negotiate and manage complicated or troubling interactions
+  KC2: Behave professionally in dealings with colleagues and team members within the ED
+  KC3: Work professionally and effectively with those outside the ED
+  KC4: Manage challenging interactions with patients who appear angry or distressed
 
 SLO8: Lead the ED shift
-  KC1: Coordinate and prioritise patient flow across the department
-  KC2: Lead the clinical team and delegate appropriately during a shift
-  KC3: Manage department-level incidents and escalate appropriately
+  KC1: Provide support to ED staff of all levels and disciplines on the ED shift
+  KC2: Liaise with the rest of the acute/urgent care team and wider hospital as shift leader
+  KC3: Maintain situational awareness throughout the shift to ensure safety is optimised
+  KC4: Anticipate challenges, generate options, make decisions and communicate these effectively to the team as lead clinician
 
 SLO9: Support, supervise and educate
-  KC1: Prepare and deliver teaching sessions to colleagues and students
-  KC2: Supervise and give feedback to junior colleagues
-  KC3: Contribute to the learning environment of the ED
+  KC1: Undertake training and supervision of members of the ED team in the clinical environment
+  KC2: Prepare and deliver teaching sessions outside of the clinical environment (simulation, small-group work, didactic teaching)
+  KC3: Provide effective constructive feedback to colleagues including debrief
+  KC4: Understand the principles necessary to mentor and appraise junior doctors
 
-SLO10: Participate in research and manage data appropriately
-  KC1: Understand research methodology and apply to clinical practice
-  KC2: Manage patient data appropriately and ethically
-  KC3: Participate in or lead clinical research activity
+SLO10: Participate in research and managing data appropriately
+  KC1: Appraise, synthesise, communicate and use research evidence to develop EM care
+  KC2: Actively participate in research
+  KC3: Search the medical literature effectively and critically appraise studies
 
-SLO11: Participate in and promote quality improvement and patient safety
-  KC1: Identify and report patient safety incidents
-  KC2: Lead or participate in a quality improvement project
-  KC3: Apply QI methodology to improve clinical care
+SLO11: Participate in and promote activity to improve the quality and safety of patient care
+  KC1: Provide clinical leadership on effective Quality Improvement work
+  KC2: Support and develop a culture of departmental safety and good clinical governance
+  KC3: Describe involvement and show understanding of QI methods; reflect on a Quality Improvement Project
 
 SLO12: Lead and manage
-  KC1: Understand health service management and governance structures
-  KC2: Demonstrate leadership behaviours and values in clinical practice
-  KC3: Contribute to departmental management activities
-  KC4: Develop a personal development plan and support others to do so
+  KC1: Demonstrate involvement in a range of management activities and understanding of relevant medicolegal directives
+  KC2: Investigate a patient safety incident; participate and contribute effectively to departmental clinical governance activities and risk reduction projects
+  KC3: Manage the staff rota; understand relevant employment law and recruitment activities
+  KC4: Effectively represent the ED at inter-specialty meetings
+  KC5: Demonstrate how effective Emergency Medicine Leadership positively impacts on standards of patient care and patient safety
+  KC6: Demonstrate a positive impact on the culture of the Emergency Department through attitudes and behaviours that impact positively on colleagues, patients and their relatives
 
 CRITICAL — Only select SLOs if the case DIRECTLY DEMONSTRATES that capability:
 
