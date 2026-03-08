@@ -440,6 +440,10 @@ async def extract_form_data(case_description: str, form_type: str, edit_feedback
         field_defs.append(line)
 
     field_keys = [f['key'] for f in schema["fields"]]
+    # Always add key_capabilities alongside any kc_tick field so hierarchy renders correctly
+    has_kc_tick = any(f['type'] == 'kc_tick' for f in schema["fields"])
+    if has_kc_tick and "key_capabilities" not in field_keys:
+        field_keys = field_keys + ["key_capabilities"]
     json_template = "{\n" + ",\n".join([f'  "{k}": "<extracted value>"' for k in field_keys]) + "\n}"
 
     # Check if this is a reflection-style form
@@ -463,10 +467,11 @@ Field definitions:
 Rules:
 - For dropdown fields: return ONLY one of the listed options. If unclear, use the first option.
 - For multi_select fields: return a list of values from the listed options.
-- For kc_tick fields: return a list of FULL KC description strings using the curriculum map below.
-  Select 3-5 KCs that are DIRECTLY demonstrated by the case. Format each as:
-  "SLO8 KC1: will provide support to ED staff at all levels and disciplines on the ED shift (2025 Update)"
-  Use EXACT text from the map. NEVER return bare codes like "SLO8" or "SLO9".
+- For kc_tick fields (curriculum_links): return a list of SLO codes ONLY e.g. ["SLO1", "SLO8"].
+  Separately, populate "key_capabilities" with 3-5 FULL KC description strings for those SLOs.
+  Format each KC as: "SLO8 KC1: will provide support to ED staff at all levels... (2025 Update)"
+  Use EXACT text from the map. curriculum_links = codes only. key_capabilities = full strings.
+  If the form has a kc_tick field, always include "key_capabilities" in the JSON too.
 - For date fields: return YYYY-MM-DD. Use today if not mentioned: {date.today()}
 - For text fields: extract directly from the case, be concise and clinical
 - Do not fabricate details not present in the case

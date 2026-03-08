@@ -678,6 +678,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 draft = await extract_form_data(case_text, explicit_form)
             _store_draft(context, draft)
         except Exception as e:
+            logger.error(f"Draft generation failed: {e}", exc_info=True)
             context.user_data.clear()
             await ack.edit_text("⚠️ Could not generate draft. Try again or /reset.")
             return ConversationHandler.END
@@ -805,6 +806,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         _store_draft(context, draft)
     except Exception as e:
         context.user_data.clear()
+        logger.error(f"Draft generation failed in form_choice: {e}", exc_info=True)
         await query.edit_message_text(f"⚠️ Could not generate draft. Try again or /reset.")
         return ConversationHandler.END
 
