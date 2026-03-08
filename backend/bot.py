@@ -200,10 +200,7 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Reset conversation state and clear user data."""
     context.user_data.clear()
     await update.message.reply_text(
-        "✅ Reset done — all clear.\n\nSend a case by text, voice, or photo whenever you're ready.",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📂 File a case", callback_data="ACTION|file")]
-        ])
+        "✅ Reset done — all clear.\n\nSend a case by text, voice, or photo whenever you're ready."
     )
     return ConversationHandler.END
 
@@ -235,6 +232,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "ACTION|file":
         await query.answer()
+        # Disarm button immediately — prevents multiple taps sending multiple prompts
+        await query.edit_message_reply_markup(reply_markup=None)
         user_id = update.effective_user.id
         if not has_credentials(user_id):
             await query.message.reply_text(
@@ -693,6 +692,17 @@ def main():
 
     application = build_application()
     application.add_error_handler(error_handler)
+
+    # Register commands so they appear in Telegram's "/" menu
+    async def post_init(app):
+        await app.bot.set_my_commands([
+            ("start", "Open Portfolio Guru and get started"),
+            ("reset", "Clear current session and start fresh"),
+            ("status", "Check if your Kaizen account is connected"),
+            ("cancel", "Cancel the current action"),
+        ])
+    application.post_init = post_init
+
     logger.info("Portfolio Guru v2 starting in POLLING mode...")
     application.run_polling(drop_pending_updates=True)
 
