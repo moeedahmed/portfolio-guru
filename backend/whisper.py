@@ -12,13 +12,13 @@ _WHISPER_CLI = shutil.which("whisper")
 
 
 async def transcribe_voice(file_path: str) -> str:
-    """Transcribe voice note (.ogg) to text using Whisper."""
-    # Try local whisper CLI first
+    """Transcribe voice note using Gemini (primary). Local whisper CLI as fallback if available."""
     if _WHISPER_CLI:
-        return await _transcribe_local(file_path)
-
-    # Fall back to OpenAI API
-    return await _transcribe_openai(file_path)
+        try:
+            return await _transcribe_local(file_path)
+        except Exception:
+            pass
+    return await _transcribe_gemini(file_path)
 
 
 async def _transcribe_local(file_path: str) -> str:
