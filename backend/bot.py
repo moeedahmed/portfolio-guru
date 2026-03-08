@@ -597,23 +597,24 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         case_text = raw_text
 
     elif update.message.voice:
-        ack = await update.message.reply_text("Transcribing voice note...")
+        ack = await update.message.reply_text("🎙️ Transcribing voice note…")
         try:
             voice_file = await update.message.voice.get_file()
             with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
                 await voice_file.download_to_drive(tmp.name)
                 case_text = await transcribe_voice(tmp.name)
                 os.unlink(tmp.name)
-            await ack.edit_text(f"Transcribed:\n\n{case_text[:500]}...")
+            await ack.edit_text("🎙️ Voice note read. Finding matching forms…")
+            context.user_data["status_msg_id"] = ack.message_id
+            context.user_data["status_msg_chat"] = ack.chat_id
         except Exception as e:
             context.user_data.clear()
-            await ack.edit_text(f"Could not transcribe voice note: {str(e)[:200]}")
+            await ack.edit_text("⚠️ Couldn't transcribe voice note. Try again.")
             return ConversationHandler.END
 
     elif update.message.photo:
-        ack = await update.message.reply_text("Reading image...")
+        ack = await update.message.reply_text("📷 Reading image…")
         try:
-            # Get largest photo
             photo = update.message.photo[-1]
             photo_file = await photo.get_file()
             with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
@@ -623,7 +624,9 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             if case_text.strip() == "NOT_CLINICAL":
                 await ack.edit_text("This image doesn't look like a clinical case. Send a text description or a photo of clinical notes/findings.")
                 return ConversationHandler.END
-            await ack.edit_text(f"📷 Image read. Generating form options…")
+            await ack.edit_text("📷 Image read. Finding matching forms…")
+            context.user_data["status_msg_id"] = ack.message_id
+            context.user_data["status_msg_chat"] = ack.chat_id
         except Exception as e:
             context.user_data.clear()
             await ack.edit_text("⚠️ Couldn't read image. Try a clearer photo or describe the case in text.")
@@ -681,10 +684,28 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     rationale_lines = [f"- {r.form_type}: {r.rationale}" for r in recommendations if r.uuid]
     rationale_text = "\n".join(rationale_lines) if rationale_lines else "- CBD: Clinical case"
 
-    await update.message.reply_text(
-        f"From this case I can create:\n\n{rationale_text}",
-        reply_markup=_build_form_choice_keyboard(recommendations)
-    )
+    status_msg = context.user_data.pop("status_msg_id", None)
+    status_chat = context.user_data.pop("status_msg_chat", None)
+
+    if status_msg and status_chat:
+        # Edit the existing status bubble in-place
+        try:
+            await context.bot.edit_message_text(
+                chat_id=status_chat,
+                message_id=status_msg,
+                text=f"Which form would you like to create?\n\n{rationale_text}",
+                reply_markup=_build_form_choice_keyboard(recommendations)
+            )
+        except Exception:
+            await update.message.reply_text(
+                f"Which form would you like to create?\n\n{rationale_text}",
+                reply_markup=_build_form_choice_keyboard(recommendations)
+            )
+    else:
+        await update.message.reply_text(
+            f"Which form would you like to create?\n\n{rationale_text}",
+            reply_markup=_build_form_choice_keyboard(recommendations)
+        )
     return AWAIT_FORM_CHOICE
 
 
