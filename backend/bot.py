@@ -6,7 +6,7 @@ import asyncio
 import logging
 import os
 import tempfile
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     filters, ContextTypes, ConversationHandler, PicklePersistence,
@@ -109,25 +109,31 @@ TRAINING_LEVEL_FORMS = {
     "SAS": ["CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "STAT", "MSF", "QIAT", "JCF", "PROC_LOG", "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH", "US_CASE", "COMPLAINT", "SERIOUS_INC", "ESLE"],
 }
 
-WELCOME_MSG = """Portfolio Guru helps you file clinical cases to your RCEM Kaizen e-portfolio - in seconds.
+WELCOME_MSG = """🩺 Portfolio Guru — your WPBA entries, filed in seconds.
 
-Share a case by text, voice note, or photo. I'll draft the entry, show you exactly what will be filed, and only submit when you approve.
+Describe a case by text, voice note, or photo.
+I'll pick the right form, draft the entry, and file it when you approve.
 
-Your Kaizen credentials are encrypted and never shared."""
+Your credentials are encrypted and never shared.
 
-WELCOME_MSG_CONNECTED = """Portfolio Guru — ready to go.
+Tap 🔗 Connect to get started."""
 
-Send a case by text, voice note, or photo and I'll handle the rest."""
+WELCOME_MSG_CONNECTED = """🩺 Portfolio Guru — ready when you are.
 
-WHAT_IS_THIS_MSG = """Portfolio Guru files your WPBA entries to Kaizen — in seconds.
+Send me a clinical case (text, voice, or photo) and I'll handle the rest."""
 
-Describe a clinical case by text, voice note, or photo. The bot works out which form fits (CBD, DOPS, LAT, Mini-CEX, ACAT, and more), extracts the right fields, and shows you a draft to review before anything is saved.
+WHAT_IS_THIS_MSG = """🩺 Portfolio Guru files your WPBA entries — in seconds.
 
-You approve every draft before it goes to Kaizen. Nothing is submitted to an assessor without your sign-off.
+📝 Describe → 🔍 I pick the form → ✅ You approve → 📤 Filed
 
-Supported forms: CBD · DOPS · Mini-CEX · ACAT · LAT · ACAF · STAT · MSF · QIAT · JCF"""
+Describe a clinical case by text, voice note, or photo. The bot works out which form fits best, extracts the right fields, and shows you the full draft to review. Nothing is saved until you approve.
 
-FILE_CASE_PROMPT = "Send me a case description - text, voice note, or photo."
+All 19 RCEM forms supported:
+CBD · DOPS · Mini-CEX · ACAT · LAT · ACAF · STAT · MSF · QIAT · JCF · Teaching · Procedural Log · SDL · Ultrasound Case · ESLE · Complaint · Serious Incident · Educational Activity · Formal Course
+
+Works with Kaizen and other e-portfolio platforms."""
+
+FILE_CASE_PROMPT = "Send me a case description — text, voice note, or photo."
 
 
 def _build_welcome_keyboard(connected: bool = False):
@@ -420,6 +426,17 @@ def _format_generic_draft(draft: FormDraft) -> str:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
+
+    # Handle deep links: /start setup, /start file
+    if context.args:
+        deep_link = context.args[0].lower()
+        if deep_link == "setup":
+            return await setup_start(update, context)
+        elif deep_link == "file":
+            if has_credentials(update.effective_user.id):
+                await update.message.reply_text(FILE_CASE_PROMPT)
+                return AWAIT_CASE_INPUT
+
     connected = has_credentials(update.effective_user.id)
     msg = WELCOME_MSG_CONNECTED if connected else WELCOME_MSG
     await update.message.reply_text(msg, reply_markup=_build_welcome_keyboard(connected=connected))
@@ -429,7 +446,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     if has_credentials(user_id):
-        await update.message.reply_text("✅ Credentials stored. Ready to file cases.")
+        training_level = get_training_level(user_id)
+        grade_str = f"📊 Training level: {training_level}" if training_level else "📊 Training level: not set (use /setup)"
+        # Count drafts filed
+        import pathlib
+        drafts_dir = pathlib.Path.home() / ".openclaw/data/portfolio-guru/drafts"
+        draft_count = len(list(drafts_dir.glob(f"{user_id}_*"))) if drafts_dir.exists() else 0
+        drafts_str = f"📂 Drafts filed: {draft_count}"
+        await update.message.reply_text(
+            f"✅ Portfolio connected and ready.\n\n{grade_str}\n{drafts_str}",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📂 File a case", callback_data="ACTION|file")]
+            ])
+        )
     else:
         await update.message.reply_text("🔗 No credentials stored.", reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")]
@@ -440,6 +469,19 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 # === SETUP FLOW ===
 
 async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    # Redirect to DM if in a group chat
+    chat = update.effective_chat
+    if chat.type != "private":
+        bot_username = (await context.bot.get_me()).username
+        await (update.callback_query.message if update.callback_query else update.message).reply_text(
+            f"🔒 For security, set up your credentials in a private chat.\n\n"
+            f"👉 [Open private chat](https://t.me/{bot_username}?start=setup)",
+            parse_mode="Markdown"
+        )
+        if update.callback_query:
+            await update.callback_query.answer()
+        return ConversationHandler.END
+
     # Can be triggered by command or callback
     if update.callback_query:
         await update.callback_query.answer()
@@ -539,6 +581,28 @@ async def handle_setup_button(update: Update, context: ContextTypes.DEFAULT_TYPE
         await setup_start(update, context)
 
 
+async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle 👍/👎 feedback after filing."""
+    query = update.callback_query
+    await query.answer("Thanks for the feedback!")
+    feedback = query.data.split("|")[1]  # "good" or "bad"
+    user_id = update.effective_user.id
+    # Log feedback
+    import json as _json
+    from pathlib import Path
+    feedback_dir = Path.home() / ".openclaw/data/portfolio-guru/feedback"
+    feedback_dir.mkdir(parents=True, exist_ok=True)
+    from datetime import datetime
+    entry = {"user_id": user_id, "feedback": feedback, "timestamp": datetime.now().isoformat()}
+    feedback_path = feedback_dir / f"{user_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    with open(feedback_path, "w") as f:
+        _json.dump(entry, f)
+    # Disarm feedback buttons, keep "File another" button
+    await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup([
+        [InlineKeyboardButton("📂 File another case", callback_data="ACTION|file")],
+    ]))
+
+
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Top-level /cancel — clears state and returns to idle."""
     context.user_data.clear()
@@ -589,19 +653,22 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 
-HELP_MSG = """📖 *Portfolio Guru — Commands*
+HELP_MSG = """📖 *Portfolio Guru — Help*
 
+*How it works:*
+📝 Describe a case → 🔍 I pick the form → ✅ You approve → 📤 Filed
+
+Send a case by text, voice note, or photo. I'll suggest the best WPBA form, generate a full draft, and file it to your e-portfolio when you approve.
+
+*Commands:*
 /start — Welcome screen
-/setup — Connect your Kaizen account
-/status — Check if Kaizen is connected
+/setup — Connect your portfolio account
+/status — Check connection and filing stats
 /reset — Clear current session
 /cancel — Cancel current action
 /delete — Delete all your stored data
 
-*How to use:*
-Send a case description by text, voice note, or photo. I'll suggest the best form, show you a draft, and file it when you approve.
-
-*Supported forms:*
+*All 19 RCEM forms supported:*
 CBD · DOPS · Mini-CEX · ACAT · LAT · ACAF · STAT · MSF · QIAT · JCF · Teaching · Procedural Log · SDL · Ultrasound Case · ESLE · Complaint · Serious Incident · Educational Activity · Formal Course"""
 
 
@@ -701,6 +768,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         raw_text = update.message.text.strip()
 
         # Classify intent for text messages
+        await update.effective_chat.send_action(constants.ChatAction.TYPING)
         try:
             intent = await classify_intent(raw_text)
         except Exception:
@@ -787,6 +855,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if explicit_form:
         context.user_data["chosen_form"] = explicit_form
         emoji = FORM_EMOJIS.get(explicit_form, "📋")
+        await update.effective_chat.send_action(constants.ChatAction.TYPING)
         ack = await update.message.reply_text(f"{emoji} Generating {_form_display_name(explicit_form)} draft…")
         try:
             if explicit_form == "CBD":
@@ -807,6 +876,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     training_level = get_training_level(user_id)
     allowed_forms = TRAINING_LEVEL_FORMS.get(training_level, TRAINING_LEVEL_FORMS["ST5"]) if training_level else TRAINING_LEVEL_FORMS["ST5"]
 
+    await update.effective_chat.send_action(constants.ChatAction.TYPING)
     try:
         recommendations = await recommend_form_types(case_text)
         # Filter to forms appropriate for this training level
@@ -996,6 +1066,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
 
     # Determine platform (default: kaizen; future: from user profile)
     platform = "kaizen"
+    await update.effective_chat.send_action(constants.ChatAction.TYPING)
     ack = await query.message.reply_text(f"📤 Filing {form_name}…")
 
     try:
@@ -1022,7 +1093,11 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
 
     context.user_data.clear()
     end_keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📂 File another case", callback_data="ACTION|file")],
+        [
+            InlineKeyboardButton("👍", callback_data="FEEDBACK|good"),
+            InlineKeyboardButton("👎", callback_data="FEEDBACK|bad"),
+            InlineKeyboardButton("📂 File another", callback_data="ACTION|file"),
+        ],
     ])
 
     status = result["status"]
@@ -1297,6 +1372,7 @@ def build_application() -> Application:
     # Top-level handlers that must work regardless of conversation state
     application.add_handler(CallbackQueryHandler(handle_info_button, pattern=r"^INFO\|"))
     application.add_handler(CallbackQueryHandler(handle_setup_button, pattern=r"^ACTION\|setup$"))
+    application.add_handler(CallbackQueryHandler(handle_feedback, pattern=r"^FEEDBACK\|"))
     application.add_handler(setup_conv)
     application.add_handler(case_conv)
 
@@ -1334,13 +1410,26 @@ def main():
     async def post_init(app):
         await app.bot.set_my_commands([
             ("start", "Open Portfolio Guru and get started"),
-            ("setup", "Connect your Kaizen account"),
-            ("status", "Check if Kaizen is connected"),
+            ("setup", "Connect your portfolio account"),
+            ("status", "Check connection and stats"),
             ("reset", "Clear current session and start fresh"),
             ("cancel", "Cancel whatever is happening"),
             ("delete", "Delete all your stored data"),
             ("help", "How to use Portfolio Guru"),
         ])
+        # Set bot description (shown on profile page before starting)
+        try:
+            await app.bot.set_my_description(
+                "Portfolio Guru files your medical WPBA entries in seconds.\n\n"
+                "Describe a case by text, voice, or photo — the bot picks the right form, "
+                "drafts the entry, and files it when you approve.\n\n"
+                "All 19 RCEM forms supported. Works with Kaizen and other e-portfolio platforms."
+            )
+            await app.bot.set_my_short_description(
+                "File WPBA entries to your e-portfolio in seconds. Text, voice, or photo → draft → approve → filed."
+            )
+        except Exception:
+            pass  # Non-critical — BotFather settings may not update on every restart
     application.post_init = post_init
 
     logger.info("Portfolio Guru v2 starting in POLLING mode...")
