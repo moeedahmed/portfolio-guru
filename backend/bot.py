@@ -674,10 +674,10 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await ack.edit_text(preview, reply_markup=_build_approval_keyboard(), parse_mode="Markdown")
         return AWAIT_APPROVAL
 
-    # No explicit form — get AI recommendations filtered by training level
+    # No explicit form — get AI recommendations filtered by training level (if set)
     user_id = update.effective_user.id
-    training_level = get_training_level(user_id) or "ST5"
-    allowed_forms = TRAINING_LEVEL_FORMS.get(training_level, TRAINING_LEVEL_FORMS["ST5"])
+    training_level = get_training_level(user_id)
+    allowed_forms = TRAINING_LEVEL_FORMS.get(training_level, TRAINING_LEVEL_FORMS["ST5"]) if training_level else TRAINING_LEVEL_FORMS["ST5"]
 
     try:
         recommendations = await recommend_form_types(case_text)
@@ -739,8 +739,14 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         from extractor import FORM_UUIDS
         from models import FormTypeRecommendation
         user_id = update.effective_user.id
-        training_level = get_training_level(user_id) or "ST5"
-        allowed = TRAINING_LEVEL_FORMS.get(training_level, TRAINING_LEVEL_FORMS["ST5"])
+        training_level = get_training_level(user_id)
+        # If no training level set, show all forms and nudge user to set grade
+        if training_level:
+            allowed = TRAINING_LEVEL_FORMS.get(training_level, TRAINING_LEVEL_FORMS["ST5"])
+            header = f"All forms available for {training_level} — pick one:"
+        else:
+            allowed = TRAINING_LEVEL_FORMS["ST5"]  # show full set, no filtering
+            header = "All forms - pick one:\n\n💡 Set your training grade in /setup to see only relevant forms."
         all_recs = [
             FormTypeRecommendation(form_type=ft, rationale="", uuid=FORM_UUIDS.get(ft))
             for ft in allowed if FORM_UUIDS.get(ft)
@@ -754,10 +760,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
             InlineKeyboardButton("⬅️ Back", callback_data="FORM|back"),
             InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|form"),
         ])
-        await query.edit_message_text(
-            f"All forms available for {training_level} — pick one:",
-            reply_markup=InlineKeyboardMarkup(rows)
-        )
+        await query.edit_message_text(header, reply_markup=InlineKeyboardMarkup(rows))
         return AWAIT_FORM_CHOICE
 
     if data == "FORM|back":
