@@ -841,6 +841,7 @@ def build_application() -> Application:
             ],
             AWAIT_EDIT_VALUE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_value),
+                CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
             ],
         },
         fallbacks=[
