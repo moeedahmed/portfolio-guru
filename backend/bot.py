@@ -309,8 +309,8 @@ def _format_generic_draft(draft: FormDraft) -> str:
         key = field["key"]
         field_type = field["type"]
 
-        # key_capabilities is merged into curriculum_links hierarchy — never render separately
-        if key == "key_capabilities":
+        # These fields are rendered via the curriculum hierarchy — never render separately
+        if key in ("key_capabilities", "curriculum_section", "section_of_curriculum"):
             continue
 
         value = draft.fields.get(key)

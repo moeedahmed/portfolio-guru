@@ -326,7 +326,7 @@ FORM_SCHEMAS = {
             {"key": "title_of_education",   "label": "Title of education",          "type": "text",     "required": True},
             {"key": "delivered_by",         "label": "Who delivered the education", "type": "text",     "required": False},
             {"key": "learning_points",      "label": "Main learning points",        "type": "text",     "required": False},
-            {"key": "curriculum_section",   "label": "Section of Curriculum covered in the teaching", "type": "text", "required": False},
+            # curriculum_section omitted — rendered via curriculum_links hierarchy
             {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)",     "type": "kc_tick",  "required": False},
         ]
     },
