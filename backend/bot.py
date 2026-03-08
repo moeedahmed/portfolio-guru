@@ -381,9 +381,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     if has_credentials(user_id):
-        await update.message.reply_text("Credentials stored. Ready to file cases.")
+        await update.message.reply_text("✅ Credentials stored. Ready to file cases.")
     else:
-        await update.message.reply_text("No credentials stored.", reply_markup=InlineKeyboardMarkup([
+        await update.message.reply_text("🔗 No credentials stored.", reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")]
         ]))
 
@@ -394,19 +394,19 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     # Can be triggered by command or callback
     if update.callback_query:
         await update.callback_query.answer()
-        await update.callback_query.message.reply_text("What's your Kaizen username (email)?")
+        await update.callback_query.message.reply_text("📧 What's your Kaizen username (email)?")
     else:
-        await update.message.reply_text("What's your Kaizen username (email)?")
+        await update.message.reply_text("📧 What's your Kaizen username (email)?")
     return AWAIT_USERNAME
 
 
 async def setup_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     text = update.message.text.strip()
     if "@" not in text or "." not in text:
-        await update.message.reply_text("That doesn't look like an email. What's your Kaizen username?")
+        await update.message.reply_text("⚠️ That doesn't look like an email. What's your Kaizen username?")
         return AWAIT_USERNAME
     context.user_data["setup_username"] = text
-    await update.message.reply_text("What's your Kaizen password?")
+    await update.message.reply_text("🔒 What's your Kaizen password?")
     return AWAIT_PASSWORD
 
 
@@ -456,9 +456,9 @@ async def setup_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     context.user_data.clear()
     if update.callback_query:
         await update.callback_query.answer()
-        await update.callback_query.message.reply_text("Setup cancelled.")
+        await update.callback_query.message.reply_text("❌ Setup cancelled.")
     else:
-        await update.message.reply_text("Setup cancelled.")
+        await update.message.reply_text("❌ Setup cancelled.")
     return ConversationHandler.END
 
 
@@ -560,7 +560,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Disarm buttons immediately — prevents double-tap
         await query.edit_message_reply_markup(reply_markup=None)
         context.user_data.clear()
-        await query.message.reply_text("Cancelled. Send me a case whenever you're ready.")
+        await query.message.reply_text("❌ Cancelled. Send me a case whenever you're ready.")
         return ConversationHandler.END
 
 
@@ -657,7 +657,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if not case_text:
         context.user_data.clear()
-        await update.message.reply_text("Send a text message, voice note, or photo.")
+        await update.message.reply_text("💬 Send a text message, voice note, or photo.")
         return ConversationHandler.END
 
     # Store case text and input source
@@ -835,14 +835,14 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     creds = get_credentials(user_id)
     if not creds:
         context.user_data.clear()
-        await query.message.reply_text("Credentials not found. Run /setup again.")
+        await query.message.reply_text("⚠️ Credentials not found. Run /setup again.")
         return ConversationHandler.END
 
     username, password = creds
     draft = _load_draft(context)
     if not draft:
         context.user_data.clear()
-        await query.message.reply_text("No draft data found. Start over.")
+        await query.message.reply_text("⚠️ No draft data found. Start over.")
         return ConversationHandler.END
 
     # Handle FormDraft (non-CBD forms)
@@ -878,7 +878,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
 
     # CBD form — use filer
     cbd_data = draft
-    ack = await query.message.reply_text("Filing to Kaizen...")
+    ack = await query.message.reply_text("📤 Filing to Kaizen…")
 
     try:
         status_result, action_log, screenshot_b64, assessor_warning = await file_cbd_to_kaizen(
@@ -942,7 +942,7 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if not draft:
         context.user_data.clear()
-        await update.message.reply_text("Edit failed — draft expired. Send /reset.")
+        await update.message.reply_text("⚠️ Edit failed — draft expired. Send /reset.")
         return ConversationHandler.END
 
     # Resolve feedback from any input modality (including forwarded messages)
@@ -981,7 +981,7 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         ack = await msg.reply_text("✏️ Regenerating draft with your feedback…")
     else:
         # Unknown message type (sticker, gif, etc.) — stay in edit mode
-        await msg.reply_text("Send text, a voice note, or a photo with your feedback.")
+        await msg.reply_text("💬 Send text, a voice note, or a photo with your feedback.")
         return AWAIT_EDIT_VALUE
 
     try:
