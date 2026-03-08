@@ -102,6 +102,17 @@ def _load_draft(context):
  AWAIT_CASE_INPUT, AWAIT_TRAINING_LEVEL,
  AWAIT_VOICE_EXAMPLES) = range(9)
 
+# Common button patterns used across the bot
+_BTN_RESET = InlineKeyboardButton("🔄 Start Fresh", callback_data="ACTION|reset")
+_BTN_FILE = InlineKeyboardButton("📂 File a case", callback_data="ACTION|file")
+_BTN_SETUP = InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")
+_BTN_CANCEL = InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel")
+_BTN_HELP = InlineKeyboardButton("ℹ️ Help", callback_data="INFO|what")
+_BTN_VOICE = InlineKeyboardButton("✍️ Voice Profile", callback_data="ACTION|voice")
+
+_KB_RETRY_RESET = InlineKeyboardMarkup([[_BTN_RESET]])
+_KB_FILE_RESET = InlineKeyboardMarkup([[_BTN_FILE], [_BTN_RESET]])
+
 # Training level → form types available
 TRAINING_LEVEL_FORMS = {
     "ST3": ["CBD", "DOPS", "MINI_CEX", "ACAT", "MSF", "PROC_LOG", "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH", "COMPLAINT", "SERIOUS_INC", "ESLE"],
@@ -473,19 +484,24 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     if has_credentials(user_id):
         training_level = get_training_level(user_id)
-        grade_str = f"📊 Training level: {training_level}" if training_level else "📊 Training level: not set (use /setup)"
+        grade_str = f"📊 Training level: {training_level}" if training_level else "📊 Training level: not set"
         # Count drafts filed
         import pathlib
         drafts_dir = pathlib.Path.home() / ".openclaw/data/portfolio-guru/drafts"
         draft_count = len(list(drafts_dir.glob(f"{user_id}_*"))) if drafts_dir.exists() else 0
         drafts_str = f"📂 Drafts filed: {draft_count}"
         vp = get_voice_profile(user_id)
-        voice_str = "✍️ Voice profile: active" if vp else "✍️ Voice profile: not set (use /voice)"
+        voice_str = "✍️ Voice profile: active" if vp else "✍️ Voice profile: not set"
+        buttons = [
+            [InlineKeyboardButton("📂 File a case", callback_data="ACTION|file")],
+        ]
+        if not vp:
+            buttons.append([InlineKeyboardButton("✍️ Set up voice profile", callback_data="ACTION|voice")])
+        if not training_level:
+            buttons.append([InlineKeyboardButton("🔗 Update setup", callback_data="ACTION|setup")])
         await update.message.reply_text(
             f"✅ Portfolio connected and ready.\n\n{grade_str}\n{drafts_str}\n{voice_str}",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📂 File a case", callback_data="ACTION|file")]
-            ])
+            reply_markup=InlineKeyboardMarkup(buttons)
         )
     else:
         await update.message.reply_text("🔗 No credentials stored.", reply_markup=InlineKeyboardMarkup([
@@ -542,7 +558,7 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if update.effective_chat.type != "private":
             await update.effective_chat.send_message(
                 "⚠️ I couldn't delete your password message — I need admin rights in groups. "
-                "Please delete it manually, or use /setup in a private chat with me for better security."
+                "Please delete it manually for security."
             )
 
     store_credentials(user_id, username, password)
@@ -614,8 +630,11 @@ async def voice_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         "• Photos of handwritten/printed entries\n"
         "• Voice notes describing your style\n\n"
         "I'll analyse your writing style and use it to make all future drafts sound like you.\n\n"
-        "Send your first example now, or /cancel to skip.",
-        parse_mode="Markdown"
+        "Send your first example now.",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
+        ])
     )
     context.user_data["voice_examples"] = []
     return AWAIT_VOICE_EXAMPLES
@@ -757,12 +776,20 @@ async def _build_voice_profile(update: Update, context: ContextTypes.DEFAULT_TYP
         await ack.edit_text(
             f"✅ Voice profile created from {len(examples)} examples.\n\n"
             f"Your style: {summary}\n\n"
-            "All future drafts will match your writing voice. "
-            "Use /voice to update or remove it anytime."
+            "All future drafts will match your writing voice.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📂 File a case", callback_data="ACTION|file"),
+                 InlineKeyboardButton("🔄 Rebuild", callback_data="ACTION|voice")],
+            ])
         )
     except Exception as e:
         logger.error(f"Voice profile generation failed: {e}", exc_info=True)
-        await ack.edit_text("⚠️ Couldn't analyse your writing style. Try again with /voice.")
+        await ack.edit_text(
+            "⚠️ Couldn't analyse your writing style.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|voice")],
+            ])
+        )
 
     context.user_data.pop("voice_examples", None)
     return ConversationHandler.END
@@ -775,20 +802,103 @@ async def handle_info_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.message.reply_text(WHAT_IS_THIS_MSG)
 
 
-async def handle_setup_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle ACTION|setup button from any message, regardless of conversation state."""
+async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle all ACTION| buttons — universal dispatcher for button-first UX."""
     query = update.callback_query
     await query.answer()
+    action = query.data.split("|", 1)[1] if "|" in query.data else ""
     user_id = update.effective_user.id
-    if has_credentials(user_id):
+
+    if action == "setup":
+        if has_credentials(user_id):
+            await query.message.reply_text(
+                "Your Kaizen account is already connected.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📂 File a case", callback_data="ACTION|file")]
+                ])
+            )
+        else:
+            await setup_start(update, context)
+
+    elif action == "reset":
+        context.user_data.clear()
         await query.message.reply_text(
-            "Your Kaizen account is already connected. Send me a case to get started.",
+            "🔄 Session cleared. Ready for a new case.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📂 File a case", callback_data="ACTION|file")]
+                [_BTN_FILE],
             ])
         )
-    else:
-        await setup_start(update, context)
+
+    elif action == "cancel":
+        context.user_data.clear()
+        await query.message.reply_text("❌ Cancelled.")
+
+    elif action == "voice":
+        # Trigger voice profile flow — simulate /voice command
+        existing = get_voice_profile(user_id)
+        if existing:
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 Rebuild Profile", callback_data="VOICE|rebuild"),
+                 InlineKeyboardButton("🗑️ Remove Profile", callback_data="VOICE|remove")],
+                [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
+            ])
+            await query.message.reply_text(
+                "✍️ You already have a voice profile. What would you like to do?",
+                reply_markup=keyboard
+            )
+        else:
+            await query.message.reply_text(
+                "✍️ *Voice Profile Setup*\n\n"
+                "Send me 3-5 examples of portfolio entries you've written before.\n"
+                "• Text messages (paste or type)\n"
+                "• Photos of handwritten/printed entries\n"
+                "• Voice notes describing your style\n\n"
+                "Send your first example now.",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
+                ])
+            )
+            context.user_data["voice_examples"] = []
+
+    elif action == "file":
+        if not has_credentials(user_id):
+            await query.message.reply_text(
+                "🔗 Connect your Kaizen account first.",
+                reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]])
+            )
+        else:
+            await query.message.reply_text("📋 Send me a case — text, voice note, or photo.")
+
+    elif action == "help":
+        await query.message.reply_text(WHAT_IS_THIS_MSG)
+
+    elif action == "status":
+        # Inline status — same as /status command
+        if has_credentials(user_id):
+            training_level = get_training_level(user_id)
+            grade_str = f"📊 Training level: {training_level}" if training_level else "📊 Training level: not set"
+            import pathlib
+            drafts_dir = pathlib.Path.home() / ".openclaw/data/portfolio-guru/drafts"
+            draft_count = len(list(drafts_dir.glob(f"{user_id}_*"))) if drafts_dir.exists() else 0
+            vp = get_voice_profile(user_id)
+            voice_str = "✍️ Voice profile: active" if vp else "✍️ Voice profile: not set"
+            await query.message.reply_text(
+                f"✅ Portfolio connected.\n\n{grade_str}\n📂 Drafts filed: {draft_count}\n{voice_str}",
+                reply_markup=InlineKeyboardMarkup([[_BTN_FILE]])
+            )
+        else:
+            await query.message.reply_text("🔗 Not connected yet.", reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]]))
+
+    elif action == "delete":
+        # Confirm before deleting
+        await query.message.reply_text(
+            "⚠️ This will delete all your stored data (credentials, profile, voice profile). Are you sure?",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🗑️ Yes, delete", callback_data="CONFIRM|delete"),
+                 InlineKeyboardButton("❌ No, keep", callback_data="ACTION|cancel")],
+            ])
+        )
 
 
 async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -847,7 +957,8 @@ async def delete_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
     if deleted_items:
         await update.message.reply_text(
-            f"🗑️ Deleted: {', '.join(deleted_items)}.\n\nYour data has been erased. Run /setup to reconnect."
+            f"🗑️ Deleted: {', '.join(deleted_items)}.\n\nYour data has been erased.",
+            reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]])
         )
     else:
         await update.message.reply_text("ℹ️ No stored data found for your account.")
@@ -870,20 +981,21 @@ HELP_MSG = """📖 *Portfolio Guru — Help*
 
 Send a case by text, voice note, or photo. I'll suggest the best WPBA form, generate a full draft, and file it to your e-portfolio when you approve.
 
-*Commands:*
-/start — Welcome screen
-/setup — Connect your portfolio account
-/status — Check connection and filing stats
-/reset — Clear current session
-/cancel — Cancel current action
-/delete — Delete all your stored data
-
 *All 19 RCEM forms supported:*
 CBD · DOPS · Mini-CEX · ACAT · LAT · ACAF · STAT · MSF · QIAT · JCF · Teaching · Procedural Log · SDL · Ultrasound Case · ESLE · Complaint · Serious Incident · Educational Activity · Formal Course"""
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text(HELP_MSG, parse_mode="Markdown")
+    await update.message.reply_text(
+        HELP_MSG,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [_BTN_FILE],
+            [_BTN_SETUP, _BTN_VOICE],
+            [InlineKeyboardButton("📊 Status", callback_data="ACTION|status"),
+             _BTN_RESET],
+        ])
+    )
     return ConversationHandler.END
 
 
@@ -1098,7 +1210,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return ConversationHandler.END
         except Exception as e:
             logger.error(f"Draft generation failed: {e}", exc_info=True)
-            await ack.edit_text("⚠️ Could not generate draft. Try again or /reset.")
+            await ack.edit_text("⚠️ Could not generate draft.", reply_markup=_KB_RETRY_RESET)
             return ConversationHandler.END
         preview = _format_draft_preview(draft)
         await _safe_edit_text(ack, preview, reply_markup=_build_approval_keyboard(), parse_mode="Markdown")
@@ -1177,7 +1289,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
             header = f"All forms available for {training_level} — pick one:"
         else:
             allowed = TRAINING_LEVEL_FORMS["ST5"]  # show full set, no filtering
-            header = "All forms - pick one:\n\n💡 Set your training grade in /setup to see only relevant forms."
+            header = "All forms - pick one:"
         all_recs = [
             FormTypeRecommendation(form_type=ft, rationale="", uuid=FORM_UUIDS.get(ft))
             for ft in allowed if FORM_UUIDS.get(ft)
@@ -1234,11 +1346,11 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         _store_draft(context, draft)
     except asyncio.TimeoutError:
         logger.error(f"Draft generation timed out after 45s for {form_type}")
-        await query.edit_message_text("⏳ Draft generation timed out. Please try again — /reset if needed.", reply_markup=None)
+        await query.edit_message_text("⏳ Draft generation timed out.", reply_markup=_KB_RETRY_RESET)
         return ConversationHandler.END
     except Exception as e:
         logger.error(f"Draft generation failed in form_choice: {e}", exc_info=True)
-        await query.edit_message_text(f"⚠️ Could not generate draft. Try again or /reset.", reply_markup=None)
+        await query.edit_message_text("⚠️ Could not generate draft.", reply_markup=_KB_RETRY_RESET)
         # Do NOT clear user_data — a newer flow may be active
         return ConversationHandler.END
 
@@ -1260,7 +1372,10 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     creds = get_credentials(user_id)
     if not creds:
         context.user_data.clear()
-        await query.message.reply_text("⚠️ Credentials not found. Run /setup again.")
+        await query.message.reply_text(
+            "⚠️ Credentials not found.",
+            reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]])
+        )
         return ConversationHandler.END
 
     username, password = creds
@@ -1381,7 +1496,8 @@ async def handle_approval_edit(update: Update, context: ContextTypes.DEFAULT_TYP
     draft = _load_draft(context)
     if not draft:
         await query.message.reply_text(
-            "This draft has expired. Send /reset and file a new case.",
+            "This draft has expired.",
+            reply_markup=_KB_FILE_RESET,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Reset", callback_data="ACTION|reset")]])
         )
         return ConversationHandler.END
@@ -1404,7 +1520,7 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if not draft:
         context.user_data.clear()
-        await update.message.reply_text("⚠️ Edit failed — draft expired. Send /reset.")
+        await update.message.reply_text("⚠️ Edit failed — draft expired.", reply_markup=_KB_RETRY_RESET)
         return ConversationHandler.END
 
     # Resolve feedback from any input modality (including forwarded messages)
@@ -1476,10 +1592,10 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             ), timeout=45)
         _store_draft(context, updated)
     except asyncio.TimeoutError:
-        await ack.edit_text("⏳ Regeneration timed out. Try again or /reset.")
+        await ack.edit_text("⏳ Regeneration timed out.", reply_markup=_KB_RETRY_RESET)
         return AWAIT_APPROVAL
     except Exception as e:
-        await ack.edit_text("⚠️ Couldn't regenerate. Try again or /reset.")
+        await ack.edit_text("⚠️ Couldn't regenerate.", reply_markup=_KB_RETRY_RESET)
         return AWAIT_APPROVAL
 
     preview = _format_draft_preview(updated)
@@ -1516,7 +1632,10 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
     else:
         # Intent is 'case' - looks like a new case
         await update.message.reply_text(
-            "It looks like you want to file a new case. Send /reset to start fresh, or /cancel to exit."
+            "It looks like you want to file a new case.",
+            reply_markup=InlineKeyboardMarkup([
+                [_BTN_RESET, _BTN_CANCEL],
+            ])
         )
         return AWAIT_CASE_INPUT
 
@@ -1616,7 +1735,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("help", help_command))
     # Top-level handlers that must work regardless of conversation state
     application.add_handler(CallbackQueryHandler(handle_info_button, pattern=r"^INFO\|"))
-    application.add_handler(CallbackQueryHandler(handle_setup_button, pattern=r"^ACTION\|setup$"))
+    application.add_handler(CallbackQueryHandler(handle_action_button, pattern=r"^ACTION\|"))
     application.add_handler(CallbackQueryHandler(handle_feedback, pattern=r"^FEEDBACK\|"))
 
     voice_conv = ConversationHandler(
@@ -1667,7 +1786,8 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     # Generic fallback
     if update and hasattr(update, 'effective_message') and update.effective_message:
         await update.effective_message.reply_text(
-            "Something went wrong. Please send /reset and try again."
+            "Something went wrong.",
+            reply_markup=_KB_RETRY_RESET
         )
 
 
