@@ -82,6 +82,29 @@ FORM_EMOJIS = {
     "ACAF": "✅", "STAT": "📊",
 }
 
+FIELD_EMOJIS = {
+    "date_of_encounter":    "📅",
+    "date":                 "📅",
+    "clinical_setting":     "🏥",
+    "setting":              "🏥",
+    "patient_presentation": "🩺",
+    "presentation":         "🩺",
+    "procedure":            "🔪",
+    "procedure_performed":  "🔪",
+    "clinical_reasoning":   "🗒️",
+    "case_discussion":      "🗒️",
+    "reflection":           "💭",
+    "supervisor_name":      "👤",
+    "assessor":             "👤",
+    "level_of_supervision": "🎚️",
+    "stage_of_training":    "📈",
+    "trainee_role":         "👨‍⚕️",
+    "leadership_context":   "🧭",
+    "journal":              "📰",
+    "article_title":        "📰",
+    "qi_project":           "📊",
+}
+
 def _build_form_choice_keyboard(recommendations):
     """Build inline keyboard for form type selection."""
     buttons = []
@@ -284,17 +307,21 @@ def _format_generic_draft(draft: FormDraft) -> str:
             lines.append(f"📚 *Curriculum:*\n{formatted}\n")
             continue
 
+        # Prefix label with emoji if available
+        fe = FIELD_EMOJIS.get(key, "")
+        label_str = f"{fe} *{label}:*" if fe else f"*{label}:*"
+
         # Format other lists (multi_select)
         if isinstance(value, list):
             if value:
                 value = "\n".join(f"  • {v}" for v in value)
-                lines.append(f"*{label}:*\n{value}\n")
+                lines.append(f"{label_str}\n{value}\n")
             else:
-                lines.append(f"*{label}:*\n  • None\n")
+                lines.append(f"{label_str}\n  • None\n")
         elif len(str(value)) > 100:
-            lines.append(f"*{label}:*\n{value}\n")
+            lines.append(f"{label_str}\n{value}\n")
         else:
-            lines.append(f"*{label}:* {value}")
+            lines.append(f"{label_str} {value}")
 
     return "\n".join(lines)
 
@@ -568,10 +595,13 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 await photo_file.download_to_drive(tmp.name)
                 case_text = await extract_from_image(tmp.name)
                 os.unlink(tmp.name)
-            await ack.edit_text(f"Extracted:\n\n{case_text[:500]}...")
+            if case_text.strip() == "NOT_CLINICAL":
+                await ack.edit_text("This image doesn't look like a clinical case. Send a text description or a photo of clinical notes/findings.")
+                return ConversationHandler.END
+            await ack.edit_text(f"📷 Image read. Generating form options…")
         except Exception as e:
             context.user_data.clear()
-            await ack.edit_text(f"Could not extract text from image: {str(e)[:200]}")
+            await ack.edit_text("⚠️ Couldn't read image. Try a clearer photo or describe the case in text.")
             return ConversationHandler.END
 
     if not case_text:
