@@ -20,7 +20,7 @@ from form_schemas import FORM_SCHEMAS
 from models import FormDraft, CBDData
 from whisper import transcribe_voice
 from vision import extract_from_image
-from profile_store import init_profile_db, store_training_level, get_training_level
+from profile_store import init_profile_db, store_training_level, get_training_level, get_voice_profile, store_voice_profile, clear_voice_profile
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -99,7 +99,8 @@ def _load_draft(context):
 (AWAIT_USERNAME, AWAIT_PASSWORD,
  AWAIT_FORM_CHOICE, AWAIT_APPROVAL,
  AWAIT_EDIT_FIELD, AWAIT_EDIT_VALUE,
- AWAIT_CASE_INPUT, AWAIT_TRAINING_LEVEL) = range(8)
+ AWAIT_CASE_INPUT, AWAIT_TRAINING_LEVEL,
+ AWAIT_VOICE_EXAMPLES) = range(9)
 
 # Training level → form types available
 TRAINING_LEVEL_FORMS = {
@@ -478,8 +479,10 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         drafts_dir = pathlib.Path.home() / ".openclaw/data/portfolio-guru/drafts"
         draft_count = len(list(drafts_dir.glob(f"{user_id}_*"))) if drafts_dir.exists() else 0
         drafts_str = f"📂 Drafts filed: {draft_count}"
+        vp = get_voice_profile(user_id)
+        voice_str = "✍️ Voice profile: active" if vp else "✍️ Voice profile: not set (use /voice)"
         await update.message.reply_text(
-            f"✅ Portfolio connected and ready.\n\n{grade_str}\n{drafts_str}",
+            f"✅ Portfolio connected and ready.\n\n{grade_str}\n{drafts_str}\n{voice_str}",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("📂 File a case", callback_data="ACTION|file")]
             ])
@@ -580,6 +583,188 @@ async def setup_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         await update.callback_query.message.reply_text("❌ Setup cancelled.")
     else:
         await update.message.reply_text("❌ Setup cancelled.")
+    return ConversationHandler.END
+
+
+# === VOICE PROFILE FLOW ===
+
+async def voice_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Start voice profile collection — /voice command."""
+    user_id = update.effective_user.id
+    existing = get_voice_profile(user_id)
+
+    if existing:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Rebuild Profile", callback_data="VOICE|rebuild"),
+             InlineKeyboardButton("🗑️ Remove Profile", callback_data="VOICE|remove")],
+            [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
+        ])
+        await update.message.reply_text(
+            "✍️ You already have a voice profile active. Your drafts are styled to match your writing.\n\n"
+            "What would you like to do?",
+            reply_markup=keyboard
+        )
+        return AWAIT_VOICE_EXAMPLES
+
+    await update.message.reply_text(
+        "✍️ *Voice Profile Setup*\n\n"
+        "Send me 3-5 examples of portfolio entries you've written before. "
+        "These can be:\n"
+        "• Text messages (paste or type)\n"
+        "• Photos of handwritten/printed entries\n"
+        "• Voice notes describing your style\n\n"
+        "I'll analyse your writing style and use it to make all future drafts sound like you.\n\n"
+        "Send your first example now, or /cancel to skip.",
+        parse_mode="Markdown"
+    )
+    context.user_data["voice_examples"] = []
+    return AWAIT_VOICE_EXAMPLES
+
+
+async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Collect a voice profile example from the user."""
+    msg = update.message
+    examples = context.user_data.get("voice_examples", [])
+
+    # Handle callback queries (rebuild/remove/cancel buttons)
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        data = query.data
+
+        if data == "VOICE|cancel":
+            context.user_data.pop("voice_examples", None)
+            await query.edit_message_text("❌ Voice profile setup cancelled.")
+            return ConversationHandler.END
+
+        if data == "VOICE|remove":
+            clear_voice_profile(update.effective_user.id)
+            context.user_data.pop("voice_examples", None)
+            await query.edit_message_text("🗑️ Voice profile removed. Drafts will use standard clinical style.")
+            return ConversationHandler.END
+
+        if data == "VOICE|rebuild":
+            context.user_data["voice_examples"] = []
+            await query.edit_message_text(
+                "🔄 Starting fresh. Send me 3-5 examples of your portfolio writing.\n\n"
+                "Send your first example now."
+            )
+            return AWAIT_VOICE_EXAMPLES
+
+        if data == "VOICE|done":
+            return await _build_voice_profile(update, context)
+
+        return AWAIT_VOICE_EXAMPLES
+
+    # Text example
+    if msg and msg.text:
+        text = msg.text.strip()
+        if text.lower() in ("/cancel", "/done"):
+            if text.lower() == "/done" and len(examples) >= 2:
+                return await _build_voice_profile(update, context)
+            context.user_data.pop("voice_examples", None)
+            await msg.reply_text("❌ Voice profile setup cancelled.")
+            return ConversationHandler.END
+        examples.append(text)
+
+    # Photo example — extract text from image
+    elif msg and msg.photo:
+        from vision import extract_from_image
+        ack = await msg.reply_text("📷 Reading image…")
+        try:
+            photo = msg.photo[-1]
+            photo_file = await photo.get_file()
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                tmp_path = tmp.name
+                await photo_file.download_to_drive(tmp_path)
+                text = await extract_from_image(tmp_path)
+            import os
+            os.unlink(tmp_path)
+            if text and text.strip() != "NOT_CLINICAL":
+                examples.append(text)
+                await ack.edit_text(f"📷 Got it — example {len(examples)} captured.")
+            else:
+                await ack.edit_text("⚠️ Couldn't extract text from that image. Try another.")
+                return AWAIT_VOICE_EXAMPLES
+        except Exception:
+            await ack.edit_text("⚠️ Couldn't read image. Try pasting text instead.")
+            return AWAIT_VOICE_EXAMPLES
+
+    # Voice note
+    elif msg and msg.voice:
+        ack = await msg.reply_text("🎙️ Transcribing…")
+        try:
+            voice_file = await msg.voice.get_file()
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+                tmp_path = tmp.name
+                await voice_file.download_to_drive(tmp_path)
+                text = await transcribe_voice(tmp_path)
+            import os
+            os.unlink(tmp_path)
+            if text:
+                examples.append(text)
+                await ack.edit_text(f"🎙️ Transcribed — example {len(examples)} captured.")
+            else:
+                await ack.edit_text("⚠️ Couldn't transcribe. Try pasting text instead.")
+                return AWAIT_VOICE_EXAMPLES
+        except Exception:
+            await ack.edit_text("⚠️ Transcription failed. Try pasting text instead.")
+            return AWAIT_VOICE_EXAMPLES
+
+    context.user_data["voice_examples"] = examples
+
+    if len(examples) >= 5:
+        return await _build_voice_profile(update, context)
+
+    if len(examples) >= 3:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"✅ Build Profile ({len(examples)} examples)", callback_data="VOICE|done")],
+            [InlineKeyboardButton("➕ Add More", callback_data="VOICE|more")],
+        ])
+        await (msg or update.callback_query.message).reply_text(
+            f"Got {len(examples)} examples. You can send more (up to 5) or build your profile now.",
+            reply_markup=keyboard,
+        )
+    else:
+        remaining = 3 - len(examples)
+        await (msg or update.callback_query.message).reply_text(
+            f"Got it — example {len(examples)} captured. Send {remaining} more (minimum 3 needed)."
+        )
+
+    return AWAIT_VOICE_EXAMPLES
+
+
+async def _build_voice_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Build the voice profile from collected examples."""
+    examples = context.user_data.get("voice_examples", [])
+    target = update.callback_query.message if update.callback_query else update.message
+
+    ack = await target.reply_text("🔍 Analysing your writing style…")
+
+    try:
+        from voice_profile import generate_voice_profile
+        profile_json = await asyncio.wait_for(
+            generate_voice_profile(examples), timeout=30
+        )
+        store_voice_profile(update.effective_user.id, profile_json, len(examples))
+
+        import json
+        profile = json.loads(profile_json)
+        summary = profile.get("voice_summary", "Profile generated successfully.")
+
+        await ack.edit_text(
+            f"✅ Voice profile created from {len(examples)} examples.\n\n"
+            f"Your style: {summary}\n\n"
+            "All future drafts will match your writing voice. "
+            "Use /voice to update or remove it anytime."
+        )
+    except Exception as e:
+        logger.error(f"Voice profile generation failed: {e}", exc_info=True)
+        await ack.edit_text("⚠️ Couldn't analyse your writing style. Try again with /voice.")
+
+    context.user_data.pop("voice_examples", None)
     return ConversationHandler.END
 
 
@@ -901,10 +1086,11 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.effective_chat.send_action(constants.ChatAction.TYPING)
         ack = await update.message.reply_text(f"{emoji} Generating {_form_display_name(explicit_form)} draft…")
         try:
+            vp = get_voice_profile(update.effective_user.id) or ""
             if explicit_form == "CBD":
-                draft = await asyncio.wait_for(extract_cbd_data(case_text), timeout=45)
+                draft = await asyncio.wait_for(extract_cbd_data(case_text, voice_profile_json=vp), timeout=45)
             else:
-                draft = await asyncio.wait_for(extract_form_data(case_text, explicit_form), timeout=45)
+                draft = await asyncio.wait_for(extract_form_data(case_text, explicit_form, voice_profile_json=vp), timeout=45)
             _store_draft(context, draft)
         except asyncio.TimeoutError:
             logger.error(f"Draft generation timed out for explicit {explicit_form}")
@@ -1040,10 +1226,11 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
     try:
+        vp = get_voice_profile(update.effective_user.id) or ""
         if form_type == "CBD":
-            draft = await asyncio.wait_for(extract_cbd_data(case_text), timeout=45)
+            draft = await asyncio.wait_for(extract_cbd_data(case_text, voice_profile_json=vp), timeout=45)
         else:
-            draft = await asyncio.wait_for(extract_form_data(case_text, form_type), timeout=45)
+            draft = await asyncio.wait_for(extract_form_data(case_text, form_type, voice_profile_json=vp), timeout=45)
         _store_draft(context, draft)
     except asyncio.TimeoutError:
         logger.error(f"Draft generation timed out after 45s for {form_type}")
@@ -1270,19 +1457,22 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     try:
         form_type = draft.form_type if isinstance(draft, FormDraft) else "CBD"
         current_draft_text = _format_draft_preview(draft)
+        vp = get_voice_profile(update.effective_user.id) or ""
 
         if form_type == "CBD":
             updated = await asyncio.wait_for(extract_cbd_data(
                 case_text,
                 edit_feedback=feedback,
-                current_draft=current_draft_text
+                current_draft=current_draft_text,
+                voice_profile_json=vp,
             ), timeout=45)
         else:
             updated = await asyncio.wait_for(extract_form_data(
                 case_text,
                 form_type,
                 edit_feedback=feedback,
-                current_draft=current_draft_text
+                current_draft=current_draft_text,
+                voice_profile_json=vp,
             ), timeout=45)
         _store_draft(context, updated)
     except asyncio.TimeoutError:
@@ -1428,7 +1618,23 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(handle_info_button, pattern=r"^INFO\|"))
     application.add_handler(CallbackQueryHandler(handle_setup_button, pattern=r"^ACTION\|setup$"))
     application.add_handler(CallbackQueryHandler(handle_feedback, pattern=r"^FEEDBACK\|"))
+
+    voice_conv = ConversationHandler(
+        entry_points=[CommandHandler("voice", voice_start)],
+        states={
+            AWAIT_VOICE_EXAMPLES: [
+                CallbackQueryHandler(voice_collect_example, pattern=r"^VOICE\|"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, voice_collect_example),
+                MessageHandler(filters.PHOTO, voice_collect_example),
+                MessageHandler(filters.VOICE, voice_collect_example),
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", setup_cancel)],
+        allow_reentry=True,
+    )
+
     application.add_handler(setup_conv)
+    application.add_handler(voice_conv)
     application.add_handler(case_conv)
 
     # NOTE: CallbackQueryHandler already registered in case_conv fallbacks.
@@ -1485,6 +1691,7 @@ def main():
         await app.bot.set_my_commands([
             ("start", "Open Portfolio Guru and get started"),
             ("setup", "Connect your portfolio account"),
+            ("voice", "Set up your personal writing voice"),
             ("status", "Check connection and stats"),
             ("reset", "Clear current session and start fresh"),
             ("cancel", "Cancel whatever is happening"),

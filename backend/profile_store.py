@@ -20,6 +20,8 @@ class UserProfile(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     telegram_user_id: int = Field(unique=True, index=True)
     training_level: str = Field(default="ST5")   # ST3|ST4|ST5|ST6|SAS
+    voice_profile: Optional[str] = Field(default=None)  # JSON style profile from user examples
+    voice_examples_count: int = Field(default=0)  # how many examples were used to build profile
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -53,3 +55,46 @@ def get_training_level(telegram_user_id: int) -> Optional[str]:
             select(UserProfile).where(UserProfile.telegram_user_id == telegram_user_id)
         ).first()
         return profile.training_level if profile else None
+
+
+def store_voice_profile(telegram_user_id: int, profile_json: str, examples_count: int) -> None:
+    """Store a generated voice/writing style profile for a user."""
+    with Session(engine) as session:
+        existing = session.exec(
+            select(UserProfile).where(UserProfile.telegram_user_id == telegram_user_id)
+        ).first()
+        if existing:
+            existing.voice_profile = profile_json
+            existing.voice_examples_count = examples_count
+            existing.updated_at = datetime.utcnow()
+            session.add(existing)
+        else:
+            session.add(UserProfile(
+                telegram_user_id=telegram_user_id,
+                voice_profile=profile_json,
+                voice_examples_count=examples_count,
+            ))
+        session.commit()
+
+
+def get_voice_profile(telegram_user_id: int) -> Optional[str]:
+    """Get the stored voice/writing style profile JSON. Returns None if not set."""
+    with Session(engine) as session:
+        profile = session.exec(
+            select(UserProfile).where(UserProfile.telegram_user_id == telegram_user_id)
+        ).first()
+        return profile.voice_profile if profile else None
+
+
+def clear_voice_profile(telegram_user_id: int) -> None:
+    """Remove the user's voice profile."""
+    with Session(engine) as session:
+        existing = session.exec(
+            select(UserProfile).where(UserProfile.telegram_user_id == telegram_user_id)
+        ).first()
+        if existing:
+            existing.voice_profile = None
+            existing.voice_examples_count = 0
+            existing.updated_at = datetime.utcnow()
+            session.add(existing)
+            session.commit()

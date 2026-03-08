@@ -420,7 +420,7 @@ Be conservative — do not recommend a form unless the case description clearly 
     return recommendations
 
 
-async def extract_cbd_data(case_description: str, edit_feedback: str = "", current_draft: str = "") -> CBDData:
+async def extract_cbd_data(case_description: str, edit_feedback: str = "", current_draft: str = "", voice_profile_json: str = "") -> CBDData:
     """Extract structured CBD data from free-text case description."""
     client = _get_client()
 
@@ -495,6 +495,13 @@ Write the reflection in direct, first-person clinical language:
 - Today's date: {date.today()}
 - Return ONLY the JSON. No explanation."""
 
+    # Inject personal voice profile if available
+    if voice_profile_json:
+        from voice_profile import build_voice_instruction
+        voice_block = build_voice_instruction(voice_profile_json)
+        if voice_block:
+            system_prompt += f"\n{voice_block}"
+
     prompt = f"{system_prompt}\n\nCase description:\n{case_description}"
     if edit_feedback and current_draft:
         prompt += f"\n\nCurrent draft (improve this based on the feedback below):\n{current_draft}\n\nUser feedback:\n{edit_feedback}"
@@ -547,7 +554,7 @@ Write the reflection in direct, first-person clinical language:
     return CBDData(**data)
 
 
-async def extract_form_data(case_description: str, form_type: str, edit_feedback: str = "", current_draft: str = "") -> FormDraft:
+async def extract_form_data(case_description: str, form_type: str, edit_feedback: str = "", current_draft: str = "", voice_profile_json: str = "") -> FormDraft:
     """Extract structured data for any non-CBD form type."""
     if form_type not in FORM_SCHEMAS:
         raise ValueError(f"Unknown form type: {form_type}")
@@ -608,6 +615,13 @@ Rules:
 
 Case description:
 {case_description}"""
+
+    # Inject personal voice profile if available
+    if voice_profile_json:
+        from voice_profile import build_voice_instruction
+        voice_block = build_voice_instruction(voice_profile_json)
+        if voice_block:
+            system_prompt += f"\n{voice_block}"
 
     if edit_feedback and current_draft:
         system_prompt += f"\n\nCurrent draft (improve based on feedback below):\n{current_draft}\n\nUser feedback:\n{edit_feedback}"
