@@ -706,8 +706,8 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )]
         context.user_data["form_recommendations"] = recommendations
 
-    rationale_lines = [f"- {r.form_type}: {r.rationale}" for r in recommendations if r.uuid]
-    rationale_text = "\n".join(rationale_lines) if rationale_lines else "- CBD: Clinical case"
+    rationale_lines = [f"- {_form_display_name(r.form_type)}: {r.rationale}" for r in recommendations if r.uuid]
+    rationale_text = "\n".join(rationale_lines) if rationale_lines else "- Case-Based Discussion: Clinical case"
 
     status_msg = context.user_data.pop("status_msg_id", None)
     status_chat = context.user_data.pop("status_msg_chat", None)
