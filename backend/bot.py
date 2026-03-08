@@ -701,8 +701,10 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     status_msg = context.user_data.pop("status_msg_id", None)
     status_chat = context.user_data.pop("status_msg_chat", None)
 
+    # Persist recommendations so back button can restore this screen
+    context.user_data["form_recommendations_text"] = f"Which form would you like to create?\n\n{rationale_text}"
+
     if status_msg and status_chat:
-        # Edit the existing status bubble in-place
         try:
             await context.bot.edit_message_text(
                 chat_id=status_chat,
@@ -734,7 +736,6 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return AWAIT_FORM_CHOICE
 
     if data == "FORM|show_all":
-        # Show full form list for this user's training level
         from extractor import FORM_UUIDS
         from models import FormTypeRecommendation
         user_id = update.effective_user.id
@@ -749,10 +750,23 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
             emoji = FORM_EMOJIS.get(rec.form_type, "📄")
             buttons.append(InlineKeyboardButton(f"{emoji} {rec.form_type}", callback_data=f"FORM|{rec.form_type}"))
         rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
-        rows.append([InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|form")])
+        rows.append([
+            InlineKeyboardButton("⬅️ Back", callback_data="FORM|back"),
+            InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|form"),
+        ])
         await query.edit_message_text(
             f"All forms available for {training_level} — pick one:",
             reply_markup=InlineKeyboardMarkup(rows)
+        )
+        return AWAIT_FORM_CHOICE
+
+    if data == "FORM|back":
+        # Restore the AI recommendations screen
+        recommendations = context.user_data.get("form_recommendations", [])
+        saved_text = context.user_data.get("form_recommendations_text", "Which form would you like to create?")
+        await query.edit_message_text(
+            saved_text,
+            reply_markup=_build_form_choice_keyboard(recommendations)
         )
         return AWAIT_FORM_CHOICE
 
