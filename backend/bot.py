@@ -1111,7 +1111,7 @@ def build_application() -> Application:
             CallbackQueryHandler(handle_callback),  # Handle all callbacks in fallback
         ],
         per_message=False,
-        allow_reentry=True,
+        allow_reentry=False,
         persistent=True,
         name="case_conv",
     )
