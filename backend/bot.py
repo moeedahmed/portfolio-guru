@@ -679,7 +679,6 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             _store_draft(context, draft)
         except Exception as e:
             logger.error(f"Draft generation failed: {e}", exc_info=True)
-            context.user_data.clear()
             await ack.edit_text("⚠️ Could not generate draft. Try again or /reset.")
             return ConversationHandler.END
         preview = _format_draft_preview(draft)
@@ -787,6 +786,16 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return AWAIT_FORM_CHOICE
 
     form_type = data.split("|")[1]
+
+    # Stale button guard — if case_text is gone, this button belongs to an old flow
+    case_text = context.user_data.get("case_text", "")
+    if not case_text:
+        try:
+            await query.edit_message_text("⏳ This draft has expired. Start a new case whenever you're ready.", reply_markup=None)
+        except Exception:
+            pass  # message may already be edited
+        return ConversationHandler.END
+
     context.user_data["chosen_form"] = form_type
 
     # Disarm buttons, show single working status — updated in-place throughout
@@ -796,8 +805,6 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup=None
     )
 
-    case_text = context.user_data.get("case_text", "")
-
     try:
         if form_type == "CBD":
             draft = await extract_cbd_data(case_text)
@@ -805,9 +812,9 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
             draft = await extract_form_data(case_text, form_type)
         _store_draft(context, draft)
     except Exception as e:
-        context.user_data.clear()
         logger.error(f"Draft generation failed in form_choice: {e}", exc_info=True)
-        await query.edit_message_text(f"⚠️ Could not generate draft. Try again or /reset.")
+        await query.edit_message_text(f"⚠️ Could not generate draft. Try again or /reset.", reply_markup=None)
+        # Do NOT clear user_data — a newer flow may be active
         return ConversationHandler.END
 
     # Replace status with draft preview + approval buttons — same message, no new bubble
