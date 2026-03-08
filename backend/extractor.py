@@ -436,7 +436,7 @@ Return ONLY a JSON object with these exact fields:
   "stage_of_training": null,
   "trainee_role": "e.g. 'Primary clinician with indirect supervision'",
   "clinical_reasoning": "what the trainee thought, investigated, and did — and why",
-  "reflection": "what was learned from this case / learning points — write in direct, first-person clinical language",
+  "reflection": "what was learned — extract from what was said, do NOT invent learning points",
   "level_of_supervision": "Direct" or "Indirect" or "Distant",
   "supervisor_name": null or "Name if mentioned",
   "curriculum_links": ["SLO1", "SLO3"],
@@ -489,9 +489,11 @@ Write the reflection in direct, first-person clinical language:
 - Be specific about learning points
 - Avoid: em dashes, "delve", "navigate", "crucial", "importantly", "comprehensive", "moreover", "furthermore", "on the other hand", "in summary"
 
-===== RULES =====
-- Extract only what is stated or clearly implied. Do not fabricate clinical details.
-- For unspecified fields, use a reasonable placeholder like "Not specified in description".
+===== GROUNDING RULES (NON-NEGOTIABLE) =====
+- Extract ONLY what the doctor explicitly stated or clearly implied. Never invent clinical details.
+- If a field cannot be filled from the case description, set it to "Not mentioned in case" — do NOT generate plausible-sounding content to fill gaps.
+- Never add diagnoses, investigations, procedures, or clinical reasoning the doctor did not describe.
+- It is better to leave a field sparse than to fabricate content. Doctors will reject inaccurate drafts.
 - Today's date: {date.today()}
 - Return ONLY the JSON. No explanation."""
 
@@ -538,9 +540,9 @@ Write the reflection in direct, first-person clinical language:
     if not data.get("patient_presentation"):
         data["patient_presentation"] = "Not specified"
     if not data.get("trainee_role"):
-        data["trainee_role"] = "Primary clinician"
+        data["trainee_role"] = "Not mentioned in case"
     if not data.get("clinical_reasoning"):
-        data["clinical_reasoning"] = data.get("reflection", "See reflection")
+        data["clinical_reasoning"] = "Not mentioned in case"
     if not data.get("reflection"):
         data["reflection"] = "Reflection not extracted - please edit"
 
@@ -608,7 +610,12 @@ Rules:
 - For text fields: extract directly from the case, be concise and clinical
 - Write in direct, first-person clinical language ("I assessed...", "I managed...")
 - NEVER use: em dashes, "delve", "navigate", "crucial", "importantly", "comprehensive", "moreover", "furthermore", "holistic", "robust", "multifaceted", "pivotal", "seamless", "facilitate", "leverage", "unlock", "embark", "meticulous", "overarching", "in summary", "it's worth noting", "this case highlights", "moving forward"
-- Do not fabricate details not present in the case
+
+===== GROUNDING RULES (NON-NEGOTIABLE) =====
+- Extract ONLY what the doctor explicitly stated or clearly implied. Never invent clinical details.
+- If a field cannot be filled from the case description, set it to "Not mentioned in case" — do NOT generate plausible-sounding content to fill gaps.
+- Never add diagnoses, investigations, procedures, or clinical reasoning the doctor did not describe.
+- It is better to leave a field sparse than to fabricate content. Doctors will reject inaccurate drafts.
 - Return ONLY the JSON object. No explanation.
 
 {RCEM_KC_MAP}
