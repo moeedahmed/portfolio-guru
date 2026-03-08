@@ -34,11 +34,13 @@ Share a case by text, voice note, or photo. I'll draft the entry, show you exact
 
 Your Kaizen credentials are encrypted and never shared."""
 
-WHAT_IS_THIS_MSG = """A CBD (Case-Based Discussion) is a workplace-based assessment where you discuss a clinical case you managed with a supervisor.
+WHAT_IS_THIS_MSG = """Portfolio Guru files your WPBA entries to Kaizen — in seconds.
 
-Portfolio Guru extracts the key information from your case description and creates a draft CBD in Kaizen - ready for you to review and submit to your supervisor.
+Describe a clinical case by text, voice note, or photo. The bot works out which form fits (CBD, DOPS, LAT, Mini-CEX, ACAT, and more), extracts the right fields, and shows you a draft to review before anything is saved.
 
-You stay in control: nothing is submitted until you approve it."""
+You approve every draft before it goes to Kaizen. Nothing is submitted to a supervisor without your sign-off.
+
+Supported forms: CBD · DOPS · Mini-CEX · ACAT · LAT · ACAF · STAT · MSF · QIAT · JCF"""
 
 FILE_CASE_PROMPT = "Send me a case description - text, voice note, or photo."
 
