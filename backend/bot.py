@@ -1407,8 +1407,27 @@ def build_application() -> Application:
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Log errors and notify user if possible."""
+    """Log errors and notify user with context-appropriate messages."""
     logger.error("Exception while handling an update:", exc_info=context.error)
+
+    error_msg = str(context.error).lower() if context.error else ""
+
+    # Stale callback query — button tapped after Telegram's ~30s window
+    if "query is too old" in error_msg or "query id is invalid" in error_msg:
+        logger.info("Stale callback query — ignoring gracefully")
+        # Can't answer the query (it's expired), but we can send a message
+        if update and hasattr(update, 'effective_message') and update.effective_message:
+            await update.effective_message.reply_text(
+                "⏳ That button expired. Please tap the latest buttons or send your case again."
+            )
+        return
+
+    # Conflict error from dual bot instances — silent, self-resolving
+    if "conflict" in error_msg and "terminated by other" in error_msg:
+        logger.warning("409 Conflict — another bot instance running, will self-resolve")
+        return
+
+    # Generic fallback
     if update and hasattr(update, 'effective_message') and update.effective_message:
         await update.effective_message.reply_text(
             "Something went wrong. Please send /reset and try again."
