@@ -983,10 +983,22 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             [InlineKeyboardButton("📂 File another case", callback_data="ACTION|file")],
         ])
         kaizen_url = f"https://kaizenep.com/events/new-section/{draft.uuid}"
+        # Build a compact summary of the key fields
+        summary_lines = []
+        for key, val in draft.fields.items():
+            if key in ("date_of_encounter", "date_of_event") and val:
+                summary_lines.append(f"📅 {val}")
+            elif key == "curriculum_links" and val:
+                slo_str = ", ".join(val) if isinstance(val, list) else val
+                summary_lines.append(f"📚 {slo_str}")
+        summary = "\n".join(summary_lines)
+        if summary:
+            summary = f"\n\n{summary}"
+
         await query.message.reply_text(
-            f"{form_emoji} *{form_name} draft saved.*\n\n"
-            f"Open Kaizen to review and assign an assessor — auto-filing for this form type is coming soon.\n\n"
-            f"[Open in Kaizen]({kaizen_url})",
+            f"{form_emoji} *{form_name} — draft ready.*{summary}\n\n"
+            f"👉 Tap below to open a blank {form_name} in Kaizen, then copy the details from your draft.\n\n"
+            f"[Open {form_name} in Kaizen]({kaizen_url})",
             reply_markup=end_keyboard,
             parse_mode="Markdown"
         )
