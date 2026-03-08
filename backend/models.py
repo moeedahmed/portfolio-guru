@@ -18,6 +18,19 @@ class CBDData(BaseModel):
     key_capabilities: List[str] = []        # KC strings e.g. ["SLO1 KC1", "SLO6 KC2"]
 
 
+class FormDraft(BaseModel):
+    """Generic draft — holds any form's extracted field values as a flat dict."""
+    form_type: str
+    fields: dict        # key → extracted value, keyed by schema field key
+    uuid: Optional[str] = None
+
+
+class DraftPreviewField(BaseModel):
+    label: str
+    value: str
+    field_type: str     # "text", "date", "dropdown", "kc_tick", "multi_select"
+
+
 class FormTypeRecommendation(BaseModel):
     form_type: str          # "CBD", "DOPS", "LAT", etc.
     rationale: str          # one-line reason why this form fits

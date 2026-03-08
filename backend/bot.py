@@ -196,6 +196,29 @@ async def setup_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return ConversationHandler.END
 
 
+async def handle_info_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle INFO|what button from any message, regardless of conversation state."""
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text(WHAT_IS_THIS_MSG)
+
+
+async def handle_setup_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle ACTION|setup button from any message, regardless of conversation state."""
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    if has_credentials(user_id):
+        await query.message.reply_text(
+            "Your Kaizen account is already connected. Send me a case to get started.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📂 File a case", callback_data="ACTION|file")]
+            ])
+        )
+    else:
+        await setup_start(update, context)
+
+
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Top-level /cancel — clears state and returns to idle."""
     context.user_data.clear()
@@ -669,6 +692,9 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("status", status))
     application.add_handler(CommandHandler("reset", reset))
     application.add_handler(CommandHandler("cancel", cancel_command))
+    # Top-level handlers that must work regardless of conversation state
+    application.add_handler(CallbackQueryHandler(handle_info_button, pattern=r"^INFO\|"))
+    application.add_handler(CallbackQueryHandler(handle_setup_button, pattern=r"^ACTION\|setup$"))
     application.add_handler(setup_conv)
     application.add_handler(case_conv)
 

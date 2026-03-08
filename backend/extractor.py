@@ -5,7 +5,8 @@ import os
 import re
 from datetime import date
 from typing import List, Callable, Any
-from models import CBDData, FormTypeRecommendation
+from models import CBDData, FormTypeRecommendation, FormDraft
+from form_schemas import FORM_SCHEMAS
 
 _client = None
 
@@ -135,10 +136,16 @@ async def recommend_form_types(case_description: str) -> List[FormTypeRecommenda
     system_prompt = """Analyze this clinical case and recommend which WPBA forms apply.
 
 Rules:
-- CBD: Always include if trainee managed a clinical case (any case = CBD eligible)
-- LAT: Add if resus leadership, leading the department, managing a major incident, coordinating a team
-- DOPS: Add if trainee explicitly performed a procedure (LP, intubation, central line, chest drain, etc.)
-- ACAT: Add if description covers a full shift or multiple patients
+- CBD: Always if trainee managed a clinical case (retrospective reasoning discussion)
+- LAT: If resus leadership, leading a shift, coordinating the department, managing a major incident
+- DOPS: If trainee personally performed a procedure
+- ACAT: If description covers a full shift or multiple patients observed
+- MINI_CEX: If someone directly observed the trainee seeing a patient (real-time bedside observation)
+- ACAF: If trainee searched literature or critically appraised evidence
+- JCF: If trainee presented at a journal club
+- STAT: If trainee delivered a structured teaching session
+- QIAT: If trainee completed or is presenting a QI project
+- MSF: If trainee is requesting 360-degree colleague feedback
 - Never recommend more than 3 forms
 
 Return ONLY a JSON array:
@@ -321,3 +328,82 @@ Write the reflection in direct, first-person clinical language:
         data["key_capabilities"] = []
 
     return CBDData(**data)
+
+
+async def extract_form_data(case_description: str, form_type: str) -> FormDraft:
+    """Extract structured data for any non-CBD form type."""
+    if form_type not in FORM_SCHEMAS:
+        raise ValueError(f"Unknown form type: {form_type}")
+
+    schema = FORM_SCHEMAS[form_type]
+    client = _get_client()
+
+    # Build field definitions for the prompt
+    field_defs = []
+    for field in schema["fields"]:
+        req = "yes" if field["required"] else "no"
+        line = f"- {field['key']} | {field['label']} | type: {field['type']} | required: {req}"
+        if "options" in field:
+            line += f"\n  options: {', '.join(field['options'])}"
+        field_defs.append(line)
+
+    field_keys = [f['key'] for f in schema["fields"]]
+    json_template = "{\n" + ",\n".join([f'  "{k}": "<extracted value>"' for k in field_keys]) + "\n}"
+
+    system_prompt = f"""You are a medical portfolio assistant. Extract data for a {schema['name']} ({form_type}) WPBA entry.
+
+Return ONLY a JSON object with these exact keys:
+{json_template}
+
+Field definitions:
+{chr(10).join(field_defs)}
+
+Rules:
+- For dropdown fields: return ONLY one of the listed options. If unclear, use the first option.
+- For multi_select fields: return a list of values from the listed options.
+- For kc_tick fields: return a list of SLO strings e.g. ["SLO1", "SLO3"]
+- For date fields: return YYYY-MM-DD. Use today if not mentioned: {date.today()}
+- For text fields: extract directly from the case, be concise and clinical
+- Do not fabricate details not present in the case
+- Return ONLY the JSON object. No explanation.
+
+Case description:
+{case_description}"""
+
+    response = await _gemini_call_with_retry(
+        lambda: client.models.generate_content(model="gemini-3-flash-preview", contents=system_prompt)
+    )
+    raw = response.text.strip()
+
+    # Strip markdown code fences if present
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    raw = raw.strip()
+
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError) as e:
+        # Retry once with explicit instruction
+        retry_prompt = f"Fix the JSON and return ONLY valid JSON. No explanation.\n\nParse error: {e}\n\nOriginal output:\n{raw}"
+        retry_response = await _gemini_call_with_retry(
+            lambda: client.models.generate_content(model="gemini-3-flash-preview", contents=retry_prompt)
+        )
+        retry_raw = retry_response.text.strip()
+        if retry_raw.startswith("```"):
+            retry_raw = retry_raw.split("```")[1]
+            if retry_raw.startswith("json"):
+                retry_raw = retry_raw[4:]
+        retry_raw = retry_raw.strip()
+        data = json.loads(retry_raw)
+
+    # Apply humanizer to reflection if present
+    if "reflection" in data and data["reflection"]:
+        data["reflection"] = _humanize_reflection(data["reflection"])
+
+    return FormDraft(
+        form_type=form_type,
+        fields=data,
+        uuid=FORM_UUIDS.get(form_type)
+    )
