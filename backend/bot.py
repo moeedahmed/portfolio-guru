@@ -13,7 +13,7 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler, PicklePersistence,
 )
 from store import store_credentials, get_credentials, has_credentials, init
-from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, answer_question, extract_explicit_form_type
+from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, answer_question, extract_explicit_form_type, assess_case_sufficiency
 from filer_router import route_filing
 from kaizen_filer import FORM_UUIDS
 from form_schemas import FORM_SCHEMAS
@@ -109,6 +109,8 @@ _BTN_SETUP = InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|s
 _BTN_CANCEL = InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel")
 _BTN_HELP = InlineKeyboardButton("ℹ️ Help", callback_data="INFO|what")
 _BTN_VOICE = InlineKeyboardButton("✍️ Voice Profile", callback_data="ACTION|voice")
+_BTN_ADD_DETAIL = InlineKeyboardButton("➕ I'll add more", callback_data="ACTION|add_detail")
+_BTN_CONTINUE_THIN = InlineKeyboardButton("✅ Continue anyway", callback_data="ACTION|continue_thin")
 
 _KB_RETRY_RESET = InlineKeyboardMarkup([[_BTN_RESET]])
 _KB_FILE_RESET = InlineKeyboardMarkup([[_BTN_FILE], [_BTN_RESET]])
@@ -1041,6 +1043,36 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text(FILE_CASE_PROMPT)
             return AWAIT_CASE_INPUT
 
+    elif data == "ACTION|add_detail":
+        await query.answer()
+        await query.edit_message_reply_markup(reply_markup=None)
+        context.user_data["awaiting_detail"] = True
+        await query.message.reply_text("Send me the extra detail and I'll fold it into the same case.")
+        return AWAIT_CASE_INPUT
+
+    elif data == "ACTION|continue_thin":
+        await query.answer()
+        await query.edit_message_reply_markup(reply_markup=None)
+        context.user_data["continue_thin"] = True
+        await query.message.reply_text("Okay — continuing with the detail you already gave me.")
+        case_text = context.user_data.get("case_text", "")
+        if case_text:
+            class _SyntheticMessage:
+                def __init__(self, original_message, text):
+                    self._original = original_message
+                    self.text = text
+                    self.voice = None
+                    self.photo = None
+                    self.chat_id = original_message.chat_id
+                    self.message_id = original_message.message_id
+                async def reply_text(self, *args, **kwargs):
+                    return await self._original.reply_text(*args, **kwargs)
+            original_message = update.effective_message
+            update.message = _SyntheticMessage(original_message, case_text)
+            return await handle_case_input(update, context)
+        await query.message.reply_text(FILE_CASE_PROMPT)
+        return AWAIT_CASE_INPUT
+
     elif data.startswith("FORM|"):
         return await handle_form_choice(update, context)
 
@@ -1185,9 +1217,36 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text("💬 Send a text message, voice note, or photo.")
         return ConversationHandler.END
 
+    # If user is adding detail after a thin-case prompt, merge it once and continue
+    if context.user_data.get("awaiting_detail") and update.message.text:
+        previous_case = context.user_data.get("case_text", "")
+        case_text = f"{previous_case}\n\nAdditional detail:\n{case_text}".strip()
+        context.user_data.pop("awaiting_detail", None)
+        context.user_data["thin_case_rechecked"] = True
+
     # Store case text and input source
     context.user_data["case_text"] = case_text
     input_source = "photo" if update.message.photo else ("voice" if update.message.voice else "text")
+
+    # Thin-case gate — ask specific questions before drafting if the case is too sparse
+    if not context.user_data.get("thin_case_rechecked") and not context.user_data.get("continue_thin"):
+        try:
+            sufficiency = await asyncio.wait_for(assess_case_sufficiency(case_text), timeout=15)
+        except Exception:
+            sufficiency = {"sufficient": True, "questions": []}
+        if not sufficiency.get("sufficient", True):
+            questions = sufficiency.get("questions", [])[:3]
+            q_text = "\n".join(f"• {q}" for q in questions) if questions else "• What happened clinically?\n• What were you thinking at the time?\n• What did you learn from it?"
+            context.user_data["case_text"] = case_text
+            context.user_data["thin_case_rechecked"] = True
+            await update.message.reply_text(
+                f"Your case is a bit brief for a strong portfolio entry. A few questions that would help:\n\n{q_text}\n\nSend me the extra detail and I'll add it to your case, or tap below to continue with what you have.",
+                reply_markup=InlineKeyboardMarkup([[_BTN_ADD_DETAIL, _BTN_CONTINUE_THIN]])
+            )
+            context.user_data["awaiting_detail"] = True
+            return AWAIT_CASE_INPUT
+
+    context.user_data.pop("continue_thin", None)
 
     # Only check for explicit form type in text/voice input — never for photos
     # (photo descriptions should always go to user-selected form, never auto-routed)

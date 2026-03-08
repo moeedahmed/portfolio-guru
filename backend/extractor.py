@@ -209,6 +209,14 @@ SLOP_PATTERNS = [
     r"\bplayed a (?:key|vital|critical|crucial) role\b",
     r"\ba testament to\b",
     r"\bgame.?changer\b",
+    r"\bensur(?:e[sd]?|ing)\b",
+    r"\benhance[sd]?\b",
+    r"\bultimately\b",
+    r"\bsignificant(?:ly)?\b",
+    r"\bnotably\b",
+    r"\bthis case (?:served as|was) a (?:valuable|important|key)\b",
+    r"\breinforced (?:the importance|my understanding)\b",
+    r"\bhighlighted the (?:importance|need|value)\b",
 ]
 
 # Fields that should be humanized (narrative text, not dates/dropdowns/names)
@@ -312,6 +320,47 @@ Question: """
     contents = f"{prompt}{text}"
     response = await _gemini_generate(contents)
     return response.text.strip()
+
+
+async def assess_case_sufficiency(case_description: str) -> dict:
+    """Check if a case has enough detail for a quality portfolio entry.
+    Returns {"sufficient": True/False, "questions": ["...", "..."]}."""
+    prompt = f"""You are a medical portfolio assistant. A doctor has described a clinical case for their e-portfolio entry.
+Assess whether the description contains enough detail to write a high-quality entry.
+
+A sufficient case should mention most of:
+- What the patient presented with
+- What the doctor did (assessment, investigations, management)
+- Clinical reasoning (why they made those decisions)
+- What they learned or would do differently
+
+Case description:
+{case_description}
+
+If the case has enough detail, return: {{"sufficient": true, "questions": []}}
+If the case is too thin, return: {{"sufficient": false, "questions": ["specific question 1", "specific question 2"]}}
+
+Rules:
+- Ask 2-3 specific questions about what's missing - not generic "tell me more"
+- Questions should target the specific gaps: missing reasoning, missing outcome, missing reflection, etc.
+- Return ONLY the JSON. No explanation."""
+
+    response = await _gemini_generate(prompt)
+    raw = response.text.strip()
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    raw = raw.strip()
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return {"sufficient": True, "questions": []}
+    if "sufficient" not in data:
+        data["sufficient"] = True
+    if "questions" not in data or not isinstance(data["questions"], list):
+        data["questions"] = []
+    return data
 
 
 def _humanize_text(text: str) -> str:
@@ -508,6 +557,19 @@ Write the reflection in direct, first-person clinical language:
         voice_block = build_voice_instruction(voice_profile_json)
         if voice_block:
             system_prompt += f"\n{voice_block}"
+    else:
+        system_prompt += """
+
+===== DEFAULT WRITING STANDARD =====
+Write as an experienced UK EM trainee would write their own portfolio entry:
+- First person, professional but not stiff ("I assessed" not "The patient was assessed by the trainee")
+- Specific clinical language without being verbose — name the condition, the investigation, the finding
+- Short, direct sentences. Vary length slightly to avoid monotony.
+- Reflection should sound genuine and personal, not templated — what genuinely surprised you, challenged you, or changed your practice
+- Avoid: hedging phrases ("it could be argued"), academic formality ("the aforementioned"), motivational language ("this was a fantastic learning opportunity")
+- British English spelling (recognised, organised, haemorrhage, paediatric)
+- Sound like a confident registrar writing after a shift, not an AI summarising a textbook
+"""
 
     prompt = f"{system_prompt}\n\nCase description:\n{case_description}"
     if edit_feedback and current_draft:
@@ -639,6 +701,19 @@ Case description:
         voice_block = build_voice_instruction(voice_profile_json)
         if voice_block:
             system_prompt += f"\n{voice_block}"
+    else:
+        system_prompt += """
+
+===== DEFAULT WRITING STANDARD =====
+Write as an experienced UK EM trainee would write their own portfolio entry:
+- First person, professional but not stiff ("I assessed" not "The patient was assessed by the trainee")
+- Specific clinical language without being verbose — name the condition, the investigation, the finding
+- Short, direct sentences. Vary length slightly to avoid monotony.
+- Reflection should sound genuine and personal, not templated — what genuinely surprised you, challenged you, or changed your practice
+- Avoid: hedging phrases ("it could be argued"), academic formality ("the aforementioned"), motivational language ("this was a fantastic learning opportunity")
+- British English spelling (recognised, organised, haemorrhage, paediatric)
+- Sound like a confident registrar writing after a shift, not an AI summarising a textbook
+"""
 
     if edit_feedback and current_draft:
         system_prompt += f"\n\nCurrent draft (improve based on feedback below):\n{current_draft}\n\nUser feedback:\n{edit_feedback}"
