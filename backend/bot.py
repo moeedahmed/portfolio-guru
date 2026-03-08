@@ -1080,9 +1080,9 @@ def build_application() -> Application:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
             ],
             AWAIT_EDIT_VALUE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_value),
-                MessageHandler(filters.VOICE, handle_edit_value),
-                MessageHandler(filters.PHOTO, handle_edit_value),
+                # Catch ALL message types — text, voice, photo, forwarded voice/photo
+                # Never let unmatched messages escape to entry points while in edit mode
+                MessageHandler(~filters.COMMAND, handle_edit_value),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
             ],
         },
