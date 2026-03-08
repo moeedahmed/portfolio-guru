@@ -196,6 +196,13 @@ async def setup_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return ConversationHandler.END
 
 
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Top-level /cancel — clears state and returns to idle."""
+    context.user_data.clear()
+    await update.message.reply_text("❌ Cancelled. Send a case whenever you're ready.")
+    return ConversationHandler.END
+
+
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Reset conversation state and clear user data."""
     context.user_data.clear()
@@ -661,6 +668,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("status", status))
     application.add_handler(CommandHandler("reset", reset))
+    application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(setup_conv)
     application.add_handler(case_conv)
 
@@ -697,9 +705,10 @@ def main():
     async def post_init(app):
         await app.bot.set_my_commands([
             ("start", "Open Portfolio Guru and get started"),
+            ("setup", "Connect your Kaizen account"),
+            ("status", "Check if Kaizen is connected"),
             ("reset", "Clear current session and start fresh"),
-            ("status", "Check if your Kaizen account is connected"),
-            ("cancel", "Cancel the current action"),
+            ("cancel", "Cancel whatever is happening"),
         ])
     application.post_init = post_init
 
