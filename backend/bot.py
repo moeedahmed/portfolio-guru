@@ -141,27 +141,58 @@ def _format_draft_preview(draft) -> str:
 
 def _format_curriculum_hierarchy(curriculum_links, key_capabilities) -> str:
     """Render SLOs with their KCs nested underneath as a hierarchy."""
+    import re as _re
     if not curriculum_links:
         return "  • None"
 
-    # Group KCs by their parent SLO prefix
+    # Build a safe display label for each SLO (no underscores that break Markdown)
+    def slo_label(slo: str) -> str:
+        labels = {
+            "SLO1": "SLO1 — Stable adult patients",
+            "SLO3": "SLO3 — Clinical questions & decisions",
+            "SLO4": "SLO4 — Injured patients",
+            "SLO5": "SLO5 — Resuscitation & stabilisation",
+            "SLO6_PAEDS": "SLO6 — Paediatric care",
+            "SLO6_PROC": "SLO6 — Procedural skills",
+            "SLO7": "SLO7 — Complex situations",
+            "SLO8": "SLO8 — Lead the ED shift",
+            "SLO9_TEACH": "SLO9 — Teaching & supervision",
+            "SLO9_RESEARCH": "SLO9 — Research",
+            "SLO10": "SLO10 — Quality improvement",
+            "SLO12": "SLO12 — Lead & manage",
+        }
+        return labels.get(slo.upper(), slo.replace("_", " "))
+
+    # Group KCs by parent SLO — match on full key first, then numeric prefix
     slo_kcs: dict = {slo: [] for slo in curriculum_links}
     for kc in (key_capabilities or []):
-        # KC format: "SLO8 KC1: description" or "SLO8_PROC KC1: description"
+        kc_upper = kc.upper()
+        matched = False
+        # Try full key match first (e.g. SLO6_PROC)
         for slo in curriculum_links:
-            slo_prefix = slo.split("_")[0]  # "SLO8" from "SLO8_PROC"
-            if kc.upper().startswith(slo_prefix + " ") or kc.upper().startswith(slo_prefix + "_"):
+            if kc_upper.startswith(slo.upper() + " ") or kc_upper.startswith(slo.upper() + "_KC"):
                 slo_kcs[slo].append(kc)
+                matched = True
                 break
+        if not matched:
+            # Fall back to numeric prefix (e.g. SLO6 matches SLO6_PROC or SLO6_PAEDS)
+            m = _re.match(r'^(SLO\d+)', kc_upper)
+            if m:
+                num_prefix = m.group(1)
+                for slo in curriculum_links:
+                    if slo.upper().startswith(num_prefix):
+                        slo_kcs[slo].append(kc)
+                        matched = True
+                        break
 
     lines = []
     for slo in curriculum_links:
-        lines.append(f"• *{slo}*")
+        lines.append(f"• *{slo_label(slo)}*")
         for kc in slo_kcs.get(slo, []):
-            # Strip the "SLO8 KC1: " prefix for cleaner display
-            kc_text = kc
-            import re
-            kc_text = re.sub(r'^SLO\w+\s+KC\d+:\s*', '', kc, flags=re.IGNORECASE)
+            # Strip the code prefix ("SLO8 KC1: " or "SLO6_PROC KC2: ") for clean display
+            kc_text = _re.sub(r'^SLO\w+\s+KC\d+:\s*', '', kc, flags=_re.IGNORECASE).strip()
+            # Escape any remaining underscores to prevent Markdown italics
+            kc_text = kc_text.replace('_', '\\_')
             lines.append(f"  ↳ {kc_text}")
     return "\n".join(lines)
 
