@@ -338,55 +338,31 @@ Stage of Training mapping:
 - ACCS trainee → "ACCS ST1-ST2/CT1-CT2"
 - If unclear or not mentioned → null (leave blank — do NOT guess)
 
-===== CURRICULUM LINKS — STRICT RULES =====
+===== KEY CAPABILITIES — PRIMARY SELECTION =====
+
+The full KC list is below. Read the case, then pick 3-6 KCs that are DIRECTLY demonstrated.
+KCs are what matter — SLOs are just grouping labels derived automatically from whichever KCs you select.
 
 {RCEM_KC_MAP}
 
-CRITICAL — Only select SLOs if the case DIRECTLY DEMONSTRATES that capability.
-Use Kaizen's SLO numbering (above) — NOT the curriculum website numbering.
+INSTRUCTIONS:
+1. Read the full case description.
+2. Go through the KC list above and ask: "Does this case directly demonstrate this specific capability?"
+3. Select every KC where the answer is YES — there is no upper limit per SLO.
+4. Do NOT default to KC1 for each SLO. Read each KC description carefully.
+5. Aim for 3-6 KCs total across the whole case. More is better than fewer if warranted.
+6. Use the FULL KC text exactly as written above (including the "(2025 Update)" suffix).
+7. Format each as: "SLO_CODE KC_NUM: full description text (2025 Update)"
 
-✅ SELECT SLO5 if: Patient was actually resuscitated, intubated, had cardiac arrest, airway emergency, or required immediate stabilisation
-❌ DO NOT select SLO5 if: Patient was GCS 15, stable, or just "in resus" for observation
+HARD RULES — only select if DIRECTLY demonstrated:
+- Resuscitation KCs (SLO5): only if patient was actually resuscitated, intubated, arrested
+- Procedure KCs (SLO6_PROC): only if trainee personally performed a named procedure
+- Paediatric KCs (SLO6_PAEDS): only if patient was under 16
+- Shift leadership KCs (SLO8): only if trainee explicitly led/coordinated the shift
+- Teaching KCs (SLO9_TEACH): only if trainee delivered teaching or supervised a junior
+- Trauma KCs (SLO4): only if patient had a traumatic injury the trainee managed
 
-✅ SELECT SLO6 (Procedures) if: Trainee personally performed a procedure (LP, central line, chest drain, intubation, etc.)
-❌ DO NOT select SLO6 (Procedures) if: Procedure was indicated but not performed, or performed by someone else
-
-✅ SELECT SLO4 if: Patient had trauma/injury that trainee managed
-❌ DO NOT select SLO4 if: Medical patient with incidental minor injury
-
-✅ SELECT SLO6 (Paeds) if: Patient was a child/young person under 16
-❌ DO NOT select SLO6 (Paeds) if: Adult patient
-
-✅ SELECT SLO8 if: Trainee led the shift, coordinated the department
-❌ DO NOT select SLO8 if: Trainee just saw patients on a shift
-
-✅ SELECT SLO9 (Teaching) if: Trainee delivered teaching or supervised a junior colleague
-❌ DO NOT select SLO9 (Teaching) if: Trainee was taught BY a consultant
-
-✅ SELECT SLO5 if: Patient was a child/young person under 16
-❌ DO NOT select SLO5 if: Adult patient
-
-✅ SELECT SLO8 if: Trainee led the shift, coordinated the department
-❌ DO NOT select SLO8 if: Trainee just saw patients on a shift
-
-NEGATIVE EXAMPLES (do NOT select):
-- "Patient in resus with headache, GCS 15, LP performed" → NO SLO3 (patient stable, no resuscitation)
-- "Discussed management with consultant" → NO SLO9 (no teaching/supervision by trainee)
-- "Busy shift with multiple patients" → NO SLO8 (no shift leadership)
-
-Return 2-4 SLOs that are DIRECTLY demonstrated. Aim for breadth across the case.
-
-===== KEY CAPABILITIES — SELECT 3-5 PER FORM =====
-
-Key Capabilities are sub-competencies within each SLO. Use the FULL KC description text from the list above.
-Format: return as a list of strings like: "SLO1 KC1: Competent in ECG, clinical image, and biochemical assay interpretation"
-
-Rules:
-- Only select KCs if you selected the parent SLO
-- Select ALL KCs that are directly demonstrated — aim for 3 to 5 total
-- Use the FULL KC description text, not just the code
-- If a case demonstrates multiple aspects of one SLO, select multiple KCs from that SLO
-- It is better to select 4-5 well-matched KCs than to underselect
+For curriculum_links: derive the SLO codes from the KCs you selected (e.g. if you pick SLO1 KC1 and SLO3 KC2, curriculum_links = ["SLO1", "SLO3"])
 
 ===== REFLECTION STYLE =====
 
