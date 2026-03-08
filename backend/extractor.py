@@ -82,11 +82,15 @@ _client = None
 
 
 async def _gemini_call_with_retry(fn: Callable[..., Any], *args, retries: int = 3, delay: int = 2) -> Any:
-    """Retry Gemini API calls on 503/UNAVAILABLE/overloaded errors."""
+    """Retry Gemini API calls on 503/UNAVAILABLE/overloaded errors.
+    Runs the synchronous Gemini SDK call in a thread to avoid blocking the event loop.
+    """
     last_error = None
+    loop = asyncio.get_event_loop()
     for attempt in range(retries):
         try:
-            return fn(*args)
+            # Run sync SDK call in thread pool — never block the event loop
+            return await loop.run_in_executor(None, lambda: fn(*args))
         except Exception as e:
             error_msg = str(e).lower()
             if any(term in error_msg for term in ["503", "unavailable", "overloaded"]):
