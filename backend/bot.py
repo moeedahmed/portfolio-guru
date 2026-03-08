@@ -15,13 +15,38 @@ from store import store_credentials, get_credentials, has_credentials, init
 from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, answer_question, extract_explicit_form_type
 from filer import file_cbd_to_kaizen
 from form_schemas import FORM_SCHEMAS
-from models import FormDraft
+from models import FormDraft, CBDData
 from whisper import transcribe_voice
 from vision import extract_from_image
 from profile_store import init_profile_db, store_training_level, get_training_level
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _store_draft(context, draft):
+    """Store draft as plain dict so PicklePersistence can serialise it."""
+    if isinstance(draft, CBDData):
+        context.user_data["draft_data"] = {"_type": "CBD", **draft.model_dump()}
+    elif isinstance(draft, FormDraft):
+        context.user_data["draft_data"] = {"_type": "FORM", "form_type": draft.form_type,
+                                            "fields": draft.fields, "uuid": draft.uuid}
+
+
+def _load_draft(context):
+    """Reconstruct draft object from stored dict."""
+    raw = context.user_data.get("draft_data")
+    if not raw:
+        return None
+    if isinstance(raw, (CBDData, FormDraft)):
+        return raw  # already an object (in-memory session, not restored)
+    t = raw.get("_type")
+    if t == "CBD":
+        d = {k: v for k, v in raw.items() if k != "_type"}
+        return CBDData(**d)
+    elif t == "FORM":
+        return FormDraft(form_type=raw["form_type"], fields=raw["fields"], uuid=raw.get("uuid"))
+    return None
 
 # ConversationHandler states
 (AWAIT_USERNAME, AWAIT_PASSWORD,
@@ -623,7 +648,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 draft = await extract_cbd_data(case_text)
             else:
                 draft = await extract_form_data(case_text, explicit_form)
-            context.user_data["draft_data"] = draft
+            _store_draft(context, draft)
         except Exception as e:
             context.user_data.clear()
             await ack.edit_text("⚠️ Could not generate draft. Try again or /reset.")
@@ -690,7 +715,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
             draft = await extract_cbd_data(case_text)
         else:
             draft = await extract_form_data(case_text, form_type)
-        context.user_data["draft_data"] = draft
+        _store_draft(context, draft)
     except Exception as e:
         context.user_data.clear()
         await query.edit_message_text(f"⚠️ Could not generate draft. Try again or /reset.")
@@ -718,7 +743,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         return ConversationHandler.END
 
     username, password = creds
-    draft = context.user_data.get("draft_data")
+    draft = _load_draft(context)
     if not draft:
         context.user_data.clear()
         await query.message.reply_text("No draft data found. Start over.")
@@ -795,7 +820,7 @@ async def handle_approval_edit(update: Update, context: ContextTypes.DEFAULT_TYP
 
     await query.edit_message_reply_markup(reply_markup=None)
 
-    draft = context.user_data.get("draft_data")
+    draft = _load_draft(context)
     if not draft:
         await query.message.reply_text(
             "This draft has expired. Send /reset and file a new case.",
@@ -817,7 +842,7 @@ async def handle_edit_field(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle free-text feedback — regenerate draft using original case + feedback."""
     feedback = update.message.text.strip()
-    draft = context.user_data.get("draft_data")
+    draft = _load_draft(context)
     case_text = context.user_data.get("case_text", "")
 
     if not draft:
@@ -844,7 +869,7 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 edit_feedback=feedback,
                 current_draft=current_draft_text
             )
-        context.user_data["draft_data"] = updated
+        _store_draft(context, updated)
     except Exception as e:
         await ack.edit_text("⚠️ Couldn't regenerate. Try again or /reset.")
         return AWAIT_APPROVAL
