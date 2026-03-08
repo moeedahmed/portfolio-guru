@@ -316,19 +316,27 @@ def _format_generic_draft(draft: FormDraft) -> str:
             except (ValueError, AttributeError):
                 pass
 
-        # curriculum_links: render as unified SLO→KC hierarchy (pull key_capabilities too)
+        # curriculum_links: render as unified SLO→KC hierarchy
         if key == "curriculum_links" and isinstance(value, list):
             import re as _re
             key_caps = draft.fields.get("key_capabilities") or []
-            # Derive parent SLO list from curriculum_links values
+            # Derive SLO list — curriculum_links may contain SLO codes OR full KC strings
             slos_seen = []
-            all_kcs = list(value) + list(key_caps)
             for item in value:
                 m = _re.match(r'^(SLO\w+)', item, _re.IGNORECASE)
                 slo = m.group(1).upper() if m else item.upper()
                 if slo not in slos_seen:
                     slos_seen.append(slo)
-            formatted = _format_curriculum_hierarchy(slos_seen, all_kcs)
+            # Also pull SLOs from key_caps in case curriculum_links only has codes
+            for kc in key_caps:
+                m = _re.match(r'^(SLO\w+)', kc, _re.IGNORECASE)
+                if m:
+                    slo = m.group(1).upper()
+                    if slo not in slos_seen:
+                        slos_seen.append(slo)
+            # Use key_caps for KC lines — deduplicate against curriculum_links to avoid doubling
+            kc_strings = key_caps if key_caps else [v for v in value if _re.match(r'^SLO\w+\s+KC', v, _re.IGNORECASE)]
+            formatted = _format_curriculum_hierarchy(slos_seen, kc_strings)
             lines.append(f"📚 *Curriculum:*\n{formatted}\n")
             continue
 
