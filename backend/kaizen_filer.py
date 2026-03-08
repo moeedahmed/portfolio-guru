@@ -13,9 +13,65 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+import re
+
 from playwright.async_api import async_playwright, Page, Browser
 
 logger = logging.getLogger(__name__)
+
+# Emoji stripping — portfolio entries must NEVER contain emojis
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F600-\U0001F64F"  # emoticons
+    "\U0001F300-\U0001F5FF"  # symbols & pictographs
+    "\U0001F680-\U0001F6FF"  # transport & map
+    "\U0001F1E0-\U0001F1FF"  # flags
+    "\U00002702-\U000027B0"
+    "\U000024C2-\U0001F251"
+    "\U0001f926-\U0001f937"
+    "\U00010000-\U0010ffff"
+    "\u2640-\u2642"
+    "\u2600-\u2B55"
+    "\u200d"
+    "\u23cf"
+    "\u23e9"
+    "\u231a"
+    "\ufe0f"
+    "\u3030"
+    "]+",
+    flags=re.UNICODE,
+)
+
+
+def _strip_emojis(text: str) -> str:
+    """Remove all emojis from text before filing to Kaizen."""
+    return _EMOJI_RE.sub("", text).strip()
+
+# ─── Kaizen Select Values (discovered from live DOM) ────────────────────────
+
+STAGE_SELECT_VALUES = {
+    "ACCS":         "string:39b9fe64-b1e7-4726-81e2-73aaead0ee95",
+    "Intermediate": "string:0669c338-e695-40f9-8fae-aee2ee7d68e1",
+    "Higher":       "string:3815019a-e2be-4824-a4fb-555b55ffeab2",
+    "PEM":          "string:fc7caa86-b83c-48d0-9b86-0fb73617d2b5",
+}
+
+# SLO checkbox Angular node IDs (all 2025 Update forms use SLO-level, no KC sub-tree)
+SLO_CHECKBOX_IDS = {
+    "header": "8b012340-36e6-4a67-b182-d3509a855837",
+    "SLO1":   "426c9d2e-27b2-45a5-9461-c875dec29148",
+    "SLO2":   "850d9e21-d9ed-4345-8177-8a2f18e5d6d2",
+    "SLO3":   "020dc71f-2c21-4ccb-9aa6-f3c827854632",
+    "SLO4":   "b2ba65fb-6fdc-458a-a412-37cad63fd6ec",
+    "SLO5":   "fa194764-7a17-4ad7-b6e1-496414974499",
+    "SLO6":   "e6ae7acb-9127-41b3-9074-922d5ba58edb",
+    "SLO7":   "24eeeda0-b3d1-47ad-87bf-53f8470a0344",
+    "SLO8":   "a5f64f22-93cf-4a64-af29-e1c8a5f8f843",
+    "SLO9":   "b51e1dba-16aa-413f-bc7d-e4d01da9a083",
+    "SLO10":  "1cdbba1b-9b81-4357-8ed9-45c9895469d7",
+    "SLO11":  "4d6678f1-cc39-4640-8545-a05aaf249aeb",
+    "SLO12":  "9d138719-c7c8-4138-b637-964d76a33658",
+}
 
 # ─── Form UUIDs (2025 Update) ───────────────────────────────────────────────
 
@@ -220,17 +276,30 @@ def _to_uk_date(iso_date: str) -> str:
 
 
 async def _login(page: Page, username: str, password: str) -> bool:
-    """Log in to Kaizen. Returns True on success."""
+    """Log in to Kaizen via RCEM portal. Two-step: username → password."""
     try:
         await page.goto("https://eportfolio.rcem.ac.uk", wait_until="networkidle", timeout=30000)
         await asyncio.sleep(2)
 
-        await page.fill('input[name="login"]', username)
-        await page.fill('input[name="password"]', password)
-        await page.click('button[type="submit"]')
+        # Step 1: Username
+        login_input = page.locator('input[name="login"]')
+        if await login_input.count() > 0:
+            await login_input.fill(username)
+            await page.locator('button[type="submit"]').click()
+            await asyncio.sleep(2)
+
+        # Step 2: Password (may be on same or separate page)
+        pwd_input = page.locator('input[name="password"]')
+        if await pwd_input.count() > 0:
+            await pwd_input.fill(password)
+            await page.locator('button[type="submit"]').click()
+        else:
+            # Try single-page login
+            await page.fill('input[name="password"]', password)
+            await page.click('button[type="submit"]')
 
         await page.wait_for_url("**/kaizenep.com/**", timeout=30000)
-        await asyncio.sleep(2)
+        await asyncio.sleep(3)
         logger.info(f"Kaizen login success: {page.url}")
         return True
     except Exception as e:
@@ -244,6 +313,10 @@ async def _fill_field(page: Page, dom_id: str, value: Any, field_key: str) -> bo
         return False
 
     try:
+        # Special handling for stage_of_training — use known select values
+        if field_key == "stage_of_training":
+            return await _fill_stage_of_training(page, dom_id, value)
+
         el = page.locator(f"#{dom_id}")
         if not await el.count():
             logger.warning(f"Field not found: #{dom_id} ({field_key})")
@@ -258,7 +331,6 @@ async def _fill_field(page: Page, dom_id: str, value: Any, field_key: str) -> bo
                 await el.click()
                 await el.fill("")
                 await el.type(uk_date, delay=50)
-                # Press Tab to trigger date picker close
                 await el.press("Tab")
                 await asyncio.sleep(0.3)
                 return True
@@ -266,26 +338,13 @@ async def _fill_field(page: Page, dom_id: str, value: Any, field_key: str) -> bo
 
         # Select dropdowns
         if tag == "SELECT":
-            try:
-                await el.select_option(label=str(value))
-                return True
-            except Exception:
-                # Try partial match — Kaizen options sometimes have extra text
-                options = await el.evaluate("""el => {
-                    return Array.from(el.options).map(o => ({value: o.value, text: o.text}))
-                }""")
-                val_lower = str(value).lower()
-                for opt in options:
-                    if val_lower in opt["text"].lower():
-                        await el.select_option(value=opt["value"])
-                        return True
-                logger.warning(f"No matching option for #{dom_id}: '{value}' in {[o['text'] for o in options]}")
-                return False
+            return await _fill_select(el, dom_id, value, field_key)
 
-        # Textareas and text inputs
+        # Textareas and text inputs — strip emojis before filing
         if tag in ("TEXTAREA", "INPUT"):
+            clean_value = _strip_emojis(str(value))
             await el.click()
-            await el.fill(str(value))
+            await el.fill(clean_value)
             return True
 
         return False
@@ -295,43 +354,123 @@ async def _fill_field(page: Page, dom_id: str, value: Any, field_key: str) -> bo
         return False
 
 
+async def _fill_stage_of_training(page: Page, dom_id: str, value: Any) -> bool:
+    """Fill the stage of training select using known Kaizen values."""
+    val_str = str(value).lower()
+    select_value = None
+
+    # Map common AI-generated values to Kaizen select values
+    if "higher" in val_str or "st4" in val_str or "st5" in val_str or "st6" in val_str:
+        select_value = STAGE_SELECT_VALUES["Higher"]
+    elif "intermediate" in val_str or "st3" in val_str:
+        select_value = STAGE_SELECT_VALUES["Intermediate"]
+    elif "accs" in val_str or "st1" in val_str or "st2" in val_str or "ct1" in val_str or "ct2" in val_str:
+        select_value = STAGE_SELECT_VALUES["ACCS"]
+    elif "pem" in val_str:
+        select_value = STAGE_SELECT_VALUES["PEM"]
+    else:
+        # Default to Higher (most common for Moeed = ST5)
+        select_value = STAGE_SELECT_VALUES["Higher"]
+        logger.info(f"Defaulting stage to Higher for value: '{value}'")
+
+    try:
+        el = page.locator(f"#{dom_id}")
+        if await el.count() > 0:
+            await el.select_option(value=select_value)
+            await asyncio.sleep(3)  # Wait for curriculum section to load after stage selection
+            logger.info(f"Selected stage of training: {select_value}")
+            return True
+    except Exception as e:
+        logger.warning(f"Stage selection failed: {e}")
+    return False
+
+
+async def _fill_select(el, dom_id: str, value: Any, field_key: str) -> bool:
+    """Fill a generic select dropdown with label or partial match."""
+    try:
+        await el.select_option(label=str(value))
+        return True
+    except Exception:
+        # Try partial match — Kaizen options sometimes have extra text
+        options = await el.evaluate("""el => {
+            return Array.from(el.options).map(o => ({value: o.value, text: o.text}))
+        }""")
+        val_lower = str(value).lower()
+        for opt in options:
+            if val_lower in opt["text"].lower():
+                await el.select_option(value=opt["value"])
+                return True
+        logger.warning(f"No matching option for #{dom_id}: '{value}' in {[o['text'] for o in options]}")
+        return False
+
+
 async def _tick_curriculum(page: Page, slo_codes: List[str]) -> int:
-    """Tick KC checkboxes for the given SLO codes. Returns number ticked."""
+    """Tick SLO checkboxes via Angular scope node IDs.
+
+    2025 Update forms use flat SLO-level checkboxes (no KC sub-tree).
+    CBD starts with ALL SLOs checked; other forms start unchecked.
+    We tick the desired SLOs and untick the rest.
+    """
     if not slo_codes:
         return 0
 
-    ticked = 0
-    # KC checkboxes are inside the curriculum section — find by kzt-search area
-    # Each SLO is a collapsible section; KCs are checkboxes within
-    checkboxes = await page.query_selector_all("input[type=checkbox]")
+    # Normalize SLO codes: "SLO1", "SLO 1", "1" → "SLO1"
+    wanted = set()
+    for code in slo_codes:
+        code = code.strip().upper().replace(" ", "")
+        if code.startswith("SLO"):
+            wanted.add(code)
+        elif code.isdigit():
+            wanted.add(f"SLO{code}")
 
-    for cb in checkboxes:
-        cb_id = await cb.get_attribute("id") or ""
-        if cb_id == "filledOnSameDevice":
-            continue
+    if not wanted:
+        return 0
 
-        # Get the label text for this checkbox
-        label_text = await cb.evaluate("""el => {
-            let lbl = el.closest('label');
-            if (lbl) return lbl.textContent.trim();
-            let next = el.nextElementSibling;
-            if (next) return next.textContent.trim();
-            let parent = el.parentElement;
-            if (parent) return parent.textContent.trim();
-            return '';
-        }""")
+    # Use Angular scope to find and toggle checkboxes by node._id
+    result = await page.evaluate("""(args) => {
+        const wanted = new Set(args.wanted);
+        const sloIds = args.sloIds;
+        let ticked = 0;
+        let unticked = 0;
 
-        # Check if any of our SLO codes appear in the label
-        for slo in slo_codes:
-            slo_clean = slo.replace("SLO", "").strip()
-            if slo_clean and (slo in label_text or f"SLO{slo_clean}" in label_text):
-                is_checked = await cb.is_checked()
-                if not is_checked:
-                    await cb.click()
-                    ticked += 1
-                break
+        const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+        for (const cb of checkboxes) {
+            if (cb.id === 'filledOnSameDevice') continue;
 
-    logger.info(f"Ticked {ticked} curriculum checkboxes for SLOs: {slo_codes}")
+            try {
+                const scope = angular.element(cb).scope();
+                if (!scope || !scope.node) continue;
+                const nodeId = scope.node._id;
+
+                // Find which SLO this checkbox represents
+                let sloKey = null;
+                for (const [key, id] of Object.entries(sloIds)) {
+                    if (id === nodeId) {
+                        sloKey = key;
+                        break;
+                    }
+                }
+
+                if (!sloKey || sloKey === 'header') continue;
+
+                const isWanted = wanted.has(sloKey);
+                const isChecked = cb.checked;
+
+                if (isWanted && !isChecked) {
+                    cb.click();
+                    ticked++;
+                } else if (!isWanted && isChecked) {
+                    cb.click();
+                    unticked++;
+                }
+            } catch(e) { /* skip non-Angular checkboxes */ }
+        }
+        return {ticked, unticked, wanted: Array.from(wanted)};
+    }""", {"wanted": list(wanted), "sloIds": SLO_CHECKBOX_IDS})
+
+    ticked = result.get("ticked", 0)
+    unticked = result.get("unticked", 0)
+    logger.info(f"Curriculum: ticked {ticked}, unticked {unticked} for SLOs: {list(wanted)}")
     return ticked
 
 
@@ -441,8 +580,19 @@ async def file_to_kaizen(
                 return {"status": "failed", "filled": [], "skipped": [],
                         "error": f"Form page didn't load — redirected to {page.url}"}
 
-            # Fill each mapped field
+            # Fill stage_of_training FIRST — curriculum checkboxes appear after
+            if "stage_of_training" in field_map:
+                st_dom = field_map["stage_of_training"]
+                st_val = fields.get("stage_of_training", "Higher")
+                if await _fill_field(page, st_dom, st_val, "stage_of_training"):
+                    filled.append("stage_of_training")
+                else:
+                    skipped.append("stage_of_training")
+
+            # Fill remaining mapped fields
             for field_key, dom_id in field_map.items():
+                if field_key == "stage_of_training":
+                    continue  # Already handled above
                 value = fields.get(field_key)
                 if value is None or value == "" or value == []:
                     skipped.append(field_key)
@@ -454,7 +604,7 @@ async def file_to_kaizen(
                 else:
                     skipped.append(field_key)
 
-            # Tick curriculum checkboxes
+            # Tick curriculum checkboxes (SLO-level, after stage selection)
             if curriculum_links:
                 await _tick_curriculum(page, curriculum_links)
 
