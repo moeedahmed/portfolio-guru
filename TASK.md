@@ -1,224 +1,233 @@
-# TASK.md — Portfolio Guru: Add 9 New Kaizen Forms
+# TASK: Generic Browser-Use Filer + Filer Router
 
-## Session to resume
-`f1d5979e-201c-4c8a-84ef-0bc511f7b31d`
+## Goal
+Add a browser-use powered universal filer that can fill ANY e-portfolio form on any platform,
+alongside the existing deterministic Kaizen filer. The router automatically picks the right approach.
 
-## Objective
-Add 9 new Kaizen form types to Portfolio Guru. Each form needs:
-1. A UUID in `FORM_UUIDS` (backend/extractor.py)
-2. A schema in `FORM_SCHEMAS` (backend/form_schemas.py)
-3. A short code key in `TRAINING_LEVEL_FORMS` (backend/bot.py)
-4. An emoji in `FORM_EMOJIS` (backend/bot.py)
-5. An extraction prompt in `extract_form_data()` (backend/extractor.py)
+## Architecture
 
-## Step 0 — Discover UUIDs (REQUIRED FIRST)
-Run `backend/discover_uuids.py` to scrape Kaizen and get the UUIDs for the 9 new forms.
-The script logs into Kaizen and lists all form URLs. Find UUIDs for:
-- Teaching Delivered By Trainee (2025 Update)
-- Procedural Log ST3-ST6 (2025 Update)
-- Self-directed Learning Reflection (2025 Update)
-- Ultrasound Case Reflection (2025 Update)
-- Reflection on ESLE (2025 Update)
-- Reflection on Complaints (2025 Update)
-- Reflection on Serious Incident (2025 Update)
-- Educational Activity Attended (2025 Update)
-- Attendance at Formal Course (2025 Update)
+### Files to create/modify:
+1. `backend/browser_filer.py` — NEW: Generic browser-use filer for unmapped portfolios
+2. `backend/filer_router.py` — NEW: Routes filing requests to the right filer
+3. `backend/selector_logger.py` — NEW: Logs DOM selectors from browser-use sessions for learning
+4. `backend/bot.py` — MODIFY: Use filer_router instead of kaizen_filer directly
+5. `backend/kaizen_filer.py` — KEEP AS-IS: Deterministic Playwright filer for Kaizen
 
-Add them to `FORM_UUIDS` with these short codes:
-- `"TEACH"` — Teaching Delivered By Trainee
-- `"PROC_LOG"` — Procedural Log ST3-ST6
-- `"SDL"` — Self-directed Learning Reflection
-- `"US_CASE"` — Ultrasound Case Reflection
-- `"ESLE"` — Reflection on ESLE
-- `"COMPLAINT"` — Reflection on Complaints
-- `"SERIOUS_INC"` — Reflection on Serious Incident
-- `"EDU_ACT"` — Educational Activity Attended
-- `"FORMAL_COURSE"` — Attendance at Formal Course
+### Flow:
+```
+User approves draft
+  → bot.py calls filer_router.route_filing(platform, form_type, fields, creds)
+  → filer_router checks: does a deterministic mapping exist for this platform+form_type?
+    → YES: call kaizen_filer.file_to_kaizen() (or future platform-specific filers)
+    → NO: call browser_filer.file_with_browser_use()
+  → both return same result format: {status, filled, skipped, error}
+```
 
-## Step 1 — Add schemas to form_schemas.py
+## 1. browser_filer.py
 
-Add each form to `FORM_SCHEMAS`. Source of truth: Medic's verified report.
-All schemas follow this pattern (see existing entries for reference):
+### Purpose
+Use browser-use Agent to navigate to any e-portfolio, log in, find the right form,
+and fill it field by field using AI navigation.
+
+### Implementation
 
 ```python
-"SHORT_CODE": {
-    "name": "Full Form Name",
-    "filer_available": False,  # no filer built yet — save draft locally
-    "fields": [
-        {"key": "...", "label": "...", "type": "...", "required": True/False},
-        ...
-    ]
+async def file_with_browser_use(
+    platform_url: str,        # e.g. "https://eportfolio.rcem.ac.uk" or "https://soar.nhs.uk"
+    form_url: str | None,     # Direct form URL if known, None if agent needs to navigate
+    form_name: str,           # Human-readable: "Case-Based Discussion"
+    fields: dict[str, Any],   # field_key → value pairs from extractor
+    credentials: dict,        # {"username": "...", "password": "..."}
+    curriculum_links: list[str] | None = None,
+    model: str = "gemini-3-flash-preview",  # Default to Gemini; upgrade to GPT-4o for complex forms
+) -> dict:
+    """Returns {status, filled, skipped, error, selectors_log}"""
+```
+
+### Key design decisions:
+- Use browser-use's `sensitive_data` parameter for credentials (masks them in LLM context)
+- Use `allowed_domains` on BrowserProfile to prevent credential leakage to other sites
+- Build task prompt dynamically from fields dict — each field becomes a clear instruction
+- `step_timeout=180` (3 min per step — e-portfolios are slow)
+- `max_steps=40` (login ~5 steps + navigate ~5 + fill ~20 fields + save ~5 + buffer)
+- After filling each field, the agent should verify the value was set correctly
+- Register `register_new_step_callback` to log DOM selectors used at each step
+- Save conversation path for debugging: `~/.openclaw/data/portfolio-guru/browser-use-logs/`
+- Generate GIF of the session for debugging: saved to same directory
+- `use_vision=True` (essential for reading form layouts)
+- Model selection: start with Gemini 3 Flash (free), fall back to GPT-4o if Flash fails
+
+### Task prompt template:
+```
+You are filling in an e-portfolio form for a medical trainee.
+
+CREDENTIALS (use the sensitive_data placeholders):
+- Username: {x_username}
+- Password: {x_password}
+
+STEPS:
+1. Go to {platform_url}
+2. Log in with the credentials above
+3. Navigate to: {form_url or "find the form called: " + form_name}
+4. Fill in each field as specified below
+5. After filling each field, verify the value appears correctly
+6. Save as DRAFT — NEVER submit, NEVER send to supervisor/assessor
+
+FIELDS TO FILL:
+{for each field_key, value in fields.items():}
+- Field labelled "{field_key_to_label(field_key)}": Enter "{value}"
+{endfor}
+
+{if curriculum_links:}
+CURRICULUM CHECKBOXES:
+Find the curriculum/KC section and tick these items: {curriculum_links}
+{endif}
+
+CRITICAL RULES:
+- NEVER click Submit, Send, or any button that sends to a supervisor
+- Only click Save, Save Draft, or Save as Draft
+- If you cannot find a field, skip it and note which field was missing
+- If the page doesn't load or login fails, stop immediately and report
+- Wait for pages to fully load before interacting (SPAs may take 10-20 seconds)
+```
+
+### Error handling:
+- Timeout: 5 minutes total (vs 3 min for deterministic)
+- If agent reports "login failed" → return {status: "failed", error: "Login failed — check credentials"}
+- If agent reports "form not found" → return {status: "failed", error: "Could not find form on this platform"}
+- If agent fills some but not all fields → return {status: "partial", filled: [...], skipped: [...]}
+
+### Selector logging (for the learning loop):
+The `register_new_step_callback` captures each step's action. Parse these to extract:
+- DOM selectors used (CSS selectors, XPath)
+- Field labels matched
+- Values entered
+Save to `~/.openclaw/data/portfolio-guru/selector-logs/{platform}/{form_type}/{timestamp}.json`
+
+## 2. filer_router.py
+
+### Purpose
+Single entry point for all filing. Decides whether to use deterministic or browser-use.
+
+```python
+# Registry of deterministic filers
+DETERMINISTIC_FILERS = {
+    "kaizen": {
+        "module": "kaizen_filer",
+        "function": "file_to_kaizen",
+        "supported_forms": [...all 19 form types...],
+    },
+    # Future: "soar", "horus", "llp" etc.
 }
+
+async def route_filing(
+    platform: str,            # "kaizen", "soar", "horus", etc.
+    form_type: str,           # "CBD", "DOPS", etc.
+    fields: dict,
+    credentials: dict,        # {"username": "...", "password": "..."}
+    curriculum_links: list[str] | None = None,
+    platform_url: str | None = None,  # Required for browser-use path
+    form_url: str | None = None,      # Direct form URL if known
+    form_name: str | None = None,     # Human-readable form name
+) -> dict:
+    """
+    Routes to deterministic filer if mapping exists, otherwise browser-use.
+    Returns: {status, filled, skipped, error, method: "deterministic"|"browser-use"}
+    """
 ```
 
-### Field types used
-- `"date"` — date picker
-- `"text"` — free text
-- `"dropdown"` — single select, include `"options": [...]`
-- `"multi_select"` — checkboxes, include `"options": [...]`
-- `"kc_tick"` — curriculum alignment (SLO/KC ticking) — always key `"curriculum_links"`
-- `"file_upload"` — skip in extraction (not supported)
+### Logic:
+1. Check if `platform` is in DETERMINISTIC_FILERS
+2. If yes, check if `form_type` is in that platform's supported forms
+3. If both yes → call deterministic filer
+4. Otherwise → call browser_filer.file_with_browser_use()
+5. Add `method` key to result so bot.py can show appropriate messaging
 
-### TEACH — Teaching Delivered By Trainee
-Fields (from verified Kaizen form):
-- `date_of_teaching` (date, required) — "Date of teaching activity"
-- `title_of_session` (text, required) — "Title of session"
-- `recognised_courses` (dropdown) — options: ["- n/a -", "ATLS", "APLS", "ALS", "ELS", "Other"]
-- `learning_outcomes` (text, required) — "Learning outcomes used in session"
-- `curriculum_links` (kc_tick)
+## 3. selector_logger.py
 
-### PROC_LOG — Procedural Log ST3-ST6
-Fields:
-- `date_of_activity` (date, required) — "Date of Activity"
-- `stage_of_training` (dropdown, required) — options: ["Intermediate/ST3", "Higher/ST4-ST6", "PEM Sub-specialty", "ACCS ST1-ST2/CT1-CT2"]
-- `year_of_training` (text) — "Year of training"
-- `age_of_patient` (text) — "Age of patient"
-- `reflective_comments` (text, required) — "Reflective comments on procedure"
-- `curriculum_links` (kc_tick)
-
-### SDL — Self-directed Learning Reflection
-Fields:
-- `reflection_title` (text, required) — "Reflection Title"
-- `learning_activity_type` (multi_select, required) — options: ["RCEMlearning Module (Exam & CPD)", "RCEMlearning Reference", "e-Learning for Healthcare", "Podcast/Broadcast/Video", "RCEMFOAMed Podcast/Blog", "Blog/Article/Journal/Magazine", "Other"]
-- `resource_details` (text, required) — "Please specify details of the learning resource"
-- `reflection` (text) — "Reflection"
-- `curriculum_links` (kc_tick)
-
-### US_CASE — Ultrasound Case Reflection
-Fields:
-- `case_reflection_title` (text, required) — "Case reflection title"
-- `date_of_case` (date, required) — "Date of case"
-- `location` (text) — "Location"
-- `patient_gender` (dropdown) — options: ["- n/a -", "Male", "Female", "Other"]
-- `patient_age` (text) — "Patient's Age"
-- `equipment_used` (text) — "Equipment Used"
-- `us_application` (multi_select) — options: ["AAA", "ELS", "FAST", "Vascular Access", "Other"]
-- `clinical_scenario` (text) — "Describe the clinical scenario"
-- `how_used` (text) — "How was ultrasound used in this case?"
-- `usable_images` (text) — "Were you able to obtain usable images?"
-- `interpret_images` (text) — "Were you able to interpret the images?"
-- `changed_management` (text) — "Did the use of ultrasound change management of the patient?"
-- `learning_points` (text) — "What did you learn from this case?"
-- `other_comments` (text) — "Other comments"
-- `curriculum_links` (kc_tick)
-
-### ESLE — Reflection on ESLE
-Fields:
-- `reflection_title` (text, required) — "Title of reflection"
-- `date_of_esle` (date) — "Date of ESLE"
-- `esle_category` (multi_select, required) — options: ["Management & Supervision", "Teamwork & Cooperation", "Decision making", "Situational Awareness"]
-- `circumstances` (text) — "Describe the circumstances. What did you do? What did others do?"
-- `replay_differently` (text) — "If you could replay the event, what would you have done differently?"
-- `why` (text) — "Why?"
-- `different_outcome` (text) — "How would the outcome be different if you replayed this event?"
-- `focussing_on` (text) — "Focussing on what you would have done differently..."
-- `learned` (text) — "What have you learned from the experience?"
-- `further_action` (text) — "Further action required"
-- `curriculum_links` (kc_tick)
-
-### COMPLAINT — Reflection on Complaints
-Fields:
-- `reflection_title` (text, required) — "Title of reflection"
-- `date_of_complaint` (date, required) — "Date of complaint"
-- `key_features` (text, required) — "Key features of complaint"
-- `key_aspects` (text, required) — "Key aspects of case and care given by trainee"
-- `learning_points` (text, required) — "What are the learning points from this case?"
-- `further_action` (text, required) — "Further action required"
-- `curriculum_links` (kc_tick)
-
-### SERIOUS_INC — Reflection on Serious Incident
-Fields:
-- `reflection_title` (text, required) — "Title of reflection"
-- `date_of_incident` (date, required) — "Date of incident"
-- `description` (text, required) — "Description of case including adverse events"
-- `root_causes` (text, required) — "Root causes of events" (prompt: patient, illness, team, task, environment, culture, organisation)
-- `contributing_factors` (text, required) — "Contributing factors" (prompt: distractions, equipment, task overload, help)
-- `learning_points` (text, required) — "What are the learning points from this case?"
-- `further_action` (text, required) — "Further action required"
-- `curriculum_links` (kc_tick)
-
-### EDU_ACT — Educational Activity Attended
-Fields:
-- `date_of_education` (date, required) — "Date of education"
-- `title_of_education` (text, required) — "Title of education"
-- `delivered_by` (text) — "Who delivered the education"
-- `learning_points` (text) — "Main learning points"
-- `curriculum_section` (text) — "Section of Curriculum covered in the teaching"
-- `curriculum_links` (kc_tick)
-
-### FORMAL_COURSE — Attendance at Formal Course
-Fields:
-- `stage_of_training` (dropdown, required) — options: ["Intermediate/ST3", "Higher/ST4-ST6", "PEM Sub-specialty", "ACCS ST1-ST2/CT1-CT2"]
-- `project_description` (text, required) — "Project Description"
-- `reflective_notes` (text, required) — "Reflective notes from experience"
-- `resources_used` (text, required) — "Resources Used"
-- `lessons_learned` (text, required) — "Lessons learned"
-- `curriculum_links` (kc_tick)
-
-## Step 2 — Add to TRAINING_LEVEL_FORMS (backend/bot.py)
-
-Update the `TRAINING_LEVEL_FORMS` dict to include the new form codes at appropriate levels:
+### Purpose
+Log and analyse DOM selectors from browser-use sessions. Future: auto-generate Playwright mappings.
 
 ```python
-TRAINING_LEVEL_FORMS = {
-    "ST3":  ["CBD", "DOPS", "MINI_CEX", "ACAT", "MSF", "PROC_LOG", "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH", "COMPLAINT", "SERIOUS_INC", "ESLE"],
-    "ST4":  ["CBD", "DOPS", "MINI_CEX", "ACAT", "MSF", "LAT", "ACAF", "QIAT", "PROC_LOG", "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH", "US_CASE", "COMPLAINT", "SERIOUS_INC", "ESLE"],
-    "ST5":  ["CBD", "DOPS", "MINI_CEX", "ACAT", "MSF", "LAT", "ACAF", "QIAT", "STAT", "JCF", "PROC_LOG", "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH", "US_CASE", "COMPLAINT", "SERIOUS_INC", "ESLE"],
-    "ST6":  ["CBD", "DOPS", "MINI_CEX", "ACAT", "MSF", "LAT", "ACAF", "QIAT", "STAT", "JCF", "PROC_LOG", "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH", "US_CASE", "COMPLAINT", "SERIOUS_INC", "ESLE"],
-    "SAS":  ["CBD", "DOPS", "MINI_CEX", "ACAT", "MSF", "LAT", "ACAF", "QIAT", "STAT", "JCF", "PROC_LOG", "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH", "US_CASE", "COMPLAINT", "SERIOUS_INC", "ESLE"],
-}
+def log_selectors(platform: str, form_type: str, selectors: list[dict]) -> str:
+    """Save selector log. Returns path to log file."""
+
+def get_selector_history(platform: str, form_type: str) -> list[dict]:
+    """Get all logged selectors for a platform+form combination."""
+
+def analyse_selectors(platform: str, form_type: str) -> dict | None:
+    """
+    If enough consistent selector data exists (3+ successful filings),
+    return a candidate deterministic mapping.
+    Returns None if not enough data.
+    """
 ```
 
-## Step 3 — Add emojis to FORM_EMOJIS (backend/bot.py)
+This is the learning loop foundation. For v2, we can add:
+- Auto-generate `{platform}_filer.py` from consistent selector patterns
+- Confidence scoring (how many times each selector succeeded vs failed)
+- Human review step before promoting a mapping to deterministic
 
-Add to the `FORM_EMOJIS` dict:
+## 4. bot.py changes
+
+### Import change:
 ```python
-"TEACH":        "👨‍🏫",
-"PROC_LOG":     "🔬",
-"SDL":          "📖",
-"US_CASE":      "🔊",
-"ESLE":         "⚠️",
-"COMPLAINT":    "📝",
-"SERIOUS_INC":  "🚨",
-"EDU_ACT":      "🎓",
-"FORMAL_COURSE":"📋",
+# Old:
+from kaizen_filer import file_to_kaizen, FORM_UUIDS
+# New:
+from filer_router import route_filing
+from kaizen_filer import FORM_UUIDS  # Still need UUIDs for Kaizen URLs
 ```
 
-## Step 4 — Add extraction prompts to extractor.py
+### In handle_approval_approve:
+Replace the direct `file_to_kaizen()` call with `route_filing()`.
 
-In `extract_form_data()`, add cases for each new form type inside the existing if/elif chain.
-Each prompt should:
-1. Tell Gemini what the form is for
-2. List the fields to extract with their keys
-3. Instruct it to use British English
-4. Instruct it to write professionally but naturally
-5. Tell it NOT to invent clinical details not present in the case text
+The `platform` parameter comes from user's profile (stored at setup time).
+For now, all users are on Kaizen, so default to "kaizen".
 
-Use the existing CBD/DOPS/LAT prompts as style reference.
+### Future: platform selection at setup
+Add `AWAIT_PLATFORM` state after training level:
+- "Which e-portfolio platform do you use?"
+- Buttons: Kaizen | Horus | SOAR | Other
+- Store in UserProfile
 
-Key instruction for all reflection forms:
-```
-This is a self-reflection form. The trainee is reflecting on their own experience.
-Write in first person ("I managed...", "I reflected on...").
-Do not invent clinical details. Base everything on the case description provided.
-```
+For now, hardcode "kaizen" as default platform.
 
-## Step 5 — Test locally
+## 5. Model selection strategy
 
-After all forms added:
-1. Run `python3 -c "from form_schemas import FORM_SCHEMAS; print(list(FORM_SCHEMAS.keys()))"` — should show all 19 forms
-2. Run `python3 -c "from extractor import FORM_UUIDS; print(list(FORM_UUIDS.keys()))"` — should show all 19 UUIDs
-3. Run `python3 -c "import bot; print('OK')"` — should import cleanly
+### For browser-use:
+- **Primary: Gemini 3 Flash** — free tier, handles simple forms
+- **Fallback: GPT-4o** — if Flash fails or for complex SPAs
+  - Requires OPENAI_API_KEY env var (exists in BWS as credentials.OPENAI_API_KEY)
+- **Future: Claude Sonnet** — if needed for specific platforms
 
-## Do NOT touch
-- `filer.py` — filing logic, frozen
-- `store.py` — credential storage, frozen
-- `credentials.py` — credential model, frozen
-- `main.py` — entry point, frozen
-- `run_local.sh` — startup script, frozen
-- Any existing form schemas already in `FORM_SCHEMAS`
+### Cost profile:
+- Deterministic Playwright: $0.00 per filing
+- Browser-use + Gemini Flash: ~$0.00-0.01 per filing (free tier)
+- Browser-use + GPT-4o: ~$0.02-0.05 per filing
+- Browser-use + Claude Sonnet: ~$0.03-0.06 per filing
 
-## Commit when done
-```
-feat: add 9 new Kaizen forms (TEACH, PROC_LOG, SDL, US_CASE, ESLE, COMPLAINT, SERIOUS_INC, EDU_ACT, FORMAL_COURSE)
-```
+## Dependencies
+
+### Already installed:
+- browser-use 0.12.1 (includes playwright)
+- google-genai (for Gemini)
+
+### May need:
+- openai (for GPT-4o fallback) — check if browser-use bundles it
+
+## Testing plan
+
+1. Test filer_router → kaizen path (should work exactly as before)
+2. Test browser_filer on Kaizen CBD (known form, can compare against deterministic)
+3. Test browser_filer on a different platform (if Moeed has access to Horus/SOAR)
+4. Verify selector logging captures usable data
+5. Verify timeout handling (5 min browser-use vs 3 min deterministic)
+
+## Safety constraints (CRITICAL)
+- NEVER submit any form — always save as draft
+- NEVER send to supervisor/assessor
+- Credentials passed via browser-use sensitive_data (masked in LLM context)
+- allowed_domains locks browser to the target platform only
+- Browser-use session timeout: 5 minutes max
+- If browser-use fails, return clean error — never leave browser hanging

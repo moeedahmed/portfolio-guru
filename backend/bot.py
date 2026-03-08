@@ -13,7 +13,8 @@ from telegram.ext import (
 )
 from store import store_credentials, get_credentials, has_credentials, init
 from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, answer_question, extract_explicit_form_type
-from kaizen_filer import file_to_kaizen, FORM_UUIDS
+from filer_router import route_filing
+from kaizen_filer import FORM_UUIDS
 from form_schemas import FORM_SCHEMAS
 from models import FormDraft, CBDData
 from whisper import transcribe_voice
@@ -993,16 +994,25 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     with open(drafts_dir / filename, "w") as f:
         _json.dump({"form_type": form_type, "fields": fields}, f, indent=2)
 
-    ack = await query.message.reply_text(f"📤 Filing {form_name} to Kaizen…")
+    # Determine platform (default: kaizen; future: from user profile)
+    platform = "kaizen"
+    ack = await query.message.reply_text(f"📤 Filing {form_name}…")
 
     try:
         result = await asyncio.wait_for(
-            file_to_kaizen(form_type, fields, username, password, curriculum_links),
-            timeout=180,
+            route_filing(
+                platform=platform,
+                form_type=form_type,
+                fields=fields,
+                credentials={"username": username, "password": password},
+                curriculum_links=curriculum_links,
+                form_name=form_name,
+            ),
+            timeout=300,  # 5 min — browser-use path may take longer
         )
     except asyncio.TimeoutError:
         context.user_data.clear()
-        await ack.edit_text("⏱ Filing timed out (3 min). The draft may have saved — check Kaizen directly.")
+        await ack.edit_text("⏱ Filing timed out. The draft may have saved — check your portfolio directly.")
         return ConversationHandler.END
     except Exception as e:
         logger.error(f"Filer error for {form_type}: {e}", exc_info=True)
@@ -1020,22 +1030,28 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     skipped = result.get("skipped", [])
     error = result.get("error")
 
+    method = result.get("method", "deterministic")
+
     if status == "success":
         date_val = fields.get("date_of_encounter", fields.get("date_of_event", ""))
         slo_str = ", ".join(curriculum_links) if curriculum_links else ""
         summary = f"\n\n📅 {date_val}" if date_val else ""
         if slo_str:
             summary += f"  ·  📚 {slo_str}"
-        msg = f"✅ *{form_name} draft saved in Kaizen.*\n\nNot submitted to assessor — open Kaizen to assign one when ready.{summary}"
+        msg = f"✅ *{form_name} draft saved.*\n\nNot submitted to assessor — open your portfolio to assign one when ready.{summary}"
     elif status == "partial":
         msg = (
             f"⚠️ *{form_name} draft saved but some fields may be incomplete.*\n\n"
             f"Filled: {len(filled)} · Skipped: {len(skipped)}\n"
-            f"Review in Kaizen before sending to assessor."
+            f"Review in your portfolio before sending to assessor."
         )
     else:
-        kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS.get(form_type, '')}"
-        msg = f"❌ *Filing failed.* {error or ''}\n\n[Open {form_name} manually in Kaizen]({kaizen_url})"
+        # Show manual link for Kaizen; generic message for other platforms
+        if platform == "kaizen" and FORM_UUIDS.get(form_type):
+            kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS[form_type]}"
+            msg = f"❌ *Filing failed.* {error or ''}\n\n[Open {form_name} manually in Kaizen]({kaizen_url})"
+        else:
+            msg = f"❌ *Filing failed.* {error or ''}\n\nTry again or fill the form manually in your portfolio."
 
     await _safe_edit_text(ack, msg, reply_markup=end_keyboard, parse_mode="Markdown")
     return ConversationHandler.END
