@@ -59,14 +59,22 @@ Return ONLY the extracted/described text, no additional commentary."""
         )
     ]
 
-    # Run sync Gemini call in thread pool — never block the event loop
+    # Run sync Gemini call in thread pool with model fallback
     loop = asyncio.get_event_loop()
-    response = await loop.run_in_executor(
-        None,
-        lambda: client.models.generate_content(
-            model="gemini-3-flash-preview",
-            contents=contents,
-        )
-    )
-
-    return response.text.strip()
+    models_to_try = ["gemini-3-flash-preview", "gemini-2.5-flash"]
+    last_error = None
+    for model in models_to_try:
+        try:
+            response = await loop.run_in_executor(
+                None,
+                lambda m=model: client.models.generate_content(model=m, contents=contents)
+            )
+            return response.text.strip()
+        except Exception as e:
+            error_msg = str(e).lower()
+            if any(t in error_msg for t in ["503", "unavailable", "overloaded", "404"]):
+                last_error = e
+                logger.warning(f"Vision model {model} failed: {e}")
+                continue
+            raise
+    raise last_error

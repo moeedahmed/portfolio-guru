@@ -80,16 +80,44 @@ SLO12: Lead & Manage (2025 Update)
 
 _client = None
 
+PRIMARY_MODEL = "gemini-3-flash-preview"
+FALLBACK_MODEL = "gemini-2.5-flash"
+
+
+async def _gemini_generate(prompt, retries: int = 3, delay: int = 2):
+    """Call Gemini generate_content with automatic model fallback.
+    Tries PRIMARY_MODEL first with retries, then FALLBACK_MODEL.
+    """
+    client = _get_client()
+    loop = asyncio.get_event_loop()
+    last_error = None
+
+    for model in [PRIMARY_MODEL, FALLBACK_MODEL]:
+        for attempt in range(retries if model == PRIMARY_MODEL else 1):
+            try:
+                return await loop.run_in_executor(
+                    None,
+                    lambda m=model: client.models.generate_content(model=m, contents=prompt)
+                )
+            except Exception as e:
+                error_msg = str(e).lower()
+                if any(term in error_msg for term in ["503", "unavailable", "overloaded", "404"]):
+                    last_error = e
+                    if model == PRIMARY_MODEL and attempt < retries - 1:
+                        await asyncio.sleep(delay)
+                    elif model == PRIMARY_MODEL:
+                        logger.warning(f"{PRIMARY_MODEL} failed after {retries} retries, falling back to {FALLBACK_MODEL}")
+                    continue
+                raise
+    raise last_error
+
 
 async def _gemini_call_with_retry(fn: Callable[..., Any], *args, retries: int = 3, delay: int = 2) -> Any:
-    """Retry Gemini API calls on 503/UNAVAILABLE/overloaded errors.
-    Runs the synchronous Gemini SDK call in a thread to avoid blocking the event loop.
-    """
+    """Legacy wrapper — kept for any call sites that still use it directly."""
     last_error = None
     loop = asyncio.get_event_loop()
     for attempt in range(retries):
         try:
-            # Run sync SDK call in thread pool — never block the event loop
             return await loop.run_in_executor(None, lambda: fn(*args))
         except Exception as e:
             error_msg = str(e).lower()
@@ -98,8 +126,8 @@ async def _gemini_call_with_retry(fn: Callable[..., Any], *args, retries: int = 
                 if attempt < retries - 1:
                     await asyncio.sleep(delay)
                 continue
-            raise  # Re-raise non-retryable errors immediately
-    raise last_error  # All retries exhausted
+            raise
+    raise last_error
 
 FORM_UUIDS = {
     # 2025 update versions (preferred)
@@ -197,9 +225,7 @@ async def classify_intent(text: str) -> str:
 Message: """
 
     contents = f"{prompt}{text}\n\nRespond with ONLY one word: chitchat, question, or case"
-    response = await _gemini_call_with_retry(
-        lambda: client.models.generate_content(model="gemini-3-flash-preview", contents=contents)
-    )
+    response = await _gemini_generate(contents)
     result = response.text.strip().lower()
 
     # Normalize response
@@ -227,9 +253,7 @@ Answer this question about what you do. Be concise and helpful. Key facts:
 Question: """
 
     contents = f"{prompt}{text}"
-    response = await _gemini_call_with_retry(
-        lambda: client.models.generate_content(model="gemini-3-flash-preview", contents=contents)
-    )
+    response = await _gemini_generate(contents)
     return response.text.strip()
 
 
@@ -282,9 +306,7 @@ Only include forms that clearly apply. CBD is almost always applicable.
 Be conservative — do not recommend a form unless the case description clearly demonstrates that activity."""
 
     prompt = f"{system_prompt}\n\nCase description:\n{case_description}"
-    response = await _gemini_call_with_retry(
-        lambda: client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
-    )
+    response = await _gemini_generate(prompt)
     raw = response.text.strip()
 
     # Strip markdown code fences
@@ -401,9 +423,7 @@ Write the reflection in direct, first-person clinical language:
     elif edit_feedback:
         prompt += f"\n\nUser feedback to apply:\n{edit_feedback}"
 
-    response = await _gemini_call_with_retry(
-        lambda: client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
-    )
+    response = await _gemini_generate(prompt)
     raw = response.text.strip()
 
     # Strip markdown code fences if present
@@ -418,9 +438,7 @@ Write the reflection in direct, first-person clinical language:
     except (json.JSONDecodeError, ValueError) as e:
         # Retry once with explicit instruction
         retry_prompt = f"Fix the JSON and return ONLY valid JSON. No explanation.\n\nParse error: {e}\n\nOriginal output:\n{raw}"
-        retry_response = await _gemini_call_with_retry(
-            lambda: client.models.generate_content(model="gemini-3-flash-preview", contents=retry_prompt)
-        )
+        retry_response = await _gemini_generate(retry_prompt)
         retry_raw = retry_response.text.strip()
         if retry_raw.startswith("```"):
             retry_raw = retry_raw.split("```")[1]
@@ -505,9 +523,7 @@ Case description:
     elif edit_feedback:
         system_prompt += f"\n\nUser feedback to apply:\n{edit_feedback}"
 
-    response = await _gemini_call_with_retry(
-        lambda: client.models.generate_content(model="gemini-3-flash-preview", contents=system_prompt)
-    )
+    response = await _gemini_generate(system_prompt)
     raw = response.text.strip()
 
     # Strip markdown code fences if present
@@ -522,9 +538,7 @@ Case description:
     except (json.JSONDecodeError, ValueError) as e:
         # Retry once with explicit instruction
         retry_prompt = f"Fix the JSON and return ONLY valid JSON. No explanation.\n\nParse error: {e}\n\nOriginal output:\n{raw}"
-        retry_response = await _gemini_call_with_retry(
-            lambda: client.models.generate_content(model="gemini-3-flash-preview", contents=retry_prompt)
-        )
+        retry_response = await _gemini_generate(retry_prompt)
         retry_raw = retry_response.text.strip()
         if retry_raw.startswith("```"):
             retry_raw = retry_raw.split("```")[1]

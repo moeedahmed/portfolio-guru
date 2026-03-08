@@ -76,18 +76,28 @@ async def _transcribe_gemini(file_path: str) -> str:
     mime_type = mime_map.get(ext, "audio/ogg")
 
     loop = asyncio.get_event_loop()
+    models_to_try = ["gemini-3-flash-preview", "gemini-2.5-flash"]
+    contents = [
+        "Transcribe this voice note exactly as spoken. Return only the transcribed text, no commentary.",
+        types.Part.from_bytes(data=audio_data, mime_type=mime_type),
+    ]
 
-    def _call():
-        return client.models.generate_content(
-            model="gemini-3-flash-preview",
-            contents=[
-                "Transcribe this voice note exactly as spoken. Return only the transcribed text, no commentary.",
-                types.Part.from_bytes(data=audio_data, mime_type=mime_type),
-            ]
-        )
-
-    response = await loop.run_in_executor(None, _call)
-    return response.text.strip()
+    last_error = None
+    for model in models_to_try:
+        try:
+            response = await loop.run_in_executor(
+                None,
+                lambda m=model: client.models.generate_content(model=m, contents=contents)
+            )
+            return response.text.strip()
+        except Exception as e:
+            error_msg = str(e).lower()
+            if any(t in error_msg for t in ["503", "unavailable", "overloaded", "404"]):
+                last_error = e
+                logger.warning(f"Whisper model {model} failed: {e}")
+                continue
+            raise
+    raise last_error
 
 
 async def _transcribe_openai(file_path: str) -> str:
