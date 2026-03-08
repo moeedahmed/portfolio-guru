@@ -938,34 +938,44 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text("Edit failed — draft expired. Send /reset.")
         return ConversationHandler.END
 
-    # Resolve feedback from any input modality
-    if update.message.voice:
-        ack = await update.message.reply_text("🎙️ Transcribing…")
+    # Resolve feedback from any input modality (including forwarded messages)
+    msg = update.message
+    voice = msg.voice or (msg.audio if msg.audio else None)
+    photo = msg.photo
+
+    if voice:
+        ack = await msg.reply_text("🎙️ Transcribing…")
         try:
-            voice_file = await update.message.voice.get_file()
+            voice_file = await voice.get_file()
             with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
                 await voice_file.download_to_drive(tmp.name)
                 feedback = await transcribe_voice(tmp.name)
                 os.unlink(tmp.name)
             await ack.edit_text("✏️ Regenerating draft with your feedback…")
-        except Exception:
+        except Exception as e:
+            logger.error(f"Voice transcription in edit failed: {e}", exc_info=True)
             await ack.edit_text("⚠️ Couldn't transcribe voice note. Type your feedback instead.")
             return AWAIT_EDIT_VALUE
-    elif update.message.photo:
-        ack = await update.message.reply_text("📷 Reading image…")
+    elif photo:
+        ack = await msg.reply_text("📷 Reading image…")
         try:
-            photo_file = await update.message.photo[-1].get_file()
+            photo_file = await photo[-1].get_file()
             with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
                 await photo_file.download_to_drive(tmp.name)
                 feedback = await extract_from_image(tmp.name)
                 os.unlink(tmp.name)
             await ack.edit_text("✏️ Regenerating draft with your feedback…")
-        except Exception:
+        except Exception as e:
+            logger.error(f"Photo extraction in edit failed: {e}", exc_info=True)
             await ack.edit_text("⚠️ Couldn't read image. Type your feedback instead.")
             return AWAIT_EDIT_VALUE
+    elif msg.text:
+        feedback = msg.text.strip()
+        ack = await msg.reply_text("✏️ Regenerating draft with your feedback…")
     else:
-        feedback = update.message.text.strip()
-        ack = await update.message.reply_text("✏️ Regenerating draft with your feedback…")
+        # Unknown message type (sticker, gif, etc.) — stay in edit mode
+        await msg.reply_text("Send text, a voice note, or a photo with your feedback.")
+        return AWAIT_EDIT_VALUE
 
     try:
         form_type = draft.form_type if isinstance(draft, FormDraft) else "CBD"
