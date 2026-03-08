@@ -228,8 +228,8 @@ def _format_cbd_draft(cbd_data) -> str:
         f"📅 *Date:* {date_display}\n"
         f"🏥 *Setting:* {cbd_data.clinical_setting}\n"
         f"🩺 *Presentation:* {cbd_data.patient_presentation}\n\n"
-        f"*Case narrative:*\n{cbd_data.clinical_reasoning}\n\n"
-        f"*Reflection:*\n{cbd_data.reflection}\n\n"
+        f"🗒️ *Case narrative:*\n{cbd_data.clinical_reasoning}\n\n"
+        f"💭 *Reflection:*\n{cbd_data.reflection}\n\n"
         f"📚 *Curriculum:*\n{curriculum}"
     )
 
