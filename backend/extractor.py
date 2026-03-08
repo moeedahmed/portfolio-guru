@@ -489,6 +489,11 @@ Write the reflection in direct, first-person clinical language:
 - Be specific about learning points
 - Avoid: em dashes, "delve", "navigate", "crucial", "importantly", "comprehensive", "moreover", "furthermore", "on the other hand", "in summary"
 
+===== FORMATTING =====
+- Break any narrative field (reflection, clinical_reasoning, description) into 2-3 short paragraphs if it exceeds ~80 words.
+- Use natural paragraph breaks: what happened → what I did/thought → what I learned or would change.
+- Never write a single block of 100+ words with no paragraph break.
+
 ===== GROUNDING RULES (NON-NEGOTIABLE) =====
 - Extract ONLY what the doctor explicitly stated or clearly implied. Never invent clinical details.
 - If a field cannot be filled from the case description, set it to "Not mentioned in case" — do NOT generate plausible-sounding content to fill gaps.
@@ -610,6 +615,11 @@ Rules:
 - For text fields: extract directly from the case, be concise and clinical
 - Write in direct, first-person clinical language ("I assessed...", "I managed...")
 - NEVER use: em dashes, "delve", "navigate", "crucial", "importantly", "comprehensive", "moreover", "furthermore", "holistic", "robust", "multifaceted", "pivotal", "seamless", "facilitate", "leverage", "unlock", "embark", "meticulous", "overarching", "in summary", "it's worth noting", "this case highlights", "moving forward"
+
+===== FORMATTING =====
+- Break any narrative field (reflection, clinical_reasoning, description) into 2-3 short paragraphs if it exceeds ~80 words.
+- Use natural paragraph breaks: what happened → what I did/thought → what I learned or would change.
+- Never write a single block of 100+ words with no paragraph break.
 
 ===== GROUNDING RULES (NON-NEGOTIABLE) =====
 - Extract ONLY what the doctor explicitly stated or clearly implied. Never invent clinical details.
