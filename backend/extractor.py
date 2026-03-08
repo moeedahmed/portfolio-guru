@@ -1,10 +1,13 @@
 from google import genai
 import asyncio
 import json
+import logging
 import os
 import re
 from datetime import date
 from typing import List, Callable, Any
+
+logger = logging.getLogger(__name__)
 from models import CBDData, FormTypeRecommendation, FormDraft
 from form_schemas import FORM_SCHEMAS
 
