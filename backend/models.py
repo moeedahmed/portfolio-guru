@@ -8,11 +8,11 @@ class CBDData(BaseModel):
     patient_age: str                 # e.g. "45-year-old"
     patient_presentation: str        # chief complaint
     clinical_setting: str            # e.g. "Emergency Department - Resus"
-    stage_of_training: str           # "Intermediate/ST3" | "Higher/ST4-ST6" | "PEM" | "ACCS"
+    stage_of_training: Optional[str] = None  # "Intermediate/ST3" | "Higher/ST4-ST6" | "PEM" | "ACCS" | None if unknown
     trainee_role: str                # what the trainee did
     clinical_reasoning: str          # maps to "Case to be discussed" field
     reflection: str                  # maps to "Reflection of event" field
-    level_of_supervision: str        # "Direct" | "Indirect" | "Distant"
+    level_of_supervision: Optional[str] = None  # "Direct" | "Indirect" | "Distant"
     supervisor_name: Optional[str] = None   # name or email
     curriculum_links: List[str] = []        # SLO labels e.g. ["SLO3", "SLO6"]
     key_capabilities: List[str] = []        # KC strings e.g. ["SLO1 KC1", "SLO6 KC2"]
