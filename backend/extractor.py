@@ -83,13 +83,14 @@ SLO12: Lead & Manage (2025 Update)
 
 _client = None
 
-PRIMARY_MODEL = "gemini-3-flash-preview"
-FALLBACK_MODEL = "gemini-2.5-flash"
+PRIMARY_MODEL = "gemini-2.5-flash"
+FALLBACK_MODEL = "gemini-2.0-flash"
 
 
-async def _gemini_generate(prompt, retries: int = 3, delay: int = 2):
+async def _gemini_generate(prompt, retries: int = 2, delay: int = 1):
     """Call Gemini generate_content with automatic model fallback.
     Tries PRIMARY_MODEL first with retries, then FALLBACK_MODEL.
+    Fast-path: minimal retries to keep latency low.
     """
     client = _get_client()
     loop = asyncio.get_event_loop()

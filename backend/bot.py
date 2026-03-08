@@ -791,12 +791,30 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if update.message.text:
         raw_text = update.message.text.strip()
 
-        # Classify intent for text messages
-        await update.effective_chat.send_action(constants.ChatAction.TYPING)
-        try:
-            intent = await classify_intent(raw_text)
-        except Exception:
-            intent = "case"  # Default to case on error
+        # Fast heuristic: long clinical-sounding messages skip classify entirely
+        # Saves ~3-5s of Gemini latency for obvious cases
+        _CLINICAL_KEYWORDS = {"patient", "presented", "diagnosed", "examined", "management",
+                              "symptoms", "clinical", "assessment", "treatment", "referred",
+                              "history", "examination", "investigation", "procedure", "resuscitation",
+                              "chest pain", "shortness of breath", "abdominal", "fracture", "suture",
+                              "intubation", "cannulation", "triage", "observations", "bloods"}
+        words_lower = raw_text.lower()
+        word_count = len(raw_text.split())
+        clinical_hits = sum(1 for kw in _CLINICAL_KEYWORDS if kw in words_lower)
+
+        if word_count > 30 and clinical_hits >= 2:
+            # Obviously a clinical case — skip AI classify
+            intent = "case"
+        elif word_count < 8 and clinical_hits == 0:
+            # Very short, no clinical language — likely chitchat
+            intent = "chitchat" if word_count < 4 else "case"
+        else:
+            # Ambiguous — use AI classify
+            await update.effective_chat.send_action(constants.ChatAction.TYPING)
+            try:
+                intent = await classify_intent(raw_text)
+            except Exception:
+                intent = "case"  # Default to case on error
 
         if intent == "chitchat":
             context.user_data.clear()

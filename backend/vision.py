@@ -61,7 +61,7 @@ Return ONLY the extracted/described text, no additional commentary."""
 
     # Run sync Gemini call in thread pool with model fallback
     loop = asyncio.get_event_loop()
-    models_to_try = ["gemini-3-flash-preview", "gemini-2.5-flash"]
+    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash"]
     last_error = None
     for model in models_to_try:
         try:

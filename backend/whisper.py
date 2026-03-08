@@ -76,7 +76,7 @@ async def _transcribe_gemini(file_path: str) -> str:
     mime_type = mime_map.get(ext, "audio/ogg")
 
     loop = asyncio.get_event_loop()
-    models_to_try = ["gemini-3-flash-preview", "gemini-2.5-flash"]
+    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash"]
     contents = [
         "Transcribe this voice note exactly as spoken. Return only the transcribed text, no commentary.",
         types.Part.from_bytes(data=audio_data, mime_type=mime_type),
