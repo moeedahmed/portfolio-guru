@@ -1,8 +1,8 @@
 from google import genai
+import asyncio
 import json
 import os
 import re
-import time
 from datetime import date
 from typing import List, Callable, Any
 from models import CBDData, FormTypeRecommendation
@@ -10,7 +10,7 @@ from models import CBDData, FormTypeRecommendation
 _client = None
 
 
-def _gemini_call_with_retry(fn: Callable[..., Any], *args, retries: int = 3, delay: int = 2) -> Any:
+async def _gemini_call_with_retry(fn: Callable[..., Any], *args, retries: int = 3, delay: int = 2) -> Any:
     """Retry Gemini API calls on 503/UNAVAILABLE/overloaded errors."""
     last_error = None
     for attempt in range(retries):
@@ -21,7 +21,7 @@ def _gemini_call_with_retry(fn: Callable[..., Any], *args, retries: int = 3, del
             if any(term in error_msg for term in ["503", "unavailable", "overloaded"]):
                 last_error = e
                 if attempt < retries - 1:
-                    time.sleep(delay)
+                    await asyncio.sleep(delay)
                 continue
             raise  # Re-raise non-retryable errors immediately
     raise last_error  # All retries exhausted
@@ -65,7 +65,7 @@ def _get_client():
     return _client
 
 
-def classify_intent(text: str) -> str:
+async def classify_intent(text: str) -> str:
     """Classify user message intent: 'chitchat', 'question', or 'case'."""
     client = _get_client()
 
@@ -78,7 +78,7 @@ def classify_intent(text: str) -> str:
 Message: """
 
     contents = f"{prompt}{text}\n\nRespond with ONLY one word: chitchat, question, or case"
-    response = _gemini_call_with_retry(
+    response = await _gemini_call_with_retry(
         lambda: client.models.generate_content(model="gemini-3-flash-preview", contents=contents)
     )
     result = response.text.strip().lower()
@@ -92,7 +92,7 @@ Message: """
         return "case"
 
 
-def answer_question(text: str) -> str:
+async def answer_question(text: str) -> str:
     """Generate a helpful answer about the bot's capabilities."""
     client = _get_client()
 
@@ -108,7 +108,7 @@ Answer this question about what you do. Be concise and helpful. Key facts:
 Question: """
 
     contents = f"{prompt}{text}"
-    response = _gemini_call_with_retry(
+    response = await _gemini_call_with_retry(
         lambda: client.models.generate_content(model="gemini-3-flash-preview", contents=contents)
     )
     return response.text.strip()
@@ -128,7 +128,7 @@ def _humanize_reflection(text: str) -> str:
     return result
 
 
-def recommend_form_types(case_description: str) -> List[FormTypeRecommendation]:
+async def recommend_form_types(case_description: str) -> List[FormTypeRecommendation]:
     """Recommend applicable WPBA form types based on case description."""
     client = _get_client()
 
@@ -147,7 +147,7 @@ Return ONLY a JSON array:
 Only include forms that clearly apply. CBD is almost always applicable."""
 
     prompt = f"{system_prompt}\n\nCase description:\n{case_description}"
-    response = _gemini_call_with_retry(
+    response = await _gemini_call_with_retry(
         lambda: client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
     )
     raw = response.text.strip()
@@ -185,7 +185,7 @@ Only include forms that clearly apply. CBD is almost always applicable."""
     return recommendations
 
 
-def extract_cbd_data(case_description: str) -> CBDData:
+async def extract_cbd_data(case_description: str) -> CBDData:
     """Extract structured CBD data from free-text case description."""
     client = _get_client()
 
@@ -284,7 +284,7 @@ Write the reflection in direct, first-person clinical language:
 - Return ONLY the JSON. No explanation."""
 
     prompt = f"{system_prompt}\n\nCase description:\n{case_description}"
-    response = _gemini_call_with_retry(
+    response = await _gemini_call_with_retry(
         lambda: client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
     )
     raw = response.text.strip()
@@ -301,7 +301,7 @@ Write the reflection in direct, first-person clinical language:
     except (json.JSONDecodeError, ValueError) as e:
         # Retry once with explicit instruction
         retry_prompt = f"Fix the JSON and return ONLY valid JSON. No explanation.\n\nParse error: {e}\n\nOriginal output:\n{raw}"
-        retry_response = _gemini_call_with_retry(
+        retry_response = await _gemini_call_with_retry(
             lambda: client.models.generate_content(model="gemini-3-flash-preview", contents=retry_prompt)
         )
         retry_raw = retry_response.text.strip()

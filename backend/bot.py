@@ -210,6 +210,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("INFO|"):
         await query.answer()
         await query.message.reply_text(WHAT_IS_THIS_MSG)
+        return ConversationHandler.END
 
     elif data == "ACTION|setup":
         await query.answer()
@@ -221,7 +222,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     [InlineKeyboardButton("File a case", callback_data="ACTION|file")]
                 ])
             )
-            return None
+            return ConversationHandler.END
         return await setup_start(update, context)
 
     elif data == "ACTION|file":
@@ -285,7 +286,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
         # Classify intent for text messages
         try:
-            intent = classify_intent(raw_text)
+            intent = await classify_intent(raw_text)
         except Exception:
             intent = "case"  # Default to case on error
 
@@ -299,7 +300,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if intent == "question":
             context.user_data.clear()
             try:
-                answer = answer_question(raw_text)
+                answer = await answer_question(raw_text)
                 await update.message.reply_text(answer)
             except Exception:
                 await update.message.reply_text(
@@ -351,7 +352,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     # Get form recommendations
     try:
-        recommendations = recommend_form_types(case_text)
+        recommendations = await recommend_form_types(case_text)
         context.user_data["form_recommendations"] = recommendations
     except Exception as e:
         logger.error(f"Form recommendation failed: {e}")
@@ -399,7 +400,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
     ack = await query.message.reply_text("Extracting case data...")
 
     try:
-        cbd_data = extract_cbd_data(case_text)
+        cbd_data = await extract_cbd_data(case_text)
         context.user_data["draft_data"] = cbd_data
     except Exception as e:
         context.user_data.clear()
@@ -546,12 +547,12 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return AWAIT_APPROVAL
 
 
-async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle unexpected text messages mid-conversation."""
     raw_text = update.message.text.strip()
 
     try:
-        intent = classify_intent(raw_text)
+        intent = await classify_intent(raw_text)
     except Exception:
         intent = "case"
 
@@ -559,25 +560,25 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
         await update.message.reply_text(
             "Hey! Ready when you are. Send me a clinical case and I'll draft it for your portfolio."
         )
-        # Stay in current state - don't return anything to preserve state
+        return AWAIT_CASE_INPUT
 
     elif intent == "question":
         try:
-            answer = answer_question(raw_text)
+            answer = await answer_question(raw_text)
             await update.message.reply_text(answer)
         except Exception:
             await update.message.reply_text(
                 "I help you file clinical cases to your Kaizen e-portfolio. "
                 "Send me a case description by text, voice note, or photo."
             )
-        # Stay in current state
+        return AWAIT_CASE_INPUT
 
     else:
         # Intent is 'case' - looks like a new case
         await update.message.reply_text(
             "It looks like you want to file a new case. Send /reset to start fresh, or /cancel to exit."
         )
-        # Stay in current state
+        return AWAIT_CASE_INPUT
 
 
 # === APPLICATION BUILDER ===
@@ -635,6 +636,7 @@ def build_application() -> Application:
             CallbackQueryHandler(handle_callback),  # Handle all callbacks in fallback
         ],
         per_message=False,
+        allow_reentry=True,
     )
 
     # Setup conversation handler
@@ -645,6 +647,7 @@ def build_application() -> Application:
             AWAIT_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_password)],
         },
         fallbacks=[CommandHandler("cancel", setup_cancel)],
+        allow_reentry=True,
     )
 
     # Register handlers
@@ -660,6 +663,15 @@ def build_application() -> Application:
     return application
 
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log errors and notify user if possible."""
+    logger.error("Exception while handling an update:", exc_info=context.error)
+    if update and hasattr(update, 'effective_message') and update.effective_message:
+        await update.effective_message.reply_text(
+            "Something went wrong. Please send /reset and try again."
+        )
+
+
 def main():
     """Entry point for local development - runs in polling mode."""
     import requests as _req
@@ -672,6 +684,7 @@ def main():
     logger.info("Webhook cleared - polling mode active")
 
     application = build_application()
+    application.add_error_handler(error_handler)
     logger.info("Portfolio Guru v2 starting in POLLING mode...")
     application.run_polling(drop_pending_updates=True)
 
