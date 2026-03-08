@@ -42,7 +42,7 @@ WHAT_IS_THIS_MSG = """Portfolio Guru files your WPBA entries to Kaizen — in se
 
 Describe a clinical case by text, voice note, or photo. The bot works out which form fits (CBD, DOPS, LAT, Mini-CEX, ACAT, and more), extracts the right fields, and shows you a draft to review before anything is saved.
 
-You approve every draft before it goes to Kaizen. Nothing is submitted to a supervisor without your sign-off.
+You approve every draft before it goes to Kaizen. Nothing is submitted to an assessor without your sign-off.
 
 Supported forms: CBD · DOPS · Mini-CEX · ACAT · LAT · ACAF · STAT · MSF · QIAT · JCF"""
 
@@ -605,7 +605,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     slos = ", ".join(cbd_data.curriculum_links) if cbd_data.curriculum_links else "None"
 
     if status_result == "success":
-        msg = f"Saved as draft in Kaizen. Not submitted to supervisor.\n\nDate: {cbd_data.date_of_encounter}\nForm: CBD\nSLOs: {slos}"
+        msg = f"Saved as draft in Kaizen. Not submitted to assessor.\n\nDate: {cbd_data.date_of_encounter}\nForm: CBD\nSLOs: {slos}"
     elif status_result == "partial":
         msg = f"Draft saved but some fields may be incomplete. Review in Kaizen.\n\nDate: {cbd_data.date_of_encounter}"
     else:
