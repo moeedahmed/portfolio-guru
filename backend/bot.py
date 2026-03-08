@@ -44,25 +44,31 @@ FILE_CASE_PROMPT = "Send me a case description - text, voice note, or photo."
 def _build_welcome_keyboard():
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("What is this?", callback_data="INFO|what"),
-            InlineKeyboardButton("Connect Kaizen", callback_data="ACTION|setup"),
+            InlineKeyboardButton("❓ What is this?", callback_data="INFO|what"),
+            InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup"),
         ],
-        [InlineKeyboardButton("File a case", callback_data="ACTION|file")],
+        [InlineKeyboardButton("📂 File a case", callback_data="ACTION|file")],
     ])
 
+
+FORM_EMOJIS = {
+    "CBD": "🩺", "DOPS": "🔪", "MINI_CEX": "🏥", "ACAT": "📋",
+    "MSF": "👥", "QIAT": "🎓", "LAT": "📖", "JCF": "💼",
+    "ACAF": "✅", "STAT": "📊",
+}
 
 def _build_form_choice_keyboard(recommendations):
     """Build inline keyboard for form type selection."""
     buttons = []
     for rec in recommendations:
+        emoji = FORM_EMOJIS.get(rec.form_type, "📄")
         if rec.uuid:
-            label = rec.form_type
+            label = f"{emoji} {rec.form_type}"
             buttons.append(InlineKeyboardButton(label, callback_data=f"FORM|{rec.form_type}"))
         else:
-            # UUID not verified - show as coming soon
-            buttons.append(InlineKeyboardButton(f"{rec.form_type} (coming soon)", callback_data="FORM|disabled"))
+            buttons.append(InlineKeyboardButton(f"{emoji} {rec.form_type} (coming soon)", callback_data="FORM|disabled"))
     # Add cancel button
-    buttons.append(InlineKeyboardButton("Cancel", callback_data="CANCEL|form"))
+    buttons.append(InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|form"))
     # Arrange in rows of 2
     rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
     return InlineKeyboardMarkup(rows)
@@ -71,28 +77,28 @@ def _build_form_choice_keyboard(recommendations):
 def _build_approval_keyboard():
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("File this draft", callback_data="APPROVE|draft"),
-            InlineKeyboardButton("Edit", callback_data="EDIT|draft"),
+            InlineKeyboardButton("✅ File this draft", callback_data="APPROVE|draft"),
+            InlineKeyboardButton("✏️ Edit", callback_data="EDIT|draft"),
         ],
-        [InlineKeyboardButton("Cancel", callback_data="CANCEL|draft")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|draft")],
     ])
 
 
 def _build_edit_field_keyboard():
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Date", callback_data="FIELD|date_of_encounter"),
-            InlineKeyboardButton("Setting", callback_data="FIELD|clinical_setting"),
+            InlineKeyboardButton("📅 Date", callback_data="FIELD|date_of_encounter"),
+            InlineKeyboardButton("🏥 Setting", callback_data="FIELD|clinical_setting"),
         ],
         [
-            InlineKeyboardButton("Presentation", callback_data="FIELD|patient_presentation"),
-            InlineKeyboardButton("Case discussion", callback_data="FIELD|clinical_reasoning"),
+            InlineKeyboardButton("🩺 Presentation", callback_data="FIELD|patient_presentation"),
+            InlineKeyboardButton("📝 Case discussion", callback_data="FIELD|clinical_reasoning"),
         ],
         [
-            InlineKeyboardButton("Reflection", callback_data="FIELD|reflection"),
-            InlineKeyboardButton("SLOs", callback_data="FIELD|curriculum_links"),
+            InlineKeyboardButton("💭 Reflection", callback_data="FIELD|reflection"),
+            InlineKeyboardButton("📚 SLOs", callback_data="FIELD|curriculum_links"),
         ],
-        [InlineKeyboardButton("Cancel edit", callback_data="CANCEL|edit")],
+        [InlineKeyboardButton("↩️ Cancel edit", callback_data="CANCEL|edit")],
     ])
 
 
@@ -135,7 +141,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Credentials stored. Ready to file cases.")
     else:
         await update.message.reply_text("No credentials stored.", reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Connect Kaizen", callback_data="ACTION|setup")]
+            [InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")]
         ]))
 
 
@@ -221,7 +227,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text(
                 "Your Kaizen account is already connected. Send me a case to get started.",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("File a case", callback_data="ACTION|file")]
+                    [InlineKeyboardButton("📂 File a case", callback_data="ACTION|file")]
                 ])
             )
             return ConversationHandler.END
@@ -234,7 +240,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text(
                 "Connect your Kaizen account first.",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("Connect Kaizen", callback_data="ACTION|setup")]
+                    [InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")]
                 ])
             )
             return ConversationHandler.END
@@ -275,7 +281,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text(
             "Connect your Kaizen account first.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Connect Kaizen", callback_data="ACTION|setup")]
+                [InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")]
             ])
         )
         return ConversationHandler.END
@@ -483,7 +489,7 @@ async def handle_approval_edit(update: Update, context: ContextTypes.DEFAULT_TYP
     if not context.user_data.get("draft_data"):
         await query.message.reply_text(
             "This draft has expired (bot was restarted). Send /reset and file a new case.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Reset", callback_data="ACTION|reset")]])
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Reset", callback_data="ACTION|reset")]])
         )
         return ConversationHandler.END
 
