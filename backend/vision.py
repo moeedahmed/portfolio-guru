@@ -19,6 +19,7 @@ def _get_client():
 
 async def extract_from_image(image_path: str) -> str:
     """Extract case description from clinical photo/screenshot using Gemini Vision."""
+    import asyncio
     client = _get_client()
 
     # Read and encode image
@@ -38,6 +39,9 @@ async def extract_from_image(image_path: str) -> str:
 
     prompt = """Extract the clinical case description from this image.
 
+If this is a photo of a non-clinical subject (selfie, food, scenery, pet, random object, meme, etc.),
+respond with EXACTLY the word: NOT_CLINICAL
+
 If this is a screenshot of text (e.g. from notes, a message, or a document), transcribe all the clinical text.
 
 If this is a clinical photo, describe what you see in clinical terms that could be used for a case discussion.
@@ -55,9 +59,14 @@ Return ONLY the extracted/described text, no additional commentary."""
         )
     ]
 
-    response = client.models.generate_content(
-        model="gemini-3-flash-preview",
-        contents=contents,
+    # Run sync Gemini call in thread pool — never block the event loop
+    loop = asyncio.get_event_loop()
+    response = await loop.run_in_executor(
+        None,
+        lambda: client.models.generate_content(
+            model="gemini-3-flash-preview",
+            contents=contents,
+        )
     )
 
     return response.text.strip()

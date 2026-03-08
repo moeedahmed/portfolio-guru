@@ -23,6 +23,51 @@ from profile_store import init_profile_db, store_training_level, get_training_le
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+MAX_TELEGRAM_MSG = 4096
+
+
+async def _safe_edit_text(target, text: str, **kwargs):
+    """Edit message text, splitting if it exceeds Telegram's 4096 char limit.
+    For the first chunk, passes kwargs (reply_markup, parse_mode) through.
+    Subsequent chunks are sent as new messages with no markup."""
+    if len(text) <= MAX_TELEGRAM_MSG:
+        return await target.edit_text(text, **kwargs)
+
+    # Split at last newline before limit
+    chunks = []
+    remaining = text
+    while remaining:
+        if len(remaining) <= MAX_TELEGRAM_MSG:
+            chunks.append(remaining)
+            break
+        split_at = remaining[:MAX_TELEGRAM_MSG].rfind("\n")
+        if split_at < 100:
+            split_at = MAX_TELEGRAM_MSG - 1
+        chunks.append(remaining[:split_at])
+        remaining = remaining[split_at:].lstrip("\n")
+
+    # First chunk gets the kwargs (reply_markup etc.)
+    if len(chunks) == 1:
+        return await target.edit_text(chunks[0], **kwargs)
+
+    # First chunk edits the existing message (no buttons — they go on last chunk)
+    markup = kwargs.pop("reply_markup", None)
+    await target.edit_text(chunks[0], **kwargs)
+
+    # Middle chunks as new messages
+    chat = target.chat if hasattr(target, "chat") else None
+    for chunk in chunks[1:-1]:
+        if chat:
+            await chat.send_message(chunk, parse_mode=kwargs.get("parse_mode"))
+
+    # Last chunk gets the reply_markup
+    if chat and chunks[-1:]:
+        return await chat.send_message(
+            chunks[-1], reply_markup=markup, parse_mode=kwargs.get("parse_mode")
+        )
+
+
+
 
 def _store_draft(context, draft):
     """Store draft as plain dict so PicklePersistence can serialise it."""
@@ -372,13 +417,15 @@ def _format_generic_draft(draft: FormDraft) -> str:
 
 # === COMMAND HANDLERS ===
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data.clear()
     connected = has_credentials(update.effective_user.id)
     msg = WELCOME_MSG_CONNECTED if connected else WELCOME_MSG
     await update.message.reply_text(msg, reply_markup=_build_welcome_keyboard(connected=connected))
+    return ConversationHandler.END
 
 
-async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     if has_credentials(user_id):
         await update.message.reply_text("✅ Credentials stored. Ready to file cases.")
@@ -386,6 +433,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("🔗 No credentials stored.", reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")]
         ]))
+    return ConversationHandler.END
 
 
 # === SETUP FLOW ===
@@ -419,7 +467,12 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     try:
         await update.message.delete()
     except Exception:
-        pass
+        # Can't delete in groups without admin rights — warn user
+        if update.effective_chat.type != "private":
+            await update.effective_chat.send_message(
+                "⚠️ I couldn't delete your password message — I need admin rights in groups. "
+                "Please delete it manually, or use /setup in a private chat with me for better security."
+            )
 
     store_credentials(user_id, username, password)
     context.user_data.pop("setup_username", None)
@@ -492,12 +545,67 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return ConversationHandler.END
 
 
+async def delete_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Delete all stored data for this user — credentials, profile, conversation state."""
+    user_id = update.effective_user.id
+    context.user_data.clear()
+
+    # Delete credentials
+    from credentials import engine as cred_engine, UserCredential
+    from profile_store import engine as prof_engine, UserProfile
+    from sqlmodel import Session, select
+
+    deleted_items = []
+    with Session(cred_engine) as session:
+        cred = session.exec(select(UserCredential).where(UserCredential.telegram_user_id == user_id)).first()
+        if cred:
+            session.delete(cred)
+            session.commit()
+            deleted_items.append("Kaizen credentials")
+
+    with Session(prof_engine) as session:
+        profile = session.exec(select(UserProfile).where(UserProfile.telegram_user_id == user_id)).first()
+        if profile:
+            session.delete(profile)
+            session.commit()
+            deleted_items.append("training level")
+
+    if deleted_items:
+        await update.message.reply_text(
+            f"🗑️ Deleted: {', '.join(deleted_items)}.\n\nYour data has been erased. Run /setup to reconnect."
+        )
+    else:
+        await update.message.reply_text("ℹ️ No stored data found for your account.")
+    return ConversationHandler.END
+
+
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Reset conversation state and clear user data."""
     context.user_data.clear()
     await update.message.reply_text(
         "✅ Reset done — all clear.\n\nSend a case by text, voice, or photo whenever you're ready."
     )
+    return ConversationHandler.END
+
+
+HELP_MSG = """📖 *Portfolio Guru — Commands*
+
+/start — Welcome screen
+/setup — Connect your Kaizen account
+/status — Check if Kaizen is connected
+/reset — Clear current session
+/cancel — Cancel current action
+/delete — Delete all your stored data
+
+*How to use:*
+Send a case description by text, voice note, or photo. I'll suggest the best form, show you a draft, and file it when you approve.
+
+*Supported forms:*
+CBD · DOPS · Mini-CEX · ACAT · LAT · ACAF · STAT · MSF · QIAT · JCF · Teaching · Procedural Log · SDL · Ultrasound Case · ESLE · Complaint · Serious Incident · Educational Activity · Formal Course"""
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text(HELP_MSG, parse_mode="Markdown")
     return ConversationHandler.END
 
 
@@ -621,12 +729,13 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     elif update.message.voice:
         ack = await update.message.reply_text("🎙️ Transcribing voice note…")
+        tmp_path = None
         try:
             voice_file = await update.message.voice.get_file()
             with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
-                await voice_file.download_to_drive(tmp.name)
-                case_text = await transcribe_voice(tmp.name)
-                os.unlink(tmp.name)
+                tmp_path = tmp.name
+                await voice_file.download_to_drive(tmp_path)
+                case_text = await transcribe_voice(tmp_path)
             await ack.edit_text("🎙️ Voice note read. Finding matching forms…")
             context.user_data["status_msg_id"] = ack.message_id
             context.user_data["status_msg_chat"] = ack.chat_id
@@ -634,16 +743,20 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             context.user_data.clear()
             await ack.edit_text("⚠️ Couldn't transcribe voice note. Try again.")
             return ConversationHandler.END
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
     elif update.message.photo:
         ack = await update.message.reply_text("📷 Reading image…")
+        tmp_path = None
         try:
             photo = update.message.photo[-1]
             photo_file = await photo.get_file()
             with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-                await photo_file.download_to_drive(tmp.name)
-                case_text = await extract_from_image(tmp.name)
-                os.unlink(tmp.name)
+                tmp_path = tmp.name
+                await photo_file.download_to_drive(tmp_path)
+                case_text = await extract_from_image(tmp_path)
             if case_text.strip() == "NOT_CLINICAL":
                 await ack.edit_text("This image doesn't look like a clinical case. Send a text description or a photo of clinical notes/findings.")
                 return ConversationHandler.END
@@ -654,6 +767,9 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             context.user_data.clear()
             await ack.edit_text("⚠️ Couldn't read image. Try a clearer photo or describe the case in text.")
             return ConversationHandler.END
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
     if not case_text:
         context.user_data.clear()
@@ -682,7 +798,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await ack.edit_text("⚠️ Could not generate draft. Try again or /reset.")
             return ConversationHandler.END
         preview = _format_draft_preview(draft)
-        await ack.edit_text(preview, reply_markup=_build_approval_keyboard(), parse_mode="Markdown")
+        await _safe_edit_text(ack, preview, reply_markup=_build_approval_keyboard(), parse_mode="Markdown")
         return AWAIT_APPROVAL
 
     # No explicit form — get AI recommendations filtered by training level (if set)
@@ -819,7 +935,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     # Replace status with draft preview + approval buttons — same message, no new bubble
     preview = _format_draft_preview(draft)
-    await query.edit_message_text(preview, reply_markup=_build_approval_keyboard(), parse_mode="Markdown")
+    await _safe_edit_text(query.message, preview, reply_markup=_build_approval_keyboard(), parse_mode="Markdown")
     return AWAIT_APPROVAL
 
 
@@ -952,30 +1068,38 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if voice:
         ack = await msg.reply_text("🎙️ Transcribing…")
+        tmp_path = None
         try:
             voice_file = await voice.get_file()
             with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
-                await voice_file.download_to_drive(tmp.name)
-                feedback = await transcribe_voice(tmp.name)
-                os.unlink(tmp.name)
+                tmp_path = tmp.name
+                await voice_file.download_to_drive(tmp_path)
+                feedback = await transcribe_voice(tmp_path)
             await ack.edit_text("✏️ Regenerating draft with your feedback…")
         except Exception as e:
             logger.error(f"Voice transcription in edit failed: {e}", exc_info=True)
             await ack.edit_text("⚠️ Couldn't transcribe voice note. Type your feedback instead.")
             return AWAIT_EDIT_VALUE
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
     elif photo:
         ack = await msg.reply_text("📷 Reading image…")
+        tmp_path = None
         try:
             photo_file = await photo[-1].get_file()
             with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-                await photo_file.download_to_drive(tmp.name)
-                feedback = await extract_from_image(tmp.name)
-                os.unlink(tmp.name)
+                tmp_path = tmp.name
+                await photo_file.download_to_drive(tmp_path)
+                feedback = await extract_from_image(tmp_path)
             await ack.edit_text("✏️ Regenerating draft with your feedback…")
         except Exception as e:
             logger.error(f"Photo extraction in edit failed: {e}", exc_info=True)
             await ack.edit_text("⚠️ Couldn't read image. Type your feedback instead.")
             return AWAIT_EDIT_VALUE
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
     elif msg.text:
         feedback = msg.text.strip()
         ack = await msg.reply_text("✏️ Regenerating draft with your feedback…")
@@ -1007,7 +1131,7 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return AWAIT_APPROVAL
 
     preview = _format_draft_preview(updated)
-    await ack.edit_text(preview, reply_markup=_build_approval_keyboard(), parse_mode="Markdown")
+    await _safe_edit_text(ack, preview, reply_markup=_build_approval_keyboard(), parse_mode="Markdown")
     return AWAIT_APPROVAL
 
 
@@ -1106,6 +1230,9 @@ def build_application() -> Application:
             ],
         },
         fallbacks=[
+            CommandHandler("start", start),
+            CommandHandler("help", help_command),
+            CommandHandler("status", status),
             CommandHandler("reset", reset),
             CommandHandler("cancel", setup_cancel),
             CallbackQueryHandler(handle_callback),  # Handle all callbacks in fallback
@@ -1133,6 +1260,8 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("status", status))
     application.add_handler(CommandHandler("reset", reset))
     application.add_handler(CommandHandler("cancel", cancel_command))
+    application.add_handler(CommandHandler("delete", delete_data))
+    application.add_handler(CommandHandler("help", help_command))
     # Top-level handlers that must work regardless of conversation state
     application.add_handler(CallbackQueryHandler(handle_info_button, pattern=r"^INFO\|"))
     application.add_handler(CallbackQueryHandler(handle_setup_button, pattern=r"^ACTION\|setup$"))
@@ -1177,6 +1306,8 @@ def main():
             ("status", "Check if Kaizen is connected"),
             ("reset", "Clear current session and start fresh"),
             ("cancel", "Cancel whatever is happening"),
+            ("delete", "Delete all your stored data"),
+            ("help", "How to use Portfolio Guru"),
         ])
     application.post_init = post_init
 

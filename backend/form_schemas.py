@@ -126,6 +126,7 @@ FORM_SCHEMAS = {
             {"key": "future_research",      "label": "Recommend future research ideas",    "type": "text",  "required": False},
             {"key": "reflection",           "label": "Comment (Reflection)",               "type": "text",  "required": False},
             {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)",            "type": "kc_tick","required": False},
+            {"key": "key_capabilities",     "label": "Key Capabilities",                   "type": "kc_tick","required": False},
         ]
     },
 
@@ -146,6 +147,7 @@ FORM_SCHEMAS = {
             {"key": "session_length",       "label": "Length of Session",       "type": "text",     "required": False},
             {"key": "session_title",        "label": "Title of Teaching Session","type": "text",    "required": True},
             {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)", "type": "kc_tick",  "required": False},
+            {"key": "key_capabilities",     "label": "Key Capabilities",        "type": "kc_tick",  "required": False},
         ]
     },
 
@@ -182,6 +184,7 @@ FORM_SCHEMAS = {
             {"key": "reflection",           "label": "Reflections and Learning",    "type": "text",     "required": True},
             {"key": "next_pdp",             "label": "Next Year's PDP",             "type": "text",     "required": True},
             {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)",     "type": "kc_tick",  "required": False},
+            {"key": "key_capabilities",     "label": "Key Capabilities",        "type": "kc_tick",  "required": False},
         ]
     },
 
@@ -200,6 +203,7 @@ FORM_SCHEMAS = {
             {"key": "session_length",       "label": "Length of Session",       "type": "text",     "required": False},
             {"key": "paper_title",          "label": "Title of Paper",          "type": "text",     "required": True},
             {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)", "type": "kc_tick",  "required": False},
+            {"key": "key_capabilities",     "label": "Key Capabilities",        "type": "kc_tick",  "required": False},
         ]
     },
 
@@ -215,6 +219,7 @@ FORM_SCHEMAS = {
              "options": ["- n/a -", "ATLS", "APLS", "ALS", "ELS", "Other"]},
             {"key": "learning_outcomes",    "label": "Learning outcomes used in session", "type": "text", "required": True},
             {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)",     "type": "kc_tick",  "required": False},
+            {"key": "key_capabilities",     "label": "Key Capabilities",        "type": "kc_tick",  "required": False},
         ]
     },
 
@@ -229,6 +234,7 @@ FORM_SCHEMAS = {
             {"key": "age_of_patient",       "label": "Age of patient",              "type": "text",     "required": False},
             {"key": "reflective_comments",  "label": "Reflective comments on procedure", "type": "text", "required": True},
             {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)",     "type": "kc_tick",  "required": False},
+            {"key": "key_capabilities",     "label": "Key Capabilities",        "type": "kc_tick",  "required": False},
         ]
     },
 
@@ -243,6 +249,7 @@ FORM_SCHEMAS = {
             {"key": "resource_details",     "label": "Please specify details of the learning resource", "type": "text", "required": True},
             {"key": "reflection",           "label": "Reflection",                  "type": "text",     "required": False},
             {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)",     "type": "kc_tick",  "required": False},
+            {"key": "key_capabilities",     "label": "Key Capabilities",        "type": "kc_tick",  "required": False},
         ]
     },
 
@@ -267,6 +274,7 @@ FORM_SCHEMAS = {
             {"key": "learning_points",      "label": "What did you learn from this case?", "type": "text", "required": False},
             {"key": "other_comments",       "label": "Other comments",              "type": "text",     "required": False},
             {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)",     "type": "kc_tick",  "required": False},
+            {"key": "key_capabilities",     "label": "Key Capabilities",        "type": "kc_tick",  "required": False},
         ]
     },
 
@@ -286,6 +294,7 @@ FORM_SCHEMAS = {
             {"key": "learned",              "label": "What have you learned from the experience?", "type": "text", "required": False},
             {"key": "further_action",       "label": "Further action required",     "type": "text",     "required": False},
             {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)",     "type": "kc_tick",  "required": False},
+            {"key": "key_capabilities",     "label": "Key Capabilities",        "type": "kc_tick",  "required": False},
         ]
     },
 
@@ -300,6 +309,7 @@ FORM_SCHEMAS = {
             {"key": "learning_points",      "label": "What are the learning points from this case?", "type": "text", "required": True},
             {"key": "further_action",       "label": "Further action required",     "type": "text",     "required": True},
             {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)",     "type": "kc_tick",  "required": False},
+            {"key": "key_capabilities",     "label": "Key Capabilities",        "type": "kc_tick",  "required": False},
         ]
     },
 
@@ -315,6 +325,7 @@ FORM_SCHEMAS = {
             {"key": "learning_points",      "label": "What are the learning points from this case?", "type": "text", "required": True},
             {"key": "further_action",       "label": "Further action required",     "type": "text",     "required": True},
             {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)",     "type": "kc_tick",  "required": False},
+            {"key": "key_capabilities",     "label": "Key Capabilities",        "type": "kc_tick",  "required": False},
         ]
     },
 
@@ -328,6 +339,7 @@ FORM_SCHEMAS = {
             {"key": "learning_points",      "label": "Main learning points",        "type": "text",     "required": False},
             # curriculum_section omitted — rendered via curriculum_links hierarchy
             {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)",     "type": "kc_tick",  "required": False},
+            {"key": "key_capabilities",     "label": "Key Capabilities",        "type": "kc_tick",  "required": False},
         ]
     },
 
@@ -342,6 +354,7 @@ FORM_SCHEMAS = {
             {"key": "resources_used",       "label": "Resources Used",              "type": "text",     "required": True},
             {"key": "lessons_learned",      "label": "Lessons learned",             "type": "text",     "required": True},
             {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)",     "type": "kc_tick",  "required": False},
+            {"key": "key_capabilities",     "label": "Key Capabilities",        "type": "kc_tick",  "required": False},
         ]
     },
 }

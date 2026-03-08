@@ -1,52 +1,75 @@
 # Portfolio Guru — CLAUDE.md
 
 ## Project
-Portfolio Guru automates e-portfolio filing for doctors in training.
-Doctor sends a text description of a clinical case via Telegram → LLM extracts structured WPBA data → browser-use logs into Kaizen → fills CBD form → saves as draft → replies to Telegram.
+Portfolio Guru automates e-portfolio filing for UK EM trainees.
+Doctor sends a clinical case via Telegram (text, voice, or photo) → Gemini extracts structured WPBA data → shows draft for approval → saves to Kaizen (CBD auto-filed via browser-use; other forms saved as local JSON draft with Kaizen link).
 
 ## Stack
-- Backend: FastAPI + Python 3.12
-- Telegram bot: python-telegram-bot v21+
-- Browser automation: browser-use + Playwright (Chromium)
-- LLM extraction: Anthropic Claude (claude-haiku-4-5)
-- LLM navigation: Anthropic Claude (claude-opus-4-5 via browser-use)
+- Telegram bot: python-telegram-bot v21+ (polling mode)
+- LLM extraction/vision/voice: Google Gemini 3 Flash Preview (`gemini-3-flash-preview`)
+- Browser automation: browser-use + Playwright (Chromium) — CBD filer only
 - Credential store: Fernet-encrypted SQLite (via SQLModel)
+- State persistence: PicklePersistence (survives restarts)
 - Target platform: Kaizen ePortfolio (eportfolio.rcem.ac.uk → kaizenep.com)
-- Deployment: Railway (Docker container)
+- Deployment: systemd user service (`portfolio-guru-bot.service`) on local machine
 
 ## Key Constraints
 - NEVER log credentials (username, password, or decrypted values)
-- NEVER submit the CBD — draft save only
+- NEVER submit any form — draft save only
 - NEVER send to supervisor — that's the doctor's action
-- Always capture screenshot before returning
 - Bot token in TELEGRAM_BOT_TOKEN env var
+- Google API key in GOOGLE_API_KEY env var
 - Fernet key in FERNET_SECRET_KEY env var
 
-## Kaizen CBD Form
-- Login: https://eportfolio.rcem.ac.uk → redirects to kaizenep.com
-- CBD URL (2025 Update): https://kaizenep.com/events/new-section/3ce5989a-b61c-4c24-ab12-711bf928b181
-- ALWAYS navigate directly to the UUID URL — do not use menus
-- Date format: Kaizen expects d/m/yyyy (e.g. 6/3/2026), not ISO
+## Supported Forms (19)
+CBD · DOPS · Mini-CEX · ACAT · LAT · ACAF · STAT · MSF · QIAT · JCF · TEACH · PROC_LOG · SDL · US_CASE · ESLE · COMPLAINT · SERIOUS_INC · EDU_ACT · FORMAL_COURSE
 
-## User Credentials (for testing — dev only)
-These are Moeed's Kaizen credentials in Bitwarden Secrets Manager:
-- Username BWS ID: 6e14d32b-6fff-480d-87b0-b3f300ee30f6
-- Password BWS ID: f311d41a-fa77-44f8-be42-b3f300ee3e08
+Only CBD has a browser-use auto-filer. All other forms save a JSON draft locally and provide a Kaizen link.
 
-In production, credentials come from the per-user encrypted SQLite store (credentials.py).
+## Kaizen Form UUIDs
+All 19 form UUIDs are in `backend/extractor.py` → `FORM_UUIDS` dict.
+CBD URL pattern: `https://kaizenep.com/events/new-section/<UUID>`
+Date format: Kaizen expects d/m/yyyy (e.g. 6/3/2026), not ISO.
 
 ## File Structure
 ```
 portfolio-guru/
 ├── backend/
-│   ├── main.py          # FastAPI app, /api/file endpoint
-│   ├── bot.py           # Telegram bot
-│   ├── extractor.py     # LLM extraction → CBDData
-│   ├── filer.py         # browser-use agent → Kaizen
-│   ├── models.py        # Pydantic schemas
-│   ├── credentials.py   # Fernet-encrypted credential store
-│   ├── config.py        # BWS credential loading (dev fallback)
-│   ├── Dockerfile
+│   ├── bot.py           # Telegram bot — conversation handler, draft preview, approval flow
+│   ├── extractor.py     # Gemini extraction — CBD, generic forms, recommendations, intent classification
+│   ├── form_schemas.py  # Ground-truth Kaizen form schemas (19 forms)
+│   ├── models.py        # Pydantic models — CBDData, FormDraft, FormTypeRecommendation
+│   ├── filer.py         # browser-use CBD auto-filer (Playwright + Gemini)
+│   ├── vision.py        # Image extraction via Gemini Vision
+│   ├── whisper.py       # Voice transcription via Gemini native audio
+│   ├── credentials.py   # Fernet-encrypted credential store (SQLite)
+│   ├── profile_store.py # Training level store (SQLite)
+│   ├── store.py         # Unified store — picks SQLite or Render backend
+│   ├── config.py        # BWS credential loading (dev)
+│   ├── render_store.py  # Render.com env var store (production)
+│   ├── main.py          # FastAPI app (legacy, not used in polling mode)
+│   ├── run_local.sh     # Local dev startup script (loads BWS secrets)
 │   └── requirements.txt
-└── CLAUDE.md
+├── CLAUDE.md            # This file
+└── WORKFLOWS.md         # Agent-readable workflow definitions
 ```
+
+## Conversation States
+AWAIT_USERNAME=0, AWAIT_PASSWORD=1, AWAIT_FORM_CHOICE=2, AWAIT_APPROVAL=3,
+AWAIT_EDIT_FIELD=4, AWAIT_EDIT_VALUE=5, AWAIT_CASE_INPUT=6, AWAIT_TRAINING_LEVEL=7
+
+## Key Design Decisions
+- `allow_reentry=False` on case_conv — prevents voice/photo from restarting conversation mid-edit
+- PicklePersistence with `_store_draft`/`_load_draft` helpers — Pydantic objects stored as plain dicts
+- KC-first curriculum selection — KCs picked directly from case context, SLOs derived
+- `curriculum_links` = SLO codes only; `key_capabilities` = full KC strings
+- All Gemini calls wrapped in `_gemini_call_with_retry` with `run_in_executor` (never blocks event loop)
+- Stale button guard on `handle_form_choice` — expired buttons show clean message
+
+## Testing
+- Bot token BWS ID: af553b7d-5c05-418a-b80e-b405015708ed
+- Google API key BWS ID: af6579a0-2cbe-4cef-94b3-b405017b48fe
+- Fernet key BWS ID: 9e653679-9a33-4c23-a15c-b405015713de
+- Test account: Create via /setup in bot
+- Restart: `systemctl --user restart portfolio-guru-bot.service`
+- Logs: `tail -f /tmp/portfolio-guru-bot.log`

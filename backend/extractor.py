@@ -158,16 +158,25 @@ def extract_explicit_form_type(text: str) -> str | None:
     """
     text_lower = text.lower()
     patterns = {
-        "CBD":      ["cbd", "case-based discussion", "case based discussion"],
-        "DOPS":     ["dops", "directly observed procedural", "procedural skill"],
-        "MINI_CEX": ["mini cex", "mini-cex", "minicex", "clinical evaluation exercise"],
-        "LAT":      ["lat", "acute care assessment", "acute assessment tool"],
-        "ACAT":     ["acat", "acute care assessment"],
-        "ACAF":     ["acaf", "acute care assessment form"],
-        "STAT":     ["stat", "structured assessment"],
-        "MSF":      ["msf", "multi source feedback", "multi-source feedback", "360"],
-        "QIAT":     ["qiat", "quality improvement"],
-        "JCF":      ["jcf", "journal club"],
+        "CBD":          ["cbd", "case-based discussion", "case based discussion"],
+        "DOPS":         ["dops", "directly observed procedural", "procedural skill"],
+        "MINI_CEX":     ["mini cex", "mini-cex", "minicex", "clinical evaluation exercise"],
+        "LAT":          ["lat", "leadership assessment tool"],
+        "ACAT":         ["acat", "acute care assessment tool"],
+        "ACAF":         ["acaf", "applied critical appraisal", "critical appraisal form"],
+        "STAT":         ["stat", "structured teaching assessment"],
+        "MSF":          ["msf", "multi source feedback", "multi-source feedback", "360"],
+        "QIAT":         ["qiat", "quality improvement assessment"],
+        "JCF":          ["jcf", "journal club"],
+        "TEACH":        ["teach form", "teaching delivered", "teaching session form"],
+        "PROC_LOG":     ["proc log", "procedural log", "procedure log"],
+        "SDL":          ["sdl", "self-directed learning", "self directed learning"],
+        "US_CASE":      ["ultrasound case", "us case", "pocus case"],
+        "ESLE":         ["esle", "significant learning event"],
+        "COMPLAINT":    ["complaint reflection", "complaint form"],
+        "SERIOUS_INC":  ["serious incident", "si reflection", "never event"],
+        "EDU_ACT":      ["educational activity", "edu act", "teaching attended"],
+        "FORMAL_COURSE":["formal course", "atls", "apls", "als course", "epals"],
     }
     for form_type, keywords in patterns.items():
         if any(kw in text_lower for kw in keywords):
@@ -246,7 +255,7 @@ async def recommend_form_types(case_description: str) -> List[FormTypeRecommenda
 
 Rules:
 - CBD: Always if trainee managed a clinical case (retrospective reasoning discussion)
-- LAT: ONLY if the trainee was explicitly the shift leader or shift co-ordinator, or managed a major incident as lead. Advising a junior colleague or teaching a colleague does NOT qualify for LAT.
+- LAT: ONLY if the trainee was explicitly the shift leader or shift co-ordinator, or managed a major incident as lead
 - DOPS: If trainee personally performed a hands-on procedure (intubation, central line, LP, chest drain, etc.)
 - ACAT: If description covers a full shift or multiple patients observed
 - MINI_CEX: If someone directly observed the trainee seeing a patient (real-time bedside observation)
@@ -255,6 +264,15 @@ Rules:
 - STAT: If trainee delivered a structured teaching session to a group
 - QIAT: If trainee completed or is presenting a QI project
 - MSF: If trainee is requesting 360-degree colleague feedback
+- TEACH: If trainee delivered teaching (bedside, sim, lecture) or supervised a junior
+- PROC_LOG: If trainee performed a procedure and wants to log it (lighter than DOPS — no assessor needed)
+- SDL: If trainee did self-directed learning (podcast, article, online module, video)
+- US_CASE: If trainee performed or interpreted a point-of-care ultrasound scan
+- ESLE: If trainee is reflecting on an event with significant learning (near-miss, unexpected outcome, difficult situation)
+- COMPLAINT: If trainee is reflecting on a patient complaint
+- SERIOUS_INC: If trainee is reflecting on a serious incident or never event
+- EDU_ACT: If trainee attended a teaching session, lecture, or educational event (as learner, not teacher)
+- FORMAL_COURSE: If trainee attended a formal course (ATLS, APLS, ALS, etc.)
 - Never recommend more than 3 forms
 
 Return ONLY a JSON array:
