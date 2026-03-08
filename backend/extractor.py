@@ -92,17 +92,22 @@ async def _gemini_generate(prompt, retries: int = 2, delay: int = 1):
     Tries PRIMARY_MODEL first with retries, then FALLBACK_MODEL.
     Fast-path: minimal retries to keep latency low.
     """
+    import time as _time
     client = _get_client()
     loop = asyncio.get_event_loop()
     last_error = None
+    t0 = _time.monotonic()
 
     for model in [PRIMARY_MODEL, FALLBACK_MODEL]:
         for attempt in range(retries if model == PRIMARY_MODEL else 1):
             try:
-                return await loop.run_in_executor(
+                result = await loop.run_in_executor(
                     None,
                     lambda m=model: client.models.generate_content(model=m, contents=prompt)
                 )
+                elapsed = _time.monotonic() - t0
+                logger.info(f"Gemini {model} responded in {elapsed:.1f}s")
+                return result
             except Exception as e:
                 error_msg = str(e).lower()
                 if any(term in error_msg for term in ["503", "unavailable", "overloaded", "404"]):
@@ -110,7 +115,7 @@ async def _gemini_generate(prompt, retries: int = 2, delay: int = 1):
                     if model == PRIMARY_MODEL and attempt < retries - 1:
                         await asyncio.sleep(delay)
                     elif model == PRIMARY_MODEL:
-                        logger.warning(f"{PRIMARY_MODEL} failed after {retries} retries, falling back to {FALLBACK_MODEL}")
+                        logger.warning(f"{PRIMARY_MODEL} failed after {retries} retries ({_time.monotonic()-t0:.1f}s), falling back to {FALLBACK_MODEL}")
                     continue
                 raise
     raise last_error

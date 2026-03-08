@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import tempfile
+import time
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
@@ -901,10 +902,14 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         ack = await update.message.reply_text(f"{emoji} Generating {_form_display_name(explicit_form)} draft…")
         try:
             if explicit_form == "CBD":
-                draft = await extract_cbd_data(case_text)
+                draft = await asyncio.wait_for(extract_cbd_data(case_text), timeout=45)
             else:
-                draft = await extract_form_data(case_text, explicit_form)
+                draft = await asyncio.wait_for(extract_form_data(case_text, explicit_form), timeout=45)
             _store_draft(context, draft)
+        except asyncio.TimeoutError:
+            logger.error(f"Draft generation timed out for explicit {explicit_form}")
+            await ack.edit_text("⏳ Draft generation timed out. Please try again.")
+            return ConversationHandler.END
         except Exception as e:
             logger.error(f"Draft generation failed: {e}", exc_info=True)
             await ack.edit_text("⚠️ Could not generate draft. Try again or /reset.")
@@ -920,7 +925,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     await update.effective_chat.send_action(constants.ChatAction.TYPING)
     try:
-        recommendations = await recommend_form_types(case_text)
+        recommendations = await asyncio.wait_for(recommend_form_types(case_text), timeout=30)
         # Filter to forms appropriate for this training level
         recommendations = [r for r in recommendations if r.form_type in allowed_forms]
         context.user_data["form_recommendations"] = recommendations
@@ -1036,10 +1041,14 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     try:
         if form_type == "CBD":
-            draft = await extract_cbd_data(case_text)
+            draft = await asyncio.wait_for(extract_cbd_data(case_text), timeout=45)
         else:
-            draft = await extract_form_data(case_text, form_type)
+            draft = await asyncio.wait_for(extract_form_data(case_text, form_type), timeout=45)
         _store_draft(context, draft)
+    except asyncio.TimeoutError:
+        logger.error(f"Draft generation timed out after 45s for {form_type}")
+        await query.edit_message_text("⏳ Draft generation timed out. Please try again — /reset if needed.", reply_markup=None)
+        return ConversationHandler.END
     except Exception as e:
         logger.error(f"Draft generation failed in form_choice: {e}", exc_info=True)
         await query.edit_message_text(f"⚠️ Could not generate draft. Try again or /reset.", reply_markup=None)
@@ -1262,19 +1271,22 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         current_draft_text = _format_draft_preview(draft)
 
         if form_type == "CBD":
-            updated = await extract_cbd_data(
+            updated = await asyncio.wait_for(extract_cbd_data(
                 case_text,
                 edit_feedback=feedback,
                 current_draft=current_draft_text
-            )
+            ), timeout=45)
         else:
-            updated = await extract_form_data(
+            updated = await asyncio.wait_for(extract_form_data(
                 case_text,
                 form_type,
                 edit_feedback=feedback,
                 current_draft=current_draft_text
-            )
+            ), timeout=45)
         _store_draft(context, updated)
+    except asyncio.TimeoutError:
+        await ack.edit_text("⏳ Regeneration timed out. Try again or /reset.")
+        return AWAIT_APPROVAL
     except Exception as e:
         await ack.edit_text("⚠️ Couldn't regenerate. Try again or /reset.")
         return AWAIT_APPROVAL
