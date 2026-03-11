@@ -20,6 +20,7 @@ from form_schemas import FORM_SCHEMAS
 from models import FormDraft, CBDData
 from whisper import transcribe_voice
 from vision import extract_from_image
+from documents import extract_from_document, is_supported_document
 from profile_store import init_profile_db, store_training_level, get_training_level, get_voice_profile, store_voice_profile, clear_voice_profile
 
 logging.basicConfig(level=logging.INFO)
@@ -126,7 +127,7 @@ TRAINING_LEVEL_FORMS = {
 
 WELCOME_MSG = """🩺 Portfolio Guru — your WPBA entries, filed in seconds.
 
-Describe a case by text, voice note, or photo.
+Describe a case by text, voice note, photo, or document.
 I'll pick the right form, draft the entry, and file it when you approve.
 
 Your credentials are encrypted and never shared.
@@ -135,20 +136,20 @@ Tap 🔗 Connect to get started."""
 
 WELCOME_MSG_CONNECTED = """🩺 Portfolio Guru — ready when you are.
 
-Send me a clinical case (text, voice, or photo) and I'll handle the rest."""
+Send me a clinical case (text, voice, photo, or document) and I'll handle the rest."""
 
 WHAT_IS_THIS_MSG = """🩺 Portfolio Guru files your WPBA entries — in seconds.
 
 📝 Describe → 🔍 I pick the form → ✅ You approve → 📤 Filed
 
-Describe a clinical case by text, voice note, or photo. The bot works out which form fits best, extracts the right fields, and shows you the full draft to review. Nothing is saved until you approve.
+Describe a clinical case by text, voice note, photo, or document (PDF, PowerPoint, Word). The bot works out which form fits best, extracts the right fields, and shows you the full draft to review. Nothing is saved until you approve.
 
 All 19 RCEM forms supported:
 CBD · DOPS · Mini-CEX · ACAT · LAT · ACAF · STAT · MSF · QIAT · JCF · Teaching · Procedural Log · SDL · Ultrasound Case · ESLE · Complaint · Serious Incident · Educational Activity · Formal Course
 
 Works with Kaizen and other e-portfolio platforms."""
 
-FILE_CASE_PROMPT = "Send me a case description — text, voice note, or photo."
+FILE_CASE_PROMPT = "Send me a case description — text, voice note, photo, or document (PDF, PowerPoint, Word)."
 
 
 def _build_welcome_keyboard(connected: bool = False):
@@ -870,7 +871,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]])
             )
         else:
-            await query.message.reply_text("📋 Send me a case — text, voice note, or photo.")
+            await query.message.reply_text("📋 Send me a case — text, voice note, photo, or document.")
 
     elif action == "help":
         await query.message.reply_text(WHAT_IS_THIS_MSG)
@@ -971,7 +972,7 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Reset conversation state and clear user data."""
     context.user_data.clear()
     await update.message.reply_text(
-        "✅ Reset done — all clear.\n\nSend a case by text, voice, or photo whenever you're ready."
+        "✅ Reset done — all clear.\n\nSend a case by text, voice, photo, or document whenever you're ready."
     )
     return ConversationHandler.END
 
@@ -981,7 +982,7 @@ HELP_MSG = """📖 *Portfolio Guru — Help*
 *How it works:*
 📝 Describe a case → 🔍 I pick the form → ✅ You approve → 📤 Filed
 
-Send a case by text, voice note, or photo. I'll suggest the best WPBA form, generate a full draft, and file it to your e-portfolio when you approve.
+Send a case by text, voice note, photo, or document. I'll suggest the best WPBA form, generate a full draft, and file it to your e-portfolio when you approve.
 
 *All 19 RCEM forms supported:*
 CBD · DOPS · Mini-CEX · ACAT · LAT · ACAF · STAT · MSF · QIAT · JCF · Teaching · Procedural Log · SDL · Ultrasound Case · ESLE · Complaint · Serious Incident · Educational Activity · Formal Course"""
@@ -1097,7 +1098,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # === CASE INPUT HANDLER ===
 
 async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle text, voice, or photo input for case description."""
+    """Handle text, voice, photo, or document input for case description."""
     user_id = update.effective_user.id
 
     # Clear any stale status message state from previous sessions
@@ -1161,7 +1162,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             except Exception:
                 await update.message.reply_text(
                     "I help you file clinical cases to your Kaizen e-portfolio. "
-                    "Send me a case description by text, voice note, or photo."
+                    "Send me a case description by text, voice note, photo, or document."
                 )
             return ConversationHandler.END
 
@@ -1212,9 +1213,65 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
 
+    elif update.message.document:
+        # Handle document files (PDF, PPTX, DOCX)
+        doc = update.message.document
+        file_name = doc.file_name or "document"
+        
+        if not is_supported_document(file_name):
+            await update.message.reply_text(
+                f"📄 *{file_name}*\n\nI can read PDF, PowerPoint (.pptx), Word (.docx), and text files. "
+                "This file type isn't supported yet.",
+                parse_mode="Markdown"
+            )
+            return ConversationHandler.END
+        
+        ack = await update.message.reply_text(f"📄 Reading *{file_name}*…", parse_mode="Markdown")
+        tmp_path = None
+        try:
+            doc_file = await doc.get_file()
+            # Determine file extension from original filename
+            suffix = os.path.splitext(file_name)[1] or ".tmp"
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                tmp_path = tmp.name
+                await doc_file.download_to_drive(tmp_path)
+                case_text = await extract_from_document(tmp_path)
+            
+            if not case_text or not case_text.strip():
+                await ack.edit_text(
+                    f"⚠️ Couldn't extract text from *{file_name}*. "
+                    "The file might be scanned images (no text layer) or password-protected.\n\n"
+                    "Try:\n"
+                    "• Sending a clearer/updated version\n"
+                    "• Describing the case in text instead",
+                    parse_mode="Markdown"
+                )
+                return ConversationHandler.END
+            
+            # Truncate very long documents
+            max_chars = 15000
+            if len(case_text) > max_chars:
+                case_text = case_text[:max_chars] + "\n\n[Document truncated — using first 15,000 characters]"
+            
+            await ack.edit_text(f"📄 *{file_name}* read. Finding matching forms…", parse_mode="Markdown")
+            context.user_data["status_msg_id"] = ack.message_id
+            context.user_data["status_msg_chat"] = ack.chat_id
+            context.user_data["document_name"] = file_name
+        except Exception as e:
+            logger.error(f"Document processing failed: {e}", exc_info=True)
+            context.user_data.clear()
+            await ack.edit_text(
+                f"⚠️ Couldn't read *{file_name}*. Try a different file format or describe the case in text.",
+                parse_mode="Markdown"
+            )
+            return ConversationHandler.END
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
     if not case_text:
         context.user_data.clear()
-        await update.message.reply_text("💬 Send a text message, voice note, or photo.")
+        await update.message.reply_text("💬 Send a text message, voice note, photo, or document.")
         return ConversationHandler.END
 
     # If user is adding detail after a thin-case prompt, merge it once and continue
@@ -1226,7 +1283,14 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     # Store case text and input source
     context.user_data["case_text"] = case_text
-    input_source = "photo" if update.message.photo else ("voice" if update.message.voice else "text")
+    if update.message.photo:
+        input_source = "photo"
+    elif update.message.voice:
+        input_source = "voice"
+    elif update.message.document:
+        input_source = "document"
+    else:
+        input_source = "text"
 
     # Thin-case gate — ask specific questions before drafting if the case is too sparse
     if not context.user_data.get("thin_case_rechecked") and not context.user_data.get("continue_thin"):
@@ -1500,9 +1564,13 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         return ConversationHandler.END
     except Exception as e:
         logger.error(f"Filer error for {form_type}: {e}", exc_info=True)
-        context.user_data.clear()
-        await ack.edit_text("❌ Filing failed. Try again or check Kaizen directly.")
-        return ConversationHandler.END
+        # Keep draft data for retry — do NOT clear user_data
+        retry_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_filing")],
+            [InlineKeyboardButton("🔄 Start Fresh", callback_data="ACTION|reset")],
+        ])
+        await ack.edit_text("❌ Filing failed. Try again or start fresh.", reply_markup=retry_keyboard)
+        return AWAIT_APPROVAL  # Stay in approval state so retry can pick up draft
 
     context.user_data.clear()
     end_keyboard = InlineKeyboardMarkup([
@@ -1572,7 +1640,7 @@ async def handle_edit_field(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle text, voice, or photo feedback — regenerate draft using original case + feedback."""
+    """Handle text, voice, photo, or document feedback — regenerate draft using original case + feedback."""
     draft = _load_draft(context)
     case_text = context.user_data.get("case_text", "")
 
@@ -1683,7 +1751,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
         except Exception:
             await update.message.reply_text(
                 "I help you file clinical cases to your Kaizen e-portfolio. "
-                "Send me a case description by text, voice note, or photo."
+                "Send me a case description by text, voice note, photo, or document."
             )
         return AWAIT_CASE_INPUT
 
@@ -1728,12 +1796,14 @@ def build_application() -> Application:
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_case_input),
             MessageHandler(filters.VOICE, handle_case_input),
             MessageHandler(filters.PHOTO, handle_case_input),
+            MessageHandler(filters.Document.ALL, handle_case_input),
         ],
         states={
             AWAIT_CASE_INPUT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_case_input),
                 MessageHandler(filters.VOICE, handle_case_input),
                 MessageHandler(filters.PHOTO, handle_case_input),
+                MessageHandler(filters.Document.ALL, handle_case_input),
             ],
             AWAIT_FORM_CHOICE: [
                 CallbackQueryHandler(handle_form_choice, pattern=r"^FORM\|"),
@@ -1841,12 +1911,29 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         logger.warning("409 Conflict — another bot instance running, will self-resolve")
         return
 
-    # Generic fallback
+    # Generic fallback — preserve draft if we're in approval state
     if update and hasattr(update, 'effective_message') and update.effective_message:
-        await update.effective_message.reply_text(
-            "Something went wrong.",
-            reply_markup=_KB_RETRY_RESET
-        )
+        # Check if we have a draft in user_data (means we're in approval flow)
+        draft = None
+        if hasattr(context, 'user_data'):
+            draft = _load_draft(context)
+        
+        if draft:
+            # We have a draft — offer retry + start fresh
+            retry_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_filing")],
+                [InlineKeyboardButton("🔄 Start Fresh", callback_data="ACTION|reset")],
+            ])
+            await update.effective_message.reply_text(
+                "Something went wrong while filing. Try again or start fresh.",
+                reply_markup=retry_keyboard
+            )
+        else:
+            # No draft — just start fresh
+            await update.effective_message.reply_text(
+                "Something went wrong.",
+                reply_markup=_KB_RETRY_RESET
+            )
 
 
 def main():
@@ -1880,12 +1967,12 @@ def main():
         try:
             await app.bot.set_my_description(
                 "Portfolio Guru files your medical WPBA entries in seconds.\n\n"
-                "Describe a case by text, voice, or photo — the bot picks the right form, "
+                "Describe a case by text, voice, photo, or document — the bot picks the right form, "
                 "drafts the entry, and files it when you approve.\n\n"
                 "All 19 RCEM forms supported. Works with Kaizen and other e-portfolio platforms."
             )
             await app.bot.set_my_short_description(
-                "File WPBA entries to your e-portfolio in seconds. Text, voice, or photo → draft → approve → filed."
+                "File WPBA entries to your e-portfolio in seconds. Text, voice, photo, or document → draft → approve → filed."
             )
         except Exception:
             pass  # Non-critical — BotFather settings may not update on every restart

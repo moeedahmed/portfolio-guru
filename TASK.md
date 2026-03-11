@@ -187,3 +187,57 @@ r"\bhighlighted the (?:importance|need|value)\b",                  # AI reflecti
 - No auth/schema/state changes
 - Mostly prompt modifications (low blast radius)
 - One new conversation flow branch (thin case) — moderate risk, isolated to one handler
+
+---
+
+## Feature: Document Upload Support (Added 2026-03-11)
+
+### Overview
+Portfolio Guru now supports reading case descriptions from uploaded documents (PDF, PowerPoint, Word).
+
+### Supported formats
+- **PDF** (.pdf) — text extraction via pypdf
+- **PowerPoint** (.pptx, .ppt) — slide text extraction via python-pptx
+- **Word** (.docx, .doc) — paragraph and table text via python-docx
+- **Text** (.txt, .md) — plain text files
+
+### Files changed
+- `backend/documents.py` — NEW: document extraction module
+- `backend/bot.py` — MODIFIED: added document handler to conversation flow
+
+### Implementation details
+
+**New module: `documents.py`**
+- `extract_from_document(file_path)` — main entry point, routes by file extension
+- `extract_pdf()` — uses pypdf (already installed)
+- `extract_pptx()` — uses python-pptx (already installed)
+- `extract_docx()` — uses python-docx (already installed)
+- `is_supported_document(filename)` — validation helper
+
+**Changes to `bot.py`:**
+1. Import document extraction: `from documents import extract_from_document, is_supported_document`
+2. Added document handler in `handle_case_input()`:
+   - Checks file extension against supported types
+   - Downloads file via Telegram Bot API
+   - Extracts text using appropriate parser
+   - Truncates documents >15,000 characters
+   - Handles errors (scanned PDFs, password protection, etc.)
+3. Added `MessageHandler(filters.Document.ALL, handle_case_input)` to:
+   - Entry points (for new conversations)
+   - AWAIT_CASE_INPUT state (for ongoing conversations)
+4. Updated all user-facing messages to mention documents
+5. Added `input_source = "document"` tracking
+
+### Error handling
+- Unsupported file types: clear message listing supported formats
+- Extraction failures (scanned images, password protection): helpful guidance
+- Large documents: automatic truncation with notice
+
+### Testing checklist
+- [ ] Upload PDF with text layer → extracts successfully
+- [ ] Upload PowerPoint (.pptx) → extracts slide content
+- [ ] Upload Word (.docx) → extracts paragraphs and tables
+- [ ] Upload scanned PDF (no text layer) → graceful error with guidance
+- [ ] Upload unsupported file (.xlsx, .zip) → clear rejection message
+- [ ] Document upload in thin-case flow → works correctly
+- [ ] Document upload after "Continue anyway" → works correctly
