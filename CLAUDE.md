@@ -59,6 +59,7 @@ AWAIT_USERNAME=0, AWAIT_PASSWORD=1, AWAIT_FORM_CHOICE=2, AWAIT_APPROVAL=3,
 AWAIT_EDIT_FIELD=4, AWAIT_EDIT_VALUE=5, AWAIT_CASE_INPUT=6, AWAIT_TRAINING_LEVEL=7
 
 ## Key Design Decisions
+- **Local development only until well-tested** — Decision 2026-03-11: Keep bot running locally via systemd until fully functional. No Render/Railway deploy until core features stable and tested.
 - `allow_reentry=False` on case_conv — prevents voice/photo from restarting conversation mid-edit
 - PicklePersistence with `_store_draft`/`_load_draft` helpers — Pydantic objects stored as plain dicts
 - KC-first curriculum selection — KCs picked directly from case context, SLOs derived
