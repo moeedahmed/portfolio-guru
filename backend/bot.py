@@ -96,6 +96,25 @@ def _load_draft(context):
         return FormDraft(form_type=raw["form_type"], fields=raw["fields"], uuid=raw.get("uuid"))
     return None
 
+
+def _thin_case_state_snapshot(context) -> dict:
+    """Debug-safe snapshot for callback routing without logging case content."""
+    case_text = context.user_data.get("case_text") or ""
+    return {
+        "has_case_text": bool(case_text),
+        "case_chars": len(case_text),
+        "awaiting_detail": bool(context.user_data.get("awaiting_detail")),
+        "continue_thin": bool(context.user_data.get("continue_thin")),
+        "thin_case_check_count": int(context.user_data.get("thin_case_check_count", 0) or 0),
+        "input_source": context.user_data.get("case_input_source"),
+    }
+
+
+def _clear_thin_case_flags(context) -> None:
+    """Clear transient thin-case gating flags while preserving the stored case text."""
+    for key in ("awaiting_detail", "continue_thin", "thin_case_check_count", "case_input_source"):
+        context.user_data.pop(key, None)
+
 # ConversationHandler states
 (AWAIT_USERNAME, AWAIT_PASSWORD,
  AWAIT_FORM_CHOICE, AWAIT_APPROVAL,
@@ -808,9 +827,15 @@ async def handle_info_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle all ACTION| buttons — universal dispatcher for button-first UX."""
     query = update.callback_query
-    await query.answer()
     action = query.data.split("|", 1)[1] if "|" in query.data else ""
     user_id = update.effective_user.id
+    logger.info(
+        "Global ACTION callback: action=%s user=%s state=%s",
+        action,
+        user_id,
+        _thin_case_state_snapshot(context),
+    )
+    await query.answer()
 
     if action == "setup":
         if has_credentials(user_id):
@@ -1004,10 +1029,132 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 # === CALLBACK QUERY HANDLERS ===
 
+async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_id: int, case_text: str, input_source: str) -> int:
+    """Run thin-case gating, form recommendation, and draft generation for extracted case text."""
+    context.user_data["case_text"] = case_text
+    context.user_data["case_input_source"] = input_source
+
+    thin_case_check_count = int(context.user_data.get("thin_case_check_count", 0) or 0)
+    if not context.user_data.get("continue_thin") and thin_case_check_count < 2:
+        try:
+            sufficiency = await asyncio.wait_for(assess_case_sufficiency(case_text), timeout=15)
+            logger.info(
+                "Thin-case assessment complete: user=%s sufficient=%s state=%s",
+                user_id,
+                sufficiency.get("sufficient", True),
+                _thin_case_state_snapshot(context),
+            )
+        except Exception as exc:
+            logger.warning("Thin-case assessment failed for user=%s: %s", user_id, exc)
+            sufficiency = {"sufficient": True, "questions": []}
+
+        if not sufficiency.get("sufficient", True) and thin_case_check_count == 0:
+            questions = sufficiency.get("questions", [])[:3]
+            q_text = "\n".join(f"• {q}" for q in questions) if questions else (
+                "• What happened clinically?\n"
+                "• What were you thinking at the time?\n"
+                "• What did you learn from it?"
+            )
+            context.user_data["thin_case_check_count"] = 1
+            context.user_data["awaiting_detail"] = True
+            await message.reply_text(
+                f"Your case is a bit brief for a strong portfolio entry. A few questions that would help:\n\n{q_text}\n\nSend me the extra detail and I'll add it to your case, or tap below to continue with what you have.",
+                reply_markup=InlineKeyboardMarkup([[_BTN_ADD_DETAIL, _BTN_CONTINUE_THIN]])
+            )
+            return AWAIT_CASE_INPUT
+
+        if not sufficiency.get("sufficient", True):
+            logger.info("Thin case still sparse after one follow-up; proceeding anyway for user=%s", user_id)
+
+    context.user_data.pop("continue_thin", None)
+    context.user_data.pop("awaiting_detail", None)
+    context.user_data.pop("thin_case_check_count", None)
+
+    # Only check for explicit form type in text/voice/document input — never for photos
+    # (photo descriptions should always go to user-selected form, never auto-routed)
+    explicit_form = extract_explicit_form_type(case_text) if input_source != "photo" else None
+    if explicit_form:
+        context.user_data["chosen_form"] = explicit_form
+        emoji = FORM_EMOJIS.get(explicit_form, "📋")
+        await message.chat.send_action(constants.ChatAction.TYPING)
+        ack = await message.reply_text(f"{emoji} Generating {_form_display_name(explicit_form)} draft…")
+        try:
+            vp = get_voice_profile(user_id) or ""
+            if explicit_form == "CBD":
+                draft = await asyncio.wait_for(extract_cbd_data(case_text, voice_profile_json=vp), timeout=45)
+            else:
+                draft = await asyncio.wait_for(extract_form_data(case_text, explicit_form, voice_profile_json=vp), timeout=45)
+            _store_draft(context, draft)
+        except asyncio.TimeoutError:
+            logger.error("Draft generation timed out for explicit %s", explicit_form)
+            await ack.edit_text("⏳ Draft generation timed out. Please try again.")
+            return ConversationHandler.END
+        except Exception as exc:
+            logger.error("Draft generation failed for explicit %s: %s", explicit_form, exc, exc_info=True)
+            await ack.edit_text("⚠️ Could not generate draft.", reply_markup=_KB_RETRY_RESET)
+            return ConversationHandler.END
+        preview = _format_draft_preview(draft)
+        await _safe_edit_text(ack, preview, reply_markup=_build_approval_keyboard(), parse_mode="Markdown")
+        return AWAIT_APPROVAL
+
+    # No explicit form — get AI recommendations filtered by training level (if set)
+    training_level = get_training_level(user_id)
+    allowed_forms = TRAINING_LEVEL_FORMS.get(training_level, TRAINING_LEVEL_FORMS["ST5"]) if training_level else TRAINING_LEVEL_FORMS["ST5"]
+
+    await message.chat.send_action(constants.ChatAction.TYPING)
+    try:
+        recommendations = await asyncio.wait_for(recommend_form_types(case_text), timeout=30)
+        recommendations = [r for r in recommendations if r.form_type in allowed_forms]
+        context.user_data["form_recommendations"] = recommendations
+    except Exception as exc:
+        logger.error(f"Form recommendation failed: {exc}")
+        from models import FormTypeRecommendation
+        from extractor import FORM_UUIDS
+        recommendations = [FormTypeRecommendation(
+            form_type="CBD",
+            rationale="Clinical case",
+            uuid=FORM_UUIDS["CBD"]
+        )]
+        context.user_data["form_recommendations"] = recommendations
+
+    rationale_lines = [f"- {_form_display_name(r.form_type)}: {r.rationale}" for r in recommendations if r.uuid]
+    rationale_text = "\n".join(rationale_lines) if rationale_lines else "- Case-Based Discussion: Clinical case"
+
+    status_msg = context.user_data.pop("status_msg_id", None)
+    status_chat = context.user_data.pop("status_msg_chat", None)
+
+    context.user_data["form_recommendations_text"] = f"Which form would you like to create?\n\n{rationale_text}"
+
+    if status_msg and status_chat:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=status_chat,
+                message_id=status_msg,
+                text=f"Which form would you like to create?\n\n{rationale_text}",
+                reply_markup=_build_form_choice_keyboard(recommendations)
+            )
+        except Exception:
+            await message.reply_text(
+                f"Which form would you like to create?\n\n{rationale_text}",
+                reply_markup=_build_form_choice_keyboard(recommendations)
+            )
+    else:
+        await message.reply_text(
+            f"Which form would you like to create?\n\n{rationale_text}",
+            reply_markup=_build_form_choice_keyboard(recommendations)
+        )
+    return AWAIT_FORM_CHOICE
+
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Route callback queries based on prefix."""
     query = update.callback_query
     data = query.data
+    logger.info(
+        "Conversation callback: data=%s user=%s state=%s",
+        data,
+        update.effective_user.id,
+        _thin_case_state_snapshot(context),
+    )
 
     if data.startswith("INFO|"):
         await query.answer()
@@ -1047,32 +1194,29 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "ACTION|add_detail":
         await query.answer()
         await query.edit_message_reply_markup(reply_markup=None)
+        if not context.user_data.get("case_text"):
+            await query.message.reply_text("That prompt has expired. Send your case again and I'll continue.")
+            return AWAIT_CASE_INPUT
         context.user_data["awaiting_detail"] = True
+        context.user_data.pop("continue_thin", None)
         await query.message.reply_text("Send me the extra detail and I'll fold it into the same case.")
         return AWAIT_CASE_INPUT
 
     elif data == "ACTION|continue_thin":
         await query.answer()
         await query.edit_message_reply_markup(reply_markup=None)
+        case_text = (context.user_data.get("case_text") or "").strip()
+        if not case_text:
+            await query.message.reply_text("That prompt has expired. Send your case again and I'll continue.")
+            return AWAIT_CASE_INPUT
+        context.user_data.pop("awaiting_detail", None)
         context.user_data["continue_thin"] = True
         await query.message.reply_text("Okay — continuing with the detail you already gave me.")
-        case_text = context.user_data.get("case_text", "")
-        if case_text:
-            class _SyntheticMessage:
-                def __init__(self, original_message, text):
-                    self._original = original_message
-                    self.text = text
-                    self.voice = None
-                    self.photo = None
-                    self.chat_id = original_message.chat_id
-                    self.message_id = original_message.message_id
-                async def reply_text(self, *args, **kwargs):
-                    return await self._original.reply_text(*args, **kwargs)
-            original_message = update.effective_message
-            update.message = _SyntheticMessage(original_message, case_text)
-            return await handle_case_input(update, context)
-        await query.message.reply_text(FILE_CASE_PROMPT)
-        return AWAIT_CASE_INPUT
+        input_source = context.user_data.get("case_input_source", "text")
+        return await _process_case_text(query.message, context, update.effective_user.id, case_text, input_source)
+
+    elif data == "ACTION|retry_filing":
+        return await handle_approval_approve(update, context)
 
     elif data.startswith("FORM|"):
         return await handle_form_choice(update, context)
@@ -1086,7 +1230,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("FIELD|"):
         return await handle_edit_field(update, context)
 
-    elif data.startswith("CANCEL|") or data == "ACTION|reset":
+    elif data.startswith("CANCEL|") or data in {"ACTION|reset", "ACTION|cancel"}:
         await query.answer()
         # Disarm buttons immediately — prevents double-tap
         await query.edit_message_reply_markup(reply_markup=None)
@@ -1121,31 +1265,47 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if update.message.text:
         raw_text = update.message.text.strip()
-
-        # Fast heuristic: long clinical-sounding messages skip classify entirely
-        # Saves ~3-5s of Gemini latency for obvious cases
-        _CLINICAL_KEYWORDS = {"patient", "presented", "diagnosed", "examined", "management",
-                              "symptoms", "clinical", "assessment", "treatment", "referred",
-                              "history", "examination", "investigation", "procedure", "resuscitation",
-                              "chest pain", "shortness of breath", "abdominal", "fracture", "suture",
-                              "intubation", "cannulation", "triage", "observations", "bloods"}
         words_lower = raw_text.lower()
         word_count = len(raw_text.split())
-        clinical_hits = sum(1 for kw in _CLINICAL_KEYWORDS if kw in words_lower)
 
-        if word_count > 30 and clinical_hits >= 2:
-            # Obviously a clinical case — skip AI classify
-            intent = "case"
-        elif word_count < 8 and clinical_hits == 0:
-            # Very short, no clinical language — likely chitchat
-            intent = "chitchat" if word_count < 4 else "case"
+        # Fast-path: question patterns (before clinical heuristic)
+        # Catches "Do you have...", "Can you...", "What about...", "Is X mapped?"
+        _QUESTION_PATTERNS = [
+            r"^do you ", r"^do we ", r"^can you ", r"^can we ",
+            r"^is ", r"^are ", r"^what ", r"^how ", r"^why ",
+            r"^where ", r"^when ", r"^who ", r"^which ",
+            r"\bmapped\b", r"\bsupported\b", r"\bavailable\b",
+            r"\bdo you have\b", r"\bdo we have\b",
+        ]
+        import re
+        is_question_pattern = any(re.search(p, words_lower) for p in _QUESTION_PATTERNS)
+
+        if is_question_pattern and word_count < 15:
+            # Short question — answer directly without classify
+            intent = "question"
         else:
-            # Ambiguous — use AI classify
-            await update.effective_chat.send_action(constants.ChatAction.TYPING)
-            try:
-                intent = await classify_intent(raw_text)
-            except Exception:
-                intent = "case"  # Default to case on error
+            # Fast heuristic: long clinical-sounding messages skip classify entirely
+            # Saves ~3-5s of Gemini latency for obvious cases
+            _CLINICAL_KEYWORDS = {"patient", "presented", "diagnosed", "examined", "management",
+                                  "symptoms", "clinical", "assessment", "treatment", "referred",
+                                  "history", "examination", "investigation", "procedure", "resuscitation",
+                                  "chest pain", "shortness of breath", "abdominal", "fracture", "suture",
+                                  "intubation", "cannulation", "triage", "observations", "bloods"}
+            clinical_hits = sum(1 for kw in _CLINICAL_KEYWORDS if kw in words_lower)
+
+            if word_count > 30 and clinical_hits >= 2:
+                # Obviously a clinical case — skip AI classify
+                intent = "case"
+            elif word_count < 8 and clinical_hits == 0:
+                # Very short, no clinical language — likely chitchat
+                intent = "chitchat" if word_count < 4 else "case"
+            else:
+                # Ambiguous — use AI classify
+                await update.effective_chat.send_action(constants.ChatAction.TYPING)
+                try:
+                    intent = await classify_intent(raw_text)
+                except Exception:
+                    intent = "case"  # Default to case on error
 
         if intent == "chitchat":
             context.user_data.clear()
@@ -1274,15 +1434,16 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text("💬 Send a text message, voice note, photo, or document.")
         return ConversationHandler.END
 
-    # If user is adding detail after a thin-case prompt, merge it once and continue
-    if context.user_data.get("awaiting_detail") and update.message.text:
-        previous_case = context.user_data.get("case_text", "")
-        case_text = f"{previous_case}\n\nAdditional detail:\n{case_text}".strip()
+    # If user is adding detail after a thin-case prompt, merge it into the stored case.
+    if context.user_data.get("awaiting_detail"):
+        previous_case = context.user_data.get("case_text", "").strip()
+        if previous_case:
+            case_text = f"{previous_case}\n\nAdditional detail:\n{case_text}".strip()
         context.user_data.pop("awaiting_detail", None)
-        context.user_data["thin_case_rechecked"] = True
+        context.user_data["thin_case_check_count"] = 1
+    else:
+        _clear_thin_case_flags(context)
 
-    # Store case text and input source
-    context.user_data["case_text"] = case_text
     if update.message.photo:
         input_source = "photo"
     elif update.message.voice:
@@ -1291,104 +1452,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         input_source = "document"
     else:
         input_source = "text"
-
-    # Thin-case gate — ask specific questions before drafting if the case is too sparse
-    if not context.user_data.get("thin_case_rechecked") and not context.user_data.get("continue_thin"):
-        try:
-            sufficiency = await asyncio.wait_for(assess_case_sufficiency(case_text), timeout=15)
-        except Exception:
-            sufficiency = {"sufficient": True, "questions": []}
-        if not sufficiency.get("sufficient", True):
-            questions = sufficiency.get("questions", [])[:3]
-            q_text = "\n".join(f"• {q}" for q in questions) if questions else "• What happened clinically?\n• What were you thinking at the time?\n• What did you learn from it?"
-            context.user_data["case_text"] = case_text
-            context.user_data["thin_case_rechecked"] = True
-            await update.message.reply_text(
-                f"Your case is a bit brief for a strong portfolio entry. A few questions that would help:\n\n{q_text}\n\nSend me the extra detail and I'll add it to your case, or tap below to continue with what you have.",
-                reply_markup=InlineKeyboardMarkup([[_BTN_ADD_DETAIL, _BTN_CONTINUE_THIN]])
-            )
-            context.user_data["awaiting_detail"] = True
-            return AWAIT_CASE_INPUT
-
-    context.user_data.pop("continue_thin", None)
-
-    # Only check for explicit form type in text/voice input — never for photos
-    # (photo descriptions should always go to user-selected form, never auto-routed)
-    explicit_form = extract_explicit_form_type(case_text) if input_source != "photo" else None
-    if explicit_form:
-        context.user_data["chosen_form"] = explicit_form
-        emoji = FORM_EMOJIS.get(explicit_form, "📋")
-        await update.effective_chat.send_action(constants.ChatAction.TYPING)
-        ack = await update.message.reply_text(f"{emoji} Generating {_form_display_name(explicit_form)} draft…")
-        try:
-            vp = get_voice_profile(update.effective_user.id) or ""
-            if explicit_form == "CBD":
-                draft = await asyncio.wait_for(extract_cbd_data(case_text, voice_profile_json=vp), timeout=45)
-            else:
-                draft = await asyncio.wait_for(extract_form_data(case_text, explicit_form, voice_profile_json=vp), timeout=45)
-            _store_draft(context, draft)
-        except asyncio.TimeoutError:
-            logger.error(f"Draft generation timed out for explicit {explicit_form}")
-            await ack.edit_text("⏳ Draft generation timed out. Please try again.")
-            return ConversationHandler.END
-        except Exception as e:
-            logger.error(f"Draft generation failed: {e}", exc_info=True)
-            await ack.edit_text("⚠️ Could not generate draft.", reply_markup=_KB_RETRY_RESET)
-            return ConversationHandler.END
-        preview = _format_draft_preview(draft)
-        await _safe_edit_text(ack, preview, reply_markup=_build_approval_keyboard(), parse_mode="Markdown")
-        return AWAIT_APPROVAL
-
-    # No explicit form — get AI recommendations filtered by training level (if set)
-    user_id = update.effective_user.id
-    training_level = get_training_level(user_id)
-    allowed_forms = TRAINING_LEVEL_FORMS.get(training_level, TRAINING_LEVEL_FORMS["ST5"]) if training_level else TRAINING_LEVEL_FORMS["ST5"]
-
-    await update.effective_chat.send_action(constants.ChatAction.TYPING)
-    try:
-        recommendations = await asyncio.wait_for(recommend_form_types(case_text), timeout=30)
-        # Filter to forms appropriate for this training level
-        recommendations = [r for r in recommendations if r.form_type in allowed_forms]
-        context.user_data["form_recommendations"] = recommendations
-    except Exception as e:
-        logger.error(f"Form recommendation failed: {e}")
-        from models import FormTypeRecommendation
-        from extractor import FORM_UUIDS
-        recommendations = [FormTypeRecommendation(
-            form_type="CBD",
-            rationale="Clinical case",
-            uuid=FORM_UUIDS["CBD"]
-        )]
-        context.user_data["form_recommendations"] = recommendations
-
-    rationale_lines = [f"- {_form_display_name(r.form_type)}: {r.rationale}" for r in recommendations if r.uuid]
-    rationale_text = "\n".join(rationale_lines) if rationale_lines else "- Case-Based Discussion: Clinical case"
-
-    status_msg = context.user_data.pop("status_msg_id", None)
-    status_chat = context.user_data.pop("status_msg_chat", None)
-
-    # Persist recommendations so back button can restore this screen
-    context.user_data["form_recommendations_text"] = f"Which form would you like to create?\n\n{rationale_text}"
-
-    if status_msg and status_chat:
-        try:
-            await context.bot.edit_message_text(
-                chat_id=status_chat,
-                message_id=status_msg,
-                text=f"Which form would you like to create?\n\n{rationale_text}",
-                reply_markup=_build_form_choice_keyboard(recommendations)
-            )
-        except Exception:
-            await update.message.reply_text(
-                f"Which form would you like to create?\n\n{rationale_text}",
-                reply_markup=_build_form_choice_keyboard(recommendations)
-            )
-    else:
-        await update.message.reply_text(
-            f"Which form would you like to create?\n\n{rationale_text}",
-            reply_markup=_build_form_choice_keyboard(recommendations)
-        )
-    return AWAIT_FORM_CHOICE
+    return await _process_case_text(update.message, context, user_id, case_text, input_source)
 
 
 async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1792,7 +1856,7 @@ def build_application() -> Application:
     # Main conversation handler for case filing flow
     case_conv = ConversationHandler(
         entry_points=[
-            CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|file$"),
+            CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:file|reset|cancel)$"),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_case_input),
             MessageHandler(filters.VOICE, handle_case_input),
             MessageHandler(filters.PHOTO, handle_case_input),
@@ -1804,6 +1868,8 @@ def build_application() -> Application:
                 MessageHandler(filters.VOICE, handle_case_input),
                 MessageHandler(filters.PHOTO, handle_case_input),
                 MessageHandler(filters.Document.ALL, handle_case_input),
+                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|add_detail$"),
+                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|continue_thin$"),
             ],
             AWAIT_FORM_CHOICE: [
                 CallbackQueryHandler(handle_form_choice, pattern=r"^FORM\|"),
@@ -1834,7 +1900,10 @@ def build_application() -> Application:
             CommandHandler("status", status),
             CommandHandler("reset", reset),
             CommandHandler("cancel", setup_cancel),
-            CallbackQueryHandler(handle_callback),  # Handle all callbacks in fallback
+            CallbackQueryHandler(
+                handle_callback,
+                pattern=r"^(?:INFO\|.*|CANCEL\|.*|ACTION\|(?:file|setup|reset|cancel|add_detail|continue_thin|retry_filing))$",
+            ),
         ],
         per_message=False,
         allow_reentry=False,
@@ -1863,7 +1932,12 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("help", help_command))
     # Top-level handlers that must work regardless of conversation state
     application.add_handler(CallbackQueryHandler(handle_info_button, pattern=r"^INFO\|"))
-    application.add_handler(CallbackQueryHandler(handle_action_button, pattern=r"^ACTION\|"))
+    application.add_handler(
+        CallbackQueryHandler(
+            handle_action_button,
+            pattern=r"^ACTION\|(?!file$|reset$|cancel$|add_detail$|continue_thin$|retry_filing$).+",
+        )
+    )
     application.add_handler(CallbackQueryHandler(handle_feedback, pattern=r"^FEEDBACK\|"))
 
     voice_conv = ConversationHandler(
