@@ -1856,7 +1856,9 @@ def build_application() -> Application:
     # Main conversation handler for case filing flow
     case_conv = ConversationHandler(
         entry_points=[
-            CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:file|reset|cancel)$"),
+            # Let thin-case buttons re-enter the case conversation even if the
+            # user taps them after the active state has been lost.
+            CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:file|reset|cancel|add_detail|continue_thin)$"),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_case_input),
             MessageHandler(filters.VOICE, handle_case_input),
             MessageHandler(filters.PHOTO, handle_case_input),
