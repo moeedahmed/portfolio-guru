@@ -306,19 +306,68 @@ async def answer_question(text: str) -> str:
     """Generate a helpful answer about the bot's capabilities."""
     client = _get_client()
 
-    prompt = """You are Portfolio Guru, a Telegram bot that helps RCEM doctors file their clinical cases to the Kaizen e-portfolio.
+    # Check if user is asking about specific form types or capabilities
+    text_lower = text.lower()
+    form_keywords = ["form", "ticket", "type", "mapped", "support", "management", "cbd", "dops", "lat", "qiat", "msf", "available"]
+    is_asking_about_forms = any(kw in text_lower for kw in form_keywords)
+
+    if is_asking_about_forms:
+        # Direct answer about available forms
+        form_list = [
+            ("CBD", "Case-Based Discussion"),
+            ("DOPS", "Directly Observed Procedural Skills"),
+            ("Mini-CEX", "Mini Clinical Evaluation Exercise"),
+            ("LAT", "Leadership Assessment Tool"),
+            ("ACAT", "Acute Care Assessment Tool"),
+            ("ACAF", "Applied Critical Appraisal Form"),
+            ("STAT", "Structured Teaching Assessment Tool"),
+            ("MSF", "Multi-Source Feedback"),
+            ("QIAT", "Quality Improvement Assessment Tool"),
+            ("JCF", "Journal Club Form"),
+            ("TEACH", "Teaching Delivered by Trainee"),
+            ("PROC_LOG", "Procedural Log"),
+            ("SDL", "Self-Directed Learning Reflection"),
+            ("US_CASE", "Ultrasound Case Reflection"),
+            ("ESLE", "Educational Supervisor's Learning Event"),
+            ("COMPLAINT", "Reflection on Complaints"),
+            ("SERIOUS_INC", "Reflection on Serious Incident"),
+            ("EDU_ACT", "Educational Activity Attended"),
+            ("FORMAL_COURSE", "Attendance at Formal Course"),
+        ]
+
+        # Check if asking about a specific form
+        for form_code, form_name in form_list:
+            if form_code.lower().replace("_", " ") in text_lower or form_code.lower() in text_lower:
+                return f"✅ Yes, {form_code} ({form_name}) is fully supported with auto-filing to Kaizen."
+
+        # General question about what's supported
+        forms_text = "\n".join([f"• {code} — {name}" for code, name in form_list[:10]])
+        forms_text += f"\n• ...and {len(form_list) - 10} more"
+
+        return f"""📋 I support all 19 RCEM WPBA forms with full auto-filing to Kaizen:
+
+{forms_text}
+
+All forms are auto-filled with structured data and saved as drafts in Kaizen.
+
+Describe your case or activity and I'll recommend the right form."""
+
+    # General question — use AI but with grounded facts
+    prompt = f"""You are Portfolio Guru, a Telegram bot that helps RCEM doctors file their clinical cases to the Kaizen e-portfolio.
 
 Answer this question about what you do. Be concise and helpful. Key facts:
-- You accept case descriptions via text, voice note, or photo
-- You extract structured data and create a CBD (Case-Based Discussion) draft
+- You accept case descriptions via text, voice note, photo, or document (PDF, Word, PowerPoint)
+- You support all 19 RCEM WPBA forms: CBD, DOPS, Mini-CEX, ACAT, LAT, ACAF, STAT, MSF, QIAT, JCF, Teaching, Procedural Log, SDL, Ultrasound Case, ESLE, Complaint, Serious Incident, Educational Activity, Formal Course
+- All 19 forms have full auto-filing to Kaizen — data is extracted and forms are filled automatically
 - The draft is shown for review before filing
 - Nothing is submitted to a supervisor - only saved as a draft
 - Credentials are encrypted and never shared
 
-Question: """
+Question: {text}
 
-    contents = f"{prompt}{text}"
-    response = await _gemini_generate(contents)
+Answer concisely. If the question is about a specific form type, confirm it's supported."""
+
+    response = await _gemini_generate(prompt)
     return response.text.strip()
 
 
@@ -469,16 +518,69 @@ Be conservative — do not recommend a form unless the case description clearly 
     return recommendations
 
 
-async def extract_cbd_data(case_description: str, edit_feedback: str = "", current_draft: str = "", voice_profile_json: str = "") -> CBDData:
+def _missing_text_value(leave_missing_blank: bool, fallback: str = "Not mentioned in case") -> str:
+    return "" if leave_missing_blank else fallback
+
+
+def _normalise_text_field(value, leave_missing_blank: bool, fallback: str = "Not mentioned in case"):
+    if value is None:
+        return _missing_text_value(leave_missing_blank, fallback)
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned or cleaned.lower() in {"not mentioned in case", "to be added", "not specified"}:
+            return _missing_text_value(leave_missing_blank, fallback)
+        return cleaned
+    return str(value).strip()
+
+
+def _normalise_list_field(value) -> list:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    cleaned = str(value).strip()
+    return [cleaned] if cleaned else []
+
+
+def _normalise_dropdown_field(value, options: list, leave_missing_blank: bool):
+    cleaned = _normalise_text_field(value, leave_missing_blank, "")
+    if cleaned in options:
+        return cleaned
+    return "" if leave_missing_blank else (options[0] if options else "")
+
+
+async def extract_cbd_data(
+    case_description: str,
+    edit_feedback: str = "",
+    current_draft: str = "",
+    voice_profile_json: str = "",
+    leave_missing_blank: bool = True,
+    preserve_original_content: bool = True,
+) -> CBDData:
     """Extract structured CBD data from free-text case description."""
     client = _get_client()
+    missing_text_instruction = (
+        'If a field cannot be filled from the case description, return an empty string "" for text/date/dropdown fields, null for nullable fields, and [] for list fields.'
+        if leave_missing_blank
+        else 'If a field cannot be filled from the case description, set it to "Not mentioned in case".'
+    )
+    preserve_instruction = (
+        """
+===== WORDING RULES =====
+- Keep the doctor's original content exactly as provided wherever possible.
+- Do not paraphrase, embellish, or "improve" explicit clinical details.
+- If a sentence from the case already fits a field, copy it with only the lightest trimming needed to fit JSON.
+"""
+        if preserve_original_content
+        else ""
+    )
 
     system_prompt = f"""You are a medical portfolio assistant. Extract structured data from a doctor's clinical case description for a Case-Based Discussion (CBD) WPBA entry.
 
 Return ONLY a JSON object with these exact fields:
 {{
   "form_type": "CBD",
-  "date_of_encounter": "YYYY-MM-DD — today if not mentioned",
+  "date_of_encounter": "YYYY-MM-DD if explicitly stated, otherwise empty string",
   "patient_age": "age as string e.g. '45-year-old'",
   "patient_presentation": "presenting complaint / chief complaint",
   "clinical_setting": "e.g. 'Emergency Department - Resus', 'Majors', 'Minors'",
@@ -545,11 +647,11 @@ Write the reflection in direct, first-person clinical language:
 
 ===== GROUNDING RULES (NON-NEGOTIABLE) =====
 - Extract ONLY what the doctor explicitly stated or clearly implied. Never invent clinical details.
-- If a field cannot be filled from the case description, set it to "Not mentioned in case" — do NOT generate plausible-sounding content to fill gaps.
+- {missing_text_instruction}
 - Never add diagnoses, investigations, procedures, or clinical reasoning the doctor did not describe.
 - It is better to leave a field sparse than to fabricate content. Doctors will reject inaccurate drafts.
-- Today's date: {date.today()}
 - Return ONLY the JSON. No explanation."""
+    system_prompt += preserve_instruction
 
     # Inject personal voice profile if available
     if voice_profile_json:
@@ -601,35 +703,58 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
         retry_raw = retry_raw.strip()
         data = json.loads(retry_raw)
 
-    # Coerce null required-ish fields to sensible defaults
-    if not data.get("date_of_encounter"):
-        data["date_of_encounter"] = str(date.today())
-    if not data.get("patient_presentation"):
-        data["patient_presentation"] = "Not specified"
-    if not data.get("trainee_role"):
-        data["trainee_role"] = "Not mentioned in case"
-    if not data.get("clinical_reasoning"):
-        data["clinical_reasoning"] = "Not mentioned in case"
-    if not data.get("reflection"):
-        data["reflection"] = "Reflection not extracted - please edit"
+    normalised = {
+        "form_type": "CBD",
+        "date_of_encounter": _normalise_text_field(data.get("date_of_encounter"), leave_missing_blank, ""),
+        "patient_age": _normalise_text_field(data.get("patient_age"), leave_missing_blank, ""),
+        "patient_presentation": _normalise_text_field(data.get("patient_presentation"), leave_missing_blank, ""),
+        "clinical_setting": _normalise_text_field(data.get("clinical_setting"), leave_missing_blank, ""),
+        "stage_of_training": _normalise_text_field(data.get("stage_of_training"), leave_missing_blank, ""),
+        "trainee_role": _normalise_text_field(data.get("trainee_role"), leave_missing_blank, ""),
+        "clinical_reasoning": _normalise_text_field(data.get("clinical_reasoning"), leave_missing_blank, ""),
+        "reflection": _normalise_text_field(data.get("reflection"), leave_missing_blank, ""),
+        "level_of_supervision": _normalise_text_field(data.get("level_of_supervision"), leave_missing_blank, ""),
+        "supervisor_name": _normalise_text_field(data.get("supervisor_name"), leave_missing_blank, ""),
+        "curriculum_links": _normalise_list_field(data.get("curriculum_links")),
+        "key_capabilities": _normalise_list_field(data.get("key_capabilities")),
+    }
 
     # Apply humanizer to ALL narrative fields before user sees the draft
-    data = _humanize_all_fields(data)
+    normalised = _humanize_all_fields(normalised)
 
-    # Ensure key_capabilities exists
-    if "key_capabilities" not in data:
-        data["key_capabilities"] = []
-
-    return CBDData(**data)
+    return CBDData(**normalised)
 
 
-async def extract_form_data(case_description: str, form_type: str, edit_feedback: str = "", current_draft: str = "", voice_profile_json: str = "") -> FormDraft:
+async def extract_form_data(
+    case_description: str,
+    form_type: str,
+    edit_feedback: str = "",
+    current_draft: str = "",
+    voice_profile_json: str = "",
+    leave_missing_blank: bool = True,
+    preserve_original_content: bool = True,
+) -> FormDraft:
     """Extract structured data for any non-CBD form type."""
     if form_type not in FORM_SCHEMAS:
         raise ValueError(f"Unknown form type: {form_type}")
 
     schema = FORM_SCHEMAS[form_type]
     client = _get_client()
+    missing_text_instruction = (
+        'If a field cannot be filled from the case description, return an empty string "" for text/date/dropdown fields and [] for multi-select or curriculum fields.'
+        if leave_missing_blank
+        else 'If a field cannot be filled from the case description, set it to "Not mentioned in case".'
+    )
+    preserve_instruction = (
+        """
+===== WORDING RULES =====
+- Keep the doctor's original content exactly as provided wherever possible.
+- Do not paraphrase, embellish, or "improve" explicit clinical details.
+- If a sentence from the case already fits a field, copy it with only the lightest trimming needed to fit JSON.
+"""
+        if preserve_original_content
+        else ""
+    )
 
     # Build field definitions for the prompt
     field_defs = []
@@ -666,15 +791,15 @@ Field definitions:
 {chr(10).join(field_defs)}
 
 Rules:
-- For dropdown fields: return ONLY one of the listed options. If unclear, use the first option.
-- For multi_select fields: return a list of values from the listed options.
+- For dropdown fields: return ONLY one of the listed options. If the case does not explicitly support one option, return an empty string.
+- For multi_select fields: return a list of values from the listed options. If none are explicit, return [].
 - For kc_tick fields (curriculum_links): return a list of SLO codes ONLY e.g. ["SLO1", "SLO8"].
   Separately, populate "key_capabilities" with 3-5 FULL KC description strings for those SLOs.
   Format each KC as: "SLO8 KC1: will provide support to ED staff at all levels... (2025 Update)"
   Use EXACT text from the map. curriculum_links = codes only. key_capabilities = full strings.
   If the form has a kc_tick field, always include "key_capabilities" in the JSON too.
-- For date fields: return YYYY-MM-DD. Use today if not mentioned: {date.today()}
-- For text fields: extract directly from the case, be concise and clinical
+- For date fields: return YYYY-MM-DD only if explicitly stated. Otherwise return an empty string.
+- For text fields: extract directly from the case and keep the doctor's original wording where possible
 - Write in direct, first-person clinical language ("I assessed...", "I managed...")
 - NEVER use: em dashes, "delve", "navigate", "crucial", "importantly", "comprehensive", "moreover", "furthermore", "holistic", "robust", "multifaceted", "pivotal", "seamless", "facilitate", "leverage", "unlock", "embark", "meticulous", "overarching", "in summary", "it's worth noting", "this case highlights", "moving forward"
 
@@ -685,7 +810,7 @@ Rules:
 
 ===== GROUNDING RULES (NON-NEGOTIABLE) =====
 - Extract ONLY what the doctor explicitly stated or clearly implied. Never invent clinical details.
-- If a field cannot be filled from the case description, set it to "Not mentioned in case" — do NOT generate plausible-sounding content to fill gaps.
+- {missing_text_instruction}
 - Never add diagnoses, investigations, procedures, or clinical reasoning the doctor did not describe.
 - It is better to leave a field sparse than to fabricate content. Doctors will reject inaccurate drafts.
 - Return ONLY the JSON object. No explanation.
@@ -694,6 +819,7 @@ Rules:
 
 Case description:
 {case_description}"""
+    system_prompt += preserve_instruction
 
     # Inject personal voice profile if available
     if voice_profile_json:
@@ -744,11 +870,26 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
         retry_raw = retry_raw.strip()
         data = json.loads(retry_raw)
 
+    normalised = {}
+    for field in schema["fields"]:
+        key = field["key"]
+        field_type = field["type"]
+        raw_value = data.get(key)
+        if field_type in {"multi_select", "kc_tick"}:
+            normalised[key] = _normalise_list_field(raw_value)
+        elif field_type == "dropdown":
+            normalised[key] = _normalise_dropdown_field(raw_value, field.get("options", []), leave_missing_blank)
+        else:
+            normalised[key] = _normalise_text_field(raw_value, leave_missing_blank, "")
+
+    if has_kc_tick:
+        normalised["key_capabilities"] = _normalise_list_field(data.get("key_capabilities"))
+
     # Apply humanizer to ALL narrative fields before user sees the draft
-    data = _humanize_all_fields(data)
+    normalised = _humanize_all_fields(normalised)
 
     return FormDraft(
         form_type=form_type,
-        fields=data,
+        fields=normalised,
         uuid=FORM_UUIDS.get(form_type)
     )

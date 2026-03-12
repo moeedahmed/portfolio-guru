@@ -13,7 +13,7 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler, PicklePersistence,
 )
 from store import store_credentials, get_credentials, has_credentials, init
-from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, answer_question, extract_explicit_form_type, assess_case_sufficiency
+from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, answer_question, extract_explicit_form_type
 from filer_router import route_filing
 from kaizen_filer import FORM_UUIDS
 from form_schemas import FORM_SCHEMAS
@@ -72,55 +72,86 @@ async def _safe_edit_text(target, text: str, **kwargs):
 
 
 
+def _serialise_draft(draft):
+    """Serialise a draft as a plain dict so PicklePersistence can store it."""
+    if isinstance(draft, CBDData):
+        return {"_type": "CBD", **draft.model_dump()}
+    if isinstance(draft, FormDraft):
+        return {"_type": "FORM", "form_type": draft.form_type, "fields": draft.fields, "uuid": draft.uuid}
+    return None
+
+
 def _store_draft(context, draft):
     """Store draft as plain dict so PicklePersistence can serialise it."""
-    if isinstance(draft, CBDData):
-        context.user_data["draft_data"] = {"_type": "CBD", **draft.model_dump()}
-    elif isinstance(draft, FormDraft):
-        context.user_data["draft_data"] = {"_type": "FORM", "form_type": draft.form_type,
-                                            "fields": draft.fields, "uuid": draft.uuid}
+    context.user_data["draft_data"] = _serialise_draft(draft)
 
 
-def _load_draft(context):
-    """Reconstruct draft object from stored dict."""
-    raw = context.user_data.get("draft_data")
+def _deserialise_draft(raw):
+    """Reconstruct a draft object from its stored dict form."""
     if not raw:
         return None
     if isinstance(raw, (CBDData, FormDraft)):
-        return raw  # already an object (in-memory session, not restored)
+        return raw
     t = raw.get("_type")
     if t == "CBD":
         d = {k: v for k, v in raw.items() if k != "_type"}
         return CBDData(**d)
-    elif t == "FORM":
+    if t == "FORM":
         return FormDraft(form_type=raw["form_type"], fields=raw["fields"], uuid=raw.get("uuid"))
     return None
 
 
-def _thin_case_state_snapshot(context) -> dict:
+def _load_draft(context):
+    """Reconstruct draft object from stored dict."""
+    return _deserialise_draft(context.user_data.get("draft_data"))
+
+
+def _store_pending_draft(context, draft) -> None:
+    """Store the analysed draft used during template review."""
+    context.user_data["pending_draft_data"] = _serialise_draft(draft)
+
+
+def _load_pending_draft(context):
+    """Load the analysed draft used during template review."""
+    return _deserialise_draft(context.user_data.get("pending_draft_data"))
+
+
+def _case_review_state_snapshot(context) -> dict:
     """Debug-safe snapshot for callback routing without logging case content."""
     case_text = context.user_data.get("case_text") or ""
     return {
         "has_case_text": bool(case_text),
         "case_chars": len(case_text),
         "awaiting_detail": bool(context.user_data.get("awaiting_detail")),
-        "continue_thin": bool(context.user_data.get("continue_thin")),
-        "thin_case_check_count": int(context.user_data.get("thin_case_check_count", 0) or 0),
+        "pending_form": context.user_data.get("chosen_form"),
+        "has_pending_draft": bool(context.user_data.get("pending_draft_data")),
         "input_source": context.user_data.get("case_input_source"),
     }
 
 
-def _clear_thin_case_flags(context) -> None:
-    """Clear transient thin-case gating flags while preserving the stored case text."""
-    for key in ("awaiting_detail", "continue_thin", "thin_case_check_count", "case_input_source"):
+def _clear_case_review_state(context, keep_case: bool = True) -> None:
+    """Clear transient case-review flags while optionally preserving the stored case text."""
+    for key in (
+        "awaiting_detail",
+        "case_input_source",
+        "chosen_form",
+        "pending_draft_data",
+        "template_prompt_message_id",
+        "template_prompt_chat_id",
+        "form_recommendations",
+        "form_recommendations_text",
+        "document_name",
+    ):
         context.user_data.pop(key, None)
+    if not keep_case:
+        context.user_data.pop("case_text", None)
 
 # ConversationHandler states
 (AWAIT_USERNAME, AWAIT_PASSWORD,
  AWAIT_FORM_CHOICE, AWAIT_APPROVAL,
  AWAIT_EDIT_FIELD, AWAIT_EDIT_VALUE,
  AWAIT_CASE_INPUT, AWAIT_TRAINING_LEVEL,
- AWAIT_VOICE_EXAMPLES) = range(9)
+ AWAIT_VOICE_EXAMPLES, AWAIT_TEMPLATE_REVIEW) = range(10)
 
 # Common button patterns used across the bot
 _BTN_RESET = InlineKeyboardButton("🔄 Start Fresh", callback_data="ACTION|reset")
@@ -147,7 +178,7 @@ TRAINING_LEVEL_FORMS = {
 WELCOME_MSG = """🩺 Portfolio Guru — your WPBA entries, filed in seconds.
 
 Describe a case by text, voice note, photo, or document.
-I'll pick the right form, draft the entry, and file it when you approve.
+I'll suggest the best WPBA types, show the template, and draft the entry when you approve.
 
 Your credentials are encrypted and never shared.
 
@@ -159,7 +190,7 @@ Send me a clinical case (text, voice, photo, or document) and I'll handle the re
 
 WHAT_IS_THIS_MSG = """🩺 Portfolio Guru files your WPBA entries — in seconds.
 
-📝 Describe → 🔍 I pick the form → ✅ You approve → 📤 Filed
+📝 Describe → 🔍 I suggest form types → 🧩 You review the template → ✅ You approve → 📤 Filed
 
 Describe a clinical case by text, voice note, photo, or document (PDF, PowerPoint, Word). The bot works out which form fits best, extracts the right fields, and shows you the full draft to review. Nothing is saved until you approve.
 
@@ -269,6 +300,13 @@ def _build_form_choice_keyboard(recommendations):
     return InlineKeyboardMarkup(rows)
 
 
+def _build_template_review_keyboard():
+    return InlineKeyboardMarkup([
+        [_BTN_ADD_DETAIL, _BTN_CONTINUE_THIN],
+        [_BTN_CANCEL],
+    ])
+
+
 def _build_approval_keyboard():
     return InlineKeyboardMarkup([
         [
@@ -317,6 +355,96 @@ def _format_draft_preview(draft) -> str:
     if isinstance(draft, FormDraft):
         return _format_generic_draft(draft)
     return _format_cbd_draft(draft)
+
+
+def _draft_fields_for_review(draft) -> dict:
+    if isinstance(draft, CBDData):
+        return draft.model_dump()
+    if isinstance(draft, FormDraft):
+        return draft.fields
+    return {}
+
+
+def _is_missing_field_value(value) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, list):
+        return not any(str(item).strip() for item in value)
+    if isinstance(value, str):
+        return not value.strip()
+    return False
+
+
+def _summarise_field_value(value) -> str:
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value if str(item).strip())
+    return str(value).strip()
+
+
+def _template_requirements(form_type: str):
+    schema = FORM_SCHEMAS.get(form_type, {})
+    required = []
+    optional = []
+    for field in schema.get("fields", []):
+        if field["type"] == "kc_tick" or field["key"] == "key_capabilities":
+            continue
+        target = required if field.get("required") else optional
+        target.append(field)
+    return required, optional
+
+
+def _missing_template_fields(draft, form_type: str):
+    fields = _draft_fields_for_review(draft)
+    required, optional = _template_requirements(form_type)
+    missing_required = [field for field in required if _is_missing_field_value(fields.get(field["key"]))]
+    missing_optional = [field for field in optional if _is_missing_field_value(fields.get(field["key"]))]
+    present_fields = [field for field in required + optional if not _is_missing_field_value(fields.get(field["key"]))]
+    return missing_required, missing_optional, present_fields
+
+
+def _format_template_review(form_type: str, draft) -> str:
+    form_name = _form_display_name(form_type)
+    required, optional = _template_requirements(form_type)
+    missing_required, missing_optional, present_fields = _missing_template_fields(draft, form_type)
+    fields = _draft_fields_for_review(draft)
+
+    lines = [
+        f"🧩 *{form_name} template*",
+        "",
+        "*Required fields*",
+        *[f"• {field['label']}" for field in required],
+    ]
+
+    if optional:
+        lines.extend([
+            "",
+            "*Optional fields*",
+            *[f"• {field['label']}" for field in optional],
+        ])
+
+    if present_fields:
+        lines.extend(["", "*Picked up from your case*"])
+        for field in present_fields[:6]:
+            value = _summarise_field_value(fields.get(field["key"]))
+            if len(value) > 120:
+                value = f"{value[:117].rstrip()}..."
+            lines.append(f"• {field['label']}: {value}")
+
+    missing_labels = [field["label"] for field in missing_required]
+    if missing_optional:
+        missing_labels.extend(field["label"] for field in missing_optional[:3])
+
+    lines.extend(["", "*Still missing*"])
+    if missing_labels:
+        lines.extend(f"• {label}" for label in missing_labels)
+    else:
+        lines.append("• Nothing obvious")
+
+    lines.extend([
+        "",
+        "Send more detail if you want to fill the gaps, or tap *Continue anyway* to draft this using only the information explicitly present in your case.",
+    ])
+    return "\n".join(lines)
 
 
 def _format_curriculum_hierarchy(curriculum_links, key_capabilities) -> str:
@@ -833,7 +961,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         "Global ACTION callback: action=%s user=%s state=%s",
         action,
         user_id,
-        _thin_case_state_snapshot(context),
+        _case_review_state_snapshot(context),
     )
     await query.answer()
 
@@ -1005,9 +1133,9 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 HELP_MSG = """📖 *Portfolio Guru — Help*
 
 *How it works:*
-📝 Describe a case → 🔍 I pick the form → ✅ You approve → 📤 Filed
+📝 Describe a case → 🔍 I suggest WPBA types → 🧩 You review the template → ✅ You approve → 📤 Filed
 
-Send a case by text, voice note, photo, or document. I'll suggest the best WPBA form, generate a full draft, and file it to your e-portfolio when you approve.
+Send a case by text, voice note, photo, or document. I'll suggest the best WPBA types, show the chosen template and what's missing, then generate a draft for approval.
 
 *All 19 RCEM forms supported:*
 CBD · DOPS · Mini-CEX · ACAT · LAT · ACAF · STAT · MSF · QIAT · JCF · Teaching · Procedural Log · SDL · Ultrasound Case · ESLE · Complaint · Serious Incident · Educational Activity · Formal Course"""
@@ -1029,75 +1157,65 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 # === CALLBACK QUERY HANDLERS ===
 
+async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: int, case_text: str, form_type: str):
+    """Create an explicit-only draft snapshot for the selected form."""
+    vp = get_voice_profile(user_id) or ""
+    if form_type == "CBD":
+        draft = await asyncio.wait_for(
+            extract_cbd_data(
+                case_text,
+                voice_profile_json=vp,
+                leave_missing_blank=True,
+                preserve_original_content=True,
+            ),
+            timeout=45,
+        )
+    else:
+        draft = await asyncio.wait_for(
+            extract_form_data(
+                case_text,
+                form_type,
+                voice_profile_json=vp,
+                leave_missing_blank=True,
+                preserve_original_content=True,
+            ),
+            timeout=45,
+        )
+    _store_pending_draft(context, draft)
+    context.user_data["chosen_form"] = form_type
+    context.user_data["awaiting_detail"] = True
+    return draft
+
+
 async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_id: int, case_text: str, input_source: str) -> int:
-    """Run thin-case gating, form recommendation, and draft generation for extracted case text."""
+    """Store case text, suggest form types, or move directly to the chosen template review."""
     context.user_data["case_text"] = case_text
     context.user_data["case_input_source"] = input_source
 
-    thin_case_check_count = int(context.user_data.get("thin_case_check_count", 0) or 0)
-    if not context.user_data.get("continue_thin") and thin_case_check_count < 2:
-        try:
-            sufficiency = await asyncio.wait_for(assess_case_sufficiency(case_text), timeout=15)
-            logger.info(
-                "Thin-case assessment complete: user=%s sufficient=%s state=%s",
-                user_id,
-                sufficiency.get("sufficient", True),
-                _thin_case_state_snapshot(context),
-            )
-        except Exception as exc:
-            logger.warning("Thin-case assessment failed for user=%s: %s", user_id, exc)
-            sufficiency = {"sufficient": True, "questions": []}
-
-        if not sufficiency.get("sufficient", True) and thin_case_check_count == 0:
-            questions = sufficiency.get("questions", [])[:3]
-            q_text = "\n".join(f"• {q}" for q in questions) if questions else (
-                "• What happened clinically?\n"
-                "• What were you thinking at the time?\n"
-                "• What did you learn from it?"
-            )
-            context.user_data["thin_case_check_count"] = 1
-            context.user_data["awaiting_detail"] = True
-            await message.reply_text(
-                f"Your case is a bit brief for a strong portfolio entry. A few questions that would help:\n\n{q_text}\n\nSend me the extra detail and I'll add it to your case, or tap below to continue with what you have.",
-                reply_markup=InlineKeyboardMarkup([[_BTN_ADD_DETAIL, _BTN_CONTINUE_THIN]])
-            )
-            return AWAIT_CASE_INPUT
-
-        if not sufficiency.get("sufficient", True):
-            logger.info("Thin case still sparse after one follow-up; proceeding anyway for user=%s", user_id)
-
-    context.user_data.pop("continue_thin", None)
-    context.user_data.pop("awaiting_detail", None)
-    context.user_data.pop("thin_case_check_count", None)
-
-    # Only check for explicit form type in text/voice/document input — never for photos
-    # (photo descriptions should always go to user-selected form, never auto-routed)
     explicit_form = extract_explicit_form_type(case_text) if input_source != "photo" else None
     if explicit_form:
-        context.user_data["chosen_form"] = explicit_form
-        emoji = FORM_EMOJIS.get(explicit_form, "📋")
         await message.chat.send_action(constants.ChatAction.TYPING)
-        ack = await message.reply_text(f"{emoji} Generating {_form_display_name(explicit_form)} draft…")
+        ack = await message.reply_text(f"🧩 Reviewing {_form_display_name(explicit_form)} template…")
         try:
-            vp = get_voice_profile(user_id) or ""
-            if explicit_form == "CBD":
-                draft = await asyncio.wait_for(extract_cbd_data(case_text, voice_profile_json=vp), timeout=45)
-            else:
-                draft = await asyncio.wait_for(extract_form_data(case_text, explicit_form, voice_profile_json=vp), timeout=45)
-            _store_draft(context, draft)
+            draft = await _analyse_selected_form(context, user_id, case_text, explicit_form)
         except asyncio.TimeoutError:
-            logger.error("Draft generation timed out for explicit %s", explicit_form)
-            await ack.edit_text("⏳ Draft generation timed out. Please try again.")
+            logger.error("Template review timed out for explicit %s", explicit_form)
+            await ack.edit_text("⏳ Template review timed out. Please try again.")
             return ConversationHandler.END
         except Exception as exc:
-            logger.error("Draft generation failed for explicit %s: %s", explicit_form, exc, exc_info=True)
-            await ack.edit_text("⚠️ Could not generate draft.", reply_markup=_KB_RETRY_RESET)
+            logger.error("Template review failed for explicit %s: %s", explicit_form, exc, exc_info=True)
+            await ack.edit_text("⚠️ Could not review that template.", reply_markup=_KB_RETRY_RESET)
             return ConversationHandler.END
-        preview = _format_draft_preview(draft)
-        await _safe_edit_text(ack, preview, reply_markup=_build_approval_keyboard(), parse_mode="Markdown")
-        return AWAIT_APPROVAL
 
-    # No explicit form — get AI recommendations filtered by training level (if set)
+        review_text = _format_template_review(explicit_form, draft)
+        await _safe_edit_text(
+            ack,
+            review_text,
+            reply_markup=_build_template_review_keyboard(),
+            parse_mode="Markdown",
+        )
+        return AWAIT_TEMPLATE_REVIEW
+
     training_level = get_training_level(user_id)
     allowed_forms = TRAINING_LEVEL_FORMS.get(training_level, TRAINING_LEVEL_FORMS["ST5"]) if training_level else TRAINING_LEVEL_FORMS["ST5"]
 
@@ -1105,43 +1223,61 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
     try:
         recommendations = await asyncio.wait_for(recommend_form_types(case_text), timeout=30)
         recommendations = [r for r in recommendations if r.form_type in allowed_forms]
+        if not recommendations:
+            from models import FormTypeRecommendation
+            from extractor import FORM_UUIDS
+
+            recommendations = [FormTypeRecommendation(
+                form_type="CBD",
+                rationale="Case-Based Discussion is the safest fit from the available detail.",
+                uuid=FORM_UUIDS["CBD"],
+            )]
         context.user_data["form_recommendations"] = recommendations
     except Exception as exc:
-        logger.error(f"Form recommendation failed: {exc}")
+        logger.error("Form recommendation failed: %s", exc)
         from models import FormTypeRecommendation
         from extractor import FORM_UUIDS
+
         recommendations = [FormTypeRecommendation(
             form_type="CBD",
-            rationale="Clinical case",
-            uuid=FORM_UUIDS["CBD"]
+            rationale="Clinical case discussion is still the safest fit from the information provided.",
+            uuid=FORM_UUIDS["CBD"],
         )]
         context.user_data["form_recommendations"] = recommendations
 
-    rationale_lines = [f"- {_form_display_name(r.form_type)}: {r.rationale}" for r in recommendations if r.uuid]
-    rationale_text = "\n".join(rationale_lines) if rationale_lines else "- Case-Based Discussion: Clinical case"
+    rationale_lines = [f"• *{_form_display_name(r.form_type)}* - {r.rationale}" for r in recommendations if r.uuid]
+    rationale_text = "\n".join(rationale_lines) if rationale_lines else "• *Case-Based Discussion* - Clinical case discussion."
 
     status_msg = context.user_data.pop("status_msg_id", None)
     status_chat = context.user_data.pop("status_msg_chat", None)
 
-    context.user_data["form_recommendations_text"] = f"Which form would you like to create?\n\n{rationale_text}"
+    prompt_text = (
+        "Suggested WPBA types for this case:\n\n"
+        f"{rationale_text}\n\n"
+        "Pick one and I'll show that template plus anything still missing."
+    )
+    context.user_data["form_recommendations_text"] = prompt_text
 
     if status_msg and status_chat:
         try:
             await context.bot.edit_message_text(
                 chat_id=status_chat,
                 message_id=status_msg,
-                text=f"Which form would you like to create?\n\n{rationale_text}",
-                reply_markup=_build_form_choice_keyboard(recommendations)
+                text=prompt_text,
+                reply_markup=_build_form_choice_keyboard(recommendations),
+                parse_mode="Markdown",
             )
         except Exception:
             await message.reply_text(
-                f"Which form would you like to create?\n\n{rationale_text}",
-                reply_markup=_build_form_choice_keyboard(recommendations)
+                prompt_text,
+                reply_markup=_build_form_choice_keyboard(recommendations),
+                parse_mode="Markdown",
             )
     else:
         await message.reply_text(
-            f"Which form would you like to create?\n\n{rationale_text}",
-            reply_markup=_build_form_choice_keyboard(recommendations)
+            prompt_text,
+            reply_markup=_build_form_choice_keyboard(recommendations),
+            parse_mode="Markdown",
         )
     return AWAIT_FORM_CHOICE
 
@@ -1153,7 +1289,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Conversation callback: data=%s user=%s state=%s",
         data,
         update.effective_user.id,
-        _thin_case_state_snapshot(context),
+        _case_review_state_snapshot(context),
     )
 
     if data.startswith("INFO|"):
@@ -1194,26 +1330,30 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "ACTION|add_detail":
         await query.answer()
         await query.edit_message_reply_markup(reply_markup=None)
-        if not context.user_data.get("case_text"):
+        if not context.user_data.get("case_text") or not context.user_data.get("chosen_form"):
             await query.message.reply_text("That prompt has expired. Send your case again and I'll continue.")
             return AWAIT_CASE_INPUT
         context.user_data["awaiting_detail"] = True
-        context.user_data.pop("continue_thin", None)
         await query.message.reply_text("Send me the extra detail and I'll fold it into the same case.")
         return AWAIT_CASE_INPUT
 
     elif data == "ACTION|continue_thin":
         await query.answer()
-        await query.edit_message_reply_markup(reply_markup=None)
-        case_text = (context.user_data.get("case_text") or "").strip()
-        if not case_text:
+        draft = _load_pending_draft(context)
+        if not draft or not context.user_data.get("chosen_form"):
             await query.message.reply_text("That prompt has expired. Send your case again and I'll continue.")
             return AWAIT_CASE_INPUT
+        _store_draft(context, draft)
         context.user_data.pop("awaiting_detail", None)
-        context.user_data["continue_thin"] = True
-        await query.message.reply_text("Okay — continuing with the detail you already gave me.")
-        input_source = context.user_data.get("case_input_source", "text")
-        return await _process_case_text(query.message, context, update.effective_user.id, case_text, input_source)
+        context.user_data.pop("pending_draft_data", None)
+        preview = _format_draft_preview(draft)
+        await _safe_edit_text(
+            query.message,
+            preview,
+            reply_markup=_build_approval_keyboard(),
+            parse_mode="Markdown",
+        )
+        return AWAIT_APPROVAL
 
     elif data == "ACTION|retry_filing":
         return await handle_approval_approve(update, context)
@@ -1265,69 +1405,68 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if update.message.text:
         raw_text = update.message.text.strip()
-        words_lower = raw_text.lower()
-        word_count = len(raw_text.split())
-
-        # Fast-path: question patterns (before clinical heuristic)
-        # Catches "Do you have...", "Can you...", "What about...", "Is X mapped?"
-        _QUESTION_PATTERNS = [
-            r"^do you ", r"^do we ", r"^can you ", r"^can we ",
-            r"^is ", r"^are ", r"^what ", r"^how ", r"^why ",
-            r"^where ", r"^when ", r"^who ", r"^which ",
-            r"\bmapped\b", r"\bsupported\b", r"\bavailable\b",
-            r"\bdo you have\b", r"\bdo we have\b",
-        ]
-        import re
-        is_question_pattern = any(re.search(p, words_lower) for p in _QUESTION_PATTERNS)
-
-        if is_question_pattern and word_count < 15:
-            # Short question — answer directly without classify
-            intent = "question"
+        if context.user_data.get("awaiting_detail") and context.user_data.get("chosen_form"):
+            case_text = raw_text
         else:
-            # Fast heuristic: long clinical-sounding messages skip classify entirely
-            # Saves ~3-5s of Gemini latency for obvious cases
-            _CLINICAL_KEYWORDS = {"patient", "presented", "diagnosed", "examined", "management",
-                                  "symptoms", "clinical", "assessment", "treatment", "referred",
-                                  "history", "examination", "investigation", "procedure", "resuscitation",
-                                  "chest pain", "shortness of breath", "abdominal", "fracture", "suture",
-                                  "intubation", "cannulation", "triage", "observations", "bloods"}
-            clinical_hits = sum(1 for kw in _CLINICAL_KEYWORDS if kw in words_lower)
+            words_lower = raw_text.lower()
+            word_count = len(raw_text.split())
 
-            if word_count > 30 and clinical_hits >= 2:
-                # Obviously a clinical case — skip AI classify
-                intent = "case"
-            elif word_count < 8 and clinical_hits == 0:
-                # Very short, no clinical language — likely chitchat
-                intent = "chitchat" if word_count < 4 else "case"
+            # Fast-path: question patterns (before clinical heuristic)
+            # Catches "Do you have...", "Can you...", "What about...", "Is X mapped?"
+            _QUESTION_PATTERNS = [
+                r"^do you ", r"^do we ", r"^can you ", r"^can we ",
+                r"^is ", r"^are ", r"^what ", r"^how ", r"^why ",
+                r"^where ", r"^when ", r"^who ", r"^which ",
+                r"\bmapped\b", r"\bsupported\b", r"\bavailable\b",
+                r"\bdo you have\b", r"\bdo we have\b",
+            ]
+            import re
+            is_question_pattern = any(re.search(p, words_lower) for p in _QUESTION_PATTERNS)
+
+            if is_question_pattern and word_count < 15:
+                # Short question — answer directly without classify
+                intent = "question"
             else:
-                # Ambiguous — use AI classify
-                await update.effective_chat.send_action(constants.ChatAction.TYPING)
-                try:
-                    intent = await classify_intent(raw_text)
-                except Exception:
-                    intent = "case"  # Default to case on error
+                # Fast heuristic: long clinical-sounding messages skip classify entirely
+                # Saves ~3-5s of Gemini latency for obvious cases
+                _CLINICAL_KEYWORDS = {"patient", "presented", "diagnosed", "examined", "management",
+                                      "symptoms", "clinical", "assessment", "treatment", "referred",
+                                      "history", "examination", "investigation", "procedure", "resuscitation",
+                                      "chest pain", "shortness of breath", "abdominal", "fracture", "suture",
+                                      "intubation", "cannulation", "triage", "observations", "bloods"}
+                clinical_hits = sum(1 for kw in _CLINICAL_KEYWORDS if kw in words_lower)
 
-        if intent == "chitchat":
-            context.user_data.clear()
-            await update.message.reply_text(
-                "Hey! Ready when you are. Send me a clinical case and I'll draft it for your portfolio."
-            )
-            return ConversationHandler.END
+                if word_count > 30 and clinical_hits >= 2:
+                    intent = "case"
+                elif word_count < 8 and clinical_hits == 0:
+                    intent = "chitchat" if word_count < 4 else "case"
+                else:
+                    await update.effective_chat.send_action(constants.ChatAction.TYPING)
+                    try:
+                        intent = await classify_intent(raw_text)
+                    except Exception:
+                        intent = "case"
 
-        if intent == "question":
-            context.user_data.clear()
-            try:
-                answer = await answer_question(raw_text)
-                await update.message.reply_text(answer)
-            except Exception:
+            if intent == "chitchat":
+                context.user_data.clear()
                 await update.message.reply_text(
-                    "I help you file clinical cases to your Kaizen e-portfolio. "
-                    "Send me a case description by text, voice note, photo, or document."
+                    "Hey! Ready when you are. Send me a clinical case and I'll draft it for your portfolio."
                 )
-            return ConversationHandler.END
+                return ConversationHandler.END
 
-        # Intent is 'case' - proceed with filing flow
-        case_text = raw_text
+            if intent == "question":
+                context.user_data.clear()
+                try:
+                    answer = await answer_question(raw_text)
+                    await update.message.reply_text(answer)
+                except Exception:
+                    await update.message.reply_text(
+                        "I help you file clinical cases to your Kaizen e-portfolio. "
+                        "Send me a case description by text, voice note, photo, or document."
+                    )
+                return ConversationHandler.END
+
+            case_text = raw_text
 
     elif update.message.voice:
         ack = await update.message.reply_text("🎙️ Transcribing voice note…")
@@ -1434,15 +1573,11 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text("💬 Send a text message, voice note, photo, or document.")
         return ConversationHandler.END
 
-    # If user is adding detail after a thin-case prompt, merge it into the stored case.
-    if context.user_data.get("awaiting_detail"):
+    # If the user is refining a chosen template, keep the original wording and append the new detail.
+    if context.user_data.get("awaiting_detail") and context.user_data.get("chosen_form"):
         previous_case = context.user_data.get("case_text", "").strip()
         if previous_case:
-            case_text = f"{previous_case}\n\nAdditional detail:\n{case_text}".strip()
-        context.user_data.pop("awaiting_detail", None)
-        context.user_data["thin_case_check_count"] = 1
-    else:
-        _clear_thin_case_flags(context)
+            case_text = f"{previous_case}\n\n{case_text}".strip()
 
     if update.message.photo:
         input_source = "photo"
@@ -1452,6 +1587,33 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         input_source = "document"
     else:
         input_source = "text"
+
+    chosen_form = context.user_data.get("chosen_form")
+    if chosen_form and context.user_data.get("awaiting_detail"):
+        context.user_data["case_text"] = case_text
+        context.user_data["case_input_source"] = input_source
+        await update.effective_chat.send_action(constants.ChatAction.TYPING)
+        ack = await update.message.reply_text(f"🧩 Updating {_form_display_name(chosen_form)} template…")
+        try:
+            draft = await _analyse_selected_form(context, user_id, case_text, chosen_form)
+        except asyncio.TimeoutError:
+            await ack.edit_text("⏳ Template review timed out. Please try again.")
+            return AWAIT_TEMPLATE_REVIEW
+        except Exception as exc:
+            logger.error("Template review refresh failed for %s: %s", chosen_form, exc, exc_info=True)
+            await ack.edit_text("⚠️ Could not refresh that template.", reply_markup=_KB_RETRY_RESET)
+            return AWAIT_TEMPLATE_REVIEW
+
+        review_text = _format_template_review(chosen_form, draft)
+        await _safe_edit_text(
+            ack,
+            review_text,
+            reply_markup=_build_template_review_keyboard(),
+            parse_mode="Markdown",
+        )
+        return AWAIT_TEMPLATE_REVIEW
+
+    _clear_case_review_state(context, keep_case=False)
     return await _process_case_text(update.message, context, user_id, case_text, input_source)
 
 
@@ -1517,34 +1679,30 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     context.user_data["chosen_form"] = form_type
 
-    # Disarm buttons, show single working status — updated in-place throughout
-    emoji = FORM_EMOJIS.get(form_type, "📋")
     await query.edit_message_text(
-        f"{emoji} Generating {_form_display_name(form_type)} draft…",
-        reply_markup=None
+        f"🧩 Reviewing {_form_display_name(form_type)} template…",
+        reply_markup=None,
     )
 
     try:
-        vp = get_voice_profile(update.effective_user.id) or ""
-        if form_type == "CBD":
-            draft = await asyncio.wait_for(extract_cbd_data(case_text, voice_profile_json=vp), timeout=45)
-        else:
-            draft = await asyncio.wait_for(extract_form_data(case_text, form_type, voice_profile_json=vp), timeout=45)
-        _store_draft(context, draft)
+        draft = await _analyse_selected_form(context, update.effective_user.id, case_text, form_type)
     except asyncio.TimeoutError:
-        logger.error(f"Draft generation timed out after 45s for {form_type}")
-        await query.edit_message_text("⏳ Draft generation timed out.", reply_markup=_KB_RETRY_RESET)
+        logger.error("Template review timed out after 45s for %s", form_type)
+        await query.edit_message_text("⏳ Template review timed out.", reply_markup=_KB_RETRY_RESET)
         return ConversationHandler.END
     except Exception as e:
-        logger.error(f"Draft generation failed in form_choice: {e}", exc_info=True)
-        await query.edit_message_text("⚠️ Could not generate draft.", reply_markup=_KB_RETRY_RESET)
-        # Do NOT clear user_data — a newer flow may be active
+        logger.error("Template review failed in form_choice: %s", e, exc_info=True)
+        await query.edit_message_text("⚠️ Could not review that template.", reply_markup=_KB_RETRY_RESET)
         return ConversationHandler.END
 
-    # Replace status with draft preview + approval buttons — same message, no new bubble
-    preview = _format_draft_preview(draft)
-    await _safe_edit_text(query.message, preview, reply_markup=_build_approval_keyboard(), parse_mode="Markdown")
-    return AWAIT_APPROVAL
+    review_text = _format_template_review(form_type, draft)
+    await _safe_edit_text(
+        query.message,
+        review_text,
+        reply_markup=_build_template_review_keyboard(),
+        parse_mode="Markdown",
+    )
+    return AWAIT_TEMPLATE_REVIEW
 
 
 async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1877,6 +2035,15 @@ def build_application() -> Application:
                 CallbackQueryHandler(handle_form_choice, pattern=r"^FORM\|"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
+            ],
+            AWAIT_TEMPLATE_REVIEW: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_case_input),
+                MessageHandler(filters.VOICE, handle_case_input),
+                MessageHandler(filters.PHOTO, handle_case_input),
+                MessageHandler(filters.Document.ALL, handle_case_input),
+                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|add_detail$"),
+                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|continue_thin$"),
+                CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
             ],
             AWAIT_APPROVAL: [
                 CallbackQueryHandler(handle_approval_approve, pattern=r"^APPROVE\|"),
