@@ -1594,14 +1594,12 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                         intent = "case"
 
             if intent == "chitchat":
-                context.user_data.clear()
                 await update.message.reply_text(
                     "Hey! Ready when you are. Send me a clinical case and I'll draft it for your portfolio."
                 )
                 return ConversationHandler.END
 
-            if intent == "question":
-                context.user_data.clear()
+            if intent in ("question", "question_general"):
                 try:
                     answer = await answer_question(raw_text)
                     await update.message.reply_text(answer)
@@ -2353,6 +2351,7 @@ def build_application() -> Application:
                 MessageHandler(filters.VOICE, handle_case_input),
                 MessageHandler(filters.PHOTO, handle_case_input),
                 MessageHandler(filters.Document.ALL, handle_case_input),
+                CallbackQueryHandler(handle_form_choice, pattern=r"^FORM\|"),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|add_detail$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|continue_thin$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
