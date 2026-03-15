@@ -257,6 +257,55 @@ FORM_EMOJIS = {
     "EDU_ACT": "🎓", "FORMAL_COURSE": "📋",
 }
 
+FORM_BUTTON_LABELS = {
+    # Core WPBAs — official RCEM codes
+    "CBD": "CBD",
+    "CBD_2021": "CBD (2021)",
+    "DOPS": "DOPS",
+    "DOPS_2021": "DOPS (2021)",
+    "MINI_CEX": "Mini-CEX",
+    "MINI_CEX_2021": "Mini-CEX (2021)",
+    "ACAT": "ACAT",
+    "ACAT_2021": "ACAT (2021)",
+    "ACAF": "ACAF",
+    "ACAF_2021": "ACAF (2021)",
+    "LAT": "LAT",
+    "LAT_2021": "LAT (2021)",
+    "STAT": "STAT",
+    "MSF": "MSF",
+    "QIAT": "QIAT",
+    "QIAT_2021": "QIAT (2021)",
+    # Teaching & Education
+    "JCF": "Journal Club",
+    "TEACH": "Teaching Session",
+    "EDU_ACT": "Educational Activity",
+    "FORMAL_COURSE": "Formal Course",
+    "SDL": "Self-Directed Learning",
+    # Procedures & Clinical
+    "DOPS_PROC": "DOPS Procedure",
+    "PROC_LOG": "Procedural Log",
+    "US_CASE": "Ultrasound Case",
+    # Reflection & Incidents
+    "ESLE": "ESLE",
+    "ESLE_2021": "ESLE (2021)",
+    "SERIOUS_INC": "Serious Incident",
+    "COMPLAINT": "Complaint",
+    # Management (new)
+    "MGMT_ROTA": "Rota Management",
+    "MGMT_RISK": "Risk Management",
+    "MGMT_MEETING": "Meeting / Committee",
+    "MGMT_PROJECT": "QI Project",
+    "MGMT_AUDIT": "Audit",
+    "MGMT_SERVICE": "Service Improvement",
+    "MGMT_LEADERSHIP": "Leadership",
+    # Other
+    "BUSINESS_CASE": "Business Case",
+    "RESEARCH": "Research Activity",
+    "REFLECTIVE": "Reflective Practice",
+    "PDP": "Personal Dev Plan",
+    "RPL": "Reflective Practice Log",
+}
+
 FIELD_EMOJIS = {
     "date_of_encounter":      "📅",
     "date":                   "📅",
@@ -315,12 +364,12 @@ def _build_form_choice_keyboard(recommendations):
     buttons = []
     for rec in recommendations:
         emoji = FORM_EMOJIS.get(rec.form_type, "📄")
-        label = _form_display_name(rec.form_type)
+        label = FORM_BUTTON_LABELS.get(rec.form_type) or _form_display_name(rec.form_type)[:24]
         if rec.uuid:
             buttons.append(InlineKeyboardButton(f"{emoji} {label}", callback_data=f"FORM|{rec.form_type}"))
         else:
             buttons.append(InlineKeyboardButton(f"{emoji} {label} (soon)", callback_data="FORM|disabled"))
-    rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
+    rows = [[b] for b in buttons]  # one button per row
     rows.append([
         InlineKeyboardButton("📋 See all forms", callback_data="FORM|show_all"),
         InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|form"),
@@ -1953,9 +2002,9 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         buttons = []
         for rec in all_recs:
             emoji = FORM_EMOJIS.get(rec.form_type, "📄")
-            label = _form_display_name(rec.form_type)
+            label = FORM_BUTTON_LABELS.get(rec.form_type) or _form_display_name(rec.form_type)[:24]
             buttons.append(InlineKeyboardButton(f"{emoji} {label}", callback_data=f"FORM|{rec.form_type}"))
-        rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
+        rows = [[b] for b in buttons]  # one button per row
         rows.append([
             InlineKeyboardButton("⬅️ Back", callback_data="FORM|back"),
             InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|form"),
