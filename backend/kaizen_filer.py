@@ -109,6 +109,7 @@ SLO_CHECKBOX_IDS = {
 # ─── Form UUIDs (2025 Update) ───────────────────────────────────────────────
 
 FORM_UUIDS = {
+    # ─── 2025 Update versions (preferred) ─────────────────────────────────
     "CBD":           "3ce5989a-b61c-4c24-ab12-711bf928b181",
     "DOPS":          "159831f9-6d22-4e77-851b-87e30aee37a2",
     "LAT":           "eb1c7547-0f41-49e7-95de-8adffd849924",
@@ -124,10 +125,70 @@ FORM_UUIDS = {
     "SDL":           "743885d8-c1b8-4566-bc09-8ed9b0e09829",
     "US_CASE":       "558b196a-8168-4cc6-b363-6f6e4b08397a",
     "ESLE":          "cbc7a42f-a2f0-436b-813e-bbf97cce0a34",
+    "ESLE_ASSESS":   "4a6f3a91-10ed-45d0-bb82-3e87ae2d6d04",  # ESLE: Part 1 & 2 (2025 Update - v3)
     "COMPLAINT":     "f7c0ba98-5a47-4e37-b76a-ca3c5c8484cc",
     "SERIOUS_INC":   "9d4a7912-a615-4ae4-9fae-6be966bcf254",
     "EDU_ACT":       "868dc0e7-f4e9-4283-ac52-d9c8b246024b",
     "FORMAL_COURSE": "c7cd9a95-e2aa-4f61-a441-b663f3c933c6",
+    "REFLECT_LOG":   "32d0fcb9-05d0-4d6d-b877-ebd5daf0b4e9",  # Reflective Practice Log (2025 Update)
+    "TEACH_OBS":     "30668ad8-e1db-4a27-bb2d-3e395e6acfcf",  # Teaching observation tool (2025 Update)
+    # ─── 2021 versions ────────────────────────────────────────────────────
+    "CBD_2021":           "310b903a-8c97-44e0-8ec3-4bf692b33441",
+    "DOPS_2021":          "27a300c6-245a-4fed-943e-fe2976686d0d",
+    "ACAT_2021":          "2a8a02fe-c085-4cd7-a78e-b024a359011a",
+    "ACAF_2021":          "37978f7b-1770-40ed-8bf1-53a96ae13c25",
+    "STAT_2021":          "262e7e37-9f74-414f-bc88-fb6ff5ce2239",
+    "MINI_CEX_2021":      "26978104-5583-46c4-9799-07555a18b3d4",
+    "JCF_2021":           "efb238d0-66f7-487d-b18a-cfda78c8e733",
+    "ESLE_2021":          "e4417335-969c-4a4e-a04f-cc272afc1ab8",
+    "TEACH_2021":         "98c35142-6b8d-4958-86c5-4dfd06f22143",
+    "PROC_LOG_2021":      "25527933-81e6-484f-b4dd-7ea23c2e3919",
+    "SDL_2021":           "5f679c9f-ed61-4dc9-afc9-2c1f98ba3983",
+    "US_CASE_2021":       "eede404a-cfab-442f-8c4c-0a1160cc45f1",
+    "COMPLAINT_2021":     "6c8cd525-dae4-479c-8836-864691a74832",
+    "SERIOUS_INC_2021":   "e2df1663-1b94-403a-91fa-37f568161ed5",
+    "EDU_ACT_2021":       "7a40ed0e-0280-4e16-b3dc-468022d84575",
+    "FORMAL_COURSE_2021": "1889dfd7-4267-4b77-a062-357740c2ed4d",
+    "TEACH_OBS_2021":     "e43a8b88-2bea-4bdb-a5aa-02e0cd388698",
+    "TEACH_CONFID_2021":  "563d2c82-46b5-41d7-b601-58a45b347a3a",
+    # ─── Management section (2021/2025 shared) ────────────────────────────
+    "MGMT_ROTA":          "ffc650a7-309d-42e0-8886-21521114bfb2",
+    "MGMT_RISK":          "4a349b8d-6f9f-478f-b623-4f083d6ce87b",
+    "MGMT_RECRUIT":       "2a2c04a5-388a-4b38-ad74-06bacfd39594",
+    "MGMT_PROJECT":       "6b5f60e2-0237-4429-9870-a2bd8cceeb97",
+    "MGMT_RISK_PROC":     "957ab9dc-de1e-4b87-b38f-9bd4f54cb9a1",
+    "MGMT_TRAINING_EVT":  "2cd1ddb3-7d33-45dd-9269-c09209568391",
+    "MGMT_GUIDELINE":     "8121d957-ed22-4799-b9fa-d3eb52c9a37a",
+    "MGMT_INFO":          "9d396397-94bc-4905-b27b-547c938868de",
+    "MGMT_INDUCTION":     "fb37ecae-334a-40e2-aa6e-043a24952283",
+    "MGMT_EXPERIENCE":    "73805ea3-ee61-4a59-a57d-d89aca660309",
+    "MGMT_REPORT":        "0131f31d-a78c-41cb-8147-15fc1e2c42df",
+    "TEACH_CONFID":       "f614bdcc-5d31-4b5b-b980-1e073e2431db",  # Teach Confidentiality (2025 Update)
+    "APPRAISAL":          "099be248-10de-4241-99ec-970d947963ae",
+    "BUSINESS_CASE":      "8a720578-cee6-4e19-b9ff-fb0f95a3019c",
+    "CLIN_GOV":           "d5a56390-d229-41f6-b67f-3231a3390f75",
+    "MGMT_COMPLAINT":     "89217cd1-cfae-4006-b35e-221c46f5a645",
+    "COST_IMPROVE":       "1cc77669-859f-4d2a-9588-f3d0de69f40f",
+    "CRIT_INCIDENT":      "b6445c81-388b-4f48-b510-b080b406b74e",
+    "EQUIP_SERVICE":      "ec09e28d-86f3-4bdc-8547-ef3ab0a5388e",
+    # ─── Research, Audit & QI ─────────────────────────────────────────────
+    "AUDIT":              "33c454df-eb86-49f1-8ec0-ee2ccbe8c574",
+    "RESEARCH":           "3d4c6a82-f7ab-4b11-bb36-c7487de4ff2d",
+    # ─── Educational Review & Meetings ────────────────────────────────────
+    "EDU_MEETING":        "cf3c4b40-12e6-46ca-b7a7-4914bf792f6b",
+    "EDU_MEETING_SUPP":   "35e1bd6b-4de3-441b-82f7-ef236a8f7a7c",
+    "PDP":                "c2b716dd-2d2a-462e-8df0-70760673448c",
+    # ─── Training Post & Supervisor ───────────────────────────────────────
+    "ADD_POST":           "c8049d8b-11f7-4bad-ac6c-c0b3c9ded1bb",
+    "ADD_SUPERVISOR":     "87205ea8-ee22-4555-8e30-3a5ffc8b0bd2",
+    # ─── Progression ─────────────────────────────────────────────────────
+    "HIGHER_PROG":        "c19ca7c4-54ba-4816-b292-8bce1af4a62f",
+    # ─── Other ────────────────────────────────────────────────────────────
+    "ABSENCE":            "9feb8df3-1c70-4237-bf77-c6520e43c9c2",
+    "CCT":                "9425aea9-1fb9-4230-b2a3-ec1712599caa",
+    "FILE_UPLOAD":        "108ae04a-d865-4a4a-ba97-9c537563e960",
+    "FILE_UPLOAD_2021":   "2db062c4-471e-4216-92f2-d51af84f2246",
+    "OOP":                "2b023326-a34f-463e-a921-bf215599b0ac",
 }
 
 

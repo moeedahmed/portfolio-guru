@@ -25,10 +25,30 @@ PLATFORM_REGISTRY = {
         "form_url_pattern": "https://kaizenep.com/events/new-section/{uuid}",
         "deterministic": True,
         "supported_forms": [
+            # 2025 Update forms
             "CBD", "DOPS", "LAT", "ACAT", "ACAF", "STAT", "MSF",
             "MINI_CEX", "JCF", "QIAT", "TEACH", "PROC_LOG", "SDL",
-            "US_CASE", "ESLE", "COMPLAINT", "SERIOUS_INC", "EDU_ACT",
-            "FORMAL_COURSE",
+            "US_CASE", "ESLE", "ESLE_ASSESS", "COMPLAINT", "SERIOUS_INC",
+            "EDU_ACT", "FORMAL_COURSE", "REFLECT_LOG", "TEACH_OBS",
+            # 2021 versions
+            "CBD_2021", "DOPS_2021", "ACAT_2021", "ACAF_2021", "STAT_2021",
+            "MINI_CEX_2021", "JCF_2021", "ESLE_2021", "TEACH_2021",
+            "PROC_LOG_2021", "SDL_2021", "US_CASE_2021", "COMPLAINT_2021",
+            "SERIOUS_INC_2021", "EDU_ACT_2021", "FORMAL_COURSE_2021",
+            "TEACH_OBS_2021", "TEACH_CONFID_2021",
+            # Management section
+            "MGMT_ROTA", "MGMT_RISK", "MGMT_RECRUIT", "MGMT_PROJECT",
+            "MGMT_RISK_PROC", "MGMT_TRAINING_EVT", "MGMT_GUIDELINE",
+            "MGMT_INFO", "MGMT_INDUCTION", "MGMT_EXPERIENCE", "MGMT_REPORT",
+            "TEACH_CONFID", "APPRAISAL", "BUSINESS_CASE", "CLIN_GOV",
+            "MGMT_COMPLAINT", "COST_IMPROVE", "CRIT_INCIDENT", "EQUIP_SERVICE",
+            # Research, Audit & QI
+            "AUDIT", "RESEARCH",
+            # Educational Review & Meetings
+            "EDU_MEETING", "EDU_MEETING_SUPP", "PDP",
+            # Other
+            "ADD_POST", "ADD_SUPERVISOR", "HIGHER_PROG",
+            "ABSENCE", "CCT", "FILE_UPLOAD", "FILE_UPLOAD_2021", "OOP",
         ],
     },
     # Future platforms — browser-use only until DOM mappings built

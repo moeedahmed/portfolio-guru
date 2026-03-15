@@ -377,4 +377,337 @@ FORM_SCHEMAS = {
             {"key": "key_capabilities",     "label": "Key Capabilities",        "type": "kc_tick",  "required": False},
         ]
     },
+
+    # ===== NEWLY DISCOVERED FORMS (full catalogue) =====
+
+    "ESLE_ASSESS": {
+        "name": "ESLE: Part 1 & 2 (2025 Update)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date", "type": "date", "required": True},
+            {"key": "stage_of_training", "label": "Stage of Training", "type": "dropdown", "required": True,
+             "options": ["Intermediate/ST3", "Higher/ST4-ST6", "PEM Sub-specialty", "ACCS ST1-ST2/CT1-CT2"]},
+            {"key": "reflection",        "label": "Reflection",        "type": "text",     "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+            {"key": "key_capabilities",  "label": "Key Capabilities",  "type": "kc_tick",  "required": False},
+        ]
+    },
+
+    "REFLECT_LOG": {
+        "name": "Reflective Practice Log (2025 Update)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date", "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection",        "type": "text",     "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+            {"key": "key_capabilities",  "label": "Key Capabilities",  "type": "kc_tick",  "required": False},
+        ]
+    },
+
+    "TEACH_OBS": {
+        "name": "Teaching Observation Tool (2025 Update)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",              "type": "date",     "required": True},
+            {"key": "stage_of_training", "label": "Stage of Training", "type": "dropdown", "required": True,
+             "options": ["Intermediate/ST3", "Higher/ST4-ST6", "PEM Sub-specialty", "ACCS ST1-ST2/CT1-CT2"]},
+            {"key": "reflection",        "label": "Reflection",        "type": "text",     "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+            {"key": "key_capabilities",  "label": "Key Capabilities",  "type": "kc_tick",  "required": False},
+        ]
+    },
+
+    "TEACH_CONFID": {
+        "name": "Management: Teach Confidentiality (2025 Update)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+            {"key": "key_capabilities",  "label": "Key Capabilities",  "type": "kc_tick",  "required": False},
+        ]
+    },
+
+    # ─── Management section forms ─────────────────────────────────────────
+
+    "MGMT_ROTA": {
+        "name": "Management: Rota (2021/2025)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+        ]
+    },
+
+    "MGMT_RISK": {
+        "name": "Management: Risk Register (2021/2025)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+        ]
+    },
+
+    "MGMT_RECRUIT": {
+        "name": "Management: Recruitment (2021/2025)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+        ]
+    },
+
+    "MGMT_PROJECT": {
+        "name": "Management: Project Record (2021/2025)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+        ]
+    },
+
+    "MGMT_RISK_PROC": {
+        "name": "Management: Procedure to Reduce Risk (2021/2025)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+        ]
+    },
+
+    "MGMT_TRAINING_EVT": {
+        "name": "Management: Organising a Training Event (2021/2025)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+        ]
+    },
+
+    "MGMT_GUIDELINE": {
+        "name": "Management: Introduction of Guideline (2021/2025)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+        ]
+    },
+
+    "MGMT_INFO": {
+        "name": "Management: Information Management (2021/2025)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+        ]
+    },
+
+    "MGMT_INDUCTION": {
+        "name": "Management: Induction Programme (2021/2025)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+        ]
+    },
+
+    "MGMT_EXPERIENCE": {
+        "name": "Management Experience (2021/2025)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+        ]
+    },
+
+    "MGMT_REPORT": {
+        "name": "Management: Writing a Report (2021/2025)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+        ]
+    },
+
+    "APPRAISAL": {
+        "name": "Appraisal of Others (2021/2025)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+        ]
+    },
+
+    "BUSINESS_CASE": {
+        "name": "Business Case (2021/2025)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+        ]
+    },
+
+    "CLIN_GOV": {
+        "name": "Clinical Governance Meetings (2021/2025)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+        ]
+    },
+
+    "MGMT_COMPLAINT": {
+        "name": "Complaint (Management - 2021/2025)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+        ]
+    },
+
+    "COST_IMPROVE": {
+        "name": "Cost Improvement Plan (2021/2025)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+        ]
+    },
+
+    "CRIT_INCIDENT": {
+        "name": "Critical Incident (2021/2025)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+        ]
+    },
+
+    "EQUIP_SERVICE": {
+        "name": "Introduction of Equipment or Service (2021/2025)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+        ]
+    },
+
+    # ─── Research, Audit & QI ─────────────────────────────────────────────
+
+    "AUDIT": {
+        "name": "Audit Assessment Tool (2021/2025)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+        ]
+    },
+
+    "RESEARCH": {
+        "name": "Research Activity (2021/2025)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+        ]
+    },
+
+    # ─── Educational Review & Meetings ────────────────────────────────────
+
+    "EDU_MEETING": {
+        "name": "Educational Meeting ST3-ST7",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+        ]
+    },
+
+    "EDU_MEETING_SUPP": {
+        "name": "Educational Meeting: Supplementary Review",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+        ]
+    },
+
+    "PDP": {
+        "name": "Personal Development Plan (2021/2025)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
+            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+        ]
+    },
+
+    # ─── Other ────────────────────────────────────────────────────────────
+
+    "HIGHER_PROG": {
+        "name": "Higher Progression Form (ST4-ST6)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter",    "label": "Date",              "type": "date",     "required": True},
+            {"key": "stage_of_training",    "label": "Stage of Training", "type": "dropdown", "required": True,
+             "options": ["Higher/ST4-ST6"]},
+            {"key": "reflection",           "label": "Reflection",        "type": "text",     "required": True},
+        ]
+    },
+
+    "ABSENCE": {
+        "name": "Absences",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date", "type": "date", "required": True},
+            {"key": "reflection",        "label": "Details", "type": "text", "required": True},
+        ]
+    },
+
+    "CCT": {
+        "name": "RCEM CCT Application",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date", "type": "date", "required": True},
+        ]
+    },
+
+    "FILE_UPLOAD": {
+        "name": "File Upload - Miscellaneous (2025 Update)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date", "type": "date", "required": True},
+        ]
+    },
+
+    "OOP": {
+        "name": "Out of Programme (OOP/OOPT/R)",
+        "filer_available": False,
+        "fields": [
+            {"key": "date_of_encounter", "label": "Date", "type": "date", "required": True},
+            {"key": "reflection",        "label": "Details", "type": "text", "required": True},
+        ]
+    },
 }
