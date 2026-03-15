@@ -1,6 +1,7 @@
 """
 Filer router — single entry point for all form filing.
 Picks the right approach: deterministic Playwright (fast, free) or browser-use (universal, AI-driven).
+Uses filing coverage data to auto-escalate when Playwright reliability is low.
 
 Usage:
     result = await route_filing(
@@ -89,15 +90,38 @@ async def route_filing(
             "method": "deterministic" | "browser-use",
         }
     """
+    from filing_coverage import should_use_browser_use, record_run
+
     platform_lower = platform.lower()
     platform_config = PLATFORM_REGISTRY.get(platform_lower)
 
-    # Deterministic path: known platform with mapped forms
-    if platform_config and platform_config.get("deterministic") and form_type in platform_config.get("supported_forms", []):
-        logger.info(f"Using deterministic filer for {platform}/{form_type}")
-        return await _route_deterministic(platform_lower, form_type, fields, credentials, curriculum_links)
+    # Coverage-based escalation: check if browser-use should override deterministic
+    has_curriculum = bool(curriculum_links)
+    use_browser = should_use_browser_use(form_type, has_curriculum)
 
-    # Browser-use path: unmapped platform or unmapped form type
+    if platform_config and platform_config.get("deterministic") and form_type in platform_config.get("supported_forms", []):
+        if use_browser:
+            # Coverage says Playwright isn't reliable enough yet — escalate
+            logger.info(f"Coverage check: escalating {form_type} to browser-use (low confidence in Playwright)")
+        else:
+            # Playwright is reliable — use deterministic path
+            logger.info(f"Using deterministic filer for {platform}/{form_type}")
+            result = await _route_deterministic(platform_lower, form_type, fields, credentials, curriculum_links)
+
+            # Auto-escalation: if Playwright returned partial with important fields skipped
+            skipped = set(result.get("skipped", []))
+            important_skipped = skipped & {"curriculum_links", "key_capabilities"}
+            if result["status"] == "partial" and important_skipped:
+                logger.info(f"Playwright partial for {form_type}, escalating to browser-use (skipped: {important_skipped})")
+                # Record the partial Playwright run
+                record_run(form_type, "deterministic", result.get("filled", []), result.get("skipped", []))
+                # Fall through to browser-use below
+            else:
+                # Record and return
+                record_run(form_type, "deterministic", result.get("filled", []), result.get("skipped", []))
+                return result
+
+    # Browser-use path
     logger.info(f"Using browser-use filer for {platform}/{form_type}")
     resolved_url = platform_url or (platform_config or {}).get("login_url")
     if not resolved_url:
@@ -116,7 +140,7 @@ async def route_filing(
         if uuid:
             form_url = platform_config["form_url_pattern"].format(uuid=uuid)
 
-    return await _route_browser_use(
+    result = await _route_browser_use(
         platform=platform_lower,
         platform_url=resolved_url,
         form_url=form_url,
@@ -126,6 +150,21 @@ async def route_filing(
         credentials=credentials,
         curriculum_links=curriculum_links,
     )
+
+    # Record browser-use run
+    record_run(form_type, "browser-use", result.get("filled", []), result.get("skipped", []))
+
+    # DOM learning: if browser-use discovered new UUIDs, patch kaizen_filer.py
+    if result.get("discovered_uuids"):
+        try:
+            from dom_learner import learn_from_browser_use_run
+            learned = await learn_from_browser_use_run(form_type, result)
+            if learned:
+                logger.info(f"DOM learner added {len(learned)} new fields for {form_type}")
+        except Exception as e:
+            logger.warning(f"DOM learner failed for {form_type}: {e}")
+
+    return result
 
 
 async def _route_deterministic(

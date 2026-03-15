@@ -14,6 +14,7 @@ Usage:
 import asyncio
 import logging
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -264,12 +265,16 @@ async def file_with_browser_use(
     if "rcem" in base_domain:
         allowed_domains = ["*rcem*", "*kaizenep*", "*kaizen*"]
 
-    # Set up selector logging
+    # Set up selector logging and UUID discovery
     sel_logger = SelectorLogger(platform, form_type)
     step_count = [0]
+    discovered_uuids: Dict[str, str] = {}
+
+    # UUID pattern for Angular node IDs (Kaizen uses these as field identifiers)
+    _uuid_re = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
 
     def step_callback(state, output, step_num):
-        """Capture each browser-use step for selector logging."""
+        """Capture each browser-use step for selector logging and UUID extraction."""
         step_count[0] = step_num
         try:
             action_str = str(output) if output else ""
@@ -280,6 +285,19 @@ async def file_with_browser_use(
                 raw_action=action_str[:500],
                 success=True,
             )
+
+            # Extract UUIDs from the action — browser-use often interacts
+            # with elements whose IDs contain Angular node UUIDs
+            uuids_found = _uuid_re.findall(action_str)
+            if uuids_found:
+                # Try to associate UUID with a field by looking for field labels nearby
+                action_lower = action_str.lower()
+                for field_key, label in FIELD_LABELS.items():
+                    if label.lower() in action_lower or field_key in action_lower:
+                        for uid in uuids_found:
+                            if uid not in discovered_uuids.values():
+                                discovered_uuids[field_key] = uid
+                                break
         except Exception:
             pass
 
@@ -376,6 +394,7 @@ async def file_with_browser_use(
                 "method": "browser-use",
                 "model_used": model,
                 "selectors_log": sel_logger.save(),
+                "discovered_uuids": discovered_uuids,
             }
         elif any(w in result_text for w in [
             "form not found", "could not find", "page not found", "404",
@@ -390,6 +409,7 @@ async def file_with_browser_use(
                 "method": "browser-use",
                 "model_used": model,
                 "selectors_log": sel_logger.save(),
+                "discovered_uuids": discovered_uuids,
             }
         else:
             # Ambiguous — check step count
@@ -413,6 +433,7 @@ async def file_with_browser_use(
             "method": "browser-use",
             "model_used": model,
             "selectors_log": log_path,
+            "discovered_uuids": discovered_uuids,
         }
 
     except asyncio.TimeoutError:
@@ -425,6 +446,7 @@ async def file_with_browser_use(
             "method": "browser-use",
             "model_used": model,
             "selectors_log": sel_logger.save(),
+            "discovered_uuids": discovered_uuids,
         }
     except Exception as e:
         logger.error(f"Browser-use filer error: {e}", exc_info=True)
@@ -437,6 +459,7 @@ async def file_with_browser_use(
             "method": "browser-use",
             "model_used": model,
             "selectors_log": sel_logger.save(),
+            "discovered_uuids": discovered_uuids,
         }
 
 

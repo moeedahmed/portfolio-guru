@@ -1107,6 +1107,48 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     ]))
 
 
+async def handle_filing_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle 'Something missing?' button after filing — ask which field was missed."""
+    query = update.callback_query
+    await query.answer()
+
+    # Parse form_type from callback: FILING|feedback|<form_type>
+    parts = query.data.split("|")
+    form_type = parts[2] if len(parts) > 2 else "unknown"
+
+    # Store form_type for the follow-up message
+    context.user_data["pushback_form_type"] = form_type
+
+    # Common fields that might be missed
+    field_buttons = [
+        [InlineKeyboardButton("Curriculum links / SLOs", callback_data=f"PUSHBACK|{form_type}|curriculum_links")],
+        [InlineKeyboardButton("Key Capabilities", callback_data=f"PUSHBACK|{form_type}|key_capabilities")],
+        [InlineKeyboardButton("Reflection", callback_data=f"PUSHBACK|{form_type}|reflection")],
+        [InlineKeyboardButton("Date", callback_data=f"PUSHBACK|{form_type}|date_of_encounter")],
+        [InlineKeyboardButton("Other field", callback_data=f"PUSHBACK|{form_type}|other")],
+    ]
+
+    await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(field_buttons))
+
+
+async def handle_pushback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Record which field was missed — feeds back into coverage tracker."""
+    query = update.callback_query
+    await query.answer("Got it — noted for next time.")
+
+    parts = query.data.split("|")
+    form_type = parts[1] if len(parts) > 1 else "unknown"
+    field_name = parts[2] if len(parts) > 2 else "unknown"
+
+    from filing_coverage import record_pushback
+    record_pushback(form_type, field_name)
+
+    # Disarm to single "File another" button
+    await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup([
+        [InlineKeyboardButton("📂 File another case", callback_data="ACTION|file")],
+    ]))
+
+
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Top-level /cancel — clears state and returns to idle."""
     context.user_data.clear()
@@ -2025,13 +2067,6 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         return AWAIT_APPROVAL  # Stay in approval state so retry can pick up draft
 
     context.user_data.clear()
-    end_keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("👍", callback_data="FEEDBACK|good"),
-            InlineKeyboardButton("👎", callback_data="FEEDBACK|bad"),
-            InlineKeyboardButton("📂 File another", callback_data="ACTION|file"),
-        ],
-    ])
 
     status = result["status"]
     filled = result.get("filled", [])
@@ -2039,6 +2074,20 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     error = result.get("error")
 
     method = result.get("method", "deterministic")
+
+    # Build end keyboard — include "Something missing?" for success/partial
+    feedback_row = [
+        InlineKeyboardButton("👍", callback_data="FEEDBACK|good"),
+        InlineKeyboardButton("👎", callback_data="FEEDBACK|bad"),
+        InlineKeyboardButton("📂 File another", callback_data="ACTION|file"),
+    ]
+    if status in ("success", "partial"):
+        end_keyboard = InlineKeyboardMarkup([
+            feedback_row,
+            [InlineKeyboardButton("Something missing?", callback_data=f"FILING|feedback|{form_type}")],
+        ])
+    else:
+        end_keyboard = InlineKeyboardMarkup([feedback_row])
 
     if status == "success":
         date_val = fields.get("date_of_encounter", fields.get("date_of_event", ""))
@@ -2516,6 +2565,8 @@ def build_application() -> Application:
         )
     )
     application.add_handler(CallbackQueryHandler(handle_feedback, pattern=r"^FEEDBACK\|"))
+    application.add_handler(CallbackQueryHandler(handle_filing_feedback, pattern=r"^FILING\|feedback\|"))
+    application.add_handler(CallbackQueryHandler(handle_pushback, pattern=r"^PUSHBACK\|"))
 
     voice_conv = ConversationHandler(
         entry_points=[CommandHandler("voice", voice_start)],
