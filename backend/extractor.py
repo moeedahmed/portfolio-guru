@@ -295,34 +295,97 @@ def extract_explicit_form_type(text: str) -> str | None:
     return None
 
 
-async def classify_intent(text: str) -> str:
-    """Classify user message intent: 'chitchat', 'question', or 'case'."""
+async def classify_intent(text: str, case_context: str = "") -> str:
+    """Classify user message intent into 5 categories.
+
+    When case_context is provided (user has an active case), the classifier
+    can distinguish questions *about that case* from general questions and
+    can tell new cases apart from additional detail for the current one.
+
+    Returns one of:
+        chitchat, question_general, question_about_case, new_case, edit_detail
+    """
     client = _get_client()
 
-    prompt = """Classify this message into exactly one category:
+    if case_context:
+        prompt = f"""You are classifying a message from a user who already has an active clinical case in progress.
 
-- chitchat: greetings, check-ins, status questions, short social messages (hi, hello, you there, still there, you ok, thanks, bye, ok, great, are you working, hello?, ping, hey, what's up, etc.)
-- question: asking about what the bot does, how it works, capabilities, help requests
-- case: a clinical case description suitable for portfolio filing (contains patient details, symptoms, management, procedures, or clinical scenarios)
+Active case (for context — do NOT treat this as the message):
+\"\"\"
+{case_context[:600]}
+\"\"\"
 
-Message: """
+Classify the NEW message below into exactly one category:
 
-    contents = f"{prompt}{text}\n\nRespond with ONLY one word: chitchat, question, or case"
-    response = await _gemini_generate(contents)
+- chitchat: greetings, check-ins, status checks (hi, hello, you there, ping, thanks, ok, great, bye, etc.)
+- question_general: asking about what the bot does or what forms exist IN GENERAL (not about their specific case)
+- question_about_case: asking about their SPECIFIC active case — doubt about form type, asking for suggestions, "is this right for X", "what would be better", "should I use Y instead", "what do you suggest"
+- new_case: a COMPLETELY NEW clinical case description (contains different patient details, symptoms, management unrelated to the active case above)
+- edit_detail: additional detail, correction, or clarification about the CURRENT active case
+
+Message: {text}
+
+Respond with ONLY one of: chitchat, question_general, question_about_case, new_case, edit_detail"""
+    else:
+        prompt = f"""Classify this message into exactly one category:
+
+- chitchat: greetings, check-ins, status checks, short social messages (hi, hello, you there, still there, you ok, thanks, bye, ok, great, are you working, hello?, ping, hey, what's up, etc.)
+- question_general: asking about what the bot does, how it works, capabilities, help requests
+- new_case: a clinical case description suitable for portfolio filing (contains patient details, symptoms, management, procedures, or clinical scenarios)
+
+Message: {text}
+
+Respond with ONLY one of: chitchat, question_general, new_case"""
+
+    response = await _gemini_generate(prompt)
     result = response.text.strip().lower()
 
-    # Normalize response
+    # Normalize response to valid category
     if "chitchat" in result:
         return "chitchat"
-    elif "question" in result:
-        return "question"
+    elif "question_about_case" in result:
+        return "question_about_case"
+    elif "question_general" in result or "question" in result:
+        return "question_general"
+    elif "edit_detail" in result:
+        return "edit_detail"
     else:
-        return "case"
+        return "new_case"
 
 
-async def answer_question(text: str) -> str:
-    """Generate a helpful answer about the bot's capabilities."""
+async def answer_question(text: str, case_context: str = "") -> str:
+    """Generate a helpful answer about the bot's capabilities.
+
+    When case_context is provided and the question relates to form types,
+    the answer is grounded in that specific case rather than being generic.
+    """
     client = _get_client()
+
+    # If the user has an active case and is asking about forms/suggestions,
+    # give a case-specific answer instead of a generic list
+    if case_context:
+        text_lower = text.lower()
+        case_question_signals = [
+            "suggest", "recommend", "right", "better", "instead",
+            "which", "what form", "what type", "should i", "best",
+            "wrong", "not sure", "doubt",
+        ]
+        if any(sig in text_lower for sig in case_question_signals):
+            prompt = f"""You are Portfolio Guru. The user has an active clinical case and is asking what form type would be best for it.
+
+Active case:
+\"\"\"
+{case_context[:800]}
+\"\"\"
+
+User question: {text}
+
+Analyse the case and suggest the 2-3 best RCEM WPBA form types for THIS specific case.
+Available forms: CBD, DOPS, Mini-CEX, ACAT, LAT, ACAF, STAT, MSF, QIAT, JCF, Teaching, Procedural Log, SDL, Ultrasound Case, ESLE, Complaint, Serious Incident, Educational Activity, Formal Course.
+
+Be concise. For each suggestion give the form name and a one-line reason why it fits this case."""
+            response = await _gemini_generate(prompt)
+            return response.text.strip()
 
     # Check if user is asking about specific form types or capabilities
     text_lower = text.lower()

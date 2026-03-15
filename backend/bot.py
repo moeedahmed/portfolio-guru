@@ -1388,28 +1388,29 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # === TEMPLATE REVIEW TEXT HANDLER ===
 
 async def handle_template_review_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle text during AWAIT_TEMPLATE_REVIEW — check intent before treating as case detail."""
+    """Handle text during AWAIT_TEMPLATE_REVIEW — 5-category intent check with case context."""
     raw_text = update.message.text.strip()
+    case_text = context.user_data.get("case_text", "")
+    current_form = context.user_data.get("chosen_form", "")
 
     try:
-        intent = await classify_intent(raw_text)
+        intent = await classify_intent(raw_text, case_context=case_text)
     except Exception:
-        intent = "case"
+        intent = "edit_detail"
 
-    chosen_form = context.user_data.get("chosen_form", "")
-    form_name = _form_display_name(chosen_form) if chosen_form else "your form"
+    form_name = _form_display_name(current_form) if current_form else "your form"
 
     if intent == "chitchat":
         await update.message.reply_text(
-            f"Still here! Your {form_name} template is ready above — add more detail, or tap Continue anyway."
+            f"Still here! Your {form_name} template is ready — add detail or tap Continue anyway."
         )
         return AWAIT_TEMPLATE_REVIEW
 
-    if intent == "question":
+    elif intent == "question_general":
         try:
             answer = await answer_question(raw_text)
             await update.message.reply_text(
-                f"{answer}\n\nYour {form_name} template is still ready above — tap Continue anyway when you're done."
+                f"{answer}\n\nYour {form_name} template is still ready above."
             )
         except Exception:
             await update.message.reply_text(
@@ -1417,8 +1418,61 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
             )
         return AWAIT_TEMPLATE_REVIEW
 
-    # Intent is 'case' — treat as additional detail (existing behaviour)
-    return await handle_case_input(update, context)
+    elif intent == "question_about_case":
+        # User doubts the form choice — re-run recommendations on their actual case
+        await update.effective_chat.send_action(constants.ChatAction.TYPING)
+
+        try:
+            recommendations = await asyncio.wait_for(
+                recommend_form_types(case_text), timeout=30
+            )
+            if recommendations:
+                top = recommendations[:3]
+                options_text = "\n".join([
+                    f"• *{_form_display_name(r.form_type)}* — {r.rationale}"
+                    for r in top
+                ])
+                reply = (
+                    f"Based on your case, here are the best fits:\n\n"
+                    f"{options_text}\n\n"
+                    f"Want to switch to one of these instead?"
+                )
+                buttons = [
+                    [InlineKeyboardButton(
+                        f"Switch to {_form_display_name(r.form_type)}",
+                        callback_data=f"FORM|{r.form_type}"
+                    )]
+                    for r in top if r.form_type != current_form
+                ]
+                buttons.append([InlineKeyboardButton("Keep current form", callback_data="ACTION|continue_thin")])
+                await update.message.reply_text(
+                    reply,
+                    reply_markup=InlineKeyboardMarkup(buttons),
+                    parse_mode="Markdown"
+                )
+            else:
+                await update.message.reply_text(
+                    f"Happy to help think this through. What specifically feels off about {form_name} for this case?"
+                )
+        except Exception:
+            await update.message.reply_text(
+                "What specifically feels off about the current form? I can re-suggest based on your case."
+            )
+        return AWAIT_TEMPLATE_REVIEW
+
+    elif intent == "new_case":
+        await update.message.reply_text(
+            "Looks like a new case — tap Cancel first to start fresh, or Continue anyway to file the current one.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("❌ Cancel current", callback_data="CANCEL|reset"),
+                InlineKeyboardButton("✅ Continue current", callback_data="ACTION|continue_thin"),
+            ]])
+        )
+        return AWAIT_TEMPLATE_REVIEW
+
+    else:
+        # edit_detail — treat as additional case info (existing behaviour)
+        return await handle_case_input(update, context)
 
 
 # === EDIT VALUE WITH INTENT HANDLER ===
@@ -1441,29 +1495,33 @@ async def handle_edit_value_with_intent(update: Update, context: ContextTypes.DE
     try:
         intent = await classify_intent(raw_text)
     except Exception:
-        intent = "case"  # default to treating as edit content
+        intent = "edit_detail"  # default to treating as edit content
 
-    edit_field = context.user_data.get("edit_field", "this field")
+    field = context.user_data.get("edit_field", "this field")
 
     if intent == "chitchat":
         await msg.reply_text(
-            f"Still in edit mode — send me your feedback or tap Cancel to exit."
+            f"Still in edit mode — send me the new value for *{field}*, or tap Cancel to exit.",
+            parse_mode="Markdown"
         )
         return AWAIT_EDIT_VALUE
 
-    if intent == "question":
+    if intent in ("question_general", "question_about_case"):
         try:
-            answer = await answer_question(raw_text)
+            case_text = context.user_data.get("case_text", "")
+            answer = await answer_question(raw_text, case_context=case_text)
             await msg.reply_text(
-                f"{answer}\n\nStill in edit mode — send your feedback when ready."
+                f"{answer}\n\nStill in edit mode — send your new value for *{field}* when ready.",
+                parse_mode="Markdown"
             )
         except Exception:
             await msg.reply_text(
-                "Still in edit mode — send me your feedback or tap Cancel to exit."
+                f"Still in edit mode — send me the new value for *{field}*, or tap Cancel to exit.",
+                parse_mode="Markdown"
             )
         return AWAIT_EDIT_VALUE
 
-    # Intent is 'case' — treat as edit content
+    # edit_detail / new_case — treat as edit content
     return await handle_edit_value(update, context)
 
 
@@ -2040,36 +2098,53 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle unexpected text messages mid-conversation."""
+    """Handle unexpected text messages mid-conversation (AWAIT_APPROVAL, AWAIT_EDIT_FIELD, AWAIT_FORM_CHOICE)."""
     raw_text = update.message.text.strip()
+    case_text = context.user_data.get("case_text", "")
 
     try:
-        intent = await classify_intent(raw_text)
+        intent = await classify_intent(raw_text, case_context=case_text)
     except Exception:
-        intent = "case"
+        intent = "new_case"
 
-    # Check if we're in AWAIT_APPROVAL state (draft is waiting)
+    # Check if we're in a state with an active draft
     has_draft = bool(_load_draft(context))
+    has_pending = bool(context.user_data.get("pending_draft_data"))
+    in_flow = has_draft or has_pending or bool(case_text)
 
     if intent == "chitchat":
         if has_draft:
             await update.message.reply_text(
-                "Still here! Your draft is ready above — tap Approve to file it, or Edit to change a field."
+                "Still here — your draft is ready above. Tap *Approve* to file it, or *Edit* to change a field.",
+                parse_mode="Markdown"
             )
             return AWAIT_APPROVAL
+        if in_flow:
+            await update.message.reply_text(
+                "Still here! Your case is in progress — use the buttons above to continue."
+            )
+            # Return current state — don't clear anything
+            if has_pending:
+                return AWAIT_TEMPLATE_REVIEW
+            return AWAIT_FORM_CHOICE
         await update.message.reply_text(
             "Hey! Ready when you are. Send me a clinical case and I'll draft it for your portfolio."
         )
         return AWAIT_CASE_INPUT
 
-    elif intent == "question":
+    elif intent in ("question_general", "question_about_case"):
         try:
-            answer = await answer_question(raw_text)
+            answer = await answer_question(raw_text, case_context=case_text)
             if has_draft:
                 await update.message.reply_text(
                     f"{answer}\n\nYour draft is ready above — tap Approve when ready."
                 )
                 return AWAIT_APPROVAL
+            if in_flow:
+                await update.message.reply_text(
+                    f"{answer}\n\nYour case is still in progress — use the buttons above to continue."
+                )
+                return AWAIT_FORM_CHOICE
             await update.message.reply_text(answer)
         except Exception:
             await update.message.reply_text(
@@ -2079,7 +2154,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
         return AWAIT_CASE_INPUT
 
     else:
-        # Intent is 'case' - looks like a new case
+        # new_case or edit_detail — looks like a new case
         await update.message.reply_text(
             "It looks like you want to file a new case.",
             reply_markup=InlineKeyboardMarkup([
