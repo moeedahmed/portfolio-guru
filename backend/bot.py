@@ -1280,6 +1280,19 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
             await ack.edit_text("⚠️ Could not review that template.", reply_markup=_KB_RETRY_RESET)
             return ConversationHandler.END
 
+        missing_required, _, _ = _missing_template_fields(draft, explicit_form)
+        if not missing_required:
+            # All required fields filled — skip template review, go to draft preview
+            _store_draft(context, draft)
+            preview = _format_draft_preview(draft)
+            await _safe_edit_text(
+                ack,
+                preview,
+                reply_markup=_build_approval_keyboard(),
+                parse_mode="Markdown",
+            )
+            return AWAIT_APPROVAL
+
         review_text = _format_template_review(explicit_form, draft)
         await _safe_edit_text(
             ack,
@@ -1458,6 +1471,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.error("Template review failed for improve: %s", exc, exc_info=True)
                 await query.edit_message_text("⚠️ Could not refresh that template.", reply_markup=_KB_RETRY_RESET)
                 return AWAIT_TEMPLATE_REVIEW
+            missing_required, _, _ = _missing_template_fields(draft, chosen_form)
+            if not missing_required:
+                _store_draft(context, draft)
+                preview = _format_draft_preview(draft)
+                await _safe_edit_text(
+                    query.message,
+                    preview,
+                    reply_markup=_build_approval_keyboard(),
+                    parse_mode="Markdown",
+                )
+                return AWAIT_APPROVAL
+
             review_text = _format_template_review(chosen_form, draft)
             await _safe_edit_text(
                 query.message,
@@ -1873,6 +1898,18 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await ack.edit_text("⚠️ Could not refresh that template.", reply_markup=_KB_RETRY_RESET)
             return AWAIT_TEMPLATE_REVIEW
 
+        missing_required, _, _ = _missing_template_fields(draft, chosen_form)
+        if not missing_required:
+            _store_draft(context, draft)
+            preview = _format_draft_preview(draft)
+            await _safe_edit_text(
+                ack,
+                preview,
+                reply_markup=_build_approval_keyboard(),
+                parse_mode="Markdown",
+            )
+            return AWAIT_APPROVAL
+
         review_text = _format_template_review(chosen_form, draft)
         await _safe_edit_text(
             ack,
@@ -1965,6 +2002,19 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text("⚠️ Could not review that template.", reply_markup=_KB_RETRY_RESET)
         return ConversationHandler.END
 
+    missing_required, _, _ = _missing_template_fields(draft, form_type)
+    if not missing_required:
+        # All required fields filled — skip template review, go to draft preview
+        _store_draft(context, draft)
+        preview = _format_draft_preview(draft)
+        await _safe_edit_text(
+            query.message,
+            preview,
+            reply_markup=_build_approval_keyboard(),
+            parse_mode="Markdown",
+        )
+        return AWAIT_APPROVAL
+
     review_text = _format_template_review(form_type, draft)
     await _safe_edit_text(
         query.message,
@@ -2054,7 +2104,13 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         )
     except asyncio.TimeoutError:
         context.user_data.clear()
-        await ack.edit_text("⏱ Filing timed out. The draft may have saved — check your portfolio directly.")
+        try:
+            await ack.edit_text("⏱ Filing timed out. The draft may have saved — check your portfolio directly.")
+        except Exception:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="⏱ Filing timed out. The draft may have saved — check your portfolio directly.",
+            )
         return ConversationHandler.END
     except Exception as e:
         logger.error(f"Filer error for {form_type}: {e}", exc_info=True)
@@ -2063,7 +2119,14 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_filing")],
             [InlineKeyboardButton("🔄 Start Fresh", callback_data="ACTION|reset")],
         ])
-        await ack.edit_text("❌ Filing failed. Try again or start fresh.", reply_markup=retry_keyboard)
+        try:
+            await ack.edit_text("❌ Filing failed. Try again or start fresh.", reply_markup=retry_keyboard)
+        except Exception:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="❌ Filing failed. Try again or start fresh.",
+                reply_markup=retry_keyboard,
+            )
         return AWAIT_APPROVAL  # Stay in approval state so retry can pick up draft
 
     context.user_data.clear()
@@ -2116,7 +2179,16 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         else:
             msg = f"❌ *Filing failed.* {error or ''}\n\nTry again or fill the form manually in your portfolio."
 
-    await _safe_edit_text(ack, msg, reply_markup=end_keyboard, parse_mode="Markdown")
+    try:
+        await _safe_edit_text(ack, msg, reply_markup=end_keyboard, parse_mode="Markdown")
+    except Exception:
+        logger.warning("Could not edit filing status message — sending new message instead")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=msg,
+            reply_markup=end_keyboard,
+            parse_mode="Markdown",
+        )
     return ConversationHandler.END
 
 
