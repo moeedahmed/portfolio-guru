@@ -83,8 +83,8 @@ SLO12: Lead & Manage (2025 Update)
 
 _client = None
 
-PRIMARY_MODEL = "gemini-2.5-flash"
-FALLBACK_MODEL = "gemini-2.0-flash"
+PRIMARY_MODEL = "gemini-3-flash-preview"
+FALLBACK_MODEL = "gemini-2.5-flash"
 
 
 async def _gemini_generate(prompt, retries: int = 2, delay: int = 1):
@@ -875,7 +875,7 @@ Rules:
 - For dropdown fields: return ONLY one of the listed options. If the case does not explicitly support one option, return an empty string.
 - For multi_select fields: return a list of values from the listed options. If none are explicit, return [].
 - For kc_tick fields (curriculum_links): return a list of SLO codes ONLY e.g. ["SLO1", "SLO8"].
-  Separately, populate "key_capabilities" with 3-5 FULL KC description strings for those SLOs.
+  Separately, populate "key_capabilities" with FULL KC description strings for those SLOs — include ALL that genuinely fit the case, minimum 1. Do NOT pad to reach any minimum number. Do NOT include a KC unless the case explicitly demonstrates it. Quality over quantity.
   Format each KC as: "SLO8 KC1: will provide support to ED staff at all levels... (2025 Update)"
   Use EXACT text from the map. curriculum_links = codes only. key_capabilities = full strings.
   If the form has a kc_tick field, always include "key_capabilities" in the JSON too.

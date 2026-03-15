@@ -11,7 +11,12 @@ from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 _DEFAULT_DB = os.path.expanduser("~/.openclaw/data/portfolio-guru/portfolio_guru.db")
 DATABASE_URL = os.environ.get("DATABASE_URL", f"sqlite:///{_DEFAULT_DB}")
-FERNET_KEY = os.environ.get("FERNET_SECRET_KEY", "").encode()
+def _get_fernet_key() -> bytes:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+    return os.environ.get("FERNET_SECRET_KEY", "").encode()
+
+FERNET_KEY = _get_fernet_key()
 
 engine = create_engine(DATABASE_URL)
 

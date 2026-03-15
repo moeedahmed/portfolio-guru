@@ -11,7 +11,7 @@ Doctor sends a clinical case via Telegram (text, voice, or photo) → Gemini ext
 - Credential store: Fernet-encrypted SQLite (via SQLModel)
 - State persistence: PicklePersistence (survives restarts)
 - Target platform: Kaizen ePortfolio (eportfolio.rcem.ac.uk → kaizenep.com)
-- Deployment: systemd user service (`portfolio-guru-bot.service`) on local machine
+- Deployment: background process on Mac Mini M4 (macOS). No launchd plist yet — started manually. Logs at /tmp/portfolio-guru-bot.log
 
 ## Key Constraints
 - NEVER log credentials (username, password, or decrypted values)
@@ -20,6 +20,7 @@ Doctor sends a clinical case via Telegram (text, voice, or photo) → Gemini ext
 - Bot token in TELEGRAM_BOT_TOKEN env var
 - Google API key in GOOGLE_API_KEY env var
 - Fernet key in FERNET_SECRET_KEY env var
+- macOS host (Mac Mini M4) — NO systemd, NO systemctl. Use launchd or manual process management.
 
 ## Supported Forms (19)
 CBD · DOPS · Mini-CEX · ACAT · LAT · ACAF · STAT · MSF · QIAT · JCF · TEACH · PROC_LOG · SDL · US_CASE · ESLE · COMPLAINT · SERIOUS_INC · EDU_ACT · FORMAL_COURSE
@@ -49,6 +50,7 @@ portfolio-guru/
 │   ├── render_store.py  # Render.com env var store (production)
 │   ├── main.py          # FastAPI app (legacy, not used in polling mode)
 │   ├── run_local.sh     # Local dev startup script (loads BWS secrets)
+│   ├── venv/            # Python virtualenv — activate with: source venv/bin/activate
 │   └── requirements.txt
 ├── CLAUDE.md            # This file
 └── WORKFLOWS.md         # Agent-readable workflow definitions
@@ -72,5 +74,5 @@ AWAIT_EDIT_FIELD=4, AWAIT_EDIT_VALUE=5, AWAIT_CASE_INPUT=6, AWAIT_TRAINING_LEVEL
 - Google API key BWS ID: af6579a0-2cbe-4cef-94b3-b405017b48fe
 - Fernet key BWS ID: 9e653679-9a33-4c23-a15c-b405015713de
 - Test account: Create via /setup in bot
-- Restart: `systemctl --user restart portfolio-guru-bot.service`
+- Restart: `pkill -f "bot.py" && sleep 2 && cd /Users/moeedahmed/projects/portfolio-guru/backend && nohup venv/bin/python3 bot.py >> /tmp/portfolio-guru-bot.log 2>&1 &`
 - Logs: `tail -f /tmp/portfolio-guru-bot.log`

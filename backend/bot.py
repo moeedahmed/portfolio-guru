@@ -2048,10 +2048,16 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             summary += f"  ·  📚 {slo_str}"
         msg = f"✅ *{form_name} draft saved.*\n\nNot submitted to assessor — open your portfolio to assign one when ready.{summary}"
     elif status == "partial":
+        skipped_names = [s.replace("_", " ").title() for s in skipped]
+        if len(skipped_names) > 3:
+            skipped_display = ", ".join(skipped_names[:3]) + f" + {len(skipped_names) - 3} more"
+        else:
+            skipped_display = ", ".join(skipped_names)
         msg = (
-            f"⚠️ *{form_name} draft saved but some fields may be incomplete.*\n\n"
-            f"Filled: {len(filled)} · Skipped: {len(skipped)}\n"
-            f"Review in your portfolio before sending to assessor."
+            f"✅ *{form_name} draft saved to Kaizen.*\n\n"
+            f"{len(filled)} fields filled from your case.\n"
+            f"{len(skipped)} left blank — not enough info to fill without guessing: {skipped_display}.\n\n"
+            f"Open your portfolio, complete those fields, then assign an assessor."
         )
     else:
         # Show manual link for Kaizen; generic message for other platforms
@@ -2569,15 +2575,19 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
                 [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_filing")],
                 [InlineKeyboardButton("🔄 Start Fresh", callback_data="ACTION|reset")],
             ])
-            await update.effective_message.reply_text(
+            await _edit_last_bot_msg(
+                context,
+                update.effective_message.chat_id,
                 "Something went wrong while filing. Try again or start fresh.",
-                reply_markup=retry_keyboard
+                reply_markup=retry_keyboard,
             )
         else:
             # No draft — just start fresh
-            await update.effective_message.reply_text(
+            await _edit_last_bot_msg(
+                context,
+                update.effective_message.chat_id,
                 "Something went wrong.",
-                reply_markup=_KB_RETRY_RESET
+                reply_markup=_KB_RETRY_RESET,
             )
 
 
