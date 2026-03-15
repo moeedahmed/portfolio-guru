@@ -1419,46 +1419,45 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
         return AWAIT_TEMPLATE_REVIEW
 
     elif intent == "question_about_case":
-        # User doubts the form choice — re-run recommendations on their actual case
+        # User doubts the form choice — re-run recommendations and show the SAME suggestion UI
         await update.effective_chat.send_action(constants.ChatAction.TYPING)
 
         try:
+            training_level = get_training_level(update.effective_user.id)
+            allowed_forms = TRAINING_LEVEL_FORMS.get(training_level, TRAINING_LEVEL_FORMS["ST5"]) if training_level else TRAINING_LEVEL_FORMS["ST5"]
             recommendations = await asyncio.wait_for(
                 recommend_form_types(case_text), timeout=30
             )
+            recommendations = [r for r in recommendations if r.form_type in allowed_forms]
+
             if recommendations:
-                top = recommendations[:3]
-                options_text = "\n".join([
+                rationale_lines = [
                     f"• *{_form_display_name(r.form_type)}* — {r.rationale}"
-                    for r in top
-                ])
-                reply = (
-                    f"Based on your case, here are the best fits:\n\n"
-                    f"{options_text}\n\n"
-                    f"Want to switch to one of these instead?"
-                )
-                buttons = [
-                    [InlineKeyboardButton(
-                        f"Switch to {_form_display_name(r.form_type)}",
-                        callback_data=f"FORM|{r.form_type}"
-                    )]
-                    for r in top if r.form_type != current_form
+                    for r in recommendations if r.uuid
                 ]
-                buttons.append([InlineKeyboardButton("Keep current form", callback_data="ACTION|continue_thin")])
-                await update.message.reply_text(
-                    reply,
-                    reply_markup=InlineKeyboardMarkup(buttons),
-                    parse_mode="Markdown"
+                rationale_text = "\n".join(rationale_lines)
+                prompt_text = (
+                    f"Sure — here's what fits your case:\n\n"
+                    f"{rationale_text}\n\n"
+                    f"Pick one to switch, or keep going with {form_name}."
                 )
+                context.user_data["form_recommendations"] = recommendations
+                await update.message.reply_text(
+                    prompt_text,
+                    reply_markup=_build_form_choice_keyboard(recommendations),
+                    parse_mode="Markdown",
+                )
+                return AWAIT_FORM_CHOICE
             else:
                 await update.message.reply_text(
-                    f"Happy to help think this through. What specifically feels off about {form_name} for this case?"
+                    f"Based on your case, {form_name} is still the best fit. Tap Continue anyway to proceed, or Cancel to start over."
                 )
+                return AWAIT_TEMPLATE_REVIEW
         except Exception:
             await update.message.reply_text(
-                "What specifically feels off about the current form? I can re-suggest based on your case."
+                f"Happy to help — what specifically feels off about {form_name} for this case?"
             )
-        return AWAIT_TEMPLATE_REVIEW
+            return AWAIT_TEMPLATE_REVIEW
 
     elif intent == "new_case":
         await update.message.reply_text(
