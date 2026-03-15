@@ -235,7 +235,27 @@ FORM_SCHEMAS = {
             {"key": "reflective_comments",  "label": "Reflective comments on procedure", "type": "text", "required": True},
             {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)",     "type": "kc_tick",  "required": False},
             {"key": "key_capabilities",     "label": "Key Capabilities",        "type": "kc_tick",  "required": False},
-        ]
+        ],
+        "kc_labels": {
+            "SLO6_KC1": "Clinical knowledge to identify when key EM procedural skills are indicated",
+            "SLO6_KC2": "Knowledge and psychomotor skills to perform EM procedural skills safely",
+            "SLO6_KC3": "Supervise and guide colleagues in delivering procedural skills",
+            "SLO3_KC1": "Airway management",
+            "SLO3_KC2": "Expert in fluid management and circulatory support",
+            "SLO3_KC3": "Manage all life-threatening conditions including peri-arrest",
+            "SLO3_KC5": "Effectively lead and support resuscitation teams",
+            "SLO4_KC1": "Expert in assessment, investigation and initial management of all injuries",
+            "SLO5_KC1": "Expert in assessing/managing all children and young adults",
+        },
+        "higher_procedures": [
+            "Paediatric sedation", "Adult sedation", "Advanced airway", "NIV",
+            "Open chest drain", "Resuscitative thoracotomy", "Lateral canthotomy",
+            "DC cardioversion", "External pacing", "Pericardiocentesis",
+            "Life-threatening haemorrhage", "Emergency delivery",
+            "Resuscitative hysterotomy", "Fracture/dislocation manipulation",
+            "Large joint aspiration", "PoCUS-ELS", "PoCUS-Shock", "PoCUS-AAA",
+            "PoCUS-eFAST/FAFF", "Other",
+        ],
     },
 
     "SDL": {

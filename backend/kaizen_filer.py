@@ -15,9 +15,42 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import re
 
-from playwright.async_api import async_playwright, Page, Browser
+from playwright.async_api import async_playwright, Page, Browser, BrowserContext
 
 logger = logging.getLogger(__name__)
+
+KAIZEN_USE_CDP = os.environ.get("KAIZEN_USE_CDP", "").lower() in ("1", "true", "yes")
+CDP_URL = os.environ.get("KAIZEN_CDP_URL", "http://localhost:18800")
+
+
+async def connect_cdp_browser() -> tuple[Page | None, any]:
+    """
+    Connect to an existing managed browser via CDP.
+    Returns (page, playwright_instance) or (None, None) on failure.
+    The caller must NOT close the browser — it's shared.
+    """
+    try:
+        pw = await async_playwright().start()
+        browser = await pw.chromium.connect_over_cdp(CDP_URL)
+
+        # Look for an existing Kaizen page
+        for context in browser.contexts:
+            for page in context.pages:
+                if "kaizenep.com" in page.url:
+                    logger.info(f"CDP: reusing existing Kaizen page: {page.url}")
+                    return page, pw
+
+        # No Kaizen page found — open a new one in the first context
+        if browser.contexts:
+            page = await browser.contexts[0].new_page()
+        else:
+            ctx = await browser.new_context()
+            page = await ctx.new_page()
+        logger.info("CDP: opened new page in managed browser")
+        return page, pw
+    except Exception as e:
+        logger.warning(f"CDP connection failed ({e}), falling back to headless")
+        return None, None
 
 # Emoji stripping — portfolio entries must NEVER contain emojis
 _EMOJI_RE = re.compile(
@@ -612,74 +645,90 @@ async def file_to_kaizen(
     filled = []
     skipped = []
     browser = None
+    cdp_pw = None
+    use_cdp = KAIZEN_USE_CDP
 
     try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+        page = None
+
+        # CDP mode: connect to managed browser
+        if use_cdp:
+            page, cdp_pw = await connect_cdp_browser()
+            if page is None:
+                use_cdp = False  # fallback to headless
+
+        # Headless mode (default or CDP fallback)
+        if not use_cdp:
+            pw = await async_playwright().start()
+            cdp_pw = pw
+            browser = await pw.chromium.launch(headless=True)
             page = await browser.new_page()
 
-            # Login
+        # Login (skip if CDP page is already on Kaizen)
+        if use_cdp and "kaizenep.com" in page.url:
+            logger.info("CDP: already logged in, skipping login")
+        else:
             if not await _login(page, username, password):
                 return {"status": "failed", "filled": [], "skipped": [], "error": "Login failed"}
 
-            # Navigate to form
-            form_url = f"https://kaizenep.com/events/new-section/{uuid}"
-            await page.goto(form_url, wait_until="networkidle", timeout=30000)
-            await asyncio.sleep(5)  # Kaizen SPA is slow
+        # Navigate to form
+        form_url = f"https://kaizenep.com/events/new-section/{uuid}"
+        await page.goto(form_url, wait_until="networkidle", timeout=30000)
+        await asyncio.sleep(5)  # Kaizen SPA is slow
 
-            # Verify we're on the form page
-            if "new-section" not in page.url:
-                return {"status": "failed", "filled": [], "skipped": [],
-                        "error": f"Form page didn't load — redirected to {page.url}"}
+        # Verify we're on the form page
+        if "new-section" not in page.url:
+            return {"status": "failed", "filled": [], "skipped": [],
+                    "error": f"Form page didn't load — redirected to {page.url}"}
 
-            # Fill stage_of_training FIRST — curriculum checkboxes appear after
-            if "stage_of_training" in field_map:
-                st_dom = field_map["stage_of_training"]
-                st_val = fields.get("stage_of_training", "Higher")
-                if await _fill_field(page, st_dom, st_val, "stage_of_training"):
-                    filled.append("stage_of_training")
-                else:
-                    skipped.append("stage_of_training")
-
-            # Fill remaining mapped fields
-            for field_key, dom_id in field_map.items():
-                if field_key == "stage_of_training":
-                    continue  # Already handled above
-                value = fields.get(field_key)
-                if value is None or value == "" or value == []:
-                    skipped.append(field_key)
-                    continue
-
-                success = await _fill_field(page, dom_id, value, field_key)
-                if success:
-                    filled.append(field_key)
-                else:
-                    skipped.append(field_key)
-
-            # Tick curriculum checkboxes (SLO-level, after stage selection)
-            if curriculum_links:
-                await _tick_curriculum(page, curriculum_links)
-
-            # Save as draft
-            saved = await _save_draft(page)
-
-            # Determine status
-            if saved and len(filled) > 0:
-                if len(skipped) == 0:
-                    status = "success"
-                else:
-                    status = "partial"
-            elif len(filled) > 0:
-                status = "partial"
+        # Fill stage_of_training FIRST — curriculum checkboxes appear after
+        if "stage_of_training" in field_map:
+            st_dom = field_map["stage_of_training"]
+            st_val = fields.get("stage_of_training", "Higher")
+            if await _fill_field(page, st_dom, st_val, "stage_of_training"):
+                filled.append("stage_of_training")
             else:
-                status = "failed"
+                skipped.append("stage_of_training")
 
-            return {
-                "status": status,
-                "filled": filled,
-                "skipped": skipped,
-                "error": None if saved else "Save button not found or click failed",
-            }
+        # Fill remaining mapped fields
+        for field_key, dom_id in field_map.items():
+            if field_key == "stage_of_training":
+                continue  # Already handled above
+            value = fields.get(field_key)
+            if value is None or value == "" or value == []:
+                skipped.append(field_key)
+                continue
+
+            success = await _fill_field(page, dom_id, value, field_key)
+            if success:
+                filled.append(field_key)
+            else:
+                skipped.append(field_key)
+
+        # Tick curriculum checkboxes (SLO-level, after stage selection)
+        if curriculum_links:
+            await _tick_curriculum(page, curriculum_links)
+
+        # Save as draft
+        saved = await _save_draft(page)
+
+        # Determine status
+        if saved and len(filled) > 0:
+            if len(skipped) == 0:
+                status = "success"
+            else:
+                status = "partial"
+        elif len(filled) > 0:
+            status = "partial"
+        else:
+            status = "failed"
+
+        return {
+            "status": status,
+            "filled": filled,
+            "skipped": skipped,
+            "error": None if saved else "Save button not found or click failed",
+        }
 
     except Exception as e:
         logger.error(f"Kaizen filer error for {form_type}: {e}", exc_info=True)
@@ -690,8 +739,14 @@ async def file_to_kaizen(
             "error": str(e),
         }
     finally:
-        if browser:
+        # Only close browser in headless mode — CDP browser is shared
+        if browser and not use_cdp:
             try:
                 await browser.close()
+            except Exception:
+                pass
+        if cdp_pw:
+            try:
+                await cdp_pw.stop()
             except Exception:
                 pass

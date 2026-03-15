@@ -22,6 +22,12 @@ from whisper import transcribe_voice
 from vision import extract_from_image
 from documents import extract_from_document, is_supported_document
 from profile_store import init_profile_db, store_training_level, get_training_level, get_voice_profile, store_voice_profile, clear_voice_profile
+from bulk_filer import bulk_file
+from kaizen_unsigned_scraper import scrape_unsigned_tickets
+import chase_guard
+
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1988,6 +1994,142 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
         return AWAIT_CASE_INPUT
 
 
+# === BULK / UNSIGNED / CHASE COMMANDS ===
+
+async def bulk_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /bulk — file multiple entries from a JSON array."""
+    user_id = update.effective_user.id
+    creds = get_credentials(user_id)
+    if not creds:
+        await update.message.reply_text("Connect your Kaizen account first with /setup")
+        return
+
+    text = (update.message.text or "").replace("/bulk", "", 1).strip()
+    if not text:
+        await update.message.reply_text(
+            "Usage: /bulk followed by a JSON array of entries.\n"
+            'Each entry: {"form_type": "CBD", "fields": {...}}'
+        )
+        return
+
+    try:
+        import json as _json
+        entries = _json.loads(text)
+        if not isinstance(entries, list):
+            await update.message.reply_text("Expected a JSON array of entries.")
+            return
+    except _json.JSONDecodeError as e:
+        await update.message.reply_text(f"Invalid JSON: {e}")
+        return
+
+    msg = await update.message.reply_text(f"Filing {len(entries)} entries...")
+    credentials = {"username": creds[0], "password": creds[1]}
+
+    results = await bulk_file(entries, credentials)
+
+    # Send progress summary
+    success = sum(1 for r in results if r["status"] in ("success", "partial"))
+    failed = sum(1 for r in results if r["status"] == "failed")
+    lines = [f"Filed {success}/{len(entries)} — {failed} failed"]
+    for r in results:
+        status_icon = "✅" if r["status"] in ("success", "partial") else "❌"
+        err = f": {r['error']}" if r.get("error") else ""
+        lines.append(f"{status_icon} {r['form_type']}{err}")
+
+    await msg.edit_text("\n".join(lines))
+
+
+async def unsigned_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /unsigned — scrape and display unsigned tickets."""
+    user_id = update.effective_user.id
+    creds = get_credentials(user_id)
+
+    msg = await update.message.reply_text("Scanning for unsigned tickets...")
+
+    username = creds[0] if creds else ""
+    password = creds[1] if creds else ""
+
+    try:
+        tickets = await scrape_unsigned_tickets(username, password)
+    except Exception as e:
+        await msg.edit_text(f"Scraper error: {e}")
+        return
+
+    if not tickets:
+        await msg.edit_text("No unsigned tickets found after 2025-01-01.")
+        return
+
+    # Group by assessor
+    by_assessor: dict[str, list] = {}
+    for t in tickets:
+        name = t.get("assessor_name") or "Unknown"
+        by_assessor.setdefault(name, []).append(t)
+
+    lines = [f"Unsigned tickets: {len(tickets)} total\n"]
+    for assessor, tix in sorted(by_assessor.items()):
+        dates = [t["event_date"] for t in tix if t.get("event_date")]
+        oldest = min(dates) if dates else "?"
+        # Check chase eligibility
+        allowed, reason = chase_guard.check_allowed(assessor)
+        chase_icon = "🟢" if allowed else "🔴"
+        lines.append(f"{chase_icon} {assessor}: {len(tix)} ticket(s), oldest: {oldest}")
+        lines.append(f"   Chase: {reason}")
+
+    await msg.edit_text("\n".join(lines))
+
+
+async def chase_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /chase <assessor_email> — check chase eligibility and offer template."""
+    text = (update.message.text or "").replace("/chase", "", 1).strip()
+    if not text:
+        await update.message.reply_text("Usage: /chase <assessor_email>")
+        return
+
+    email = text.split()[0]
+    allowed, reason = chase_guard.check_allowed(email)
+
+    if not allowed:
+        await update.message.reply_text(f"🔴 {reason}")
+        return
+
+    # Build chase template
+    chases = chase_guard.get_assessor_chases(email)
+    chase_num = len(chases) + 1
+    template = (
+        f"🟢 Chase #{chase_num} allowed for {email}\n\n"
+        f"Suggested message:\n"
+        f"---\n"
+        f"Dear colleague,\n\n"
+        f"I hope you are well. I have an outstanding portfolio entry awaiting your review "
+        f"on Kaizen. I would be very grateful if you could sign it at your convenience.\n\n"
+        f"Many thanks.\n"
+        f"---\n\n"
+        f"Send the chase yourself, then tap Confirm to log it."
+    )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Confirm chase sent", callback_data=f"CHASE_LOG|{email}")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="CHASE_LOG|cancel")],
+    ])
+    await update.message.reply_text(template, reply_markup=keyboard)
+
+
+async def handle_chase_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle chase confirmation callback."""
+    query = update.callback_query
+    await query.answer()
+    data = query.data.replace("CHASE_LOG|", "")
+
+    if data == "cancel":
+        await query.edit_message_text("Chase cancelled.")
+        return
+
+    email = data
+    entry = chase_guard.log_chase(email=email, name=email, method="manual")
+    await query.edit_message_text(
+        f"✅ Chase #{entry['chase_number']} logged for {email} on {entry['date']}"
+    )
+
+
 # === APPLICATION BUILDER ===
 
 def build_application() -> Application:
@@ -2099,6 +2241,10 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(CommandHandler("delete", delete_data))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("bulk", bulk_command))
+    application.add_handler(CommandHandler("unsigned", unsigned_command))
+    application.add_handler(CommandHandler("chase", chase_command))
+    application.add_handler(CallbackQueryHandler(handle_chase_log, pattern=r"^CHASE_LOG\|"))
     # Top-level handlers that must work regardless of conversation state
     application.add_handler(CallbackQueryHandler(handle_info_button, pattern=r"^INFO\|"))
     application.add_handler(
@@ -2205,6 +2351,9 @@ def main():
             ("cancel", "Cancel whatever is happening"),
             ("delete", "Delete all your stored data"),
             ("help", "How to use Portfolio Guru"),
+            ("bulk", "File multiple entries from JSON"),
+            ("unsigned", "Show unsigned tickets awaiting assessors"),
+            ("chase", "Check chase eligibility for an assessor"),
         ])
         # Set bot description (shown on profile page before starting)
         try:
