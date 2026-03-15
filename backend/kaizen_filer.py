@@ -208,6 +208,9 @@ FORM_FIELD_MAP = {
         "involved_in_project": "2e2096f3-f65e-465c-bdd6-effadbe743dc",
         "qi_journey_aspects": "8a8f2bce-26fa-4baa-81d3-5b567ce9d45c",
         "next_pdp": "09a89221-ab2c-42f6-8462-1333540f8cf8",
+        # TODO: reflection UUID needs discovery via CDP on live QIAT form
+        # Field label: "4.2 Reflections and Learning"
+        # "reflection": "<UUID_TO_DISCOVER>",
     },
     "JCF": {
         "date_of_encounter": "startDate",
@@ -439,6 +442,54 @@ async def _fill_select(el, dom_id: str, value: Any, field_key: str) -> bool:
                 return True
         logger.warning(f"No matching option for #{dom_id}: '{value}' in {[o['text'] for o in options]}")
         return False
+
+
+async def _expand_curriculum_section(page: Page) -> None:
+    """Expand the curriculum accordion/section so SLO checkboxes become visible.
+
+    Non-fatal — if no expand control is found, continues silently
+    (some forms may already have it expanded).
+    """
+    try:
+        # Look for curriculum section header / expand toggle
+        expand_candidates = [
+            page.get_by_text("Curriculum", exact=False).locator("xpath=ancestor-or-self::*[contains(@class,'accordion') or contains(@class,'panel') or contains(@class,'collapse') or contains(@class,'expand')]"),
+            page.locator('[class*="curriculum"] [class*="expand"], [class*="curriculum"] [class*="toggle"]'),
+            page.locator('[class*="accordion"] >> text=Curriculum'),
+            page.get_by_text("Should you want to link to the curriculum"),
+            page.get_by_text("Curriculum LO/SLO"),
+        ]
+
+        for candidate in expand_candidates:
+            try:
+                if await candidate.count() > 0:
+                    first = candidate.first
+                    # Click the element or its parent accordion header
+                    await first.click(timeout=3000)
+                    logger.info("Curriculum section: clicked expand control")
+                    await asyncio.sleep(2)  # Let Angular render the SLO checkboxes
+                    return
+            except Exception:
+                continue
+
+        # Fallback: try clicking any collapsed accordion panel that might contain curriculum
+        accordion_headers = page.locator('[class*="accordion-toggle"], [class*="panel-heading"], [class*="section-header"]')
+        count = await accordion_headers.count()
+        for i in range(count):
+            header = accordion_headers.nth(i)
+            try:
+                text = (await header.inner_text()).strip().lower()
+                if "curriculum" in text or "slo" in text or "learning outcome" in text:
+                    await header.click(timeout=3000)
+                    logger.info(f"Curriculum section: expanded accordion header: '{text}'")
+                    await asyncio.sleep(2)
+                    return
+            except Exception:
+                continue
+
+        logger.info("Curriculum section: no expand control found (may already be expanded)")
+    except Exception as e:
+        logger.warning(f"Curriculum expand step failed (non-fatal): {e}")
 
 
 async def _tick_curriculum(page: Page, slo_codes: List[str]) -> int:
@@ -705,8 +756,9 @@ async def file_to_kaizen(
             else:
                 skipped.append(field_key)
 
-        # Tick curriculum checkboxes (SLO-level, after stage selection)
+        # Expand curriculum section then tick SLO checkboxes
         if curriculum_links:
+            await _expand_curriculum_section(page)
             await _tick_curriculum(page, curriculum_links)
 
         # Save as draft
