@@ -78,6 +78,27 @@ async def _safe_edit_text(target, text: str, **kwargs):
 
 
 
+async def _edit_last_bot_msg(context, chat_id, text, reply_markup=None, parse_mode=None):
+    """Edit the last bot ack message in place. Falls back to new message if not found."""
+    msg_id = context.user_data.get("last_bot_msg_id")
+    if msg_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=msg_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode,
+            )
+            return
+        except Exception:
+            pass
+    # Fallback: send new message and store its id
+    msg = await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode=parse_mode)
+    context.user_data["last_bot_msg_id"] = msg.message_id
+    context.user_data["last_bot_chat_id"] = chat_id
+
+
 def _serialise_draft(draft):
     """Serialise a draft as a plain dict so PicklePersistence can store it."""
     if isinstance(draft, CBDData):
@@ -142,6 +163,7 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
         "case_input_source",
         "chosen_form",
         "pending_draft_data",
+        "pending_new_case_text",
         "template_prompt_message_id",
         "template_prompt_chat_id",
         "form_recommendations",
@@ -1203,6 +1225,8 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
     if explicit_form:
         await message.chat.send_action(constants.ChatAction.TYPING)
         ack = await message.reply_text(f"🧩 Reviewing {_form_display_name(explicit_form)} template…")
+        context.user_data["last_bot_msg_id"] = ack.message_id
+        context.user_data["last_bot_chat_id"] = ack.chat_id
         try:
             draft = await _analyse_selected_form(context, user_id, case_text, explicit_form)
         except asyncio.TimeoutError:
@@ -1221,6 +1245,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
             reply_markup=_build_template_review_keyboard(),
             parse_mode="Markdown",
         )
+        context.user_data["last_bot_msg_id"] = ack.message_id
         return AWAIT_TEMPLATE_REVIEW
 
     training_level = get_training_level(user_id)
@@ -1365,6 +1390,46 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "ACTION|retry_filing":
         return await handle_approval_approve(update, context)
 
+    elif data == "CASE|new":
+        await query.answer()
+        new_text = context.user_data.pop("pending_new_case_text", "")
+        context.user_data.clear()
+        if new_text:
+            user_id = update.effective_user.id
+            return await _process_case_text(query.message, context, user_id, new_text, "text")
+        await query.edit_message_text("Send me the new case whenever you're ready.")
+        return AWAIT_CASE_INPUT
+
+    elif data == "CASE|improve":
+        await query.answer()
+        old_case = context.user_data.get("case_text", "")
+        new_detail = context.user_data.pop("pending_new_case_text", "")
+        merged = f"{old_case}\n\nAdditional context:\n{new_detail}"
+        chosen_form = context.user_data.get("chosen_form")
+        user_id = update.effective_user.id
+        if chosen_form:
+            context.user_data["case_text"] = merged
+            await query.edit_message_text(f"🧩 Updating {_form_display_name(chosen_form)} template…")
+            try:
+                draft = await _analyse_selected_form(context, user_id, merged, chosen_form)
+            except Exception as exc:
+                logger.error("Template review failed for improve: %s", exc, exc_info=True)
+                await query.edit_message_text("⚠️ Could not refresh that template.", reply_markup=_KB_RETRY_RESET)
+                return AWAIT_TEMPLATE_REVIEW
+            review_text = _format_template_review(chosen_form, draft)
+            await _safe_edit_text(
+                query.message,
+                review_text,
+                reply_markup=_build_template_review_keyboard(),
+                parse_mode="Markdown",
+            )
+            context.user_data["last_bot_msg_id"] = query.message.message_id
+            context.user_data["last_bot_chat_id"] = query.message.chat_id
+            return AWAIT_TEMPLATE_REVIEW
+        else:
+            context.user_data.clear()
+            return await _process_case_text(query.message, context, user_id, merged, "text")
+
     elif data.startswith("FORM|"):
         return await handle_form_choice(update, context)
 
@@ -1466,12 +1531,17 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
     elif intent == "new_case":
         has_draft = bool(context.user_data.get("current_draft") or context.user_data.get("case_text"))
         if has_draft:
-            await update.message.reply_text(
-                "Looks like a new case — tap Cancel to start fresh, or Continue to keep the current one.",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("❌ Start fresh", callback_data="CANCEL|reset"),
-                    InlineKeyboardButton("✅ Keep current", callback_data="ACTION|continue_thin"),
-                ]])
+            context.user_data["pending_new_case_text"] = raw_text
+            prompt_text = "Looks like a new case — start fresh or fold it into the current one?"
+            markup = InlineKeyboardMarkup([[
+                InlineKeyboardButton("🆕 New case", callback_data="CASE|new"),
+                InlineKeyboardButton("✏️ Improve current", callback_data="CASE|improve"),
+            ]])
+            await _edit_last_bot_msg(
+                context,
+                update.effective_chat.id,
+                prompt_text,
+                reply_markup=markup,
             )
             return AWAIT_TEMPLATE_REVIEW
         else:
@@ -1749,6 +1819,8 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         context.user_data["case_input_source"] = input_source
         await update.effective_chat.send_action(constants.ChatAction.TYPING)
         ack = await update.message.reply_text(f"🧩 Updating {_form_display_name(chosen_form)} template…")
+        context.user_data["last_bot_msg_id"] = ack.message_id
+        context.user_data["last_bot_chat_id"] = ack.chat_id
         try:
             draft = await _analyse_selected_form(context, user_id, case_text, chosen_form)
         except asyncio.TimeoutError:
@@ -1766,6 +1838,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             reply_markup=_build_template_review_keyboard(),
             parse_mode="Markdown",
         )
+        context.user_data["last_bot_msg_id"] = ack.message_id
         return AWAIT_TEMPLATE_REVIEW
 
     _clear_case_review_state(context, keep_case=False)
@@ -1857,6 +1930,8 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup=_build_template_review_keyboard(),
         parse_mode="Markdown",
     )
+    context.user_data["last_bot_msg_id"] = query.message.message_id
+    context.user_data["last_bot_chat_id"] = query.message.chat_id
     return AWAIT_TEMPLATE_REVIEW
 
 
@@ -2362,6 +2437,7 @@ def build_application() -> Application:
                 MessageHandler(filters.VOICE, handle_case_input),
                 MessageHandler(filters.PHOTO, handle_case_input),
                 MessageHandler(filters.Document.ALL, handle_case_input),
+                CallbackQueryHandler(handle_callback, pattern=r"^CASE\|"),
                 CallbackQueryHandler(handle_form_choice, pattern=r"^FORM\|"),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|add_detail$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|continue_thin$"),
