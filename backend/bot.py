@@ -1385,6 +1385,88 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
 
+# === TEMPLATE REVIEW TEXT HANDLER ===
+
+async def handle_template_review_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle text during AWAIT_TEMPLATE_REVIEW — check intent before treating as case detail."""
+    raw_text = update.message.text.strip()
+
+    try:
+        intent = await classify_intent(raw_text)
+    except Exception:
+        intent = "case"
+
+    chosen_form = context.user_data.get("chosen_form", "")
+    form_name = _form_display_name(chosen_form) if chosen_form else "your form"
+
+    if intent == "chitchat":
+        await update.message.reply_text(
+            f"Still here! Your {form_name} template is ready above — add more detail, or tap Continue anyway."
+        )
+        return AWAIT_TEMPLATE_REVIEW
+
+    if intent == "question":
+        try:
+            answer = await answer_question(raw_text)
+            await update.message.reply_text(
+                f"{answer}\n\nYour {form_name} template is still ready above — tap Continue anyway when you're done."
+            )
+        except Exception:
+            await update.message.reply_text(
+                f"Your {form_name} template is ready above — add more detail, or tap Continue anyway."
+            )
+        return AWAIT_TEMPLATE_REVIEW
+
+    # Intent is 'case' — treat as additional detail (existing behaviour)
+    return await handle_case_input(update, context)
+
+
+# === EDIT VALUE WITH INTENT HANDLER ===
+
+async def handle_edit_value_with_intent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle text during AWAIT_EDIT_VALUE — check intent for short non-clinical messages."""
+    msg = update.message
+
+    # Non-text messages (voice, photo, document) — pass straight through
+    if not msg.text:
+        return await handle_edit_value(update, context)
+
+    raw_text = msg.text.strip()
+    word_count = len(raw_text.split())
+
+    # Long messages are almost certainly real edit content — skip intent check
+    if word_count >= 6:
+        return await handle_edit_value(update, context)
+
+    try:
+        intent = await classify_intent(raw_text)
+    except Exception:
+        intent = "case"  # default to treating as edit content
+
+    edit_field = context.user_data.get("edit_field", "this field")
+
+    if intent == "chitchat":
+        await msg.reply_text(
+            f"Still in edit mode — send me your feedback or tap Cancel to exit."
+        )
+        return AWAIT_EDIT_VALUE
+
+    if intent == "question":
+        try:
+            answer = await answer_question(raw_text)
+            await msg.reply_text(
+                f"{answer}\n\nStill in edit mode — send your feedback when ready."
+            )
+        except Exception:
+            await msg.reply_text(
+                "Still in edit mode — send me your feedback or tap Cancel to exit."
+            )
+        return AWAIT_EDIT_VALUE
+
+    # Intent is 'case' — treat as edit content
+    return await handle_edit_value(update, context)
+
+
 # === CASE INPUT HANDLER ===
 
 async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1966,7 +2048,15 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
     except Exception:
         intent = "case"
 
+    # Check if we're in AWAIT_APPROVAL state (draft is waiting)
+    has_draft = bool(_load_draft(context))
+
     if intent == "chitchat":
+        if has_draft:
+            await update.message.reply_text(
+                "Still here! Your draft is ready above — tap Approve to file it, or Edit to change a field."
+            )
+            return AWAIT_APPROVAL
         await update.message.reply_text(
             "Hey! Ready when you are. Send me a clinical case and I'll draft it for your portfolio."
         )
@@ -1975,6 +2065,11 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
     elif intent == "question":
         try:
             answer = await answer_question(raw_text)
+            if has_draft:
+                await update.message.reply_text(
+                    f"{answer}\n\nYour draft is ready above — tap Approve when ready."
+                )
+                return AWAIT_APPROVAL
             await update.message.reply_text(answer)
         except Exception:
             await update.message.reply_text(
@@ -2179,7 +2274,7 @@ def build_application() -> Application:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
             ],
             AWAIT_TEMPLATE_REVIEW: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_case_input),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_template_review_text),
                 MessageHandler(filters.VOICE, handle_case_input),
                 MessageHandler(filters.PHOTO, handle_case_input),
                 MessageHandler(filters.Document.ALL, handle_case_input),
@@ -2199,9 +2294,9 @@ def build_application() -> Application:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
             ],
             AWAIT_EDIT_VALUE: [
-                # Catch ALL message types — text, voice, photo, forwarded voice/photo
-                # Never let unmatched messages escape to entry points while in edit mode
-                MessageHandler(~filters.COMMAND, handle_edit_value),
+                # Text goes through intent check; non-text (voice, photo, doc) passes straight through
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_value_with_intent),
+                MessageHandler(~filters.COMMAND & ~filters.TEXT, handle_edit_value),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
             ],
         },

@@ -245,20 +245,38 @@ def _get_client():
 
 def extract_explicit_form_type(text: str) -> str | None:
     """
-    Check if the user explicitly named a form type in their message.
+    Check if the user is EXPLICITLY REQUESTING a specific form type.
+    Only triggers when the user states intent to create a named form
+    (e.g. "make me a CBD", "I want to file a DOPS").
+    Does NOT trigger when the case text merely mentions clinical concepts
+    that happen to match form names (e.g. "leadership" in a QIP case).
     Returns the short form key (e.g. "CBD", "DOPS") or None.
     No AI call — pure pattern match for speed.
     """
     text_lower = text.lower()
+
+    # Intent phrases — user must use one of these to signal explicit form request
+    intent_phrases = [
+        "make me a", "create a", "file a", "file as", "submit as",
+        "log as", "log a", "do a", "fill in a", "fill a",
+        "i want a", "i need a", "use a", "as a ", "do this as",
+        "make this a", "treat this as", "this is a", "record as",
+    ]
+
+    has_intent = any(phrase in text_lower for phrase in intent_phrases)
+    if not has_intent:
+        return None
+
+    # Only match if user expressed explicit intent AND named the form
     patterns = {
         "CBD":          ["cbd", "case-based discussion", "case based discussion"],
-        "DOPS":         ["dops", "directly observed procedural", "procedural skill"],
+        "DOPS":         ["dops", "directly observed procedural"],
         "MINI_CEX":     ["mini cex", "mini-cex", "minicex", "clinical evaluation exercise"],
-        "LAT":          ["lat", "leadership assessment tool"],
+        "LAT":          ["leadership assessment tool"],
         "ACAT":         ["acat", "acute care assessment tool"],
         "ACAF":         ["acaf", "applied critical appraisal", "critical appraisal form"],
         "STAT":         ["stat", "structured teaching assessment"],
-        "MSF":          ["msf", "multi source feedback", "multi-source feedback", "360"],
+        "MSF":          ["msf", "multi source feedback", "multi-source feedback"],
         "QIAT":         ["qiat", "quality improvement assessment"],
         "JCF":          ["jcf", "journal club"],
         "TEACH":        ["teach form", "teaching delivered", "teaching session form"],
@@ -283,7 +301,7 @@ async def classify_intent(text: str) -> str:
 
     prompt = """Classify this message into exactly one category:
 
-- chitchat: greetings, thanks, short social messages (hi, hello, thanks, bye, ok, great, etc.)
+- chitchat: greetings, check-ins, status questions, short social messages (hi, hello, you there, still there, you ok, thanks, bye, ok, great, are you working, hello?, ping, hey, what's up, etc.)
 - question: asking about what the bot does, how it works, capabilities, help requests
 - case: a clinical case description suitable for portfolio filing (contains patient details, symptoms, management, procedures, or clinical scenarios)
 
