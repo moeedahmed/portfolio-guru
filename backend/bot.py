@@ -1130,6 +1130,7 @@ async def delete_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Reset conversation state and clear user data."""
     context.user_data.clear()
+    context.user_data["post_reset"] = True
     await update.message.reply_text(
         "✅ Reset done — all clear.\n\nSend a case by text, voice, photo, or document whenever you're ready."
     )
@@ -1389,6 +1390,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_template_review_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle text during AWAIT_TEMPLATE_REVIEW — 5-category intent check with case context."""
+    if context.user_data.pop("post_reset", False):
+        return await handle_case_input(update, context)
+
     raw_text = update.message.text.strip()
     case_text = context.user_data.get("case_text", "")
     current_form = context.user_data.get("chosen_form", "")
@@ -1460,14 +1464,19 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
             return AWAIT_TEMPLATE_REVIEW
 
     elif intent == "new_case":
-        await update.message.reply_text(
-            "Looks like a new case — tap Cancel first to start fresh, or Continue anyway to file the current one.",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("❌ Cancel current", callback_data="CANCEL|reset"),
-                InlineKeyboardButton("✅ Continue current", callback_data="ACTION|continue_thin"),
-            ]])
-        )
-        return AWAIT_TEMPLATE_REVIEW
+        has_draft = bool(context.user_data.get("current_draft") or context.user_data.get("case_text"))
+        if has_draft:
+            await update.message.reply_text(
+                "Looks like a new case — tap Cancel to start fresh, or Continue to keep the current one.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("❌ Start fresh", callback_data="CANCEL|reset"),
+                    InlineKeyboardButton("✅ Keep current", callback_data="ACTION|continue_thin"),
+                ]])
+            )
+            return AWAIT_TEMPLATE_REVIEW
+        else:
+            context.user_data.clear()
+            return await handle_case_input(update, context)
 
     else:
         # edit_detail — treat as additional case info (existing behaviour)
@@ -1529,6 +1538,9 @@ async def handle_edit_value_with_intent(update: Update, context: ContextTypes.DE
 async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle text, voice, photo, or document input for case description."""
     user_id = update.effective_user.id
+
+    # Clear post_reset flag if set (belt and braces)
+    context.user_data.pop("post_reset", None)
 
     # Clear any stale status message state from previous sessions
     context.user_data.pop("status_msg_id", None)
