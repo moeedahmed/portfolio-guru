@@ -20,6 +20,7 @@ class UserProfile(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     telegram_user_id: int = Field(unique=True, index=True)
     training_level: str = Field(default="ST5")   # ST3|ST4|ST5|ST6|SAS
+    curriculum: Optional[str] = Field(default=None)  # "2025" or "2021"; None treated as "2025"
     voice_profile: Optional[str] = Field(default=None)  # JSON style profile from user examples
     voice_examples_count: int = Field(default=0)  # how many examples were used to build profile
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -30,6 +31,24 @@ def init_profile_db():
     db_path = DATABASE_URL.replace("sqlite:///", "")
     pathlib.Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     SQLModel.metadata.create_all(engine)
+    # Migrate: add curriculum column if missing (create_all won't alter existing tables)
+    _migrate_add_column("curriculum", "TEXT")
+
+
+def _migrate_add_column(column_name: str, column_type: str) -> None:
+    """Add a column to userprofile if it doesn't exist (SQLite migration)."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute("PRAGMA table_info(userprofile)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if column_name not in columns:
+            conn.execute(f"ALTER TABLE userprofile ADD COLUMN {column_name} {column_type}")
+            conn.commit()
+        conn.close()
+    except Exception:
+        pass  # table may not exist yet — create_all will handle it
 
 
 def store_training_level(telegram_user_id: int, training_level: str) -> None:
@@ -98,3 +117,30 @@ def clear_voice_profile(telegram_user_id: int) -> None:
             existing.updated_at = datetime.utcnow()
             session.add(existing)
             session.commit()
+
+
+def store_curriculum(telegram_user_id: int, curriculum: str) -> None:
+    """Store curriculum preference ("2025" or "2021")."""
+    with Session(engine) as session:
+        existing = session.exec(
+            select(UserProfile).where(UserProfile.telegram_user_id == telegram_user_id)
+        ).first()
+        if existing:
+            existing.curriculum = curriculum
+            existing.updated_at = datetime.utcnow()
+            session.add(existing)
+        else:
+            session.add(UserProfile(
+                telegram_user_id=telegram_user_id,
+                curriculum=curriculum
+            ))
+        session.commit()
+
+
+def get_curriculum(telegram_user_id: int) -> str:
+    """Get curriculum preference. Returns "2025" if not set."""
+    with Session(engine) as session:
+        profile = session.exec(
+            select(UserProfile).where(UserProfile.telegram_user_id == telegram_user_id)
+        ).first()
+        return profile.curriculum if profile and profile.curriculum else "2025"

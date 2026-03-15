@@ -21,7 +21,7 @@ from models import FormDraft, CBDData
 from whisper import transcribe_voice
 from vision import extract_from_image
 from documents import extract_from_document, is_supported_document
-from profile_store import init_profile_db, store_training_level, get_training_level, get_voice_profile, store_voice_profile, clear_voice_profile
+from profile_store import init_profile_db, store_training_level, get_training_level, get_voice_profile, store_voice_profile, clear_voice_profile, store_curriculum, get_curriculum
 from bulk_filer import bulk_file
 from kaizen_unsigned_scraper import scrape_unsigned_tickets
 import chase_guard
@@ -179,7 +179,8 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
  AWAIT_FORM_CHOICE, AWAIT_APPROVAL,
  AWAIT_EDIT_FIELD, AWAIT_EDIT_VALUE,
  AWAIT_CASE_INPUT, AWAIT_TRAINING_LEVEL,
- AWAIT_VOICE_EXAMPLES, AWAIT_TEMPLATE_REVIEW) = range(10)
+ AWAIT_VOICE_EXAMPLES, AWAIT_TEMPLATE_REVIEW,
+ AWAIT_CURRICULUM) = range(11)
 
 # Common button patterns used across the bot
 _BTN_RESET = InlineKeyboardButton("🔄 Start Fresh", callback_data="ACTION|reset")
@@ -359,11 +360,32 @@ def _form_display_name(form_type: str) -> str:
     return schema.get("name", form_type)
 
 
-def _build_form_choice_keyboard(recommendations):
-    """Build inline keyboard for form type selection — AI suggestions + See all forms escape hatch."""
-    buttons = []
+def _build_form_choice_keyboard(recommendations, curriculum="2025"):
+    """Build inline keyboard for form type selection — AI suggestions + See all forms escape hatch.
+    Filters recommendations by curriculum preference."""
+    from extractor import FORM_UUIDS
+    # Apply curriculum filter to recommendations
+    filtered = []
+    has_2021_variant = {k[:-5] for k in FORM_UUIDS if k.endswith("_2021")}
     for rec in recommendations:
-        emoji = FORM_EMOJIS.get(rec.form_type, "📄")
+        ft = rec.form_type
+        if curriculum == "2021" and ft in has_2021_variant:
+            # Swap to _2021 variant
+            ft_2021 = ft + "_2021"
+            from models import FormTypeRecommendation
+            filtered.append(FormTypeRecommendation(
+                form_type=ft_2021, rationale=rec.rationale, uuid=FORM_UUIDS.get(ft_2021)
+            ))
+        elif curriculum == "2025" and ft.endswith("_2021"):
+            # Skip _2021 forms on 2025 curriculum
+            continue
+        else:
+            filtered.append(rec)
+
+    buttons = []
+    for rec in filtered:
+        base_ft = rec.form_type.replace("_2021", "") if rec.form_type.endswith("_2021") else rec.form_type
+        emoji = FORM_EMOJIS.get(base_ft, "📄")
         label = FORM_BUTTON_LABELS.get(rec.form_type) or _form_display_name(rec.form_type)[:24]
         if rec.uuid:
             buttons.append(InlineKeyboardButton(f"{emoji} {label}", callback_data=f"FORM|{rec.form_type}"))
@@ -375,6 +397,36 @@ def _build_form_choice_keyboard(recommendations):
         InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|form"),
     ])
     return InlineKeyboardMarkup(rows)
+
+
+def _filter_forms_by_curriculum(form_types, curriculum):
+    """Filter form list based on curriculum preference.
+    - 2025: exclude _2021 suffixed forms
+    - 2021: swap base forms that have _2021 variants with those variants
+    """
+    from extractor import FORM_UUIDS
+    has_2021_variant = {k[:-5] for k in FORM_UUIDS if k.endswith("_2021")}
+
+    if curriculum == "2021":
+        result = []
+        for ft in form_types:
+            if ft.endswith("_2021"):
+                result.append(ft)
+            elif ft in has_2021_variant:
+                result.append(ft + "_2021")
+            else:
+                result.append(ft)
+        return result
+    else:
+        # 2025 (default) — base forms only
+        return [ft for ft in form_types if not ft.endswith("_2021")]
+
+
+def _build_curriculum_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📘 2025 Update", callback_data="SET_CURRICULUM|2025"),
+         InlineKeyboardButton("📗 2021 Curriculum", callback_data="SET_CURRICULUM|2021")],
+    ])
 
 
 def _build_template_review_keyboard():
@@ -712,6 +764,8 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if has_credentials(user_id):
         training_level = get_training_level(user_id)
         grade_str = f"📊 Training level: {training_level}" if training_level else "📊 Training level: not set"
+        curriculum = get_curriculum(user_id)
+        cur_str = f"📘 Curriculum: {curriculum}"
         # Count drafts filed
         import pathlib
         drafts_dir = pathlib.Path.home() / ".openclaw/data/portfolio-guru/drafts"
@@ -727,7 +781,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         if not training_level:
             buttons.append([InlineKeyboardButton("🔗 Update setup", callback_data="ACTION|setup")])
         await update.message.reply_text(
-            f"✅ Portfolio connected and ready.\n\n{grade_str}\n{drafts_str}\n{voice_str}",
+            f"✅ Portfolio connected and ready.\n\n{grade_str}\n{cur_str}\n{drafts_str}\n{voice_str}",
             reply_markup=InlineKeyboardMarkup(buttons)
         )
     else:
@@ -807,14 +861,29 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def setup_training_level(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle training level selection during setup."""
+    """Handle training level selection during setup — then ask curriculum."""
     query = update.callback_query
     await query.answer()
     level = query.data.split("|")[1]
     user_id = update.effective_user.id
     store_training_level(user_id, level)
     await query.edit_message_text(
-        f"All set — training level saved as {level}.\n\nSend me a case whenever you're ready."
+        f"Training level saved as {level}.\n\nWhich curriculum are you working under?",
+        reply_markup=_build_curriculum_keyboard()
+    )
+    return AWAIT_CURRICULUM
+
+
+async def setup_curriculum(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle curriculum selection during setup."""
+    query = update.callback_query
+    await query.answer()
+    curriculum = query.data.split("|")[1]
+    user_id = update.effective_user.id
+    store_curriculum(user_id, curriculum)
+    label = "2025 curriculum" if curriculum == "2025" else "2021 curriculum"
+    await query.edit_message_text(
+        f"✅ Set to {label} — I'll only show you the relevant forms.\n\nSend me a case whenever you're ready."
     )
     return ConversationHandler.END
 
@@ -1275,6 +1344,29 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return ConversationHandler.END
 
 
+async def curriculum_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Standalone /curriculum command — change curriculum anytime."""
+    user_id = update.effective_user.id
+    current = get_curriculum(user_id)
+    label = "2025 curriculum" if current == "2025" else "2021 curriculum"
+    await update.message.reply_text(
+        f"Currently set to: {label}\n\nWhich curriculum are you working under?",
+        reply_markup=_build_curriculum_keyboard()
+    )
+    return ConversationHandler.END
+
+
+async def handle_set_curriculum(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle SET_CURRICULUM| callback from /curriculum command (top-level handler)."""
+    query = update.callback_query
+    await query.answer()
+    curriculum = query.data.split("|")[1]
+    user_id = update.effective_user.id
+    store_curriculum(user_id, curriculum)
+    label = "2025 curriculum" if curriculum == "2025" else "2021 curriculum"
+    await query.edit_message_text(f"✅ Set to {label} — I'll only show you the relevant forms.")
+
+
 # === CALLBACK QUERY HANDLERS ===
 
 async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: int, case_text: str, form_type: str):
@@ -1400,19 +1492,19 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
                 chat_id=status_chat,
                 message_id=status_msg,
                 text=prompt_text,
-                reply_markup=_build_form_choice_keyboard(recommendations),
+                reply_markup=_build_form_choice_keyboard(recommendations, curriculum=get_curriculum(user_id)),
                 parse_mode="Markdown",
             )
         except Exception:
             await message.reply_text(
                 prompt_text,
-                reply_markup=_build_form_choice_keyboard(recommendations),
+                reply_markup=_build_form_choice_keyboard(recommendations, curriculum=get_curriculum(user_id)),
                 parse_mode="Markdown",
             )
     else:
         await message.reply_text(
             prompt_text,
-            reply_markup=_build_form_choice_keyboard(recommendations),
+            reply_markup=_build_form_choice_keyboard(recommendations, curriculum=get_curriculum(user_id)),
             parse_mode="Markdown",
         )
     return AWAIT_FORM_CHOICE
@@ -1629,7 +1721,7 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
                 context.user_data["form_recommendations"] = recommendations
                 await update.message.reply_text(
                     prompt_text,
-                    reply_markup=_build_form_choice_keyboard(recommendations),
+                    reply_markup=_build_form_choice_keyboard(recommendations, curriculum=get_curriculum(update.effective_user.id)),
                     parse_mode="Markdown",
                 )
                 return AWAIT_FORM_CHOICE
@@ -1988,23 +2080,28 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         from models import FormTypeRecommendation
         user_id = update.effective_user.id
         training_level = get_training_level(user_id)
+        curriculum = get_curriculum(user_id)
         # If no training level set, show all forms and nudge user to set grade
         if training_level:
             allowed = TRAINING_LEVEL_FORMS.get(training_level, TRAINING_LEVEL_FORMS["ST5"])
-            header = f"All forms available for {training_level} — pick one:"
         else:
-            allowed = TRAINING_LEVEL_FORMS["ST5"]  # show full set, no filtering
-            header = "All forms - pick one:"
+            allowed = TRAINING_LEVEL_FORMS["ST5"]
+        # Filter by curriculum preference
+        allowed = _filter_forms_by_curriculum(allowed, curriculum)
+        cur_label = "2025 curriculum" if curriculum == "2025" else "2021 curriculum"
+        header = f"All forms ({cur_label}) — pick one:" if training_level else f"All forms ({cur_label}) — pick one:"
         all_recs = [
             FormTypeRecommendation(form_type=ft, rationale="", uuid=FORM_UUIDS.get(ft))
             for ft in allowed if FORM_UUIDS.get(ft)
         ]
         buttons = []
         for rec in all_recs:
-            emoji = FORM_EMOJIS.get(rec.form_type, "📄")
+            base_ft = rec.form_type.replace("_2021", "") if rec.form_type.endswith("_2021") else rec.form_type
+            emoji = FORM_EMOJIS.get(base_ft, "📄")
             label = FORM_BUTTON_LABELS.get(rec.form_type) or _form_display_name(rec.form_type)[:24]
             buttons.append(InlineKeyboardButton(f"{emoji} {label}", callback_data=f"FORM|{rec.form_type}"))
         rows = [[b] for b in buttons]  # one button per row
+        rows.append([InlineKeyboardButton("🔄 Switch curriculum", callback_data="FORM|switch_curriculum")])
         rows.append([
             InlineKeyboardButton("⬅️ Back", callback_data="FORM|back"),
             InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|form"),
@@ -2012,13 +2109,22 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text(header, reply_markup=InlineKeyboardMarkup(rows))
         return AWAIT_FORM_CHOICE
 
+    if data == "FORM|switch_curriculum":
+        user_id = update.effective_user.id
+        current = get_curriculum(user_id)
+        new_cur = "2021" if current == "2025" else "2025"
+        store_curriculum(user_id, new_cur)
+        # Re-render show_all with new curriculum
+        query.data = "FORM|show_all"
+        return await handle_form_choice(update, context)
+
     if data == "FORM|back":
         # Restore the AI recommendations screen
         recommendations = context.user_data.get("form_recommendations", [])
         saved_text = context.user_data.get("form_recommendations_text", "Which form would you like to create?")
         await query.edit_message_text(
             saved_text,
-            reply_markup=_build_form_choice_keyboard(recommendations)
+            reply_markup=_build_form_choice_keyboard(recommendations, curriculum=get_curriculum(update.effective_user.id))
         )
         return AWAIT_FORM_CHOICE
 
@@ -2661,6 +2767,7 @@ def build_application() -> Application:
             AWAIT_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_username)],
             AWAIT_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_password)],
             AWAIT_TRAINING_LEVEL: [CallbackQueryHandler(setup_training_level, pattern=r"^LEVEL\|")],
+            AWAIT_CURRICULUM: [CallbackQueryHandler(setup_curriculum, pattern=r"^SET_CURRICULUM\|")],
         },
         fallbacks=[CommandHandler("cancel", setup_cancel)],
         allow_reentry=True,
@@ -2676,6 +2783,8 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("bulk", bulk_command))
     application.add_handler(CommandHandler("unsigned", unsigned_command))
     application.add_handler(CommandHandler("chase", chase_command))
+    application.add_handler(CommandHandler("curriculum", curriculum_command))
+    application.add_handler(CallbackQueryHandler(handle_set_curriculum, pattern=r"^SET_CURRICULUM\|"))
     application.add_handler(CallbackQueryHandler(handle_chase_log, pattern=r"^CHASE_LOG\|"))
     # Top-level handlers that must work regardless of conversation state
     application.add_handler(CallbackQueryHandler(handle_info_button, pattern=r"^INFO\|"))
