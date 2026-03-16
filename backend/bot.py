@@ -1421,9 +1421,9 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
             await ack.edit_text("⚠️ Could not review that template.", reply_markup=_KB_RETRY_RESET)
             return ConversationHandler.END
 
-        missing_required, _, _ = _missing_template_fields(draft, explicit_form)
-        if not missing_required:
-            # All required fields filled — skip template review, go to draft preview
+        missing_required, missing_optional, _ = _missing_template_fields(draft, explicit_form)
+        if not missing_required and not missing_optional:
+            # All fields filled — skip template review, go to draft preview
             _store_draft(context, draft)
             preview = _format_draft_preview(draft)
             await _safe_edit_text(
@@ -1612,8 +1612,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.error("Template review failed for improve: %s", exc, exc_info=True)
                 await query.edit_message_text("⚠️ Could not refresh that template.", reply_markup=_KB_RETRY_RESET)
                 return AWAIT_TEMPLATE_REVIEW
-            missing_required, _, _ = _missing_template_fields(draft, chosen_form)
-            if not missing_required:
+            missing_required, missing_optional, _ = _missing_template_fields(draft, chosen_form)
+            if not missing_required and not missing_optional:
                 _store_draft(context, draft)
                 preview = _format_draft_preview(draft)
                 await _safe_edit_text(
@@ -2039,8 +2039,8 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await ack.edit_text("⚠️ Could not refresh that template.", reply_markup=_KB_RETRY_RESET)
             return AWAIT_TEMPLATE_REVIEW
 
-        missing_required, _, _ = _missing_template_fields(draft, chosen_form)
-        if not missing_required:
+        missing_required, missing_optional, _ = _missing_template_fields(draft, chosen_form)
+        if not missing_required and not missing_optional:
             _store_draft(context, draft)
             preview = _format_draft_preview(draft)
             await _safe_edit_text(
@@ -2157,9 +2157,9 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text("⚠️ Could not review that template.", reply_markup=_KB_RETRY_RESET)
         return ConversationHandler.END
 
-    missing_required, _, _ = _missing_template_fields(draft, form_type)
-    if not missing_required:
-        # All required fields filled — skip template review, go to draft preview
+    missing_required, missing_optional, _ = _missing_template_fields(draft, form_type)
+    if not missing_required and not missing_optional:
+        # All fields filled — skip template review, go to draft preview
         _store_draft(context, draft)
         preview = _format_draft_preview(draft)
         await _safe_edit_text(
