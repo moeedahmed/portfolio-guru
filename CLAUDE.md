@@ -69,6 +69,14 @@ AWAIT_EDIT_FIELD=4, AWAIT_EDIT_VALUE=5, AWAIT_CASE_INPUT=6, AWAIT_TRAINING_LEVEL
 - All Gemini calls wrapped in `_gemini_call_with_retry` with `run_in_executor` (never blocks event loop)
 - Stale button guard on `handle_form_choice` — expired buttons show clean message
 
+## Session Continuity
+
+Builder uses persistent Claude Code sessions for this project via cc-sessions.json.
+Sessions are resumed via `resumeSessionId` with `mode: "session"`.
+
+## TASK-HISTORY.md
+TASK-HISTORY.md is for human reading only — never reference or import it as agent context.
+
 ## Testing
 - Bot token BWS ID: af553b7d-5c05-418a-b80e-b405015708ed
 - Google API key BWS ID: af6579a0-2cbe-4cef-94b3-b405017b48fe
@@ -76,3 +84,12 @@ AWAIT_EDIT_FIELD=4, AWAIT_EDIT_VALUE=5, AWAIT_CASE_INPUT=6, AWAIT_TRAINING_LEVEL
 - Test account: Create via /setup in bot
 - Restart: `pkill -f "bot.py" && sleep 2 && cd /Users/moeedahmed/projects/portfolio-guru/backend && nohup venv/bin/python3 bot.py >> /tmp/portfolio-guru-bot.log 2>&1 &`
 - Logs: `tail -f /tmp/portfolio-guru-bot.log`
+
+## Running Tests
+Every Claude Code session must run the test suite before declaring done:
+```bash
+cd /Users/moeedahmed/projects/portfolio-guru/backend
+source venv/bin/activate
+python -m pytest tests/ -v 2>&1 | tail -30
+```
+All tests must pass before reporting completion to Moeed. If tests fail, fix them in the same session before reporting.
