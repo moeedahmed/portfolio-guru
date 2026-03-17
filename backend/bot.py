@@ -199,9 +199,9 @@ _KB_FILE_RESET = InlineKeyboardMarkup([[_BTN_FILE], [_BTN_RESET]])
 TRAINING_LEVEL_FORMS = {
     "ST3": ["CBD", "DOPS", "MINI_CEX", "ACAT", "MSF", "PROC_LOG", "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH", "COMPLAINT", "SERIOUS_INC", "ESLE"],
     "ST4": ["CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "MSF", "QIAT", "PROC_LOG", "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH", "US_CASE", "COMPLAINT", "SERIOUS_INC", "ESLE"],
-    "ST5": ["CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "STAT", "MSF", "QIAT", "JCF", "PROC_LOG", "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH", "US_CASE", "COMPLAINT", "SERIOUS_INC", "ESLE"],
-    "ST6": ["CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "STAT", "MSF", "QIAT", "JCF", "PROC_LOG", "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH", "US_CASE", "COMPLAINT", "SERIOUS_INC", "ESLE"],
-    "SAS": ["CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "STAT", "MSF", "QIAT", "JCF", "PROC_LOG", "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH", "US_CASE", "COMPLAINT", "SERIOUS_INC", "ESLE"],
+    "ST5": ["CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "STAT", "MSF", "QIAT", "JCF", "PROC_LOG", "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH", "US_CASE", "COMPLAINT", "SERIOUS_INC", "ESLE", "MGMT_ROTA", "MGMT_RISK", "MGMT_MEETING", "MGMT_PROJECT", "MGMT_AUDIT", "MGMT_SERVICE", "MGMT_LEADERSHIP"],
+    "ST6": ["CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "STAT", "MSF", "QIAT", "JCF", "PROC_LOG", "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH", "US_CASE", "COMPLAINT", "SERIOUS_INC", "ESLE", "MGMT_ROTA", "MGMT_RISK", "MGMT_MEETING", "MGMT_PROJECT", "MGMT_AUDIT", "MGMT_SERVICE", "MGMT_LEADERSHIP"],
+    "SAS": ["CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "STAT", "MSF", "QIAT", "JCF", "PROC_LOG", "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH", "US_CASE", "COMPLAINT", "SERIOUS_INC", "ESLE", "MGMT_ROTA", "MGMT_RISK", "MGMT_MEETING", "MGMT_PROJECT", "MGMT_AUDIT", "MGMT_SERVICE", "MGMT_LEADERSHIP"],
 }
 
 WELCOME_MSG = """🩺 Portfolio Guru — your WPBA entries, filed in seconds.
@@ -2100,7 +2100,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
             emoji = FORM_EMOJIS.get(base_ft, "📄")
             label = FORM_BUTTON_LABELS.get(rec.form_type) or _form_display_name(rec.form_type)[:24]
             buttons.append(InlineKeyboardButton(f"{emoji} {label}", callback_data=f"FORM|{rec.form_type}"))
-        rows = [[b] for b in buttons]  # one button per row
+        rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]  # two buttons per row
         rows.append([InlineKeyboardButton("🔄 Switch curriculum", callback_data="FORM|switch_curriculum")])
         rows.append([
             InlineKeyboardButton("⬅️ Back", callback_data="FORM|back"),
