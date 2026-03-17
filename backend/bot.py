@@ -391,7 +391,7 @@ def _build_form_choice_keyboard(recommendations, curriculum="2025"):
             buttons.append(InlineKeyboardButton(f"{emoji} {label}", callback_data=f"FORM|{rec.form_type}"))
         else:
             buttons.append(InlineKeyboardButton(f"{emoji} {label} (soon)", callback_data="FORM|disabled"))
-    rows = [[b] for b in buttons]  # one button per row
+    rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
     rows.append([
         InlineKeyboardButton("📋 See all forms", callback_data="FORM|show_all"),
         InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|form"),
@@ -2110,13 +2110,37 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return AWAIT_FORM_CHOICE
 
     if data == "FORM|switch_curriculum":
+        from extractor import FORM_UUIDS
+        from models import FormTypeRecommendation
         user_id = update.effective_user.id
         current = get_curriculum(user_id)
         new_cur = "2021" if current == "2025" else "2025"
         store_curriculum(user_id, new_cur)
-        # Re-render show_all with new curriculum
-        query.data = "FORM|show_all"
-        return await handle_form_choice(update, context)
+        training_level = get_training_level(user_id)
+        if training_level:
+            allowed = TRAINING_LEVEL_FORMS.get(training_level, TRAINING_LEVEL_FORMS["ST5"])
+        else:
+            allowed = TRAINING_LEVEL_FORMS["ST5"]
+        allowed = _filter_forms_by_curriculum(allowed, new_cur)
+        cur_label = "2025 curriculum" if new_cur == "2025" else "2021 curriculum"
+        all_recs = [
+            FormTypeRecommendation(form_type=ft, rationale="", uuid=FORM_UUIDS.get(ft))
+            for ft in allowed if FORM_UUIDS.get(ft)
+        ]
+        buttons = []
+        for rec in all_recs:
+            base_ft = rec.form_type.replace("_2021", "") if rec.form_type.endswith("_2021") else rec.form_type
+            emoji = FORM_EMOJIS.get(base_ft, "📄")
+            label = FORM_BUTTON_LABELS.get(rec.form_type) or _form_display_name(rec.form_type)[:24]
+            buttons.append(InlineKeyboardButton(f"{emoji} {label}", callback_data=f"FORM|{rec.form_type}"))
+        rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
+        rows.append([InlineKeyboardButton("🔄 Switch curriculum", callback_data="FORM|switch_curriculum")])
+        rows.append([
+            InlineKeyboardButton("⬅️ Back", callback_data="FORM|back"),
+            InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|form"),
+        ])
+        await query.edit_message_text(f"All forms ({cur_label}) — pick one:", reply_markup=InlineKeyboardMarkup(rows))
+        return AWAIT_FORM_CHOICE
 
     if data == "FORM|back":
         # Restore the AI recommendations screen
