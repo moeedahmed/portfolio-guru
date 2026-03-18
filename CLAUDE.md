@@ -93,3 +93,26 @@ source venv/bin/activate
 python -m pytest tests/ -v 2>&1 | tail -30
 ```
 All tests must pass before reporting completion to Moeed. If tests fail, fix them in the same session before reporting.
+
+## Autonomous Test Suite
+
+Every Claude Code session MUST run the full test suite before reporting done:
+```bash
+cd /Users/moeedahmed/projects/portfolio-guru/backend
+source venv/bin/activate
+python -m pytest tests/ -v 2>&1 | tail -40
+```
+
+If any test fails:
+1. Fix the bug in the bot code
+2. Re-run the tests
+3. Repeat until all pass
+4. Only then report completion
+
+Test categories:
+- test_forms.py — labels, grades, curriculum filter
+- test_extraction.py — form detection, schema coverage
+- test_conversation.py — imports, state definitions, keyboard layout
+- test_flow_walker.py — full conversation paths, button coverage, dead ends, guardrails
+
+If a test failure requires a design decision, mark it `pytest.mark.skip(reason="...")` and flag it in the completion message.
