@@ -194,7 +194,7 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
  AWAIT_CURRICULUM, AWAIT_FORM_SEARCH) = range(12)
 
 # Common button patterns used across the bot
-_BTN_RESET = InlineKeyboardButton("🔄 Restart this case", callback_data="ACTION|reset")
+_BTN_RESET = InlineKeyboardButton("🆕 Start fresh", callback_data="ACTION|reset")
 _BTN_FILE = InlineKeyboardButton("📂 File a case", callback_data="ACTION|file")
 _BTN_SETUP = InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")
 _BTN_CANCEL = InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel")
@@ -3087,7 +3087,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         # Keep draft data for retry — do NOT clear user_data
         retry_keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_filing")],
-            [InlineKeyboardButton("🔄 Restart this case", callback_data="ACTION|reset")],
+            [InlineKeyboardButton("🆕 Start fresh", callback_data="ACTION|reset")],
         ])
         try:
             await ack.edit_text("❌ Filing failed. Try again or start fresh.", reply_markup=retry_keyboard)
@@ -3269,7 +3269,7 @@ async def handle_approval_submit(update: Update, context: ContextTypes.DEFAULT_T
         logger.error(f"Filer error for {form_type}: {e}", exc_info=True)
         retry_keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_filing")],
-            [InlineKeyboardButton("🔄 Restart this case", callback_data="ACTION|reset")],
+            [InlineKeyboardButton("🆕 Start fresh", callback_data="ACTION|reset")],
         ])
         try:
             await ack.edit_text("❌ Filing failed. Try again or start fresh.", reply_markup=retry_keyboard)
@@ -3576,6 +3576,11 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle unexpected text messages mid-conversation (AWAIT_APPROVAL, AWAIT_EDIT_FIELD, AWAIT_FORM_CHOICE)."""
+    # After a reset, treat ANY incoming message as a fresh case
+    if context.user_data.pop("post_reset", False):
+        context.user_data.clear()
+        return await handle_case_input(update, context)
+
     raw_text = update.message.text.strip()
     case_text = context.user_data.get("case_text", "")
 
@@ -3632,13 +3637,18 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
 
     else:
         # new_case or edit_detail — looks like a new case
-        await update.message.reply_text(
-            "It looks like you want to file a new case.",
-            reply_markup=InlineKeyboardMarkup([
-                [_BTN_RESET, _BTN_CANCEL],
-            ])
-        )
-        return AWAIT_CASE_INPUT
+        if in_flow:
+            await update.message.reply_text(
+                "It looks like you want to file a new case.",
+                reply_markup=InlineKeyboardMarkup([
+                    [_BTN_RESET, _BTN_CANCEL],
+                ])
+            )
+            return AWAIT_CASE_INPUT
+        else:
+            # No active draft/case — go straight to fresh case
+            context.user_data.clear()
+            return await handle_case_input(update, context)
 
 
 # === BULK / UNSIGNED / CHASE COMMANDS ===
@@ -3982,7 +3992,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
             # We have a draft — offer retry + start fresh
             retry_keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_filing")],
-                [InlineKeyboardButton("🔄 Restart this case", callback_data="ACTION|reset")],
+                [InlineKeyboardButton("🆕 Start fresh", callback_data="ACTION|reset")],
             ])
             await _edit_last_bot_msg(
                 context,
