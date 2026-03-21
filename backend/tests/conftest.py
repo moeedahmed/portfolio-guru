@@ -6,6 +6,12 @@ import os
 # Add backend to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "e2e: end-to-end tests requiring Telegram credentials")
+    config.addinivalue_line("markers", "live: live Telegram tests (requires personal account session)")
+    config.addinivalue_line("markers", "kaizen: live Kaizen integration tests (requires credentials, manual only)")
+
 @pytest.fixture
 def mock_update():
     """Fake Telegram update — simulates a user sending a message."""
