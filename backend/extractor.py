@@ -4,8 +4,8 @@ import json
 import logging
 import os
 import re
-from datetime import date
-from typing import List, Callable, Any
+from datetime import date, timedelta
+from typing import List
 
 logger = logging.getLogger(__name__)
 from models import CBDData, FormTypeRecommendation, FormDraft
@@ -83,60 +83,99 @@ SLO12: Lead & Manage (2025 Update)
 
 _client = None
 
-PRIMARY_MODEL = "gemini-3-flash-preview"
-FALLBACK_MODEL = "gemini-2.5-flash"
+# Provider chain — tried in order. Each must implement generate(prompt) → text
+PROVIDERS = [
+    {
+        "name": "gemini-2.5-flash",
+        "type": "gemini",
+        "model": "gemini-2.5-flash",
+        "env_key": "GOOGLE_API_KEY",
+    },
+    {
+        "name": "deepseek-v4",
+        "type": "openai_compat",
+        "model": "deepseek-chat",
+        "base_url": "https://api.deepseek.com",
+        "env_key": "DEEPSEEK_API_KEY",
+    },
+    {
+        "name": "gpt-5.4-nano",
+        "type": "openai",
+        "model": "gpt-5.4-nano",
+        "env_key": "OPENAI_API_KEY",
+    },
+]
 
 
-async def _gemini_generate(prompt, retries: int = 2, delay: int = 1):
-    """Call Gemini generate_content with automatic model fallback.
-    Tries PRIMARY_MODEL first with retries, then FALLBACK_MODEL.
-    Fast-path: minimal retries to keep latency low.
+async def _generate(prompt, retries: int = 1, tier: str = ""):
+    """Call LLM with multi-provider fallback chain.
+    Iterates through PROVIDERS in order. Skips providers whose env key is missing.
+    On rate limit (429) or server error (5xx), moves to the next provider.
+    Free tier only uses the first provider (Gemini). Pro/Pro+ uses the full chain.
+    Returns the response as a plain string.
     """
     import time as _time
-    client = _get_client()
     loop = asyncio.get_event_loop()
     last_error = None
     t0 = _time.monotonic()
 
-    for model in [PRIMARY_MODEL, FALLBACK_MODEL]:
-        for attempt in range(retries if model == PRIMARY_MODEL else 1):
+    # Resolve tier: explicit param > env var > full chain
+    effective_tier = tier or os.environ.get("CURRENT_USER_TIER", "pro")
+    providers = PROVIDERS[:1] if effective_tier == "free" else PROVIDERS
+
+    for provider in providers:
+        api_key = os.environ.get(provider["env_key"])
+        if not api_key:
+            logger.debug("Skipping %s — %s not set", provider["name"], provider["env_key"])
+            continue
+
+        for attempt in range(retries + 1):
             try:
-                result = await loop.run_in_executor(
-                    None,
-                    lambda m=model: client.models.generate_content(model=m, contents=prompt)
-                )
-                elapsed = _time.monotonic() - t0
-                logger.info(f"Gemini {model} responded in {elapsed:.1f}s")
-                return result
+                if provider["type"] == "gemini":
+                    client = _get_client()
+                    result = await loop.run_in_executor(
+                        None,
+                        lambda m=provider["model"]: client.models.generate_content(model=m, contents=prompt)
+                    )
+                    elapsed = _time.monotonic() - t0
+                    logger.info(f"{provider['name']} responded in {elapsed:.1f}s")
+                    return result.text
+                else:
+                    # openai or openai_compat
+                    from openai import OpenAI
+                    oai_client = OpenAI(
+                        api_key=api_key,
+                        base_url=provider.get("base_url"),
+                    )
+                    response = await loop.run_in_executor(
+                        None,
+                        lambda c=oai_client, m=provider["model"]: c.chat.completions.create(
+                            model=m,
+                            messages=[{"role": "user", "content": prompt}],
+                            response_format={"type": "json_object"},
+                            temperature=0.2,
+                        )
+                    )
+                    elapsed = _time.monotonic() - t0
+                    logger.info(f"{provider['name']} responded in {elapsed:.1f}s")
+                    return response.choices[0].message.content
             except Exception as e:
-                error_msg = str(e).lower()
-                if any(term in error_msg for term in ["503", "unavailable", "overloaded", "404"]):
-                    last_error = e
-                    if model == PRIMARY_MODEL and attempt < retries - 1:
-                        await asyncio.sleep(delay)
-                    elif model == PRIMARY_MODEL:
-                        logger.warning(f"{PRIMARY_MODEL} failed after {retries} retries ({_time.monotonic()-t0:.1f}s), falling back to {FALLBACK_MODEL}")
-                    continue
-                raise
-    raise last_error
-
-
-async def _gemini_call_with_retry(fn: Callable[..., Any], *args, retries: int = 3, delay: int = 2) -> Any:
-    """Legacy wrapper — kept for any call sites that still use it directly."""
-    last_error = None
-    loop = asyncio.get_event_loop()
-    for attempt in range(retries):
-        try:
-            return await loop.run_in_executor(None, lambda: fn(*args))
-        except Exception as e:
-            error_msg = str(e).lower()
-            if any(term in error_msg for term in ["503", "unavailable", "overloaded"]):
                 last_error = e
-                if attempt < retries - 1:
-                    await asyncio.sleep(delay)
-                continue
-            raise
-    raise last_error
+                error_msg = str(e).lower()
+                is_retryable = any(term in error_msg for term in [
+                    "429", "rate", "503", "502", "500", "unavailable", "overloaded",
+                ])
+                if is_retryable:
+                    if attempt < retries:
+                        await asyncio.sleep(1)
+                        continue
+                    logger.warning("%s failed (%s), trying next provider", provider["name"], e)
+                    break  # next provider
+                else:
+                    logger.warning("%s error (%s), trying next provider", provider["name"], e)
+                    break  # next provider
+
+    raise last_error or RuntimeError("All providers failed — none configured")
 
 FORM_UUIDS = {
     # ─── 2025 Update versions (preferred) ─────────────────────────────────
@@ -394,8 +433,8 @@ Message: {text}
 
 Respond with ONLY one of: chitchat, question_general, new_case"""
 
-    response = await _gemini_generate(prompt)
-    result = response.text.strip().lower()
+    text = await _generate(prompt)
+    result = text.strip().lower()
 
     # Normalize response to valid category
     if "chitchat" in result:
@@ -441,8 +480,8 @@ Analyse the case and suggest the 2-3 best RCEM WPBA form types for THIS specific
 Available forms: CBD, DOPS, Mini-CEX, ACAT, LAT, ACAF, STAT, MSF, QIAT, JCF, Teaching, Procedural Log, SDL, Ultrasound Case, ESLE, Complaint, Serious Incident, Educational Activity, Formal Course.
 
 Be concise. For each suggestion give the form name and a one-line reason why it fits this case."""
-            response = await _gemini_generate(prompt)
-            return response.text.strip()
+            text = await _generate(prompt)
+            return text.strip()
 
     # Check if user is asking about specific form types or capabilities
     text_lower = text.lower()
@@ -505,8 +544,8 @@ Question: {text}
 
 Answer concisely. If the question is about a specific form type, confirm it's supported."""
 
-    response = await _gemini_generate(prompt)
-    return response.text.strip()
+    text = await _generate(prompt)
+    return text.strip()
 
 
 async def assess_case_sufficiency(case_description: str) -> dict:
@@ -532,8 +571,8 @@ Rules:
 - Questions should target the specific gaps: missing reasoning, missing outcome, missing reflection, etc.
 - Return ONLY the JSON. No explanation."""
 
-    response = await _gemini_generate(prompt)
-    raw = response.text.strip()
+    text = await _generate(prompt)
+    raw = text.strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):
@@ -589,55 +628,238 @@ async def recommend_form_types(case_description: str) -> List[FormTypeRecommenda
     """Recommend applicable WPBA form types based on case description."""
     client = _get_client()
 
-    system_prompt = """Analyze this clinical case and recommend which WPBA forms apply.
+    system_prompt = """You are an expert RCEM portfolio advisor. Analyse the clinical or educational event described and
+recommend the 1-3 most appropriate RCEM Kaizen WPBA form types.
 
-Rules:
-- CBD: Always if trainee managed a clinical case (retrospective reasoning discussion)
-- LAT: ONLY if the trainee was explicitly the shift leader or shift co-ordinator, or managed a major incident as lead
-- DOPS: If trainee personally performed a hands-on procedure (intubation, central line, LP, chest drain, etc.)
-- ACAT: If description covers a full shift or multiple patients observed
-- MINI_CEX: If someone directly observed the trainee seeing a patient (real-time bedside observation)
-- ACAF: If trainee searched literature or critically appraised evidence
-- JCF: If trainee presented at a journal club
-- STAT: If trainee delivered a structured teaching session to a group
-- QIAT: If trainee completed or is presenting a QI project
-- MSF: If trainee is requesting 360-degree colleague feedback
-- TEACH: If trainee delivered teaching (bedside, sim, lecture) or supervised a junior
-- TEACH_OBS: If trainee was observed teaching and wants formal feedback on teaching skills
-- PROC_LOG: If trainee performed a procedure and wants to log it (lighter than DOPS — no assessor needed)
-- SDL: If trainee did self-directed learning (podcast, article, online module, video)
-- US_CASE: If trainee performed or interpreted a point-of-care ultrasound scan
-- ESLE: If trainee is reflecting on an event with significant learning (near-miss, unexpected outcome, difficult situation)
-- ESLE_ASSESS: If trainee needs formal ESLE assessment (Part 1 & 2) with assessor involvement
-- COMPLAINT: If trainee is reflecting on a patient complaint
-- SERIOUS_INC: If trainee is reflecting on a serious incident or never event
-- CRIT_INCIDENT: If trainee managed or was involved in a critical incident (management perspective)
-- EDU_ACT: If trainee attended a teaching session, lecture, or educational event (as learner, not teacher)
-- FORMAL_COURSE: If trainee attended a formal course (ATLS, APLS, ALS, etc.)
-- REFLECT_LOG: If trainee wants a general reflective practice log entry
-- AUDIT: If trainee conducted or participated in a clinical audit
-- RESEARCH: If trainee conducted or participated in a research project
-- PDP: If trainee is writing/updating their personal development plan
-- MGMT_ROTA: If trainee was involved in rota management
-- MGMT_RISK: If trainee managed or contributed to the risk register
-- MGMT_PROJECT: If trainee managed or led a project (non-QI)
-- MGMT_GUIDELINE: If trainee introduced or updated a clinical guideline
-- MGMT_EXPERIENCE: If trainee gained general management experience
-- BUSINESS_CASE: If trainee wrote or contributed to a business case
-- CLIN_GOV: If trainee attended or contributed to clinical governance meetings
-- APPRAISAL: If trainee appraised or supervised others
-- TEACH_CONFID: If trainee taught about confidentiality
-- Never recommend more than 3 forms
+=== AUTHORITATIVE FORM DEFINITIONS (from rcemcurriculum.co.uk official guidance) ===
 
-Return ONLY a JSON array:
-[{"form_type": "CBD", "rationale": "one-line reason"}, ...]
+CBD (Case-Based Discussion)
+- Purpose: Assess the trainee's management of a specific patient — clinical reasoning, decision-making,
+  application of medical knowledge. Should focus on a written record (case notes, discharge summary,
+  clinic letter).
+- Requires: A specific patient case the trainee managed. Retrospective discussion with an assessor.
+- NOT for: Procedures performed (use DOPS/PROC_LOG), bedside observations (use Mini-CEX),
+  shift-level performance (use ESLE or ACAT), teaching activities (use STAT/TEACH).
+- Suggest when: Trainee describes managing a patient, making clinical decisions, or wants to discuss
+  their clinical reasoning on a case.
 
-Only include forms that clearly apply. CBD is almost always applicable.
-Be conservative — do not recommend a form unless the case description clearly demonstrates that activity."""
+Mini-CEX (Mini-Clinical Evaluation Exercise)
+- Purpose: Evaluate a clinical encounter — history taking, examination, clinical reasoning — with
+  IMMEDIATE feedback. The assessor directly observes the trainee with the patient in real time.
+- Requires: Assessor present at the bedside or in the consultation, watching the trainee with the patient.
+- NOT for: Retrospective case discussion (use CBD), full shift observation (use ESLE/ACAT),
+  procedures (use DOPS).
+- Suggest when: Trainee was directly observed by someone during a patient interaction — seeing
+  a patient while a consultant watched, or a bedside teaching scenario where competence was assessed.
+
+DOPS (Direct Observation of Procedural Skills)
+- Purpose: Assess performance of a specific practical procedure against a structured checklist.
+  Immediate feedback on strengths and areas to develop.
+- Requires: Trainee personally performed a hands-on procedure AND an assessor observed it.
+- NOT for: Logging procedures without an observer (use PROC_LOG), clinical reasoning (use CBD).
+- Suggest when: Trainee performed intubation, central line, LP, chest drain, arterial line, IO access,
+  cardioversion, pericardiocentesis, or any procedural skill and had an assessor watching.
+
+PROC_LOG (Procedural Log)
+- Purpose: Log a procedure performed. Lighter than DOPS — no direct assessor observation required.
+- Requires: Trainee performed a procedure.
+- NOT for: Replacing DOPS when an assessor was present (prefer DOPS for assessed procedures).
+- Suggest when: Trainee performed a procedure but no formal assessment occurred, or wants to log
+  volume of procedures.
+
+ACAT (Acute Care Assessment Tool)
+- Purpose: Assess a doctor's performance during an acute medical take or a period of acute care
+  involving MULTIPLE patients. Covers clinical decision-making, prioritisation, and management across
+  a session or ward round.
+- Requires: Assessor observed trainee managing multiple patients over a period (e.g. clerking shift,
+  acute take, busy resus session, ward round).
+- NOT for: Single patient cases (use CBD or Mini-CEX), procedures (use DOPS), teaching.
+- Suggest when: Trainee describes a full shift, a resus session involving multiple patients, managing
+  the department, or a clinical period where several patients were seen.
+
+ESLE (Extended Supervised Learning Event)
+- Purpose: Observe NON-TECHNICAL SKILLS across a substantial shift period (~2-3 hours minimum).
+  Covers 4 NTS domains ONLY: (1) Management & Supervision, (2) Teamwork & Cooperation,
+  (3) Decision Making, (4) Situational Awareness. Assessor is SUPERNUMERARY (not in clinical numbers).
+  First ESLE must be within first 3 months of training year.
+- Requires: Assessor physically present and watching the trainee work for a substantial part of a shift.
+  The assessment spans multiple interactions/cases. Debrief takes ~1 hour after observation.
+- NOT for: Individual case write-ups. Not for single clinical encounters. Not for "learning from" a case.
+  The word "learning" in a description does NOT trigger ESLE.
+- Suggest when: Description explicitly mentions shift-level observation, NTS feedback, a consultant
+  watching them work across a session, or the specific NTS domains listed above.
+
+MSF (Multi-Source Feedback)
+- Purpose: Collect 360-degree feedback on generic professional skills (communication, leadership,
+  teamwork, reliability) from multiple colleagues — doctors, nurses, allied health professionals,
+  admin staff. Trainee does not see individual responses. Feedback given by Educational Supervisor.
+- Requires: Trainee wants to initiate a formal MSF round with multiple raters.
+- NOT for: Feedback from a single person, individual case feedback, teaching feedback.
+- Suggest when: Trainee explicitly mentions wanting colleague feedback, requesting 360 feedback,
+  or has been asked to do MSF by their ES.
+
+LAT (Leadership Assessment Tool)
+- Purpose: Assess leadership skills in a specific situation — multi-professional resus, EPIC role,
+  handover, chairing a meeting, QI leadership. Uses EMLeaders Framework. Can be used in sim,
+  clinical, or non-clinical settings. Includes self-reflection (Part 1 by trainee) + assessor feedback (Part 2).
+- Requires: Trainee was in a leadership role in a specific identifiable situation.
+- NOT for: General clinical care without a leadership element, observer roles, teaching.
+- Suggest when: Trainee led a resus, led a trauma call, was shift co-ordinator or EPIC doctor,
+  chaired a clinical meeting, managed a major incident as team leader, led a handover.
+
+ACAF (Applied Critical Appraisal Form)
+- Purpose: Structured evidence-based medicine form. Trainee identifies a clinical question from
+  practice, performs a literature search (PICO), evaluates the evidence, and applies it.
+- Requires: Trainee searched the literature to answer a clinical question arising from their work.
+- NOT for: Cases where no literature search occurred, general reflections on practice.
+- Suggest when: Trainee searched PubMed/guidelines/literature for evidence about a clinical question,
+  reviewed a paper, or conducted critical appraisal relevant to their practice.
+
+JCF (Journal Club Form)
+- Purpose: Document a formal journal club presentation — where trainee presents and discusses
+  a paper to a group.
+- Requires: Trainee presented a paper at a formal journal club meeting.
+- NOT for: Informal discussion of papers, self-directed reading, literature searches (use ACAF).
+- Suggest when: Trainee presented at journal club, led an evidence-based discussion with colleagues
+  in a formal educational meeting.
+
+STAT (Structured Teaching Assessment Tool)
+- Purpose: Assess a formal teaching session delivered by the trainee — face-to-face or online,
+  any setting. Includes bedside teaching, simulation sessions, lectures, tutorials.
+- Requires: Trainee DELIVERED a teaching session and an assessor was present to observe it.
+- NOT for: Teaching someone informally during patient care (TEACH form), attending a teaching
+  session as a learner (EDU_ACT).
+- Suggest when: Trainee delivered a formal teaching session (bedside, simulation, lecture, tutorial)
+  with an assessor observing.
+
+TEACH (Teaching Delivered by Trainee)
+- Purpose: Record teaching delivered during routine clinical work — bedside teaching, supervising
+  a junior, informal opportunistic teaching. Lower-threshold than STAT; no formal observation required.
+- Requires: Trainee taught or supervised a colleague or junior.
+- NOT for: Formal observed teaching sessions (use STAT), attending teaching as a learner.
+- Suggest when: Trainee mentored a junior, taught at the bedside, supervised a procedure, or
+  delivered opportunistic clinical teaching.
+
+TEACH_OBS (Teaching Observation Tool)
+- Purpose: Structured feedback on the trainee's competence at teaching, provided by an observer.
+  Process is trainee-led. For formal observed teaching.
+- Requires: An assessor observed the trainee's teaching session specifically to give feedback on
+  the TEACHING SKILL, not just the content.
+- NOT for: Recording that teaching happened (use TEACH), content-focused sessions.
+- Suggest when: Trainee wants formal feedback on their teaching ability, had an assessor observe
+  and evaluate their teaching style and skills.
+
+QIAT (Quality Improvement Assessment Tool)
+- Purpose: Assess a QI project or audit — problem analysis, methodology, measurement, team
+  working, stakeholder engagement. Assessed by a supervisor.
+- Requires: Trainee completed or contributed to a QI project or audit.
+- NOT for: Clinical care, individual cases, teaching. CANNOT be used as a Management Portfolio
+  assignment (separate requirement).
+- Suggest when: Trainee completed a QI project, an audit, a re-audit, or led/contributed to
+  a quality improvement initiative.
+
+SDL (Self-Directed Learning Reflection)
+- Purpose: Record and reflect on self-directed learning — reading, online modules, podcasts,
+  videos, independent study.
+- Requires: Trainee completed a learning activity independently (not a formal course or teaching session).
+- NOT for: Formal courses (use FORMAL_COURSE), formal teaching received (use EDU_ACT).
+- Suggest when: Trainee completed RCEMLearning module, read a paper independently, listened
+  to a medical podcast, watched an educational video, or did self-study.
+
+EDU_ACT (Educational Activity Attended)
+- Purpose: Record a teaching session, lecture, or educational event attended as a LEARNER.
+- Requires: Trainee attended an educational event (departmental teaching, grand round, lecture,
+  educational meeting, simulation day as a participant).
+- NOT for: Events where trainee was the TEACHER (use STAT/TEACH), formal courses with
+  certificates (use FORMAL_COURSE).
+- Suggest when: Trainee attended a teaching session, departmental meeting, educational grand
+  round, or learning event as a participant.
+
+FORMAL_COURSE (Attendance at Formal Course)
+- Purpose: Document completion of a formal course — ALS, ATLS, APLS, ALSO, leadership
+  courses, simulation courses with formal certification.
+- Requires: Trainee attended a structured course with defined learning objectives, typically
+  resulting in a certificate.
+- NOT for: Informal teaching, departmental educational sessions (use EDU_ACT).
+- Suggest when: Trainee completed ALS, ATLS, APLS, ALSO, human factors course, simulation
+  course, leadership training day, or any certified course.
+
+US_CASE (Ultrasound Case Reflection)
+- Purpose: Document and reflect on a specific point-of-care ultrasound (POCUS) case.
+- Requires: Trainee performed or interpreted a POCUS scan.
+- NOT for: General imaging discussion, CT/MRI, formal radiology.
+- Suggest when: Trainee performed FAST scan, cardiac echo, lung ultrasound, IVC assessment,
+  vascular access guidance, or any POCUS in clinical practice.
+
+ESLE_ASSESS (ESLE Part 1 & 2 — 2025 Update)
+- Purpose: The formal assessed ESLE with structured Part 1 (event timeline) and Part 2 (NTS review).
+  Requires two assessors including Educational Supervisor.
+- Same context requirements as ESLE above. Use ESLE_ASSESS when the description suggests
+  a formal, dual-assessor ESLE with both parts to complete.
+
+REFLECT_LOG (Reflective Practice Log)
+- Purpose: General reflective entry — thoughts on clinical practice, professional development,
+  or any learning experience that doesn't fit a specific form.
+- NOT for: If a more specific form clearly fits, use that instead.
+- Suggest when: Trainee wants to reflect generally and no other specific form clearly applies.
+
+COMPLAINT (Reflection on a Patient Complaint)
+- Purpose: Reflect on a patient complaint — what happened, response, learning.
+- Requires: An actual patient complaint was made about or involving the trainee's care.
+- Suggest when: Trainee is reflecting on a formal complaint from a patient or relative.
+
+SERIOUS_INC (Reflection on Serious Incident)
+- Purpose: Reflect on a serious incident or never event.
+- Requires: A formally declared serious incident or never event.
+- Suggest when: Trainee was involved in a serious incident investigation or a never event.
+
+MGMT_* (Management Portfolio forms — Rota, Complaint, Critical Incident, Risk, Project, etc.)
+- Purpose: Document completion of a specific management activity as part of the Management
+  Portfolio requirement (mandatory 4 assignments for ST3-6 in EM posts).
+- Requires: Trainee has actually completed the management activity described.
+- Suggest MGMT_ROTA when: Involved in rota planning/management for the department.
+- Suggest MGMT_RISK when: Contributed to the departmental risk register.
+- Suggest MGMT_PROJECT when: Led or completed a non-QI project.
+- Suggest MGMT_GUIDELINE when: Introduced, reviewed, or updated a clinical guideline.
+- Suggest MGMT_COMPLAINT (management version) when: Managed a patient complaint process
+  from the management perspective (root cause, response, actions) — distinct from COMPLAINT
+  (personal reflection).
+- Suggest CRIT_INCIDENT when: Managed a critical incident investigation using root cause analysis.
+- Suggest CLIN_GOV when: Attended and contributed to clinical governance meetings over 6 months.
+- Suggest BUSINESS_CASE when: Wrote or contributed to a formal business case.
+- Suggest COST_IMPROVE when: Led or contributed to a cost improvement / efficiency initiative.
+- Suggest EQUIP_SERVICE when: Introduced a new piece of equipment or a new service.
+- Suggest APPRAISAL when: Formally appraised a junior colleague.
+- Suggest TEACH_CONFID when: Delivered teaching on confidentiality or data protection.
+
+=== DECISION RULES ===
+
+1. Match the form to what ACTUALLY HAPPENED, not to keywords. "Significant learning" ≠ ESLE.
+   "Taught someone" alone ≠ STAT (need a formal observed session). "Complicated case" alone ≠ ESLE.
+
+2. Maximum 3 suggestions. Suggest fewer if only 1-2 clearly fit.
+
+3. Do NOT default to CBD for every case. CBD is appropriate for clinical case management discussions —
+   if the description is purely a procedure, a teaching session, or a shift-level observation, CBD is wrong.
+
+4. ESLE is one of the hardest to trigger correctly. Only suggest it if the description explicitly mentions
+   shift-level observation, a consultant watching across multiple cases/interactions, or NTS feedback.
+   A single case — however complex — does not warrant ESLE.
+
+5. Prefer specificity. If DOPS clearly applies, suggest DOPS over CBD. If US_CASE applies,
+   suggest it over CBD. CBD is a fallback for case management when no more specific form fits.
+
+6. For teaching: distinguish between STAT (formal, observed, assessor evaluating teaching),
+   TEACH (informal/bedside, no formal observation needed), and EDU_ACT (trainee was the learner).
+
+7. Return ONLY a JSON array. No markdown, no explanation outside the JSON.
+   Format: [{"form_type": "CBD", "rationale": "one-line reason specific to this case"}, ...]
+
+=== END DEFINITIONS ==="""
 
     prompt = f"{system_prompt}\n\nCase description:\n{case_description}"
-    response = await _gemini_generate(prompt)
-    raw = response.text.strip()
+    text = await _generate(prompt)
+    raw = text.strip()
 
     # Strip markdown code fences
     if raw.startswith("```"):
@@ -649,8 +871,7 @@ Be conservative — do not recommend a form unless the case description clearly 
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
-        # Default to CBD only
-        data = [{"form_type": "CBD", "rationale": "Clinical case management"}]
+        data = []
 
     recommendations = []
     for item in data[:3]:  # Max 3
@@ -659,14 +880,6 @@ Be conservative — do not recommend a form unless the case description clearly 
             form_type=form_type,
             rationale=item.get("rationale", ""),
             uuid=FORM_UUIDS.get(form_type)
-        ))
-
-    # Ensure CBD is always included
-    if not any(r.form_type == "CBD" for r in recommendations):
-        recommendations.insert(0, FormTypeRecommendation(
-            form_type="CBD",
-            rationale="Clinical case management",
-            uuid=FORM_UUIDS["CBD"]
         ))
 
     return recommendations
@@ -729,12 +942,20 @@ async def extract_cbd_data(
         else ""
     )
 
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    today_str = today.strftime("%Y-%m-%d")
+    yesterday_str = yesterday.strftime("%Y-%m-%d")
+    day_of_week = today.strftime("%A")
+
     system_prompt = f"""You are a medical portfolio assistant. Extract structured data from a doctor's clinical case description for a Case-Based Discussion (CBD) WPBA entry.
+
+Today's date: {today_str} ({day_of_week}). Yesterday: {yesterday_str}.
 
 Return ONLY a JSON object with these exact fields:
 {{
   "form_type": "CBD",
-  "date_of_encounter": "YYYY-MM-DD if explicitly stated, otherwise empty string",
+  "date_of_encounter": "YYYY-MM-DD format. Resolve relative references: 'today' → {today_str}, 'yesterday' → {yesterday_str}, 'this morning' → {today_str}, 'last [weekday]' → calculate from today. Empty string only if no date can be inferred",
   "patient_age": "age as string e.g. '45-year-old'",
   "patient_presentation": "presenting complaint / chief complaint",
   "clinical_setting": "e.g. 'Emergency Department - Resus', 'Majors', 'Minors'",
@@ -833,8 +1054,8 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
     elif edit_feedback:
         prompt += f"\n\nUser feedback to apply:\n{edit_feedback}"
 
-    response = await _gemini_generate(prompt)
-    raw = response.text.strip()
+    text = await _generate(prompt)
+    raw = text.strip()
 
     # Strip markdown code fences if present
     if raw.startswith("```"):
@@ -848,8 +1069,8 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
     except (json.JSONDecodeError, ValueError) as e:
         # Retry once with explicit instruction
         retry_prompt = f"Fix the JSON and return ONLY valid JSON. No explanation.\n\nParse error: {e}\n\nOriginal output:\n{raw}"
-        retry_response = await _gemini_generate(retry_prompt)
-        retry_raw = retry_response.text.strip()
+        retry_text = await _generate(retry_prompt)
+        retry_raw = retry_text.strip()
         if retry_raw.startswith("```"):
             retry_raw = retry_raw.split("```")[1]
             if retry_raw.startswith("json"):
@@ -936,7 +1157,15 @@ Write all text fields in first person ("I managed...", "I reflected on...", "I l
 Use British English spelling. Write professionally but naturally.
 """ if is_reflection else ""
 
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    today_str = today.strftime("%Y-%m-%d")
+    yesterday_str = yesterday.strftime("%Y-%m-%d")
+    day_of_week = today.strftime("%A")
+
     system_prompt = f"""You are a medical portfolio assistant. Extract data for a {schema['name']} ({form_type}) WPBA entry.
+
+Today's date: {today_str} ({day_of_week}). Yesterday: {yesterday_str}.
 {reflection_instruction}
 Return ONLY a JSON object with these exact keys:
 {json_template}
@@ -952,7 +1181,7 @@ Rules:
   Format each KC as: "SLO8 KC1: will provide support to ED staff at all levels... (2025 Update)"
   Use EXACT text from the map. curriculum_links = codes only. key_capabilities = full strings.
   If the form has a kc_tick field, always include "key_capabilities" in the JSON too.
-- For date fields: return YYYY-MM-DD only if explicitly stated. Otherwise return an empty string.
+- For date fields: return YYYY-MM-DD format. Resolve relative references using today's date above: "today" → {today_str}, "yesterday" → {yesterday_str}, "this morning/afternoon/evening" → {today_str}, "last [weekday]" → calculate from today. Only return empty string if no date at all can be inferred.
 - For text fields: extract directly from the case and keep the doctor's original wording where possible
 - Write in direct, first-person clinical language ("I assessed...", "I managed...")
 - NEVER use: em dashes, "delve", "navigate", "crucial", "importantly", "comprehensive", "moreover", "furthermore", "holistic", "robust", "multifaceted", "pivotal", "seamless", "facilitate", "leverage", "unlock", "embark", "meticulous", "overarching", "in summary", "it's worth noting", "this case highlights", "moving forward"
@@ -1000,8 +1229,8 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
     elif edit_feedback:
         system_prompt += f"\n\nUser feedback to apply:\n{edit_feedback}"
 
-    response = await _gemini_generate(system_prompt)
-    raw = response.text.strip()
+    text = await _generate(system_prompt)
+    raw = text.strip()
 
     # Strip markdown code fences if present
     if raw.startswith("```"):
@@ -1015,8 +1244,8 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
     except (json.JSONDecodeError, ValueError) as e:
         # Retry once with explicit instruction
         retry_prompt = f"Fix the JSON and return ONLY valid JSON. No explanation.\n\nParse error: {e}\n\nOriginal output:\n{raw}"
-        retry_response = await _gemini_generate(retry_prompt)
-        retry_raw = retry_response.text.strip()
+        retry_text = await _generate(retry_prompt)
+        retry_raw = retry_text.strip()
         if retry_raw.startswith("```"):
             retry_raw = retry_raw.split("```")[1]
             if retry_raw.startswith("json"):
@@ -1047,3 +1276,125 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
         fields=normalised,
         uuid=FORM_UUIDS.get(form_type)
     )
+
+
+async def review_draft(form_type: str, fields: dict, case_text: str) -> dict:
+    """Review a completed draft against WPBA quality criteria.
+    Returns structured feedback with scores and suggestions."""
+    from form_schemas import FORM_SCHEMAS
+
+    schema = FORM_SCHEMAS.get(form_type, {})
+    form_name = schema.get("name", form_type)
+
+    today = date.today()
+    today_str = today.strftime("%Y-%m-%d")
+    day_of_week = today.strftime("%A")
+
+    fields_summary = json.dumps(fields, indent=2, default=str)
+
+    prompt = f"""You are a senior UK Emergency Medicine consultant and WPBA assessor.
+Today's date: {today_str} ({day_of_week}).
+
+Review this completed {form_name} ({form_type}) draft against WPBA quality criteria.
+
+ORIGINAL CASE INPUT:
+{case_text}
+
+DRAFT FIELDS:
+{fields_summary}
+
+FORM SCHEMA: {form_name} ({form_type})
+
+Score the draft on these 5 criteria (each 1-5):
+
+1. **Reflection depth** — Is the reflection analytical (what would I do differently, what did I learn) or just descriptive? 1-2 = descriptive only, 3 = some analysis, 4-5 = genuine insight.
+
+2. **Clinical reasoning** — Does the entry show clear decision-making, differentials, thought process? 1-2 = just lists what happened, 3 = mentions decisions, 4-5 = shows reasoning and uncertainty.
+
+3. **SLO/Curriculum coverage** — Are the selected SLOs genuinely demonstrated by the case, or just tagged? 1-2 = SLOs don't match, 3 = loosely relevant, 4-5 = clearly evidenced. If no SLOs are present, score based on whether the case content would map well to curriculum areas.
+
+4. **Assessor readiness** — Would an assessor have enough detail for a meaningful discussion? 1-2 = too thin, 3 = adequate, 4-5 = rich discussion material.
+
+5. **Language quality** — First-person clinical language, no AI-tells (em dashes, "delve", "crucial", "comprehensive", "facilitate"), professional tone. 1-2 = obvious AI, 3 = mostly natural, 4-5 = reads like a real doctor wrote it.
+
+Return ONLY valid JSON:
+{{
+  "overall_score": <float, average of 5 scores, 1 decimal>,
+  "scores": {{
+    "reflection_depth": {{"score": <int 1-5>, "feedback": "<1-2 sentences>"}},
+    "clinical_reasoning": {{"score": <int 1-5>, "feedback": "<1-2 sentences>"}},
+    "slo_coverage": {{"score": <int 1-5>, "feedback": "<1-2 sentences>"}},
+    "assessor_readiness": {{"score": <int 1-5>, "feedback": "<1-2 sentences>"}},
+    "language_quality": {{"score": <int 1-5>, "feedback": "<1-2 sentences>"}}
+  }},
+  "top_suggestion": "<single most impactful improvement suggestion>",
+  "verdict": "<ready|improve|weak>"
+}}
+
+verdict rules: "ready" if overall_score >= 3.5, "improve" if 2.5-3.4, "weak" if < 2.5
+"""
+    raw = await _generate(prompt)
+    text = raw.strip()
+    # Strip markdown code fences if present
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    return json.loads(text)
+
+
+async def analyse_portfolio_health(case_history: list, training_level: str) -> dict:
+    """Analyse filed cases against ARCP requirements.
+    case_history: list of dicts with form_type, filed_at, status.
+    training_level: e.g. 'ST4', 'ST5', 'ST6'.
+    Returns structured health analysis.
+    """
+    from collections import Counter
+
+    total = len(case_history)
+    form_counts = dict(Counter(c["form_type"] for c in case_history))
+
+    history_summary = json.dumps(case_history, indent=2, default=str)
+    form_dist = json.dumps(form_counts, indent=2)
+
+    prompt = f"""You are a senior UK Emergency Medicine consultant and ARCP assessor.
+
+A trainee at {training_level} level has filed the following cases via their ePortfolio over the last 6 months:
+
+FILING HISTORY ({total} entries):
+{history_summary}
+
+FORM DISTRIBUTION:
+{form_dist}
+
+RCEM CURRICULUM SLOs (for reference):
+{RCEM_KC_MAP}
+
+Analyse this portfolio against ARCP requirements for a {training_level} trainee. Consider:
+- Breadth of form types (CBD, DOPS, Mini-CEX, etc.)
+- SLO coverage based on the types of cases filed
+- Whether the volume is sufficient for this stage of training
+- Any obvious gaps that would concern an ARCP panel
+
+Return ONLY valid JSON:
+{{
+  "total_cases": {total},
+  "form_distribution": {form_dist},
+  "slo_coverage": {{
+    "covered": ["<SLO codes likely covered based on form types and volume>"],
+    "gaps": ["<SLO codes likely NOT covered>"]
+  }},
+  "strengths": ["<2-3 positive observations>"],
+  "gaps": ["<2-3 gap observations>"],
+  "suggestions": ["<3-4 actionable suggestions to improve portfolio>"],
+  "arcp_readiness": "<on_track|needs_attention|at_risk>"
+}}
+
+Be specific and practical. Reference actual form types and SLO numbers.
+If there are zero cases, return at_risk with appropriate suggestions for getting started.
+"""
+    raw = await _generate(prompt)
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    return json.loads(text)

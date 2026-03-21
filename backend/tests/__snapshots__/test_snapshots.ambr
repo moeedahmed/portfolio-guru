@@ -1,0 +1,107 @@
+# serializer version: 1
+# name: test_draft_preview_snapshot
+  dict({
+    'buttons': list([
+      tuple(
+        '📤 Save as draft',
+        'APPROVE|draft',
+      ),
+      tuple(
+        '🚀 File & submit',
+        'APPROVE|submit',
+      ),
+      tuple(
+        '📝 Review draft',
+        'REVIEW|draft',
+      ),
+      tuple(
+        '✏️ Edit',
+        'EDIT|draft',
+      ),
+      tuple(
+        '❌ Cancel',
+        'CANCEL|draft',
+      ),
+    ]),
+    'text': '''
+      🩺 *Draft Case-Based Discussion — Review before filing*
+      
+      📅 *Date:* 17 Mar 2026
+      
+      🏥 *Clinical Setting:* Emergency Department
+      
+      🩺 *Patient Presentation:* Central chest pain with diaphoresis
+      
+      📈 *Stage of Training:* Higher/ST4-ST6
+      
+      👨‍⚕️ *Trainee Role:* I led the assessment with indirect supervision.
+      
+      🗒️ *Case to be discussed:* I treated the presentation as acute coronary syndrome and escalated early to cardiology.
+      
+      💭 *Reflection of event:* I would involve the cath lab team earlier if the ECG remains dynamic.
+      
+      🎚️ *Level of Supervision:* Indirect
+      
+      📚 *Curriculum:*
+      • *SLO1 — Stable adult patients*
+        ↳ KC1: to be expert in assessing and…
+      • *SLO3 — Clinical questions & decisions*
+        ↳ KC1: able to support the pre-hospital, medical,…
+  
+    ''',
+  })
+# ---
+# name: test_form_recommendation_snapshot
+  dict({
+    'buttons': list([
+      tuple(
+        '🩺 CBD',
+        'FORM|CBD',
+      ),
+      tuple(
+        '📋 ACAT',
+        'FORM|ACAT',
+      ),
+      tuple(
+        '📋 See all forms',
+        'FORM|show_all',
+      ),
+      tuple(
+        '❌ Cancel',
+        'CANCEL|form',
+      ),
+    ]),
+    'text': '''
+      Suggested WPBA types for this case:
+      
+      • *Case-Based Discussion* - Best fit for a reflective clinical case.
+      • *Acute Care Assessment Tool* - The case spans multiple patients across a shift.
+      
+      Pick one and I'll show that template plus anything still missing.
+    ''',
+  })
+# ---
+# name: test_start_message_snapshot
+  dict({
+    'buttons': list([
+      tuple(
+        '❓ What is this?',
+        'INFO|what',
+      ),
+      tuple(
+        '🔗 Connect Kaizen',
+        'ACTION|setup',
+      ),
+    ]),
+    'text': '''
+      🩺 Portfolio Guru — your WPBA entries, filed in seconds.
+      
+      Describe a case by text, voice note, photo, or document.
+      I'll suggest the best WPBA types, show the template, and draft the entry when you approve.
+      
+      Your credentials are encrypted and never shared.
+      
+      Tap 🔗 Connect to get started.
+    ''',
+  })
+# ---

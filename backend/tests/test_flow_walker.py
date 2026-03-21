@@ -79,7 +79,7 @@ class TestFlowWalker:
         update = sim._make_text_update(SAMPLE_CASES['valid'])
         context = sim._make_context()
 
-        with patch('bot.has_credentials', return_value=True),              patch('bot.classify_intent', new_callable=AsyncMock, return_value='case'),              patch('bot.recommend_form_types', new_callable=AsyncMock, return_value=recommended_forms),              patch('bot.get_training_level', return_value='ST5'),              patch('bot.get_curriculum', return_value='2025'):
+        with patch('bot.has_credentials', return_value=True),              patch('bot.classify_intent', new_callable=AsyncMock, return_value='case'),              patch('bot.recommend_form_types', new_callable=AsyncMock, return_value=recommended_forms),              patch('bot.get_training_level', return_value='ST5'),              patch('bot.get_curriculum', return_value='2025'),              patch('bot.check_can_file', new_callable=AsyncMock, return_value=(True, 0, 5, 'free')):
             result = await handle_case_input(update, context)
 
         assert result == AWAIT_FORM_CHOICE
@@ -118,20 +118,52 @@ class TestFlowWalker:
 
     @pytest.mark.asyncio
     async def test_all_forms_screen_has_navigation(self):
-        from bot import AWAIT_FORM_CHOICE, handle_form_choice
+        from bot import AWAIT_FORM_CHOICE, FORM_CATEGORIES, _CAT_SLUGS, handle_form_choice
 
         sim = BotSimulator()
         update = sim._make_callback_update('FORM|show_all')
         context = sim._make_context()
 
-        with patch('bot.get_training_level', return_value='ST5'),              patch('bot.get_curriculum', return_value='2025'):
+        with patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_curriculum', return_value='2025'):
             result = await handle_form_choice(update, context)
 
         assert result == AWAIT_FORM_CHOICE
         button_data = [data for _, data in sim.get_last_buttons()]
-        assert 'FORM|switch_curriculum' in button_data
+        # Should show category buttons, search, and back
+        for cat_name, slug in _CAT_SLUGS.items():
+            assert f'FORM|cat_{slug}' in button_data, f"Missing category button for {cat_name}"
+        assert 'FORM|search' in button_data
         assert 'FORM|back' in button_data
-        assert 'CANCEL|form' in button_data
+
+    @pytest.mark.asyncio
+    async def test_category_shows_filtered_forms(self):
+        from bot import AWAIT_FORM_CHOICE, FORM_CATEGORIES, handle_form_choice
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('FORM|cat_CLINICAL')
+        context = sim._make_context()
+
+        with patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_curriculum', return_value='2025'):
+            result = await handle_form_choice(update, context)
+
+        assert result == AWAIT_FORM_CHOICE
+        button_data = [data for _, data in sim.get_last_buttons()]
+        # Should contain form buttons and back-to-categories
+        assert 'FORM|show_all' in button_data  # back to categories
+        assert any(d.startswith('FORM|') and d != 'FORM|show_all' for d in button_data)
+
+    @pytest.mark.asyncio
+    async def test_search_returns_to_form_choice(self):
+        from bot import AWAIT_FORM_SEARCH, handle_form_choice
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('FORM|search')
+        context = sim._make_context()
+
+        result = await handle_form_choice(update, context)
+        assert result == AWAIT_FORM_SEARCH
 
     @pytest.mark.asyncio
     async def test_callback_buttons_have_guardrails(self, thin_draft):
@@ -223,7 +255,118 @@ class TestFlowWalker:
         context = sim._make_context()
         context.user_data['case_text'] = SAMPLE_CASES['valid']
 
-        result = await handle_callback(update, context)
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.get_training_level', return_value='ST5'):
+            result = await handle_callback(update, context)
 
         assert result == ConversationHandler.END
-        assert sim.get_last_text()
+        assert 'file another case' in sim.get_last_text().lower()
+        assert any(data == 'ACTION|file' for _, data in sim.get_last_buttons())
+
+    @pytest.mark.asyncio
+    async def test_cancel_path_uses_setup_button_when_setup_incomplete(self):
+        from bot import handle_callback
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('CANCEL|draft')
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+
+        with patch('bot.has_credentials', return_value=False), \
+             patch('bot.get_training_level', return_value=None):
+            result = await handle_callback(update, context)
+
+        assert result == ConversationHandler.END
+        assert 'finish setup' in sim.get_last_text().lower()
+        assert any(data == 'ACTION|setup' for _, data in sim.get_last_buttons())
+
+    @pytest.mark.asyncio
+    async def test_stale_button_redirects_to_fresh_next_step(self):
+        from bot import handle_form_choice
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('FORM|CBD')
+        context = sim._make_context()
+
+        with patch('bot.has_credentials', return_value=True),              patch('bot.get_training_level', return_value='ST5'):
+            result = await handle_form_choice(update, context)
+
+        assert result == ConversationHandler.END
+        assert sim.messages_sent[-1][0] == 'reply'
+        assert 'start a new case' in sim.get_last_text().lower()
+        assert any(data == 'ACTION|file' for _, data in sim.get_last_buttons())
+
+    @pytest.mark.asyncio
+    async def test_expired_draft_recovery_sends_fresh_latest_template_message(self, thin_draft):
+        from bot import AWAIT_TEMPLATE_REVIEW, handle_approval_edit
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('EDIT|draft')
+        context = sim._make_context()
+        context.user_data.update({
+            'case_text': SAMPLE_CASES['valid'],
+            'chosen_form': thin_draft.form_type,
+            'pending_draft_data': {
+                '_type': 'FORM',
+                'form_type': thin_draft.form_type,
+                'fields': thin_draft.fields,
+                'uuid': thin_draft.uuid,
+            },
+        })
+
+        with patch('bot.has_credentials', return_value=True),              patch('bot.get_training_level', return_value='ST5'),              patch('bot._missing_template_fields', return_value=([{'label': 'Supervisor'}], [], [])):
+            result = await handle_approval_edit(update, context)
+
+        assert result == AWAIT_TEMPLATE_REVIEW
+        assert sim.messages_sent[-1][0] == 'reply'
+        assert 'still in progress' in sim.messages_sent[-2][1].lower()
+        assert {'ACTION|add_detail', 'ACTION|continue_thin'} <= {data for _, data in sim.get_last_buttons()}
+
+    @pytest.mark.asyncio
+    async def test_paused_approval_button_recovers_latest_draft_message(self, thin_draft):
+        from bot import AWAIT_APPROVAL, handle_approval_approve
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('APPROVE|draft')
+        context = sim._make_context()
+        context.user_data.update({
+            'case_text': SAMPLE_CASES['valid'],
+            'chosen_form': thin_draft.form_type,
+            'pending_draft_data': {
+                '_type': 'FORM',
+                'form_type': thin_draft.form_type,
+                'fields': thin_draft.fields,
+                'uuid': thin_draft.uuid,
+            },
+        })
+
+        with patch('bot.get_credentials', return_value=('user', 'pass')),              patch('bot.has_credentials', return_value=True),              patch('bot.get_training_level', return_value='ST5'),              patch('bot._missing_template_fields', return_value=([], [], [])):
+            result = await handle_approval_approve(update, context)
+
+        assert result == AWAIT_APPROVAL
+        assert sim.messages_sent[-1][0] == 'reply'
+        assert 'still in progress' in sim.messages_sent[-2][1].lower()
+        assert {'APPROVE|draft', 'EDIT|draft'} <= {data for _, data in sim.get_last_buttons()}
+
+    @pytest.mark.asyncio
+    async def test_filing_completion_arrives_as_fresh_latest_message(self, thin_draft):
+        from bot import handle_approval_approve
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('APPROVE|draft')
+        context = sim._make_context()
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin_draft.form_type,
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+
+        with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.route_filing', new_callable=AsyncMock, return_value={'status': 'success', 'filled': [], 'skipped': [], 'method': 'deterministic'}):
+            result = await handle_approval_approve(update, context)
+
+        assert result == ConversationHandler.END
+        assert sim.messages_sent[-1][0] == 'send'
+        assert 'draft saved' in sim.get_last_text().lower()
+        assert any(data == 'ACTION|file' for _, data in sim.get_last_buttons())
