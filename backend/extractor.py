@@ -885,6 +885,16 @@ MGMT_* (Management Portfolio forms — Rota, Complaint, Critical Incident, Risk,
     return recommendations
 
 
+def combine_case_inputs(initial: str, additions: list) -> str:
+    """Combine initial case text with accumulated additions for re-extraction."""
+    parts = [initial.strip()]
+    for addition in additions:
+        text = addition.strip() if isinstance(addition, str) else str(addition).strip()
+        if text:
+            parts.append(text)
+    return "\n\n".join(parts)
+
+
 def _missing_text_value(leave_missing_blank: bool, fallback: str = "Not mentioned in case") -> str:
     return "" if leave_missing_blank else fallback
 

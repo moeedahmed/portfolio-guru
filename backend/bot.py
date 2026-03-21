@@ -13,7 +13,7 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler, PicklePersistence,
 )
 from store import store_credentials, get_credentials, has_credentials, init
-from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, answer_question, extract_explicit_form_type, review_draft, analyse_portfolio_health
+from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, answer_question, extract_explicit_form_type, review_draft, analyse_portfolio_health, combine_case_inputs
 from usage import record_case_filed, get_cases_this_month, check_can_file, get_user_tier, set_user_tier, get_case_history, TIER_LIMITS
 from filer_router import route_filing
 from kaizen_filer import FORM_UUIDS
@@ -178,6 +178,8 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
         "form_recommendations",
         "form_recommendations_text",
         "document_name",
+        "accumulating_case",
+        "accumulation_additions",
     ):
         context.user_data.pop(key, None)
     if not keep_case:
@@ -198,7 +200,6 @@ _BTN_SETUP = InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|s
 _BTN_CANCEL = InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel")
 _BTN_HELP = InlineKeyboardButton("ℹ️ Help", callback_data="INFO|what")
 _BTN_VOICE = InlineKeyboardButton("✍️ Voice Profile", callback_data="ACTION|voice")
-_BTN_ADD_DETAIL = InlineKeyboardButton("➕ I'll add more", callback_data="ACTION|add_detail")
 _BTN_CONTINUE_THIN = InlineKeyboardButton("✅ Draft with this info", callback_data="ACTION|continue_thin")
 
 _KB_RETRY_RESET = InlineKeyboardMarkup([[_BTN_RESET]])
@@ -780,7 +781,7 @@ def _build_curriculum_keyboard():
 
 def _build_template_review_keyboard():
     return InlineKeyboardMarkup([
-        [_BTN_ADD_DETAIL, _BTN_CONTINUE_THIN],
+        [_BTN_CONTINUE_THIN],
         [_BTN_CANCEL],
     ])
 
@@ -935,7 +936,7 @@ def _format_template_review(form_type: str, draft) -> str:
 
     lines.extend([
         "",
-        "Send more detail if you want to fill the gaps, or tap *Draft with this info* and I'll build the draft using only what your case already says.",
+        "💬 Send anything to add more detail — or tap below.",
     ])
     return "\n".join(lines)
 
@@ -2137,17 +2138,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return AWAIT_CASE_INPUT
 
     elif data == "ACTION|add_detail":
-        await query.answer()
-        await query.edit_message_reply_markup(reply_markup=None)
-        if not context.user_data.get("case_text") or not context.user_data.get("chosen_form"):
-            return await _resume_paused_flow(
-                update,
-                context,
-                "That earlier button is no longer active.",
-            )
-        context.user_data["awaiting_detail"] = True
-        await query.message.reply_text("Send me the extra detail and I'll fold it into the same case.")
-        return AWAIT_CASE_INPUT
+        # Legacy button — just acknowledge; users now send detail directly
+        await query.answer("Just send your detail — no button needed!")
+        return AWAIT_TEMPLATE_REVIEW
 
     elif data == "ACTION|continue_thin":
         await query.answer()
@@ -2265,10 +2258,172 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
 
+# === IMPLICIT CASE ACCUMULATION ===
+
+async def _accumulate_and_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE, new_text: str) -> int:
+    """Append new_text to accumulated case context and re-extract the template."""
+    user_id = update.effective_user.id
+    chosen_form = context.user_data.get("chosen_form", "")
+    initial_case = context.user_data.get("case_text", "")
+
+    if not chosen_form or not initial_case:
+        return await handle_case_input(update, context)
+
+    # Track accumulation additions
+    additions = context.user_data.get("accumulation_additions", [])
+    additions.append(new_text)
+    context.user_data["accumulation_additions"] = additions
+    context.user_data["accumulating_case"] = True
+
+    # Combine all inputs
+    combined = combine_case_inputs(initial_case, additions)
+    context.user_data["case_text"] = combined
+
+    form_name = _form_display_name(chosen_form)
+    await update.effective_chat.send_action(constants.ChatAction.TYPING)
+    ack = await update.message.reply_text(f"🧩 Updating {form_name} template…")
+    context.user_data["last_bot_msg_id"] = ack.message_id
+    context.user_data["last_bot_chat_id"] = ack.chat_id
+
+    try:
+        draft = await _analyse_selected_form(context, user_id, combined, chosen_form)
+    except asyncio.TimeoutError:
+        await ack.edit_text("⏳ Template review timed out. Please try again.")
+        return AWAIT_TEMPLATE_REVIEW
+    except Exception as exc:
+        logger.error("Accumulation refresh failed for %s: %s", chosen_form, exc, exc_info=True)
+        await ack.edit_text("⚠️ Could not refresh that template.", reply_markup=_KB_RETRY_RESET)
+        return AWAIT_TEMPLATE_REVIEW
+
+    missing_required, missing_optional, _ = _missing_template_fields(draft, chosen_form)
+    if not missing_required and not missing_optional:
+        _store_draft(context, draft)
+        context.user_data.pop("accumulating_case", None)
+        context.user_data.pop("accumulation_additions", None)
+        preview = _format_draft_preview(draft)
+        await _safe_edit_text(
+            ack,
+            preview,
+            reply_markup=_build_approval_keyboard(),
+            parse_mode="Markdown",
+        )
+        return AWAIT_APPROVAL
+
+    review_text = _format_template_review(chosen_form, draft)
+    await _safe_edit_text(
+        ack,
+        review_text,
+        reply_markup=_build_template_review_keyboard(),
+        parse_mode="Markdown",
+    )
+    context.user_data["last_bot_msg_id"] = ack.message_id
+    return AWAIT_TEMPLATE_REVIEW
+
+
+async def handle_template_review_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle voice, photo, video, or document during AWAIT_TEMPLATE_REVIEW — implicit accumulation."""
+    msg = update.message
+    extracted_text = None
+
+    if msg.voice:
+        ack = await msg.reply_text("🎙️ Transcribing voice note…")
+        tmp_path = None
+        try:
+            voice_file = await msg.voice.get_file()
+            with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+                tmp_path = tmp.name
+                await voice_file.download_to_drive(tmp_path)
+                extracted_text = await transcribe_voice(tmp_path)
+            await ack.edit_text("🎙️ Got it — updating template…")
+        except Exception:
+            await ack.edit_text("⚠️ Couldn't transcribe voice note. Try again or send text.")
+            return AWAIT_TEMPLATE_REVIEW
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+    elif msg.photo:
+        ack = await msg.reply_text("📷 Reading image…")
+        tmp_path = None
+        try:
+            photo = msg.photo[-1]
+            photo_file = await photo.get_file()
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                tmp_path = tmp.name
+                await photo_file.download_to_drive(tmp_path)
+                extracted_text = await extract_from_image(tmp_path)
+            if extracted_text and extracted_text.strip() == "NOT_CLINICAL":
+                extracted_text = None
+                await ack.edit_text("That image doesn't look clinical — send text or another photo.")
+                return AWAIT_TEMPLATE_REVIEW
+            await ack.edit_text("📷 Got it — updating template…")
+        except Exception:
+            await ack.edit_text("⚠️ Couldn't read image. Try a clearer photo or text.")
+            return AWAIT_TEMPLATE_REVIEW
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+    elif msg.video:
+        ack = await msg.reply_text("🎬 Extracting audio from video…")
+        tmp_path = None
+        try:
+            video_file = await msg.video.get_file()
+            with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+                tmp_path = tmp.name
+                await video_file.download_to_drive(tmp_path)
+                extracted_text = await transcribe_voice(tmp_path)
+            await ack.edit_text("🎬 Got it — updating template…")
+        except Exception:
+            await ack.edit_text("⚠️ Couldn't extract audio from video. Try a voice note or text.")
+            return AWAIT_TEMPLATE_REVIEW
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+    elif msg.document:
+        doc = msg.document
+        file_name = doc.file_name or "document"
+        if not is_supported_document(file_name):
+            await msg.reply_text("Got it — added to your case.")
+            return AWAIT_TEMPLATE_REVIEW
+        ack = await msg.reply_text(f"📄 Reading *{file_name}*…", parse_mode="Markdown")
+        tmp_path = None
+        try:
+            doc_file = await doc.get_file()
+            suffix = os.path.splitext(file_name)[1] or ".tmp"
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                tmp_path = tmp.name
+                await doc_file.download_to_drive(tmp_path)
+                extracted_text = await extract_from_document(tmp_path)
+            if not extracted_text or not extracted_text.strip():
+                await ack.edit_text("⚠️ Couldn't extract text from that file.")
+                return AWAIT_TEMPLATE_REVIEW
+            max_chars = 15000
+            if len(extracted_text) > max_chars:
+                extracted_text = extracted_text[:max_chars]
+            await ack.edit_text(f"📄 Got it — updating template…")
+        except Exception:
+            await ack.edit_text("⚠️ Couldn't read that file. Try text instead.")
+            return AWAIT_TEMPLATE_REVIEW
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+    else:
+        await msg.reply_text("Got it — added to your case.")
+        return AWAIT_TEMPLATE_REVIEW
+
+    if not extracted_text or not extracted_text.strip():
+        return AWAIT_TEMPLATE_REVIEW
+
+    return await _accumulate_and_refresh(update, context, extracted_text)
+
+
 # === TEMPLATE REVIEW TEXT HANDLER ===
 
 async def handle_template_review_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle text during AWAIT_TEMPLATE_REVIEW — 5-category intent check with case context."""
+    """Handle text during AWAIT_TEMPLATE_REVIEW — implicit accumulation with intent check."""
     if context.user_data.pop("post_reset", False):
         return await handle_case_input(update, context)
 
@@ -2285,7 +2440,7 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
 
     if intent == "chitchat":
         await update.message.reply_text(
-            f"Still here! Your {form_name} template is ready — add detail or tap Draft with this info."
+            f"Still here! Your {form_name} template is ready — send more detail or tap below."
         )
         return AWAIT_TEMPLATE_REVIEW
 
@@ -2293,11 +2448,11 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
         try:
             answer = await answer_question(raw_text)
             await update.message.reply_text(
-                f"{answer}\n\nYour {form_name} template is still ready above."
+                f"{answer}\n\n💬 Your case is still open — send more detail or tap Cancel."
             )
         except Exception:
             await update.message.reply_text(
-                f"Your {form_name} template is ready above — add more detail, or tap Draft with this info."
+                f"💬 Your case is still open — send more detail or tap below."
             )
         return AWAIT_TEMPLATE_REVIEW
 
@@ -2363,10 +2518,8 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
             return await handle_case_input(update, context)
 
     else:
-        # edit_detail — treat as additional case info
-        # Set awaiting_detail so handle_case_input merges into existing case
-        context.user_data["awaiting_detail"] = True
-        return await handle_case_input(update, context)
+        # edit_detail — implicit accumulation: append and re-extract
+        return await _accumulate_and_refresh(update, context, raw_text)
 
 
 # === EDIT VALUE WITH INTENT HANDLER ===
@@ -3656,7 +3809,7 @@ def build_application() -> Application:
         entry_points=[
             # Let thin-case buttons re-enter the case conversation even if the
             # user taps them after the active state has been lost.
-            CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:file|reset|cancel|add_detail|continue_thin)$"),
+            CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:file|reset|cancel|continue_thin)$"),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_case_input),
             MessageHandler(filters.VOICE, handle_case_input),
             MessageHandler(filters.PHOTO, handle_case_input),
@@ -3668,7 +3821,6 @@ def build_application() -> Application:
                 MessageHandler(filters.VOICE, handle_case_input),
                 MessageHandler(filters.PHOTO, handle_case_input),
                 MessageHandler(filters.Document.ALL, handle_case_input),
-                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|add_detail$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|continue_thin$"),
             ],
             AWAIT_FORM_CHOICE: [
@@ -3683,12 +3835,12 @@ def build_application() -> Application:
             ],
             AWAIT_TEMPLATE_REVIEW: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_template_review_text),
-                MessageHandler(filters.VOICE, handle_case_input),
-                MessageHandler(filters.PHOTO, handle_case_input),
-                MessageHandler(filters.Document.ALL, handle_case_input),
+                MessageHandler(filters.VOICE, handle_template_review_media),
+                MessageHandler(filters.PHOTO, handle_template_review_media),
+                MessageHandler(filters.VIDEO, handle_template_review_media),
+                MessageHandler(filters.Document.ALL, handle_template_review_media),
                 CallbackQueryHandler(handle_callback, pattern=r"^CASE\|"),
                 CallbackQueryHandler(handle_form_choice, pattern=r"^FORM\|"),
-                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|add_detail$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|continue_thin$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
             ],
@@ -3720,7 +3872,7 @@ def build_application() -> Application:
             CommandHandler("cancel", setup_cancel),
             CallbackQueryHandler(
                 handle_callback,
-                pattern=r"^(?:INFO\|.*|CANCEL\|.*|ACTION\|(?:file|setup|reset|cancel|add_detail|continue_thin|retry_filing))$",
+                pattern=r"^(?:INFO\|.*|CANCEL\|.*|ACTION\|(?:file|setup|reset|cancel|continue_thin|retry_filing))$",
             ),
         ],
         per_message=False,
@@ -3765,7 +3917,7 @@ def build_application() -> Application:
     application.add_handler(
         CallbackQueryHandler(
             handle_action_button,
-            pattern=r"^ACTION\|(?!file$|reset$|cancel$|add_detail$|continue_thin$|retry_filing$).+",
+            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|retry_filing$).+",
         )
     )
     application.add_handler(CallbackQueryHandler(handle_feedback, pattern=r"^FEEDBACK\|"))

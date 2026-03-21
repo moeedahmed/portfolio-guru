@@ -108,7 +108,7 @@ class TestFlowWalker:
         }
 
         assert result == AWAIT_TEMPLATE_REVIEW
-        assert {'ACTION|add_detail', 'ACTION|continue_thin'} <= {data for _, data in sim.get_last_buttons()}
+        assert {'ACTION|continue_thin'} <= {data for _, data in sim.get_last_buttons()}
 
         sim.clear_messages()
         update = sim._make_callback_update('ACTION|continue_thin')
@@ -320,7 +320,7 @@ class TestFlowWalker:
         assert result == AWAIT_TEMPLATE_REVIEW
         assert sim.messages_sent[-1][0] == 'reply'
         assert 'still in progress' in sim.messages_sent[-2][1].lower()
-        assert {'ACTION|add_detail', 'ACTION|continue_thin'} <= {data for _, data in sim.get_last_buttons()}
+        assert {'ACTION|continue_thin'} <= {data for _, data in sim.get_last_buttons()}
 
     @pytest.mark.asyncio
     async def test_paused_approval_button_recovers_latest_draft_message(self, thin_draft):
