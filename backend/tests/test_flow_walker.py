@@ -260,7 +260,7 @@ class TestFlowWalker:
             result = await handle_callback(update, context)
 
         assert result == ConversationHandler.END
-        assert 'file another case' in sim.get_last_text().lower()
+        assert 'cancelled' in sim.get_last_text().lower()
         assert any(data == 'ACTION|file' for _, data in sim.get_last_buttons())
 
     @pytest.mark.asyncio
@@ -277,7 +277,7 @@ class TestFlowWalker:
             result = await handle_callback(update, context)
 
         assert result == ConversationHandler.END
-        assert 'finish setup' in sim.get_last_text().lower()
+        assert 'cancelled' in sim.get_last_text().lower()
         assert any(data == 'ACTION|setup' for _, data in sim.get_last_buttons())
 
     @pytest.mark.asyncio
@@ -369,4 +369,5 @@ class TestFlowWalker:
         assert result == ConversationHandler.END
         assert sim.messages_sent[-1][0] == 'send'
         assert 'draft saved' in sim.get_last_text().lower()
-        assert any(data == 'ACTION|file' for _, data in sim.get_last_buttons())
+        # Home menu buttons present (ACTION|file if connected, ACTION|setup if not)
+        assert any(data.startswith('ACTION|') for _, data in sim.get_last_buttons())

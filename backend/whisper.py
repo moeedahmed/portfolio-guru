@@ -12,13 +12,20 @@ _WHISPER_CLI = shutil.which("whisper")
 
 
 async def transcribe_voice(file_path: str) -> str:
-    """Transcribe voice note using Gemini (primary). Local whisper CLI as fallback if available."""
+    """Transcribe voice note using Gemini (primary), OpenAI Whisper as fallback."""
     if _WHISPER_CLI:
         try:
             return await _transcribe_local(file_path)
         except Exception:
             pass
-    return await _transcribe_gemini(file_path)
+    try:
+        return await _transcribe_gemini(file_path)
+    except Exception as e:
+        error_msg = str(e).lower()
+        if any(t in error_msg for t in ["429", "quota", "resource", "exhausted"]):
+            logger.warning(f"Gemini transcription quota hit — falling back to OpenAI Whisper: {e}")
+            return await _transcribe_openai(file_path)
+        raise
 
 
 async def _transcribe_local(file_path: str) -> str:
@@ -76,7 +83,7 @@ async def _transcribe_gemini(file_path: str) -> str:
     mime_type = mime_map.get(ext, "audio/ogg")
 
     loop = asyncio.get_event_loop()
-    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash"]
+    models_to_try = ["gemini-3-flash-preview", "gemini-2.5-flash"]
     contents = [
         "Transcribe this voice note exactly as spoken. Return only the transcribed text, no commentary.",
         types.Part.from_bytes(data=audio_data, mime_type=mime_type),
@@ -92,9 +99,9 @@ async def _transcribe_gemini(file_path: str) -> str:
             return response.text.strip()
         except Exception as e:
             error_msg = str(e).lower()
-            if any(t in error_msg for t in ["503", "unavailable", "overloaded", "404"]):
+            if any(t in error_msg for t in ["503", "unavailable", "overloaded", "404", "429", "quota", "resource"]):
                 last_error = e
-                logger.warning(f"Whisper model {model} failed: {e}")
+                logger.warning(f"Whisper model {model} failed: {e} — trying next")
                 continue
             raise
     raise last_error

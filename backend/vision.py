@@ -61,7 +61,7 @@ Return ONLY the extracted/described text, no additional commentary."""
 
     # Run sync Gemini call in thread pool with model fallback
     loop = asyncio.get_event_loop()
-    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash"]
+    models_to_try = ["gemini-3-flash-preview", "gemini-2.5-flash"]
     last_error = None
     for model in models_to_try:
         try:
@@ -72,9 +72,35 @@ Return ONLY the extracted/described text, no additional commentary."""
             return response.text.strip()
         except Exception as e:
             error_msg = str(e).lower()
-            if any(t in error_msg for t in ["503", "unavailable", "overloaded", "404"]):
+            if any(t in error_msg for t in ["503", "unavailable", "overloaded", "404", "429", "quota", "resource"]):
                 last_error = e
-                logger.warning(f"Vision model {model} failed: {e}")
+                logger.warning(f"Vision model {model} failed: {e} — trying next")
                 continue
             raise
+
+    # Gemini quota exhausted — fall back to OpenAI vision (gpt-4o-mini)
+    logger.info("Gemini vision quota exhausted — falling back to OpenAI vision")
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    if openai_key:
+        try:
+            import base64 as _b64
+            from openai import AsyncOpenAI
+            oai = AsyncOpenAI(api_key=openai_key)
+            b64_image = _b64.b64encode(image_data).decode("utf-8")
+            oai_prompt = prompt
+            resp = await oai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": oai_prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64_image}"}},
+                    ]
+                }],
+                max_tokens=1500,
+            )
+            return resp.choices[0].message.content.strip()
+        except Exception as e2:
+            logger.error(f"OpenAI vision fallback also failed: {e2}")
+
     raise last_error

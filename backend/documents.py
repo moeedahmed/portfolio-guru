@@ -36,8 +36,56 @@ async def extract_from_document(file_path: str) -> str:
         return ""
 
 
+async def _ocr_pdf_with_gemini(file_path: str) -> str:
+    """OCR a scanned PDF using Gemini Vision (native PDF input — no page rendering needed)."""
+    import asyncio
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
+
+    with open(file_path, "rb") as f:
+        pdf_data = f.read()
+
+    prompt = (
+        "Extract ALL text from this PDF document exactly as written. "
+        "Preserve the structure (headings, paragraphs, lists, tables). "
+        "Return only the extracted text, no commentary."
+    )
+
+    contents = [
+        types.Content(
+            role="user",
+            parts=[
+                types.Part.from_bytes(data=pdf_data, mime_type="application/pdf"),
+                types.Part.from_text(text=prompt),
+            ]
+        )
+    ]
+
+    loop = asyncio.get_event_loop()
+    models_to_try = ["gemini-3-flash-preview", "gemini-2.5-flash"]
+
+    for model in models_to_try:
+        try:
+            response = await loop.run_in_executor(
+                None,
+                lambda m=model: client.models.generate_content(model=m, contents=contents)
+            )
+            return response.text.strip()
+        except Exception as e:
+            error_msg = str(e).lower()
+            if any(t in error_msg for t in ["503", "unavailable", "overloaded", "404", "429", "not found"]):
+                logger.warning(f"Gemini {model} PDF OCR failed: {e} — trying next model")
+                continue
+            raise
+
+    logger.error("All Gemini models failed for PDF OCR — returning empty string")
+    return ""
+
+
 async def _extract_pdf(file_path: str) -> str:
-    """Extract text from PDF using pypdf."""
+    """Extract text from PDF. Falls back to Gemini Vision OCR for scanned/image-only PDFs."""
     try:
         from pypdf import PdfReader
         reader = PdfReader(file_path)
@@ -46,10 +94,16 @@ async def _extract_pdf(file_path: str) -> str:
             page_text = page.extract_text()
             if page_text:
                 text_parts.append(page_text)
-        return "\n\n".join(text_parts)
+        combined = "\n\n".join(text_parts)
+
+        if len(combined.strip()) > 200:
+            return combined
+
+        logger.info("PDF returned minimal text from pypdf — falling back to Gemini Vision OCR")
     except Exception as e:
-        logger.error(f"PDF extraction failed: {e}")
-        return ""
+        logger.warning(f"pypdf extraction failed: {e} — trying Gemini Vision OCR")
+
+    return await _ocr_pdf_with_gemini(file_path)
 
 
 async def _extract_pptx(file_path: str) -> str:

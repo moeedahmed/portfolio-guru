@@ -1,0 +1,12 @@
+#!/bin/sh
+
+cd backend || exit 1
+venv/bin/python3 -m pytest tests/ -x -q --ignore=tests/test_e2e.py --ignore=tests/test_e2e_live.py --ignore=tests/test_kaizen_integration.py 2>&1
+status=$?
+
+if [ "$status" -ne 0 ]; then
+  printf "%s\n" "❌ Tests failed — commit blocked. Run 'cd backend && venv/bin/python3 -m pytest tests/ -v' to see details."
+  exit 1
+fi
+
+exit 0
