@@ -616,16 +616,13 @@ Or use the menu below to check your portfolio status."""
 
 _WHAT_IS_THIS_FORM_COUNT = max(len(v) for v in TRAINING_LEVEL_FORMS.values())
 
-WHAT_IS_THIS_MSG = f"""🩺 Portfolio Guru files your WPBA entries — in seconds.
+WHAT_IS_THIS_MSG = """🩺 Portfolio Guru files your WPBA entries — in seconds.
 
-📝 Describe → 🔍 I suggest form types → 🧩 You review the template → ✅ You approve → 📤 Filed
+📝 Describe a case → 🔍 I pick the form → ✅ You approve → 📤 Filed to Kaizen
 
-Describe a clinical case by text, voice note, photo, or document (PDF, PowerPoint, Word). The bot works out which form fits best, extracts the right fields, and shows you the full draft to review. Nothing is saved until you approve.
+Send a case by text, voice note, photo, or document. I extract the fields, draft the entry, and save it to Kaizen when you approve. Nothing is filed without your OK.
 
-{_WHAT_IS_THIS_FORM_COUNT} RCEM forms supported:
-CBD · DOPS · Mini-CEX · ACAT · LAT · ACAF · STAT · MSF · QIAT · JCF · Teaching · Procedural Log · SDL · Ultrasound Case · ESLE · ESLE Assessment · Complaint · Serious Incident · Educational Activity · Formal Course · Reflective Practice Log · Teaching Observation · Teach Confidentiality · Appraisal · Clinical Governance · Critical Incident · Audit · Research · Educational Meeting · PDP · Business Case · Cost Improvement · Equipment/Service · Management forms (Rota, Risk, Meeting, Project, Audit, Service, Leadership, Recruitment, Risk Process, Training Event, Guideline, Information, Induction, Experience, Report, Complaint)
-
-Files directly to Kaizen ePortfolio. Other platforms coming soon."""
+All 45 RCEM forms supported — assessments, reflections, teaching, management, audit, and more."""
 
 FILE_CASE_PROMPT = "Send me a case description — text, voice note, photo, or document (PDF, PowerPoint, Word)."
 
@@ -1674,7 +1671,14 @@ async def handle_info_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """Handle INFO|what button from any message, regardless of conversation state."""
     query = update.callback_query
     await query.answer()
-    await query.message.reply_text(WHAT_IS_THIS_MSG)
+    user_id = update.effective_user.id
+    await query.message.edit_text(
+        WHAT_IS_THIS_MSG,
+        reply_markup=InlineKeyboardMarkup([
+            [_BTN_FILE if has_credentials(user_id) else _BTN_SETUP],
+            [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu")],
+        ]),
+    )
 
 
 async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1759,7 +1763,13 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             await query.message.reply_text("📋 Send me a case — text, voice note, photo, or document.")
 
     elif action == "help":
-        await query.message.reply_text(WHAT_IS_THIS_MSG)
+        await query.message.edit_text(
+            WHAT_IS_THIS_MSG,
+            reply_markup=InlineKeyboardMarkup([
+                [_BTN_FILE],
+                [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu")],
+            ]),
+        )
 
     elif action == "status":
         # Inline status — same as /status command
@@ -2094,12 +2104,23 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 HELP_MSG = """📖 *Portfolio Guru — Help*
 
 *How it works:*
-📝 Describe a case → 🔍 I suggest WPBA types → 🧩 You review the template → ✅ You approve → 📤 Filed
+📝 Describe → 🔍 I pick the form → ✅ You approve → 📤 Filed to Kaizen
 
-Send a case by text, voice note, photo, or document. I'll suggest the best WPBA types, show the chosen template and what's missing, then generate a draft for approval.
+*What you can send:*
+Text, voice note, photo, or document (PDF, PPTX, Word)
 
-*All 45 RCEM forms supported:*
-CBD · DOPS · Mini-CEX · ACAT · LAT · ACAF · STAT · MSF · QIAT · JCF · Teaching · Procedural Log · SDL · Ultrasound Case · ESLE Assessment · Complaint · Serious Incident · Educational Activity · Formal Course"""
+*What I do:*
+Suggest the best form, extract all the fields, show you a draft to review and edit, then save to Kaizen as a draft when you approve.
+
+*45 RCEM forms supported* — assessments, reflections, teaching, management, audit, research, and more.
+
+*Commands:*
+/start — Main menu
+/setup — Connect or update Kaizen credentials
+/voice — Set up your writing style profile
+/upgrade — View subscription plans
+/status — Check your usage and settings
+/help — This message"""
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
