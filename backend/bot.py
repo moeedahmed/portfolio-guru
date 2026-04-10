@@ -1543,7 +1543,7 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
     if msg and msg.text:
         text = msg.text.strip()
         if text.lower() in ("/cancel", "/done"):
-            if text.lower() == "/done" and len(examples) >= 2:
+            if text.lower() == "/done" and len(examples) >= 3:
                 return await _build_voice_profile(update, context)
             context.user_data.pop("voice_examples", None)
             await msg.reply_text(
@@ -1649,10 +1649,18 @@ async def _build_voice_profile(update: Update, context: ContextTypes.DEFAULT_TYP
                  InlineKeyboardButton("🔄 Rebuild", callback_data="ACTION|voice")],
             ])
         )
+    except asyncio.TimeoutError:
+        logger.warning("Voice profile generation timed out (30s)")
+        await ack.edit_text(
+            "⚠️ Analysis took too long — please try again. This usually works on a second attempt.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|voice")],
+            ])
+        )
     except Exception as e:
         logger.error(f"Voice profile generation failed: {e}", exc_info=True)
         await ack.edit_text(
-            "⚠️ Couldn't analyse your writing style.",
+            "⚠️ Couldn't analyse your writing style. Try again or send different examples.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|voice")],
             ])
