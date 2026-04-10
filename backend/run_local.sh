@@ -6,10 +6,10 @@ set -e
 
 echo "Loading secrets from BWS..."
 BWS_ACCESS_TOKEN=$(cat ~/.openclaw/.bws-token)
-BWS_BIN=$(command -v bws)
+BWS_BIN=$(command -v bws 2>/dev/null || echo "/Users/moeedahmed/.cargo/bin/bws")
 
-if [ -z "$BWS_BIN" ]; then
-  echo "bws not found on PATH — install Bitwarden Secrets Manager CLI or fix PATH" >&2
+if [ ! -x "$BWS_BIN" ]; then
+  echo "bws not found — install Bitwarden Secrets Manager CLI" >&2
   exit 1
 fi
 

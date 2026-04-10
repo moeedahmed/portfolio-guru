@@ -1710,10 +1710,16 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
 
     elif action == "cancel":
         context.user_data.clear()
-        await query.message.reply_text(
-            _cancelled_next_step_text(user_id),
-            reply_markup=_build_next_step_keyboard(user_id),
-        )
+        try:
+            await query.message.edit_text(
+                _cancelled_next_step_text(user_id),
+                reply_markup=_build_next_step_keyboard(user_id),
+            )
+        except Exception:
+            await query.message.reply_text(
+                _cancelled_next_step_text(user_id),
+                reply_markup=_build_next_step_keyboard(user_id),
+            )
 
     elif action == "voice":
         # Trigger voice profile flow — simulate /voice command
@@ -1759,18 +1765,31 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         # Inline status — same as /status command
         if has_credentials(user_id):
             training_level = get_training_level(user_id)
-            grade_str = f"📊 Training level: {training_level}" if training_level else "📊 Training level: not set"
-            import pathlib
-            drafts_dir = pathlib.Path.home() / ".openclaw/data/portfolio-guru/drafts"
-            draft_count = len(list(drafts_dir.glob(f"{user_id}_*"))) if drafts_dir.exists() else 0
+            curriculum = get_curriculum(user_id) or "2025"
+            curriculum_label = "2021 Curriculum" if curriculum == "2021" else "2025 Update"
+            tier = await get_user_tier(user_id)
+            tier_label = {"free": "Free", "pro": "Pro", "pro_plus": "Pro+"}.get(tier, "Free")
+            used = await get_cases_this_month(user_id)
+            from usage import TIER_LIMITS
+            limit = TIER_LIMITS.get(tier, 10)
+            usage_str = f"{used} cases this month" if limit == -1 else f"{used}/{limit} cases this month"
             vp = get_voice_profile(user_id)
-            voice_str = "✍️ Voice profile: active" if vp else "✍️ Voice profile: not set"
-            await query.message.reply_text(
-                f"✅ Portfolio connected.\n\n{grade_str}\n📂 Drafts filed: {draft_count}\n{voice_str}",
-                reply_markup=InlineKeyboardMarkup([[_BTN_FILE]])
+            voice_str = "✅ Active" if vp else "Not set"
+
+            await query.message.edit_text(
+                f"📊 Your status\n\n"
+                f"🎓 Training level: {training_level or 'Not set'}\n"
+                f"📚 Curriculum: {curriculum_label}\n"
+                f"⭐ Plan: {tier_label}\n"
+                f"📋 Usage: {usage_str}\n"
+                f"✍️ Voice profile: {voice_str}",
+                reply_markup=InlineKeyboardMarkup([
+                    [_BTN_FILE],
+                    [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu")],
+                ])
             )
         else:
-            await query.message.reply_text("🔗 Not connected yet.", reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]]))
+            await query.message.edit_text("🔗 Not connected yet.", reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]]))
 
     elif action == "unsigned":
         # Inline unsigned — same as /unsigned command
@@ -1847,21 +1866,53 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         curriculum = get_curriculum(user_id) or "2025"
         curriculum_label = "2021 Curriculum" if curriculum == "2021" else "2025 Update"
         training_level = get_training_level(user_id) or "Not set"
-        await query.message.reply_text(
+        voice_profile = get_voice_profile(user_id)
+        voice_status = "✅ Active" if voice_profile else "Not set"
+
+        buttons = [
+            [InlineKeyboardButton("📘 Switch to 2025 Update", callback_data="SET_CURRICULUM|2025"),
+             InlineKeyboardButton("📗 Switch to 2021 Curriculum", callback_data="SET_CURRICULUM|2021")],
+            [InlineKeyboardButton("🎓 Change training level", callback_data="ACTION|change_level")],
+            [InlineKeyboardButton("✍️ Voice profile" if not voice_profile else "🔄 Rebuild voice profile", callback_data="ACTION|voice"),
+             InlineKeyboardButton("🔗 Update credentials", callback_data="ACTION|setup")],
+            [InlineKeyboardButton("🗑️ Delete all my data", callback_data="ACTION|delete")],
+            [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu")],
+        ]
+
+        await query.message.edit_text(
             f"⚙️ Your settings\n\n"
             f"📚 Curriculum: {curriculum_label}\n"
-            f"🎓 Training level: {training_level}\n\n"
-            f"Tap below to change curriculum — your choice is saved and used for all future filings.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📘 Switch to 2025 Update", callback_data="SET_CURRICULUM|2025"),
-                 InlineKeyboardButton("📗 Switch to 2021 Curriculum", callback_data="SET_CURRICULUM|2021")],
-                [InlineKeyboardButton("🔙 Back", callback_data="ACTION|cancel")],
-            ])
+            f"🎓 Training level: {training_level}\n"
+            f"✍️ Voice profile: {voice_status}\n\n"
+            f"Tap to change any setting.",
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
+    elif action == "change_level":
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("ST3", callback_data="SETLEVEL|ST3"),
+             InlineKeyboardButton("ST4", callback_data="SETLEVEL|ST4")],
+            [InlineKeyboardButton("ST5", callback_data="SETLEVEL|ST5"),
+             InlineKeyboardButton("ST6", callback_data="SETLEVEL|ST6")],
+            [InlineKeyboardButton("SAS / Fellow", callback_data="SETLEVEL|SAS")],
+            [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
+        ])
+        await query.message.edit_text(
+            "🎓 What's your training level?",
+            reply_markup=keyboard,
+        )
+
+    elif action == "back_to_menu":
+        await query.message.edit_text(
+            "🩺 Portfolio Guru — ready when you are.\n\n"
+            "Send me a clinical case (text, voice, photo, or document) and I'll handle the rest.\n\n"
+            "Or use the menu below to check your portfolio status.",
+            reply_markup=_build_welcome_keyboard(connected=has_credentials(user_id)),
         )
 
     elif action == "delete":
         # Confirm before deleting
-        await query.message.reply_text(
+        await query.message.edit_text(
             "⚠️ This wipes your saved Kaizen login, training level, curriculum choice, and voice profile. It does not affect cases already saved in Kaizen. Are you sure?",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🗑️ Yes, delete", callback_data="CONFIRM|delete"),
@@ -2288,7 +2339,27 @@ async def handle_set_curriculum(update: Update, context: ContextTypes.DEFAULT_TY
     user_id = update.effective_user.id
     store_curriculum(user_id, curriculum)
     label = "2025 curriculum" if curriculum == "2025" else "2021 curriculum"
-    await query.edit_message_text(f"✅ Set to {label} — I'll only show you the relevant forms.")
+    await query.edit_message_text(
+        f"✅ Set to {label} — I'll only show you the relevant forms.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
+        ]),
+    )
+
+
+async def handle_set_level(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle SETLEVEL| callback from settings → change training level."""
+    query = update.callback_query
+    await query.answer()
+    level = query.data.split("|")[1]
+    user_id = update.effective_user.id
+    store_training_level(user_id, level)
+    await query.edit_message_text(
+        f"✅ Training level set to {level}.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
+        ]),
+    )
 
 
 # === CALLBACK QUERY HANDLERS ===
@@ -4310,6 +4381,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("settier", settier_command))
     application.add_handler(CallbackQueryHandler(handle_upgrade_button, pattern=r"^UPGRADE\|"))
     application.add_handler(CallbackQueryHandler(handle_set_curriculum, pattern=r"^SET_CURRICULUM\|"))
+    application.add_handler(CallbackQueryHandler(handle_set_level, pattern=r"^SETLEVEL\|"))
     application.add_handler(CallbackQueryHandler(handle_chase_log, pattern=r"^CHASE_LOG\|"))
     # Top-level handlers that must work regardless of conversation state
     application.add_handler(CallbackQueryHandler(handle_info_button, pattern=r"^INFO\|"))
