@@ -2185,7 +2185,13 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     await update.effective_chat.send_action(constants.ChatAction.TYPING)
 
-    training_level = get_training_level(user_id) or "ST4"
+    training_level = get_training_level(user_id)
+    if not training_level:
+        training_level = "ST4"
+        level_note = "\n\n_Note: No training level set — analysing as ST4. Use /setup to update._"
+    else:
+        level_note = ""
+
     history = await get_case_history(user_id, months=6)
 
     if not history:
@@ -2197,11 +2203,19 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return ConversationHandler.END
 
+    progress_msg = await update.message.reply_text("📊 Analysing your portfolio...")
+
     try:
-        analysis = await analyse_portfolio_health(history, training_level)
+        analysis = await asyncio.wait_for(
+            analyse_portfolio_health(history, training_level), timeout=45
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Portfolio health analysis timed out (45s)")
+        await progress_msg.edit_text("⚠️ Analysis took too long — please try again.")
+        return ConversationHandler.END
     except Exception as e:
         logger.error(f"Portfolio health analysis failed: {e}", exc_info=True)
-        await update.message.reply_text("❌ Could not analyse portfolio health. Try again later.")
+        await progress_msg.edit_text("❌ Could not analyse portfolio health. Try again later.")
         return ConversationHandler.END
 
     from datetime import datetime as _dt
@@ -2247,9 +2261,10 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         f"⚠️ *Gaps:*\n{gaps_str}\n\n"
         f"💡 *Suggestions:*\n{suggestions_str}\n\n"
         f"ARCP readiness: {readiness_str}"
+        f"{level_note}"
     )
 
-    await update.message.reply_text(msg, parse_mode="Markdown")
+    await progress_msg.edit_text(msg, parse_mode="Markdown")
     return ConversationHandler.END
 
 
