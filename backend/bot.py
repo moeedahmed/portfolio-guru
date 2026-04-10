@@ -625,7 +625,7 @@ Describe a clinical case by text, voice note, photo, or document (PDF, PowerPoin
 {_WHAT_IS_THIS_FORM_COUNT} RCEM forms supported:
 CBD · DOPS · Mini-CEX · ACAT · LAT · ACAF · STAT · MSF · QIAT · JCF · Teaching · Procedural Log · SDL · Ultrasound Case · ESLE · ESLE Assessment · Complaint · Serious Incident · Educational Activity · Formal Course · Reflective Practice Log · Teaching Observation · Teach Confidentiality · Appraisal · Clinical Governance · Critical Incident · Audit · Research · Educational Meeting · PDP · Business Case · Cost Improvement · Equipment/Service · Management forms (Rota, Risk, Meeting, Project, Audit, Service, Leadership, Recruitment, Risk Process, Training Event, Guideline, Information, Induction, Experience, Report, Complaint)
 
-Works with Kaizen and other e-portfolio platforms."""
+Files directly to Kaizen ePortfolio. Other platforms coming soon."""
 
 FILE_CASE_PROMPT = "Send me a case description — text, voice note, photo, or document (PDF, PowerPoint, Word)."
 
@@ -4420,10 +4420,10 @@ def main():
                 "Portfolio Guru files your medical WPBA entries in seconds.\n\n"
                 "Describe a case by text, voice, photo, or document — the bot picks the right form, "
                 "drafts the entry, and files it when you approve.\n\n"
-                "All 19 RCEM forms supported. Works with Kaizen and other e-portfolio platforms."
+                "45 RCEM forms supported. Files directly to Kaizen ePortfolio."
             )
             await app.bot.set_my_short_description(
-                "File WPBA entries to your e-portfolio in seconds. Text, voice, photo, or document → draft → approve → filed."
+                "File WPBA entries to Kaizen in seconds. Text, voice, photo, or document → draft → approve → filed."
             )
         except Exception:
             pass  # Non-critical — BotFather settings may not update on every restart
