@@ -340,7 +340,7 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
 
 # Common button patterns used across the bot
 _BTN_RESET = InlineKeyboardButton("🆕 Start fresh", callback_data="ACTION|reset")
-_BTN_FILE = InlineKeyboardButton("📂 File a case", callback_data="ACTION|file")
+_BTN_FILE = InlineKeyboardButton("📋 File a case", callback_data="ACTION|file")
 _BTN_SETUP = InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")
 _BTN_CANCEL = InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel")
 _BTN_HELP = InlineKeyboardButton("ℹ️ Help", callback_data="INFO|what")
@@ -358,7 +358,7 @@ def _setup_needs_finishing(user_id: int) -> bool:
 def _build_next_step_keyboard(user_id: int, *, include_reset: bool = False) -> InlineKeyboardMarkup:
     if _setup_needs_finishing(user_id):
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔗 Connect Kaizen account", callback_data="ACTION|setup")],
+            [InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")],
             [InlineKeyboardButton("ℹ️ How does this work?", callback_data="INFO|what")],
         ])
     # Connected user — show the three things they actually need
@@ -1278,7 +1278,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         vp = get_voice_profile(user_id)
         voice_str = "✍️ Voice profile: active" if vp else "✍️ Voice profile: not set"
         buttons = [
-            [InlineKeyboardButton("📂 File a case", callback_data="ACTION|file")],
+            [InlineKeyboardButton("📋 File a case", callback_data="ACTION|file")],
         ]
         if not vp:
             buttons.append([InlineKeyboardButton("✍️ Set up voice profile", callback_data="ACTION|voice")])
@@ -1645,7 +1645,7 @@ async def _build_voice_profile(update: Update, context: ContextTypes.DEFAULT_TYP
             f"Your style: {summary}\n\n"
             "All future drafts will match your writing voice.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📂 File a case", callback_data="ACTION|file"),
+                [InlineKeyboardButton("📋 File a case", callback_data="ACTION|file"),
                  InlineKeyboardButton("🔄 Rebuild", callback_data="ACTION|voice")],
             ])
         )
@@ -1695,7 +1695,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             await query.message.reply_text(
                 "Your Kaizen account is already connected.",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📂 File a case", callback_data="ACTION|file")]
+                    [InlineKeyboardButton("📋 File a case", callback_data="ACTION|file")]
                 ])
             )
         else:
@@ -2039,7 +2039,7 @@ HELP_MSG = """📖 *Portfolio Guru — Help*
 
 Send a case by text, voice note, photo, or document. I'll suggest the best WPBA types, show the chosen template and what's missing, then generate a draft for approval.
 
-*All 19 RCEM forms supported:*
+*All 45 RCEM forms supported:*
 CBD · DOPS · Mini-CEX · ACAT · LAT · ACAF · STAT · MSF · QIAT · JCF · Teaching · Procedural Log · SDL · Ultrasound Case · ESLE Assessment · Complaint · Serious Incident · Educational Activity · Formal Course"""
 
 
@@ -2385,7 +2385,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
                 "Couldn't determine the best form — browse all types below.",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("📋 See all forms", callback_data="FORM|show_all")],
-                    [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_recommend")],
+                    [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_recommend")],
                 ]),
             )
             return AWAIT_FORM_CHOICE
@@ -2396,7 +2396,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
             message, context,
             "⚠️ AI is temporarily unavailable. Tap below to try again or pick a form manually.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_recommend")],
+                [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_recommend")],
                 [InlineKeyboardButton("📋 Pick form manually", callback_data="FORM|show_all")],
             ]),
         )
