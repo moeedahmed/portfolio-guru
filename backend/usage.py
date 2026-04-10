@@ -142,6 +142,18 @@ async def get_cases_this_week(user_id: int) -> int:
             return row[0] if row else 0
 
 
+async def get_user_by_stripe_customer(stripe_customer_id: str) -> int | None:
+    """Look up telegram_user_id by Stripe customer ID. Returns None if not found."""
+    await _ensure_db()
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT telegram_user_id FROM user_profiles WHERE stripe_customer_id = ?",
+            (stripe_customer_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+
 async def set_user_tier(user_id: int, tier: str, stripe_customer_id: str = None, stripe_subscription_id: str = None):
     """Set or update a user's subscription tier."""
     await _ensure_db()

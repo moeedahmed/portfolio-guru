@@ -24,24 +24,37 @@ echo "Gemini key in use (last4): ${GOOGLE_API_KEY: -4}"
 export FERNET_SECRET_KEY=$(get_secret 9e653679-9a33-4c23-a15c-b405015713de)
 export OPENAI_API_KEY=$(get_secret 2772c5c3-b357-4015-8252-b3ea00939469)
 export DEEPSEEK_API_KEY=$(get_secret 1628cc03-0446-4455-b801-b3eb014c82fb)
-# Stripe — set STRIPE_BWS_ID in env or add to credentials-map.json once created in Stripe dashboard
-export STRIPE_SECRET_KEY="${STRIPE_SECRET_KEY:-$(get_secret "${STRIPE_BWS_ID:-placeholder}" 2>/dev/null || echo "")}"
-export STRIPE_PRO_PRICE_ID="${STRIPE_PRO_PRICE_ID:-price_placeholder_pro}"
-export STRIPE_PRO_PLUS_PRICE_ID="${STRIPE_PRO_PLUS_PRICE_ID:-price_placeholder_pro_plus}"
+# Stripe (Portfolio Guru account)
+export STRIPE_SECRET_KEY=$(get_secret 4450d6ac-f7a2-4802-a27a-b428006488c9)
+export STRIPE_WEBHOOK_SECRET=$(get_secret 3ffc5e11-f4d6-4ff8-872f-b428006e7126)
+export STRIPE_PRO_PRICE_ID="price_1TKY11FtxKHU39UdHFXn1yur"
+export STRIPE_PRO_PLUS_PRICE_ID="price_1TKY12FtxKHU39UdTQZY8rOq"
 
 # Optional: persistent browser for faster filing (login once, reuse session)
 # Requires Chrome running with: google-chrome --remote-debugging-port=18800 --user-data-dir=/tmp/kaizen-profile
 # export KAIZEN_USE_CDP=1
 # export KAIZEN_CDP_URL=http://localhost:18800
 
-echo "Secrets loaded. Starting bot in polling mode..."
+echo "Secrets loaded. Starting bot + webhook server..."
 cd "$(dirname "$0")"
 
+PYTHON=""
 if [ -x "./.venv/bin/python3" ]; then
-  exec .venv/bin/python3 bot.py
+  PYTHON="./.venv/bin/python3"
 elif [ -x "./venv/bin/python3" ]; then
-  exec venv/bin/python3 bot.py
+  PYTHON="./venv/bin/python3"
 else
   echo "Python venv not found (expected backend/venv or backend/.venv)." >&2
   exit 1
 fi
+
+# Start Stripe webhook server in background (port 8099)
+$PYTHON -m uvicorn webhook_server:app --port 8099 --log-level warning &
+WEBHOOK_PID=$!
+echo "Webhook server started (PID $WEBHOOK_PID, port 8099)"
+
+# Clean up webhook server when bot exits
+trap "kill $WEBHOOK_PID 2>/dev/null" EXIT
+
+# Start bot (foreground)
+exec $PYTHON bot.py

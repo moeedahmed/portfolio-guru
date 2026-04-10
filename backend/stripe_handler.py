@@ -48,6 +48,12 @@ async def handle_webhook_event(payload: bytes, sig_header: str, webhook_secret: 
     elif event["type"] == "customer.subscription.deleted":
         subscription = event["data"]["object"]
         customer_id = subscription["customer"]
-        return {"action": "downgraded", "customer_id": customer_id}
+        # Look up user by stripe_customer_id and reset to free
+        from usage import get_user_by_stripe_customer, set_user_tier
+        user_id = get_user_by_stripe_customer(customer_id)
+        if user_id:
+            await set_user_tier(user_id, "free")
+            return {"action": "downgraded", "user_id": user_id}
+        return {"action": "downgraded", "customer_id": customer_id, "error": "user not found"}
 
     return {"action": "ignored"}
