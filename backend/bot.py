@@ -4024,7 +4024,10 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
 # === BULK / UNSIGNED / CHASE COMMANDS ===
 
 async def bulk_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /bulk — file multiple entries from a JSON array."""
+    """Handle /bulk — disabled for now, coming in a future update."""
+    await update.message.reply_text("📦 Bulk filing is coming soon. For now, send cases one at a time.")
+    return
+    # --- Original implementation below (disabled) ---
     user_id = update.effective_user.id
     creds = get_credentials(user_id)
     if not creds:
