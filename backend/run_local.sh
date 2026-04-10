@@ -29,6 +29,11 @@ export STRIPE_SECRET_KEY="${STRIPE_SECRET_KEY:-$(get_secret "${STRIPE_BWS_ID:-pl
 export STRIPE_PRO_PRICE_ID="${STRIPE_PRO_PRICE_ID:-price_placeholder_pro}"
 export STRIPE_PRO_PLUS_PRICE_ID="${STRIPE_PRO_PLUS_PRICE_ID:-price_placeholder_pro_plus}"
 
+# Optional: persistent browser for faster filing (login once, reuse session)
+# Requires Chrome running with: google-chrome --remote-debugging-port=18800 --user-data-dir=/tmp/kaizen-profile
+# export KAIZEN_USE_CDP=1
+# export KAIZEN_CDP_URL=http://localhost:18800
+
 echo "Secrets loaded. Starting bot in polling mode..."
 cd "$(dirname "$0")"
 
