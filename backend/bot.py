@@ -1792,7 +1792,15 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             await query.message.edit_text("🔗 Not connected yet.", reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]]))
 
     elif action == "unsigned":
-        # Inline unsigned — same as /unsigned command
+        await query.message.edit_text(
+            "📬 Unsigned ticket scanning is coming soon.\n\n"
+            "This feature will show your pending assessments and let you send reminders to assessors.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu")],
+            ]),
+        )
+        return ConversationHandler.END
+        # --- Original implementation below (needs CDP browser) ---
         if not has_credentials(user_id):
             await query.message.reply_text(
                 "🔗 Connect your Kaizen account first.",
@@ -4141,7 +4149,13 @@ async def bulk_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def unsigned_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /unsigned — scrape and display unsigned tickets."""
+    """Handle /unsigned — coming soon."""
+    await update.message.reply_text(
+        "📬 Unsigned ticket scanning is coming soon.\n\n"
+        "This feature will show your pending assessments and let you send reminders to assessors."
+    )
+    return
+    # --- Original implementation below (needs CDP browser) ---
     user_id = update.effective_user.id
     creds = get_credentials(user_id)
 
@@ -4186,7 +4200,13 @@ async def unsigned_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def chase_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /chase <assessor_email> — check chase eligibility and offer template."""
+    """Handle /chase — coming soon."""
+    await update.message.reply_text(
+        "📬 Assessor reminders are coming soon.\n\n"
+        "This feature will let you send reminders directly through Kaizen for unsigned tickets."
+    )
+    return
+    # --- Original implementation below (needs unsigned ticket integration) ---
     text = (update.message.text or "").replace("/chase", "", 1).strip()
     if not text:
         await update.message.reply_text("Usage: /chase <assessor_email>")
