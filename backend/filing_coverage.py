@@ -108,39 +108,48 @@ def should_use_browser_use(
     """
     Decide whether to use browser-use instead of Playwright.
 
-    Returns True if:
-    - playwright_runs < 5
-    - any important field has fill_rate < 0.5
-    - curriculum was requested AND curriculum fill rate < 0.8
-    - any field in user_pushbacks
+    Strategy: if a form has a verified FORM_FIELD_MAP entry, let Playwright
+    try first.  The router auto-escalates to browser-use if Playwright
+    returns partial with important fields missing, so failures are caught.
+
+    Returns True (skip Playwright) only if:
+    - the form has NO DOM mapping in FORM_FIELD_MAP
+    - the form has user pushbacks (user flagged missed fields)
+    - the form has enough run history AND fill rates are below threshold
     """
+    # Check if form has a deterministic DOM mapping
+    try:
+        from kaizen_form_filer import FORM_FIELD_MAP
+        has_mapping = form_type in FORM_FIELD_MAP
+    except ImportError:
+        has_mapping = False
+
+    if not has_mapping:
+        return True
+
     data = load_coverage()
     entry = data.get(form_type)
 
     if not entry:
-        # Never filed — use browser-use
-        return True
+        # Never filed but has a verified mapping — let Playwright try
+        return False
 
-    playwright_runs = entry.get("playwright_runs", 0)
-    if playwright_runs < PLAYWRIGHT_MIN_RUNS:
-        return True
-
-    rates = entry.get("field_fill_rates", {})
     pushbacks = entry.get("user_pushbacks", [])
-
-    # Any pushback field → browser-use
     if pushbacks:
         return True
 
-    # Check important fields
-    for field in IMPORTANT_FIELDS:
-        if field in rates and rates[field] < FILL_RATE_THRESHOLD:
-            return True
+    # Only check fill rates after enough runs to judge
+    playwright_runs = entry.get("playwright_runs", 0)
+    if playwright_runs >= PLAYWRIGHT_MIN_RUNS:
+        rates = entry.get("field_fill_rates", {})
 
-    # Curriculum check
-    if curriculum_was_requested:
-        curriculum_rate = rates.get("curriculum_links", 0.0)
-        if curriculum_rate < CURRICULUM_FILL_THRESHOLD:
-            return True
+        for field in IMPORTANT_FIELDS:
+            if field in rates and rates[field] < FILL_RATE_THRESHOLD:
+                return True
+
+        if curriculum_was_requested:
+            curriculum_rate = rates.get("curriculum_links", 0.0)
+            if curriculum_rate < CURRICULUM_FILL_THRESHOLD:
+                return True
 
     return False

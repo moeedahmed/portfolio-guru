@@ -47,7 +47,7 @@ FORM_SCHEMAS = {
 
     "DOPS": {
         "name": "Direct Observation of Procedural Skills",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter",    "label": "Date",                    "type": "date",     "required": True},
             {"key": "procedure_name",       "label": "Procedure",               "type": "dropdown", "required": True,
@@ -72,7 +72,7 @@ FORM_SCHEMAS = {
 
     "MINI_CEX": {
         "name": "Mini-Clinical Evaluation Exercise",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter",    "label": "Date",                    "type": "date",     "required": True},
             {"key": "clinical_setting",     "label": "Clinical Setting",        "type": "dropdown", "required": True,
@@ -92,7 +92,7 @@ FORM_SCHEMAS = {
 
     "ACAT": {
         "name": "Acute Care Assessment Tool",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter",    "label": "Date of event",           "type": "date",     "required": True},
             {"key": "placement",            "label": "Placement",               "type": "dropdown", "required": True,
@@ -111,7 +111,7 @@ FORM_SCHEMAS = {
 
     "LAT": {
         "name": "Leadership Assessment Tool",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter",    "label": "Date",                    "type": "date",     "required": True},
             {"key": "clinical_setting",     "label": "Clinical Setting",        "type": "dropdown", "required": True,
@@ -129,7 +129,7 @@ FORM_SCHEMAS = {
 
     "ACAF": {
         "name": "Applied Critical Appraisal Form",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter",    "label": "Date",                                "type": "date",  "required": True},
             {"key": "situation",            "label": "Section 1: Situation",                "type": "text",  "required": True},
@@ -150,7 +150,7 @@ FORM_SCHEMAS = {
 
     "STAT": {
         "name": "Structured Teaching Assessment Tool",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter",    "label": "Date",                    "type": "date",     "required": True},
             {"key": "stage_of_training",    "label": "Stage of Training",       "type": "dropdown", "required": True,
@@ -171,7 +171,7 @@ FORM_SCHEMAS = {
 
     "MSF": {
         "name": "Multi-Source Feedback",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter",    "label": "Date",                    "type": "date",     "required": True},
             {"key": "stage_of_training",    "label": "Stage of Training",       "type": "dropdown", "required": True,
@@ -183,7 +183,7 @@ FORM_SCHEMAS = {
 
     "QIAT": {
         "name": "Quality Improvement Assessment Tool",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter",    "label": "Date of completion",          "type": "date",     "required": True},
             {"key": "stage_of_training",    "label": "Stage of Training",           "type": "dropdown", "required": True,
@@ -208,7 +208,7 @@ FORM_SCHEMAS = {
 
     "JCF": {
         "name": "Journal Club / Presentation Form",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter",    "label": "Date",                    "type": "date",     "required": True},
             {"key": "learner_group",        "label": "Learner Group",           "type": "text",     "required": False},
@@ -229,7 +229,7 @@ FORM_SCHEMAS = {
 
     "TEACH": {
         "name": "Teaching Delivered By Trainee",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_teaching",     "label": "Date of teaching activity",   "type": "date",     "required": True},
             {"key": "title_of_session",     "label": "Title of session",            "type": "text",     "required": True},
@@ -243,7 +243,7 @@ FORM_SCHEMAS = {
 
     "PROC_LOG": {
         "name": "Procedural Log ST3-ST6",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_activity",     "label": "Date of Activity",            "type": "date",     "required": True},
             {"key": "stage_of_training",    "label": "Stage of Training",           "type": "dropdown", "required": True,
@@ -278,7 +278,7 @@ FORM_SCHEMAS = {
 
     "SDL": {
         "name": "Self-directed Learning Reflection",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "reflection_title",     "label": "Reflection Title",            "type": "text",     "required": True},
             {"key": "learning_activity_type","label": "Learning Activity Type",     "type": "multi_select", "required": True,
@@ -293,7 +293,7 @@ FORM_SCHEMAS = {
 
     "US_CASE": {
         "name": "Ultrasound Case Reflection",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "case_reflection_title","label": "Case reflection title",       "type": "text",     "required": True},
             {"key": "date_of_case",         "label": "Date of case",                "type": "date",     "required": True},
@@ -318,7 +318,7 @@ FORM_SCHEMAS = {
 
     "COMPLAINT": {
         "name": "Reflection on Complaints",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "reflection_title",     "label": "Title of reflection",         "type": "text",     "required": True},
             {"key": "date_of_complaint",    "label": "Date of complaint",           "type": "date",     "required": True},
@@ -333,7 +333,7 @@ FORM_SCHEMAS = {
 
     "SERIOUS_INC": {
         "name": "Reflection on Serious Incident",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "reflection_title",     "label": "Title of reflection",         "type": "text",     "required": True},
             {"key": "date_of_incident",     "label": "Date of incident",            "type": "date",     "required": True},
@@ -349,7 +349,7 @@ FORM_SCHEMAS = {
 
     "EDU_ACT": {
         "name": "Educational Activity Attended",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_education",    "label": "Date of education",           "type": "date",     "required": True},
             {"key": "title_of_education",   "label": "Title of education",          "type": "text",     "required": True},
@@ -363,7 +363,7 @@ FORM_SCHEMAS = {
 
     "FORMAL_COURSE": {
         "name": "Attendance at Formal Course",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "stage_of_training",    "label": "Stage of Training",           "type": "dropdown", "required": True,
              "options": ["Intermediate/ST3", "Higher/ST4-ST6", "PEM Sub-specialty", "ACCS ST1-ST2/CT1-CT2"]},
@@ -380,7 +380,7 @@ FORM_SCHEMAS = {
 
     "ESLE_ASSESS": {
         "name": "ESLE: Part 1 & 2 (2025 Update)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date", "type": "date", "required": True},
             {"key": "stage_of_training", "label": "Stage of Training", "type": "dropdown", "required": True,
@@ -411,7 +411,7 @@ FORM_SCHEMAS = {
 
     "TEACH_OBS": {
         "name": "Teaching Observation Tool (2025 Update)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",              "type": "date",     "required": True},
             {"key": "stage_of_training", "label": "Stage of Training", "type": "dropdown", "required": True,
@@ -424,7 +424,7 @@ FORM_SCHEMAS = {
 
     "TEACH_CONFID": {
         "name": "Management: Teach Confidentiality (2025 Update)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
             {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
@@ -437,7 +437,7 @@ FORM_SCHEMAS = {
 
     "MGMT_ROTA": {
         "name": "Management: Rota (2021/2025)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
             {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
@@ -447,7 +447,7 @@ FORM_SCHEMAS = {
 
     "MGMT_RISK": {
         "name": "Management: Risk Register (2021/2025)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
             {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
@@ -457,7 +457,7 @@ FORM_SCHEMAS = {
 
     "MGMT_RECRUIT": {
         "name": "Management: Recruitment (2021/2025)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
             {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
@@ -467,7 +467,7 @@ FORM_SCHEMAS = {
 
     "MGMT_PROJECT": {
         "name": "Management: Project Record (2021/2025)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
             {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
@@ -477,7 +477,7 @@ FORM_SCHEMAS = {
 
     "MGMT_RISK_PROC": {
         "name": "Management: Procedure to Reduce Risk (2021/2025)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
             {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
@@ -487,7 +487,7 @@ FORM_SCHEMAS = {
 
     "MGMT_TRAINING_EVT": {
         "name": "Management: Organising a Training Event (2021/2025)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
             {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
@@ -497,7 +497,7 @@ FORM_SCHEMAS = {
 
     "MGMT_GUIDELINE": {
         "name": "Management: Introduction of Guideline (2021/2025)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
             {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
@@ -507,7 +507,7 @@ FORM_SCHEMAS = {
 
     "MGMT_INFO": {
         "name": "Management: Information Management (2021/2025)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
             {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
@@ -517,7 +517,7 @@ FORM_SCHEMAS = {
 
     "MGMT_INDUCTION": {
         "name": "Management: Induction Programme (2021/2025)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
             {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
@@ -527,7 +527,7 @@ FORM_SCHEMAS = {
 
     "MGMT_EXPERIENCE": {
         "name": "Management Experience (2021/2025)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
             {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
@@ -537,7 +537,7 @@ FORM_SCHEMAS = {
 
     "MGMT_REPORT": {
         "name": "Management: Writing a Report (2021/2025)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
             {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
@@ -547,7 +547,7 @@ FORM_SCHEMAS = {
 
     "APPRAISAL": {
         "name": "Appraisal of Others (2021/2025)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
             {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
@@ -557,7 +557,7 @@ FORM_SCHEMAS = {
 
     "BUSINESS_CASE": {
         "name": "Business Case (2021/2025)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
             {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
@@ -567,7 +567,7 @@ FORM_SCHEMAS = {
 
     "CLIN_GOV": {
         "name": "Clinical Governance Meetings (2021/2025)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
             {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
@@ -577,7 +577,7 @@ FORM_SCHEMAS = {
 
     "MGMT_COMPLAINT": {
         "name": "Complaint (Management - 2021/2025)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
             {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
@@ -587,7 +587,7 @@ FORM_SCHEMAS = {
 
     "COST_IMPROVE": {
         "name": "Cost Improvement Plan (2021/2025)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
             {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
@@ -597,7 +597,7 @@ FORM_SCHEMAS = {
 
     "CRIT_INCIDENT": {
         "name": "Critical Incident (2021/2025)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
             {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
@@ -607,7 +607,7 @@ FORM_SCHEMAS = {
 
     "EQUIP_SERVICE": {
         "name": "Introduction of Equipment or Service (2021/2025)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
             {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
@@ -619,7 +619,7 @@ FORM_SCHEMAS = {
 
     "AUDIT": {
         "name": "Audit Assessment Tool (2021/2025)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
             {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
@@ -629,7 +629,7 @@ FORM_SCHEMAS = {
 
     "RESEARCH": {
         "name": "Research Activity (2021/2025)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
             {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
@@ -641,7 +641,7 @@ FORM_SCHEMAS = {
 
     "EDU_MEETING": {
         "name": "Educational Meeting ST3-ST7",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
             {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
@@ -651,7 +651,7 @@ FORM_SCHEMAS = {
 
     "EDU_MEETING_SUPP": {
         "name": "Educational Meeting: Supplementary Review",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
             {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
@@ -661,7 +661,7 @@ FORM_SCHEMAS = {
 
     "PDP": {
         "name": "Personal Development Plan (2021/2025)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
             {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
@@ -673,7 +673,7 @@ FORM_SCHEMAS = {
 
     "HIGHER_PROG": {
         "name": "Higher Progression Form (ST4-ST6)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter",    "label": "Date",              "type": "date",     "required": True},
             {"key": "stage_of_training",    "label": "Stage of Training", "type": "dropdown", "required": True,
@@ -684,7 +684,7 @@ FORM_SCHEMAS = {
 
     "ABSENCE": {
         "name": "Absences",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date", "type": "date", "required": True},
             {"key": "reflection",        "label": "Details", "type": "text", "required": True},
@@ -693,7 +693,7 @@ FORM_SCHEMAS = {
 
     "CCT": {
         "name": "RCEM CCT Application",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date", "type": "date", "required": True},
         ]
@@ -701,7 +701,7 @@ FORM_SCHEMAS = {
 
     "FILE_UPLOAD": {
         "name": "File Upload - Miscellaneous (2025 Update)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date", "type": "date", "required": True},
         ]
@@ -709,7 +709,7 @@ FORM_SCHEMAS = {
 
     "OOP": {
         "name": "Out of Programme (OOP/OOPT/R)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date", "type": "date", "required": True},
             {"key": "reflection",        "label": "Details", "type": "text", "required": True},
