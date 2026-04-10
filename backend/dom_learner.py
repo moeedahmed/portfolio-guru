@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-KAIZEN_FILER_PATH = Path(__file__).parent / "kaizen_filer.py"
+KAIZEN_FILER_PATH = Path(__file__).parent / "kaizen_form_filer.py"
 DOM_LEARNING_LOG_PATH = Path(__file__).parent / "dom_learning_log.json"
 
 
@@ -39,12 +39,12 @@ def _save_learning_log(entries: list) -> None:
 
 
 def _get_current_field_map(form_type: str) -> Dict[str, str]:
-    """Read FORM_FIELD_MAP[form_type] from kaizen_filer.py at import time."""
+    """Read FORM_FIELD_MAP[form_type] from kaizen_form_filer.py at import time."""
     try:
-        from kaizen_filer import FORM_FIELD_MAP
+        from kaizen_form_filer import FORM_FIELD_MAP
         return dict(FORM_FIELD_MAP.get(form_type, {}))
     except ImportError:
-        logger.error("Could not import FORM_FIELD_MAP from kaizen_filer")
+        logger.error("Could not import FORM_FIELD_MAP from kaizen_form_filer")
         return {}
 
 

@@ -1,0 +1,1692 @@
+{
+  "APPRAISAL": {
+    "form_type": "APPRAISAL",
+    "discovery": {
+      "page_title": "New Appraisal of others (2021/2025)",
+      "field_count": 5,
+      "fields": [
+        {
+          "id": "f594f362-caf3-45e5-b8ee-616876b0c4e7",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Project Description",
+          "ngModel": ""
+        },
+        {
+          "id": "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Date",
+          "ngModel": ""
+        },
+        {
+          "id": "416c6f84-34ec-41e3-ab1b-2ddaab18f526",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Any Comments/Reflections",
+          "ngModel": ""
+        },
+        {
+          "id": "startDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Start Date",
+          "ngModel": ""
+        },
+        {
+          "id": "endDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "End Date",
+          "ngModel": ""
+        }
+      ],
+      "curriculum": {
+        "hasCurriculum": true,
+        "selector": "a.ng-binding",
+        "count": 28
+      },
+      "file_input": {
+        "hasFileInput": false,
+        "count": 0
+      }
+    },
+    "comparison": {
+      "valid_count": 4,
+      "broken_count": 0,
+      "broken": {},
+      "unmapped_count": 0,
+      "unmapped": []
+    },
+    "test_fill": {
+      "filled": [
+        "date_of_encounter",
+        "project_description",
+        "date_of_event",
+        "reflection"
+      ],
+      "failed": [],
+      "saved": true
+    },
+    "status": "VERIFIED"
+  },
+  "AUDIT": {
+    "form_type": "AUDIT",
+    "discovery": {
+      "page_title": "New Audit Assessment Tool (2021/2025)",
+      "field_count": 5,
+      "fields": [
+        {
+          "id": "2b9c010d-0e5d-456a-afbd-ea33e63af3a3",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Title of audit with brief description:",
+          "ngModel": ""
+        },
+        {
+          "id": "a7f44694-d848-4b67-85bc-94e0a2953af1",
+          "tag": "SELECT",
+          "type": "select-one",
+          "label": "RCEM Audit?",
+          "ngModel": ""
+        },
+        {
+          "id": "0653f095-95f9-4344-b825-f336791d1ded",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Date",
+          "ngModel": ""
+        },
+        {
+          "id": "startDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Start Date",
+          "ngModel": ""
+        },
+        {
+          "id": "endDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "End Date",
+          "ngModel": ""
+        }
+      ],
+      "curriculum": {
+        "hasCurriculum": true,
+        "selector": "a.ng-binding",
+        "count": 28
+      },
+      "file_input": {
+        "hasFileInput": false,
+        "count": 0
+      }
+    },
+    "comparison": {
+      "valid_count": 4,
+      "broken_count": 0,
+      "broken": {},
+      "unmapped_count": 0,
+      "unmapped": []
+    },
+    "test_fill": {
+      "filled": [
+        "date_of_encounter",
+        "title",
+        "rcem_audit",
+        "date_of_event"
+      ],
+      "failed": [],
+      "saved": true
+    },
+    "status": "VERIFIED"
+  },
+  "BUSINESS_CASE": {
+    "form_type": "BUSINESS_CASE",
+    "discovery": {
+      "page_title": "New Business Case (2021/2025)",
+      "field_count": 6,
+      "fields": [
+        {
+          "id": "f6b7732d-3bdc-496f-bde9-4a103f3f77f8",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Project Description:",
+          "ngModel": ""
+        },
+        {
+          "id": "a3a5ee55-b018-4b73-a347-dd69595f4598",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Reflective notes from experience:",
+          "ngModel": ""
+        },
+        {
+          "id": "4b99584e-6fea-48f9-9cfb-317c6de5223b",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Resources Used:",
+          "ngModel": ""
+        },
+        {
+          "id": "310b69ab-6738-4eac-9b1f-6dfb1ed810b6",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Lessons learned:",
+          "ngModel": ""
+        },
+        {
+          "id": "startDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Start Date",
+          "ngModel": ""
+        },
+        {
+          "id": "endDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "End Date",
+          "ngModel": ""
+        }
+      ],
+      "curriculum": {
+        "hasCurriculum": true,
+        "selector": "a.ng-binding",
+        "count": 28
+      },
+      "file_input": {
+        "hasFileInput": false,
+        "count": 0
+      }
+    },
+    "comparison": {
+      "valid_count": 5,
+      "broken_count": 0,
+      "broken": {},
+      "unmapped_count": 0,
+      "unmapped": []
+    },
+    "test_fill": {
+      "filled": [
+        "date_of_encounter",
+        "project_description",
+        "reflection",
+        "resources_used",
+        "lessons_learned"
+      ],
+      "failed": [],
+      "saved": true
+    },
+    "status": "VERIFIED"
+  },
+  "CLIN_GOV": {
+    "form_type": "CLIN_GOV",
+    "discovery": {
+      "page_title": "New Clinical Governance Meetings (2021/2025)",
+      "field_count": 5,
+      "fields": [
+        {
+          "id": "f594f362-caf3-45e5-b8ee-616876b0c4e7",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Project Description",
+          "ngModel": ""
+        },
+        {
+          "id": "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Date",
+          "ngModel": ""
+        },
+        {
+          "id": "416c6f84-34ec-41e3-ab1b-2ddaab18f526",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Any Comments/Reflections",
+          "ngModel": ""
+        },
+        {
+          "id": "startDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Start Date",
+          "ngModel": ""
+        },
+        {
+          "id": "endDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "End Date",
+          "ngModel": ""
+        }
+      ],
+      "curriculum": {
+        "hasCurriculum": true,
+        "selector": "a.ng-binding",
+        "count": 28
+      },
+      "file_input": {
+        "hasFileInput": false,
+        "count": 0
+      }
+    },
+    "comparison": {
+      "valid_count": 4,
+      "broken_count": 0,
+      "broken": {},
+      "unmapped_count": 0,
+      "unmapped": []
+    },
+    "test_fill": {
+      "filled": [
+        "date_of_encounter",
+        "project_description",
+        "date_of_event",
+        "reflection"
+      ],
+      "failed": [],
+      "saved": true
+    },
+    "status": "VERIFIED"
+  },
+  "COST_IMPROVE": {
+    "form_type": "COST_IMPROVE",
+    "discovery": {
+      "page_title": "New Cost Improvement Plan (2021/2025)",
+      "field_count": 6,
+      "fields": [
+        {
+          "id": "f6b7732d-3bdc-496f-bde9-4a103f3f77f8",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Project Description:",
+          "ngModel": ""
+        },
+        {
+          "id": "a3a5ee55-b018-4b73-a347-dd69595f4598",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Reflective notes from experience:",
+          "ngModel": ""
+        },
+        {
+          "id": "4b99584e-6fea-48f9-9cfb-317c6de5223b",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Resources Used:",
+          "ngModel": ""
+        },
+        {
+          "id": "310b69ab-6738-4eac-9b1f-6dfb1ed810b6",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Lessons learned:",
+          "ngModel": ""
+        },
+        {
+          "id": "startDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Start Date",
+          "ngModel": ""
+        },
+        {
+          "id": "endDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "End Date",
+          "ngModel": ""
+        }
+      ],
+      "curriculum": {
+        "hasCurriculum": true,
+        "selector": "a.ng-binding",
+        "count": 28
+      },
+      "file_input": {
+        "hasFileInput": false,
+        "count": 0
+      }
+    },
+    "comparison": {
+      "valid_count": 5,
+      "broken_count": 0,
+      "broken": {},
+      "unmapped_count": 0,
+      "unmapped": []
+    },
+    "test_fill": {
+      "filled": [
+        "date_of_encounter",
+        "project_description",
+        "reflection",
+        "resources_used",
+        "lessons_learned"
+      ],
+      "failed": [],
+      "saved": true
+    },
+    "status": "VERIFIED"
+  },
+  "CRIT_INCIDENT": {
+    "form_type": "CRIT_INCIDENT",
+    "discovery": {
+      "page_title": "New Critical Incident (2021/2025)",
+      "field_count": 5,
+      "fields": [
+        {
+          "id": "f594f362-caf3-45e5-b8ee-616876b0c4e7",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Project Description",
+          "ngModel": ""
+        },
+        {
+          "id": "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Date",
+          "ngModel": ""
+        },
+        {
+          "id": "416c6f84-34ec-41e3-ab1b-2ddaab18f526",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Any Comments/Reflections",
+          "ngModel": ""
+        },
+        {
+          "id": "startDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Start Date",
+          "ngModel": ""
+        },
+        {
+          "id": "endDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "End Date",
+          "ngModel": ""
+        }
+      ],
+      "curriculum": {
+        "hasCurriculum": true,
+        "selector": "a.ng-binding",
+        "count": 28
+      },
+      "file_input": {
+        "hasFileInput": false,
+        "count": 0
+      }
+    },
+    "comparison": {
+      "valid_count": 4,
+      "broken_count": 0,
+      "broken": {},
+      "unmapped_count": 0,
+      "unmapped": []
+    },
+    "test_fill": {
+      "filled": [
+        "date_of_encounter",
+        "project_description",
+        "date_of_event",
+        "reflection"
+      ],
+      "failed": [],
+      "saved": true
+    },
+    "status": "VERIFIED"
+  },
+  "EQUIP_SERVICE": {
+    "form_type": "EQUIP_SERVICE",
+    "discovery": {
+      "page_title": "New Introduction of Equipment or Service (2021/2025)",
+      "field_count": 5,
+      "fields": [
+        {
+          "id": "f594f362-caf3-45e5-b8ee-616876b0c4e7",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Project Description",
+          "ngModel": ""
+        },
+        {
+          "id": "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Date",
+          "ngModel": ""
+        },
+        {
+          "id": "416c6f84-34ec-41e3-ab1b-2ddaab18f526",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Any Comments/Reflections",
+          "ngModel": ""
+        },
+        {
+          "id": "startDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Start Date",
+          "ngModel": ""
+        },
+        {
+          "id": "endDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "End Date",
+          "ngModel": ""
+        }
+      ],
+      "curriculum": {
+        "hasCurriculum": true,
+        "selector": "a.ng-binding",
+        "count": 28
+      },
+      "file_input": {
+        "hasFileInput": false,
+        "count": 0
+      }
+    },
+    "comparison": {
+      "valid_count": 4,
+      "broken_count": 0,
+      "broken": {},
+      "unmapped_count": 0,
+      "unmapped": []
+    },
+    "test_fill": {
+      "filled": [
+        "date_of_encounter",
+        "project_description",
+        "date_of_event",
+        "reflection"
+      ],
+      "failed": [],
+      "saved": true
+    },
+    "status": "VERIFIED"
+  },
+  "MGMT_COMPLAINT": {
+    "form_type": "MGMT_COMPLAINT",
+    "discovery": {
+      "page_title": "New Complaint (2021/2025)",
+      "field_count": 5,
+      "fields": [
+        {
+          "id": "f594f362-caf3-45e5-b8ee-616876b0c4e7",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Project Description",
+          "ngModel": ""
+        },
+        {
+          "id": "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Date",
+          "ngModel": ""
+        },
+        {
+          "id": "416c6f84-34ec-41e3-ab1b-2ddaab18f526",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Any Comments/Reflections",
+          "ngModel": ""
+        },
+        {
+          "id": "startDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Start Date",
+          "ngModel": ""
+        },
+        {
+          "id": "endDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "End Date",
+          "ngModel": ""
+        }
+      ],
+      "curriculum": {
+        "hasCurriculum": true,
+        "selector": "a.ng-binding",
+        "count": 28
+      },
+      "file_input": {
+        "hasFileInput": false,
+        "count": 0
+      }
+    },
+    "comparison": {
+      "valid_count": 4,
+      "broken_count": 0,
+      "broken": {},
+      "unmapped_count": 0,
+      "unmapped": []
+    },
+    "test_fill": {
+      "filled": [
+        "date_of_encounter",
+        "project_description",
+        "date_of_event",
+        "reflection"
+      ],
+      "failed": [],
+      "saved": true
+    },
+    "status": "VERIFIED"
+  },
+  "MGMT_EXPERIENCE": {
+    "form_type": "MGMT_EXPERIENCE",
+    "discovery": {
+      "page_title": "New Management Experience (2021/2025)",
+      "field_count": 5,
+      "fields": [
+        {
+          "id": "cf8c49ed-24b6-43a2-9e24-38006a3b410d",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Date of management activity:",
+          "ngModel": ""
+        },
+        {
+          "id": "b17d0c63-6dfe-4841-888c-85a7f324cd0d",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Type of management activity:",
+          "ngModel": ""
+        },
+        {
+          "id": "6b2ad7a4-5e6f-447c-9dd5-bb0baa713869",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Reflective Notes:",
+          "ngModel": ""
+        },
+        {
+          "id": "startDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Start Date",
+          "ngModel": ""
+        },
+        {
+          "id": "endDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "End Date",
+          "ngModel": ""
+        }
+      ],
+      "curriculum": {
+        "hasCurriculum": true,
+        "selector": "a.ng-binding",
+        "count": 28
+      },
+      "file_input": {
+        "hasFileInput": false,
+        "count": 0
+      }
+    },
+    "comparison": {
+      "valid_count": 4,
+      "broken_count": 0,
+      "broken": {},
+      "unmapped_count": 0,
+      "unmapped": []
+    },
+    "test_fill": {
+      "filled": [
+        "date_of_encounter",
+        "date_of_activity",
+        "activity_type",
+        "reflection"
+      ],
+      "failed": [],
+      "saved": true
+    },
+    "status": "VERIFIED"
+  },
+  "MGMT_GUIDELINE": {
+    "form_type": "MGMT_GUIDELINE",
+    "discovery": {
+      "page_title": "New Management: Portfolio Introduction of Guideline (2021/2025)",
+      "field_count": 5,
+      "fields": [
+        {
+          "id": "f594f362-caf3-45e5-b8ee-616876b0c4e7",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Project Description",
+          "ngModel": ""
+        },
+        {
+          "id": "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Date",
+          "ngModel": ""
+        },
+        {
+          "id": "416c6f84-34ec-41e3-ab1b-2ddaab18f526",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Any Comments/Reflections",
+          "ngModel": ""
+        },
+        {
+          "id": "startDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Start Date",
+          "ngModel": ""
+        },
+        {
+          "id": "endDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "End Date",
+          "ngModel": ""
+        }
+      ],
+      "curriculum": {
+        "hasCurriculum": true,
+        "selector": "a.ng-binding",
+        "count": 28
+      },
+      "file_input": {
+        "hasFileInput": false,
+        "count": 0
+      }
+    },
+    "comparison": {
+      "valid_count": 4,
+      "broken_count": 0,
+      "broken": {},
+      "unmapped_count": 0,
+      "unmapped": []
+    },
+    "test_fill": {
+      "filled": [
+        "date_of_encounter",
+        "project_description",
+        "date_of_event",
+        "reflection"
+      ],
+      "failed": [],
+      "saved": true
+    },
+    "status": "VERIFIED"
+  },
+  "MGMT_INDUCTION": {
+    "form_type": "MGMT_INDUCTION",
+    "discovery": {
+      "page_title": "New Management: Induction Programme (2021/2025)",
+      "field_count": 5,
+      "fields": [
+        {
+          "id": "f594f362-caf3-45e5-b8ee-616876b0c4e7",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Project Description",
+          "ngModel": ""
+        },
+        {
+          "id": "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Date",
+          "ngModel": ""
+        },
+        {
+          "id": "416c6f84-34ec-41e3-ab1b-2ddaab18f526",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Any Comments/Reflections",
+          "ngModel": ""
+        },
+        {
+          "id": "startDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Start Date",
+          "ngModel": ""
+        },
+        {
+          "id": "endDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "End Date",
+          "ngModel": ""
+        }
+      ],
+      "curriculum": {
+        "hasCurriculum": true,
+        "selector": "a.ng-binding",
+        "count": 28
+      },
+      "file_input": {
+        "hasFileInput": false,
+        "count": 0
+      }
+    },
+    "comparison": {
+      "valid_count": 4,
+      "broken_count": 0,
+      "broken": {},
+      "unmapped_count": 0,
+      "unmapped": []
+    },
+    "test_fill": {
+      "filled": [
+        "date_of_encounter",
+        "project_description",
+        "date_of_event",
+        "reflection"
+      ],
+      "failed": [],
+      "saved": true
+    },
+    "status": "VERIFIED"
+  },
+  "MGMT_INFO": {
+    "form_type": "MGMT_INFO",
+    "discovery": {
+      "page_title": "New Management: Information Management (2021/2025)",
+      "field_count": 6,
+      "fields": [
+        {
+          "id": "b647ee6e-9bb7-4b86-bfdd-45aa0254211c",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Project Description:",
+          "ngModel": ""
+        },
+        {
+          "id": "a7d84918-a496-484a-9d77-d0425646d29f",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Reflective notes on experience:",
+          "ngModel": ""
+        },
+        {
+          "id": "b588a189-cc03-4f04-abda-be1a4190ec68",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Resources used:",
+          "ngModel": ""
+        },
+        {
+          "id": "d5cc387b-165c-4b7f-8679-5d7597b00beb",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Lessons learned:",
+          "ngModel": ""
+        },
+        {
+          "id": "startDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Start Date",
+          "ngModel": ""
+        },
+        {
+          "id": "endDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "End Date",
+          "ngModel": ""
+        }
+      ],
+      "curriculum": {
+        "hasCurriculum": true,
+        "selector": "a.ng-binding",
+        "count": 28
+      },
+      "file_input": {
+        "hasFileInput": false,
+        "count": 0
+      }
+    },
+    "comparison": {
+      "valid_count": 5,
+      "broken_count": 0,
+      "broken": {},
+      "unmapped_count": 0,
+      "unmapped": []
+    },
+    "test_fill": {
+      "filled": [
+        "date_of_encounter",
+        "project_description",
+        "reflection",
+        "resources_used",
+        "lessons_learned"
+      ],
+      "failed": [],
+      "saved": true
+    },
+    "status": "VERIFIED"
+  },
+  "MGMT_PROJECT": {
+    "form_type": "MGMT_PROJECT",
+    "discovery": {
+      "page_title": "New Management: Project Record (2021/2025)",
+      "field_count": 13,
+      "fields": [
+        {
+          "id": "93c34027-0abf-4c2f-9caf-6a45065610f0",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Reflection / Project Title",
+          "ngModel": ""
+        },
+        {
+          "id": "875855a2-1521-4d82-9f13-208f536a67c6",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Scope of task - describe the nature and clinical context",
+          "ngModel": ""
+        },
+        {
+          "id": "db6c8f0a-4e03-48a1-8eb4-7f16b358c59d",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Output of task (i.e. letter, report, rota, etc.)",
+          "ngModel": ""
+        },
+        {
+          "id": "144a72bc-d1b5-4c28-a119-9e29e3bc19a9",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Start date",
+          "ngModel": ""
+        },
+        {
+          "id": "c69115c7-339c-4c38-aa41-b65038157143",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Estimated finish date",
+          "ngModel": ""
+        },
+        {
+          "id": "1733bca8-c619-4c34-a9f3-0477234c0b7b",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Evidence / references used",
+          "ngModel": ""
+        },
+        {
+          "id": "dab8c918-caa9-4d8a-a637-49bd4a50c4de",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "People interviewed / engaged",
+          "ngModel": ""
+        },
+        {
+          "id": "08050d70-1bf7-4614-ab72-abbd8726abbc",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Other resources used",
+          "ngModel": ""
+        },
+        {
+          "id": "c0ad12ac-c6ed-45d1-a50f-b330abfbac8a",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Meetings with supervisor (please include dates, detail of discussions, and outcomes of the meetings)",
+          "ngModel": ""
+        },
+        {
+          "id": "a7c089c2-e407-470f-859c-cca8e413da3d",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Reflection on task - What would you do differently?",
+          "ngModel": ""
+        },
+        {
+          "id": "7772b34f-9476-420b-a061-8dc07b04b78c",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Reflection on learning - What have you learnt about this management activity?",
+          "ngModel": ""
+        },
+        {
+          "id": "startDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Start Date",
+          "ngModel": ""
+        },
+        {
+          "id": "endDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "End Date",
+          "ngModel": ""
+        }
+      ],
+      "curriculum": {
+        "hasCurriculum": true,
+        "selector": "a.ng-binding",
+        "count": 28
+      },
+      "file_input": {
+        "hasFileInput": false,
+        "count": 0
+      }
+    },
+    "comparison": {
+      "valid_count": 12,
+      "broken_count": 0,
+      "broken": {},
+      "unmapped_count": 0,
+      "unmapped": []
+    },
+    "test_fill": {
+      "filled": [
+        "date_of_encounter",
+        "title",
+        "scope",
+        "output",
+        "start_date",
+        "finish_date",
+        "evidence_references",
+        "people_engaged",
+        "other_resources",
+        "supervisor_meetings",
+        "reflection",
+        "reflection_on_learning"
+      ],
+      "failed": [],
+      "saved": true
+    },
+    "status": "VERIFIED"
+  },
+  "MGMT_RECRUIT": {
+    "form_type": "MGMT_RECRUIT",
+    "discovery": {
+      "page_title": "New Management: Recruitment (2021/2025)",
+      "field_count": 5,
+      "fields": [
+        {
+          "id": "f594f362-caf3-45e5-b8ee-616876b0c4e7",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Project Description",
+          "ngModel": ""
+        },
+        {
+          "id": "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Date",
+          "ngModel": ""
+        },
+        {
+          "id": "416c6f84-34ec-41e3-ab1b-2ddaab18f526",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Any Comments/Reflections",
+          "ngModel": ""
+        },
+        {
+          "id": "startDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Start Date",
+          "ngModel": ""
+        },
+        {
+          "id": "endDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "End Date",
+          "ngModel": ""
+        }
+      ],
+      "curriculum": {
+        "hasCurriculum": true,
+        "selector": "a.ng-binding",
+        "count": 28
+      },
+      "file_input": {
+        "hasFileInput": false,
+        "count": 0
+      }
+    },
+    "comparison": {
+      "valid_count": 4,
+      "broken_count": 0,
+      "broken": {},
+      "unmapped_count": 0,
+      "unmapped": []
+    },
+    "test_fill": {
+      "filled": [
+        "date_of_encounter",
+        "project_description",
+        "date_of_event",
+        "reflection"
+      ],
+      "failed": [],
+      "saved": true
+    },
+    "status": "VERIFIED"
+  },
+  "MGMT_REPORT": {
+    "form_type": "MGMT_REPORT",
+    "discovery": {
+      "page_title": "New Management: Writing a Report (2021/2025)",
+      "field_count": 5,
+      "fields": [
+        {
+          "id": "f594f362-caf3-45e5-b8ee-616876b0c4e7",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Project Description",
+          "ngModel": ""
+        },
+        {
+          "id": "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Date",
+          "ngModel": ""
+        },
+        {
+          "id": "416c6f84-34ec-41e3-ab1b-2ddaab18f526",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Any Comments/Reflections",
+          "ngModel": ""
+        },
+        {
+          "id": "startDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Start Date",
+          "ngModel": ""
+        },
+        {
+          "id": "endDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "End Date",
+          "ngModel": ""
+        }
+      ],
+      "curriculum": {
+        "hasCurriculum": true,
+        "selector": "a.ng-binding",
+        "count": 28
+      },
+      "file_input": {
+        "hasFileInput": false,
+        "count": 0
+      }
+    },
+    "comparison": {
+      "valid_count": 4,
+      "broken_count": 0,
+      "broken": {},
+      "unmapped_count": 0,
+      "unmapped": []
+    },
+    "test_fill": {
+      "filled": [
+        "date_of_encounter",
+        "project_description",
+        "date_of_event",
+        "reflection"
+      ],
+      "failed": [],
+      "saved": true
+    },
+    "status": "VERIFIED"
+  },
+  "MGMT_RISK": {
+    "form_type": "MGMT_RISK",
+    "discovery": {
+      "page_title": "New Management: Risk Register (2021/2025)",
+      "field_count": 5,
+      "fields": [
+        {
+          "id": "f594f362-caf3-45e5-b8ee-616876b0c4e7",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Project Description",
+          "ngModel": ""
+        },
+        {
+          "id": "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Date",
+          "ngModel": ""
+        },
+        {
+          "id": "416c6f84-34ec-41e3-ab1b-2ddaab18f526",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Any Comments/Reflections",
+          "ngModel": ""
+        },
+        {
+          "id": "startDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Start Date",
+          "ngModel": ""
+        },
+        {
+          "id": "endDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "End Date",
+          "ngModel": ""
+        }
+      ],
+      "curriculum": {
+        "hasCurriculum": true,
+        "selector": "a.ng-binding",
+        "count": 28
+      },
+      "file_input": {
+        "hasFileInput": false,
+        "count": 0
+      }
+    },
+    "comparison": {
+      "valid_count": 4,
+      "broken_count": 0,
+      "broken": {},
+      "unmapped_count": 0,
+      "unmapped": []
+    },
+    "test_fill": {
+      "filled": [
+        "date_of_encounter",
+        "project_description",
+        "date_of_event",
+        "reflection"
+      ],
+      "failed": [],
+      "saved": true
+    },
+    "status": "VERIFIED"
+  },
+  "MGMT_RISK_PROC": {
+    "form_type": "MGMT_RISK_PROC",
+    "discovery": {
+      "page_title": "New Management: Procedure to Reduce Risk (2021/2025)",
+      "field_count": 6,
+      "fields": [
+        {
+          "id": "b647ee6e-9bb7-4b86-bfdd-45aa0254211c",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Project Description:",
+          "ngModel": ""
+        },
+        {
+          "id": "a7d84918-a496-484a-9d77-d0425646d29f",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Reflective notes on experience:",
+          "ngModel": ""
+        },
+        {
+          "id": "b588a189-cc03-4f04-abda-be1a4190ec68",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Resources used:",
+          "ngModel": ""
+        },
+        {
+          "id": "d5cc387b-165c-4b7f-8679-5d7597b00beb",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Lessons learned:",
+          "ngModel": ""
+        },
+        {
+          "id": "startDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Start Date",
+          "ngModel": ""
+        },
+        {
+          "id": "endDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "End Date",
+          "ngModel": ""
+        }
+      ],
+      "curriculum": {
+        "hasCurriculum": true,
+        "selector": "a.ng-binding",
+        "count": 28
+      },
+      "file_input": {
+        "hasFileInput": false,
+        "count": 0
+      }
+    },
+    "comparison": {
+      "valid_count": 5,
+      "broken_count": 0,
+      "broken": {},
+      "unmapped_count": 0,
+      "unmapped": []
+    },
+    "test_fill": {
+      "filled": [
+        "date_of_encounter",
+        "project_description",
+        "reflection",
+        "resources_used",
+        "lessons_learned"
+      ],
+      "failed": [],
+      "saved": true
+    },
+    "status": "VERIFIED"
+  },
+  "MGMT_ROTA": {
+    "form_type": "MGMT_ROTA",
+    "discovery": {
+      "page_title": "New Management: Rota (2021/2025)",
+      "field_count": 5,
+      "fields": [
+        {
+          "id": "f594f362-caf3-45e5-b8ee-616876b0c4e7",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Project Description",
+          "ngModel": ""
+        },
+        {
+          "id": "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Date",
+          "ngModel": ""
+        },
+        {
+          "id": "416c6f84-34ec-41e3-ab1b-2ddaab18f526",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Any Comments/Reflections",
+          "ngModel": ""
+        },
+        {
+          "id": "startDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Start Date",
+          "ngModel": ""
+        },
+        {
+          "id": "endDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "End Date",
+          "ngModel": ""
+        }
+      ],
+      "curriculum": {
+        "hasCurriculum": true,
+        "selector": "a.ng-binding",
+        "count": 28
+      },
+      "file_input": {
+        "hasFileInput": false,
+        "count": 0
+      }
+    },
+    "comparison": {
+      "valid_count": 4,
+      "broken_count": 0,
+      "broken": {},
+      "unmapped_count": 0,
+      "unmapped": []
+    },
+    "test_fill": {
+      "filled": [
+        "date_of_encounter",
+        "project_description",
+        "date_of_event",
+        "reflection"
+      ],
+      "failed": [],
+      "saved": true
+    },
+    "status": "VERIFIED"
+  },
+  "MGMT_TRAINING_EVT": {
+    "form_type": "MGMT_TRAINING_EVT",
+    "discovery": {
+      "page_title": "New Management: Portfolio Organising a training event (2021/2025)",
+      "field_count": 5,
+      "fields": [
+        {
+          "id": "f594f362-caf3-45e5-b8ee-616876b0c4e7",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Project Description",
+          "ngModel": ""
+        },
+        {
+          "id": "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Date",
+          "ngModel": ""
+        },
+        {
+          "id": "416c6f84-34ec-41e3-ab1b-2ddaab18f526",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Any Comments/Reflections",
+          "ngModel": ""
+        },
+        {
+          "id": "startDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Start Date",
+          "ngModel": ""
+        },
+        {
+          "id": "endDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "End Date",
+          "ngModel": ""
+        }
+      ],
+      "curriculum": {
+        "hasCurriculum": true,
+        "selector": "a.ng-binding",
+        "count": 28
+      },
+      "file_input": {
+        "hasFileInput": false,
+        "count": 0
+      }
+    },
+    "comparison": {
+      "valid_count": 4,
+      "broken_count": 0,
+      "broken": {},
+      "unmapped_count": 0,
+      "unmapped": []
+    },
+    "test_fill": {
+      "filled": [
+        "date_of_encounter",
+        "project_description",
+        "date_of_event",
+        "reflection"
+      ],
+      "failed": [],
+      "saved": true
+    },
+    "status": "VERIFIED"
+  },
+  "PDP": {
+    "form_type": "PDP",
+    "discovery": {
+      "page_title": "New Personal Development Plan (PDP - 2021/2025)",
+      "field_count": 10,
+      "fields": [
+        {
+          "id": "70464420-b51e-4702-938f-bdad8ff38d3a",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Title:",
+          "ngModel": ""
+        },
+        {
+          "id": "eff0a911-1c19-4cd6-a416-27a4bfe949bc",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "What specific development needs do I have?:",
+          "ngModel": ""
+        },
+        {
+          "id": "2bda92c7-15d7-4571-bbf5-a4379cf0be60",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "How will these objectives be addressed?:",
+          "ngModel": ""
+        },
+        {
+          "id": "b3d55641-62b6-4f03-84ef-af377a55df6c",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "What are you planning to do with your Educational Development Time?",
+          "ngModel": ""
+        },
+        {
+          "id": "2e26c165-4bc3-4acd-8099-67b48752f723",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Are there areas you would like to access but have not secured permission or availability?",
+          "ngModel": ""
+        },
+        {
+          "id": "d3b5b712-09ac-46ef-bdf6-24a97967d64c",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Timescale:",
+          "ngModel": ""
+        },
+        {
+          "id": "86d15299-4657-420c-b4aa-745ad5de6db0",
+          "tag": "TEXTAREA",
+          "type": "textarea",
+          "label": "Evidence of achievement or reason why not achieved:",
+          "ngModel": ""
+        },
+        {
+          "id": "bb9ea3c7-bb65-4af3-b36b-a09d726140f9",
+          "tag": "INPUT",
+          "type": "checkbox",
+          "label": "Has it been achieved?:\n            \n            \n            \n            No\u00a0\u00a0\n            \n\n\n\n\n            Yes",
+          "ngModel": ""
+        },
+        {
+          "id": "startDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Start Date",
+          "ngModel": ""
+        },
+        {
+          "id": "endDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "End Date",
+          "ngModel": ""
+        }
+      ],
+      "curriculum": {
+        "hasCurriculum": true,
+        "selector": "a.ng-binding",
+        "count": 28
+      },
+      "file_input": {
+        "hasFileInput": false,
+        "count": 0
+      }
+    },
+    "comparison": {
+      "valid_count": 8,
+      "broken_count": 0,
+      "broken": {},
+      "unmapped_count": 0,
+      "unmapped": []
+    },
+    "test_fill": {
+      "filled": [
+        "date_of_encounter",
+        "title",
+        "reflection",
+        "how_addressed",
+        "edt_plans",
+        "access_areas",
+        "timescale",
+        "evidence_of_achievement"
+      ],
+      "failed": [],
+      "saved": true
+    },
+    "status": "VERIFIED"
+  },
+  "RESEARCH": {
+    "form_type": "RESEARCH",
+    "discovery": {
+      "page_title": "New Research Activity (2021/2025)",
+      "field_count": 13,
+      "fields": [
+        {
+          "id": "bae7ff4d-373c-4583-952e-3bbcbcd13d2e",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Title of research activity:",
+          "ngModel": ""
+        },
+        {
+          "id": "7fbf5f39-c9b1-4e2c-8c3d-455f159935fe",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Date started:",
+          "ngModel": ""
+        },
+        {
+          "id": "025d5d3f-363b-470d-9c74-7427a8b898fd",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Date finished:",
+          "ngModel": ""
+        },
+        {
+          "id": "6ff4f3d2-2ad0-42d6-a86e-04bd196cee1b",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Publication",
+          "ngModel": ""
+        },
+        {
+          "id": "644af8ed-8b54-4544-9e0e-2f22feb3c7ef",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Poster",
+          "ngModel": ""
+        },
+        {
+          "id": "f0f29cc4-255f-4126-800f-f2b061fc26b8",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Presentation",
+          "ngModel": ""
+        },
+        {
+          "id": "dc7376a1-571f-49e0-a0d4-2fcbb50cee20",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Local Presentation",
+          "ngModel": ""
+        },
+        {
+          "id": "6e9261d0-37ab-4765-a0dc-707af6c9e697",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "BestBETs",
+          "ngModel": ""
+        },
+        {
+          "id": "5e93bc8c-8cde-4ea9-9f8b-cc03b0fc4d5e",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Abstract",
+          "ngModel": ""
+        },
+        {
+          "id": "f4392cb6-bd32-4913-b998-ae0b20d31774",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Contribution to Higher Degree",
+          "ngModel": ""
+        },
+        {
+          "id": "81171c2c-f2aa-4831-91a1-53b734993e55",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Other",
+          "ngModel": ""
+        },
+        {
+          "id": "startDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "Start Date",
+          "ngModel": ""
+        },
+        {
+          "id": "endDate",
+          "tag": "INPUT",
+          "type": "text",
+          "label": "End Date",
+          "ngModel": ""
+        }
+      ],
+      "curriculum": {
+        "hasCurriculum": true,
+        "selector": "a.ng-binding",
+        "count": 28
+      },
+      "file_input": {
+        "hasFileInput": false,
+        "count": 0
+      }
+    },
+    "comparison": {
+      "valid_count": 12,
+      "broken_count": 0,
+      "broken": {},
+      "unmapped_count": 0,
+      "unmapped": []
+    },
+    "test_fill": {
+      "filled": [
+        "date_of_encounter",
+        "title",
+        "date_started",
+        "date_finished",
+        "publication",
+        "poster",
+        "presentation",
+        "local_presentation",
+        "bestbets",
+        "abstract",
+        "higher_degree",
+        "other"
+      ],
+      "failed": [],
+      "saved": true
+    },
+    "status": "VERIFIED"
+  }
+}

@@ -43,7 +43,7 @@ class TestFormSchemas:
         core_forms = [
             "CBD", "DOPS", "MINI_CEX", "ACAT", "LAT", "ACAF", "STAT",
             "MSF", "QIAT", "JCF", "TEACH", "PROC_LOG", "SDL", "US_CASE",
-            "ESLE", "COMPLAINT", "SERIOUS_INC", "EDU_ACT", "FORMAL_COURSE",
+            "ESLE_ASSESS", "COMPLAINT", "SERIOUS_INC", "EDU_ACT", "FORMAL_COURSE",
         ]
         for form_code in core_forms:
             assert form_code in FORM_UUIDS, f"{form_code} missing from FORM_UUIDS"

@@ -10,7 +10,7 @@ import json
 import logging
 from typing import List
 
-from extractor import _gemini_generate
+from extractor import _generate
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +54,8 @@ Rules:
 - British English spelling throughout
 - Return ONLY the JSON. No explanation."""
 
-    response = await _gemini_generate(prompt)
-    raw = response.text.strip()
+    text = await _generate(prompt)
+    raw = text.strip()
 
     # Strip markdown code fences
     if raw.startswith("```"):

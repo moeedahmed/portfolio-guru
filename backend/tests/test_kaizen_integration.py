@@ -11,7 +11,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from kaizen_filer import file_to_kaizen
+from kaizen_form_filer import file_to_kaizen
 
 
 def _get_kaizen_credentials():

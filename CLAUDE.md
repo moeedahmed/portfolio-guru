@@ -25,15 +25,15 @@ Doctor sends a clinical case via Telegram (text, voice, or photo) → Gemini ext
 - Fernet key in FERNET_SECRET_KEY env var
 - macOS host (Mac Mini M4) — NO systemd, NO systemctl. Use launchd or manual process management.
 
-## Supported Forms (19)
+## Supported Forms (50)
 
-CBD · DOPS · Mini-CEX · ACAT · LAT · ACAF · STAT · MSF · QIAT · JCF · TEACH · PROC_LOG · SDL · US_CASE · ESLE · COMPLAINT · SERIOUS_INC · EDU_ACT · FORMAL_COURSE
+CBD · DOPS · Mini-CEX · ACAT · LAT · ACAF · STAT · MSF · QIAT · JCF · TEACH · PROC_LOG · SDL · US_CASE · ESLE_ASSESS · COMPLAINT · SERIOUS_INC · EDU_ACT · FORMAL_COURSE · REFLECT_LOG · TEACH_OBS · TEACH_CONFID · APPRAISAL · CLIN_GOV · CRIT_INCIDENT · AUDIT · RESEARCH · EDU_MEETING · EDU_MEETING_SUPP · PDP · BUSINESS_CASE · COST_IMPROVE · EQUIP_SERVICE · MGMT_ROTA · MGMT_RISK · MGMT_PROJECT · MGMT_RECRUIT · MGMT_RISK_PROC · MGMT_TRAINING_EVT · MGMT_GUIDELINE · MGMT_INFO · MGMT_INDUCTION · MGMT_EXPERIENCE · MGMT_REPORT · MGMT_COMPLAINT · ABSENCE · CCT · FILE_UPLOAD · HIGHER_PROG · OOP
 
 Only CBD has a browser-use auto-filer. All other forms save a JSON draft locally and provide a Kaizen link.
 
 ## Kaizen Form UUIDs
 
-All 19 form UUIDs are in `backend/extractor.py` → `FORM_UUIDS` dict.
+All 50 form UUIDs are in `backend/extractor.py` → `FORM_UUIDS` dict.
 CBD URL pattern: `https://kaizenep.com/events/new-section/<UUID>`
 Date format: Kaizen expects d/m/yyyy (e.g. 6/3/2026), not ISO.
 

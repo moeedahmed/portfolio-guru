@@ -14,9 +14,9 @@ from telegram.ext import (
 )
 from store import store_credentials, get_credentials, has_credentials, init
 from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, answer_question, extract_explicit_form_type, review_draft, analyse_portfolio_health, combine_case_inputs
-from usage import record_case_filed, get_cases_this_month, check_can_file, get_user_tier, set_user_tier, get_case_history, TIER_LIMITS
+from usage import record_case_filed, get_cases_this_month, check_can_file, get_user_tier, set_user_tier, get_case_history, TIER_LIMITS, get_all_active_users, get_cases_this_week
 from filer_router import route_filing
-from kaizen_filer import FORM_UUIDS
+from kaizen_form_filer import FORM_UUIDS
 from form_schemas import FORM_SCHEMAS
 from models import FormDraft, CBDData
 from whisper import transcribe_voice
@@ -77,6 +77,150 @@ async def _safe_edit_text(target, text: str, **kwargs):
         )
 
 
+
+
+# ---------------------------------------------------------------------------
+# Weekly nudge — FORM_LABELS + helpers ported from weekly_check.py
+# ---------------------------------------------------------------------------
+FORM_LABELS = {
+    "CBD": "CBD", "DOPS": "DOPS", "MINI_CEX": "Mini-CEX", "ACAT": "ACAT",
+    "LAT": "LAT", "ACAF": "ACAF", "STAT": "STAT", "MSF": "MSF",
+    "QIAT": "QIAT", "JCF": "JCF", "ESLE_ASSESS": "ESLE", "AUDIT": "Audit",
+    "REFLECT_LOG": "Reflective Log", "COMPLAINT": "Complaint",
+    "SERIOUS_INC": "Serious Incident", "CRIT_INCIDENT": "Critical Incident",
+    "PDP": "PDP", "APPRAISAL": "Appraisal", "TEACH": "Teaching",
+    "TEACH_OBS": "Teaching Observation", "TEACH_CONFID": "Confidentiality",
+    "SDL": "SDL", "EDU_ACT": "Educational Activity", "EDU_MEETING": "ES Meeting",
+    "EDU_MEETING_SUPP": "ES Meeting (Supp)", "FORMAL_COURSE": "Formal Course",
+    "PROC_LOG": "Procedure Log", "US_CASE": "Ultrasound Case",
+    "RESEARCH": "Research", "CLIN_GOV": "Clinical Governance",
+    "COST_IMPROVE": "Cost Improvement", "EQUIP_SERVICE": "Equipment/Service",
+    "BUSINESS_CASE": "Business Case",
+    "MGMT_ROTA": "Rota Management", "MGMT_RISK": "Risk Management",
+    "MGMT_RISK_PROC": "Risk Procedure", "MGMT_INFO": "Information Management",
+    "MGMT_EXPERIENCE": "Management Experience", "MGMT_REPORT": "Management Report",
+    "MGMT_COMPLAINT": "Management Complaint", "MGMT_GUIDELINE": "Guideline Development",
+    "MGMT_INDUCTION": "Induction", "MGMT_PROJECT": "Management Project",
+    "MGMT_RECRUIT": "Recruitment", "MGMT_TRAINING_EVT": "Training Event",
+    "OOP": "Out of Programme", "ABSENCE": "Absence", "CCT": "CCT Application",
+    "HIGHER_PROG": "Higher Programme", "FILE_UPLOAD": "File Upload",
+}
+
+
+def _nudge_label(form_type: str) -> str:
+    key = form_type.replace("_2021", "")
+    return FORM_LABELS.get(key, key)
+
+
+async def _compute_weekly_stats(user_id: int) -> dict:
+    """Compute cases this week + longest form gap for a user."""
+    from datetime import datetime, timezone
+    import aiosqlite as _aiosqlite
+    from usage import DB_PATH, _ensure_db
+
+    await _ensure_db()
+    cases = await get_cases_this_week(user_id)
+
+    async with _aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT form_type, MAX(filed_at) as last_filed FROM portfolio_usage "
+            "WHERE telegram_user_id = ? GROUP BY form_type",
+            (user_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+
+    gap = None
+    if rows:
+        now = datetime.now(timezone.utc)
+        worst_form, worst_days = None, 0
+        for form_type, last_filed_str in rows:
+            try:
+                last_filed = datetime.fromisoformat(last_filed_str)
+                if last_filed.tzinfo is None:
+                    last_filed = last_filed.replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                continue
+            gap_days = (now - last_filed).days
+            if gap_days > worst_days:
+                worst_days = gap_days
+                worst_form = form_type
+        if worst_days >= 7 and worst_form:
+            gap = (_nudge_label(worst_form), worst_days)
+
+    return {"cases": cases, "gap": gap}
+
+
+def _build_nudge_message(stats: dict) -> tuple[str, InlineKeyboardMarkup]:
+    """Build weekly nudge message text and inline keyboard."""
+    cases = stats["cases"]
+    gap = stats["gap"]
+    lines = []
+
+    if cases > 0:
+        lines.append("\U0001f4cb Your portfolio this week")
+        lines.append("")
+        lines.append(f"Cases filed: {cases} this week")
+    else:
+        lines.append("\U0001f4cb Portfolio check-in")
+        lines.append("")
+        lines.append("No cases filed this week \u2014 that's fine, but worth a nudge.")
+
+    if gap:
+        label, days = gap
+        lines.append("")
+        lines.append(f"Longest gap: no {label} in {days} days")
+
+    lines.append("")
+    if cases > 0:
+        lines.append("Keep the momentum going \u2014 tap below to file a case.")
+    else:
+        lines.append("One case takes 2 minutes. Tap below to get started.")
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("\U0001f4cb File a case", callback_data="ACTION|file")]
+    ])
+    return "\n".join(lines), keyboard
+
+
+async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send weekly gap-detection nudge to all active users.
+
+    Guard: file-based dedup (survives bot restarts + pickle flush failures).
+    Skips if run within 24 hours of last send.
+    """
+    import os
+    sentinel = os.path.expanduser("~/.openclaw/data/portfolio-guru/weekly_push_last_run")
+    os.makedirs(os.path.dirname(sentinel), exist_ok=True)
+    now = time.time()
+    if os.path.exists(sentinel):
+        last_run = float(open(sentinel).read().strip())
+        if now - last_run < 86400:
+            logger.info("weekly_push skipped — ran %.1f hours ago", (now - last_run) / 3600)
+            return
+
+    with open(sentinel, "w") as f:
+        f.write(str(now))
+    logger.info("weekly_push starting")
+
+    users = await get_all_active_users()
+    sent = 0
+    failed = 0
+
+    for user_id in users:
+        try:
+            stats = await _compute_weekly_stats(user_id)
+            text, keyboard = _build_nudge_message(stats)
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=text,
+                reply_markup=keyboard,
+            )
+            sent += 1
+        except Exception as e:
+            logger.warning("weekly_push failed for %s: %s", user_id, e)
+            failed += 1
+
+    logger.info("weekly_push complete: %d sent, %d failed", sent, failed)
 
 
 async def _edit_last_bot_msg(context, chat_id, text, reply_markup=None, parse_mode=None):
@@ -171,6 +315,7 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
         "awaiting_detail",
         "case_input_source",
         "chosen_form",
+        "paused_flow_rebuild",
         "pending_draft_data",
         "pending_new_case_text",
         "template_prompt_message_id",
@@ -211,9 +356,17 @@ def _setup_needs_finishing(user_id: int) -> bool:
 
 
 def _build_next_step_keyboard(user_id: int, *, include_reset: bool = False) -> InlineKeyboardMarkup:
-    rows = [[_BTN_SETUP]] if _setup_needs_finishing(user_id) else [[_BTN_FILE]]
-    if include_reset and not _setup_needs_finishing(user_id):
-        rows.append([_BTN_RESET])
+    if _setup_needs_finishing(user_id):
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔗 Connect Kaizen account", callback_data="ACTION|setup")],
+            [InlineKeyboardButton("ℹ️ How does this work?", callback_data="INFO|what")],
+        ])
+    # Connected user — show the three things they actually need
+    rows = [
+        [InlineKeyboardButton("📋 File a case", callback_data="ACTION|file")],
+        [InlineKeyboardButton("📊 Check status", callback_data="ACTION|status"),
+         InlineKeyboardButton("ℹ️ Help", callback_data="INFO|what")],
+    ]
     return InlineKeyboardMarkup(rows)
 
 
@@ -290,7 +443,8 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return AWAIT_TEMPLATE_REVIEW
 
-    if case_text and chosen_form:
+    if case_text and chosen_form and context.user_data.get("paused_flow_rebuild"):
+        context.user_data.pop("paused_flow_rebuild", None)
         await _send_latest_message(
             message,
             context,
@@ -381,44 +535,44 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
 TRAINING_LEVEL_FORMS = {
     "ST3": [
         "CBD", "DOPS", "MINI_CEX", "ACAT", "MSF", "PROC_LOG", "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH",
-        "COMPLAINT", "SERIOUS_INC", "ESLE",
+        "COMPLAINT", "SERIOUS_INC",
         "REFLECT_LOG", "TEACH_OBS", "ESLE_ASSESS", "TEACH_CONFID", "APPRAISAL", "CLIN_GOV",
         "CRIT_INCIDENT", "AUDIT", "RESEARCH", "EDU_MEETING", "EDU_MEETING_SUPP", "PDP",
     ],
     "ST4": [
         "CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "MSF", "QIAT", "PROC_LOG", "SDL", "EDU_ACT",
-        "FORMAL_COURSE", "TEACH", "US_CASE", "COMPLAINT", "SERIOUS_INC", "ESLE",
+        "FORMAL_COURSE", "TEACH", "US_CASE", "COMPLAINT", "SERIOUS_INC",
         "REFLECT_LOG", "TEACH_OBS", "ESLE_ASSESS", "TEACH_CONFID", "APPRAISAL", "CLIN_GOV",
         "CRIT_INCIDENT", "AUDIT", "RESEARCH", "EDU_MEETING", "EDU_MEETING_SUPP", "PDP",
         "BUSINESS_CASE", "COST_IMPROVE", "EQUIP_SERVICE",
     ],
     "ST5": [
         "CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "STAT", "MSF", "QIAT", "JCF", "PROC_LOG", "SDL",
-        "EDU_ACT", "FORMAL_COURSE", "TEACH", "US_CASE", "COMPLAINT", "SERIOUS_INC", "ESLE",
+        "EDU_ACT", "FORMAL_COURSE", "TEACH", "US_CASE", "COMPLAINT", "SERIOUS_INC",
         "REFLECT_LOG", "TEACH_OBS", "ESLE_ASSESS", "TEACH_CONFID", "APPRAISAL", "CLIN_GOV",
         "CRIT_INCIDENT", "AUDIT", "RESEARCH", "EDU_MEETING", "EDU_MEETING_SUPP", "PDP",
         "BUSINESS_CASE", "COST_IMPROVE", "EQUIP_SERVICE",
-        "MGMT_ROTA", "MGMT_RISK", "MGMT_MEETING", "MGMT_PROJECT", "MGMT_AUDIT", "MGMT_SERVICE", "MGMT_LEADERSHIP",
+        "MGMT_ROTA", "MGMT_RISK", "MGMT_PROJECT",
         "MGMT_RECRUIT", "MGMT_RISK_PROC", "MGMT_TRAINING_EVT", "MGMT_GUIDELINE", "MGMT_INFO",
         "MGMT_INDUCTION", "MGMT_EXPERIENCE", "MGMT_REPORT", "MGMT_COMPLAINT",
     ],
     "ST6": [
         "CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "STAT", "MSF", "QIAT", "JCF", "PROC_LOG", "SDL",
-        "EDU_ACT", "FORMAL_COURSE", "TEACH", "US_CASE", "COMPLAINT", "SERIOUS_INC", "ESLE",
+        "EDU_ACT", "FORMAL_COURSE", "TEACH", "US_CASE", "COMPLAINT", "SERIOUS_INC",
         "REFLECT_LOG", "TEACH_OBS", "ESLE_ASSESS", "TEACH_CONFID", "APPRAISAL", "CLIN_GOV",
         "CRIT_INCIDENT", "AUDIT", "RESEARCH", "EDU_MEETING", "EDU_MEETING_SUPP", "PDP",
         "BUSINESS_CASE", "COST_IMPROVE", "EQUIP_SERVICE",
-        "MGMT_ROTA", "MGMT_RISK", "MGMT_MEETING", "MGMT_PROJECT", "MGMT_AUDIT", "MGMT_SERVICE", "MGMT_LEADERSHIP",
+        "MGMT_ROTA", "MGMT_RISK", "MGMT_PROJECT",
         "MGMT_RECRUIT", "MGMT_RISK_PROC", "MGMT_TRAINING_EVT", "MGMT_GUIDELINE", "MGMT_INFO",
         "MGMT_INDUCTION", "MGMT_EXPERIENCE", "MGMT_REPORT", "MGMT_COMPLAINT",
     ],
     "SAS": [
         "CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "STAT", "MSF", "QIAT", "JCF", "PROC_LOG", "SDL",
-        "EDU_ACT", "FORMAL_COURSE", "TEACH", "US_CASE", "COMPLAINT", "SERIOUS_INC", "ESLE",
+        "EDU_ACT", "FORMAL_COURSE", "TEACH", "US_CASE", "COMPLAINT", "SERIOUS_INC",
         "REFLECT_LOG", "TEACH_OBS", "ESLE_ASSESS", "TEACH_CONFID", "APPRAISAL", "CLIN_GOV",
         "CRIT_INCIDENT", "AUDIT", "RESEARCH", "EDU_MEETING", "EDU_MEETING_SUPP", "PDP",
         "BUSINESS_CASE", "COST_IMPROVE", "EQUIP_SERVICE",
-        "MGMT_ROTA", "MGMT_RISK", "MGMT_MEETING", "MGMT_PROJECT", "MGMT_AUDIT", "MGMT_SERVICE", "MGMT_LEADERSHIP",
+        "MGMT_ROTA", "MGMT_RISK", "MGMT_PROJECT",
         "MGMT_RECRUIT", "MGMT_RISK_PROC", "MGMT_TRAINING_EVT", "MGMT_GUIDELINE", "MGMT_INFO",
         "MGMT_INDUCTION", "MGMT_EXPERIENCE", "MGMT_REPORT", "MGMT_COMPLAINT",
     ],
@@ -426,23 +580,21 @@ TRAINING_LEVEL_FORMS = {
 
 # Category groupings for "See all forms" navigation
 FORM_CATEGORIES = {
-    "🩺 Clinical Assessment": ["CBD", "DOPS", "MINI_CEX", "ACAT", "LAT", "ACAF", "STAT", "QIAT"],
-    "👥 Supervised Practice": ["MSF", "JCF", "ESLE", "ESLE_ASSESS"],
-    "📚 Education & Teaching": ["TEACH", "TEACH_OBS", "TEACH_CONFID", "FORMAL_COURSE", "EDU_ACT", "EDU_MEETING", "EDU_MEETING_SUPP", "SDL"],
-    "📋 Reflective & Dev": ["REFLECT_LOG", "PDP", "APPRAISAL", "PROC_LOG"],
-    "🔬 Quality & Governance": ["AUDIT", "RESEARCH", "CLIN_GOV", "CRIT_INCIDENT", "COMPLAINT", "SERIOUS_INC", "COST_IMPROVE", "EQUIP_SERVICE"],
-    "🌐 Specialist": ["US_CASE", "BUSINESS_CASE"],
-    "🏛️ Management": ["MGMT_ROTA", "MGMT_RISK", "MGMT_RECRUIT", "MGMT_PROJECT", "MGMT_RISK_PROC", "MGMT_TRAINING_EVT", "MGMT_GUIDELINE", "MGMT_INFO", "MGMT_INDUCTION", "MGMT_EXPERIENCE", "MGMT_REPORT", "MGMT_COMPLAINT", "MGMT_AUDIT", "MGMT_SERVICE", "MGMT_LEADERSHIP", "MGMT_MEETING"],
+    "🩺 Clinical": ["CBD", "DOPS", "MINI_CEX", "ACAT", "LAT", "ACAF", "STAT", "MSF", "QIAT", "JCF", "ESLE_ASSESS", "AUDIT"],
+    "📝 Reflective": ["REFLECT_LOG", "COMPLAINT", "SERIOUS_INC", "CRIT_INCIDENT", "PDP", "APPRAISAL"],
+    "👨‍🏫 Teaching": ["TEACH", "TEACH_OBS", "TEACH_CONFID", "SDL", "EDU_ACT", "EDU_MEETING", "EDU_MEETING_SUPP", "FORMAL_COURSE"],
+    "🔬 Procedural": ["PROC_LOG", "US_CASE"],
+    "🔍 Quality": ["RESEARCH", "CLIN_GOV", "COST_IMPROVE", "EQUIP_SERVICE", "BUSINESS_CASE"],
+    "🏛️ Management": ["MGMT_ROTA", "MGMT_RISK", "MGMT_RECRUIT", "MGMT_PROJECT", "MGMT_RISK_PROC", "MGMT_TRAINING_EVT", "MGMT_GUIDELINE", "MGMT_INFO", "MGMT_INDUCTION", "MGMT_EXPERIENCE", "MGMT_REPORT", "MGMT_COMPLAINT"],
 }
 
 # Slug mapping for callback data (Telegram limits callback_data to 64 bytes)
 _CAT_SLUGS = {
-    "🩺 Clinical Assessment": "CLINICAL",
-    "👥 Supervised Practice": "SUPERVISED",
-    "📚 Education & Teaching": "EDUCATION",
-    "📋 Reflective & Dev": "REFLECTIVE",
-    "🔬 Quality & Governance": "GOVERNANCE",
-    "🌐 Specialist": "SPECIALIST",
+    "🩺 Clinical": "CLINICAL",
+    "📝 Reflective": "REFLECTIVE",
+    "👨‍🏫 Teaching": "TEACHING",
+    "🔬 Procedural": "PROCEDURAL",
+    "🔍 Quality": "QUALITY",
     "🏛️ Management": "MANAGEMENT",
 }
 _SLUG_TO_CAT = {v: k for k, v in _CAT_SLUGS.items()}
@@ -458,7 +610,9 @@ Tap 🔗 Connect to get started."""
 
 WELCOME_MSG_CONNECTED = """🩺 Portfolio Guru — ready when you are.
 
-Send me a clinical case (text, voice, photo, or document) and I'll handle the rest."""
+Send me a clinical case (text, voice, photo, or document) and I'll handle the rest.
+
+Or use the menu below to check your portfolio status."""
 
 _WHAT_IS_THIS_FORM_COUNT = max(len(v) for v in TRAINING_LEVEL_FORMS.values())
 
@@ -479,9 +633,17 @@ FILE_CASE_PROMPT = "Send me a case description — text, voice note, photo, or d
 def _build_welcome_keyboard(connected: bool = False):
     if connected:
         return InlineKeyboardMarkup([
+            [InlineKeyboardButton("📋 File a case", callback_data="ACTION|file")],
             [
-                InlineKeyboardButton("❓ What is this?", callback_data="INFO|what"),
-                InlineKeyboardButton("📂 File a case", callback_data="ACTION|file"),
+                InlineKeyboardButton("📬 Unsigned tickets", callback_data="ACTION|unsigned"),
+                InlineKeyboardButton("📊 My status", callback_data="ACTION|status"),
+            ],
+            [
+                InlineKeyboardButton("📈 ARCP health", callback_data="ACTION|health"),
+                InlineKeyboardButton("ℹ️ Help", callback_data="INFO|what"),
+            ],
+            [
+                InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings"),
             ],
         ])
     else:
@@ -498,7 +660,7 @@ FORM_EMOJIS = {
     "MSF": "👥", "QIAT": "🎓", "LAT": "📖", "JCF": "💼",
     "ACAF": "✅", "STAT": "📊",
     "TEACH": "👨‍🏫", "PROC_LOG": "🔬", "SDL": "📖", "US_CASE": "🔊",
-    "ESLE": "⚠️", "COMPLAINT": "📝", "SERIOUS_INC": "🚨",
+    "COMPLAINT": "📝", "SERIOUS_INC": "🚨",
     "EDU_ACT": "🎓", "FORMAL_COURSE": "📋",
     # Newly visible forms
     "REFLECT_LOG": "💭", "TEACH_OBS": "👁️", "ESLE_ASSESS": "⚠️",
@@ -514,83 +676,60 @@ FORM_EMOJIS = {
 FORM_BUTTON_LABELS = {
     # Core WPBAs — official RCEM codes
     "CBD": "CBD",
-    "CBD_2021": "CBD (2021)",
     "DOPS": "DOPS",
-    "DOPS_2021": "DOPS (2021)",
     "MINI_CEX": "Mini-CEX",
-    "MINI_CEX_2021": "Mini-CEX (2021)",
     "ACAT": "ACAT",
-    "ACAT_2021": "ACAT (2021)",
     "ACAF": "ACAF",
-    "ACAF_2021": "ACAF (2021)",
     "LAT": "LAT",
-    "LAT_2021": "LAT (2021)",
     "STAT": "STAT",
-    "STAT_2021": "STAT (2021)",
     "MSF": "MSF",
-    "MSF_2021": "MSF (2021)",
     "QIAT": "QIAT",
-    "QIAT_2021": "QIAT (2021)",
     # Teaching & Education
     "JCF": "Journal Club",
-    "JCF_2021": "Journal Club (2021)",
     "TEACH": "Teaching Session",
-    "TEACH_2021": "Teaching Session (2021)",
     "EDU_ACT": "Educational Activity",
-    "EDU_ACT_2021": "Educational Activity (2021)",
     "FORMAL_COURSE": "Formal Course",
-    "FORMAL_COURSE_2021": "Formal Course (2021)",
-    "SDL": "Self-Directed Learning",
-    "SDL_2021": "Self-Directed Learning (2021)",
+    "SDL": "SDL",
+
     # Procedures & Clinical
     "DOPS_PROC": "DOPS Procedure",
     "PROC_LOG": "Procedural Log",
-    "PROC_LOG_2021": "Procedural Log (2021)",
     "US_CASE": "Ultrasound Case",
-    "US_CASE_2021": "Ultrasound Case (2021)",
     # Reflection & Incidents
-    "ESLE": "ESLE",
-    "ESLE_2021": "ESLE (2021)",
     "SERIOUS_INC": "Serious Incident",
-    "SERIOUS_INC_2021": "Serious Incident (2021)",
     "COMPLAINT": "Complaint",
-    "COMPLAINT_2021": "Complaint (2021)",
     # Management (new)
-    "MGMT_ROTA": "Rota Management",
-    "MGMT_RISK": "Risk Management",
-    "MGMT_MEETING": "Meeting / Committee",
+    "MGMT_ROTA": "Rota",
+    "MGMT_RISK": "Risk",
     "MGMT_PROJECT": "QI Project",
-    "MGMT_AUDIT": "Audit",
-    "MGMT_SERVICE": "Service Improvement",
-    "MGMT_LEADERSHIP": "Leadership",
     # Other
     "BUSINESS_CASE": "Business Case",
-    "RESEARCH": "Research Activity",
+    "RESEARCH": "Research",
     "REFLECTIVE": "Reflective Practice",
-    "PDP": "Personal Dev Plan",
+    "PDP": "PDP",
     "RPL": "Reflective Practice Log",
     # Newly visible forms
-    "REFLECT_LOG": "Reflective Practice Log",
+    "REFLECT_LOG": "Reflective Log",
     "TEACH_OBS": "Teaching Observation",
-    "ESLE_ASSESS": "ESLE Assessment",
-    "TEACH_CONFID": "Teach Confidentiality",
-    "APPRAISAL": "Appraisal of Others",
-    "CLIN_GOV": "Clinical Governance",
+    "ESLE_ASSESS": "ESLE",
+    "TEACH_CONFID": "Confidentiality",
+    "APPRAISAL": "Appraisal",
+    "CLIN_GOV": "Governance",
     "CRIT_INCIDENT": "Critical Incident",
-    "AUDIT": "Audit Assessment",
-    "EDU_MEETING": "Educational Meeting",
-    "EDU_MEETING_SUPP": "Educational Meeting Supp",
+    "AUDIT": "Audit",
+    "EDU_MEETING": "ES Meeting",
+    "EDU_MEETING_SUPP": "ES Meeting (Supp)",
     "COST_IMPROVE": "Cost Improvement",
-    "EQUIP_SERVICE": "Equipment/Service Intro",
+    "EQUIP_SERVICE": "Equipment/Service",
     "MGMT_RECRUIT": "Recruitment",
     "MGMT_RISK_PROC": "Risk Process",
     "MGMT_TRAINING_EVT": "Training Event",
     "MGMT_GUIDELINE": "Guideline",
-    "MGMT_INFO": "Information Management",
+    "MGMT_INFO": "Information",
     "MGMT_INDUCTION": "Induction",
-    "MGMT_EXPERIENCE": "Management Experience",
-    "MGMT_REPORT": "Management Report",
-    "MGMT_COMPLAINT": "Complaint Management",
+    "MGMT_EXPERIENCE": "Experience",
+    "MGMT_REPORT": "Report",
+    "MGMT_COMPLAINT": "Complaint",
 }
 
 FIELD_EMOJIS = {
@@ -672,7 +811,7 @@ def _build_form_choice_keyboard(recommendations, curriculum="2025"):
     for rec in filtered:
         base_ft = rec.form_type.replace("_2021", "") if rec.form_type.endswith("_2021") else rec.form_type
         emoji = FORM_EMOJIS.get(base_ft, "📄")
-        label = FORM_BUTTON_LABELS.get(rec.form_type) or _form_display_name(rec.form_type)[:24]
+        label = FORM_BUTTON_LABELS.get(rec.form_type) or FORM_BUTTON_LABELS.get(base_ft) or _form_display_name(base_ft)[:24]
         if rec.uuid:
             buttons.append(InlineKeyboardButton(f"{emoji} {label}", callback_data=f"FORM|{rec.form_type}"))
         else:
@@ -765,7 +904,7 @@ def _build_category_forms_keyboard(user_id, cat_slug):
             continue
         base_ft = actual_ft.replace("_2021", "") if actual_ft.endswith("_2021") else actual_ft
         emoji = FORM_EMOJIS.get(base_ft, "📄")
-        label = FORM_BUTTON_LABELS.get(actual_ft) or _form_display_name(actual_ft)[:24]
+        label = FORM_BUTTON_LABELS.get(actual_ft) or FORM_BUTTON_LABELS.get(base_ft) or _form_display_name(base_ft)[:24]
         buttons.append(InlineKeyboardButton(f"{emoji} {label}", callback_data=f"FORM|{actual_ft}"))
     rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
     rows.append([InlineKeyboardButton("⬅️ Back to categories", callback_data="FORM|show_all")])
@@ -1503,8 +1642,8 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
     elif action == "reset":
         context.user_data.clear()
         await query.message.reply_text(
-            "🔄 Current case cleared. Your saved setup is unchanged.",
-            reply_markup=_build_next_step_keyboard(user_id)
+            "✅ Cleared — back to the main menu.",
+            reply_markup=_build_welcome_keyboard(connected=has_credentials(user_id))
         )
 
     elif action == "cancel":
@@ -1571,6 +1710,93 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         else:
             await query.message.reply_text("🔗 Not connected yet.", reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]]))
 
+    elif action == "unsigned":
+        # Inline unsigned — same as /unsigned command
+        if not has_credentials(user_id):
+            await query.message.reply_text(
+                "🔗 Connect your Kaizen account first.",
+                reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]])
+            )
+            return ConversationHandler.END
+        creds = get_credentials(user_id)
+        msg = await query.message.reply_text("🔍 Scanning for unsigned tickets...")
+        try:
+            tickets = await scrape_unsigned_tickets(creds[0], creds[1])
+        except Exception as e:
+            await msg.edit_text(f"Could not scan Kaizen — try again in a moment.")
+            return ConversationHandler.END
+        if not tickets:
+            await msg.edit_text("✅ No unsigned tickets found after Jan 2025.")
+            return ConversationHandler.END
+        by_assessor: dict[str, list] = {}
+        for t in tickets:
+            name = t.get("assessor_name") or "Unknown"
+            by_assessor.setdefault(name, []).append(t)
+        lines = [f"📋 Unsigned tickets: {len(tickets)} total\n"]
+        for assessor, tix in sorted(by_assessor.items()):
+            dates = [t["event_date"] for t in tix if t.get("event_date")]
+            oldest = min(dates) if dates else "?"
+            allowed, reason = chase_guard.check_allowed(assessor)
+            chase_icon = "🟢" if allowed else "🔴"
+            lines.append(f"{chase_icon} {assessor}: {len(tix)} ticket(s), oldest: {oldest}")
+            lines.append(f"   Chase: {reason}")
+        await msg.edit_text("\n".join(lines))
+
+    elif action == "health":
+        # Inline ARCP health check — same as /health command
+        if not has_credentials(user_id):
+            await query.message.reply_text("🔗 Connect your Kaizen account first.", reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]]))
+            return ConversationHandler.END
+        tier = await get_user_tier(user_id)
+        if tier != "pro_plus":
+            await query.message.reply_text(
+                "📊 ARCP Health is a Pro+ feature.\n\nUpgrade to get gap analysis and readiness scoring.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⭐⭐ Upgrade to Pro+", callback_data="UPGRADE|pro_plus")]]),
+            )
+            return ConversationHandler.END
+        await query.message.chat.send_action(constants.ChatAction.TYPING)
+        training_level = get_training_level(user_id) or "ST4"
+        history = await get_case_history(user_id, months=6)
+        if not history:
+            await query.message.reply_text("📊 No cases filed yet — start filing and come back to check your ARCP readiness.")
+            return ConversationHandler.END
+        try:
+            analysis = await analyse_portfolio_health(history, training_level)
+        except Exception:
+            await query.message.reply_text("Could not run health check — try again later.")
+            return ConversationHandler.END
+        from datetime import datetime as _dt
+        month_label = _dt.now().strftime("%B %Y")
+        gaps = analysis.get("gaps", [])
+        gaps_str = "\n".join(f"• {g}" for g in gaps) if gaps else "• No major gaps"
+        suggestions = analysis.get("suggestions", [])
+        suggestions_str = "\n".join(f"• {s}" for s in suggestions) if suggestions else "• Keep filing"
+        readiness = analysis.get("arcp_readiness", "needs_attention")
+        readiness_str = {"on_track": "🟢 On track", "needs_attention": "🟡 Needs attention", "at_risk": "🔴 At risk"}.get(readiness, readiness)
+        await query.message.reply_text(
+            f"📊 *Portfolio Health — {month_label}*\n\n"
+            f"⚠️ *Gaps:*\n{gaps_str}\n\n"
+            f"💡 *Suggestions:*\n{suggestions_str}\n\n"
+            f"ARCP readiness: {readiness_str}",
+            parse_mode="Markdown"
+        )
+
+    elif action == "settings":
+        curriculum = get_curriculum(user_id) or "2025"
+        curriculum_label = "2021 Curriculum" if curriculum == "2021" else "2025 Update"
+        training_level = get_training_level(user_id) or "Not set"
+        await query.message.reply_text(
+            f"⚙️ Your settings\n\n"
+            f"📚 Curriculum: {curriculum_label}\n"
+            f"🎓 Training level: {training_level}\n\n"
+            f"Tap below to change curriculum — your choice is saved and used for all future filings.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📘 Switch to 2025 Update", callback_data="SET_CURRICULUM|2025"),
+                 InlineKeyboardButton("📗 Switch to 2021 Curriculum", callback_data="SET_CURRICULUM|2021")],
+                [InlineKeyboardButton("🔙 Back", callback_data="ACTION|cancel")],
+            ])
+        )
+
     elif action == "delete":
         # Confirm before deleting
         await query.message.reply_text(
@@ -1583,25 +1809,67 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle 👍/👎 feedback after filing."""
+    """Handle 👍/👎 feedback after filing — logs to Notion DB."""
     query = update.callback_query
-    await query.answer("Thanks for the feedback!")
-    feedback = query.data.split("|")[1]  # "good" or "bad"
+    await query.answer("Thanks!")
+    parts = query.data.split("|")
+    sentiment = parts[1]  # "good" or "bad"
+    form_type = parts[2] if len(parts) > 2 else "unknown"
+    filing_status = parts[3] if len(parts) > 3 else "unknown"
     user_id = update.effective_user.id
-    # Log feedback
-    import json as _json
-    from pathlib import Path
-    feedback_dir = Path.home() / ".openclaw/data/portfolio-guru/feedback"
-    feedback_dir.mkdir(parents=True, exist_ok=True)
-    from datetime import datetime
-    entry = {"user_id": user_id, "feedback": feedback, "timestamp": datetime.now().isoformat()}
-    feedback_path = feedback_dir / f"{user_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-    with open(feedback_path, "w") as f:
-        _json.dump(entry, f)
-    # Disarm feedback buttons, keep "File another" button
-    await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup([
-        [InlineKeyboardButton("📂 File another case", callback_data="ACTION|file")],
-    ]))
+
+    result_label = "👍 Worked" if sentiment == "good" else "👎 Did not work"
+    form_name = _form_display_name(form_type)
+
+    # Log to Notion feedback DB
+    import subprocess, os
+    from datetime import datetime, timezone
+    try:
+        token_proc = subprocess.run(
+            ["/Users/moeedahmed/.cargo/bin/bws", "secret", "get",
+             "c4589dbf-029a-4005-b174-b3f3002bcbbb", "--output", "json"],
+            capture_output=True, text=True,
+            env={**os.environ, "BWS_ACCESS_TOKEN": open(os.path.expanduser("~/.openclaw/.bws-token")).read().strip()}
+        )
+        import json as _json
+        notion_token = _json.loads(token_proc.stdout)["value"]
+
+        import urllib.request
+        payload = _json.dumps({
+            "parent": {"database_id": "32bcfc10-fc57-8107-af4c-efc3c10df5e3"},
+            "properties": {
+                "Name": {"title": [{"text": {"content": f"{result_label} — {form_name}"}}]},
+                "Result": {"select": {"name": result_label}},
+                "Form": {"select": {"name": form_name}},
+                "User ID": {"rich_text": [{"text": {"content": str(user_id)}}]},
+                "Filed At": {"date": {"start": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}},
+                "Notes": {"rich_text": [{"text": {"content": f"Filing status: {filing_status}"}}]},
+            }
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.notion.com/v1/pages",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {notion_token}",
+                "Notion-Version": "2022-06-28",
+                "Content-Type": "application/json",
+            },
+            method="POST"
+        )
+        urllib.request.urlopen(req, timeout=10)
+    except Exception as _e:
+        logger.warning("Feedback Notion log failed: %s", _e)
+
+    # Disarm the feedback buttons only — leave the next-step row intact
+    try:
+        current_markup = query.message.reply_markup
+        if current_markup:
+            # Keep all rows except the feedback row (first row)
+            remaining_rows = current_markup.inline_keyboard[1:]
+            new_markup = InlineKeyboardMarkup(remaining_rows) if remaining_rows else None
+            await query.edit_message_reply_markup(reply_markup=new_markup)
+    except Exception:
+        pass
 
 
 async def handle_filing_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1640,19 +1908,17 @@ async def handle_pushback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     from filing_coverage import record_pushback
     record_pushback(form_type, field_name)
 
-    # Disarm to single "File another" button
-    await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup([
-        [InlineKeyboardButton("📂 File another case", callback_data="ACTION|file")],
-    ]))
+    # Disarm — remove all buttons, feedback noted
+    await query.edit_message_reply_markup(reply_markup=None)
 
 
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Top-level /cancel — clears state and returns to idle."""
+    """Top-level /cancel — clears state and returns to main menu."""
     user_id = update.effective_user.id
     context.user_data.clear()
     await update.message.reply_text(
-        _cancelled_next_step_text(user_id),
-        reply_markup=_build_next_step_keyboard(user_id),
+        "❌ Cancelled — back to the main menu.",
+        reply_markup=_build_welcome_keyboard(connected=has_credentials(user_id)),
     )
     return ConversationHandler.END
 
@@ -1694,10 +1960,12 @@ async def delete_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Reset conversation state and clear user data."""
+    user_id = update.effective_user.id
     context.user_data.clear()
     context.user_data["post_reset"] = True
     await update.message.reply_text(
-        "✅ Current case cleared. Your saved setup is unchanged.\n\nSend a case by text, voice, photo, or document whenever you're ready."
+        "✅ Cleared — back to the main menu.",
+        reply_markup=_build_welcome_keyboard(connected=has_credentials(user_id))
     )
     return ConversationHandler.END
 
@@ -1710,7 +1978,7 @@ HELP_MSG = """📖 *Portfolio Guru — Help*
 Send a case by text, voice note, photo, or document. I'll suggest the best WPBA types, show the chosen template and what's missing, then generate a draft for approval.
 
 *All 19 RCEM forms supported:*
-CBD · DOPS · Mini-CEX · ACAT · LAT · ACAF · STAT · MSF · QIAT · JCF · Teaching · Procedural Log · SDL · Ultrasound Case · ESLE · Complaint · Serious Incident · Educational Activity · Formal Course"""
+CBD · DOPS · Mini-CEX · ACAT · LAT · ACAF · STAT · MSF · QIAT · JCF · Teaching · Procedural Log · SDL · Ultrasound Case · ESLE Assessment · Complaint · Serious Incident · Educational Activity · Formal Course"""
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1953,7 +2221,9 @@ async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: in
     # Set tier for provider chain gating
     os.environ["CURRENT_USER_TIER"] = context.user_data.get("user_tier", "free")
     vp = get_voice_profile(user_id) or ""
-    if form_type == "CBD":
+    # Normalise _2021 suffix — extractor uses base form type for schema lookup
+    base_form_type = form_type[:-5] if form_type.endswith("_2021") else form_type
+    if base_form_type == "CBD":
         draft = await asyncio.wait_for(
             extract_cbd_data(
                 case_text,
@@ -1967,7 +2237,7 @@ async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: in
         draft = await asyncio.wait_for(
             extract_form_data(
                 case_text,
-                form_type,
+                base_form_type,
                 voice_profile_json=vp,
                 leave_missing_blank=True,
                 preserve_original_content=True,
@@ -2055,8 +2325,12 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
         )
         return AWAIT_FORM_CHOICE
 
-    rationale_lines = [f"• *{_form_display_name(r.form_type)}* - {r.rationale}" for r in recommendations if r.uuid]
-    rationale_text = "\n".join(rationale_lines) if rationale_lines else "• *Case-Based Discussion* - Clinical case discussion."
+    def _safe_rationale(text: str) -> str:
+        """Strip characters that break Telegram entity parsing in plain-text messages."""
+        return text.replace("_", " ").replace("*", "").replace("`", "").replace("[", "").replace("]", "")
+
+    rationale_lines = [f"• {_form_display_name(r.form_type)} — {_safe_rationale(r.rationale)}" for r in recommendations if r.uuid]
+    rationale_text = "\n".join(rationale_lines) if rationale_lines else "• Case-Based Discussion — Clinical case discussion."
 
     status_msg = context.user_data.pop("status_msg_id", None)
     status_chat = context.user_data.pop("status_msg_chat", None)
@@ -2075,19 +2349,16 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
                 message_id=status_msg,
                 text=prompt_text,
                 reply_markup=_build_form_choice_keyboard(recommendations, curriculum=get_curriculum(user_id)),
-                parse_mode="Markdown",
             )
         except Exception:
             await message.reply_text(
                 prompt_text,
                 reply_markup=_build_form_choice_keyboard(recommendations, curriculum=get_curriculum(user_id)),
-                parse_mode="Markdown",
             )
     else:
         await message.reply_text(
             prompt_text,
             reply_markup=_build_form_choice_keyboard(recommendations, curriculum=get_curriculum(user_id)),
-            parse_mode="Markdown",
         )
     return AWAIT_FORM_CHOICE
 
@@ -2108,17 +2379,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     elif data == "ACTION|setup":
+        # Handled entirely by setup_conv — clear case_conv state and let it through
         await query.answer()
-        user_id = update.effective_user.id
-        if has_credentials(user_id):
-            await query.message.reply_text(
-                "Your Kaizen account is already connected. Send me a case to get started.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📂 File a case", callback_data="ACTION|file")]
-                ])
-            )
-            return ConversationHandler.END
-        return await setup_start(update, context)
+        context.user_data.clear()
+        return ConversationHandler.END
 
     elif data == "ACTION|file":
         await query.answer()
@@ -2250,10 +2514,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
         # Disarm buttons immediately — prevents double-tap
         await query.edit_message_reply_markup(reply_markup=None)
+        user_id = update.effective_user.id
         context.user_data.clear()
         await query.message.reply_text(
-            _cancelled_next_step_text(update.effective_user.id),
-            reply_markup=_build_next_step_keyboard(update.effective_user.id),
+            "❌ Cancelled — back to the main menu.",
+            reply_markup=_build_welcome_keyboard(connected=has_credentials(user_id)),
         )
         return ConversationHandler.END
 
@@ -2847,7 +3112,8 @@ async def handle_form_search_text(update: Update, context: ContextTypes.DEFAULT_
     # Match against display names
     matches = []
     for ft in allowed:
-        label = FORM_BUTTON_LABELS.get(ft) or _form_display_name(ft)
+        base_ft_search = ft.replace("_2021", "") if ft.endswith("_2021") else ft
+        label = FORM_BUTTON_LABELS.get(ft) or FORM_BUTTON_LABELS.get(base_ft_search) or _form_display_name(base_ft_search)
         if query_text in label.lower() or query_text in ft.lower():
             base_ft = ft.replace("_2021", "") if ft.endswith("_2021") else ft
             emoji = FORM_EMOJIS.get(base_ft, "📄")
@@ -3108,19 +3374,22 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
 
     method = result.get("method", "deterministic")
 
-    # Build end keyboard — include "Something missing?" for success/partial
+    # Build end keyboard — feedback row + full home menu
+    _fb_suffix = f"|{form_type}|{status}"
+    _uid_end = update.effective_user.id
     feedback_row = [
-        InlineKeyboardButton("👍", callback_data="FEEDBACK|good"),
-        InlineKeyboardButton("👎", callback_data="FEEDBACK|bad"),
-        InlineKeyboardButton("📂 File another", callback_data="ACTION|file"),
+        InlineKeyboardButton("👍 Worked", callback_data=f"FEEDBACK|good{_fb_suffix}"),
+        InlineKeyboardButton("👎 Didn't work", callback_data=f"FEEDBACK|bad{_fb_suffix}"),
     ]
+    home_menu = _build_welcome_keyboard(connected=has_credentials(_uid_end))
     if status in ("success", "partial"):
-        end_keyboard = InlineKeyboardMarkup([
-            feedback_row,
-            [InlineKeyboardButton("Something missing?", callback_data=f"FILING|feedback|{form_type}")],
-        ])
+        # feedback + "Something missing?" + home menu rows
+        extra_rows = [[InlineKeyboardButton("Something missing?", callback_data=f"FILING|feedback|{form_type}")]]
+        end_keyboard = InlineKeyboardMarkup(
+            [feedback_row] + extra_rows + list(home_menu.inline_keyboard)
+        )
     else:
-        end_keyboard = InlineKeyboardMarkup([feedback_row])
+        end_keyboard = InlineKeyboardMarkup([feedback_row] + list(home_menu.inline_keyboard))
 
     # Track usage for successful filings
     usage_line = ""
@@ -3150,13 +3419,24 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             skipped_display = ", ".join(skipped_names[:3]) + f" + {len(skipped_names) - 3} more"
         else:
             skipped_display = ", ".join(skipped_names)
-        msg = (
-            f"✅ *{form_name} draft saved to Kaizen.*\n\n"
-            f"{len(filled)} fields filled from your case.\n"
-            f"{len(skipped)} left blank — not enough info to fill without guessing: {skipped_display}.\n\n"
-            f"Open your portfolio, complete those fields, then assign an assessor.{usage_line}"
-        )
-        status_line = "✅ Filing finished."
+        if error:
+            # Partial with error — save may not have worked
+            kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS.get(form_type, '')}" if FORM_UUIDS.get(form_type) else ""
+            link_text = f"\n\n[Open {form_name} manually in Kaizen]({kaizen_url})" if kaizen_url else ""
+            msg = (
+                f"⚠️ *{form_name} — filing had issues.*\n\n"
+                f"{len(filled)} fields filled, but: {error}\n\n"
+                f"Check your portfolio — the draft may not have saved.{link_text}{usage_line}"
+            )
+            status_line = "⚠️ Filing needs attention."
+        else:
+            msg = (
+                f"✅ *{form_name} draft saved to Kaizen.*\n\n"
+                f"{len(filled)} fields filled from your case.\n"
+                f"{len(skipped)} left blank — not enough info to fill without guessing: {skipped_display}.\n\n"
+                f"Open your portfolio, complete those fields, then assign an assessor.{usage_line}"
+            )
+            status_line = "✅ Filing finished."
     else:
         # Show manual link for Kaizen; generic message for other platforms
         if platform == "kaizen" and FORM_UUIDS.get(form_type):
@@ -3253,12 +3533,12 @@ async def handle_approval_submit(update: Update, context: ContextTypes.DEFAULT_T
                 form_name=form_name,
                 submit=True,
             ),
-            timeout=300,
+            timeout=420,  # 7 min — submit path skips verification, extra buffer
         )
     except asyncio.TimeoutError:
         context.user_data.clear()
         try:
-            await ack.edit_text("⏱ Filing timed out. The entry may have saved — check your portfolio directly.")
+            await ack.edit_text("⏱ Taking longer than expected — your entry has likely saved. Check your portfolio to confirm.")
         except Exception:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
@@ -3288,18 +3568,21 @@ async def handle_approval_submit(update: Update, context: ContextTypes.DEFAULT_T
     skipped = result.get("skipped", [])
     error = result.get("error")
 
-    feedback_row = [
-        InlineKeyboardButton("👍", callback_data="FEEDBACK|good"),
-        InlineKeyboardButton("👎", callback_data="FEEDBACK|bad"),
-        InlineKeyboardButton("📂 File another", callback_data="ACTION|file"),
+    _fb_suffix2 = f"|{form_type}|{status}"
+    _uid_end2 = update.effective_user.id
+    feedback_row2 = [
+        InlineKeyboardButton("👍 Worked", callback_data=f"FEEDBACK|good{_fb_suffix2}"),
+        InlineKeyboardButton("👎 Didn't work", callback_data=f"FEEDBACK|bad{_fb_suffix2}"),
     ]
+    home_menu2 = _build_welcome_keyboard(connected=has_credentials(_uid_end2))
     if status in ("success", "partial"):
-        end_keyboard = InlineKeyboardMarkup([
-            feedback_row,
-            [InlineKeyboardButton("Something missing?", callback_data=f"FILING|feedback|{form_type}")],
-        ])
+        end_keyboard = InlineKeyboardMarkup(
+            [feedback_row2,
+             [InlineKeyboardButton("Something missing?", callback_data=f"FILING|feedback|{form_type}")]]
+            + list(home_menu2.inline_keyboard)
+        )
     else:
-        end_keyboard = InlineKeyboardMarkup([feedback_row])
+        end_keyboard = InlineKeyboardMarkup([feedback_row2] + list(home_menu2.inline_keyboard))
 
     # Track usage for successful filings
     usage_line = ""
@@ -3324,13 +3607,23 @@ async def handle_approval_submit(update: Update, context: ContextTypes.DEFAULT_T
             skipped_display = ", ".join(skipped_names[:3]) + f" + {len(skipped_names) - 3} more"
         else:
             skipped_display = ", ".join(skipped_names)
-        msg = (
-            f"✅ *{form_name} submitted.*\n\n"
-            f"{len(filled)} fields filled from your case.\n"
-            f"{len(skipped)} left blank: {skipped_display}.\n\n"
-            f"Posted directly to your portfolio.{usage_line}"
-        )
-        status_line = "✅ Filing finished."
+        if error:
+            kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS.get(form_type, '')}" if FORM_UUIDS.get(form_type) else ""
+            link_text = f"\n\n[Open {form_name} manually in Kaizen]({kaizen_url})" if kaizen_url else ""
+            msg = (
+                f"⚠️ *{form_name} — filing had issues.*\n\n"
+                f"{len(filled)} fields filled, but: {error}\n\n"
+                f"Check your portfolio — the entry may not have saved.{link_text}{usage_line}"
+            )
+            status_line = "⚠️ Filing needs attention."
+        else:
+            msg = (
+                f"✅ *{form_name} submitted.*\n\n"
+                f"{len(filled)} fields filled from your case.\n"
+                f"{len(skipped)} left blank: {skipped_display}.\n\n"
+                f"Posted directly to your portfolio.{usage_line}"
+            )
+            status_line = "✅ Filing finished."
     else:
         if platform == "kaizen" and FORM_UUIDS.get(form_type):
             kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS[form_type]}"
@@ -3701,13 +3994,19 @@ async def unsigned_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     user_id = update.effective_user.id
     creds = get_credentials(user_id)
 
-    msg = await update.message.reply_text("Scanning for unsigned tickets...")
+    if not creds or not creds[0]:
+        await update.message.reply_text(
+            "You need to connect your Kaizen account first.\n\nUse /setup to get started.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("⚙️ Connect Kaizen", callback_data="ACTION|setup")
+            ]])
+        )
+        return
 
-    username = creds[0] if creds else ""
-    password = creds[1] if creds else ""
+    msg = await update.message.reply_text("🔍 Scanning for unsigned tickets...")
 
     try:
-        tickets = await scrape_unsigned_tickets(username, password)
+        tickets = await scrape_unsigned_tickets(creds[0], creds[1])
     except Exception as e:
         await msg.edit_text(f"Scraper error: {e}")
         return
@@ -3819,7 +4118,7 @@ def build_application() -> Application:
         entry_points=[
             # Let thin-case buttons re-enter the case conversation even if the
             # user taps them after the active state has been lost.
-            CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:file|reset|cancel|continue_thin)$"),
+            CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:file|reset|cancel|continue_thin|unsigned|status|health|help|voice)$"),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_case_input),
             MessageHandler(filters.VOICE, handle_case_input),
             MessageHandler(filters.PHOTO, handle_case_input),
@@ -3836,6 +4135,7 @@ def build_application() -> Application:
             AWAIT_FORM_CHOICE: [
                 CallbackQueryHandler(handle_form_choice, pattern=r"^FORM\|"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
+                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|retry_recommend$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
             ],
             AWAIT_FORM_SEARCH: [
@@ -3882,7 +4182,7 @@ def build_application() -> Application:
             CommandHandler("cancel", setup_cancel),
             CallbackQueryHandler(
                 handle_callback,
-                pattern=r"^(?:INFO\|.*|CANCEL\|.*|ACTION\|(?:file|setup|reset|cancel|continue_thin|retry_filing))$",
+                pattern=r"^(?:INFO\|.*|CANCEL\|.*|ACTION\|(?:file|reset|cancel|continue_thin|retry_filing|retry_recommend))$",
             ),
         ],
         per_message=False,
@@ -3893,7 +4193,10 @@ def build_application() -> Application:
 
     # Setup conversation handler
     setup_conv = ConversationHandler(
-        entry_points=[CommandHandler("setup", setup_start)],
+        entry_points=[
+            CommandHandler("setup", setup_start),
+            CallbackQueryHandler(setup_start, pattern=r"^ACTION\|setup$"),
+        ],
         states={
             AWAIT_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_username)],
             AWAIT_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_password)],
@@ -3927,7 +4230,7 @@ def build_application() -> Application:
     application.add_handler(
         CallbackQueryHandler(
             handle_action_button,
-            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|retry_filing$).+",
+            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|retry_filing$|setup$).+",
         )
     )
     application.add_handler(CallbackQueryHandler(handle_feedback, pattern=r"^FEEDBACK\|"))
@@ -4024,6 +4327,9 @@ def main():
 
     application = build_application()
     application.add_error_handler(error_handler)
+
+    # Weekly nudge — every 7 days. first=86400 means don't fire on startup.
+    application.job_queue.run_repeating(weekly_push, interval=604800, first=86400)
 
     # Register commands so they appear in Telegram's "/" menu
     async def post_init(app):

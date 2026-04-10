@@ -19,22 +19,22 @@ RCEM_KC_MAP = """RCEM Higher EM Curriculum (2025 Update) — Exact Kaizen Checkb
 SLO1: Care for acutely physiologically stable adult patients presenting to acute care across the full range of complexity (2025 Update)
   KC1: to be expert in assessing and managing all adult patients attending the ED. These capabilities will apply to patients attending with both physical and psychological ill health (2025 Update)
 
-SLO3: Support the ED team by answering clinical questions and making safe decisions (2025 Update)
+SLO2: Support the ED team by answering clinical questions and making safe decisions (2025 Update)
   KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)
   KC2: aware of when it is appropriate to review patients remotely or directly and able to teach these principles to others (2025 Update)
 
-SLO4: Care for acutely injured patients across the full range of complexity (2025 Update)
-  KC1: be expert in assessment, investigation and clinical management of patients attending with all injuries, regardless of complexity (2025 Update)
-  KC2: provide expert leadership of the Major Trauma Team (2025 Update)
-
-SLO5: Resuscitate and stabilise patients in the ED knowing when it is appropriate to stop (2025 Update)
+SLO3: Resuscitate and stabilise patients in the ED knowing when it is appropriate to stop (2025 Update)
   KC1: provide airway management & ventilatory support to critically ill patients (2025 Update)
   KC2: be expert in fluid management and circulatory support in critically ill patients (2025 Update)
   KC3: manage all the life-threatening conditions including peri-arrest & arrest situations in the ED (2025 Update)
   KC4: be expert in caring for ED patients and their relatives and loved ones at the end of the patient's life (2025 Update)
   KC5: effectively lead and support resuscitation teams (2025 Update)
 
-SLO6_PAEDS: Care for children of all ages, at all stages of development and with complex needs (2025 Update)
+SLO4: Care for acutely injured patients across the full range of complexity (2025 Update)
+  KC1: be expert in assessment, investigation and clinical management of patients attending with all injuries, regardless of complexity (2025 Update)
+  KC2: provide expert leadership of the Major Trauma Team (2025 Update)
+
+SLO5: Care for children of all ages, at all stages of development and with complex needs (2025 Update)
   KC1: be expert in assessing and managing all children and young adult patients attending the ED (2025 Update)
   KC2: be able to provide airway management & ventilatory support to critically ill paediatric patients (2025 Update)
   KC3: be able to lead and support a multidisciplinary paediatric resuscitation including trauma (2025 Update)
@@ -42,7 +42,7 @@ SLO6_PAEDS: Care for children of all ages, at all stages of development and with
   KC5: be able to manage all the life-threatening paediatric conditions including peri-arrest & arrest situations in the ED (2025 Update)
   KC6: be able to assess and formulate a management plan for children and young adults who present with complex medical and social needs (2025 Update)
 
-SLO6_PROC: Deliver key procedural skills needed in EM (2025 Update)
+SLO6: Deliver key procedural skills needed in EM (2025 Update)
   KC1: the clinical knowledge to identify when key EM practical/emergency skills are indicated (2025 Update)
   KC2: the knowledge and psychomotor skills to perform EM procedural skills safely and in a timely fashion (2025 Update)
   KC3: be able to supervise and guide colleagues in delivering procedural skills (2025 Update)
@@ -58,17 +58,17 @@ SLO8: Lead the ED shift (2025 Update)
   KC3: will maintain situational awareness throughout the shift to ensure safety is optimised (2025 Update)
   KC4: will anticipate challenges, generate options, make decisions and communicate these effectively to the team as lead clinician (2025 Update)
 
-SLO9_TEACH: Support, supervise & educate others working in the ED (2025 Update)
+SLO9: Support, supervise & educate others working in the ED (2025 Update)
   KC1: be able to undertake training and supervision of members of the ED team in the clinical environment (2025 Update)
   KC2: be able to prepare and deliver teaching sessions outside of the clinical environment, including simulation, small group work, and didactic presentations (2025 Update)
   KC3: be able to provide effective constructive feedback to colleagues, including debrief (2025 Update)
   KC4: understand the principles necessary to mentor and appraise junior doctors (2025 Update)
 
-SLO9_RESEARCH: Participate in research and manage data appropriately (2025 Update)
+SLO10: Participate in research and manage data appropriately (2025 Update)
   KC1: be able to appraise, synthesise, communicate and use research evidence to develop EM care (2025 Update)
   KC2: be able to actively participate in research (2025 Update)
 
-SLO10: Participate in & promote activity to improve quality & safety of patient care (2025 Update)
+SLO11: Participate in & promote activity to improve quality & safety of patient care (2025 Update)
   KC1: be able to provide clinical leadership on effective Quality Improvement work (2025 Update)
   KC2: be able to support and develop a culture of departmental safety, and good clinical governance (2025 Update)
 
@@ -99,9 +99,9 @@ PROVIDERS = [
         "env_key": "DEEPSEEK_API_KEY",
     },
     {
-        "name": "gpt-5.4-nano",
+        "name": "gpt-4o-mini",
         "type": "openai",
-        "model": "gpt-5.4-nano",
+        "model": "gpt-4o-mini",
         "env_key": "OPENAI_API_KEY",
     },
 ]
@@ -841,6 +841,9 @@ MGMT_* (Management Portfolio forms — Rota, Complaint, Critical Incident, Risk,
 
 3. Do NOT default to CBD for every case. CBD is appropriate for clinical case management discussions —
    if the description is purely a procedure, a teaching session, or a shift-level observation, CBD is wrong.
+   If the trainee is REFLECTING on a case (describing what they learned, what they'd do differently,
+   cognitive bias, professional development) — REFLECT_LOG is the PRIMARY suggestion, not CBD.
+   CBD and REFLECT_LOG can both appear, but reflection-framed descriptions → REFLECT_LOG first.
 
 4. ESLE is one of the hardest to trigger correctly. Only suggest it if the description explicitly mentions
    shift-level observation, a consultant watching across multiple cases/interactions, or NTS feedback.
@@ -852,7 +855,13 @@ MGMT_* (Management Portfolio forms — Rota, Complaint, Critical Incident, Risk,
 6. For teaching: distinguish between STAT (formal, observed, assessor evaluating teaching),
    TEACH (informal/bedside, no formal observation needed), and EDU_ACT (trainee was the learner).
 
-7. Return ONLY a JSON array. No markdown, no explanation outside the JSON.
+7. Reflection signals — if the description contains ANY of these, include REFLECT_LOG in suggestions:
+   - "I learned", "I realise", "I now know", "I would do differently", "fixation bias", "cognitive bias",
+   - "missed", "overlooked", "on reflection", "looking back", "this taught me", "I reflect"
+   - Describing a case where something went wrong and the trainee is processing it
+   In these cases REFLECT_LOG should appear first OR alongside CBD — never be omitted.
+
+8. Return ONLY a JSON array. No markdown, no explanation outside the JSON.
    Format: [{"form_type": "CBD", "rationale": "one-line reason specific to this case"}, ...]
 
 === END DEFINITIONS ==="""
@@ -1001,12 +1010,19 @@ KCs are what matter — SLOs are just grouping labels derived automatically from
 
 INSTRUCTIONS:
 1. Read the full case description.
-2. Go through the KC list above and ask: "Does this case directly demonstrate this specific capability?"
-3. Select every KC where the answer is YES — there is no upper limit per SLO.
-4. Do NOT default to KC1 for each SLO. Read each KC description carefully.
-5. Aim for 3-6 KCs total across the whole case. More is better than fewer if warranted.
-6. Use the FULL KC text exactly as written above (including the "(2025 Update)" suffix).
-7. Format each as: "SLO_CODE KC_NUM: full description text (2025 Update)"
+2. For each SLO that is relevant to the case, read KC2, KC3, KC4... FIRST. Ask: does this case directly demonstrate THIS specific numbered capability?
+3. Only consider KC1 for an SLO after checking the higher KCs. KC1 is a broad fallback — only include it if the case demonstrates something KC2+ does not already cover for that SLO.
+4. Select KCs where the answer is YES. There is no minimum or target number — select exactly what fits, nothing more.
+5. Use the FULL KC text exactly as written above (including the "(2025 Update)" suffix).
+6. Format each as: "SLO_CODE KC_NUM: full description text (2025 Update)"
+
+KC1 RULE (critical): KC1 for most SLOs is written so broadly it technically fits any clinical case.
+Do NOT select KC1 just because it "could apply". Only select KC1 if:
+- The case specifically demonstrates something unique to KC1 that KC2+ does not cover, OR
+- KC1 is the only KC for that SLO
+
+Examples of KC1 being WRONG: selecting SLO1 KC1 just because a patient was assessed. Selecting SLO3 KC1 just because a decision was made. These are true of every case — they add no specificity.
+Examples of KC1 being RIGHT: selecting SLO5 KC1 when the trainee performed airway management (KC1 is specific here). Selecting SLO9_RESEARCH KC1 when the trainee critically appraised evidence (only KC for research).
 
 HARD RULES — only select if DIRECTLY demonstrated:
 - Resuscitation KCs (SLO5): only if patient was actually resuscitated, intubated, arrested
@@ -1093,12 +1109,21 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
         "date_of_encounter": _normalise_text_field(data.get("date_of_encounter"), leave_missing_blank, ""),
         "patient_age": _normalise_text_field(data.get("patient_age"), leave_missing_blank, ""),
         "patient_presentation": _normalise_text_field(data.get("patient_presentation"), leave_missing_blank, ""),
-        "clinical_setting": _normalise_text_field(data.get("clinical_setting"), leave_missing_blank, ""),
+        "clinical_setting": _normalise_dropdown_field(
+            data.get("clinical_setting"),
+            ["Emergency Department", "Acute Medical Ward", "Paediatric Emergency Department",
+             "Intensive Care Unit", "Emergency Department Observation Unit", "Minor Injury Unit", "Other"],
+            leave_missing_blank
+        ),
         "stage_of_training": _normalise_text_field(data.get("stage_of_training"), leave_missing_blank, ""),
         "trainee_role": _normalise_text_field(data.get("trainee_role"), leave_missing_blank, ""),
         "clinical_reasoning": _normalise_text_field(data.get("clinical_reasoning"), leave_missing_blank, ""),
         "reflection": _normalise_text_field(data.get("reflection"), leave_missing_blank, ""),
-        "level_of_supervision": _normalise_text_field(data.get("level_of_supervision"), leave_missing_blank, ""),
+        "level_of_supervision": _normalise_dropdown_field(
+            data.get("level_of_supervision"),
+            ["Direct", "Indirect", "Distant"],
+            leave_missing_blank
+        ),
         "supervisor_name": _normalise_text_field(data.get("supervisor_name"), leave_missing_blank, ""),
         "curriculum_links": _normalise_list_field(data.get("curriculum_links")),
         "key_capabilities": _normalise_list_field(data.get("key_capabilities")),
@@ -1120,10 +1145,12 @@ async def extract_form_data(
     preserve_original_content: bool = True,
 ) -> FormDraft:
     """Extract structured data for any non-CBD form type."""
-    if form_type not in FORM_SCHEMAS:
+    # _2021 variants share the same schema as the base form — strip suffix for lookup
+    schema_key = form_type[:-5] if form_type.endswith("_2021") and form_type not in FORM_SCHEMAS else form_type
+    if schema_key not in FORM_SCHEMAS:
         raise ValueError(f"Unknown form type: {form_type}")
 
-    schema = FORM_SCHEMAS[form_type]
+    schema = FORM_SCHEMAS[schema_key]
     client = _get_client()
     missing_text_instruction = (
         'If a field cannot be filled from the case description, return an empty string "" for text/date/dropdown fields and [] for multi-select or curriculum fields.'
@@ -1158,7 +1185,7 @@ async def extract_form_data(
     json_template = "{\n" + ",\n".join([f'  "{k}": "<extracted value>"' for k in field_keys]) + "\n}"
 
     # Check if this is a reflection-style form
-    reflection_forms = {"SDL", "US_CASE", "ESLE", "COMPLAINT", "SERIOUS_INC", "EDU_ACT", "FORMAL_COURSE"}
+    reflection_forms = {"SDL", "US_CASE", "ESLE", "COMPLAINT", "SERIOUS_INC", "EDU_ACT", "FORMAL_COURSE", "REFLECT_LOG"}
     is_reflection = form_type in reflection_forms
 
     reflection_instruction = """
@@ -1166,6 +1193,24 @@ This is a self-reflection form. The trainee is reflecting on their own experienc
 Write all text fields in first person ("I managed...", "I reflected on...", "I learned...").
 Use British English spelling. Write professionally but naturally.
 """ if is_reflection else ""
+
+    # REFLECT_LOG-specific field scoping — prevents repetition across 7 narrative fields
+    reflect_log_instruction = """
+===== REFLECT_LOG FIELD SCOPING (mandatory — prevents repetition) =====
+
+Each field has a distinct purpose. Do NOT repeat clinical facts across fields.
+Each point should appear in EXACTLY ONE field.
+
+Field scoping rules:
+- reflection (Description / What happened): Clinical narrative only — what occurred, what you observed, what you did. No learning points, no "I would", no "I now know". Pure account of events.
+- replay_differently (What would you do differently): ONE specific concrete action. One sentence or two max. Do not explain WHY here — that is the next field.
+- why (Why): The reason behind the "differently" answer. Focus on the cognitive or systemic cause (e.g. fixation bias, workload). Do not repeat the clinical story.
+- different_outcome (Would the outcome be different): Direct yes/no answer + one sentence on the specific impact. Do not restate the diagnosis or the error — just the counterfactual outcome.
+- focussing_on (What are you focussing on): Forward-looking only — what practice change or learning goal you are now working on. Not what happened. Not what you learned. What you will DO differently going forward.
+- learned (What have you learned): Distil to 1-2 genuine learning points. Do not repeat the clinical narrative. Do not repeat focussing_on content. What insight did this case give you?
+
+Anti-repetition rule: if you find yourself writing the words "ECG", "atrial flutter", "fixation bias" (or any other case-specific term) in more than two fields — stop and redistribute. Each key concept appears in ONE field only.
+""" if form_type == "REFLECT_LOG" else ""
 
     today = date.today()
     yesterday = today - timedelta(days=1)
@@ -1176,18 +1221,37 @@ Use British English spelling. Write professionally but naturally.
     system_prompt = f"""You are a medical portfolio assistant. Extract data for a {schema['name']} ({form_type}) WPBA entry.
 
 Today's date: {today_str} ({day_of_week}). Yesterday: {yesterday_str}.
-{reflection_instruction}
+{reflection_instruction}{reflect_log_instruction}
 Return ONLY a JSON object with these exact keys:
 {json_template}
 
 Field definitions:
 {chr(10).join(field_defs)}
 
+===== REQUIRED vs OPTIONAL FIELDS =====
+
+Fields marked required: yes MUST be filled. If the case does not explicitly mention the needed
+information, infer it from context where reasonable (e.g. clinical setting from the department
+mentioned, stage of training from the trainee's grade if stated). If inference is not possible,
+write a placeholder that will make the field reviewable rather than leaving it blank.
+
+Fields marked required: no are OPTIONAL. Fill them ONLY if the case genuinely provides
+information that belongs in that field. If a field is optional and the case does not provide
+applicable content, leave it as an empty string "" (or [] for list fields).
+
+DO NOT fabricate content for optional fields. DO NOT restate information from other fields
+just to populate an optional field. An empty optional field is correct and expected.
+
+This mirrors how doctors actually fill in their own portfolios — they fill what they experienced,
+not every box for completeness.
+
 Rules:
 - For dropdown fields: return ONLY one of the listed options. If the case does not explicitly support one option, return an empty string.
 - For multi_select fields: return a list of values from the listed options. If none are explicit, return [].
 - For kc_tick fields (curriculum_links): return a list of SLO codes ONLY e.g. ["SLO1", "SLO8"].
-  Separately, populate "key_capabilities" with FULL KC description strings for those SLOs — include ALL that genuinely fit the case, minimum 1. Do NOT pad to reach any minimum number. Do NOT include a KC unless the case explicitly demonstrates it. Quality over quantity.
+  Separately, populate "key_capabilities" with FULL KC description strings for those SLOs.
+  KC SELECTION RULE: For each relevant SLO, check KC2, KC3, KC4... FIRST. Only include KC1 if no higher-numbered KC fits, or if KC1 captures something specific that the others do not. KC1 for SLO1 and SLO3 are extremely broad — do NOT select them just because a patient was assessed or a decision was made. That is true of every case and adds no value.
+  Do NOT pad to reach any minimum number. Do NOT include a KC unless the case explicitly demonstrates it. Quality over quantity.
   Format each KC as: "SLO8 KC1: will provide support to ED staff at all levels... (2025 Update)"
   Use EXACT text from the map. curriculum_links = codes only. key_capabilities = full strings.
   If the form has a kc_tick field, always include "key_capabilities" in the JSON too.

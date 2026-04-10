@@ -73,7 +73,7 @@ _kaizen_uuids = None
 def _get_kaizen_uuids():
     global _kaizen_uuids
     if _kaizen_uuids is None:
-        from kaizen_filer import FORM_UUIDS
+        from kaizen_form_filer import FORM_UUIDS
         _kaizen_uuids = FORM_UUIDS
     return _kaizen_uuids
 
@@ -87,6 +87,7 @@ async def route_filing(
     form_name: Optional[str] = None,
     platform_url: Optional[str] = None,
     form_url: Optional[str] = None,
+    submit: bool = False,
 ) -> Dict[str, Any]:
     """
     Route a filing request to the appropriate filer.
@@ -126,12 +127,15 @@ async def route_filing(
         else:
             # Playwright is reliable — use deterministic path
             logger.info(f"Using deterministic filer for {platform}/{form_type}")
-            result = await _route_deterministic(platform_lower, form_type, fields, credentials, curriculum_links)
+            result = await _route_deterministic(platform_lower, form_type, fields, credentials, curriculum_links, submit=submit)
 
             # Auto-escalation: if Playwright returned partial with important fields skipped
+            # OR if no fields were filled at all (no DOM mapping for this form type)
             skipped = set(result.get("skipped", []))
+            filled = result.get("filled", [])
             important_skipped = skipped & {"curriculum_links", "key_capabilities"}
-            if result["status"] == "partial" and important_skipped:
+            no_fields_filled = result["status"] == "partial" and len(filled) == 0
+            if result["status"] == "partial" and (important_skipped or no_fields_filled):
                 logger.info(f"Playwright partial for {form_type}, escalating to browser-use (skipped: {important_skipped})")
                 # Record the partial Playwright run
                 record_run(form_type, "deterministic", result.get("filled", []), result.get("skipped", []))
@@ -174,7 +178,7 @@ async def route_filing(
     # Record browser-use run
     record_run(form_type, "browser-use", result.get("filled", []), result.get("skipped", []))
 
-    # DOM learning: if browser-use discovered new UUIDs, patch kaizen_filer.py
+    # DOM learning: if browser-use discovered new UUIDs, patch kaizen_form_filer.py
     if result.get("discovered_uuids"):
         try:
             from dom_learner import learn_from_browser_use_run
@@ -193,16 +197,18 @@ async def _route_deterministic(
     fields: Dict[str, Any],
     credentials: Dict[str, str],
     curriculum_links: Optional[List[str]],
+    submit: bool = False,
 ) -> Dict[str, Any]:
     """Route to the deterministic Playwright filer."""
     if platform == "kaizen":
-        from kaizen_filer import file_to_kaizen
+        from kaizen_form_filer import file_to_kaizen
         result = await file_to_kaizen(
             form_type=form_type,
             fields=fields,
             username=credentials["username"],
             password=credentials["password"],
             curriculum_links=curriculum_links,
+            submit=submit,
         )
         result["method"] = "deterministic"
         return result

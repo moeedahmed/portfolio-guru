@@ -1,0 +1,12 @@
+{
+  "TEST_FORM": {
+    "uuid": "test-123",
+    "group": "Test",
+    "fields": [
+      {
+        "label": "Test Field",
+        "type": "text"
+      }
+    ]
+  }
+}

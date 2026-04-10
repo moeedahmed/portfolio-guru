@@ -143,6 +143,7 @@ def _build_task_prompt(
     form_url: Optional[str],
     form_name: str,
     fields: Dict[str, Any],
+    credentials: Dict[str, str],
     curriculum_links: Optional[List[str]] = None,
 ) -> str:
     """Build the browser-use agent task prompt."""
@@ -186,7 +187,7 @@ If you cannot find the curriculum section, skip this step and note it."""
 
 STEPS:
 1. Go to {platform_url}
-2. Log in using the credentials provided (username: x_username, password: x_password)
+2. Log in using these credentials — username: {credentials["username"]}  password: {credentials["password"]}
    - Wait for the page to fully load after login (SPAs may take 10-20 seconds)
    - If you see an organisation/institution selector, choose the relevant one
    - If you see a "shared device" popup, dismiss it
@@ -301,20 +302,22 @@ async def file_with_browser_use(
         except Exception:
             pass
 
-    # Build the task prompt
+    # Build the task prompt (credentials interpolated directly — sensitive_data
+    # domain matching is unreliable across RCEM→Kaizen redirects)
     task = _build_task_prompt(
         platform_url=platform_url,
         form_url=form_url,
         form_name=form_name,
         fields=fields,
+        credentials=credentials,
         curriculum_links=curriculum_links,
     )
 
-    # Prepare sensitive data with domain locking
+    # Sensitive data still provided for any browser-use internal masking
     sensitive_data = {
         base_domain: {
-            "x_username": credentials["username"],
-            "x_password": credentials["password"],
+            credentials["username"]: credentials["username"],
+            credentials["password"]: credentials["password"],
         }
     }
 

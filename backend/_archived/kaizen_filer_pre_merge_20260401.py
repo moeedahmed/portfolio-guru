@@ -172,6 +172,56 @@ FORM_UUIDS = {
     "OOP":                "2b023326-a34f-463e-a921-bf215599b0ac",
 }
 
+# ─── Form display names (as they appear in Kaizen's "Saved drafts" section) ──
+
+FORM_DISPLAY_NAMES = {
+    "CBD":           "CBD",
+    "DOPS":          "DOPS",
+    "LAT":           "LAT",
+    "ACAT":          "ACAT",
+    "ACAF":          "ACAF",
+    "STAT":          "STAT",
+    "MSF":           "MSF",
+    "MINI_CEX":      "Mini-CEX",
+    "JCF":           "JCF",
+    "QIAT":          "QIAT",
+    "TEACH":         "Teaching Observation",
+    "PROC_LOG":      "Procedural Skills Log",
+    "SDL":           "Self-Directed Learning",
+    "US_CASE":       "Ultrasound Case",
+    "ESLE_ASSESS":   "ESLE",
+    "COMPLAINT":     "Complaint",
+    "SERIOUS_INC":   "Serious Incident",
+    "EDU_ACT":       "Educational Activity",
+    "FORMAL_COURSE": "Formal Course",
+    "REFLECT_LOG":   "Reflective Practice Log",
+    "TEACH_OBS":          "Teaching Observation Tool",
+    "TEACH_CONFID":       "Teach Confidentiality",
+    "AUDIT":              "Audit",
+    "RESEARCH":           "Research",
+    "APPRAISAL":          "Appraisal",
+    "PDP":                "Personal Development Plan",
+    "BUSINESS_CASE":      "Business Case",
+    "CLIN_GOV":           "Clinical Governance",
+    "EDU_MEETING":        "Educational Meeting",
+    "EDU_MEETING_SUPP":   "Educational Meeting Supplementary",
+    "CRIT_INCIDENT":      "Critical Incident",
+    "COST_IMPROVE":       "Cost Improvement Plan",
+    "EQUIP_SERVICE":      "Introduction of Equipment",
+    "MGMT_ROTA":          "Management: Rota",
+    "MGMT_RISK":          "Management: Risk Register",
+    "MGMT_RECRUIT":       "Management: Recruitment",
+    "MGMT_PROJECT":       "Management: Project Record",
+    "MGMT_RISK_PROC":     "Management: Procedure to Reduce Risk",
+    "MGMT_TRAINING_EVT":  "Management: Organising a Training Event",
+    "MGMT_GUIDELINE":     "Management: Introduction of Guideline",
+    "MGMT_INFO":          "Management: Information Management",
+    "MGMT_INDUCTION":     "Management: Induction Programme",
+    "MGMT_EXPERIENCE":    "Management: Experience",
+    "MGMT_REPORT":        "Management: Writing a Report",
+    "MGMT_COMPLAINT":     "Management: Complaint",
+}
+
 
 # ─── Field → DOM ID mapping ─────────────────────────────────────────────────
 # Maps schema field keys to Kaizen DOM element IDs.
@@ -1221,6 +1271,198 @@ async def _attach_file(page: Page, file_path: str) -> bool:
         return False
 
 
+# ─── Draft deduplication ─────────────────────────────────────────────────────
+
+async def _find_existing_draft(page: Page, form_type: str) -> bool:
+    """
+    Navigate to the activities page and look for a saved draft matching this form type.
+    If found, click into it so the page is now on the existing draft form.
+
+    Returns True if an existing draft was found and opened, False otherwise.
+    """
+    display_name = FORM_DISPLAY_NAMES.get(form_type, form_type)
+    logger.info(f"Looking for existing draft of type '{display_name}' ({form_type})")
+
+    try:
+        await page.goto("https://kaizenep.com/activities", wait_until="domcontentloaded", timeout=40000)
+        await asyncio.sleep(4)
+
+        # Look for a "Saved drafts" section — Kaizen shows drafts in a collapsible section
+        # Try expanding it if collapsed
+        drafts_header = page.locator("text=Saved drafts").first
+        try:
+            if await drafts_header.is_visible(timeout=3000):
+                await drafts_header.click()
+                await asyncio.sleep(1)
+        except Exception:
+            pass  # Section may already be expanded or not exist
+
+        # Search for a draft row matching this form type
+        # Kaizen draft rows contain the form type name as text
+        # Try exact display name first, then form_type code as fallback
+        for search_text in [display_name, form_type]:
+            draft_link = page.locator(f"a:has-text('{search_text}')").first
+            try:
+                if await draft_link.is_visible(timeout=3000):
+                    logger.info(f"Found existing draft matching '{search_text}' — clicking into it")
+                    await draft_link.click()
+                    await page.wait_for_load_state("domcontentloaded", timeout=30000)
+                    await asyncio.sleep(5)  # Kaizen SPA is slow
+                    logger.info(f"Opened existing draft at: {page.url}")
+                    return True
+            except Exception:
+                continue
+
+        # Also try partial match within draft-specific containers
+        # Some Kaizen layouts use table rows or card elements for drafts
+        for selector in [
+            "tr:has-text('draft')",
+            "[class*='draft']",
+            "[class*='saved']",
+        ]:
+            try:
+                rows = page.locator(selector)
+                count = await rows.count()
+                for i in range(count):
+                    row = rows.nth(i)
+                    row_text = await row.inner_text()
+                    if display_name.lower() in row_text.lower() or form_type.lower() in row_text.lower():
+                        # Found a matching draft row — click the link inside it
+                        link = row.locator("a").first
+                        if await link.is_visible(timeout=2000):
+                            logger.info(f"Found draft in '{selector}' row: {row_text[:80]}")
+                            await link.click()
+                            await page.wait_for_load_state("domcontentloaded", timeout=30000)
+                            await asyncio.sleep(5)
+                            logger.info(f"Opened existing draft at: {page.url}")
+                            return True
+            except Exception:
+                continue
+
+        logger.info(f"No existing draft found for '{display_name}' — will create new")
+        return False
+
+    except Exception as e:
+        logger.warning(f"Draft search failed ({e}) — will create new form")
+        return False
+
+
+async def delete_all_drafts_of_type(
+    form_type: str,
+    username: str,
+    password: str,
+    max_deletions: int = 100,
+) -> Dict[str, Any]:
+    """
+    Utility to delete all saved drafts of a given form type.
+    Use to clean up duplicate drafts.
+
+    Returns:
+        {"deleted": int, "errors": int, "error": str|None}
+    """
+    display_name = FORM_DISPLAY_NAMES.get(form_type, form_type)
+    deleted = 0
+    errors = 0
+    browser = None
+    cdp_pw = None
+    use_cdp = KAIZEN_USE_CDP
+
+    try:
+        page = None
+        if use_cdp:
+            page, cdp_pw = await connect_cdp_browser()
+            if page is None:
+                use_cdp = False
+
+        if not use_cdp:
+            pw = await async_playwright().start()
+            cdp_pw = pw
+            browser = await pw.chromium.launch(headless=True)
+            page = await browser.new_page()
+
+        if use_cdp and "kaizenep.com" in page.url:
+            logger.info("CDP: already logged in, skipping login")
+        else:
+            if not await _login(page, username, password):
+                return {"deleted": 0, "errors": 0, "error": "Login failed"}
+
+        for iteration in range(max_deletions):
+            await page.goto("https://kaizenep.com/activities", wait_until="domcontentloaded", timeout=40000)
+            await asyncio.sleep(4)
+
+            # Try to expand Saved drafts section
+            drafts_header = page.locator("text=Saved drafts").first
+            try:
+                if await drafts_header.is_visible(timeout=3000):
+                    await drafts_header.click()
+                    await asyncio.sleep(1)
+            except Exception:
+                pass
+
+            # Find a draft link matching this form type
+            found = False
+            for search_text in [display_name, form_type]:
+                draft_link = page.locator(f"a:has-text('{search_text}')").first
+                try:
+                    if await draft_link.is_visible(timeout=3000):
+                        await draft_link.click()
+                        await page.wait_for_load_state("domcontentloaded", timeout=30000)
+                        await asyncio.sleep(3)
+                        found = True
+                        break
+                except Exception:
+                    continue
+
+            if not found:
+                logger.info(f"No more drafts of type '{display_name}' to delete — done after {deleted} deletions")
+                break
+
+            # Look for a delete/discard button on the draft form
+            for btn_text in ["Delete", "Discard", "Remove", "Delete draft", "Discard draft"]:
+                delete_btn = page.locator(f"button:has-text('{btn_text}')").first
+                try:
+                    if await delete_btn.is_visible(timeout=2000):
+                        await delete_btn.click()
+                        await asyncio.sleep(1)
+                        # Handle confirmation dialog if present
+                        for confirm_text in ["Confirm", "Yes", "OK", "Delete"]:
+                            confirm_btn = page.locator(f"button:has-text('{confirm_text}')").first
+                            try:
+                                if await confirm_btn.is_visible(timeout=2000):
+                                    await confirm_btn.click()
+                                    await asyncio.sleep(2)
+                                    break
+                            except Exception:
+                                continue
+                        deleted += 1
+                        logger.info(f"Deleted draft #{deleted} of type '{display_name}'")
+                        break
+                except Exception:
+                    continue
+            else:
+                logger.warning(f"Could not find delete button on draft form — skipping")
+                errors += 1
+                if errors >= 3:
+                    break
+
+        return {"deleted": deleted, "errors": errors, "error": None}
+
+    except Exception as e:
+        logger.error(f"Draft deletion error: {e}", exc_info=True)
+        return {"deleted": deleted, "errors": errors, "error": str(e)}
+    finally:
+        if browser and not use_cdp:
+            try:
+                await browser.close()
+            except Exception:
+                pass
+        if cdp_pw:
+            try:
+                await cdp_pw.stop()
+            except Exception:
+                pass
+
+
 # ─── Main entry point ────────────────────────────────────────────────────────
 
 async def file_to_kaizen(
@@ -1232,6 +1474,7 @@ async def file_to_kaizen(
     submit: bool = False,
     attachment_path: Optional[str] = None,
     attachment_drive_url: Optional[str] = None,
+    reuse_draft: bool = True,
 ) -> Dict[str, Any]:
     """
     File a form to Kaizen as a draft.
@@ -1245,6 +1488,8 @@ async def file_to_kaizen(
         submit: If True, submit instead of saving as draft
         attachment_path: Optional local file path to attach (PDF, certificate, etc.)
         attachment_drive_url: Optional Google Drive URL to download and attach
+        reuse_draft: If True (default), look for an existing draft of this form type
+                     and overwrite it instead of creating a new one
 
     Returns:
         {
@@ -1293,15 +1538,20 @@ async def file_to_kaizen(
             if not await _login(page, username, password):
                 return {"status": "failed", "filled": [], "skipped": [], "error": "Login failed"}
 
-        # Navigate to form
-        form_url = f"https://kaizenep.com/events/new-section/{uuid}"
-        await page.goto(form_url, wait_until="networkidle", timeout=30000)
-        await asyncio.sleep(5)  # Kaizen SPA is slow
+        # Navigate to form (reuse existing draft if enabled)
+        reused_draft = False
+        if reuse_draft:
+            reused_draft = await _find_existing_draft(page, form_type)
 
-        # Verify we're on the form page
-        if "new-section" not in page.url:
-            return {"status": "failed", "filled": [], "skipped": [],
-                    "error": f"Form page didn't load — redirected to {page.url}"}
+        if not reused_draft:
+            form_url = f"https://kaizenep.com/events/new-section/{uuid}"
+            await page.goto(form_url, wait_until="networkidle", timeout=30000)
+            await asyncio.sleep(5)  # Kaizen SPA is slow
+
+            # Verify we're on the form page
+            if "new-section" not in page.url:
+                return {"status": "failed", "filled": [], "skipped": [],
+                        "error": f"Form page didn't load — redirected to {page.url}"}
 
         # Fill stage_of_training FIRST — curriculum checkboxes appear after
         if "stage_of_training" in field_map:

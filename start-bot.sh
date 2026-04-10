@@ -1,10 +1,7 @@
 #!/bin/zsh
-# Portfolio Guru bot launcher
-# Loads env vars from .env and starts the bot
+# Portfolio Guru bot launcher (local)
+# Canonical path: load secrets via BWS (backend/run_local.sh)
 
-cd "$(dirname "$0")/backend"
-set -a
-source .env
-set +a
-
-exec venv/bin/python3 bot.py
+set -e
+cd "$(dirname "$0")"
+exec bash backend/run_local.sh

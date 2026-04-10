@@ -74,8 +74,8 @@
     'text': '''
       Suggested WPBA types for this case:
       
-      • *Case-Based Discussion* - Best fit for a reflective clinical case.
-      • *Acute Care Assessment Tool* - The case spans multiple patients across a shift.
+      • Case-Based Discussion — Best fit for a reflective clinical case.
+      • Acute Care Assessment Tool — The case spans multiple patients across a shift.
       
       Pick one and I'll show that template plus anything still missing.
     ''',

@@ -1,0 +1,10 @@
+[
+  {
+    "date": "2026-03-21",
+    "form_type": "REFLECT_LOG",
+    "field": "date_of_encounter",
+    "uuid": "32d0fcb9-05d0-4d6d-b877-ebd5daf0b4e9",
+    "source": "browser-use run #1",
+    "patched": false
+  }
+]

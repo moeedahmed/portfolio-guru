@@ -5,7 +5,7 @@ from datetime import datetime
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from telegram import Update
-from models import FileRequest, FileResponse
+from models import FileRequest, FileResponse, KaizenFillRequest, KaizenFillResponse
 from extractor import extract_cbd_data
 from filer import file_cbd_to_kaizen
 from store import init
@@ -96,3 +96,28 @@ async def file_entry(request: FileRequest):
         screenshot_url=screenshot_url,
         assessor_warning=assessor_warning,
     )
+
+
+@app.post("/api/kaizen/file", response_model=KaizenFillResponse)
+async def kaizen_file(request: KaizenFillRequest):
+    from kaizen_form_filer import fill_kaizen_form
+
+    username = os.environ.get("KAIZEN_USERNAME")
+    password = os.environ.get("KAIZEN_PASSWORD")
+    if not username or not password:
+        raise HTTPException(status_code=500, detail="Kaizen credentials not configured")
+
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    screenshot_path = f"/tmp/portfolio-guru-screenshots/kaizen-{request.form_type.lower()}-{ts}.png"
+    os.makedirs(os.path.dirname(screenshot_path), exist_ok=True)
+
+    result = await fill_kaizen_form(
+        form_type=request.form_type,
+        fields=request.fields,
+        username=username,
+        password=password,
+        draft_uuid=request.draft_uuid,
+        save_as_draft=request.save_as_draft,
+        screenshot_path=screenshot_path,
+    )
+    return KaizenFillResponse(**result)

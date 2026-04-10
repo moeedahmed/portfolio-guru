@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Kaizen Portfolio Form Mapper</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 700px; margin: 40px auto; padding: 20px; line-height: 1.6; }
+        h1 { font-size: 24px; margin-bottom: 5px; }
+        .subtitle { color: #666; margin-bottom: 30px; }
+        .step { margin: 20px 0; padding: 15px; background: #f5f5f5; border-radius: 8px; }
+        .step h3 { margin-top: 0; color: #1a1a1a; }
+        .step-num { display: inline-block; width: 28px; height: 28px; background: #2563eb; color: white; text-align: center; line-height: 28px; border-radius: 50%; font-weight: bold; margin-right: 8px; }
+        code { background: #e8e8e8; padding: 2px 6px; border-radius: 3px; font-size: 13px; }
+        textarea { width: 100%; height: 100px; font-family: monospace; font-size: 11px; margin-top: 10px; border: 2px solid #2563eb; border-radius: 6px; padding: 8px; }
+        .copy-btn { display: inline-block; padding: 10px 20px; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold; margin-top: 8px; }
+        .copy-btn:hover { background: #1d4ed8; }
+        .warning { padding: 12px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px; margin: 15px 0; }
+        .safe { padding: 12px; background: #d1fae5; border-left: 4px solid #10b981; border-radius: 4px; margin: 15px 0; }
+        .progress-info { padding: 12px; background: #eff6ff; border-left: 4px solid #3b82f6; border-radius: 4px; }
+        ul { padding-left: 20px; }
+        li { margin: 4px 0; }
+    </style>
+</head>
+<body>
+    <h1>📋 Kaizen Portfolio Form Mapper</h1>
+    <p class="subtitle">Extracts all form types and their field structures from your Kaizen ePortfolio.<br>This helps build an AI tool that auto-fills portfolio forms for doctors.</p>
+
+    <div class="safe">
+        ✅ <strong>This is read-only.</strong> It reads form names and field labels from pages you can already see. It does not modify anything, submit any forms, or access your personal data/submissions.
+    </div>
+
+    <div class="step">
+        <h3><span class="step-num">1</span> Log into your Kaizen portfolio</h3>
+        <p>Go to <a href="https://eportfolio.rcem.ac.uk" target="_blank">eportfolio.rcem.ac.uk</a> and log in as normal. Wait for the dashboard to load.</p>
+    </div>
+
+    <div class="step">
+        <h3><span class="step-num">2</span> Go to "Add an activity"</h3>
+        <p>Click <strong>"Add an activity"</strong> in the menu, or go directly to <a href="https://kaizenep.com/events/new" target="_blank">kaizenep.com/events/new</a>. Wait for the list of forms to appear.</p>
+    </div>
+
+    <div class="step">
+        <h3><span class="step-num">3</span> Open the browser console</h3>
+        <ul>
+            <li><strong>Chrome/Edge:</strong> Press <code>F12</code> then click <strong>Console</strong> tab</li>
+            <li><strong>Mac:</strong> Press <code>Cmd + Option + J</code></li>
+            <li><strong>Firefox:</strong> Press <code>F12</code> then click <strong>Console</strong> tab</li>
+        </ul>
+    </div>
+
+    <div class="step">
+        <h3><span class="step-num">4</span> Copy and paste this script</h3>
+        <p>Click the box below to select all, then <code>Ctrl+C</code> / <code>Cmd+C</code> to copy. Paste it into the console and press <strong>Enter</strong>.</p>
+        <textarea id="script" readonly onclick="this.select()">(async function(){var status=document.createElement('div');status.style.cssText='position:fixed;top:20px;right:20px;background:#1e40af;color:white;padding:15px 20px;border-radius:8px;z-index:99999;font-family:sans-serif;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.3);min-width:300px';status.innerHTML='📋 Scanning forms... <span id="prog">0</span> found';document.body.appendChild(status);var prog=document.getElementById('prog');var catalogue={};var formLinks=[];var seen=new Set();document.querySelectorAll('a[ng-click*="getRouteForEventType"],a[href*="new-section"]').forEach(function(a){try{var sc=angular.element(a).scope();if(sc&&sc.eventType){var e=sc.eventType;if(!seen.has(e._id)){seen.add(e._id);formLinks.push({name:e.name,id:e._id,group:sc.group?sc.group.name:null})}}}catch(x){}});status.innerHTML='📋 Found '+formLinks.length+' forms. Now extracting fields...<br><small>This takes 1-2 minutes. Don\'t close this tab.</small>';var done=0;for(var i=0;i<formLinks.length;i++){var f=formLinks[i];try{var url='https://kaizenep.com/events/new-section/'+f.id;var iframe=document.createElement('iframe');iframe.style.cssText='position:fixed;top:-9999px;width:1200px;height:800px';iframe.src=url;document.body.appendChild(iframe);await new Promise(function(r){iframe.onload=function(){setTimeout(r,3000)};setTimeout(r,8000)});try{var doc=iframe.contentDocument||iframe.contentWindow.document;var fields=[];doc.querySelectorAll('input,textarea,select').forEach(function(el){var label='';var id=el.id||el.name||'';var prev=el.previousElementSibling;if(prev&&prev.tagName==='LABEL')label=prev.textContent.trim();if(!label){var lbl=doc.querySelector('label[for="'+id+'"]');if(lbl)label=lbl.textContent.trim()}if(!label){var p=el.closest('.form-group,.field-group,.section-field,[class*="field"],.field-wrapper,div');if(p){var l=p.querySelector('label,.field-label,.control-label,h4,.field-title,span[class*="label"]');if(l)label=l.textContent.trim().replace(/\s+/g,' ')}}var opts=[];if(el.tagName==='SELECT'){el.querySelectorAll('option').forEach(function(o){if(o.value&&o.value!=='?')opts.push(o.textContent.trim())})}if(label||id){fields.push({tag:el.tagName,type:el.type||'',id:id,name:el.name||'',label:label,placeholder:el.placeholder||'',options:opts.length?opts:undefined,required:el.required||false})}});catalogue[f.name]={uuid:f.id,group:f.group,fields:fields}}catch(e){catalogue[f.name]={uuid:f.id,group:f.group,fields:[],error:'Could not read form (cross-origin)'}}document.body.removeChild(iframe)}catch(e){catalogue[f.name]={uuid:f.id,group:f.group,fields:[],error:e.message}}done++;prog.textContent=done+'/'+formLinks.length;status.innerHTML='📋 Extracting fields... '+done+'/'+formLinks.length+'<br><small>'+f.name+'</small>'}var json=JSON.stringify(catalogue,null,2);var ta=document.createElement('textarea');ta.value=json;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);var total=Object.keys(catalogue).length;var withFields=Object.values(catalogue).filter(function(v){return v.fields&&v.fields.length>0}).length;status.innerHTML='✅ Done! '+total+' forms mapped ('+withFields+' with field details).<br><br><strong>The result is copied to your clipboard.</strong><br><small>Paste it (Ctrl+V / Cmd+V) into a message and send it back. Thank you!</small>';status.style.background='#065f46';var dl=document.createElement('a');dl.href='data:application/json;charset=utf-8,'+encodeURIComponent(json);dl.download='kaizen-forms-'+new Date().toISOString().slice(0,10)+'.json';dl.textContent='💾 Download as file';dl.style.cssText='display:block;margin-top:10px;color:white;text-decoration:underline;cursor:pointer';status.appendChild(dl)})();</textarea>
+        <button class="copy-btn" onclick="document.getElementById('script').select();document.execCommand('copy');this.textContent='✅ Copied!'">📋 Copy Script</button>
+    </div>
+
+    <div class="progress-info">
+        <strong>What happens when you run it:</strong>
+        <ul>
+            <li>A blue box appears in the top-right showing progress</li>
+            <li>The script reads each form's fields (takes 1-2 minutes)</li>
+            <li>When done, the box turns green and the result is on your clipboard</li>
+            <li>Paste it into WhatsApp/Telegram and send it back</li>
+        </ul>
+    </div>
+
+    <div class="step">
+        <h3><span class="step-num">5</span> Send the result back</h3>
+        <p>When the green "Done!" message appears, open any messaging app and press <code>Ctrl+V</code> / <code>Cmd+V</code> to paste. Send it to whoever asked you to do this.</p>
+    </div>
+
+    <div class="warning">
+        ⚠️ <strong>Note:</strong> Some forms may show "Could not read form" — this happens when the form page blocks embedding. The form name and ID are still captured; only the field details are missing for those. This is normal.
+    </div>
+
+    <hr style="margin: 30px 0; border: 1px solid #e5e7eb;">
+    <p style="color: #9ca3af; font-size: 13px;">Built by Portfolio Guru — an AI tool that helps doctors fill portfolio forms faster.<br>Questions? Contact the person who sent you this link.</p>
+</body>
+</html>

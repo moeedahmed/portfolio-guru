@@ -57,3 +57,18 @@ class FileResponse(BaseModel):
     screenshot_url: Optional[str] = None
     error: Optional[str] = None
     assessor_warning: Optional[str] = None  # set if assessor lookup failed
+
+
+class KaizenFillRequest(BaseModel):
+    form_type: str
+    fields: dict
+    draft_uuid: Optional[str] = None
+    save_as_draft: bool = True
+
+
+class KaizenFillResponse(BaseModel):
+    status: str  # "success" | "partial" | "failed"
+    filled: List[str] = []
+    skipped: List[str] = []
+    errors: List[str] = []
+    screenshot_path: Optional[str] = None

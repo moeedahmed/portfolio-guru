@@ -1,0 +1,2396 @@
+{
+  "CBD": {
+    "uuid": "3ce5989a-b61c-4c24-ab12-711bf928b181",
+    "source": "kaizen_dom_map.json",
+    "fields": {
+      "startDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date occurred on"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "End date"
+      },
+      "event-description": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Description (optional)"
+      },
+      "e0864e88-62cf-43aa-a9e5-51abd98a1cce": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Stage of training"
+      },
+      "5391f8de-de63-4db3-9e08-baaa2a380cfe": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date of event"
+      },
+      "60772a97-92eb-4dbe-a813-6a5293be82f9": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Case to be discussed"
+      },
+      "610b5c60-99ac-4902-9407-22974d6a5799": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Reflection of event"
+      },
+      "invites": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Who would you like to fill in the next section of this form?"
+      },
+      "filledOnSameDevice": {
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "Fill in on the same device"
+      }
+    }
+  },
+  "DOPS": {
+    "uuid": "159831f9-6d22-4e77-851b-87e30aee37a2",
+    "source": "kaizen_dom_map.json",
+    "fields": {
+      "startDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date occurred on"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "End date"
+      },
+      "event-description": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Description (optional)"
+      },
+      "286d64f5-2aa0-41eb-aba6-a7bc523f133c": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Placement"
+      },
+      "5391f8de-de63-4db3-9e08-baaa2a380cfe": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date of event"
+      },
+      "60772a97-92eb-4dbe-a813-6a5293be82f9": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Case observed"
+      },
+      "e0864e88-62cf-43aa-a9e5-51abd98a1cce": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Stage of Training"
+      },
+      "610b5c60-99ac-4902-9407-22974d6a5799": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Reflection of event"
+      },
+      "invites": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Who would you like to fill in the next section of this form?"
+      },
+      "filledOnSameDevice": {
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "Fill in on the same device"
+      }
+    }
+  },
+  "LAT": {
+    "uuid": "eb1c7547-0f41-49e7-95de-8adffd849924",
+    "source": "kaizen_dom_map.json",
+    "fields": {
+      "startDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date occurred on"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "End date"
+      },
+      "event-description": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Description (optional)"
+      },
+      "ebccdd92-bfac-44b4-abde-d7958118ff05": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date"
+      },
+      "b4b62e33-3359-4504-9877-17f2e38e9fd0": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Trainee Post (current position)"
+      },
+      "325c4423-ff20-4667-918b-c2f2a323acd0": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Please review leadership priorities for the year:"
+      },
+      "kzt-search-query": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": ""
+      },
+      "4c88f4f8-32bb-43c6-905b-411b7915affd": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Please describe what happened in as much detail as possible:"
+      },
+      "invites": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Who would you like to fill in the next section of this form?"
+      },
+      "filledOnSameDevice": {
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "Fill in on the same device"
+      }
+    }
+  },
+  "ACAT": {
+    "uuid": "6577ab06-8340-47e3-952a-708a5f800dcc",
+    "source": "kaizen_dom_map.json",
+    "fields": {
+      "startDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date occurred on"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "End date"
+      },
+      "event-description": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Description (optional)"
+      },
+      "5391f8de-de63-4db3-9e08-baaa2a380cfe": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date of event"
+      },
+      "286d64f5-2aa0-41eb-aba6-a7bc523f133c": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Placement"
+      },
+      "60772a97-92eb-4dbe-a813-6a5293be82f9": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Cases observed"
+      },
+      "eed0e8dc-075d-4661-aea5-2c3238af4c5b": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "ACCS Procedural List (2025 Update)"
+      },
+      "e1ae9b5b-85b2-45e4-9c1f-f322c7a6dc31": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Which clinical setting did this assessment occur in?"
+      },
+      "610b5c60-99ac-4902-9407-22974d6a5799": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Reflection of event"
+      },
+      "kzt-search-query": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": ""
+      },
+      "invites": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Who would you like to fill in the next section of this form?"
+      },
+      "filledOnSameDevice": {
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "Fill in on the same device"
+      }
+    }
+  },
+  "ACAF": {
+    "uuid": "15e67ae8-868b-4358-9b96-30a4a272f02c",
+    "source": "kaizen_dom_map.json",
+    "fields": {
+      "startDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date occurred on"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "End date"
+      },
+      "event-description": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Description (optional)"
+      },
+      "4ea8380a-86dc-4483-926e-c0deb4a7e021": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Write a focused description of the WBPA/clinical/non-clinical situation which formed the basis for this ACAF"
+      },
+      "eaaffbe3-1bbe-4600-92ec-ecad6d6483bb": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Population or Problem"
+      },
+      "66ce86c5-086c-485c-a46b-76e259ee3f77": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Intervention"
+      },
+      "3f2ca5b6-b65e-48b2-b2e4-53130ce2951d": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comparison"
+      },
+      "b1013e86-5e07-47e0-ac01-ecc332601b8c": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Outcome"
+      },
+      "0e54dd77-dcae-449d-9d90-3f2b345b42ef": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Other:"
+      },
+      "e68164a5-435e-472f-a2d3-5880eb5eae14": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Search for evidence to answer your question and summarise your search methodology"
+      },
+      "ae5f23c6-3ea1-4836-b1f4-db664f6d5d95": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Evaluate current evidence"
+      },
+      "a277f5d6-9d68-4408-ac45-20ccc97dd746": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Apply the evidence to answer your question. Explain the impact on your practice and wider EM care."
+      },
+      "eda3bc11-3115-475e-93ba-5f186f6f2ecc": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Communicate these findings to a patient"
+      },
+      "8fb576f7-aa62-496d-ac40-0cc5d7e9649e": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Recommend future research ideas"
+      },
+      "e5b279ff-63fc-46cf-a0a0-c87c8dfcc78b": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comment:"
+      },
+      "kzt-search-query": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": ""
+      },
+      "invites": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Who would you like to fill in the next section of this form?"
+      },
+      "filledOnSameDevice": {
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "Fill in on the same device"
+      }
+    }
+  },
+  "STAT": {
+    "uuid": "41ff54b8-35a7-414b-9bd6-97fb1c3eb189",
+    "source": "kaizen_dom_map.json",
+    "fields": {
+      "startDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date occurred on"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "End date"
+      },
+      "event-description": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Description (optional)"
+      },
+      "9d48100e-9647-4c67-8d39-24bbe8e5e3fa": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date"
+      },
+      "e0864e88-62cf-43aa-a9e5-51abd98a1cce": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Stage of training"
+      },
+      "d00ac11e-528f-494d-b1ff-6835fb989995": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Learner Group:"
+      },
+      "bf181d9c-4875-4010-805e-f675aaeb4e72": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Setting:"
+      },
+      "2a417a1c-351f-47f2-abe0-e46ee452d8ae": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Delivery:"
+      },
+      "55ca2e2a-53ae-46a2-ac9f-3ee693bb6440": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Number of Learners:"
+      },
+      "94398bfe-970c-456c-9cf4-618f51a0becc": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Length of Session:"
+      },
+      "8b19c437-be46-4ef9-be67-97a1b8d7e200": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Title of Teaching Session:"
+      },
+      "kzt-search-query": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": ""
+      },
+      "invites": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Who would you like to fill in the next section of this form?"
+      },
+      "filledOnSameDevice": {
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "Fill in on the same device"
+      }
+    }
+  },
+  "MSF": {
+    "uuid": "5f71ac04-ff45-44d2-b7a1-f8b921a8a4c8",
+    "source": "kaizen_dom_map.json",
+    "fields": {
+      "startDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date occurred on"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "End date"
+      },
+      "event-description": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Description (optional)"
+      },
+      "b699e57a-6f7d-463e-a5a3-f78c2bdbe50c": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date"
+      },
+      "0d9c69df-2514-4ac7-8776-b3d1037e0e51": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Medical knowledge and clinical skills:"
+      },
+      "8de9d148-2105-4b8b-bf5b-2e85c0bfa082": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "24677f0f-b345-4d6c-a79f-934bcc9f1536": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Problem-solving skills:"
+      },
+      "1ebc2730-c245-480c-a3da-db6ed4bcef69": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "461875da-67a3-4415-80e6-82a1ad483a77": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Note-keeping - clarity; legibility and completeness:"
+      },
+      "c20d75fc-567f-49b6-bc74-b1cd3cc62e63": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "adfee495-7172-4933-949a-fa76765f18c3": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Emergency Care Skills:"
+      },
+      "27f47f6e-7c89-4c83-89a2-7262644f77b1": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "21eaf63d-9cf5-41bc-92d4-0cf912eea240": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments on your clinical care:"
+      },
+      "c06ef500-bcb7-4abf-8b09-af1428e99729": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Empathy and sensitivity:"
+      },
+      "38105ea5-1316-4313-89f7-87f84210734f": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "97e34377-43c8-45b6-bb22-dc89ae068bb5": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Communicates well with all patient groups:"
+      },
+      "5c7e1ed3-703d-4e9b-9872-6f7cb14ec9f8": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "667066ff-4f3e-412b-a836-b4e5b1f6d54b": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Treats patients and relatives with respect:"
+      },
+      "ad947db7-2f5b-42cf-8732-f3eed48503a0": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "c371fa8e-ece1-44b4-95dc-16c93ae46ce1": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Appreciates the psycho-social aspects of patient care:"
+      },
+      "aece333b-6468-4957-af6b-055a7efb95e2": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "34f30a5f-c78b-456d-a147-96b47d3d94eb": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Offers explanations:"
+      },
+      "13fa6652-cc17-4738-bdf4-ea83d32cb222": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "37d84160-410d-40c8-ad63-a6b1f919fc19": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments on your relationship with patients:"
+      },
+      "b3b5854c-7bd1-4bd5-8e77-7ae65b3c6127": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Is a team-player:"
+      },
+      "7a9e5773-43f8-442c-9794-0820ba150e5b": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "c1540ce8-e2d8-429f-9e98-06a83b455790": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Asks for others' point of view and advice:"
+      },
+      "02f71da9-3ca8-4847-8f29-5f4bacde13e1": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "d3837087-6d48-4e6c-bf61-e94fa345a1ae": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Encourages discussion, empathy and sensibility:"
+      },
+      "82d1922c-3d37-4639-831c-9470e3cc8921": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "eab610fa-73f7-4662-81d3-4de59ecdc062": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Is clear and precise with instructions:"
+      },
+      "cd3a508a-15f3-4017-bc3d-5861657c8ac6": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "30cd661e-e769-43f7-ac0c-621cc6459625": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Treats colleagues with respect:"
+      },
+      "09fc23b3-fffb-4295-9255-865b397d3d92": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "e274ee13-a731-4aa8-aa5c-e271655e84a7": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Communicates well (includes non-verbal communication):"
+      },
+      "17f7a7f2-17cd-4c96-ba63-2ee57ad52255": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "3015b9f8-3f0d-41e0-ae14-eed6a1d44d19": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Is reliable:"
+      },
+      "9fdf0000-2a90-4c41-8c3a-f4d839e33d80": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "83511f96-7b69-44e3-aa4b-3986704d9e2b": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Can lead a team well:"
+      },
+      "49b0fd37-cfb8-4dea-8cd9-afa4a024ef67": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "d0676b0f-d549-497f-b3eb-00c9d3fc5b1e": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Takes responsibility:"
+      },
+      "a1ef2b8e-afe2-4ed7-b2dc-708ee309cafe": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "3a928d94-e2a2-430b-a700-c62f4eb4a6b8": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments on your relationship with colleagues:"
+      },
+      "0f04464e-f6e9-4fda-8665-ad40bff4d71d": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Teaching is structured:"
+      },
+      "68944099-b85c-4cd7-8246-ec5ee63321ad": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "ffe0befd-a903-4c73-a83a-b52e4a885e00": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Is enthusiastic about teaching:"
+      },
+      "7e129c69-0095-4a86-ad7a-bbf34024c527": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "376f291d-4750-4b1d-9b03-5734b4cfadc2": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "This clinician's teaching sessions are beneficial:"
+      },
+      "f196bebf-0563-47a5-a569-1c845fb6af78": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "71f615cb-e393-49f6-b8a5-9baf7cd1b1bb": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Teaching is presented well:"
+      },
+      "97b5ffef-9bf4-4c58-9372-5e6db1183705": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "1d3d7816-ed3c-438b-b1c0-bdb7ee4c7109": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Uses varied teaching skills:"
+      },
+      "4b4278d5-d99a-4685-ae10-d4353b0325b9": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "9af0ba57-7a78-4cc4-b830-682537826d77": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments on this clinician's teaching and training skills:"
+      },
+      "ae01a0b0-0288-4404-9ffd-82c5e0fca947": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Overall, how do you rate yourself compared to other clinicians at your level?:"
+      },
+      "588dd6e4-a6c5-4f4b-a141-8bcd7c86ce7e": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "f1a6e224-c3d0-45fe-9dc1-5560e7b03f09": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "How would you rate your performance at this stage of training?:"
+      },
+      "0ea5221f-f0aa-4bee-8af7-4b936887cd03": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Comments:"
+      },
+      "3086f426-a0e2-459e-baf8-58577c04af55": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Any general comments:"
+      }
+    }
+  },
+  "MINI_CEX": {
+    "uuid": "647665f4-a992-4541-9e17-33ba6fd1d347",
+    "source": "kaizen_dom_map.json",
+    "fields": {
+      "startDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date occurred on"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "End date"
+      },
+      "event-description": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Description (optional)"
+      },
+      "e0864e88-62cf-43aa-a9e5-51abd98a1cce": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Stage of training"
+      },
+      "5391f8de-de63-4db3-9e08-baaa2a380cfe": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date of event"
+      },
+      "f091f9c5-6c77-48be-9b96-05ebe1b56a07": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Clinical setting"
+      },
+      "60772a97-92eb-4dbe-a813-6a5293be82f9": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Case observed"
+      },
+      "610b5c60-99ac-4902-9407-22974d6a5799": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Reflection of event"
+      },
+      "invites": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Who would you like to fill in the next section of this form?"
+      },
+      "filledOnSameDevice": {
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "Fill in on the same device"
+      }
+    }
+  },
+  "JCF": {
+    "uuid": "3daa9559-3c31-4ab4-883c-9a991632a9ca",
+    "source": "kaizen_dom_map.json",
+    "fields": {
+      "startDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date occurred on"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "End date"
+      },
+      "event-description": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Description (optional)"
+      },
+      "9d48100e-9647-4c67-8d39-24bbe8e5e3fa": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date"
+      },
+      "d00ac11e-528f-494d-b1ff-6835fb989995": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Learner Group:"
+      },
+      "bf181d9c-4875-4010-805e-f675aaeb4e72": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Setting:"
+      },
+      "2a417a1c-351f-47f2-abe0-e46ee452d8ae": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Delivery:"
+      },
+      "55ca2e2a-53ae-46a2-ac9f-3ee693bb6440": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Number of Learners:"
+      },
+      "94398bfe-970c-456c-9cf4-618f51a0becc": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Length of Session:"
+      },
+      "8b19c437-be46-4ef9-be67-97a1b8d7e200": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Title of Paper:"
+      },
+      "kzt-search-query": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": ""
+      },
+      "invites": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Who would you like to fill in the next section of this form?"
+      },
+      "filledOnSameDevice": {
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "Fill in on the same device"
+      }
+    }
+  },
+  "QIAT": {
+    "uuid": "a0aa5cfc-57be-4622-b974-51d334268d57",
+    "source": "kaizen_dom_map.json",
+    "fields": {
+      "startDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date occurred on"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "End date"
+      },
+      "event-description": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Description (optional)"
+      },
+      "415a72f2-7cf3-420a-bee4-9a7aed746612": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Stage of training"
+      },
+      "9ba2f736-84a4-41eb-b7da-695734d4ec62": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Placement"
+      },
+      "c00175cc-4b38-4ff4-b7c2-2c00f1bee840": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date of completion"
+      },
+      "99bfcd58-1cc3-4f79-9832-32c9d315e1a5": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "1.1 PDP - Please summarise your QI PDP for this year in broad terms and list specific objectives below"
+      },
+      "fd738d73-9b88-4bfb-8c67-a7d7a0defa57": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "2.1 Involvement- Please describe your engagement with QI education over the past year. This can include online learning or attendance at local/national courses."
+      },
+      "dab68d71-46ca-46a6-97e8-e2f2a6b29a82": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "2.2 Learning - How has this developed your understanding of QI? How do you feel this will help your future QI work? Please map to the QI journey\u00a0in section 4.1 where relevant."
+      },
+      "2e2096f3-f65e-465c-bdd6-effadbe743dc": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "3.0 Were you involved in a QI project in any way?"
+      },
+      "kzt-search-query": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": ""
+      },
+      "8a8f2bce-26fa-4baa-81d3-5b567ce9d45c": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "\u200b4.2 Reflections and Learning - Please outline what this year has contributed to your development and knowledge of QI."
+      },
+      "09a89221-ab2c-42f6-8462-1333540f8cf8": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "\u200b4.3 Next Year\u2019s PDP- Please describe your plans for next year in QI."
+      },
+      "invites": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Who would you like to fill in the next section of this form?"
+      },
+      "filledOnSameDevice": {
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "Fill in on the same device"
+      }
+    }
+  },
+  "TEACH": {
+    "uuid": "1ffbd272-8447-439c-aa03-ff99e2dbc04d",
+    "source": "kaizen_dom_map.json",
+    "fields": {
+      "startDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date occurred on"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "End date"
+      },
+      "event-description": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Description (optional)"
+      },
+      "e90d9f84-68fc-4dbf-a8be-977180ffc2cb": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date of teaching activity:"
+      },
+      "6b62a9ef-b0bf-498c-b10b-410fa97766c3": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Title of session:"
+      },
+      "17d7899f-0564-4e51-9817-54444e43822c": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Recognised courses:"
+      },
+      "ddd8c881-91c6-46fd-84e9-32e89f617877": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Learning outcomes used in session:"
+      },
+      "kzt-search-query": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": ""
+      },
+      "eed0e8dc-075d-4661-aea5-2c3238af4c5b": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "ACCS Procedural skills (Update 2025)"
+      },
+      "31bd55b7-0e32-4918-8cc0-4ba33af83772": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Intermediate Procedural skills (2025 Update)"
+      },
+      "8def931e-3a00-43ac-8529-44cdaf34be2d": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "ST4-ST6 Higher EM Procedural skill"
+      }
+    }
+  },
+  "PROC_LOG": {
+    "uuid": "2d6ebac1-4633-49d1-9dc0-fa0d39a98afc",
+    "source": "kaizen_dom_map.json",
+    "fields": {
+      "startDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date occurred on"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "End date"
+      },
+      "event-description": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Description (optional)"
+      },
+      "8f76bc6b-68b7-4654-9116-75e421fceccd": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date of Activity"
+      },
+      "e0864e88-62cf-43aa-a9e5-51abd98a1cce": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Stage of training"
+      },
+      "036fe50f-5357-4da5-9fd6-d5c2e8d96ba4": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Year of training"
+      },
+      "ca4f531c-ea4b-4587-a964-ee471abf1193": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Age of patient"
+      },
+      "f4557928-23fa-40b0-9f14-9357f5e7e1f3": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Reflective comments on procedure"
+      },
+      "kzt-search-query": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": ""
+      }
+    }
+  },
+  "SDL": {
+    "uuid": "743885d8-c1b8-4566-bc09-8ed9b0e09829",
+    "source": "kaizen_dom_map.json",
+    "fields": {
+      "startDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date occurred on"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "End date"
+      },
+      "event-description": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Description (optional)"
+      },
+      "d7d43710-117b-4cae-8903-203b82c72f58": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Reflection Title"
+      },
+      "kzt-search-query": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": ""
+      },
+      "a732400a-6f84-439a-938c-eae849459fa7": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Please specify details of the learning resource (e.g. title, author, website etc.)"
+      },
+      "e99119c8-7cff-4d04-a2ad-0246dddfdac1": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Reflection"
+      },
+      "eed0e8dc-075d-4661-aea5-2c3238af4c5b": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "ACCS Procedural Skills (2025 Update)"
+      },
+      "31bd55b7-0e32-4918-8cc0-4ba33af83772": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Intermediate Procedural Skills (2025 Update)"
+      },
+      "8def931e-3a00-43ac-8529-44cdaf34be2d": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "ST4-ST6 Higher training EM Procedural Skills (2025 Update)"
+      }
+    }
+  },
+  "US_CASE": {
+    "uuid": "558b196a-8168-4cc6-b363-6f6e4b08397a",
+    "source": "kaizen_dom_map.json",
+    "fields": {
+      "startDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date occurred on"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "End date"
+      },
+      "event-description": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Description (optional)"
+      },
+      "3d201298-05a3-4d5a-862a-0a079ee11f77": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Case reflection title"
+      },
+      "a2777351-37e3-4568-9cac-a822f82092c4": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date of case"
+      },
+      "c7a9f5dd-fd2b-4b02-bb4d-a254e65504cb": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Location"
+      },
+      "13808567-1775-4efb-a364-4b0a453b7992": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Patient's Gender"
+      },
+      "8720bd82-f350-46ff-9696-b8be5490a4c8": {
+        "tag": "INPUT",
+        "type": "number",
+        "label": "Patient's Age"
+      },
+      "cfe23d74-2a38-4e3e-9636-913651898777": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Equipment Used"
+      },
+      "kzt-search-query": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": ""
+      },
+      "bbab795a-fe08-4599-ad2d-3c34c4c6b240": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Describe the clinical scenario"
+      },
+      "05d2c806-ef77-49f1-b582-61e6dff50273": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "How was ultrasound used in this case?"
+      },
+      "1e402c8c-4b79-4ee1-9162-3b9cb9cef780": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Were you able to obtain usable images?"
+      },
+      "e8b5b356-f813-4ee0-b69a-a2034c4edd2b": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Were you able to interpret the images?"
+      },
+      "e9419598-3230-4e50-810f-29893a6a8c42": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Did the use of ultrasound change management of the patient?"
+      },
+      "df24a5de-14a4-4d25-9c93-b93ac76991b9": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "What did you learn from this case?"
+      },
+      "317ddbf2-a3dc-4ee7-a53c-fa1369d2c929": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Other comments"
+      },
+      "eed0e8dc-075d-4661-aea5-2c3238af4c5b": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "ACCS Procedural Skills (2025 Update)"
+      },
+      "31bd55b7-0e32-4918-8cc0-4ba33af83772": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Intermediate Procedural Skills (2025 Update)"
+      },
+      "8def931e-3a00-43ac-8529-44cdaf34be2d": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "ST4-ST6 Higher training Procedural Skills (2025 Update)"
+      }
+    }
+  },
+  "ESLE": {
+    "uuid": "cbc7a42f-a2f0-436b-813e-bbf97cce0a34",
+    "source": "kaizen_dom_map.json",
+    "fields": {
+      "startDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date occurred on"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "End date"
+      },
+      "event-description": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Description (optional)"
+      },
+      "a525d382-30ea-48d2-b3ee-e325473eeb5c": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Title of reflection"
+      },
+      "c00e55ce-0eec-4725-9044-70317bafb75d": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date of ESLE"
+      },
+      "750468a4-7f96-481d-99fa-8c5af70958fd": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Describe the circumstances. What did you do? What did others do?"
+      },
+      "be609110-389a-4411-969e-ee4289f691ed": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "If you could replay the event, what would you have done differently?"
+      },
+      "761354f7-908a-4101-b7d8-66d324a62658": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Why?"
+      },
+      "5998869f-feb1-4cc4-865c-19ac975b7e0e": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "How would the outcome be different if you replayed this event? How would you feel? How would others feel?"
+      },
+      "54bb61c4-dc39-4e56-9e22-b1acd21edabb": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Focussing on what you would have done differently, what do you need to change for the future? OR what did you do well that you would do again in the future?"
+      },
+      "0a463c2f-f443-45b7-bd21-eb7c77b4e3f2": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "What have you learned from the experience?"
+      },
+      "bfa0ce31-71d0-48de-bfdf-4f28304b94dc": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Outline any further learning or development needs highlighted by the activity. How do you intend to address these? If necessary reflect any actions in your personal development plan"
+      },
+      "26a715e1-c956-4c23-9d85-ee09539458ce": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Procedural skills list (2025)"
+      },
+      "kzt-search-query": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": ""
+      }
+    }
+  },
+  "COMPLAINT": {
+    "uuid": "f7c0ba98-5a47-4e37-b76a-ca3c5c8484cc",
+    "source": "kaizen_dom_map.json",
+    "fields": {
+      "startDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date occurred on"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "End date"
+      },
+      "event-description": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Description (optional)"
+      },
+      "fe902ad2-a932-489f-bb01-2ae6dda100f4": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Title of reflection:"
+      },
+      "dbc66064-26b7-4d96-93d0-fced3a9fc998": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date of complaint:"
+      },
+      "99d5b202-bf78-4f34-884a-f5c91d4539d0": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Key features of complaint:"
+      },
+      "6dee7933-3979-4c13-afc7-914f1514c8e7": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Key aspects of case and care given by trainee:"
+      },
+      "552bb938-8929-40c3-ad3c-428dd4f114e7": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "What are the learning points from this case?:"
+      },
+      "88ffd062-b49f-4af2-aa1b-913b94906570": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Further action required:"
+      },
+      "kzt-search-query": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": ""
+      },
+      "eed0e8dc-075d-4661-aea5-2c3238af4c5b": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "ACCS Procedural Skills (2025 Update)"
+      },
+      "31bd55b7-0e32-4918-8cc0-4ba33af83772": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Intermediate EM Procedural Skills (2025 Update)"
+      },
+      "8def931e-3a00-43ac-8529-44cdaf34be2d": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "ST4-ST6 Higher Procedural Skills (2025 Update)"
+      }
+    }
+  },
+  "SERIOUS_INC": {
+    "uuid": "9d4a7912-a615-4ae4-9fae-6be966bcf254",
+    "source": "kaizen_dom_map.json",
+    "fields": {
+      "startDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date occurred on"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "End date"
+      },
+      "event-description": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Description (optional)"
+      },
+      "53009feb-16b4-4335-a81c-f5f5b4d93917": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Title of reflection:"
+      },
+      "f9e0bf51-a74e-4c6c-8fc8-9d627ebf318b": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date of incident:"
+      },
+      "a4feee19-b600-4c42-a286-15a81f8835c2": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Description of case including adverse events:"
+      },
+      "c5d0833f-db51-4dd2-9f4c-0972c1b7c54d": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Root causes of events:"
+      },
+      "898a8f93-6651-4bd8-a0f9-940ac60d908d": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Contributing factors:"
+      },
+      "b4b852e9-dbf3-4e6b-b3db-a309a6cf9f68": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "What are the learning points from this case?:"
+      },
+      "49b3a49c-5e69-4c87-9786-562777f6744b": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Further action required:"
+      },
+      "kzt-search-query": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": ""
+      },
+      "eed0e8dc-075d-4661-aea5-2c3238af4c5b": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "ACCS Procedural Skills (2025 Update)"
+      },
+      "31bd55b7-0e32-4918-8cc0-4ba33af83772": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Intermediate Procedural Skills (2025 Update)"
+      },
+      "8def931e-3a00-43ac-8529-44cdaf34be2d": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "ST4-ST6 Higher EM Procedural Skills (2025 Update)"
+      }
+    }
+  },
+  "EDU_ACT": {
+    "uuid": "868dc0e7-f4e9-4283-ac52-d9c8b246024b",
+    "source": "kaizen_dom_map.json",
+    "fields": {
+      "startDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date occurred on"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "End date"
+      },
+      "event-description": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Description (optional)"
+      },
+      "7c8be633-06f2-41c6-a7d2-dcc75c6036d5": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date of education:"
+      },
+      "772f10f2-f292-4bc8-b349-bd6fff6679b7": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Title of education:"
+      },
+      "0120a77c-d1bb-4c8c-9155-1460e0778613": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Who delivered the education:"
+      },
+      "83dd2eb4-bf25-4d79-8001-59a76f7c2cc3": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Main learning points:"
+      },
+      "bdd2ee0c-07ab-4001-ae6b-8eccdc706a4b": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Section of Curriculum covered in the teaching:"
+      },
+      "kzt-search-query": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": ""
+      },
+      "eed0e8dc-075d-4661-aea5-2c3238af4c5b": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "ACCS Procedural Skills (2025 Update)"
+      },
+      "31bd55b7-0e32-4918-8cc0-4ba33af83772": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Intermediate procedural list (2025 Update)"
+      },
+      "8def931e-3a00-43ac-8529-44cdaf34be2d": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "ST4-ST6 Higher EM Procedural skills (2025 Update)"
+      }
+    }
+  },
+  "FORMAL_COURSE": {
+    "uuid": "c7cd9a95-e2aa-4f61-a441-b663f3c933c6",
+    "source": "kaizen_dom_map.json",
+    "fields": {
+      "startDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "Date occurred on"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "",
+        "label": "End date"
+      },
+      "event-description": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Description (optional)"
+      },
+      "e0864e88-62cf-43aa-a9e5-51abd98a1cce": {
+        "tag": "SELECT",
+        "type": "",
+        "label": "Stage of training"
+      },
+      "f6b7732d-3bdc-496f-bde9-4a103f3f77f8": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Project Description:"
+      },
+      "a3a5ee55-b018-4b73-a347-dd69595f4598": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Reflective notes from experience:"
+      },
+      "4b99584e-6fea-48f9-9cfb-317c6de5223b": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Resources Used:"
+      },
+      "310b69ab-6738-4eac-9b1f-6dfb1ed810b6": {
+        "tag": "TEXTAREA",
+        "type": "",
+        "label": "Lessons learned:"
+      },
+      "kzt-search-query": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": ""
+      },
+      "invites": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Who would you like to fill in the next section of this form?"
+      },
+      "filledOnSameDevice": {
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "Fill in on the same device"
+      }
+    }
+  },
+  "APPRAISAL": {
+    "uuid": "",
+    "source": "mgmt_form_verification.json",
+    "page_title": "New Appraisal of others (2021/2025)",
+    "has_curriculum": true,
+    "has_file_input": false,
+    "status": "VERIFIED",
+    "fields": {
+      "f594f362-caf3-45e5-b8ee-616876b0c4e7": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Project Description"
+      },
+      "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Date"
+      },
+      "416c6f84-34ec-41e3-ab1b-2ddaab18f526": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Any Comments/Reflections"
+      },
+      "startDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Start Date"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "End Date"
+      }
+    }
+  },
+  "AUDIT": {
+    "uuid": "",
+    "source": "mgmt_form_verification.json",
+    "page_title": "New Audit Assessment Tool (2021/2025)",
+    "has_curriculum": true,
+    "has_file_input": false,
+    "status": "VERIFIED",
+    "fields": {
+      "2b9c010d-0e5d-456a-afbd-ea33e63af3a3": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Title of audit with brief description:"
+      },
+      "a7f44694-d848-4b67-85bc-94e0a2953af1": {
+        "tag": "SELECT",
+        "type": "select-one",
+        "label": "RCEM Audit?"
+      },
+      "0653f095-95f9-4344-b825-f336791d1ded": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Date"
+      },
+      "startDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Start Date"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "End Date"
+      }
+    }
+  },
+  "BUSINESS_CASE": {
+    "uuid": "",
+    "source": "mgmt_form_verification.json",
+    "page_title": "New Business Case (2021/2025)",
+    "has_curriculum": true,
+    "has_file_input": false,
+    "status": "VERIFIED",
+    "fields": {
+      "f6b7732d-3bdc-496f-bde9-4a103f3f77f8": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Project Description:"
+      },
+      "a3a5ee55-b018-4b73-a347-dd69595f4598": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Reflective notes from experience:"
+      },
+      "4b99584e-6fea-48f9-9cfb-317c6de5223b": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Resources Used:"
+      },
+      "310b69ab-6738-4eac-9b1f-6dfb1ed810b6": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Lessons learned:"
+      },
+      "startDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Start Date"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "End Date"
+      }
+    }
+  },
+  "CLIN_GOV": {
+    "uuid": "",
+    "source": "mgmt_form_verification.json",
+    "page_title": "New Clinical Governance Meetings (2021/2025)",
+    "has_curriculum": true,
+    "has_file_input": false,
+    "status": "VERIFIED",
+    "fields": {
+      "f594f362-caf3-45e5-b8ee-616876b0c4e7": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Project Description"
+      },
+      "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Date"
+      },
+      "416c6f84-34ec-41e3-ab1b-2ddaab18f526": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Any Comments/Reflections"
+      },
+      "startDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Start Date"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "End Date"
+      }
+    }
+  },
+  "COST_IMPROVE": {
+    "uuid": "",
+    "source": "mgmt_form_verification.json",
+    "page_title": "New Cost Improvement Plan (2021/2025)",
+    "has_curriculum": true,
+    "has_file_input": false,
+    "status": "VERIFIED",
+    "fields": {
+      "f6b7732d-3bdc-496f-bde9-4a103f3f77f8": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Project Description:"
+      },
+      "a3a5ee55-b018-4b73-a347-dd69595f4598": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Reflective notes from experience:"
+      },
+      "4b99584e-6fea-48f9-9cfb-317c6de5223b": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Resources Used:"
+      },
+      "310b69ab-6738-4eac-9b1f-6dfb1ed810b6": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Lessons learned:"
+      },
+      "startDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Start Date"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "End Date"
+      }
+    }
+  },
+  "CRIT_INCIDENT": {
+    "uuid": "",
+    "source": "mgmt_form_verification.json",
+    "page_title": "New Critical Incident (2021/2025)",
+    "has_curriculum": true,
+    "has_file_input": false,
+    "status": "VERIFIED",
+    "fields": {
+      "f594f362-caf3-45e5-b8ee-616876b0c4e7": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Project Description"
+      },
+      "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Date"
+      },
+      "416c6f84-34ec-41e3-ab1b-2ddaab18f526": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Any Comments/Reflections"
+      },
+      "startDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Start Date"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "End Date"
+      }
+    }
+  },
+  "EQUIP_SERVICE": {
+    "uuid": "",
+    "source": "mgmt_form_verification.json",
+    "page_title": "New Introduction of Equipment or Service (2021/2025)",
+    "has_curriculum": true,
+    "has_file_input": false,
+    "status": "VERIFIED",
+    "fields": {
+      "f594f362-caf3-45e5-b8ee-616876b0c4e7": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Project Description"
+      },
+      "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Date"
+      },
+      "416c6f84-34ec-41e3-ab1b-2ddaab18f526": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Any Comments/Reflections"
+      },
+      "startDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Start Date"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "End Date"
+      }
+    }
+  },
+  "MGMT_COMPLAINT": {
+    "uuid": "",
+    "source": "mgmt_form_verification.json",
+    "page_title": "New Complaint (2021/2025)",
+    "has_curriculum": true,
+    "has_file_input": false,
+    "status": "VERIFIED",
+    "fields": {
+      "f594f362-caf3-45e5-b8ee-616876b0c4e7": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Project Description"
+      },
+      "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Date"
+      },
+      "416c6f84-34ec-41e3-ab1b-2ddaab18f526": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Any Comments/Reflections"
+      },
+      "startDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Start Date"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "End Date"
+      }
+    }
+  },
+  "MGMT_EXPERIENCE": {
+    "uuid": "",
+    "source": "mgmt_form_verification.json",
+    "page_title": "New Management Experience (2021/2025)",
+    "has_curriculum": true,
+    "has_file_input": false,
+    "status": "VERIFIED",
+    "fields": {
+      "cf8c49ed-24b6-43a2-9e24-38006a3b410d": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Date of management activity:"
+      },
+      "b17d0c63-6dfe-4841-888c-85a7f324cd0d": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Type of management activity:"
+      },
+      "6b2ad7a4-5e6f-447c-9dd5-bb0baa713869": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Reflective Notes:"
+      },
+      "startDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Start Date"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "End Date"
+      }
+    }
+  },
+  "MGMT_GUIDELINE": {
+    "uuid": "",
+    "source": "mgmt_form_verification.json",
+    "page_title": "New Management: Portfolio Introduction of Guideline (2021/2025)",
+    "has_curriculum": true,
+    "has_file_input": false,
+    "status": "VERIFIED",
+    "fields": {
+      "f594f362-caf3-45e5-b8ee-616876b0c4e7": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Project Description"
+      },
+      "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Date"
+      },
+      "416c6f84-34ec-41e3-ab1b-2ddaab18f526": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Any Comments/Reflections"
+      },
+      "startDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Start Date"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "End Date"
+      }
+    }
+  },
+  "MGMT_INDUCTION": {
+    "uuid": "",
+    "source": "mgmt_form_verification.json",
+    "page_title": "New Management: Induction Programme (2021/2025)",
+    "has_curriculum": true,
+    "has_file_input": false,
+    "status": "VERIFIED",
+    "fields": {
+      "f594f362-caf3-45e5-b8ee-616876b0c4e7": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Project Description"
+      },
+      "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Date"
+      },
+      "416c6f84-34ec-41e3-ab1b-2ddaab18f526": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Any Comments/Reflections"
+      },
+      "startDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Start Date"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "End Date"
+      }
+    }
+  },
+  "MGMT_INFO": {
+    "uuid": "",
+    "source": "mgmt_form_verification.json",
+    "page_title": "New Management: Information Management (2021/2025)",
+    "has_curriculum": true,
+    "has_file_input": false,
+    "status": "VERIFIED",
+    "fields": {
+      "b647ee6e-9bb7-4b86-bfdd-45aa0254211c": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Project Description:"
+      },
+      "a7d84918-a496-484a-9d77-d0425646d29f": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Reflective notes on experience:"
+      },
+      "b588a189-cc03-4f04-abda-be1a4190ec68": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Resources used:"
+      },
+      "d5cc387b-165c-4b7f-8679-5d7597b00beb": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Lessons learned:"
+      },
+      "startDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Start Date"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "End Date"
+      }
+    }
+  },
+  "MGMT_PROJECT": {
+    "uuid": "",
+    "source": "mgmt_form_verification.json",
+    "page_title": "New Management: Project Record (2021/2025)",
+    "has_curriculum": true,
+    "has_file_input": false,
+    "status": "VERIFIED",
+    "fields": {
+      "93c34027-0abf-4c2f-9caf-6a45065610f0": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Reflection / Project Title"
+      },
+      "875855a2-1521-4d82-9f13-208f536a67c6": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Scope of task - describe the nature and clinical context"
+      },
+      "db6c8f0a-4e03-48a1-8eb4-7f16b358c59d": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Output of task (i.e. letter, report, rota, etc.)"
+      },
+      "144a72bc-d1b5-4c28-a119-9e29e3bc19a9": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Start date"
+      },
+      "c69115c7-339c-4c38-aa41-b65038157143": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Estimated finish date"
+      },
+      "1733bca8-c619-4c34-a9f3-0477234c0b7b": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Evidence / references used"
+      },
+      "dab8c918-caa9-4d8a-a637-49bd4a50c4de": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "People interviewed / engaged"
+      },
+      "08050d70-1bf7-4614-ab72-abbd8726abbc": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Other resources used"
+      },
+      "c0ad12ac-c6ed-45d1-a50f-b330abfbac8a": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Meetings with supervisor (please include dates, detail of discussions, and outcomes of the meetings)"
+      },
+      "a7c089c2-e407-470f-859c-cca8e413da3d": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Reflection on task - What would you do differently?"
+      },
+      "7772b34f-9476-420b-a061-8dc07b04b78c": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Reflection on learning - What have you learnt about this management activity?"
+      },
+      "startDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Start Date"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "End Date"
+      }
+    }
+  },
+  "MGMT_RECRUIT": {
+    "uuid": "",
+    "source": "mgmt_form_verification.json",
+    "page_title": "New Management: Recruitment (2021/2025)",
+    "has_curriculum": true,
+    "has_file_input": false,
+    "status": "VERIFIED",
+    "fields": {
+      "f594f362-caf3-45e5-b8ee-616876b0c4e7": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Project Description"
+      },
+      "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Date"
+      },
+      "416c6f84-34ec-41e3-ab1b-2ddaab18f526": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Any Comments/Reflections"
+      },
+      "startDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Start Date"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "End Date"
+      }
+    }
+  },
+  "MGMT_REPORT": {
+    "uuid": "",
+    "source": "mgmt_form_verification.json",
+    "page_title": "New Management: Writing a Report (2021/2025)",
+    "has_curriculum": true,
+    "has_file_input": false,
+    "status": "VERIFIED",
+    "fields": {
+      "f594f362-caf3-45e5-b8ee-616876b0c4e7": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Project Description"
+      },
+      "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Date"
+      },
+      "416c6f84-34ec-41e3-ab1b-2ddaab18f526": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Any Comments/Reflections"
+      },
+      "startDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Start Date"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "End Date"
+      }
+    }
+  },
+  "MGMT_RISK": {
+    "uuid": "",
+    "source": "mgmt_form_verification.json",
+    "page_title": "New Management: Risk Register (2021/2025)",
+    "has_curriculum": true,
+    "has_file_input": false,
+    "status": "VERIFIED",
+    "fields": {
+      "f594f362-caf3-45e5-b8ee-616876b0c4e7": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Project Description"
+      },
+      "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Date"
+      },
+      "416c6f84-34ec-41e3-ab1b-2ddaab18f526": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Any Comments/Reflections"
+      },
+      "startDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Start Date"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "End Date"
+      }
+    }
+  },
+  "MGMT_RISK_PROC": {
+    "uuid": "",
+    "source": "mgmt_form_verification.json",
+    "page_title": "New Management: Procedure to Reduce Risk (2021/2025)",
+    "has_curriculum": true,
+    "has_file_input": false,
+    "status": "VERIFIED",
+    "fields": {
+      "b647ee6e-9bb7-4b86-bfdd-45aa0254211c": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Project Description:"
+      },
+      "a7d84918-a496-484a-9d77-d0425646d29f": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Reflective notes on experience:"
+      },
+      "b588a189-cc03-4f04-abda-be1a4190ec68": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Resources used:"
+      },
+      "d5cc387b-165c-4b7f-8679-5d7597b00beb": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Lessons learned:"
+      },
+      "startDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Start Date"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "End Date"
+      }
+    }
+  },
+  "MGMT_ROTA": {
+    "uuid": "",
+    "source": "mgmt_form_verification.json",
+    "page_title": "New Management: Rota (2021/2025)",
+    "has_curriculum": true,
+    "has_file_input": false,
+    "status": "VERIFIED",
+    "fields": {
+      "f594f362-caf3-45e5-b8ee-616876b0c4e7": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Project Description"
+      },
+      "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Date"
+      },
+      "416c6f84-34ec-41e3-ab1b-2ddaab18f526": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Any Comments/Reflections"
+      },
+      "startDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Start Date"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "End Date"
+      }
+    }
+  },
+  "MGMT_TRAINING_EVT": {
+    "uuid": "",
+    "source": "mgmt_form_verification.json",
+    "page_title": "New Management: Portfolio Organising a training event (2021/2025)",
+    "has_curriculum": true,
+    "has_file_input": false,
+    "status": "VERIFIED",
+    "fields": {
+      "f594f362-caf3-45e5-b8ee-616876b0c4e7": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Project Description"
+      },
+      "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Date"
+      },
+      "416c6f84-34ec-41e3-ab1b-2ddaab18f526": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Any Comments/Reflections"
+      },
+      "startDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Start Date"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "End Date"
+      }
+    }
+  },
+  "PDP": {
+    "uuid": "",
+    "source": "mgmt_form_verification.json",
+    "page_title": "New Personal Development Plan (PDP - 2021/2025)",
+    "has_curriculum": true,
+    "has_file_input": false,
+    "status": "VERIFIED",
+    "fields": {
+      "70464420-b51e-4702-938f-bdad8ff38d3a": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Title:"
+      },
+      "eff0a911-1c19-4cd6-a416-27a4bfe949bc": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "What specific development needs do I have?:"
+      },
+      "2bda92c7-15d7-4571-bbf5-a4379cf0be60": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "How will these objectives be addressed?:"
+      },
+      "b3d55641-62b6-4f03-84ef-af377a55df6c": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "What are you planning to do with your Educational Development Time?"
+      },
+      "2e26c165-4bc3-4acd-8099-67b48752f723": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Are there areas you would like to access but have not secured permission or availability?"
+      },
+      "d3b5b712-09ac-46ef-bdf6-24a97967d64c": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Timescale:"
+      },
+      "86d15299-4657-420c-b4aa-745ad5de6db0": {
+        "tag": "TEXTAREA",
+        "type": "textarea",
+        "label": "Evidence of achievement or reason why not achieved:"
+      },
+      "bb9ea3c7-bb65-4af3-b36b-a09d726140f9": {
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "Has it been achieved?:\n            \n            \n            \n            No\u00a0\u00a0\n            \n\n\n\n\n            Yes"
+      },
+      "startDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Start Date"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "End Date"
+      }
+    }
+  },
+  "RESEARCH": {
+    "uuid": "",
+    "source": "mgmt_form_verification.json",
+    "page_title": "New Research Activity (2021/2025)",
+    "has_curriculum": true,
+    "has_file_input": false,
+    "status": "VERIFIED",
+    "fields": {
+      "bae7ff4d-373c-4583-952e-3bbcbcd13d2e": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Title of research activity:"
+      },
+      "7fbf5f39-c9b1-4e2c-8c3d-455f159935fe": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Date started:"
+      },
+      "025d5d3f-363b-470d-9c74-7427a8b898fd": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Date finished:"
+      },
+      "6ff4f3d2-2ad0-42d6-a86e-04bd196cee1b": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Publication"
+      },
+      "644af8ed-8b54-4544-9e0e-2f22feb3c7ef": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Poster"
+      },
+      "f0f29cc4-255f-4126-800f-f2b061fc26b8": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Presentation"
+      },
+      "dc7376a1-571f-49e0-a0d4-2fcbb50cee20": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Local Presentation"
+      },
+      "6e9261d0-37ab-4765-a0dc-707af6c9e697": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "BestBETs"
+      },
+      "5e93bc8c-8cde-4ea9-9f8b-cc03b0fc4d5e": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Abstract"
+      },
+      "f4392cb6-bd32-4913-b998-ae0b20d31774": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Contribution to Higher Degree"
+      },
+      "81171c2c-f2aa-4831-91a1-53b734993e55": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Other"
+      },
+      "startDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "Start Date"
+      },
+      "endDate": {
+        "tag": "INPUT",
+        "type": "text",
+        "label": "End Date"
+      }
+    }
+  }
+}

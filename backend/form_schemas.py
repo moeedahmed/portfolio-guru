@@ -4,6 +4,24 @@ Source: Medic's KAIZEN-FORMS-VERIFICATION-REPORT.md (verified Feb 2026 against l
 Each schema defines: fields, their types, required status, and dropdown options where applicable.
 """
 
+# ─── Common header fields (NOT in per-form fields list) ──────────────────────
+# Every Kaizen WPBA form has three header fields ABOVE the response form:
+#   - "Date occurred on"     (field_id=startDate,       required, date)
+#   - "End date"             (field_id=endDate,         required, date)
+#   - "Description (optional)" (field_id=event-description, optional, text)
+# The script must always populate startDate and endDate. event-description is
+# optional. These are not duplicated in each form's `fields` list below — they
+# are handled by the filler as universal headers. See COMMON_HEADER_FIELDS in
+# kaizen_form_filer.py for the canonical definition.
+
+COMMON_HEADER_FIELDS = [
+    {"key": "date_of_encounter", "label": "Date occurred on",     "type": "date", "required": True,  "field_id": "startDate"},
+    {"key": "end_date",          "label": "End date",             "type": "date", "required": True,  "field_id": "endDate"},
+    {"key": "description",       "label": "Description (optional)", "type": "text", "required": False, "field_id": "event-description"},
+]
+
+
+
 FORM_SCHEMAS = {
 
     "CBD": {
@@ -298,26 +316,6 @@ FORM_SCHEMAS = {
         ]
     },
 
-    "ESLE": {
-        "name": "Reflection on ESLE",
-        "filer_available": False,
-        "fields": [
-            {"key": "reflection_title",     "label": "Title of reflection",         "type": "text",     "required": True},
-            {"key": "date_of_esle",         "label": "Date of ESLE",                "type": "date",     "required": False},
-            {"key": "esle_category",        "label": "ESLE Category",               "type": "multi_select", "required": True,
-             "options": ["Management & Supervision", "Teamwork & Cooperation", "Decision making", "Situational Awareness"]},
-            {"key": "circumstances",        "label": "Describe the circumstances. What did you do? What did others do?", "type": "text", "required": False},
-            {"key": "replay_differently",   "label": "If you could replay the event, what would you have done differently?", "type": "text", "required": False},
-            {"key": "why",                  "label": "Why?",                        "type": "text",     "required": False},
-            {"key": "different_outcome",    "label": "How would the outcome be different if you replayed this event?", "type": "text", "required": False},
-            {"key": "focussing_on",         "label": "Focussing on what you would have done differently...", "type": "text", "required": False},
-            {"key": "learned",              "label": "What have you learned from the experience?", "type": "text", "required": False},
-            {"key": "further_action",       "label": "Further action required",     "type": "text",     "required": False},
-            {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)",     "type": "kc_tick",  "required": False},
-            {"key": "key_capabilities",     "label": "Key Capabilities",        "type": "kc_tick",  "required": False},
-        ]
-    },
-
     "COMPLAINT": {
         "name": "Reflection on Complaints",
         "filer_available": False,
@@ -395,12 +393,19 @@ FORM_SCHEMAS = {
 
     "REFLECT_LOG": {
         "name": "Reflective Practice Log (2025 Update)",
-        "filer_available": False,
+        "filer_available": True,
         "fields": [
-            {"key": "date_of_encounter", "label": "Date", "type": "date", "required": True},
-            {"key": "reflection",        "label": "Reflection",        "type": "text",     "required": True},
-            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
-            {"key": "key_capabilities",  "label": "Key Capabilities",  "type": "kc_tick",  "required": False},
+            {"key": "date_of_encounter",  "label": "Date",                            "type": "date",     "required": True},
+            {"key": "reflection_title",   "label": "Title of Reflection",             "type": "text",     "required": False},
+            {"key": "date_of_event",      "label": "Date of Event",                   "type": "date",     "required": False},
+            {"key": "reflection",         "label": "Description / What happened",     "type": "text",     "required": True},
+            {"key": "replay_differently", "label": "What would you do differently",   "type": "text",     "required": False},
+            {"key": "why",                "label": "Why",                              "type": "text",     "required": False},
+            {"key": "different_outcome",  "label": "Would the outcome be different",  "type": "text",     "required": False},
+            {"key": "focussing_on",       "label": "What are you focussing on",       "type": "text",     "required": False},
+            {"key": "learned",            "label": "What have you learned",            "type": "text",     "required": False},
+            {"key": "curriculum_links",   "label": "Curriculum Links (SLOs)",          "type": "kc_tick",  "required": False},
+            {"key": "key_capabilities",   "label": "Key Capabilities",                "type": "kc_tick",  "required": False},
         ]
     },
 

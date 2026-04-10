@@ -1,0 +1,51 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      FERNET_SECRET_KEY: test
+      TELEGRAM_BOT_TOKEN: fake
+      GOOGLE_API_KEY: fake
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+      - name: Run non-E2E tests
+        run: python -m pytest tests/ -v --ignore=tests/test_e2e.py
+
+  e2e:
+    if: ${{ secrets.TELETHON_API_ID != '' && secrets.TELETHON_API_HASH != '' && secrets.TELETHON_SESSION != '' }}
+    runs-on: ubuntu-latest
+    env:
+      FERNET_SECRET_KEY: test
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN_PORTFOLIO }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      TELETHON_API_ID: ${{ secrets.TELETHON_API_ID }}
+      TELETHON_API_HASH: ${{ secrets.TELETHON_API_HASH }}
+      TELETHON_SESSION: ${{ secrets.TELETHON_SESSION }}
+      TELEGRAM_BOT_USERNAME: PortfolioGuruBot
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+      - name: Run E2E tests
+        run: python -m pytest tests/ -v -m e2e

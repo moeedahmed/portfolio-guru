@@ -1,0 +1,46 @@
+{
+  "JCF": {
+    "playwright_runs": 0,
+    "browser_use_runs": 1,
+    "field_fill_rates": {
+      "setting": 1.0,
+      "paper_title": 1.0,
+      "learner_group": 1.0,
+      "date_of_encounter": 1.0,
+      "session_length": 1.0,
+      "number_of_learners": 1.0,
+      "delivery": 1.0
+    },
+    "user_pushbacks": [],
+    "last_updated": "2026-03-15"
+  },
+  "FORMAL_COURSE": {
+    "playwright_runs": 0,
+    "browser_use_runs": 1,
+    "field_fill_rates": {
+      "stage_of_training": 1.0,
+      "project_description": 1.0,
+      "lessons_learned": 0.0,
+      "reflective_notes": 0.0,
+      "resources_used": 0.0
+    },
+    "user_pushbacks": [],
+    "last_updated": "2026-03-16"
+  },
+  "REFLECT_LOG": {
+    "playwright_runs": 0,
+    "browser_use_runs": 4,
+    "field_fill_rates": {
+      "date_of_encounter": 1.0,
+      "reflection": 0.51,
+      "learned": 0.51,
+      "replay_differently": 0.51,
+      "different_outcome": 0.51,
+      "why": 0.51,
+      "focussing_on": 0.51,
+      "date_of_event": 0.3
+    },
+    "user_pushbacks": [],
+    "last_updated": "2026-03-21"
+  }
+}

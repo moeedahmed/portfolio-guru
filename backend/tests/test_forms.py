@@ -22,8 +22,7 @@ class TestFormButtonLabels:
     def test_management_forms_have_labels(self):
         """Management forms must have labels."""
         from bot import FORM_BUTTON_LABELS
-        mgmt_forms = ["MGMT_ROTA", "MGMT_RISK", "MGMT_MEETING", "MGMT_PROJECT",
-                      "MGMT_AUDIT", "MGMT_SERVICE", "MGMT_LEADERSHIP"]
+        mgmt_forms = ["MGMT_ROTA", "MGMT_RISK", "MGMT_PROJECT"]
         for form in mgmt_forms:
             assert form in FORM_BUTTON_LABELS, f"Missing label for {form}"
 
@@ -33,7 +32,7 @@ class TestTrainingLevelForms:
     def test_management_forms_in_st5(self):
         """ST5 must have management forms."""
         from bot import TRAINING_LEVEL_FORMS
-        mgmt_forms = ["MGMT_ROTA", "MGMT_RISK", "MGMT_AUDIT"]
+        mgmt_forms = ["MGMT_ROTA", "MGMT_RISK", "MGMT_PROJECT"]
         for form in mgmt_forms:
             assert form in TRAINING_LEVEL_FORMS["ST5"], f"{form} missing from ST5"
 
