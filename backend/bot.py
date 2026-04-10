@@ -1326,8 +1326,38 @@ async def setup_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text("⚠️ That doesn't look like an email. What's your Kaizen username?")
         return AWAIT_USERNAME
     context.user_data["setup_username"] = text
+    context.user_data["_setup_state_hint"] = "password"
     await update.message.reply_text("🔒 What's your Kaizen password?")
     return AWAIT_PASSWORD
+
+
+async def _test_kaizen_login(username: str, password: str) -> bool:
+    """Quick headless login test — returns True if credentials work."""
+    try:
+        from playwright.async_api import async_playwright
+        pw = await async_playwright().start()
+        browser = await pw.chromium.launch(headless=True)
+        page = await browser.new_page()
+        try:
+            await page.goto("https://eportfolio.rcem.ac.uk", wait_until="networkidle", timeout=30000)
+            await asyncio.sleep(2)
+            login_input = page.locator('input[name="login"]')
+            if await login_input.count() > 0:
+                await login_input.fill(username)
+                await page.locator('button[type="submit"]').click()
+                await asyncio.sleep(2)
+            pwd_input = page.locator('input[name="password"]')
+            if await pwd_input.count() > 0:
+                await pwd_input.fill(password)
+                await page.locator('button[type="submit"]').click()
+            await page.wait_for_url("**/kaizenep.com/**", timeout=30000)
+            return True
+        finally:
+            await browser.close()
+            await pw.stop()
+    except Exception as e:
+        logger.warning(f"Credential test failed: {e}")
+        return False
 
 
 async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1346,6 +1376,20 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 "Please delete it manually for security."
             )
 
+    # Test credentials before saving
+    progress_msg = await update.effective_chat.send_message("🔄 Testing your Kaizen login...")
+    login_ok = await asyncio.wait_for(
+        _test_kaizen_login(username, password), timeout=60
+    )
+
+    if not login_ok:
+        await progress_msg.edit_text(
+            "❌ Login failed — please check your username and password.\n\n"
+            "📧 What's your Kaizen username (email)?"
+        )
+        context.user_data.pop("setup_username", None)
+        return AWAIT_USERNAME
+
     store_credentials(user_id, username, password)
     context.user_data.pop("setup_username", None)
 
@@ -1357,7 +1401,7 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
          InlineKeyboardButton("ST6", callback_data="LEVEL|ST6")],
         [InlineKeyboardButton("SAS / Fellow", callback_data="LEVEL|SAS")],
     ])
-    await update.effective_chat.send_message(
+    await progress_msg.edit_text(
         "Kaizen connected ✅\n\nOne more thing — what's your training level? I use it to show the forms that actually apply to you.",
         reply_markup=keyboard
     )
@@ -1390,6 +1434,16 @@ async def setup_curriculum(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         f"✅ Set to {label} — I'll only show you the relevant forms.\n\nYou can file a case whenever you're ready."
     )
     return ConversationHandler.END
+
+
+async def _setup_wrong_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle non-text input during setup (photo, voice, document, etc.)."""
+    state = context.user_data.get("_setup_state_hint", "username")
+    if state == "password":
+        await update.message.reply_text("⚠️ Please type your Kaizen password — I can't read photos or voice notes here.")
+        return AWAIT_PASSWORD
+    await update.message.reply_text("⚠️ Please type your Kaizen email — I can't read photos or voice notes here.")
+    return AWAIT_USERNAME
 
 
 async def setup_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -4198,8 +4252,14 @@ def build_application() -> Application:
             CallbackQueryHandler(setup_start, pattern=r"^ACTION\|setup$"),
         ],
         states={
-            AWAIT_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_username)],
-            AWAIT_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_password)],
+            AWAIT_USERNAME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, setup_username),
+                MessageHandler(~filters.TEXT & ~filters.COMMAND, _setup_wrong_input),
+            ],
+            AWAIT_PASSWORD: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, setup_password),
+                MessageHandler(~filters.TEXT & ~filters.COMMAND, _setup_wrong_input),
+            ],
             AWAIT_TRAINING_LEVEL: [CallbackQueryHandler(setup_training_level, pattern=r"^LEVEL\|")],
             AWAIT_CURRICULUM: [CallbackQueryHandler(setup_curriculum, pattern=r"^SET_CURRICULUM\|")],
         },

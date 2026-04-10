@@ -558,6 +558,11 @@ class TestOfflineE2E:
         monkeypatch.setattr("bot.store_training_level", lambda uid, level: None)
         monkeypatch.setattr("bot.store_curriculum", lambda uid, cur: None)
 
+        # Mock credential validation — always passes in tests
+        async def fake_login_test(u, p):
+            return True
+        monkeypatch.setattr("bot._test_kaizen_login", fake_login_test)
+
         # Step 1: /setup
         update1 = make_command_update("setup")
         _prepare_update(update1, app.bot)
