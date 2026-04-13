@@ -279,8 +279,6 @@ FORMS_USING_TAG_BASED_CURRICULUM = {
     "COST_IMPROVE", "EQUIP_SERVICE", "APPRAISAL",
     # Reflective entries that may also use tag-based linking:
     "COMPLAINT", "SERIOUS_INC",
-    # Teaching forms have no in-form curriculum tree (verified 2026-04-13)
-    "TEACH",
 }
 
 
@@ -791,7 +789,7 @@ FORM_UUIDS = {
     "MSF":           "5f71ac04-ff45-44d2-b7a1-f8b921a8a4c8",
     "JCF":           "3daa9559-3c31-4ab4-883c-9a991632a9ca",
     "QIAT":          "a0aa5cfc-57be-4622-b974-51d334268d57",
-    "TEACH":         "98c35142-6b8d-4958-86c5-4dfd06f22143",
+    "TEACH":         "1ffbd272-8447-439c-aa03-ff99e2dbc04d",
     "PROC_LOG":      "2d6ebac1-4633-49d1-9dc0-fa0d39a98afc",
     "SDL":           "743885d8-c1b8-4566-bc09-8ed9b0e09829",
     "US_CASE":       "558b196a-8168-4cc6-b363-6f6e4b08397a",

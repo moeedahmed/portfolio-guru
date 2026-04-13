@@ -240,13 +240,29 @@ FORM_SCHEMAS = {
     "TEACH": {
         "name": "Teaching Delivered By Trainee",
         "filer_available": True,
-        "tag_based_curriculum": True,  # No in-form curriculum tree; uses Add Tags modal
+        "tag_based_curriculum": False,  # 2025 Update has in-form curriculum tree (2021 version used Add Tags)
         "fields": [
             {"key": "date_of_teaching",     "label": "Date of teaching activity",   "type": "date",     "required": True,  "field_id": "e90d9f84-68fc-4dbf-a8be-977180ffc2cb"},
             {"key": "title_of_session",     "label": "Title of session",            "type": "text",     "required": True},
             {"key": "recognised_courses",   "label": "Recognised Courses",          "type": "dropdown", "required": False,
              "options": ["- n/a -", "ATLS", "APLS", "ALS", "ELS", "Other"]},
             {"key": "learning_outcomes",    "label": "Learning outcomes used in session", "type": "text", "required": True},
+            {"key": "accs_procedural_skill",  "label": "ACCS Procedural skills (Update 2025)", "type": "dropdown", "required": False,
+             "options": ["- n/a -"],
+             "field_id": "eed0e8dc-075d-4661-aea5-2c3238af4c5b"},
+            {"key": "intermediate_procedural_skill", "label": "Intermediate Procedural skills (2025 Update)", "type": "dropdown", "required": False,
+             "options": ["- n/a -"],
+             "field_id": "31bd55b7-0e32-4918-8cc0-4ba33af83772"},
+            {"key": "higher_procedural_skill", "label": "ST4-ST6 Higher EM Procedural skill", "type": "dropdown", "required": False,
+             "options": ["- n/a -", "Paediatric sedation", "Adult sedation", "Advanced airway management",
+                         "Non-invasive ventilation", "Open Chest drain", "Resuscitative thoracotomy",
+                         "Lateral Canthotomy", "DC cardioversion", "External pacing", "Pericardiocentesis",
+                         "ED management of life-threatening haemorrhage", "Emergency delivery",
+                         "Resuscitative hysterotomy", "Fracture / Dislocation manipulation",
+                         "Large joint aspiration", "PoCUS - Echo in Life Support (ELS)",
+                         "PoCUS - Shock Assessment", "PoCUS - Focused Assessment for AAA",
+                         "PoCUS - eFAST / FAFF", "Other"],
+             "field_id": "8def931e-3a00-43ac-8529-44cdaf34be2d"},
             {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)",     "type": "kc_tick",  "required": False},
             {"key": "key_capabilities",     "label": "Key Capabilities",        "type": "kc_tick",  "required": False},
         ]
