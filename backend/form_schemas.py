@@ -62,6 +62,16 @@ FORM_SCHEMAS = {
             {"key": "clinical_setting",     "label": "Clinical Setting",        "type": "text",     "required": True},
             {"key": "stage_of_training",    "label": "Stage of Training",       "type": "dropdown", "required": True,
              "options": ["Intermediate/ST3", "Higher/ST4-ST6", "PEM Sub-specialty", "ACCS ST1-ST2/CT1-CT2"]},
+            {"key": "procedural_skill",     "label": "ST4-ST6 procedural skill (2025 Update)", "type": "dropdown", "required": True,
+             "options": ["Paediatric sedation", "Adult sedation", "Advanced airway management",
+                         "Non-invasive ventilation", "Open Chest drain", "Resuscitative thoracotomy",
+                         "Lateral Canthotomy", "DC cardioversion", "External pacing", "Pericardiocentesis",
+                         "ED management of life-threatening haemorrhage", "Emergency delivery",
+                         "Resuscitative hysterotomy", "Fracture / Dislocation manipulation",
+                         "Large joint aspiration", "PoCUS - Echo in Life Support (ELS)",
+                         "PoCUS - Shock Assessment", "PoCUS - Focused Assessment for AAA",
+                         "PoCUS - eFAST / FAFF", "Other"],
+             "field_id": "8def931e-3a00-43ac-8529-44cdaf34be2d"},
             {"key": "indication",           "label": "Indication",              "type": "text",     "required": True},
             {"key": "trainee_performance",  "label": "Trainee Performance",     "type": "text",     "required": True},
             {"key": "reflection",           "label": "Reflection",              "type": "text",     "required": False},
@@ -230,8 +240,9 @@ FORM_SCHEMAS = {
     "TEACH": {
         "name": "Teaching Delivered By Trainee",
         "filer_available": True,
+        "tag_based_curriculum": True,  # No in-form curriculum tree; uses Add Tags modal
         "fields": [
-            {"key": "date_of_teaching",     "label": "Date of teaching activity",   "type": "date",     "required": True},
+            {"key": "date_of_teaching",     "label": "Date of teaching activity",   "type": "date",     "required": True,  "field_id": "e90d9f84-68fc-4dbf-a8be-977180ffc2cb"},
             {"key": "title_of_session",     "label": "Title of session",            "type": "text",     "required": True},
             {"key": "recognised_courses",   "label": "Recognised Courses",          "type": "dropdown", "required": False,
              "options": ["- n/a -", "ATLS", "APLS", "ALS", "ELS", "Other"]},

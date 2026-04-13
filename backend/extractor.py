@@ -262,6 +262,7 @@ FORM_UUIDS = {
 # Applied before the user sees any draft — not post-approval
 SLOP_PATTERNS = [
     r"\s*—\s*",  # em dashes -> " - "
+    r"\s*--\s*",  # double hyphens (AI em-dash approximation) -> " - "
     # Single words
     r"\bdelve\b",
     r"\bnavigate\b",
@@ -597,6 +598,8 @@ def _humanize_text(text: str) -> str:
     result = text
     # Replace em dashes with regular dashes
     result = re.sub(r"\s*—\s*", " - ", result)
+    # Replace double hyphens (AI em-dash approximation)
+    result = re.sub(r"\s*--\s*", " - ", result)
     # Remove slop words/phrases
     for pattern in SLOP_PATTERNS[1:]:  # skip em dash pattern (already handled)
         result = re.sub(pattern, "", result, flags=re.IGNORECASE)

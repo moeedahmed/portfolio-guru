@@ -279,6 +279,8 @@ FORMS_USING_TAG_BASED_CURRICULUM = {
     "COST_IMPROVE", "EQUIP_SERVICE", "APPRAISAL",
     # Reflective entries that may also use tag-based linking:
     "COMPLAINT", "SERIOUS_INC",
+    # Teaching forms have no in-form curriculum tree (verified 2026-04-13)
+    "TEACH",
 }
 
 
@@ -378,6 +380,7 @@ FORM_FIELD_MAP = {
         "date_of_event": "5391f8de-de63-4db3-9e08-baaa2a380cfe",
         "case_observed": "60772a97-92eb-4dbe-a813-6a5293be82f9",
         "stage_of_training": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
+        "procedural_skill": "8def931e-3a00-43ac-8529-44cdaf34be2d",
         "reflection": "610b5c60-99ac-4902-9407-22974d6a5799",
     },
     "MINI_CEX": {
@@ -451,6 +454,7 @@ FORM_FIELD_MAP = {
     },
     "TEACH": {
         "date_of_teaching": "startDate",
+        "date_of_teaching_activity": "e90d9f84-68fc-4dbf-a8be-977180ffc2cb",
         "title_of_session": "6b62a9ef-b0bf-498c-b10b-410fa97766c3",
         "recognised_courses": "17d7899f-0564-4e51-9817-54444e43822c",
         "learning_outcomes": "ddd8c881-91c6-46fd-84e9-32e89f617877",
@@ -787,7 +791,7 @@ FORM_UUIDS = {
     "MSF":           "5f71ac04-ff45-44d2-b7a1-f8b921a8a4c8",
     "JCF":           "3daa9559-3c31-4ab4-883c-9a991632a9ca",
     "QIAT":          "a0aa5cfc-57be-4622-b974-51d334268d57",
-    "TEACH":         "1ffbd272-8447-439c-aa03-ff99e2dbc04d",
+    "TEACH":         "98c35142-6b8d-4958-86c5-4dfd06f22143",
     "PROC_LOG":      "2d6ebac1-4633-49d1-9dc0-fa0d39a98afc",
     "SDL":           "743885d8-c1b8-4566-bc09-8ed9b0e09829",
     "US_CASE":       "558b196a-8168-4cc6-b363-6f6e4b08397a",
