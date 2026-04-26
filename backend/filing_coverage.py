@@ -16,8 +16,21 @@ COVERAGE_PATH = Path(__file__).parent / "filing_coverage.json"
 
 # Fields considered "important" — low fill rates here trigger browser-use
 IMPORTANT_FIELDS = {
-    "curriculum_links", "key_capabilities", "reflection",
-    "clinical_reasoning", "case_to_discuss",
+    # Curriculum reliability is the highest-risk path: a draft can appear to
+    # file successfully while KC ticks silently fail.
+    "curriculum_links", "key_capabilities",
+
+    # Narrative/reflection fields are the core evidence payload.
+    "reflection", "clinical_reasoning", "case_to_discuss",
+
+    # P0 WPBA fields discovered during the 2026-04-26 live DOM inspection:
+    # CBD/DOPS/LAT forms can load successfully while these schema-critical
+    # fields are absent from the trainee-side DOM or require assessor-side /
+    # conditional handling. Treat skips here as important enough to escalate
+    # to browser-use rather than silently accepting a partial draft.
+    "clinical_setting", "patient_presentation", "trainee_role",
+    "level_of_supervision", "procedure_name", "indication",
+    "trainee_performance", "stage_of_training",
 }
 
 PLAYWRIGHT_MIN_RUNS = 5

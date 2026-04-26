@@ -111,7 +111,13 @@ async def route_filing(
             "method": "deterministic" | "browser-use",
         }
     """
-    from filing_coverage import should_use_browser_use, record_run
+    import os as _os
+    from filing_coverage import IMPORTANT_FIELDS, should_use_browser_use, record_run
+
+    # Safety gate: submit is disabled unless explicitly opted in
+    if submit and not _os.environ.get("KAIZEN_ALLOW_SUBMIT", "").lower() in ("1", "true", "yes"):
+        logger.warning("Submit requested but KAIZEN_ALLOW_SUBMIT not set — forcing draft mode")
+        submit = False
 
     platform_lower = platform.lower()
     platform_config = PLATFORM_REGISTRY.get(platform_lower)
@@ -133,7 +139,7 @@ async def route_filing(
             # OR if no fields were filled at all (no DOM mapping for this form type)
             skipped = set(result.get("skipped", []))
             filled = result.get("filled", [])
-            important_skipped = skipped & {"curriculum_links", "key_capabilities"}
+            important_skipped = skipped & IMPORTANT_FIELDS
             no_fields_filled = result["status"] == "partial" and len(filled) == 0
             if result["status"] == "partial" and (important_skipped or no_fields_filled):
                 logger.info(f"Playwright partial for {form_type}, escalating to browser-use (skipped: {important_skipped})")

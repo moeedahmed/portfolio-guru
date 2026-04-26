@@ -1,5 +1,26 @@
 .env
+.env.local
 node_modules/
 venv/
 __pycache__/
-.env.local
+
+# Runtime artefacts — never commit
+*.bak-*
+backend/*.bak-*
+backend/tests/*.bak-*
+
+# JSON ticket dumps (clinical data, dev-only)
+backend/*_2025*.json
+backend/*_2026*.json
+
+# Dev/debug scripts (one-off utilities)
+backend/dump_ticket.py
+backend/fill_one.py
+backend/tick_kcs_only.py
+backend/ensure_chrome.sh
+
+# Backup start scripts
+start-bot.sh.bak-*
+
+# Generated live inspection outputs
+backend/p0_inspection_results.json

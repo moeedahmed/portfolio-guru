@@ -277,6 +277,26 @@ FORM_SCHEMAS = {
              "options": ["Intermediate/ST3", "Higher/ST4-ST6", "PEM Sub-specialty", "ACCS ST1-ST2/CT1-CT2"]},
             {"key": "year_of_training",     "label": "Year of training",            "type": "text",     "required": False},
             {"key": "age_of_patient",       "label": "Age of patient",              "type": "text",     "required": False},
+            # Procedural skill picker — only visible once stage_of_training is
+            # set to Higher/ST4-ST6. Full option list from the dropdown below.
+            {"key": "higher_procedural_skill", "label": "ST4-ST6 Higher EM procedural skills list (2025 update)",
+             "type": "dropdown", "required": False,
+             "options": [
+                 "1. Paediatric sedation", "2. Adult sedation",
+                 "3. Advanced airway management", "4. Non-invasive ventilation",
+                 "5. Open Chest drain", "6. Resuscitative thoracotomy",
+                 "7. Lateral Canthotomy", "8. DC cardioversion",
+                 "9. External pacing", "10. Pericardiocentesis",
+                 "11. ED management of life-threatening haemorrhage",
+                 "12. Emergency delivery", "13. Resuscitative hysterotomy",
+                 "14. Fracture / Dislocation manipulation",
+                 "15. Large joint aspiration",
+                 "16. Point of Care Ultrasound - Echo in Life Support (ELS)",
+                 "17. Point of Care Ultrasound - Shock Assessment",
+                 "18. Point of Care Ultrasound - Focused Assessment for Abdominal Aortic Aneurysm (AAA)",
+                 "19. Point of Care Ultrasound - eFAST / Focussed Assessment for Free Fluid (FAFF)",
+                 "20. Other",
+             ]},
             {"key": "reflective_comments",  "label": "Reflective comments on procedure", "type": "text", "required": True},
             {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)",     "type": "kc_tick",  "required": False},
             {"key": "key_capabilities",     "label": "Key Capabilities",        "type": "kc_tick",  "required": False},
@@ -338,6 +358,12 @@ FORM_SCHEMAS = {
             {"key": "changed_management",   "label": "Did the use of ultrasound change management of the patient?", "type": "text", "required": False},
             {"key": "learning_points",      "label": "What did you learn from this case?", "type": "text", "required": False},
             {"key": "other_comments",       "label": "Other comments",              "type": "text",     "required": False},
+            # Procedural-skill dropdowns on US_CASE — must be explicitly set to "- n/a -"
+            # per skill rule "Dropdowns must be explicitly set, never left blank".
+            # Verified live 2026-04-23 after 8 drafts landed with all three blank.
+            {"key": "accs_procedural_skill",       "label": "ACCS Procedural Skills (2025 Update)",            "type": "dropdown", "required": False, "options": ["- n/a -"], "field_id": "eed0e8dc-075d-4661-aea5-2c3238af4c5b"},
+            {"key": "intermediate_procedural_skill","label": "Intermediate Procedural Skills (2025 Update)",    "type": "dropdown", "required": False, "options": ["- n/a -"], "field_id": "31bd55b7-0e32-4918-8cc0-4ba33af83772"},
+            {"key": "higher_procedural_skill",     "label": "ST4-ST6 Higher training Procedural Skills (2025 Update)", "type": "dropdown", "required": False, "options": ["- n/a -"], "field_id": "8def931e-3a00-43ac-8529-44cdaf34be2d"},
             {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)",     "type": "kc_tick",  "required": False},
             {"key": "key_capabilities",     "label": "Key Capabilities",        "type": "kc_tick",  "required": False},
         ]
@@ -378,13 +404,13 @@ FORM_SCHEMAS = {
         "name": "Educational Activity Attended",
         "filer_available": True,
         "fields": [
-            {"key": "date_of_education",    "label": "Date of education",           "type": "date",     "required": True},
-            {"key": "title_of_education",   "label": "Title of education",          "type": "text",     "required": True},
-            {"key": "delivered_by",         "label": "Who delivered the education", "type": "text",     "required": False},
-            {"key": "learning_points",      "label": "Main learning points",        "type": "text",     "required": False},
-            # curriculum_section omitted — rendered via curriculum_links hierarchy
-            {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)",     "type": "kc_tick",  "required": False},
-            {"key": "key_capabilities",     "label": "Key Capabilities",        "type": "kc_tick",  "required": False},
+            {"key": "date_of_education",    "label": "Date of education",                             "type": "date",     "required": True},
+            {"key": "title_of_education",   "label": "Title of education",                            "type": "text",     "required": True},
+            {"key": "delivered_by",         "label": "Who delivered the education",                   "type": "text",     "required": False},
+            {"key": "learning_points",      "label": "Main learning points",                          "type": "text",     "required": False},
+            {"key": "curriculum_section",   "label": "Section of Curriculum covered in the teaching", "type": "text",     "required": False},
+            {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)",                       "type": "kc_tick",  "required": False},
+            {"key": "key_capabilities",     "label": "Key Capabilities",                              "type": "kc_tick",  "required": False},
         ]
     },
 
@@ -425,6 +451,12 @@ FORM_SCHEMAS = {
             {"key": "date_of_encounter",  "label": "Date",                            "type": "date",     "required": True},
             {"key": "reflection_title",   "label": "Title of Reflection",             "type": "text",     "required": False},
             {"key": "date_of_event",      "label": "Date of Event",                   "type": "date",     "required": False},
+            # Full dropdown options verified live 2026-04-17 against kaizenep.com.
+            # Note: no 'Simulation' or 'Teaching' option here; for sim / training
+            # sessions, use '- n/a -' or omit the field.
+            {"key": "event_type",         "label": "Type of event/circumstances",     "type": "dropdown", "required": False,
+             "options": ["- n/a -", "ED patient", "CDU patient", "Clinic patient",
+                         "Anaesthetic list", "ITU", "Ward patient", "Pre-hospital"]},
             {"key": "reflection",         "label": "Description / What happened",     "type": "text",     "required": True},
             {"key": "replay_differently", "label": "What would you do differently",   "type": "text",     "required": False},
             {"key": "why",                "label": "Why",                              "type": "text",     "required": False},

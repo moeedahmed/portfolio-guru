@@ -279,6 +279,26 @@ FORMS_USING_TAG_BASED_CURRICULUM = {
     "COST_IMPROVE", "EQUIP_SERVICE", "APPRAISAL",
     # Reflective entries that may also use tag-based linking:
     "COMPLAINT", "SERIOUS_INC",
+    # Procedural Log — uses Add tags modal despite being a tally form.
+    # Verified live 2026-04-22: no inline curriculum tree, only the modal.
+    # Previously missing caused filer to report "curriculum_links (N KCs)"
+    # success while actually ticking nothing (TICK_KCS_JS returns 0 when
+    # no [kz-tree] element is present on the page).
+    "PROC_LOG",
+    # DOPS — modal-only curriculum. Has other kz-tree elements on page
+    # (e.g. procedural_skill multi-select) that fooled tree_ready check.
+    # Verified live 2026-04-23: inline kz-tree had no SLO/KC nodes.
+    "DOPS",
+    # US_CASE was briefly here (2026-04-22) based on skill §17h, but live
+    # inspection 2026-04-23 confirmed US_CASE has an inline [kz-tree] for
+    # curriculum (outside any modal). The "Add tags" modal on that form is a
+    # secondary tagging UI, not the curriculum-link path. Removed from set
+    # so KCs are ticked on the inline tree where they actually count as
+    # curriculum evidence. The skill's §17h list needs revising too.
+    # CBD uses modal-only curriculum (no inline tree). Verified live
+    # 2026-04-23 — kzTreeAttr=1 but sloAnchors=0 and visibleCheckboxes=2,
+    # i.e. the tree lives inside the Add tags modal. Same pattern as PROC_LOG.
+    "CBD",
 }
 
 
@@ -404,6 +424,14 @@ FORM_FIELD_MAP = {
         "trainee_post": "b4b62e33-3359-4504-9877-17f2e38e9fd0",
         "leadership_context": "325c4423-ff20-4667-918b-c2f2a323acd0",
         "clinical_reasoning": "4c88f4f8-32bb-43c6-905b-411b7915affd",
+        # LAT's three inline kz-trees. No shared formly wrapper ID to key on,
+        # so we locate each tree by a substring of its question heading
+        # (label_hint mode in _fill_multi_select). Ticket JSON passes list values,
+        # and the filer's list-value branch routes to _fill_multi_select.
+        # Heading text verified live 2026-04-23.
+        "leadership_elements":  "HINT:specific elements of leadership",
+        "emleaders_modules":    "HINT:EMLeaders module",
+        "emleaders_domains":    "HINT:Domain/s of the EMLeaders",
     },
     "ACAF": {
         "date_of_encounter": "startDate",
@@ -456,14 +484,30 @@ FORM_FIELD_MAP = {
         "title_of_session": "6b62a9ef-b0bf-498c-b10b-410fa97766c3",
         "recognised_courses": "17d7899f-0564-4e51-9817-54444e43822c",
         "learning_outcomes": "ddd8c881-91c6-46fd-84e9-32e89f617877",
+        # Procedural-skill dropdowns — skill rule says every dropdown must be explicitly
+        # set (empty != n/a). UUIDs match form_schemas TEACH entries, added 2026-04-21.
+        "accs_procedural_skill": "eed0e8dc-075d-4661-aea5-2c3238af4c5b",
+        "intermediate_procedural_skill": "31bd55b7-0e32-4918-8cc0-4ba33af83772",
+        "higher_procedural_skill": "8def931e-3a00-43ac-8529-44cdaf34be2d",
     },
     "PROC_LOG": {
-        "date_of_activity": "startDate",
-        "end_date": "endDate",
+        # Inner PROC_LOG-specific "Date of Activity" field — distinct from the
+        # universal top-level "Date occurred on" (startDate handled by
+        # UNIVERSAL_HEADERS via 'date_of_encounter'). Fixed 2026-04-17 after
+        # a draft landed with this inner date blank.
+        "date_of_activity": "8f76bc6b-68b7-4654-9116-75e421fceccd",
         "stage_of_training": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
         "year_of_training": "036fe50f-5357-4da5-9fd6-d5c2e8d96ba4",
         "age_of_patient": "ca4f531c-ea4b-4587-a964-ee471abf1193",
         "reflective_comments": "f4557928-23fa-40b0-9f14-9357f5e7e1f3",
+        # ST4-ST6 procedural skill dropdown — conditionally rendered only
+        # after stage_of_training is set to Higher/ST4-ST6. Same UUID as the
+        # identical dropdown on TEACH / DOPS — one canonical picker.
+        "higher_procedural_skill": "8def931e-3a00-43ac-8529-44cdaf34be2d",
+        # Required free-text field that appears when higher_procedural_skill
+        # is set to "20. Other". Verified live 2026-04-17. Always pass a
+        # value when selecting Other; form won't save otherwise.
+        "higher_procedural_skill_other_specify": "4fea8fcc-185c-4917-bfe0-2dc63f7dccb3",
     },
     "SDL": {
         "reflection_title": "d7d43710-117b-4cae-8903-203b82c72f58",
@@ -484,6 +528,20 @@ FORM_FIELD_MAP = {
         "changed_management": "e9419598-3230-4e50-810f-29893a6a8c42",
         "learning_points": "df24a5de-14a4-4d25-9c93-b93ac76991b9",
         "other_comments": "317ddbf2-a3dc-4ee7-a53c-fa1369d2c929",
+        # Multi-select kz-tree field (AAA / ELS / FAST / Vascular Access / Other).
+        # Dom_id here is the label's `for` attribute — getElementById returns null,
+        # so the filer routes list values to _fill_multi_select which locates
+        # the field by label[for=]. Added 2026-04-23.
+        "us_application": "69878c05-4fbc-4e1b-9307-54a3a3a9ca8a",
+        # Procedural-skill dropdowns — US_CASE has these three even though the
+        # form is primarily a reflective log, same pattern as TEACH. Per skill
+        # rule "Dropdowns must be explicitly set, never left blank", they must
+        # be actively set to "- n/a -" for ultrasound-case reflections where
+        # no named procedural skill applies. Added 2026-04-23 after discovering
+        # the 8 US_CASE drafts had all three left blank.
+        "accs_procedural_skill": "eed0e8dc-075d-4661-aea5-2c3238af4c5b",
+        "intermediate_procedural_skill": "31bd55b7-0e32-4918-8cc0-4ba33af83772",
+        "higher_procedural_skill": "8def931e-3a00-43ac-8529-44cdaf34be2d",
     },
     "COMPLAINT": {
         "reflection_title": "fe902ad2-a932-489f-bb01-2ae6dda100f4",
@@ -496,17 +554,32 @@ FORM_FIELD_MAP = {
     "SERIOUS_INC": {
         "reflection_title": "53009feb-16b4-4335-a81c-f5f5b4d93917",
         "date_of_incident": "f9e0bf51-a74e-4c6c-8fc8-9d627ebf318b",
-        "description": "a4feee19-b600-4c42-a286-15a81f8835c2",
+        # Renamed from "description" 2026-04-18 to avoid collision with the
+        # universal top-level 'Description (optional)' header — the old key
+        # shadowed UNIVERSAL_HEADERS["description"] so the top-level never
+        # got filled. Callers should use 'incident_description' for the
+        # inner narrative and 'description' for the one-line timeline summary.
+        "incident_description": "a4feee19-b600-4c42-a286-15a81f8835c2",
         "root_causes": "c5d0833f-db51-4dd2-9f4c-0972c1b7c54d",
         "contributing_factors": "898a8f93-6651-4bd8-a0f9-940ac60d908d",
         "learning_points": "b4b852e9-dbf3-4e6b-b3db-a309a6cf9f68",
         "further_action": "49b3a49c-5e69-4c87-9786-562777f6744b",
+        # Procedural skill dropdown — appears on this form when it's tied to
+        # a procedure-related incident (e.g. cardioversion error). Added
+        # 2026-04-18. Same UUID as PROC_LOG / DOPS / TEACH.
+        "higher_procedural_skill": "8def931e-3a00-43ac-8529-44cdaf34be2d",
+        "higher_procedural_skill_other_specify": "4fea8fcc-185c-4917-bfe0-2dc63f7dccb3",
     },
     "EDU_ACT": {
-        "date_of_education": "startDate",
+        # Internal "Date of education" is its own field, NOT the universal startDate header.
+        # UUID verified live on Kaizen 2026-04-21. Ticket JSON should set date_of_education
+        # explicitly; if not set, it falls through to the date_of_encounter (startDate) value.
+        "date_of_education": "7c8be633-06f2-41c6-a7d2-dcc75c6036d5",
         "title_of_education": "772f10f2-f292-4bc8-b349-bd6fff6679b7",
         "delivered_by": "0120a77c-d1bb-4c8c-9155-1460e0778613",
         "learning_points": "83dd2eb4-bf25-4d79-8001-59a76f7c2cc3",
+        # Free-text description of the curriculum area covered (NOT the KC tick tree).
+        "curriculum_section": "bdd2ee0c-07ab-4001-ae6b-8eccdc706a4b",
     },
     "FORMAL_COURSE": {
         "stage_of_training": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
@@ -540,6 +613,13 @@ FORM_FIELD_MAP = {
     },
     # ESLE Part 1 & 2 — actual WPBA. Trainee fills Part 1, assessor fills Part 2.
     "ESLE_PART1_2": {
+        "date_of_encounter": "startDate",
+        "stage_of_training": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
+        "date_of_esle": "2c86886b-0a18-4771-9b25-6c2272fdad6b",
+        "reflection": "488e8e63-300d-4ed9-a4f4-eaee53608f05",
+    },
+    # ESLE_ASSESS alias — bot.py and extractor.py use this name; same form as ESLE_PART1_2
+    "ESLE_ASSESS": {
         "date_of_encounter": "startDate",
         "stage_of_training": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
         "date_of_esle": "2c86886b-0a18-4771-9b25-6c2272fdad6b",
@@ -774,6 +854,20 @@ FORM_FIELD_MAP = {
         "date_of_event": "5e8746e6-918b-48c4-a0d1-5ca235e1e5ce",
         "reflection": "416c6f84-34ec-41e3-ab1b-2ddaab18f526",
     },
+    # File Upload form — for certificates, badges, letters of recognition,
+    # and supporting docs. Inspected live 2026-04-20. The actual file
+    # attachment still has to be added on Kaizen manually (via the Upload
+    # button) — this map handles the surrounding text/select fields.
+    # Note: grade_stage (not stage_of_training) so the fuzzy select
+    # matcher handles ST1-ST8 values directly; _fill_stage only knows
+    # the generic Higher/Intermediate/ACCS/PEM enumeration.
+    "FILE_UPLOAD": {
+        "is_for_arcp": "8ee2b837-1d7b-460b-a66f-c7f89806bd82",
+        "grade_stage": "7eb6ff8b-30dd-4aba-afaf-7005bfc5ec68",
+        "title_of_document": "0bd73413-98a8-4a60-8875-b18e3350f552",
+        "notes_comments": "8bbae31d-c1f8-43c8-b16c-cc101c1dcb4c",
+        "is_pocus_evidence": "68c3efd6-17f8-498e-90b7-a5e7ed5c0866",
+    },
 }
 
 # ─── Form type UUIDs (for creating new forms) ────────────────────────────────
@@ -801,6 +895,7 @@ FORM_UUIDS = {
     # When the user asks for "an ESLE", they almost always mean ESLE_PART1_2
     # unless they explicitly say "reflection on ESLE".
     "ESLE_PART1_2":  "4a6f3a91-10ed-45d0-bb82-3e87ae2d6d04",  # actual ESLE WPBA (Part 1 trainee, Part 2 assessor)
+    "ESLE_ASSESS":   "4a6f3a91-10ed-45d0-bb82-3e87ae2d6d04",  # alias — bot/extractor use ESLE_ASSESS, maps to ESLE_PART1_2
     "ESLE_REFLECTION": "cbc7a42f-a2f0-436b-813e-bbf97cce0a34",  # supplementary reflective entry, no assessor
     "COMPLAINT":     "f7c0ba98-5a47-4e37-b76a-ca3c5c8484cc",
     "SERIOUS_INC":   "9d4a7912-a615-4ae4-9fae-6be966bcf254",
@@ -847,35 +942,88 @@ FORM_UUIDS = {
 # ─── JS snippets (passed as separate strings, NEVER f-string interpolated) ───
 
 EXPAND_SLO_JS = """(sloText) => {
+    // Find the SLO node by text match on its link
     var anchors = document.querySelectorAll('a.ng-binding');
     for (var i = 0; i < anchors.length; i++) {
-        if (anchors[i].textContent.indexOf(sloText) !== -1) {
+        if (anchors[i].textContent.indexOf(sloText) === -1) continue;
+        var li = anchors[i].closest('li');
+        if (!li) return false;
+        var liScope = angular.element(li).scope();
+        if (!liScope || !liScope.node) {
+            // Fallback to DOM click (pre-2026-04-17 behaviour)
             anchors[i].click();
             return true;
         }
+        // Walk up to the tree controller scope (has nodes + expand + isExpanded)
+        var ctrl = liScope;
+        while (ctrl && !(ctrl.nodes && typeof ctrl.expand === 'function' && typeof ctrl.isExpanded === 'function')) {
+            ctrl = ctrl.$parent;
+        }
+        if (!ctrl) {
+            anchors[i].click();
+            return true;
+        }
+        // Only expand if not already expanded (idempotent)
+        if (!ctrl.isExpanded(liScope.node._id)) {
+            ctrl.expand(liScope.node._id);
+            ctrl.$apply();
+        }
+        return true;
     }
     return false;
 }"""
 
 TICK_KC_JS = """(prefix) => {
-    var selectors = ['span.ng-binding.ng-scope', 'span.ng-binding'];
-    for (var s = 0; s < selectors.length; s++) {
-        var spans = document.querySelectorAll(selectors[s]);
-        for (var i = 0; i < spans.length; i++) {
-            var txt = spans[i].textContent.trim();
-            if (txt.indexOf(prefix) === 0) {
-                var li = spans[i].parentElement;
-                while (li && li.tagName !== 'LI') { li = li.parentElement; }
-                if (li) {
-                    var cb = li.querySelector('input[type="checkbox"]');
-                    if (cb) {
-                        cb.click();
-                        return { found: true, checked: cb.checked, text: txt.slice(0, 70) };
-                    }
-                }
-                return { found: true, no_cb: true };
+    // Find the KC node by text prefix match
+    var spans = document.querySelectorAll('span.ng-binding');
+    for (var i = 0; i < spans.length; i++) {
+        var txt = spans[i].textContent.trim();
+        if (txt.indexOf(prefix) !== 0) continue;
+
+        var li = spans[i].closest('li');
+        if (!li) continue;
+        var liScope = angular.element(li).scope();
+        if (!liScope || !liScope.node) {
+            // Fallback to the old checkbox-click path
+            var cb = li.querySelector('input[type="checkbox"]');
+            if (cb) { cb.click(); return { found: true, checked: cb.checked, text: txt.slice(0, 70) }; }
+            return { found: true, no_cb: true };
+        }
+        var nodeId = liScope.node._id;
+
+        // Walk up to find outer scope that holds the form model + options.key
+        var outer = liScope;
+        while (outer && !(outer.model && outer.options && outer.options.key)) {
+            outer = outer.$parent;
+        }
+        if (outer) {
+            var key = outer.options.key;
+            if (!outer.model[key]) outer.model[key] = [];
+            if (outer.model[key].indexOf(nodeId) === -1) {
+                outer.model[key].push(nodeId);
+            }
+            outer.$apply();
+            return { found: true, checked: true, text: txt.slice(0, 70) };
+        }
+
+        // Fallback: try tree controller's toggleSelected
+        var ctrl = liScope;
+        while (ctrl && !(ctrl.nodes && typeof ctrl.toggleSelected === 'function')) {
+            ctrl = ctrl.$parent;
+        }
+        if (ctrl) {
+            try {
+                ctrl.toggleSelected(nodeId);
+                ctrl.$apply();
+                return { found: true, checked: true, text: txt.slice(0, 70) };
+            } catch (e) {
+                // Final fallback: DOM checkbox click
+                var cb2 = li.querySelector('input[type="checkbox"]');
+                if (cb2) { cb2.click(); return { found: true, checked: cb2.checked, text: txt.slice(0, 70) }; }
+                return { found: true, no_cb: true, err: String(e) };
             }
         }
+        return { found: true, no_cb: true };
     }
     return { found: false };
 }"""
@@ -884,6 +1032,135 @@ COUNT_TICKED_JS = """() => {
     var cbs = document.querySelectorAll('input[type="checkbox"]:checked');
     return cbs.length;
 }"""
+
+
+# Single-pass KC tagger: walks the Angular tree's data model to locate every
+# target KC (by name prefix), collects the ancestor chain for each, expands
+# all ancestors through ctrl.expand(), then pushes the leaf node IDs onto
+# outer.model[options.key]. One $apply() commits the lot.
+#
+# This sidesteps DOM-click-based expansion (unreliable on kz-tree) and also
+# handles the case where only a subset of leaves are rendered (e.g. the tree
+# is in "selected-only" view until ancestors are expanded).
+#
+# Accepts a list of prefix strings (e.g. "Higher SLO9 Key Capability 2").
+# Returns {ticked, expanded, results: [{prefix, found, leafId?, ancestors?}]}.
+TICK_KCS_JS = """(kcPrefixes) => {
+    // Pick the right kz-tree. Forms like US_CASE have multiple kz-trees on the page
+    // (e.g. us_application with AAA/ELS/FAST/Vascular Access/Other AND the curriculum
+    // tree with ~50 nodes for SLO1-12 + KCs). The old selector `querySelector('[kz-tree]')`
+    // returned the first one, which could be the wrong field entirely. Fix 2026-04-23:
+    // enumerate all kz-trees and pick the one whose controller.nodes actually contains
+    // one of the requested KC prefixes. Fallback to the first only if none match.
+    var trees = Array.from(document.querySelectorAll('[kz-tree]'));
+    if (!trees.length) return { error: 'no kz-tree present', ticked: 0, results: [] };
+
+    function findCtrl(tree) {
+        var li = tree.querySelector('li');
+        if (!li) return null;
+        var s = angular.element(li).scope();
+        while (s && !(s.nodes && typeof s.expand === 'function' && typeof s.toggleSelected === 'function')) {
+            s = s.$parent;
+        }
+        return s;
+    }
+    function treeHasPrefix(ctrl, prefix) {
+        function walk(ns) {
+            for (var i = 0; i < (ns || []).length; i++) {
+                var n = ns[i];
+                if (n.name && n.name.trim().indexOf(prefix) === 0) return true;
+                if (n.categories && walk(n.categories)) return true;
+            }
+            return false;
+        }
+        return walk(ctrl.nodes);
+    }
+
+    var ctrl = null;
+    for (var ti = 0; ti < trees.length; ti++) {
+        var c = findCtrl(trees[ti]);
+        if (!c) continue;
+        // Match if any requested prefix is in this tree's nodes
+        for (var pi = 0; pi < kcPrefixes.length; pi++) {
+            if (treeHasPrefix(c, kcPrefixes[pi])) { ctrl = c; break; }
+        }
+        if (ctrl) break;
+    }
+    if (!ctrl) {
+        // Fallback to first tree with a controller, for backwards compatibility
+        for (var ti2 = 0; ti2 < trees.length; ti2++) {
+            var c2 = findCtrl(trees[ti2]);
+            if (c2) { ctrl = c2; break; }
+        }
+    }
+    if (!ctrl) return { error: 'tree controller scope not found', ticked: 0, results: [] };
+
+    // Walk up further to find the outer scope that owns the form model
+    var outer = ctrl;
+    while (outer && !(outer.model && outer.options && outer.options.key)) {
+        outer = outer.$parent;
+    }
+    if (!outer) return { error: 'form model scope not found', ticked: 0, results: [] };
+
+    function findByNamePrefix(nodes, prefix, path) {
+        for (var i = 0; i < (nodes || []).length; i++) {
+            var n = nodes[i];
+            var p = path.concat([n._id]);
+            if (n.name && n.name.trim().indexOf(prefix) === 0) return p;
+            if (n.categories) {
+                var r = findByNamePrefix(n.categories, prefix, p);
+                if (r) return r;
+            }
+        }
+        return null;
+    }
+
+    var results = [];
+    var leafIds = [];
+    var ancestors = Object.create(null);  // id -> true
+
+    for (var i = 0; i < kcPrefixes.length; i++) {
+        var prefix = kcPrefixes[i];
+        var path = findByNamePrefix(ctrl.nodes, prefix, []);
+        if (!path) {
+            results.push({ prefix: prefix, found: false });
+            continue;
+        }
+        var leafId = path[path.length - 1];
+        leafIds.push(leafId);
+        for (var j = 0; j < path.length - 1; j++) ancestors[path[j]] = true;
+        results.push({ prefix: prefix, found: true, leafId: leafId, ancestors: path.length - 1 });
+    }
+
+    // Expand all ancestors so leaves render as checkboxes
+    var ancestorIds = Object.keys(ancestors);
+    for (var i = 0; i < ancestorIds.length; i++) ctrl.expand(ancestorIds[i]);
+
+    // Push leaves onto the form model (skipping duplicates)
+    var key = outer.options.key;
+    if (!outer.model[key]) outer.model[key] = [];
+    var added = 0;
+    for (var i = 0; i < leafIds.length; i++) {
+        if (outer.model[key].indexOf(leafIds[i]) === -1) {
+            outer.model[key].push(leafIds[i]);
+            added++;
+        }
+    }
+
+    outer.$apply();
+
+    return { ticked: added, expanded: ancestorIds.length, results: results };
+}"""
+
+
+# Universal Kaizen form headers present on every event form (above the
+# form-specific fields). Merged into FORM_FIELD_MAP at fill time so callers
+# can always use these keys without each form having to re-declare them.
+UNIVERSAL_HEADERS = {
+    "date_of_encounter": "startDate",
+    "end_date": "endDate",
+    "description": "event-description",
+}
 
 
 # ─── CDP connection ──────────────────────────────────────────────────────────
@@ -896,7 +1173,7 @@ async def _connect_cdp() -> tuple:
         # Reuse existing Kaizen page if available
         for context in browser.contexts:
             for page in context.pages:
-                if "kaizenep.com" in page.url:
+                if ("kaizenep.com" in page.url and "auth.kaizenep.com" not in page.url):
                     logger.info(f"CDP: reusing Kaizen page: {page.url}")
                     return page, pw
         # Open new page
@@ -1048,87 +1325,387 @@ async def _fill_text(page: Page, dom_id: str, value: str) -> bool:
 # ─── Select dropdown filling ────────────────────────────────────────────────
 
 async def _fill_select(page: Page, dom_id: str, value: str) -> bool:
-    """Fill a generic select dropdown by label text (exact or partial match)."""
-    el = page.locator(f'[id="{dom_id}"]')
-    if not await el.count():
-        return False
+    """Fill an Angular-populated select dropdown — must update BOTH the DOM and scope.
 
-    try:
-        await el.select_option(label=value)
-        await asyncio.sleep(1)
-        logger.info(f"Select set: {dom_id} = {value}")
+    Kaizen uses <select ng-options="..."> where <option>s are Angular-generated.
+    Playwright's select_option() hangs 30s per dropdown (Angular renders late);
+    for 4 dropdowns that's 2 minutes of dead time and the filer often gets
+    killed by timeout. An earlier fix (2026-04-21, scope-only) hit a worse bug:
+    setting scope.model[key] updated Formly's form state but did NOT update
+    the native <select>.selectedIndex — the UI kept showing "- n/a -" and
+    Kaizen saved the DOM value. Found on the wrist-reduction TEACH ticket,
+    where Higher Procedural persisted as "- n/a -" instead of "Fracture /
+    Dislocation manipulation" despite a successful-looking scope set.
+
+    Fix: match option by label in scope.to.options, then update BOTH
+      1. native <select>.selectedIndex to the matching <option>.index, and
+      2. scope.model[scope.options.key] to option._id.
+    Dispatch input + change events and $apply() so Angular, Formly, and the
+    form-dirty tracker all see the change. Verified 2026-04-21 by checking
+    el.options[el.selectedIndex].text matches the target label after the
+    call returns.
+    """
+    result = await page.evaluate(
+        """([domId, label]) => {
+            const el = document.getElementById(domId);
+            if (!el) return {ok: false, err: 'element not found'};
+            const ngEl = angular.element(el);
+            const scope = ngEl && ngEl.scope ? ngEl.scope() : null;
+            if (!scope || !scope.to || !Array.isArray(scope.to.options) || !scope.options || !scope.options.key) {
+                return {ok: false, err: 'no angular scope / options'};
+            }
+            const opts = scope.to.options;
+            // Normalise: trim, lowercase, collapse whitespace for tolerant matching.
+            // Kaizen's option labels can have inconsistent spacing ("Higher / ST4 - ST6"
+            // vs ticket JSON's "Higher/ST4-ST6"), which broke substring match before
+            // (fixed 2026-04-23).
+            const norm = s => String(s || '').trim().toLowerCase().replace(/\\s+/g, ' ');
+            const normNoSpaces = s => norm(s).replace(/\\s+/g, '');
+            const target = norm(label);
+            const targetNoSp = normNoSpaces(label);
+            let modelMatch = opts.find(o => o && typeof o.name === 'string' && norm(o.name) === target);
+            if (!modelMatch) {
+                modelMatch = opts.find(o => o && typeof o.name === 'string' && norm(o.name).includes(target));
+            }
+            if (!modelMatch) {
+                // Whitespace-agnostic fallback: strip spaces/punctuation and substring-match
+                modelMatch = opts.find(o => o && typeof o.name === 'string' && normNoSpaces(o.name).includes(targetNoSp));
+            }
+            if (!modelMatch) return {ok: false, err: 'no option matches label', sample: opts.slice(0, 3).map(o => (o && o.name) || '')};
+            // Find the native <option> element whose text matches the label
+            const optionEls = Array.from(el.options);
+            const targetOption = optionEls.find(o => o.text.trim() === modelMatch.name.trim());
+            if (!targetOption) return {ok: false, err: 'no DOM option with matching label', labels: optionEls.slice(0, 5).map(o => o.text.trim())};
+            // Update native DOM FIRST (UI shows the change)
+            el.selectedIndex = targetOption.index;
+            // Update Angular scope (form state / save payload)
+            scope.model[scope.options.key] = modelMatch._id;
+            // Fire events so Angular watchers, Formly validation, and the dirty tracker all see it
+            try { el.dispatchEvent(new Event('input', {bubbles: true})); } catch (e) {}
+            try { el.dispatchEvent(new Event('change', {bubbles: true})); } catch (e) {}
+            try { scope.$apply(); } catch (e) {}
+            // Verify the DOM landed on the right option
+            const actualText = el.options[el.selectedIndex] && el.options[el.selectedIndex].text.trim();
+            return {ok: actualText === modelMatch.name.trim(), matched: modelMatch.name, domText: actualText, selectedIndex: el.selectedIndex};
+        }""",
+        [dom_id, value]
+    )
+    if result.get('ok'):
+        logger.info(f"Select set (scope+DOM): {dom_id} = {result.get('matched')}")
         return True
-    except Exception:
-        # Try by value
-        try:
-            await el.select_option(value=value)
-            await asyncio.sleep(1)
-            return True
-        except Exception:
-            # Try partial label match (e.g. procedure dropdowns have numbered prefixes)
-            try:
-                options = await page.evaluate(
-                    "(domId) => { var s = document.getElementById(domId); return s ? Array.from(s.options).map(o => o.text) : []; }",
-                    dom_id
-                )
-                match = next((o for o in options if value.lower() in o.lower()), None)
-                if match:
-                    await el.select_option(label=match)
-                    await asyncio.sleep(1)
-                    logger.info(f"Select partial match: {dom_id} = {match}")
-                    return True
-            except Exception as e:
-                logger.warning(f"Select fill failed for {dom_id}: {e}")
-            return False
+    logger.warning(f"Select fill failed for {dom_id}: {result.get('err') or 'DOM/scope mismatch'} "
+                   f"(dom={result.get('domText')!r}, sample={result.get('sample') or result.get('labels')})")
+    return False
+
+
+async def _fill_multi_select(page: Page, dom_id: str, labels: List[str]) -> bool:
+    """Tick multiple options on a kz-tree multi-select field.
+
+    Two lookup modes:
+
+    1. **Formly wrapper mode** (e.g. US_CASE us_application). `dom_id` is the
+       label's `for` attribute value — a formly-generated UUID. We find the
+       label via `label[for=dom_id]`, walk up to the enclosing `.form-group`,
+       and take the kz-tree inside. Used when a single field has one tree.
+
+    2. **Label hint mode** (e.g. LAT's three leadership trees). `dom_id` starts
+       with the prefix `HINT:` followed by a substring of the tree's question
+       label (e.g. `HINT:specific elements of leadership`). We enumerate all
+       kz-trees, walk each one's ancestor chain looking for a label/heading
+       whose text contains the hint (case-insensitive), and pick the matching
+       tree. Used when a form has multiple kz-trees without unique formly
+       wrappers — each tree is identified by the question it answers.
+
+    Semantics in both modes: **exclusive-set** — ticks matching targets AND
+    unticks any other currently-ticked options in the same tree.
+
+    Added 2026-04-23 (formly mode), extended 2026-04-23 (hint mode) for LAT.
+    """
+    use_hint = dom_id.startswith("HINT:")
+    hint = dom_id[5:] if use_hint else None
+
+    result = await page.evaluate(
+        """([fid, targets, hint]) => {
+            let tree = null;
+            if (hint) {
+                // Hint mode: find the kz-tree whose OWN formly-field wrapper has a
+                // label/heading containing the hint. We scope the search to the
+                // tightest ancestor (closest formly-field/form-group) so that when
+                // multiple kz-trees share higher ancestors (as on LAT with three
+                // sibling trees), we don't cross-match. Headers that are inside
+                // any other kz-tree are skipped.
+                const trees = Array.from(document.querySelectorAll('[kz-tree], kz-tree'));
+                const hintLC = hint.toLowerCase();
+                for (const t of trees) {
+                    const wrap = t.closest('formly-field, .form-group, [ng-form], [formly-field]');
+                    if (!wrap) continue;
+                    const hdrs = wrap.querySelectorAll('label, legend, h3, h4, h5, p, strong');
+                    for (const h of hdrs) {
+                        // Skip headers that live inside any kz-tree (own or sibling)
+                        if (h.closest('[kz-tree], kz-tree')) continue;
+                        if ((h.innerText || '').toLowerCase().includes(hintLC)) {
+                            tree = t;
+                            break;
+                        }
+                    }
+                    if (tree) break;
+                }
+                if (!tree) return {ok: false, err: 'no kz-tree matched hint: ' + hint};
+            } else {
+                // Formly wrapper mode
+                const lbl = document.querySelector(`label[for="${fid}"]`);
+                if (!lbl) return {ok: false, err: 'label[for=fid] not found'};
+                let wrap = lbl;
+                while (wrap && !wrap.classList.contains('form-group') && wrap !== document.body) {
+                    wrap = wrap.parentElement;
+                }
+                if (!wrap || !wrap.classList.contains('form-group')) return {ok: false, err: 'form-group wrapper not found'};
+                tree = wrap.querySelector('[kz-tree]') || wrap.querySelector('kz-tree');
+                if (!tree) return {ok: false, err: 'no kz-tree in field wrapper'};
+            }
+            const targetSet = new Set(targets.map(t => String(t).trim().toLowerCase()));
+            const ticked = [];
+            const unticked = [];
+            const seen = [];
+            // Semantics: set field to exactly these options. Tick targets, untick non-targets.
+            // This matches the user intent when passing a list: \"here is the complete selection\".
+            tree.querySelectorAll('input[type=checkbox]').forEach(cb => {
+                const scope = angular.element(cb).scope();
+                const name = scope && scope.node ? scope.node.name : null;
+                if (!name) return;
+                seen.push(name);
+                const want = targetSet.has(name.trim().toLowerCase());
+                if (want && !cb.checked) { cb.click(); ticked.push(name); }
+                else if (want && cb.checked) { ticked.push(name); }  // already correct
+                else if (!want && cb.checked) { cb.click(); unticked.push(name); }
+            });
+            const missed = targets.filter(t =>
+                !ticked.some(n => n.trim().toLowerCase() === String(t).trim().toLowerCase())
+            );
+            return {ok: missed.length === 0, ticked, unticked, missed, available: seen};
+        }""",
+        [dom_id, labels, hint]
+    )
+    if result.get('ok'):
+        msg = f"Multi-select set: {dom_id} = {result.get('ticked')}"
+        if result.get('unticked'):
+            msg += f" (also unticked prior: {result.get('unticked')})"
+        logger.info(msg)
+        return True
+    logger.warning(
+        f"Multi-select partial/failed for {dom_id}: "
+        f"ticked={result.get('ticked')}, unticked={result.get('unticked')}, "
+        f"missed={result.get('missed')}, available={result.get('available')}, err={result.get('err')}"
+    )
+    return bool(result.get('ticked'))
 
 
 # ─── Curriculum links (SLO expansion + KC ticking) ──────────────────────────
 
 async def _fill_curriculum_links(page: Page, kc_prefixes: List[str], stage_label: str) -> tuple:
-    """Expand SLOs and tick KCs. Returns (ticked, errors)."""
-    ticked = []
-    errors = []
+    """Tick curriculum KCs in one pass via the Angular tree's data model.
+
+    Works whether the tree is rendered inline (e.g. on /new-section/ for some
+    forms) or hidden behind an 'Add tags' button (e.g. REFLECT_LOG and drafts).
+
+    Returns (ticked_prefixes, errors).
+    """
+    ticked: list = []
+    errors: list = []
 
     if not kc_prefixes:
         return ticked, errors
 
-    # Extract unique SLO numbers from KC list
-    slos = set()
-    for kc in kc_prefixes:
-        m = re.search(r"SLO(\d+)", kc)
-        if m:
-            slos.add(m.group(0))
+    # ─── Helper: click "Add tags" button to open curriculum modal ──────────
+    async def _open_add_tags_modal() -> bool:
+        return await page.evaluate(
+            """() => {
+                var btns = document.querySelectorAll('button');
+                for (var i = 0; i < btns.length; i++) {
+                    if (btns[i].textContent.trim() === 'Add tags') {
+                        btns[i].click();
+                        return true;
+                    }
+                }
+                return false;
+            }"""
+        )
 
-    # Determine stage prefix for SLO anchors
-    stage_prefix = "Higher"
-    if stage_label:
-        for s in ("Higher", "Intermediate", "ACCS", "PEM"):
-            if s.lower() in stage_label.lower():
-                stage_prefix = s
-                break
-
-    # Expand each SLO
-    for slo in sorted(slos):
-        slo_text = f"{stage_prefix} {slo}:"
-        expanded = await page.evaluate(EXPAND_SLO_JS, slo_text)
-        if expanded:
-            logger.info(f"Expanded: {slo_text}")
+    # Ensure the curriculum tree is rendered. On forms where curriculum tagging
+    # sits behind an 'Add tags' button (REFLECT_LOG, DOPS, CBD, PROC_LOG,
+    # most draft views), click it first and wait for the modal/tree to appear.
+    tree_ready = await page.evaluate("() => document.querySelectorAll('[kz-tree] li').length > 0")
+    modal_opened = False
+    if not tree_ready:
+        clicked = await _open_add_tags_modal()
+        if clicked:
+            logger.info("Clicked 'Add tags' to expose curriculum tree")
+            modal_opened = True
+            await asyncio.sleep(3)  # wait for modal render + Angular digest
         else:
-            logger.warning(f"Could not expand: {slo_text}")
-            errors.append(f"SLO expand failed: {slo_text}")
-        await asyncio.sleep(3)  # MUST wait 3s for Angular to render KCs
+            logger.warning("Curriculum tree not rendered and no 'Add tags' button found")
 
-    # Tick each KC
-    for prefix in kc_prefixes:
-        result = await page.evaluate(TICK_KC_JS, prefix)
-        if result.get("found") and result.get("checked"):
+    # Single-pass tick: walks node data, expands ancestors, pushes leaf IDs
+    # into the form model — one $apply() commits everything.
+    result = await page.evaluate(TICK_KCS_JS, kc_prefixes)
+
+    # ─── Modal retry (2026-04-23) ─────────────────────────────────────────
+    # Forms like DOPS/CBD/PROC_LOG have the curriculum tree ONLY inside the
+    # "Add tags" modal, but may also have OTHER kz-tree elements on the page
+    # (for multi-select fields like procedural_skill). The tree_ready check
+    # above sees those non-curriculum trees and skips the modal, so
+    # TICK_KCS_JS finds 0 matching KCs. Fix: if TICK_KCS_JS found nothing
+    # and we didn't open a modal, try opening the modal and re-run.
+    all_not_found = all(not r.get("found") for r in result.get("results", []))
+    if (result.get("ticked", 0) == 0 and not modal_opened
+            and (all_not_found or result.get("error"))):
+        clicked = await _open_add_tags_modal()
+        if clicked:
+            logger.info("KC inline miss — opened 'Add tags' modal for retry")
+            modal_opened = True
+            await asyncio.sleep(3)
+            result = await page.evaluate(TICK_KCS_JS, kc_prefixes)
+        else:
+            logger.warning("KC inline miss and no 'Add tags' button available")
+
+    if result.get("error"):
+        errors.append(f"KC tagger: {result['error']}")
+
+    for r in result.get("results", []):
+        prefix = r.get("prefix", "")
+        if r.get("found"):
             ticked.append(prefix)
-            logger.info(f"KC ticked: {prefix}")
-        elif result.get("found") and result.get("no_cb"):
-            errors.append(f"KC found but no checkbox: {prefix}")
+            logger.info(f"KC queued: {prefix}")
         else:
             errors.append(f"KC not found: {prefix}")
-        await asyncio.sleep(0.5)
+
+    logger.info(f"Curriculum pass: {result.get('ticked', 0)} ticked, {result.get('expanded', 0)} ancestors expanded")
+
+    # ─── Post-scope verify + DOM-click fallback (2026-04-23) ───────────────
+    # The scope-push path (TICK_KCS_JS above) has shown an intermittent silent
+    # no-op across this session: reports success but the DOM never actually
+    # shows the leaf checkboxes ticked, and the form saves without KCs. The
+    # scope.model[key].push() seems to hit a disconnected array sometimes,
+    # most likely because the outer.$parent walk lands on a scope that isn't
+    # actually bound to the tree widget's model on first form render.
+    #
+    # Fix: after the scope path, verify by reading actual DOM checkbox state
+    # for each requested prefix, and for any prefix NOT actually ticked, run
+    # a DOM-click path that expands the SLO parent and clicks the leaf
+    # checkbox by label match. This mirrors what works reliably when done
+    # manually via Playwright scripts during this session.
+    await asyncio.sleep(0.3)
+    verify_js = (
+        "(prefixes) => {"
+        "  const missed = [];"
+        "  for (const p of prefixes) {"
+        "    let hit = false;"
+        "    document.querySelectorAll('input[type=checkbox]:checked').forEach(cb => {"
+        "      if (hit) return;"
+        "      const li = cb.closest('li'); if (!li) return;"
+        "      const leaf = li.querySelector(':scope > div, :scope > span, :scope > label');"
+        "      const t = (leaf ? leaf.innerText : li.innerText).trim().split('\\n')[0];"
+        "      if (t.startsWith(p)) hit = true;"
+        "    });"
+        "    if (!hit) missed.push(p);"
+        "  }"
+        "  return {missed};"
+        "}"
+    )
+    verify_result = await page.evaluate(verify_js, kc_prefixes)
+    missed = verify_result.get("missed", [])
+    if missed:
+        logger.warning(f"KC scope-push under-delivered, {len(missed)} missing. Running DOM-click fallback.")
+        # Stage 1: expand the SLO parents of all missed prefixes
+        expand_js = (
+            "(prefixes) => {"
+            "  const anchors = Array.from(document.querySelectorAll('a'));"
+            "  const expanded = [];"
+            "  for (const p of prefixes) {"
+            "    const m = p.match(/^(Higher SLO\\d+)\\s+Key Capability/);"
+            "    if (!m) continue;"
+            "    const parentPrefix = m[1] + ':';"
+            "    const a = anchors.find(x => (x.innerText || '').trim().startsWith(parentPrefix));"
+            "    if (a) { a.click(); expanded.push(parentPrefix); }"
+            "  }"
+            "  return {expanded};"
+            "}"
+        )
+        await page.evaluate(expand_js, missed)
+        await asyncio.sleep(0.6)
+        # Stage 2: click each matching leaf checkbox
+        click_js = (
+            "(prefixes) => {"
+            "  const ticked = [];"
+            "  const still_missed = [];"
+            "  for (const p of prefixes) {"
+            "    let hit = null;"
+            "    document.querySelectorAll('input[type=checkbox]').forEach(cb => {"
+            "      if (hit) return;"
+            "      const li = cb.closest('li'); if (!li) return;"
+            "      const leaf = li.querySelector(':scope > div, :scope > span, :scope > label');"
+            "      const t = (leaf ? leaf.innerText : li.innerText).trim().split('\\n')[0];"
+            "      if (t.startsWith(p)) hit = cb;"
+            "    });"
+            "    if (hit) { if (!hit.checked) hit.click(); ticked.push(p); }"
+            "    else still_missed.push(p);"
+            "  }"
+            "  return {ticked, still_missed};"
+            "}"
+        )
+        click_result = await page.evaluate(click_js, missed)
+        logger.info(
+            f"DOM-click fallback: ticked={click_result.get('ticked')}, "
+            f"still_missed={click_result.get('still_missed')}"
+        )
+        rescued = set(click_result.get('ticked', []))
+        for p in rescued:
+            if p not in ticked:
+                ticked.append(p)
+        # Drop scope-push errors that the fallback fixed
+        errors = [e for e in errors if not any(p in e for p in rescued)]
+        for p in click_result.get('still_missed', []):
+            errors.append(f"KC still missed after DOM fallback: {p}")
+
+    # If we opened the 'Add tags' modal, COMMIT it via ctrl.success() on the
+    # modal scope. This is the function that the (hidden) apply/OK pathway
+    # calls; it persists the selected tags back to the parent event and
+    # closes the modal. Escape / ctrl.dismiss() discards selections, so we
+    # must NOT fall back to pressing Escape — that silently loses all KCs.
+    # Verified live on a REFLECT_LOG modal 2026-04-17.
+    if modal_opened:
+        closed = await page.evaluate(
+            """() => {
+                var modal = document.querySelector('.modal.in, [uib-modal-window]');
+                if (!modal) return 'no-modal';
+                var s = angular.element(modal).scope();
+                if (s && s.ctrl && typeof s.ctrl.success === 'function') {
+                    try { s.ctrl.success(); return 'commit:success'; }
+                    catch (e) { return 'commit-error:' + String(e); }
+                }
+                // Fallback: look for an explicit confirm-style button in DOM
+                var btns = modal.querySelectorAll('button');
+                for (var i = 0; i < btns.length; i++) {
+                    var t = btns[i].textContent.trim().toLowerCase();
+                    if (t === 'save' || t === 'save & close' || t === 'apply' || t === 'done' || t === 'ok') {
+                        btns[i].click();
+                        return 'button:' + btns[i].textContent.trim();
+                    }
+                }
+                return 'no-commit-path';
+            }"""
+        )
+        logger.info(f"Modal commit: {closed}")
+        if not isinstance(closed, str) or (not closed.startswith("commit:") and not closed.startswith("button:")):
+            # NEVER press Escape here — that would discard the KC selections we
+            # just made. If we reach this branch, log and surface an error so
+            # the caller sees KCs weren't committed.
+            errors.append(f"Modal commit failed: {closed}. KCs may not have persisted.")
+            logger.warning(f"Modal commit failed: {closed}")
+        await asyncio.sleep(2)
+
+    # Small delay so the digest cycle completes before the verify/save steps
+    await asyncio.sleep(1)
 
     return ticked, errors
 
@@ -1136,25 +1713,36 @@ async def _fill_curriculum_links(page: Page, kc_prefixes: List[str], stage_label
 # ─── Save ─────────────────────────────────────────────────────────────────────
 
 async def _save_form(page: Page, as_draft: bool) -> bool:
-    """Save the form as draft or send to assessor."""
+    """Save the form as draft or send to assessor.
+
+    Fix 2026-04-21: the "Save as draft" link is an <a class="btn ..."> rendered
+    by Angular, which can appear late (after scope.$apply() settles). The old
+    selector `a:has-text('Save as draft')` would sometimes return 0 matches
+    because the check ran before the link appeared in the DOM. Explicit
+    wait_for(state='visible') gives Angular up to 10s to render, then we click
+    and confirm "LAST SAVED" appears in the body.
+    """
     if as_draft:
-        save_link = page.locator("a:has-text('Save as draft')").first
+        save_link = page.locator("a.btn:has-text('Save as draft'), a:has-text('Save as draft')").first
     else:
         save_link = page.locator("a:has-text('Send to assessor'), button:has-text('Send to assessor')").first
 
-    if not await save_link.count():
-        logger.error("Save button not found")
+    try:
+        await save_link.wait_for(state='visible', timeout=10000)
+    except Exception:
+        logger.error("Save as draft link never became visible within 10s")
         return False
 
     await save_link.click()
-    await asyncio.sleep(5)
+    await asyncio.sleep(3)
 
-    # Verify save
+    # Verify save confirmation
     body_text = await page.inner_text("body")
-    if "LAST SAVED" in body_text.upper() or "SAVED" in body_text.upper():
-        logger.info("Form saved successfully")
+    if "LAST SAVED" in body_text.upper():
+        logger.info("Form saved successfully (LAST SAVED confirmed)")
         return True
     logger.warning("Save may have failed — 'LAST SAVED' not found in body")
+    return False
     return True  # Proceed anyway — save might have worked
 
 
@@ -1194,13 +1782,227 @@ async def _verify_fields(page: Page, fields: dict, field_map: dict, filled_keys:
         if not val or len(val) < 5:
             issues.append(f"{key} appears empty (dom_id={dom_id})")
 
-    # Check KCs
+    # Check KCs — use Kaizen's own "Add tags (N)" counter as the authoritative
+    # signal. COUNT_TICKED_JS counted all DOM :checked inputs which gave false
+    # negatives on forms where the curriculum modal had already closed (no
+    # checkboxes in DOM), and false positives when us_application or other
+    # unrelated multi-selects were ticked. "Add tags (N)" reads from the
+    # committed model state regardless of modal visibility. Rewrite 2026-04-23.
     if fields.get("curriculum_links"):
-        ticked_count = await page.evaluate(COUNT_TICKED_JS)
-        if ticked_count == 0:
-            issues.append("No KCs ticked")
+        count = await page.evaluate(
+            """() => {
+                const btn = Array.from(document.querySelectorAll('button, a'))
+                    .find(el => /Add tags\\s*\\(\\d+\\)/.test((el.innerText || '').trim()));
+                if (!btn) return 0;
+                const m = (btn.innerText || '').match(/\\((\\d+)\\)/);
+                return m ? parseInt(m[1], 10) : 0;
+            }"""
+        )
+        expected = len(fields.get("curriculum_links", []))
+        if count == 0:
+            issues.append("No KCs ticked (Add tags counter is 0)")
+        elif count < expected:
+            issues.append(f"KC count {count} below expected {expected}")
 
     return issues
+
+
+# ─── "Link to..." curriculum targets (separate from SLO/KC tagging) ──────────
+
+# Per-form target title that appears in the Link-to modal rows.
+# On a CBD draft, each linkable procedural skill goal shows a "CBD" target;
+# on a DOPS draft, it shows "DOPS"; etc. This dict is used to auto-infer the
+# target_title when a ticket JSON passes goal titles as plain strings instead
+# of full {goal_title, target_title} dicts. Derived from live inspection
+# 2026-04-23 (subagent DOM map against Higher EM curriculum 2025 Update).
+LINK_TO_TARGET_TITLE_BY_FORM = {
+    "CBD":           "CBD",
+    "DOPS":          "DOPS",
+    "MINI_CEX":      "Mini-CEX",
+    "STAT":          "STAT",
+    "ACAT":          "ACAT",
+    "ACAF":          "ACAF",
+    "LAT":           "LAT",
+    "ESLE_PART1_2":  "ESLE",
+    "JCF":           "JCF",
+    "QIAT":          "QIAT",
+    # Logs and certificates usually link under a different target label.
+    # Callers can override by passing explicit target_title.
+    "PROC_LOG":      "Certificate & E-learning",
+}
+
+
+async def _fill_curriculum_link_to(
+    page: Page,
+    form_type: str,
+    curriculum_name: str,
+    items: list,
+    show_all_goals: bool = False,
+    confirm: bool = True,
+) -> tuple:
+    """Tick Link-to targets on the Kaizen event header's "Link to..." dropdown.
+
+    This is distinct from the "Add tags" SLO/KC tagging. Link-to maps a ticket
+    to specific curriculum-defined goals (procedural skills, SLO-level goals)
+    where the ticket counts as directly-applicable evidence, and the links
+    appear on the trainee's goal tracking dashboard.
+
+    Args:
+        form_type: key into LINK_TO_TARGET_TITLE_BY_FORM to auto-infer target
+            title when items are passed as plain strings.
+        curriculum_name: e.g. "Higher EM curriculum (2025 Update)".
+        items: list of either str (goal title, target inferred from form_type)
+            or dict {"goal_title": str, "target_title": str}.
+        show_all_goals: True to click "Show all my goals" before matching
+            (reveals SLO goals that aren't in the default suggested list).
+        confirm: True -> click Confirm, False -> Cancel (dry-run).
+
+    Returns (ticked_labels, errors). Does not raise on partial failure;
+    missing items are reported in errors.
+
+    DOM/scope map (verified live 2026-04-23):
+      - Trigger: button.dropdown-toggle whose text starts with "Link to"
+      - Menu: .dropdown-menu with a <button> per curriculum
+      - Modal: div.modal.in[role="dialog"] with h4#myModalLabel
+      - Checkboxes: input[type=checkbox][ng-model^="ctrl.model["]
+      - Goal context: angular.element(cb).scope() -> {goal, target}
+      - Commit: modal scope's save(); Cancel: dismiss(); also button
+        `.btn-success.btn-raised` (Confirm) / `.btn-info` (Cancel).
+    """
+    ticked = []
+    errors = []
+
+    default_target = LINK_TO_TARGET_TITLE_BY_FORM.get(form_type)
+    normalised = []
+    for item in items:
+        if isinstance(item, str):
+            if not default_target:
+                errors.append(f"link-to item '{item}': no default target for form_type={form_type}; pass a dict with target_title")
+                continue
+            normalised.append({"goal_title": item, "target_title": default_target})
+        elif isinstance(item, dict) and item.get("goal_title"):
+            entry = {
+                "goal_title": item["goal_title"],
+                "target_title": item.get("target_title") or default_target,
+            }
+            if not entry["target_title"]:
+                errors.append(f"link-to item {item}: missing target_title and no default for form_type={form_type}")
+                continue
+            normalised.append(entry)
+        else:
+            errors.append(f"link-to item (bad shape): {item!r}")
+
+    if not normalised:
+        return ticked, errors
+
+    # 1. Open the Link-to dropdown
+    try:
+        await page.evaluate("""() => {
+            const b = Array.from(document.querySelectorAll('button.dropdown-toggle'))
+                .find(x => (x.innerText || '').trim().startsWith('Link to'));
+            if (!b) throw new Error('Link-to button not found');
+            b.click();
+        }""")
+        await asyncio.sleep(0.5)
+    except Exception as e:
+        errors.append(f"open Link-to dropdown: {e}")
+        return ticked, errors
+
+    # 2. Click the named curriculum button
+    try:
+        await page.evaluate(
+            """(name) => {
+                const menus = Array.from(document.querySelectorAll('.dropdown-menu'))
+                    .filter(m => m.getBoundingClientRect().width > 0);
+                for (const menu of menus) {
+                    const b = Array.from(menu.querySelectorAll('button'))
+                        .find(x => (x.innerText || '').trim() === name);
+                    if (b) { b.click(); return; }
+                }
+                throw new Error('curriculum option not found: ' + name);
+            }""",
+            curriculum_name,
+        )
+    except Exception as e:
+        errors.append(f"pick curriculum '{curriculum_name}': {e}")
+        return ticked, errors
+
+    # 3. Wait for modal and its goals to render
+    try:
+        await page.locator('div.modal.in[role="dialog"]').wait_for(state='visible', timeout=8000)
+        await page.wait_for_function(
+            """() => {
+                const m = document.querySelector('div.modal.in[role="dialog"]');
+                return m && m.querySelectorAll('input[type=checkbox]').length > 0;
+            }""",
+            timeout=8000,
+        )
+    except Exception as e:
+        errors.append(f"link-to modal never rendered: {e}")
+        return ticked, errors
+
+    # 4. Optionally reveal all goals (SLO-level targets beyond the suggested list)
+    if show_all_goals:
+        try:
+            await page.evaluate("""() => {
+                const b = Array.from(document.querySelectorAll('.modal.in button'))
+                    .find(x => (x.innerText || '').trim() === 'Show all my goals');
+                if (b) b.click();
+            }""")
+            await asyncio.sleep(0.4)
+        except Exception:
+            pass
+
+    # 5. Tick each (goal, target) match
+    for entry in normalised:
+        result = await page.evaluate(
+            """(entry) => {
+                const modal = document.querySelector('div.modal.in[role="dialog"]');
+                if (!modal) return {ok: false, err: 'no modal'};
+                const cbs = Array.from(modal.querySelectorAll('input[type=checkbox][ng-model^="ctrl.model["]'));
+                for (const cb of cbs) {
+                    const s = angular.element(cb).scope();
+                    if (!s || !s.goal || !s.target) continue;
+                    const gt = (s.goal.doc && s.goal.doc.title) || '';
+                    const tt = (s.target.doc && s.target.doc.title) || '';
+                    const goalMatch = (gt === entry.goal_title)
+                        || (gt.trim().toLowerCase().indexOf(entry.goal_title.trim().toLowerCase()) === 0);
+                    if (goalMatch && tt === entry.target_title) {
+                        if (!cb.checked) cb.click();
+                        return {ok: true, gt, tt, checked: cb.checked};
+                    }
+                }
+                return {ok: false, err: 'no match', wanted: entry};
+            }""",
+            entry,
+        )
+        if result.get('ok'):
+            ticked.append(f"{result['gt']} / {result['tt']}")
+        else:
+            errors.append(f"link-to unmatched: {entry}")
+
+    # 6. Confirm or cancel
+    try:
+        await page.evaluate(
+            """(doConfirm) => {
+                const btns = Array.from(document.querySelectorAll('.modal.in button'));
+                if (doConfirm) {
+                    const b = btns.find(x => (x.innerText || '').trim() === 'Confirm' && !x.disabled);
+                    if (!b) throw new Error('Confirm disabled or missing');
+                    b.click();
+                } else {
+                    const b = btns.find(x => (x.innerText || '').trim() === 'Cancel');
+                    if (b) b.click();
+                }
+            }""",
+            confirm,
+        )
+        await page.locator('div.modal.in[role="dialog"]').wait_for(state='hidden', timeout=5000)
+    except Exception as e:
+        errors.append(f"link-to commit: {e}")
+
+    logger.info(f"Link-to: ticked={ticked}, errors={errors}")
+    return ticked, errors
 
 
 # ─── Main entry point ────────────────────────────────────────────────────────
@@ -1256,10 +2058,13 @@ async def fill_kaizen_form(
         await page.goto(url, wait_until="networkidle", timeout=30000)
         await asyncio.sleep(4)  # Wait for Angular rendering
 
-        # Get field map for this form type
-        field_map = FORM_FIELD_MAP.get(form_type, {})
-        if not field_map:
+        # Get field map for this form type, merged with universal event headers
+        # (description / end_date / date_of_encounter) so common header keys
+        # always resolve to a DOM id even when a per-form map omits them.
+        form_field_map = FORM_FIELD_MAP.get(form_type, {})
+        if not form_field_map:
             return {"status": "failed", "filled": [], "skipped": [], "errors": [f"No field map for: {form_type}"], "screenshot": None}
+        field_map = {**UNIVERSAL_HEADERS, **form_field_map}  # form-specific wins on conflict
 
         # ─── STEP 1: Stage of training (MUST be first — loads curriculum) ─────
         stage_value = fields.get("stage") or fields.get("stage_of_training")
@@ -1297,6 +2102,17 @@ async def fill_kaizen_form(
                 skipped.append(key)
                 continue
 
+            # Multi-select fields (value is a list) — kz-tree with one checkbox per option.
+            # Route before the tagName dispatch because the dom_id for multi-select is the
+            # formly label's `for` attribute, which doesn't resolve via getElementById.
+            if isinstance(value, list):
+                ok = await _fill_multi_select(page, dom_id, value)
+                if ok:
+                    filled.append(key)
+                else:
+                    errors.append(f"{key}: multi-select fill failed")
+                continue
+
             # Detect field type
             tag = await page.evaluate(
                 "(domId) => { var el = document.getElementById(domId); return el ? el.tagName : null; }",
@@ -1328,6 +2144,29 @@ async def fill_kaizen_form(
                 filled.append(f"curriculum_links ({len(ticked)} KCs)")
             errors.extend(kc_errors)
 
+        # ─── STEP 4b: Link-to curriculum targets (separate from Add tags) ────
+        # Ticket JSON may specify:
+        #   "curriculum_link_to": {
+        #       "curriculum": "Higher EM curriculum (2025 Update)",
+        #       "items": ["Adult Sedation (2025 Update)", ...],   # strings auto-target
+        #       "show_all_goals": false
+        #   }
+        # Strings in items use the form_type default target (CBD on CBD, etc.).
+        # Dicts {goal_title, target_title} override the target.
+        link_to_spec = fields.get("curriculum_link_to")
+        if link_to_spec and isinstance(link_to_spec, dict):
+            curriculum_name = link_to_spec.get("curriculum") or "Higher EM curriculum (2025 Update)"
+            link_items = link_to_spec.get("items", [])
+            show_all = bool(link_to_spec.get("show_all_goals", False))
+            if link_items:
+                link_ticked, link_errors = await _fill_curriculum_link_to(
+                    page, form_type, curriculum_name, link_items,
+                    show_all_goals=show_all, confirm=True,
+                )
+                if link_ticked:
+                    filled.append(f"curriculum_link_to ({len(link_ticked)} targets)")
+                errors.extend(link_errors)
+
         # ─── STEP 5: Verification pass ───────────────────────────────────────
         verify_issues = await _verify_fields(page, fields, field_map, filled)
         if verify_issues:
@@ -1349,6 +2188,23 @@ async def fill_kaizen_form(
                 errors.append(f"Screenshot failed: {e}")
                 screenshot_path = None
 
+        # Extract the draft doc UUID from the current URL so callers can re-open
+        # the draft to edit, verify, or delete. Kaizen URLs look like
+        # /events/new-section/<form_uuid>?doc=<doc_uuid>&autosave=<autosave_uuid>
+        # or /events/fillin/<doc_uuid>. Added 2026-04-23 to let Claude Code
+        # detect-and-reuse skeleton drafts from failed earlier runs, and to
+        # give callers a handle for retroactive edits (e.g. us_application
+        # batch fills).
+        doc_uuid = None
+        try:
+            cur_url = page.url
+            import re as _re
+            m = _re.search(r'[?&]doc=([a-f0-9-]{36})', cur_url) or _re.search(r'/events/fillin/([a-f0-9-]{36})', cur_url)
+            if m:
+                doc_uuid = m.group(1)
+        except Exception:
+            pass
+
         # Determine status
         if not filled:
             status = "failed"
@@ -1363,6 +2219,8 @@ async def fill_kaizen_form(
             "skipped": skipped,
             "errors": errors,
             "screenshot": screenshot_path,
+            "doc_uuid": doc_uuid,
+            "url": page.url if doc_uuid else None,
         }
 
     except Exception as e:
@@ -1402,6 +2260,7 @@ FORM_DISPLAY_NAMES = {
     "SDL":           "Self-Directed Learning",
     "US_CASE":       "Ultrasound Case",
     "ESLE_PART1_2":  "ESLE: Part 1 & 2 (2025 Update)",
+    "ESLE_ASSESS":   "ESLE: Part 1 & 2 (2025 Update)",  # alias
     "ESLE_REFLECTION": "Reflection on ESLE (2025 Update)",
     "COMPLAINT":     "Complaint",
     "SERIOUS_INC":   "Serious Incident",
@@ -1451,7 +2310,7 @@ async def connect_cdp_browser() -> tuple:
         # Look for an existing Kaizen page
         for context in browser.contexts:
             for page in context.pages:
-                if "kaizenep.com" in page.url:
+                if ("kaizenep.com" in page.url and "auth.kaizenep.com" not in page.url):
                     logger.info(f"CDP: reusing existing Kaizen page: {page.url}")
                     return page, pw
 
@@ -1882,7 +2741,7 @@ async def delete_all_drafts_of_type(
             browser = await pw.chromium.launch(headless=True)
             page = await browser.new_page()
 
-        if use_cdp and "kaizenep.com" in page.url:
+        if use_cdp and ("kaizenep.com" in page.url and "auth.kaizenep.com" not in page.url):
             logger.info("CDP: already logged in, skipping login")
         else:
             if not await _login(page, username, password):
@@ -1972,10 +2831,14 @@ async def file_to_kaizen(
     submit: bool = False,
     attachment_path: Optional[str] = None,
     attachment_drive_url: Optional[str] = None,
-    reuse_draft: bool = True,
+    reuse_draft: bool = False,
 ) -> Dict[str, Any]:
     """
     File a form to Kaizen as a draft (legacy API).
+
+    By default this creates a fresh form instead of reusing an arbitrary existing
+    draft. Draft reuse is opt-in because old drafts may be incomplete, stale, or
+    already navigated to a different section shape.
 
     Used by filer_router.py and bot.py. Wraps the old filer logic
     for backward compatibility.
@@ -2009,7 +2872,7 @@ async def file_to_kaizen(
             browser = await pw.chromium.launch(headless=True)
             page = await browser.new_page()
 
-        if use_cdp and "kaizenep.com" in page.url:
+        if use_cdp and ("kaizenep.com" in page.url and "auth.kaizenep.com" not in page.url):
             logger.info("CDP: already logged in, skipping login")
         else:
             if not await _login(page, username, password):
@@ -2081,12 +2944,17 @@ async def file_to_kaizen(
             except OSError:
                 pass
 
-        # Save or submit
-        if submit:
+        # Save as draft only — submission is disabled by default for safety.
+        # The submit parameter is accepted for API compatibility but ignored
+        # unless KAIZEN_ALLOW_SUBMIT=1 is explicitly set in the environment.
+        if submit and os.environ.get("KAIZEN_ALLOW_SUBMIT", "").lower() in ("1", "true", "yes"):
+            logger.warning("SUBMIT mode enabled via KAIZEN_ALLOW_SUBMIT — submitting entry")
             saved = await _submit_entry(page)
             if not saved:
                 saved = await _save_draft_legacy(page)
         else:
+            if submit:
+                logger.warning("Submit requested but KAIZEN_ALLOW_SUBMIT not set — saving as draft instead")
             saved = await _save_draft_legacy(page)
 
         # Post-save verification
@@ -2101,8 +2969,12 @@ async def file_to_kaizen(
             if len(filled) > 0:
                 save_error += f" ({len(filled)} fields were filled but draft was NOT saved)"
         elif verified is False:
-            status = "failed"
-            save_error = "Entry not found in your portfolio after saving — it may not have saved correctly. Please check Kaizen manually."
+            # Draft save verification is a best-effort safety check. Kaizen's
+            # activities list can lag or omit freshly saved drafts, so a successful
+            # save-click with filled fields should not be reported as total failure.
+            # Surface it as partial so callers know manual confirmation is needed.
+            status = "partial"
+            save_error = "Draft save clicked, but portfolio-list verification did not find the entry. Please check Kaizen manually."
         elif len(filled) > 0:
             if len(skipped) == 0:
                 status = "success"
@@ -2187,7 +3059,7 @@ async def detect_and_delete_test_drafts(
             browser = await pw.chromium.launch(headless=True)
             page = await browser.new_page()
         
-        if use_cdp and "kaizenep.com" in page.url:
+        if use_cdp and ("kaizenep.com" in page.url and "auth.kaizenep.com" not in page.url):
             logger.info("CDP: already logged in, skipping login")
         else:
             if not await _login(page, username, password):

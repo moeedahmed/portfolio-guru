@@ -33,6 +33,61 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+# ─── Secret redaction filter ────────────────────────────────────────────────
+import re as _re_secret
+
+class _SecretRedactFilter(logging.Filter):
+    """Redact known secret patterns from all log output."""
+    _PATTERNS = [
+        _re_secret.compile(r'\b\d{8,}:[A-Za-z0-9_-]{30,}\b'),   # Telegram bot tokens
+        _re_secret.compile(r'\bAIza[A-Za-z0-9_-]{30,}\b'),       # Google API keys
+    ]
+
+    def filter(self, record):
+        msg = record.getMessage()
+        for pat in self._PATTERNS:
+            if pat.search(msg):
+                record.msg = pat.sub('***REDACTED***', str(record.msg))
+                record.args = None
+        return True
+
+
+for _handler in logging.root.handlers:
+    _handler.addFilter(_SecretRedactFilter())
+
+
+# Load secrets from Bitwarden Secrets Manager (BWS)
+# This ensures GOOGLE_API_KEY and other secrets are fetched from BWS, not hardcoded
+def _load_bws_secrets():
+    """Load secrets from BWS if not already set in environment."""
+    try:
+        from config import get_bws_secret
+
+        # BWS secret IDs for Portfolio Guru
+        BWS_SECRETS = {
+            "GOOGLE_API_KEY": "af6579a0-2cbe-4cef-94b3-b405017b48fe",
+            "KAIZEN_USERNAME": "6e14d32b-6fff-480d-87b0-b3f300ee30f6",
+            "KAIZEN_PASSWORD": "f311d41a-fa77-44f8-be42-b3f300ee3e08",
+        }
+
+        for env_var, secret_id in BWS_SECRETS.items():
+            if not os.environ.get(env_var):
+                try:
+                    secret_value = get_bws_secret(secret_id)
+                    if secret_value:
+                        os.environ[env_var] = secret_value
+                        logger.info(f"Loaded {env_var} from BWS")
+                except Exception as e:
+                    logger.warning(f"Could not load {env_var} from BWS: {e}")
+    except ImportError:
+        logger.warning("Could not import get_bws_secret from config.py")
+    except Exception as e:
+        logger.warning(f"BWS secret loading failed: {e}")
+
+# Load BWS secrets immediately after .env
+_load_bws_secrets()
+
 MAX_TELEGRAM_MSG = 4096
 
 
@@ -185,8 +240,8 @@ def _build_nudge_message(stats: dict) -> tuple[str, InlineKeyboardMarkup]:
 async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send weekly gap-detection nudge to all active users.
 
-    Guard: file-based dedup (survives bot restarts + pickle flush failures).
-    Skips if run within 24 hours of last send.
+    Guard: file-based dedup (survives bot restarts + persistence flush failures).
+    Skips if run within 6 days of last send — allows true weekly cadence, blocks daily-restart re-triggers.
     """
     import os
     sentinel = os.path.expanduser("~/.openclaw/data/portfolio-guru/weekly_push_last_run")
@@ -194,8 +249,8 @@ async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
     now = time.time()
     if os.path.exists(sentinel):
         last_run = float(open(sentinel).read().strip())
-        if now - last_run < 86400:
-            logger.info("weekly_push skipped — ran %.1f hours ago", (now - last_run) / 3600)
+        if now - last_run < 518400:
+            logger.info("weekly_push skipped — ran %.1f days ago", (now - last_run) / 86400)
             return
 
     with open(sentinel, "w") as f:
@@ -4512,9 +4567,29 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
             )
 
 
+_LOCK_FILE = os.path.expanduser("~/.portfolio-guru-bot.lock")
+_lock_fd = None
+
+
+def _acquire_instance_lock():
+    """Acquire a file lock to prevent duplicate bot polling processes."""
+    import fcntl
+    global _lock_fd
+    _lock_fd = open(_LOCK_FILE, "w")
+    try:
+        fcntl.flock(_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _lock_fd.write(str(os.getpid()))
+        _lock_fd.flush()
+    except BlockingIOError:
+        logger.error("Another Portfolio Guru bot instance is already running. Exiting.")
+        raise SystemExit(1)
+
+
 def main():
     """Entry point for local development - runs in polling mode."""
     import requests as _req
+
+    _acquire_instance_lock()
 
     init()
     init_profile_db()
@@ -4522,7 +4597,7 @@ def main():
     # Clear any existing webhook so polling works
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     _req.post(f"https://api.telegram.org/bot{token}/deleteWebhook", json={"drop_pending_updates": True})
-    logger.info("Webhook cleared - polling mode active")
+    logger.info("Webhook cleared — polling mode active")
 
     application = build_application()
     application.add_error_handler(error_handler)

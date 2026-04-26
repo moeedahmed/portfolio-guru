@@ -1,0 +1,216 @@
+{
+  "generated": "2026-04-26",
+  "description": "DOM mapping backlog — fields that need live Kaizen DOM inspection to get their element IDs",
+  "priority_tiers": {
+    "P0": "High-value WPBAs used weekly — CBD, DOPS, LAT",
+    "P1": "Frequently used WPBAs — MINI_CEX, MSF, QIAT, SDL",
+    "P2": "Other forms with gaps — TEACH_OBS, RESEARCH, AUDIT, ABSENCE, HIGHER_PROG, OOP"
+  },
+  "inspection_script": "backend/inspect_p0_fields.py — run with KAIZEN_USERNAME + KAIZEN_PASSWORD to auto-discover P0 field IDs",
+  "backlog": [
+    {
+      "form": "CBD",
+      "priority": "P0",
+      "field": "clinical_setting",
+      "field_type": "dropdown",
+      "status": "blocked_needs_live_inspection",
+      "evidence_needed": "DOM element ID from live Kaizen CBD form",
+      "next_action": "Run inspect_p0_fields.py OR manually inspect CBD form DOM for select/ng-model with label 'Clinical Setting'",
+      "note": "MINI_CEX uses f091f9c5-..., ACAT uses e1ae9b5b-... — cannot assume shared UUID, must inspect CBD specifically"
+    },
+    {
+      "form": "CBD",
+      "priority": "P0",
+      "field": "patient_presentation",
+      "field_type": "text",
+      "status": "blocked_needs_live_inspection",
+      "evidence_needed": "DOM element ID from live Kaizen CBD form",
+      "next_action": "Run inspect_p0_fields.py OR manually inspect CBD form DOM for textarea/input with label 'Patient Presentation'"
+    },
+    {
+      "form": "CBD",
+      "priority": "P0",
+      "field": "trainee_role",
+      "field_type": "text",
+      "status": "blocked_needs_live_inspection",
+      "evidence_needed": "DOM element ID from live Kaizen CBD form",
+      "next_action": "Run inspect_p0_fields.py OR manually inspect CBD form DOM for input with label 'Trainee Role'"
+    },
+    {
+      "form": "CBD",
+      "priority": "P0",
+      "field": "level_of_supervision",
+      "field_type": "dropdown",
+      "status": "blocked_needs_live_inspection",
+      "evidence_needed": "DOM element ID from live Kaizen CBD form",
+      "next_action": "Run inspect_p0_fields.py OR manually inspect CBD form DOM for select with label 'Level of Supervision'",
+      "note": "Dropdown with options: Direct, Indirect, Distant — need Angular option values too"
+    },
+    {
+      "form": "DOPS",
+      "priority": "P0",
+      "field": "procedure_name",
+      "field_type": "dropdown",
+      "status": "blocked_needs_live_inspection",
+      "evidence_needed": "DOM element ID — distinct from the existing procedural_skill (8def931e-...) dropdown",
+      "next_action": "Run inspect_p0_fields.py OR manually inspect DOPS form DOM for select labelled 'Procedure'",
+      "note": "DOPS has TWO procedure dropdowns: procedure_name (general) and procedural_skill (ST4-ST6 specific). Only procedural_skill is mapped."
+    },
+    {
+      "form": "DOPS",
+      "priority": "P0",
+      "field": "clinical_setting",
+      "field_type": "text",
+      "status": "blocked_needs_live_inspection",
+      "evidence_needed": "DOM element ID from live Kaizen DOPS form",
+      "next_action": "Run inspect_p0_fields.py OR manually inspect DOPS form DOM for input/textarea with label 'Clinical Setting'",
+      "note": "DOPS clinical_setting is type 'text' per schema (not dropdown like CBD/MINI_CEX)"
+    },
+    {
+      "form": "DOPS",
+      "priority": "P0",
+      "field": "indication",
+      "field_type": "text",
+      "status": "blocked_needs_live_inspection",
+      "evidence_needed": "DOM element ID from live Kaizen DOPS form",
+      "next_action": "Run inspect_p0_fields.py OR manually inspect DOPS form DOM for textarea with label 'Indication'"
+    },
+    {
+      "form": "DOPS",
+      "priority": "P0",
+      "field": "trainee_performance",
+      "field_type": "text",
+      "status": "blocked_needs_live_inspection",
+      "evidence_needed": "DOM element ID from live Kaizen DOPS form",
+      "next_action": "Run inspect_p0_fields.py OR manually inspect DOPS form DOM for textarea with label 'Trainee Performance'"
+    },
+    {
+      "form": "LAT",
+      "priority": "P0",
+      "field": "clinical_setting",
+      "field_type": "dropdown",
+      "status": "blocked_needs_live_inspection",
+      "evidence_needed": "DOM element ID from live Kaizen LAT form",
+      "next_action": "Run inspect_p0_fields.py OR manually inspect LAT form DOM for select with label 'Clinical Setting'",
+      "note": "LAT clinical_setting is dropdown per schema, same options as CBD/MINI_CEX but may use different UUID"
+    },
+    {
+      "form": "LAT",
+      "priority": "P0",
+      "field": "stage_of_training",
+      "field_type": "dropdown",
+      "status": "blocked_needs_live_inspection",
+      "evidence_needed": "DOM element ID from live Kaizen LAT form",
+      "next_action": "Run inspect_p0_fields.py OR manually inspect LAT form DOM for select with label 'Stage of Training'",
+      "note": "Most forms share e0864e88-... but LAT may differ — must verify"
+    },
+    {
+      "form": "LAT",
+      "priority": "P0",
+      "field": "reflection",
+      "field_type": "text",
+      "status": "blocked_needs_live_inspection",
+      "evidence_needed": "DOM element ID from live Kaizen LAT form",
+      "next_action": "Run inspect_p0_fields.py OR manually inspect LAT form DOM for textarea with label 'Reflection'",
+      "note": "Many forms share 610b5c60-... for reflection but LAT may differ — must verify"
+    },
+    {
+      "form": "MINI_CEX",
+      "priority": "P1",
+      "field": "complexity",
+      "field_type": "dropdown",
+      "status": "unmapped",
+      "evidence_needed": "DOM element ID from live Kaizen Mini-CEX form",
+      "next_action": "Inspect Mini-CEX form DOM, find select for Case Complexity"
+    },
+    {
+      "form": "MINI_CEX",
+      "priority": "P1",
+      "field": "clinical_reasoning",
+      "field_type": "text",
+      "status": "unmapped",
+      "evidence_needed": "DOM element ID from live Kaizen Mini-CEX form",
+      "next_action": "Inspect Mini-CEX form DOM, find textarea for Clinical Assessment"
+    },
+    {
+      "form": "MSF",
+      "priority": "P1",
+      "field": "stage_of_training",
+      "field_type": "dropdown",
+      "status": "unmapped",
+      "evidence_needed": "DOM element ID from live Kaizen MSF form",
+      "next_action": "Inspect MSF form DOM, find select for Stage of Training"
+    },
+    {
+      "form": "MSF",
+      "priority": "P1",
+      "field": "context",
+      "field_type": "text",
+      "status": "unmapped",
+      "evidence_needed": "DOM element ID from live Kaizen MSF form",
+      "next_action": "Inspect MSF form DOM, find textarea for Context/Description"
+    },
+    {
+      "form": "MSF",
+      "priority": "P1",
+      "field": "reflection",
+      "field_type": "text",
+      "status": "unmapped",
+      "evidence_needed": "DOM element ID from live Kaizen MSF form",
+      "next_action": "Inspect MSF form DOM, find textarea for Reflection on feedback"
+    },
+    {
+      "form": "QIAT",
+      "priority": "P1",
+      "field": "reflection",
+      "field_type": "text",
+      "status": "unmapped",
+      "evidence_needed": "DOM element ID from live Kaizen QIAT form",
+      "next_action": "Inspect QIAT form DOM, find textarea for Reflections and Learning"
+    },
+    {
+      "form": "SDL",
+      "priority": "P1",
+      "field": "learning_activity_type",
+      "field_type": "multi_select",
+      "status": "unmapped",
+      "evidence_needed": "DOM element IDs for multi-select checkboxes from live Kaizen SDL form",
+      "next_action": "Inspect SDL form DOM, find checkbox group for Learning Activity Type"
+    },
+    {
+      "form": "TEACH_OBS",
+      "priority": "P2",
+      "field": "stage_of_training",
+      "field_type": "dropdown",
+      "status": "unmapped",
+      "evidence_needed": "DOM element ID from live Kaizen TEACH_OBS form",
+      "next_action": "Inspect TEACH_OBS form DOM, find select for Stage of Training"
+    },
+    {
+      "form": "RESEARCH",
+      "priority": "P2",
+      "field": "reflection",
+      "field_type": "text",
+      "status": "unmapped",
+      "evidence_needed": "DOM element ID from live Kaizen Research form",
+      "next_action": "Inspect Research form DOM, find textarea for Reflection"
+    },
+    {
+      "form": "AUDIT",
+      "priority": "P2",
+      "field": "reflection",
+      "field_type": "text",
+      "status": "unmapped",
+      "evidence_needed": "DOM element ID from live Kaizen Audit form",
+      "next_action": "Inspect Audit form DOM, find textarea for Reflection"
+    }
+  ],
+  "summary": {
+    "total_unmapped_fields": 21,
+    "P0_fields": 11,
+    "P0_status": "blocked_needs_live_inspection — inspection script ready at backend/inspect_p0_fields.py",
+    "P1_fields": 7,
+    "P2_fields": 3,
+    "forms_affected": ["CBD", "DOPS", "LAT", "MINI_CEX", "MSF", "QIAT", "SDL", "TEACH_OBS", "RESEARCH", "AUDIT"]
+  }
+}
