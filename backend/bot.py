@@ -493,7 +493,7 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
             message,
             context,
             _format_template_review(chosen_form, pending_draft),
-            reply_markup=_build_template_review_keyboard(),
+            reply_markup=_build_template_review_keyboard(pending_draft, chosen_form),
             parse_mode="Markdown",
         )
         return AWAIT_TEMPLATE_REVIEW
@@ -541,7 +541,7 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
             message,
             context,
             _format_template_review(chosen_form, refreshed_draft),
-            reply_markup=_build_template_review_keyboard(),
+            reply_markup=_build_template_review_keyboard(refreshed_draft, chosen_form),
             parse_mode="Markdown",
         )
         return AWAIT_TEMPLATE_REVIEW
@@ -970,11 +970,16 @@ def _build_curriculum_keyboard():
     ])
 
 
-def _build_template_review_keyboard():
-    return InlineKeyboardMarkup([
-        [_BTN_CONTINUE_THIN],
-        [_BTN_CANCEL],
-    ])
+def _build_template_review_keyboard(draft=None, form_type: str | None = None):
+    rows = []
+    if draft is None or form_type is None:
+        rows.append([_BTN_CONTINUE_THIN])
+    else:
+        missing_required, _, _ = _missing_template_fields(draft, form_type)
+        if not missing_required:
+            rows.append([_BTN_CONTINUE_THIN])
+    rows.append([_BTN_CANCEL])
+    return InlineKeyboardMarkup(rows)
 
 
 def _build_approval_keyboard():
@@ -2521,7 +2526,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
         await _safe_edit_text(
             ack,
             review_text,
-            reply_markup=_build_template_review_keyboard(),
+            reply_markup=_build_template_review_keyboard(draft, explicit_form),
             parse_mode="Markdown",
         )
         context.user_data["last_bot_msg_id"] = ack.message_id
@@ -2639,14 +2644,26 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return AWAIT_TEMPLATE_REVIEW
 
     elif data == "ACTION|continue_thin":
-        await query.answer()
         draft = _load_pending_draft(context)
-        if not draft or not context.user_data.get("chosen_form"):
+        chosen_form = context.user_data.get("chosen_form")
+        if not draft or not chosen_form:
+            await query.answer()
             return await _resume_paused_flow(
                 update,
                 context,
                 "That earlier button is no longer active.",
             )
+        missing_required, _, _ = _missing_template_fields(draft, chosen_form)
+        if missing_required:
+            await query.answer("Add the required details first", show_alert=True)
+            await _safe_edit_text(
+                query.message,
+                _format_template_review(chosen_form, draft),
+                reply_markup=_build_template_review_keyboard(draft, chosen_form),
+                parse_mode="Markdown",
+            )
+            return AWAIT_TEMPLATE_REVIEW
+        await query.answer()
         _store_draft(context, draft)
         context.user_data.pop("awaiting_detail", None)
         context.user_data.pop("pending_draft_data", None)
@@ -2717,7 +2734,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await _safe_edit_text(
                 query.message,
                 review_text,
-                reply_markup=_build_template_review_keyboard(),
+                reply_markup=_build_template_review_keyboard(draft, chosen_form),
                 parse_mode="Markdown",
             )
             context.user_data["last_bot_msg_id"] = query.message.message_id
@@ -2810,7 +2827,7 @@ async def _accumulate_and_refresh(update: Update, context: ContextTypes.DEFAULT_
     await _safe_edit_text(
         ack,
         review_text,
-        reply_markup=_build_template_review_keyboard(),
+        reply_markup=_build_template_review_keyboard(draft, chosen_form),
         parse_mode="Markdown",
     )
     context.user_data["last_bot_msg_id"] = ack.message_id
@@ -3324,7 +3341,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await _safe_edit_text(
             ack,
             review_text,
-            reply_markup=_build_template_review_keyboard(),
+            reply_markup=_build_template_review_keyboard(draft, chosen_form),
             parse_mode="Markdown",
         )
         context.user_data["last_bot_msg_id"] = ack.message_id
@@ -3485,7 +3502,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await _safe_edit_text(
         query.message,
         review_text,
-        reply_markup=_build_template_review_keyboard(),
+        reply_markup=_build_template_review_keyboard(draft, form_type),
         parse_mode="Markdown",
     )
     context.user_data["last_bot_msg_id"] = query.message.message_id
@@ -3542,6 +3559,19 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     schema = FORM_SCHEMAS.get(form_type, {})
     form_name = schema.get("name", form_type)
     form_emoji = FORM_EMOJIS.get(form_type, "📋")
+
+    missing_required, _, _ = _missing_template_fields(draft, form_type)
+    if missing_required:
+        labels = ", ".join(field["label"] for field in missing_required)
+        await query.message.reply_text(
+            f"I stopped before opening Kaizen — this {form_name} is missing required details: {labels}.\n\n"
+            "Send the missing detail and I’ll update the draft.",
+            reply_markup=_build_template_review_keyboard(draft, form_type),
+        )
+        context.user_data["awaiting_detail"] = True
+        _store_pending_draft(context, draft)
+        context.user_data["chosen_form"] = form_type
+        return AWAIT_TEMPLATE_REVIEW
 
     # Save local JSON backup
     import json as _json

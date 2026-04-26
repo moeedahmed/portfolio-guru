@@ -37,10 +37,13 @@ def thin_draft():
         uuid="uuid-cbd",
         fields={
             "date_of_encounter": "2026-03-17",
-            "clinical_setting": "ED",
+            "clinical_setting": "Emergency Department",
             "patient_presentation": "Chest pain",
+            "stage_of_training": "Higher/ST4-ST6",
+            "trainee_role": "Led assessment and initial management",
             "clinical_reasoning": "Managed as ACS.",
             "reflection": "Need faster ECG review.",
+            "level_of_supervision": "Indirect",
             "curriculum_links": ["SLO1"],
             "key_capabilities": ["SLO1 KC1: Assess and stabilise the patient"],
         },
@@ -108,7 +111,7 @@ class TestFlowWalker:
         }
 
         assert result == AWAIT_TEMPLATE_REVIEW
-        assert {'ACTION|continue_thin'} <= {data for _, data in sim.get_last_buttons()}
+        assert {'ACTION|cancel'} <= {data for _, data in sim.get_last_buttons()}
 
         sim.clear_messages()
         update = sim._make_callback_update('ACTION|continue_thin')
@@ -320,7 +323,7 @@ class TestFlowWalker:
         assert result == AWAIT_TEMPLATE_REVIEW
         assert sim.messages_sent[-1][0] == 'reply'
         assert 'still in progress' in sim.messages_sent[-2][1].lower()
-        assert {'ACTION|continue_thin'} <= {data for _, data in sim.get_last_buttons()}
+        assert {'ACTION|cancel'} <= {data for _, data in sim.get_last_buttons()}
 
     @pytest.mark.asyncio
     async def test_paused_approval_button_recovers_latest_draft_message(self, thin_draft):
@@ -371,3 +374,77 @@ class TestFlowWalker:
         assert 'draft saved' in sim.get_last_text().lower()
         # Home menu buttons present (ACTION|file if connected, ACTION|setup if not)
         assert any(data.startswith('ACTION|') for _, data in sim.get_last_buttons())
+
+    @pytest.mark.asyncio
+    async def test_continue_thin_blocked_when_required_cbd_fields_missing(self):
+        from bot import AWAIT_TEMPLATE_REVIEW, handle_callback
+        from models import FormDraft
+
+        thin_cbd = FormDraft(
+            form_type="CBD",
+            uuid="uuid-cbd",
+            fields={
+                "date_of_encounter": "",
+                "clinical_setting": "",
+                "patient_presentation": "chest pain with STEMI",
+                "clinical_reasoning": "",
+                "reflection": "",
+                "curriculum_links": [],
+                "key_capabilities": [],
+            },
+        )
+        sim = BotSimulator()
+        update = sim._make_callback_update('ACTION|continue_thin')
+        context = sim._make_context()
+        context.user_data.update({
+            'chosen_form': 'CBD',
+            'pending_draft_data': {
+                '_type': 'FORM',
+                'form_type': thin_cbd.form_type,
+                'fields': thin_cbd.fields,
+                'uuid': thin_cbd.uuid,
+            },
+        })
+
+        result = await handle_callback(update, context)
+
+        assert result == AWAIT_TEMPLATE_REVIEW
+        assert 'APPROVE|draft' not in {data for _, data in sim.get_last_buttons()}
+        assert {'ACTION|continue_thin'} not in {data for _, data in sim.get_last_buttons()}
+        assert 'Still missing' in sim.get_last_text()
+
+    @pytest.mark.asyncio
+    async def test_approval_blocks_incomplete_cbd_before_route_filing(self):
+        from bot import AWAIT_TEMPLATE_REVIEW, handle_approval_approve
+        from models import FormDraft
+
+        thin_cbd = FormDraft(
+            form_type="CBD",
+            uuid="uuid-cbd",
+            fields={
+                "date_of_encounter": "",
+                "clinical_setting": "",
+                "patient_presentation": "chest pain with STEMI",
+                "clinical_reasoning": "",
+                "reflection": "",
+            },
+        )
+        sim = BotSimulator()
+        update = sim._make_callback_update('APPROVE|draft')
+        context = sim._make_context()
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin_cbd.form_type,
+            'fields': thin_cbd.fields,
+            'uuid': thin_cbd.uuid,
+        }
+
+        with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.route_filing', new_callable=AsyncMock) as mock_route:
+            result = await handle_approval_approve(update, context)
+
+        assert result == AWAIT_TEMPLATE_REVIEW
+        mock_route.assert_not_called()
+        assert 'stopped before opening kaizen' in sim.get_last_text().lower()
+        assert 'Date' in sim.get_last_text()
+        assert 'Case to be discussed' in sim.get_last_text()
