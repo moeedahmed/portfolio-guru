@@ -761,7 +761,21 @@ FORM_SCHEMAS = {
         "name": "File Upload - Miscellaneous (2025 Update)",
         "filer_available": True,
         "fields": [
-            {"key": "date_of_encounter", "label": "Date", "type": "date", "required": True},
+            # FORM_FIELD_MAP keys verified 2026-04-28; dropdown options pending live inspection.
+            {"key": "date_of_encounter", "label": "Date",                    "type": "date",     "required": True},
+            {"key": "title_of_document", "label": "Title of document",       "type": "text",     "required": True,
+             "field_id": "0bd73413-98a8-4a60-8875-b18e3350f552"},
+            {"key": "is_for_arcp",       "label": "Is this for ARCP?",       "type": "dropdown", "required": True,
+             "options": ["Yes", "No"], "field_id": "8ee2b837-1d7b-460b-a66f-c7f89806bd82"},
+            {"key": "grade_stage",       "label": "Grade / Stage",           "type": "dropdown", "required": True,
+             "options": ["Intermediate / ST3", "Higher / ST4 - ST6", "PEM Sub-specialty", "ACCS ST1-ST2 / CT1-CT2"],
+             "field_id": "7eb6ff8b-30dd-4aba-afaf-7005bfc5ec68"},
+            {"key": "is_pocus_evidence", "label": "Is this PoCUS evidence?", "type": "dropdown", "required": False,
+             "options": ["Yes", "No"], "field_id": "68c3efd6-17f8-498e-90b7-a5e7ed5c0866"},
+            {"key": "notes_comments",    "label": "Notes / comments",        "type": "text",     "required": False,
+             "field_id": "8bbae31d-c1f8-43c8-b16c-cc101c1dcb4c"},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick",  "required": False},
+            {"key": "key_capabilities",  "label": "Key Capabilities",        "type": "kc_tick",  "required": False},
         ]
     },
 
