@@ -24,3 +24,4 @@ start-bot.sh.bak-*
 
 # Generated live inspection outputs
 backend/p0_inspection_results.json
+.venv/
