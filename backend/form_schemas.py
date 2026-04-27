@@ -49,34 +49,33 @@ FORM_SCHEMAS = {
         "name": "Direct Observation of Procedural Skills",
         "filer_available": True,
         "fields": [
-            {"key": "date_of_encounter",    "label": "Date",                    "type": "date",     "required": True},
-            {"key": "procedure_name",       "label": "Procedure",               "type": "dropdown", "required": True,
-             "options": ["Paediatric sedation", "Adult sedation", "Advanced airway management",
-                         "Non-invasive ventilation", "Open Chest drain", "Resuscitative thoracotomy",
-                         "Lateral Canthotomy", "DC cardioversion", "External pacing", "Pericardiocentesis",
-                         "ED management of life-threatening haemorrhage", "Emergency delivery",
-                         "Resuscitative hysterotomy", "Fracture / Dislocation manipulation",
-                         "Large joint aspiration", "PoCUS - Echo in Life Support (ELS)",
-                         "PoCUS - Shock Assessment", "PoCUS - Focused Assessment for AAA",
-                         "PoCUS - eFAST / FAFF", "Other"]},
-            {"key": "clinical_setting",     "label": "Clinical Setting",        "type": "text",     "required": True},
-            {"key": "stage_of_training",    "label": "Stage of Training",       "type": "dropdown", "required": True,
-             "options": ["Intermediate/ST3", "Higher/ST4-ST6", "PEM Sub-specialty", "ACCS ST1-ST2/CT1-CT2"]},
+            # Verified live 2026-04-28 against fresh DOPS form. Every field below
+            # except curriculum_links / key_capabilities is REQUIRED on the live form.
+            # Earlier schema (pre-2026-04-28) listed fields like "procedure_name",
+            # "clinical_setting", "indication", "trainee_performance" that do not
+            # exist on the live DOPS form — those caused 2026-04-27 filing run to
+            # leave Placement/Case observed/Date of event/ST4-ST6 procedural skill
+            # blank because the JSON could not name them.
+            {"key": "placement",            "label": "Placement",                    "type": "dropdown", "required": True,
+             "options": ["Emergency Medicine"], "field_id": "286d64f5-2aa0-41eb-aba6-a7bc523f133c"},
+            {"key": "date_of_event",        "label": "Date of event",                "type": "date",     "required": True,
+             "field_id": "5391f8de-de63-4db3-9e08-baaa2a380cfe"},
+            {"key": "case_observed",        "label": "Case observed",                "type": "text",     "required": True,
+             "field_id": "60772a97-92eb-4dbe-a813-6a5293be82f9"},
+            {"key": "stage_of_training",    "label": "Stage of Training",            "type": "dropdown", "required": True,
+             "options": ["Intermediate / ST3", "Higher / ST4 - ST6", "PEM Sub-specialty", "ACCS ST1-ST2 / CT1-CT2"],
+             "field_id": "e0864e88-62cf-43aa-a9e5-51abd98a1cce"},
+            {"key": "reflection",           "label": "Reflection of event",          "type": "text",     "required": True,
+             "field_id": "610b5c60-99ac-4902-9407-22974d6a5799"},
+            # Procedural-skill dropdowns appear on DOPS for trainees. ACCS and
+            # Intermediate dropdowns are not rendered for Higher trainees on this
+            # form — only the ST4-ST6 Higher one is. Filer should set the higher
+            # one to the matching procedure (e.g. "PoCUS - Shock Assessment").
             {"key": "procedural_skill",     "label": "ST4-ST6 procedural skill (2025 Update)", "type": "dropdown", "required": True,
-             "options": ["Paediatric sedation", "Adult sedation", "Advanced airway management",
-                         "Non-invasive ventilation", "Open Chest drain", "Resuscitative thoracotomy",
-                         "Lateral Canthotomy", "DC cardioversion", "External pacing", "Pericardiocentesis",
-                         "ED management of life-threatening haemorrhage", "Emergency delivery",
-                         "Resuscitative hysterotomy", "Fracture / Dislocation manipulation",
-                         "Large joint aspiration", "PoCUS - Echo in Life Support (ELS)",
-                         "PoCUS - Shock Assessment", "PoCUS - Focused Assessment for AAA",
-                         "PoCUS - eFAST / FAFF", "Other"],
+             "options": ["- n/a -", "Paediatric sedation", "Adult sedation", "Advanced airway management", "Non-invasive ventilation", "Open Chest drain", "Resuscitative thoracotomy", "Lateral Canthotomy", "DC cardioversion", "External pacing", "Pericardiocentesis", "ED management of life-threatening haemorrhage", "Emergency delivery", "Resuscitative hysterotomy", "Fracture / Dislocation manipulation", "Large joint aspiration", "PoCUS - Echo in Life Support (ELS)", "PoCUS - Shock Assessment", "PoCUS - Focused Assessment for AAA", "PoCUS - eFAST / FAFF", "Other"],
              "field_id": "8def931e-3a00-43ac-8529-44cdaf34be2d"},
-            {"key": "indication",           "label": "Indication",              "type": "text",     "required": True},
-            {"key": "trainee_performance",  "label": "Trainee Performance",     "type": "text",     "required": True},
-            {"key": "reflection",           "label": "Reflection",              "type": "text",     "required": False},
-            {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)", "type": "kc_tick",  "required": False},
-            {"key": "key_capabilities",     "label": "Key Capabilities",        "type": "kc_tick",  "required": False},
+            {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)",      "type": "kc_tick",  "required": False},
+            {"key": "key_capabilities",     "label": "Key Capabilities",             "type": "kc_tick",  "required": False},
         ]
     },
 
