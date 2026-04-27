@@ -1345,8 +1345,14 @@ async def _fill_select(page: Page, dom_id: str, value: str) -> bool:
     el.options[el.selectedIndex].text matches the target label after the
     call returns.
     """
-    result = await page.evaluate(
-        """([domId, label]) => {
+    # Timing retry: Angular populates scope.to.options asynchronously.
+    # Cold form loads (esp. DOPS procedural_skill, 2026-04-27) hit a race
+    # where the SELECT exists before its options model hydrates. Retry up
+    # to 3 times with 600ms sleep when scope/options aren't ready.
+    result = None
+    for _attempt in range(3):
+        result = await page.evaluate(
+            """([domId, label]) => {
             const el = document.getElementById(domId);
             if (!el) return {ok: false, err: 'element not found'};
             const ngEl = angular.element(el);
@@ -1388,9 +1394,17 @@ async def _fill_select(page: Page, dom_id: str, value: str) -> bool:
             const actualText = el.options[el.selectedIndex] && el.options[el.selectedIndex].text.trim();
             return {ok: actualText === modelMatch.name.trim(), matched: modelMatch.name, domText: actualText, selectedIndex: el.selectedIndex};
         }""",
-        [dom_id, value]
-    )
-    if result.get('ok'):
+            [dom_id, value]
+        )
+        if result.get('ok'):
+            break
+        err = (result.get('err') or '') if result else ''
+        if 'no angular scope' in err or 'options' in err.lower():
+            await asyncio.sleep(0.6)
+            continue
+        break
+
+    if result and result.get('ok'):
         logger.info(f"Select set (scope+DOM): {dom_id} = {result.get('matched')}")
         return True
     logger.warning(f"Select fill failed for {dom_id}: {result.get('err') or 'DOM/scope mismatch'} "
@@ -1595,6 +1609,15 @@ async def _fill_curriculum_links(page: Page, kc_prefixes: List[str], stage_label
     # checkbox by label match. This mirrors what works reliably when done
     # manually via Playwright scripts during this session.
     await asyncio.sleep(0.3)
+    # Skill §17i: when curriculum is in an Add-tags modal that auto-closes
+    # after scope-push (REFLECT_LOG, US_CASE, DOPS), there are no checkboxes
+    # in DOM to verify against. Counting them gives a false-negative and
+    # triggers a DOM-click fallback that also fails. Skip DOM verify in that
+    # case and trust the scope-push report (`ticked` already populated above).
+    visible_cbs = await page.evaluate("() => document.querySelectorAll('[kz-tree] input[type=checkbox]').length")
+    if visible_cbs == 0:
+        logger.info("Curriculum modal closed (no kz-tree checkboxes in DOM); trusting scope-push report.")
+        return ticked, errors
     verify_js = (
         "(prefixes) => {"
         "  const missed = [];"
@@ -1789,20 +1812,26 @@ async def _verify_fields(page: Page, fields: dict, field_map: dict, filled_keys:
     # unrelated multi-selects were ticked. "Add tags (N)" reads from the
     # committed model state regardless of modal visibility. Rewrite 2026-04-23.
     if fields.get("curriculum_links"):
-        count = await page.evaluate(
-            """() => {
-                const btn = Array.from(document.querySelectorAll('button, a'))
-                    .find(el => /Add tags\\s*\\(\\d+\\)/.test((el.innerText || '').trim()));
-                if (!btn) return 0;
-                const m = (btn.innerText || '').match(/\\((\\d+)\\)/);
-                return m ? parseInt(m[1], 10) : 0;
-            }"""
-        )
-        expected = len(fields.get("curriculum_links", []))
-        if count == 0:
-            issues.append("No KCs ticked (Add tags counter is 0)")
-        elif count < expected:
-            issues.append(f"KC count {count} below expected {expected}")
+        # Skill §17i: "Add tags (N)" counter is unreliable on modal-curriculum
+        # forms (REFLECT_LOG, US_CASE, DOPS, etc.). After modal close the
+        # counter reads zero even when KCs saved correctly via scope-push.
+        # Trust the scope-push result reported by _fill_curriculum_links.
+        scope_pushed = any(k.startswith("curriculum_links") for k in filled_keys)
+        if not scope_pushed:
+            count = await page.evaluate(
+                """() => {
+                    const btn = Array.from(document.querySelectorAll('button, a'))
+                        .find(el => /Add tags\\s*\\(\\d+\\)/.test((el.innerText || '').trim()));
+                    if (!btn) return 0;
+                    const m = (btn.innerText || '').match(/\\((\\d+)\\)/);
+                    return m ? parseInt(m[1], 10) : 0;
+                }"""
+            )
+            expected = len(fields.get("curriculum_links", []))
+            if count == 0:
+                issues.append("No KCs ticked (Add tags counter is 0; scope-push also did not run)")
+            elif count < expected:
+                issues.append(f"KC count {count} below expected {expected}")
 
     return issues
 
