@@ -347,7 +347,7 @@ FORM_SCHEMAS = {
             {"key": "location",             "label": "Location",                    "type": "text",     "required": False},
             {"key": "patient_gender",       "label": "Patient Gender",              "type": "dropdown", "required": False,
              "options": ["- n/a -", "Male", "Female", "Other"]},
-            {"key": "patient_age",          "label": "Patient's Age",               "type": "text",     "required": False},
+            {"key": "patient_age",          "label": "Patient's Age",               "type": "number",   "required": False},
             {"key": "equipment_used",       "label": "Equipment Used",              "type": "text",     "required": False},
             {"key": "us_application",       "label": "Ultrasound Application",      "type": "multi_select", "required": False,
              "options": ["AAA", "ELS", "FAST", "Vascular Access", "Other"]},
