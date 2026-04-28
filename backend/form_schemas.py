@@ -527,9 +527,37 @@ FORM_SCHEMAS = {
         "name": "Management: Project Record (2021/2025)",
         "filer_available": True,
         "fields": [
-            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
-            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
-            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+            # Verified live 2026-04-28. Keys match FORM_FIELD_MAP["MGMT_PROJECT"]
+            # exactly so the filer can find the DOM IDs. Earlier 2026-04-28 patch
+            # used divergent names (project_title vs title etc.) and the filer
+            # skipped most fields silently.
+            {"key": "date_of_encounter", "label": "Date occurred on",            "type": "date",     "required": True},
+            {"key": "title",             "label": "Reflection / Project Title", "type": "text",     "required": True,
+             "field_id": "93c34027-0abf-4c2f-9caf-6a45065610f0"},
+            {"key": "task",              "label": "Task",                       "type": "multi_select", "required": True,
+             "options": ["Quality improvement project", "Complaint management", "Adverse / critical incident investigation", "Human resources / people management", "Financial", "Medicolegal", "Confidentiality and data protection", "Risk management", "Management / leadership training", "Educational management"], "field_id": "23794749-676f-4d4d-b8fa-14f3bde36425"},
+            {"key": "scope",             "label": "Scope of task - describe the nature and clinical context", "type": "text", "required": True,
+             "field_id": "875855a2-1521-4d82-9f13-208f536a67c6"},
+            {"key": "output",            "label": "Output of task",             "type": "text",     "required": True,
+             "field_id": "db6c8f0a-4e03-48a1-8eb4-7f16b358c59d"},
+            {"key": "start_date",        "label": "Start date",                 "type": "date",     "required": True,
+             "field_id": "144a72bc-d1b5-4c28-a119-9e29e3bc19a9"},
+            {"key": "finish_date",       "label": "Estimated finish date",      "type": "date",     "required": False,
+             "field_id": "c69115c7-339c-4c38-aa41-b65038157143"},
+            {"key": "evidence_references", "label": "Evidence / references used", "type": "text",   "required": False,
+             "field_id": "1733bca8-c619-4c34-a9f3-0477234c0b7b"},
+            {"key": "people_engaged",    "label": "People interviewed / engaged", "type": "text",   "required": False,
+             "field_id": "dab8c918-caa9-4d8a-a637-49bd4a50c4de"},
+            {"key": "other_resources",   "label": "Other resources used",       "type": "text",     "required": False,
+             "field_id": "08050d70-1bf7-4614-ab72-abbd8726abbc"},
+            {"key": "supervisor_meetings", "label": "Meetings with supervisor", "type": "text",     "required": False,
+             "field_id": "c0ad12ac-c6ed-45d1-a50f-b330abfbac8a"},
+            {"key": "reflection",        "label": "Reflection on task - What would you do differently?", "type": "text", "required": False,
+             "field_id": "a7c089c2-e407-470f-859c-cca8e413da3d"},
+            {"key": "reflection_on_learning", "label": "Reflection on learning", "type": "text",    "required": False,
+             "field_id": "7772b34f-9476-420b-a061-8dc07b04b78c"},
+            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)",    "type": "kc_tick",  "required": False},
+            {"key": "key_capabilities",  "label": "Key Capabilities",           "type": "kc_tick",  "required": False},
         ]
     },
 
@@ -689,9 +717,37 @@ FORM_SCHEMAS = {
         "name": "Research Activity (2021/2025)",
         "filer_available": True,
         "fields": [
-            {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
-            {"key": "reflection",        "label": "Reflection", "type": "text", "required": True},
-            {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
+            # Verified live 2026-04-28 against fresh Research Activity form.
+            # The 8 type-specific text fields (Publication, Poster, Presentation, etc.)
+            # are mutually free-form: fill ONE of them with a description of your
+            # activity that matches that category. Attach files is REQUIRED on
+            # the live form — uploads must be done after Save (the filer's
+            # _attach_file currently fails on this form pending Upload-button fix).
+            {"key": "date_of_encounter",      "label": "Date occurred on",            "type": "date",     "required": True},
+            {"key": "title_of_research_activity", "label": "Title of research activity:", "type": "text", "required": True,
+             "field_id": "bae7ff4d-373c-4583-952e-3bbcbcd13d2e"},
+            {"key": "date_started",           "label": "Date started:",               "type": "date",     "required": False,
+             "field_id": "7fbf5f39-c9b1-4e2c-8c3d-455f159935fe"},
+            {"key": "date_finished",          "label": "Date finished:",              "type": "date",     "required": False,
+             "field_id": "025d5d3f-363b-470d-9c74-7427a8b898fd"},
+            {"key": "publication",            "label": "Publication",                 "type": "text",     "required": False,
+             "field_id": "6ff4f3d2-2ad0-42d6-a86e-04bd196cee1b"},
+            {"key": "poster",                 "label": "Poster",                      "type": "text",     "required": False,
+             "field_id": "644af8ed-8b54-4544-9e0e-2f22feb3c7ef"},
+            {"key": "presentation",           "label": "Presentation",                "type": "text",     "required": False,
+             "field_id": "f0f29cc4-255f-4126-800f-f2b061fc26b8"},
+            {"key": "local_presentation",     "label": "Local Presentation",          "type": "text",     "required": False,
+             "field_id": "dc7376a1-571f-49e0-a0d4-2fcbb50cee20"},
+            {"key": "bestbets",               "label": "BestBETs",                    "type": "text",     "required": False,
+             "field_id": "6e9261d0-37ab-4765-a0dc-707af6c9e697"},
+            {"key": "abstract",               "label": "Abstract",                    "type": "text",     "required": False,
+             "field_id": "5e93bc8c-8cde-4ea9-9f8b-cc03b0fc4d5e"},
+            {"key": "contribution_to_higher_degree", "label": "Contribution to Higher Degree", "type": "text", "required": False,
+             "field_id": "f4392cb6-bd32-4913-b998-ae0b20d31774"},
+            {"key": "other",                  "label": "Other",                       "type": "text",     "required": False,
+             "field_id": "81171c2c-f2aa-4831-91a1-53b734993e55"},
+            {"key": "reflection",             "label": "Reflection (legacy field)",   "type": "text",     "required": False},
+            {"key": "curriculum_links",       "label": "Curriculum Links (SLOs)",     "type": "kc_tick",  "required": False},
         ]
     },
 

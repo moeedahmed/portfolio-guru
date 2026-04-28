@@ -793,6 +793,7 @@ FORM_FIELD_MAP = {
     "MGMT_PROJECT": {
         "date_of_encounter": "startDate",
         "title": "93c34027-0abf-4c2f-9caf-6a45065610f0",
+        "task": "23794749-676f-4d4d-b8fa-14f3bde36425",
         "scope": "875855a2-1521-4d82-9f13-208f536a67c6",
         "output": "db6c8f0a-4e03-48a1-8eb4-7f16b358c59d",
         "start_date": "144a72bc-d1b5-4c28-a119-9e29e3bc19a9",
@@ -2044,6 +2045,8 @@ async def fill_kaizen_form(
     draft_uuid: str = None,
     save_as_draft: bool = True,
     screenshot_path: str = None,
+    attachment_drive_url: str = None,
+    attachment_path: str = None,
 ) -> dict:
     """
     Fill a Kaizen form via CDP-connected Playwright.
@@ -2202,6 +2205,19 @@ async def fill_kaizen_form(
             for issue in verify_issues:
                 logger.warning(f"Verify: {issue}")
             errors.extend(verify_issues)
+
+        # ___ STEP 5b: File attachment (if specified) _______________________
+        if attachment_drive_url and not attachment_path:
+            temp_path = _download_drive_file(attachment_drive_url)
+            if temp_path:
+                attachment_path = temp_path
+            else:
+                errors.append(f"Failed to download attachment from {attachment_drive_url}")
+        if attachment_path:
+            if await _attach_file(page, attachment_path):
+                filled.append(f"attachment ({attachment_path.split(chr(47))[-1]})")
+            else:
+                errors.append(f"Attachment fill failed for {attachment_path}")
 
         # ─── STEP 6: Save ────────────────────────────────────────────────────
         saved = await _save_form(page, save_as_draft)
