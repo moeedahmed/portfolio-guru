@@ -43,19 +43,33 @@ if [[ ! -f "$PLIST_PATH" ]]; then
 fi
 
 launchctl bootout "gui/$(id -u)" "$PLIST_PATH" 2>/dev/null || true
-while read -r pid; do
-  [[ -z "$pid" ]] && continue
-  if lsof -a -p "$pid" -d cwd 2>/dev/null | grep -q "${APP_DIR}/backend"; then
-    kill "$pid" 2>/dev/null || true
-  fi
-done < <(pgrep -f "bot.py|webhook_server:app" || true)
-while read -r pid; do
-  [[ -z "$pid" ]] && continue
-  if ps -p "$pid" -o command= | grep -q "${APP_DIR}"; then
-    kill "$pid" 2>/dev/null || true
-  fi
-done < <(pgrep -f "start-bot.sh|start_bot.sh|run_local.sh" || true)
-sleep 2
+
+collect_app_pids() {
+  while read -r pid; do
+    [[ -z "$pid" ]] && continue
+    if lsof -a -p "$pid" -d cwd 2>/dev/null | grep -q "${APP_DIR}/backend"; then
+      echo "$pid"
+    fi
+  done < <(pgrep -f "bot.py|webhook_server:app" || true)
+  while read -r pid; do
+    [[ -z "$pid" ]] && continue
+    if ps -p "$pid" -o command= | grep -q "${APP_DIR}"; then
+      echo "$pid"
+    fi
+  done < <(pgrep -f "start-bot.sh|start_bot.sh|run_local.sh" || true)
+}
+
+mapfile -t app_pids < <(collect_app_pids | sort -u)
+if [[ "${#app_pids[@]}" -gt 0 ]]; then
+  kill "${app_pids[@]}" 2>/dev/null || true
+fi
+sleep 5
+mapfile -t app_pids < <(collect_app_pids | sort -u)
+if [[ "${#app_pids[@]}" -gt 0 ]]; then
+  kill -9 "${app_pids[@]}" 2>/dev/null || true
+fi
+sleep 1
+
 launchctl bootstrap "gui/$(id -u)" "$PLIST_PATH"
 launchctl enable "gui/$(id -u)/${SERVICE_LABEL}" 2>/dev/null || true
 
