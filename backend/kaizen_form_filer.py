@@ -2101,8 +2101,8 @@ async def file_to_kaizen(
             if len(filled) > 0:
                 save_error += f" ({len(filled)} fields were filled but draft was NOT saved)"
         elif verified is False:
-            status = "failed"
-            save_error = "Entry not found in your portfolio after saving — it may not have saved correctly. Please check Kaizen manually."
+            status = "partial"
+            save_error = "Save was clicked, but I could not confirm the entry in the activities list. Please check Kaizen manually."
         elif len(filled) > 0:
             if len(skipped) == 0:
                 status = "success"

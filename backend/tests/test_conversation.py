@@ -54,7 +54,6 @@ class TestExplicitFormRouting:
     @pytest.mark.asyncio
     async def test_photo_case_with_procedure_log_instruction_skips_recommender(self, monkeypatch):
         import bot
-        from models import FormDraft
 
         message = MagicMock()
         message.chat.send_action = AsyncMock()
@@ -66,24 +65,16 @@ class TestExplicitFormRouting:
 
         context = MagicMock()
         context.user_data = {}
-
-        draft = FormDraft(
-            form_type="PROC_LOG",
-            uuid="test-uuid",
-            fields={"procedure": "Adult procedural sedation"},
-        )
+        context.bot = MagicMock()
 
         async def fail_recommend(*args, **kwargs):
             raise AssertionError("recommend_form_types should not run for explicit procedure log requests")
 
-        async def fake_analyse(context, user_id, case_text, form_type):
-            context.user_data["chosen_form"] = form_type
-            return draft
+        async def fail_analyse(*args, **kwargs):
+            raise AssertionError("_analyse_selected_form should wait until the user taps Draft")
 
         monkeypatch.setattr(bot, "recommend_form_types", fail_recommend)
-        monkeypatch.setattr(bot, "_analyse_selected_form", fake_analyse)
-        monkeypatch.setattr(bot, "_missing_template_fields", lambda *args, **kwargs: ([], [], []))
-        monkeypatch.setattr(bot, "_format_draft_preview", lambda *args, **kwargs: "Procedure Log draft ready")
+        monkeypatch.setattr(bot, "_analyse_selected_form", fail_analyse)
 
         state = await bot._process_case_text(
             message,
@@ -93,5 +84,16 @@ class TestExplicitFormRouting:
             "photo",
         )
 
-        assert state == bot.AWAIT_APPROVAL
+        assert state == bot.AWAIT_FORM_CHOICE
         assert context.user_data["chosen_form"] == "PROC_LOG"
+        message.reply_text.assert_awaited_once()
+        sent_text = message.reply_text.await_args.args[0]
+        sent_keyboard = message.reply_text.await_args.kwargs["reply_markup"]
+        button_data = [
+            button.callback_data
+            for row in sent_keyboard.inline_keyboard
+            for button in row
+            if button.callback_data
+        ]
+        assert "Procedural Log" in sent_text
+        assert "FORM|PROC_LOG" in button_data

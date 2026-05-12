@@ -245,7 +245,37 @@ async def _edit_last_bot_msg(context, chat_id, text, reply_markup=None, parse_mo
 
 
 async def _send_latest_message(message, context, text, reply_markup=None, parse_mode=None):
-    """Always send a fresh latest message and track it for later recovery prompts."""
+    """Edit the active bot message when possible, otherwise send and track one."""
+    chat_id = getattr(message, "chat_id", None) or getattr(getattr(message, "chat", None), "id", None)
+    msg_id = context.user_data.get("last_bot_msg_id")
+    if chat_id and msg_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=msg_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode,
+            )
+            context.user_data["last_bot_chat_id"] = chat_id
+            class _TrackedMessage:
+                def __init__(self, bot, chat_id, message_id):
+                    self._bot = bot
+                    self.chat_id = chat_id
+                    self.message_id = message_id
+                    self.chat = getattr(message, "chat", None)
+
+                async def edit_text(self, text, **kwargs):
+                    return await self._bot.edit_message_text(
+                        chat_id=self.chat_id,
+                        message_id=self.message_id,
+                        text=text,
+                        **kwargs,
+                    )
+
+            return _TrackedMessage(context.bot, chat_id, msg_id)
+        except Exception:
+            pass
     msg = await message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
     context.user_data["last_bot_msg_id"] = msg.message_id
     context.user_data["last_bot_chat_id"] = msg.chat_id
@@ -923,6 +953,13 @@ def _build_template_review_keyboard():
     ])
 
 
+def _build_explicit_form_keyboard(form_type: str):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"✅ Draft {_form_display_name(form_type)}", callback_data=f"FORM|{form_type}")],
+        [_BTN_CANCEL],
+    ])
+
+
 def _build_approval_keyboard():
     return InlineKeyboardMarkup([
         [
@@ -1098,6 +1135,7 @@ def _format_template_review(form_type: str, draft) -> str:
 
     lines = [
         f"🧩 *{form_name} template*",
+        "I will use this form. Review what I found, then tap Draft with this info.",
         "",
         "*Required fields*",
         *[f"• {field['label']}" for field in required],
@@ -1118,22 +1156,21 @@ def _format_template_review(form_type: str, draft) -> str:
                 value = f"{value[:117].rstrip()}..."
             lines.append(f"• {field['label']}: {value}")
 
-    missing_labels = [field["label"] for field in missing_required]
-    if missing_optional:
-        missing_labels.extend(field["label"] for field in missing_optional[:3])
-
     lines.extend(["", "*Still missing*"])
-    if missing_labels:
-        lines.extend(f"• {label}" for label in missing_labels)
+    if missing_required:
+        lines.extend(f"• {field['label']}" for field in missing_required)
     else:
-        lines.append("• Nothing obvious")
+        lines.append("• No required fields")
+
+    if missing_optional:
+        lines.extend(["", "*Optional not filled*"])
+        lines.extend(f"• {field['label']}" for field in missing_optional[:3])
 
     lines.extend([
         "",
-        "💬 Send anything to add more detail — or tap below.",
+        "💬 Send anything to add more detail, or tap below.",
     ])
     return "\n".join(lines)
-
 
 def _format_curriculum_hierarchy(curriculum_links, key_capabilities) -> str:
     """Render SLOs with their KCs nested underneath as a hierarchy."""
@@ -2494,43 +2531,15 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
 
     explicit_form = extract_explicit_form_type(case_text)
     if explicit_form:
-        await message.chat.send_action(constants.ChatAction.TYPING)
-        ack = await message.reply_text(f"🧩 Reviewing {_form_display_name(explicit_form)} template…")
-        context.user_data["last_bot_msg_id"] = ack.message_id
-        context.user_data["last_bot_chat_id"] = ack.chat_id
-        try:
-            draft = await _analyse_selected_form(context, user_id, case_text, explicit_form)
-        except asyncio.TimeoutError:
-            logger.error("Template review timed out for explicit %s", explicit_form)
-            await ack.edit_text("⏳ Template review timed out. Please try again.")
-            return ConversationHandler.END
-        except Exception as exc:
-            logger.error("Template review failed for explicit %s: %s", explicit_form, exc, exc_info=True)
-            await ack.edit_text("⚠️ Could not review that template.", reply_markup=_KB_RETRY_RESET)
-            return ConversationHandler.END
-
-        missing_required, missing_optional, _ = _missing_template_fields(draft, explicit_form)
-        if not missing_required:
-            # All fields filled — skip template review, go to draft preview
-            _store_draft(context, draft)
-            preview = _format_draft_preview(draft, _chosen_form_reason(context, explicit_form))
-            await _safe_edit_text(
-                ack,
-                preview,
-                reply_markup=_build_approval_keyboard(),
-                parse_mode="Markdown",
-            )
-            return AWAIT_APPROVAL
-
-        review_text = _format_template_review(explicit_form, draft)
-        await _safe_edit_text(
-            ack,
-            review_text,
-            reply_markup=_build_template_review_keyboard(),
+        context.user_data["chosen_form"] = explicit_form
+        await _send_latest_message(
+            message,
+            context,
+            f"I’ll use *{_form_display_name(explicit_form)}* for this entry.\n\nTap Draft to extract the fields from what you sent.",
+            reply_markup=_build_explicit_form_keyboard(explicit_form),
             parse_mode="Markdown",
         )
-        context.user_data["last_bot_msg_id"] = ack.message_id
-        return AWAIT_TEMPLATE_REVIEW
+        return AWAIT_FORM_CHOICE
 
     training_level = get_training_level(user_id)
     allowed_forms = TRAINING_LEVEL_FORMS.get(training_level, TRAINING_LEVEL_FORMS["ST5"]) if training_level else TRAINING_LEVEL_FORMS["ST5"]
@@ -2783,9 +2792,11 @@ async def _accumulate_and_refresh(update: Update, context: ContextTypes.DEFAULT_
 
     form_name = _form_display_name(chosen_form)
     await update.effective_chat.send_action(constants.ChatAction.TYPING)
-    ack = await update.message.reply_text(f"🧩 Updating {form_name} template…")
-    context.user_data["last_bot_msg_id"] = ack.message_id
-    context.user_data["last_bot_chat_id"] = ack.chat_id
+    ack = await _send_latest_message(
+        update.message,
+        context,
+        f"🧩 Updating {form_name} template…",
+    )
 
     try:
         draft = await _analyse_selected_form(context, user_id, combined, chosen_form)
@@ -3564,7 +3575,12 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     # Determine platform (default: kaizen; future: from user profile)
     platform = "kaizen"
     await update.effective_chat.send_action(constants.ChatAction.TYPING)
-    ack = await query.message.reply_text(f"📤 Filing {form_name}…")
+    ack = query.message
+    await _safe_edit_text(
+        ack,
+        f"📤 Saving {form_name} as a Kaizen draft…",
+        parse_mode=None,
+    )
 
     try:
         result = await asyncio.wait_for(
@@ -3688,15 +3704,20 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             status_line = "❌ Filing stopped."
 
     try:
-        await ack.edit_text(status_line)
+        await _safe_edit_text(
+            ack,
+            msg,
+            reply_markup=end_keyboard,
+            parse_mode="Markdown",
+        )
     except Exception:
-        logger.warning("Could not update filing status line")
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=msg,
-        reply_markup=end_keyboard,
-        parse_mode="Markdown",
-    )
+        logger.warning("Could not update filing result line")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=msg,
+            reply_markup=end_keyboard,
+            parse_mode="Markdown",
+        )
     return ConversationHandler.END
 
 

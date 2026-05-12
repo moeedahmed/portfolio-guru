@@ -89,6 +89,29 @@ class TestFlowWalker:
         assert context.user_data['case_text'] == SAMPLE_CASES['valid']
 
     @pytest.mark.asyncio
+    async def test_explicit_form_waits_for_draft_button(self):
+        from bot import AWAIT_FORM_CHOICE, handle_case_input
+
+        sim = BotSimulator()
+        update = sim._make_text_update(
+            "Add this case as procedural log for adult procedural sedation. Shoulder reduction under sedation."
+        )
+        context = sim._make_context()
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.classify_intent', new_callable=AsyncMock, return_value='case'), \
+             patch('bot.recommend_form_types', new_callable=AsyncMock) as recommend, \
+             patch('bot._analyse_selected_form', new_callable=AsyncMock) as analyse, \
+             patch('bot.check_can_file', new_callable=AsyncMock, return_value=(True, 0, 5, 'free')):
+            result = await handle_case_input(update, context)
+
+        assert result == AWAIT_FORM_CHOICE
+        assert context.user_data['chosen_form'] == 'PROC_LOG'
+        assert any(data == 'FORM|PROC_LOG' for _, data in sim.get_last_buttons())
+        recommend.assert_not_awaited()
+        analyse.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_template_review_buttons_progress(self, thin_draft):
         from bot import AWAIT_APPROVAL, AWAIT_TEMPLATE_REVIEW, handle_callback, handle_form_choice
 
@@ -349,7 +372,7 @@ class TestFlowWalker:
         assert any(data == 'ACTION|file' for _, data in sim.get_last_buttons())
 
     @pytest.mark.asyncio
-    async def test_expired_draft_recovery_sends_fresh_latest_template_message(self, thin_draft):
+    async def test_expired_draft_recovery_updates_latest_template_message(self, thin_draft):
         from bot import AWAIT_TEMPLATE_REVIEW, handle_approval_edit
 
         sim = BotSimulator()
@@ -370,7 +393,7 @@ class TestFlowWalker:
             result = await handle_approval_edit(update, context)
 
         assert result == AWAIT_TEMPLATE_REVIEW
-        assert sim.messages_sent[-1][0] == 'reply'
+        assert sim.messages_sent[-1][0] == 'bot_edit'
         assert 'still in progress' in sim.messages_sent[-2][1].lower()
         assert {'ACTION|continue_thin'} <= {data for _, data in sim.get_last_buttons()}
 
@@ -396,12 +419,12 @@ class TestFlowWalker:
             result = await handle_approval_approve(update, context)
 
         assert result == AWAIT_APPROVAL
-        assert sim.messages_sent[-1][0] == 'reply'
+        assert sim.messages_sent[-1][0] == 'bot_edit'
         assert 'still in progress' in sim.messages_sent[-2][1].lower()
         assert {'APPROVE|draft', 'EDIT|draft'} <= {data for _, data in sim.get_last_buttons()}
 
     @pytest.mark.asyncio
-    async def test_filing_completion_arrives_as_fresh_latest_message(self, thin_draft):
+    async def test_filing_completion_updates_current_message(self, thin_draft):
         from bot import handle_approval_approve
 
         sim = BotSimulator()
@@ -419,7 +442,7 @@ class TestFlowWalker:
             result = await handle_approval_approve(update, context)
 
         assert result == ConversationHandler.END
-        assert sim.messages_sent[-1][0] == 'send'
+        assert sim.messages_sent[-1][0] == 'edit'
         assert 'draft saved' in sim.get_last_text().lower()
         # Home menu buttons present (ACTION|file if connected, ACTION|setup if not)
         assert any(data.startswith('ACTION|') for _, data in sim.get_last_buttons())
