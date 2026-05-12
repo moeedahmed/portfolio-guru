@@ -6,6 +6,7 @@ import asyncio
 import os
 import shutil
 import tempfile
+from model_config import gemini_fallback_models
 
 # Check for local whisper CLI
 _WHISPER_CLI = shutil.which("whisper")
@@ -83,7 +84,7 @@ async def _transcribe_gemini(file_path: str) -> str:
     mime_type = mime_map.get(ext, "audio/ogg")
 
     loop = asyncio.get_event_loop()
-    models_to_try = ["gemini-3-flash-preview", "gemini-2.5-flash"]
+    models_to_try = gemini_fallback_models()
     contents = [
         "Transcribe this voice note exactly as spoken. Return only the transcribed text, no commentary.",
         types.Part.from_bytes(data=audio_data, mime_type=mime_type),

@@ -4,6 +4,7 @@ import base64
 from datetime import datetime
 from typing import List, Optional
 from models import CBDData, ActionStep
+from model_config import gemini_fast_model
 
 
 def _to_uk_date(iso_date: str) -> str:
@@ -112,7 +113,7 @@ CRITICAL RULES:
     browser_session = BrowserSession(browser_profile=browser_profile)
 
     llm = ChatGoogle(
-        model="gemini-3-flash-preview",
+        model=gemini_fast_model(),
         api_key=os.environ.get("GOOGLE_API_KEY"),
     )
 

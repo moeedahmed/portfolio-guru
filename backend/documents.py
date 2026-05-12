@@ -6,6 +6,7 @@ import os
 import tempfile
 import logging
 from pathlib import Path
+from model_config import gemini_fallback_models
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ async def _ocr_pdf_with_gemini(file_path: str) -> str:
     ]
 
     loop = asyncio.get_event_loop()
-    models_to_try = ["gemini-3-flash-preview", "gemini-2.5-flash"]
+    models_to_try = gemini_fallback_models()
 
     for model in models_to_try:
         try:

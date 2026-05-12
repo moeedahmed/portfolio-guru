@@ -10,6 +10,7 @@ from typing import List
 logger = logging.getLogger(__name__)
 from models import CBDData, FormTypeRecommendation, FormDraft
 from form_schemas import FORM_SCHEMAS
+from model_config import gemini_fast_model, openai_fallback_model
 
 # RCEM Higher EM Curriculum (2025 Update) — Exact Kaizen checkbox labels
 # Source: Live Kaizen CBD form screenshot (verified 2026-03-08)
@@ -86,9 +87,9 @@ _client = None
 # Provider chain — tried in order. Each must implement generate(prompt) → text
 PROVIDERS = [
     {
-        "name": "gemini-2.5-flash",
+        "name": "gemini-fast",
         "type": "gemini",
-        "model": "gemini-2.5-flash",
+        "model": gemini_fast_model,
         "env_key": "GOOGLE_API_KEY",
     },
     {
@@ -99,9 +100,9 @@ PROVIDERS = [
         "env_key": "DEEPSEEK_API_KEY",
     },
     {
-        "name": "gpt-4o-mini",
+        "name": "openai-fallback",
         "type": "openai",
-        "model": "gpt-4o-mini",
+        "model": openai_fallback_model,
         "env_key": "OPENAI_API_KEY",
     },
 ]
@@ -133,23 +134,25 @@ async def _generate(prompt, retries: int = 1, tier: str = ""):
             try:
                 if provider["type"] == "gemini":
                     client = _get_client()
+                    model_name = provider["model"]() if callable(provider["model"]) else provider["model"]
                     result = await loop.run_in_executor(
                         None,
-                        lambda m=provider["model"]: client.models.generate_content(model=m, contents=prompt)
+                        lambda m=model_name: client.models.generate_content(model=m, contents=prompt)
                     )
                     elapsed = _time.monotonic() - t0
-                    logger.info(f"{provider['name']} responded in {elapsed:.1f}s")
+                    logger.info(f"{provider['name']} ({model_name}) responded in {elapsed:.1f}s")
                     return result.text
                 else:
                     # openai or openai_compat
                     from openai import OpenAI
+                    model_name = provider["model"]() if callable(provider["model"]) else provider["model"]
                     oai_client = OpenAI(
                         api_key=api_key,
                         base_url=provider.get("base_url"),
                     )
                     response = await loop.run_in_executor(
                         None,
-                        lambda c=oai_client, m=provider["model"]: c.chat.completions.create(
+                        lambda c=oai_client, m=model_name: c.chat.completions.create(
                             model=m,
                             messages=[{"role": "user", "content": prompt}],
                             response_format={"type": "json_object"},
@@ -157,7 +160,7 @@ async def _generate(prompt, retries: int = 1, tier: str = ""):
                         )
                     )
                     elapsed = _time.monotonic() - t0
-                    logger.info(f"{provider['name']} responded in {elapsed:.1f}s")
+                    logger.info(f"{provider['name']} ({model_name}) responded in {elapsed:.1f}s")
                     return response.choices[0].message.content
             except Exception as e:
                 last_error = e

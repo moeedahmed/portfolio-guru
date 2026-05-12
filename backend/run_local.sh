@@ -45,6 +45,10 @@ export TELEGRAM_BOT_TOKEN
 GOOGLE_API_KEY="$(get_secret af6579a0-2cbe-4cef-94b3-b405017b48fe)"
 export GOOGLE_API_KEY
 echo "Gemini key in use (last4): ${GOOGLE_API_KEY: -4}"
+export GEMINI_FAST_MODEL="${GEMINI_FAST_MODEL:-gemini-3-flash-preview}"
+export GEMINI_STABLE_MODEL="${GEMINI_STABLE_MODEL:-gemini-2.5-flash}"
+export GEMINI_PREMIUM_MODEL="${GEMINI_PREMIUM_MODEL:-gemini-3.1-pro-preview}"
+echo "Gemini models: fast=$GEMINI_FAST_MODEL stable=$GEMINI_STABLE_MODEL"
 FERNET_SECRET_KEY="$(get_secret 9e653679-9a33-4c23-a15c-b405015713de)"
 export FERNET_SECRET_KEY
 OPENAI_API_KEY="$(try_secret 2772c5c3-b357-4015-8252-b3ea00939469)"

@@ -6,6 +6,7 @@ import base64
 import os
 from google import genai
 from google.genai import types
+from model_config import gemini_fallback_models, openai_fallback_model
 
 _client = None
 
@@ -61,7 +62,7 @@ Return ONLY the extracted/described text, no additional commentary."""
 
     # Run sync Gemini call in thread pool with model fallback
     loop = asyncio.get_event_loop()
-    models_to_try = ["gemini-3-flash-preview", "gemini-2.5-flash"]
+    models_to_try = gemini_fallback_models()
     last_error = None
     for model in models_to_try:
         try:
@@ -89,7 +90,7 @@ Return ONLY the extracted/described text, no additional commentary."""
             b64_image = _b64.b64encode(image_data).decode("utf-8")
             oai_prompt = prompt
             resp = await oai.chat.completions.create(
-                model="gpt-4o-mini",
+                model=openai_fallback_model(),
                 messages=[{
                     "role": "user",
                     "content": [

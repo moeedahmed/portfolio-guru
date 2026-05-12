@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from selector_logger import SelectorLogger
+from model_config import browser_fallback_model, gemini_fast_model
 
 logger = logging.getLogger(__name__)
 
@@ -227,7 +228,7 @@ async def file_with_browser_use(
     form_url: Optional[str] = None,
     form_type: str = "unknown",
     curriculum_links: Optional[List[str]] = None,
-    model: str = "gemini-3-flash-preview",
+    model: Optional[str] = None,
     platform: str = "unknown",
 ) -> Dict[str, Any]:
     """
@@ -251,7 +252,7 @@ async def file_with_browser_use(
             "skipped": [field_keys...],
             "error": None | "error message",
             "method": "browser-use",
-            "model_used": "gemini-3-flash-preview",
+            "model_used": "<configured model>",
             "selectors_log": "/path/to/log.json" | None,
         }
     """
@@ -328,10 +329,12 @@ async def file_with_browser_use(
     )
 
     # Create LLM based on model choice
+    model = model or gemini_fast_model()
     llm = _create_llm(model)
     fallback_llm = None
-    if model != "gpt-4o":
-        fallback_llm = _create_llm("gpt-4o")
+    fallback_model = browser_fallback_model()
+    if model != fallback_model:
+        fallback_llm = _create_llm(fallback_model)
 
     # Session log directory
     log_dir = BROWSER_USE_LOG_DIR / platform / form_type
@@ -490,6 +493,6 @@ def _create_llm(model: str):
         # Default to Gemini
         from browser_use.llm.google.chat import ChatGoogle
         return ChatGoogle(
-            model="gemini-3-flash-preview",
+            model=gemini_fast_model(),
             api_key=os.environ.get("GOOGLE_API_KEY"),
         )

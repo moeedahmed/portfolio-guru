@@ -2,8 +2,8 @@
 browser-use starter for portfolio-guru
 Uses Google Gemini (free tier) via GOOGLE_API_KEY from BWS.
 
-Model: gemini-3-flash-preview (latest Flash model)
-Fallback: gemini-2.5-flash (stable Flash model)
+Model: configured by GEMINI_FAST_MODEL, defaulting to the latest Flash model.
+Fallback: configured by GEMINI_STABLE_MODEL.
 
 Usage:
     GOOGLE_API_KEY=<key> python3 browser_use_starter.py
@@ -15,6 +15,7 @@ import asyncio
 import os
 from langchain_google_genai import ChatGoogleGenerativeAI
 from browser_use import Agent
+from model_config import gemini_fast_model
 
 
 async def fill_cbd_form(task_description: str) -> str:
@@ -36,10 +37,8 @@ async def fill_cbd_form(task_description: str) -> str:
     if not api_key:
         raise ValueError("GOOGLE_API_KEY not set — fetch from BWS first")
 
-    # gemini-3-flash-preview: latest Flash model, best quality for form filling
-    # Fallback: gemini-2.5-flash (stable)
     llm = ChatGoogleGenerativeAI(
-        model="gemini-3-flash-preview",
+        model=gemini_fast_model(),
         google_api_key=api_key,
         temperature=0,
     )
