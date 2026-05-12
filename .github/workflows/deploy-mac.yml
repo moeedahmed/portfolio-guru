@@ -12,17 +12,11 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64, portfolio-guru]
     steps:
-      - name: Deploy over SSH
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.MAC_MINI_HOST }}
-          username: ${{ secrets.MAC_MINI_USER }}
-          key: ${{ secrets.MAC_MINI_SSH_KEY }}
-          port: ${{ secrets.MAC_MINI_SSH_PORT || 22 }}
-          command_timeout: 10m
-          script: |
-            set -euo pipefail
-            cd /Users/moeedahmed/projects/portfolio-guru
-            bash scripts/deploy_mac.sh
+      - name: Deploy on Mac Mini
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /Users/moeedahmed/projects/portfolio-guru
+          bash scripts/deploy_mac.sh
