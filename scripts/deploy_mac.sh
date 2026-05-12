@@ -4,6 +4,22 @@ set -euo pipefail
 APP_DIR="${PORTFOLIO_GURU_APP_DIR:-/Users/moeedahmed/projects/portfolio-guru}"
 SERVICE_LABEL="${PORTFOLIO_GURU_SERVICE_LABEL:-com.portfolioguru.bot}"
 PLIST_PATH="${HOME}/Library/LaunchAgents/${SERVICE_LABEL}.plist"
+LOCK_DIR="${PORTFOLIO_GURU_DEPLOY_LOCK:-/tmp/portfolio-guru-deploy.lock}"
+
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  if [[ -f "$LOCK_DIR/pid" ]] && ! kill -0 "$(cat "$LOCK_DIR/pid")" 2>/dev/null; then
+    rm -rf "$LOCK_DIR"
+    mkdir "$LOCK_DIR"
+  else
+    echo "ERROR: another Portfolio Guru deploy is already running."
+    exit 1
+  fi
+fi
+echo "$$" > "$LOCK_DIR/pid"
+cleanup_lock() {
+  rm -rf "$LOCK_DIR"
+}
+trap cleanup_lock EXIT
 
 cd "$APP_DIR"
 
