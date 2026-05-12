@@ -244,6 +244,14 @@ async def _edit_last_bot_msg(context, chat_id, text, reply_markup=None, parse_mo
     context.user_data["last_bot_chat_id"] = chat_id
 
 
+def _track_latest_message(context, msg):
+    """Remember a bot message that later flow steps should edit in place."""
+    context.user_data["last_bot_msg_id"] = msg.message_id
+    context.user_data["last_bot_chat_id"] = msg.chat_id
+    context.user_data["status_msg_id"] = msg.message_id
+    context.user_data["status_msg_chat"] = msg.chat_id
+
+
 async def _send_latest_message(message, context, text, reply_markup=None, parse_mode=None):
     """Edit the active bot message when possible, otherwise send and track one."""
     chat_id = getattr(message, "chat_id", None) or getattr(getattr(message, "chat", None), "id", None)
@@ -277,8 +285,7 @@ async def _send_latest_message(message, context, text, reply_markup=None, parse_
         except Exception:
             pass
     msg = await message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
-    context.user_data["last_bot_msg_id"] = msg.message_id
-    context.user_data["last_bot_chat_id"] = msg.chat_id
+    _track_latest_message(context, msg)
     return msg
 
 
@@ -3097,6 +3104,8 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     # Clear any stale status message state from previous sessions
     context.user_data.pop("status_msg_id", None)
     context.user_data.pop("status_msg_chat", None)
+    context.user_data.pop("last_bot_msg_id", None)
+    context.user_data.pop("last_bot_chat_id", None)
 
     # Check credentials
     if not has_credentials(user_id):
@@ -3196,8 +3205,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 await voice_file.download_to_drive(tmp_path)
                 case_text = await transcribe_voice(tmp_path)
             await ack.edit_text("🎙️ Voice note read. Finding matching forms…")
-            context.user_data["status_msg_id"] = ack.message_id
-            context.user_data["status_msg_chat"] = ack.chat_id
+            _track_latest_message(context, ack)
         except Exception as e:
             context.user_data.clear()
             await ack.edit_text("⚠️ Couldn't transcribe voice note. Try again.")
@@ -3223,8 +3231,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             if caption:
                 case_text = f"{caption}\n\n{case_text}".strip()
             await ack.edit_text("📷 Image read. Finding matching forms…")
-            context.user_data["status_msg_id"] = ack.message_id
-            context.user_data["status_msg_chat"] = ack.chat_id
+            _track_latest_message(context, ack)
         except Exception as e:
             context.user_data.clear()
             await ack.edit_text("⚠️ Couldn't read image. Try a clearer photo or describe the case in text.")
@@ -3274,8 +3281,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 case_text = case_text[:max_chars] + "\n\n[Document truncated — using first 15,000 characters]"
             
             await ack.edit_text(f"📄 *{file_name}* read. Finding matching forms…", parse_mode="Markdown")
-            context.user_data["status_msg_id"] = ack.message_id
-            context.user_data["status_msg_chat"] = ack.chat_id
+            _track_latest_message(context, ack)
             context.user_data["document_name"] = file_name
         except Exception as e:
             logger.error(f"Document processing failed: {e}", exc_info=True)

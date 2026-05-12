@@ -97,3 +97,43 @@ class TestExplicitFormRouting:
         ]
         assert "Procedural Log" in sent_text
         assert "FORM|PROC_LOG" in button_data
+
+    @pytest.mark.asyncio
+    async def test_explicit_form_reuses_existing_status_message(self, monkeypatch):
+        import bot
+
+        message = MagicMock()
+        message.chat_id = 456
+        message.chat.id = 456
+        message.reply_text = AsyncMock()
+
+        context = MagicMock()
+        context.user_data = {
+            "last_bot_msg_id": 123,
+            "last_bot_chat_id": 456,
+        }
+        context.bot.edit_message_text = AsyncMock()
+
+        async def fail_recommend(*args, **kwargs):
+            raise AssertionError("recommend_form_types should not run for explicit procedure log requests")
+
+        async def fail_analyse(*args, **kwargs):
+            raise AssertionError("_analyse_selected_form should wait until the user taps Draft")
+
+        monkeypatch.setattr(bot, "recommend_form_types", fail_recommend)
+        monkeypatch.setattr(bot, "_analyse_selected_form", fail_analyse)
+
+        state = await bot._process_case_text(
+            message,
+            context,
+            99999,
+            "Add this case as procedural log for adult procedural sedation\n\nSedation notes.",
+            "photo",
+        )
+
+        assert state == bot.AWAIT_FORM_CHOICE
+        message.reply_text.assert_not_awaited()
+        context.bot.edit_message_text.assert_awaited_once()
+        edited = context.bot.edit_message_text.await_args.kwargs
+        assert edited["message_id"] == 123
+        assert "Procedural Log" in edited["text"]
