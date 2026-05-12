@@ -1,0 +1,28 @@
+name: Deploy Mac Mini
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-mac-mini
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.MAC_MINI_HOST }}
+          username: ${{ secrets.MAC_MINI_USER }}
+          key: ${{ secrets.MAC_MINI_SSH_KEY }}
+          port: ${{ secrets.MAC_MINI_SSH_PORT || 22 }}
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+            cd /Users/moeedahmed/projects/portfolio-guru
+            bash scripts/deploy_mac.sh

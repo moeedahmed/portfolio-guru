@@ -4488,6 +4488,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 def main():
     """Entry point for local development - runs in polling mode."""
     import requests as _req
+    import subprocess as _subprocess
 
     init()
     init_profile_db()
@@ -4532,6 +4533,22 @@ def main():
         except Exception:
             pass  # Non-critical — BotFather settings may not update on every restart
     application.post_init = post_init
+
+    try:
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        commit = _subprocess.check_output(
+            ["git", "-C", repo_root, "rev-parse", "--short", "HEAD"],
+            text=True,
+            stderr=_subprocess.DEVNULL,
+        ).strip()
+        branch = _subprocess.check_output(
+            ["git", "-C", repo_root, "branch", "--show-current"],
+            text=True,
+            stderr=_subprocess.DEVNULL,
+        ).strip() or "detached"
+        logger.info("Portfolio Guru live commit: %s (%s)", commit, branch)
+    except Exception:
+        logger.info("Portfolio Guru live commit: unavailable")
 
     logger.info("Portfolio Guru v2 starting in POLLING mode...")
     application.run_polling(drop_pending_updates=True)
