@@ -4,6 +4,22 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LOCK_FILE="${PORTFOLIO_GURU_BOT_LOCK:-/tmp/portfolio-guru-bot.pid}"
+
+if [ -f "$LOCK_FILE" ]; then
+  EXISTING_PID="$(cat "$LOCK_FILE" 2>/dev/null || true)"
+  if [ -n "$EXISTING_PID" ] && kill -0 "$EXISTING_PID" 2>/dev/null; then
+    EXISTING_CWD="$(lsof -a -p "$EXISTING_PID" -d cwd 2>/dev/null | awk 'NR==2 {print $NF}')"
+    EXISTING_CMD="$(ps -p "$EXISTING_PID" -o command= 2>/dev/null || true)"
+    if [ "$EXISTING_CWD" = "$SCRIPT_DIR" ] && echo "$EXISTING_CMD" | grep -q "bot.py"; then
+      echo "Portfolio Guru bot already running as PID $EXISTING_PID"
+      exit 0
+    fi
+  fi
+fi
+echo "$$" > "$LOCK_FILE"
+
 echo "Loading secrets from BWS..."
 BWS_ACCESS_TOKEN=$(cat ~/.openclaw/.bws-token)
 BWS_BIN=$(command -v bws 2>/dev/null || echo "/Users/moeedahmed/.cargo/bin/bws")
@@ -36,7 +52,7 @@ export STRIPE_PRO_PLUS_PRICE_ID="price_1TKY12FtxKHU39UdTQZY8rOq"
 # export KAIZEN_CDP_URL=http://localhost:18800
 
 echo "Secrets loaded. Starting bot + webhook server..."
-cd "$(dirname "$0")"
+cd "$SCRIPT_DIR"
 
 PYTHON=""
 if [ -x "./.venv/bin/python3" ]; then
