@@ -3,13 +3,13 @@
 ## Project
 
 Portfolio Guru automates e-portfolio filing for UK EM trainees.
-Doctor sends a clinical case via Telegram (text, voice, or photo) → Gemini extracts structured WPBA data → shows draft for approval → saves to Kaizen (CBD auto-filed via browser-use; other forms saved as local JSON draft with Kaizen link).
+Doctor sends a clinical case via Telegram (text, voice, or photo) → Gemini extracts structured WPBA data → shows draft for approval → routes the form through deterministic Playwright filing with browser-use fallback where supported. Live supervisor submission is never automatic.
 
 ## Stack
 
 - Telegram bot: python-telegram-bot v21+ (polling mode)
 - LLM extraction/vision/voice: Google Gemini 3 Flash Preview (`gemini-3-flash-preview`)
-- Browser automation: browser-use + Playwright (Chromium) — CBD filer only
+- Browser automation: deterministic Playwright + browser-use fallback (Chromium)
 - Credential store: Fernet-encrypted SQLite (via SQLModel)
 - State persistence: PicklePersistence (survives restarts)
 - Target platform: Kaizen ePortfolio (eportfolio.rcem.ac.uk → kaizenep.com)
@@ -25,16 +25,14 @@ Doctor sends a clinical case via Telegram (text, voice, or photo) → Gemini ext
 - Fernet key in FERNET_SECRET_KEY env var
 - macOS host (Mac Mini M4) — NO systemd, NO systemctl. Use launchd or manual process management.
 
-## Supported Forms (50)
+## Supported Forms
 
-CBD · DOPS · Mini-CEX · ACAT · LAT · ACAF · STAT · MSF · QIAT · JCF · TEACH · PROC_LOG · SDL · US_CASE · ESLE_ASSESS · COMPLAINT · SERIOUS_INC · EDU_ACT · FORMAL_COURSE · REFLECT_LOG · TEACH_OBS · TEACH_CONFID · APPRAISAL · CLIN_GOV · CRIT_INCIDENT · AUDIT · RESEARCH · EDU_MEETING · EDU_MEETING_SUPP · PDP · BUSINESS_CASE · COST_IMPROVE · EQUIP_SERVICE · MGMT_ROTA · MGMT_RISK · MGMT_PROJECT · MGMT_RECRUIT · MGMT_RISK_PROC · MGMT_TRAINING_EVT · MGMT_GUIDELINE · MGMT_INFO · MGMT_INDUCTION · MGMT_EXPERIENCE · MGMT_REPORT · MGMT_COMPLAINT · ABSENCE · CCT · FILE_UPLOAD · HIGHER_PROG · OOP
-
-Only CBD has a browser-use auto-filer. All other forms save a JSON draft locally and provide a Kaizen link.
+`FORM_SCHEMAS` currently covers 50 forms and `FORM_UUIDS` covers 72 form routes. The router supports deterministic Playwright filing plus browser-use fallback. Treat real Kaizen filing reliability as partially verified until the skipped Kaizen filer tests are rewritten and at least one non-live deterministic filing smoke test exists.
 
 ## Kaizen Form UUIDs
 
-All 50 form UUIDs are in `backend/extractor.py` → `FORM_UUIDS` dict.
-CBD URL pattern: `https://kaizenep.com/events/new-section/<UUID>`
+Form UUIDs are in `backend/extractor.py` → `FORM_UUIDS` dict.
+Kaizen URL pattern: `https://kaizenep.com/events/new-section/<UUID>`
 Date format: Kaizen expects d/m/yyyy (e.g. 6/3/2026), not ISO.
 
 ## File Structure
@@ -81,6 +79,10 @@ AWAIT_EDIT_FIELD=4, AWAIT_EDIT_VALUE=5, AWAIT_CASE_INPUT=6, AWAIT_TRAINING_LEVEL
 
 Builder uses persistent Claude Code sessions for this project via cc-sessions.json.
 Sessions are resumed via `resumeSessionId` with `mode: "session"`.
+
+## Current Recovery Focus
+
+Use `TASK.md` for the active recovery sprint. Current priority is docs/hygiene/filing confidence before adding features. `/bulk`, `/unsigned`, and `/chase` have inconsistent disabled vs legacy code paths and must be resolved deliberately.
 
 ## TASK-HISTORY.md
 

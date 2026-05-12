@@ -1,79 +1,44 @@
-# TASK: Standardise Gemini model to gemini-3-flash-preview across all bots
+# TASK: Portfolio Guru recovery sprint — docs, hygiene, and filing confidence
 
-## Context
-Moeed wants gemini-3-flash-preview as the standard model across all bots.
-gemini-3-flash-preview is the latest available Flash model (stable gemini-3-flash doesn't exist yet).
-gemini-2.5-flash is the stable fallback.
-gemini-2.0-flash and gemini-2.0-flash-lite are retiring June 2026 — remove from all fallback chains.
+## Goal
 
-## Files to change in /Users/moeedahmed/projects/portfolio-guru/backend/
+Make Portfolio Guru restartable from repo state, not memory.
 
-### 1. browser_use_starter.py
-- Line ~42: change `model="gemini-2.0-flash-lite"` → `model="gemini-3-flash-preview"`
-- Update the comments (lines 5-6, 39-40) to reflect the new model choice
+## Scope
 
-### 2. vision.py
-- Line ~64: `models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash"]`
-  → change to `models_to_try = ["gemini-3-flash-preview", "gemini-2.5-flash"]`
-
-### 3. whisper.py
-- Line ~86: `models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash"]`
-  → change to `models_to_try = ["gemini-3-flash-preview", "gemini-2.5-flash"]`
-
-### 4. documents.py
-- Line ~67: `models_to_try = ["gemini-2.5-flash-preview-04-17", "gemini-2.0-flash"]`
-  → change to `models_to_try = ["gemini-3-flash-preview", "gemini-2.5-flash"]`
-
-### Files already correct (do NOT change):
-- filer.py — already uses gemini-3-flash-preview ✅
-- discover_uuids.py — already uses gemini-3-flash-preview ✅
-- browser_filer.py — already uses gemini-3-flash-preview ✅
-- extractor.py — uses gemini-2.5-flash as primary (acceptable, leave as-is)
-
-## Files to change in /Users/moeedahmed/projects/emgurus-hub/supabase/functions/exam-api/index.ts
-
-### 5. exam-api/index.ts
-Three lines to change:
-- Line ~123: `gemini-3-pro-preview` (deprecated) → `gemini-3-flash-preview`
-- Line ~615: `gemini-2.0-flash` → `gemini-3-flash-preview`
-- Line ~880: `gemini-2.0-flash` → `gemini-3-flash-preview`
-
-## What NOT to change
-- Do NOT change gemini-2.5-flash where it appears as a PRIMARY model in extractor.py — it's acceptable
-- Do NOT change anything in venv/ or node_modules/
-- Do NOT change any other files
-- Do NOT modify openclaw.json
+1. Refresh `CLAUDE.md` to match current product:
+   - all-form routing
+   - deterministic Playwright + browser-use fallback
+   - real log paths
+   - current disabled/coming-soon commands
+2. Clean repo hygiene:
+   - classify untracked backups, tickets, docs
+   - keep needed tickets under a clear tracked or ignored home
+   - archive/remove stale backup files safely
+3. Resolve command inconsistencies:
+   - decide whether `/unsigned` and `/chase` are disabled or enabled
+   - remove unreachable code or re-enable intentionally
+4. Restore Kaizen filing verification:
+   - rewrite or replace skipped Kaizen filer tests
+   - add at least one non-live deterministic smoke test for `route_filing`
+5. Run test suite and record current known-live limitations.
 
 ## Verification
-After changes:
-```bash
-grep -rn "gemini-2.0-flash\|gemini-1\|gemini-3-pro-preview\|gemini-2.5-flash-preview-04-17" \
-  /Users/moeedahmed/projects/portfolio-guru/backend/*.py \
-  /Users/moeedahmed/projects/emgurus-hub/supabase/functions/exam-api/index.ts \
-  2>/dev/null | grep -v venv | grep -v ".git"
-```
-This should return NO results (all old models replaced).
 
-Then commit in each repo:
-```bash
-cd /Users/moeedahmed/projects/portfolio-guru
-git add backend/browser_use_starter.py backend/vision.py backend/whisper.py backend/documents.py
-git commit -m "chore: standardise Gemini model to gemini-3-flash-preview across all backends"
+- `git status --short`
+- `python -m pytest tests/ -q --ignore=tests/test_e2e.py --ignore=tests/test_e2e_live.py --ignore=tests/test_kaizen_integration.py`
+- grep confirms docs no longer claim CBD-only filing
 
-cd /Users/moeedahmed/projects/emgurus-hub
-git add supabase/functions/exam-api/index.ts
-git commit -m "chore: upgrade exam-api edge function to gemini-3-flash-preview"
-```
+## Current evidence
 
-## Delivery
-```
-openclaw message send --account builder --channel telegram --target -1003705494413 --thread-id 784 -m "💻 Done: Gemini model standardised to gemini-3-flash-preview
+- Offline tests passed during recovery audit: 51 passed, 22 skipped.
+- Skipped tests include Kaizen filer/integration/live tests, so real browser filing confidence is not fully verified.
+- Bot is running locally and polling.
+- Gemini standardisation in Portfolio Guru backend appears done.
 
-What changed:
-• Portfolio Guru: browser_use_starter, vision, whisper, documents all upgraded (was gemini-2.0 / stale preview)
-• Exam API edge function: 3 endpoints upgraded (was gemini-2.0-flash and the deprecated gemini-3-pro)
-• All fallback chains now use gemini-2.5-flash (stable) as backup
+## Out of scope
 
-Verified: grep confirms no gemini-2.0 or stale preview strings remain
-Committed in both repos — nothing deployed yet"
-```
+- New portfolio features
+- Live Kaizen filing without explicit approval
+- Public/external sends
+- EMGurus model cleanup, which belongs to a separate EMGurus sprint
