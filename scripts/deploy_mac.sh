@@ -93,14 +93,24 @@ launchctl enable "gui/$(id -u)/${SERVICE_LABEL}" 2>/dev/null || true
 
 sleep 3
 
-service_pid="$(launchctl print "gui/$(id -u)/${SERVICE_LABEL}" | awk '/pid =/ {print $3; exit}')"
-while read -r pid; do
-  [[ -z "$pid" || "$pid" == "$service_pid" ]] && continue
-  if lsof -a -p "$pid" -d cwd 2>/dev/null | grep -q "${APP_DIR}/backend"; then
-    kill "$pid" 2>/dev/null || true
-  fi
-done < <(pgrep -f "bot.py" || true)
-sleep 2
+for _ in 1 2 3 4 5; do
+  service_pid="$(launchctl print "gui/$(id -u)/${SERVICE_LABEL}" | awk '/pid =/ {print $3; exit}')"
+  orphan_pids=""
+  while read -r pid; do
+    [[ -z "$pid" || "$pid" == "$service_pid" ]] && continue
+    if lsof -a -p "$pid" -d cwd 2>/dev/null | grep -q "${APP_DIR}/backend"; then
+      orphan_pids="${orphan_pids} ${pid}"
+    fi
+  done < <(pgrep -f "bot.py" || true)
+
+  [[ -z "$orphan_pids" ]] && break
+  # shellcheck disable=SC2086
+  kill $orphan_pids 2>/dev/null || true
+  sleep 2
+  # shellcheck disable=SC2086
+  kill -9 $orphan_pids 2>/dev/null || true
+  sleep 2
+done
 
 echo "launchd service:"
 launchctl print "gui/$(id -u)/${SERVICE_LABEL}" | sed -n '1,25p'
