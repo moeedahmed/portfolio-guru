@@ -80,11 +80,21 @@ if [[ -n "$app_pids" ]]; then
   # shellcheck disable=SC2086
   kill $app_pids 2>/dev/null || true
 fi
+webhook_port_pids="$(lsof -tiTCP:8099 -sTCP:LISTEN 2>/dev/null | tr '\n' ' ' || true)"
+if [[ -n "$webhook_port_pids" ]]; then
+  # shellcheck disable=SC2086
+  kill $webhook_port_pids 2>/dev/null || true
+fi
 sleep 5
 app_pids="$(collect_app_pids | sort -u | tr '\n' ' ')"
 if [[ -n "$app_pids" ]]; then
   # shellcheck disable=SC2086
   kill -9 $app_pids 2>/dev/null || true
+fi
+webhook_port_pids="$(lsof -tiTCP:8099 -sTCP:LISTEN 2>/dev/null | tr '\n' ' ' || true)"
+if [[ -n "$webhook_port_pids" ]]; then
+  # shellcheck disable=SC2086
+  kill -9 $webhook_port_pids 2>/dev/null || true
 fi
 sleep 1
 

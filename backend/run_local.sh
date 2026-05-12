@@ -79,6 +79,12 @@ else
 fi
 
 # Start Stripe webhook server in background (port 8099)
+WEBHOOK_PORT_PIDS="$(lsof -tiTCP:8099 -sTCP:LISTEN 2>/dev/null || true)"
+if [ -n "$WEBHOOK_PORT_PIDS" ]; then
+  kill $WEBHOOK_PORT_PIDS 2>/dev/null || true
+  sleep 1
+  kill -9 $WEBHOOK_PORT_PIDS 2>/dev/null || true
+fi
 $PYTHON -m uvicorn webhook_server:app --port 8099 --log-level warning &
 WEBHOOK_PID=$!
 echo "Webhook server started (PID $WEBHOOK_PID, port 8099)"
