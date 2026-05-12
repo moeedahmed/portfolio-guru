@@ -26,6 +26,11 @@ cd "$APP_DIR"
 echo "Deploying Portfolio Guru from $APP_DIR"
 echo "Current commit: $(git rev-parse --short HEAD)"
 
+if [[ -n "$(git status --porcelain -- backend/filing_coverage.json)" ]]; then
+  echo "Resetting generated filing coverage before deploy."
+  git restore -- backend/filing_coverage.json
+fi
+
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "ERROR: deployment checkout has local changes. Refusing to deploy."
   git status --short
