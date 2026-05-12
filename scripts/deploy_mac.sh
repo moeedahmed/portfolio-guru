@@ -58,7 +58,6 @@ done < <(pgrep -f "start-bot.sh|start_bot.sh|run_local.sh" || true)
 sleep 2
 launchctl bootstrap "gui/$(id -u)" "$PLIST_PATH"
 launchctl enable "gui/$(id -u)/${SERVICE_LABEL}" 2>/dev/null || true
-launchctl kickstart -k "gui/$(id -u)/${SERVICE_LABEL}"
 
 sleep 3
 
