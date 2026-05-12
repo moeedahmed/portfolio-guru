@@ -59,14 +59,16 @@ collect_app_pids() {
   done < <(pgrep -f "start-bot.sh|start_bot.sh|run_local.sh" || true)
 }
 
-mapfile -t app_pids < <(collect_app_pids | sort -u)
-if [[ "${#app_pids[@]}" -gt 0 ]]; then
-  kill "${app_pids[@]}" 2>/dev/null || true
+app_pids="$(collect_app_pids | sort -u | tr '\n' ' ')"
+if [[ -n "$app_pids" ]]; then
+  # shellcheck disable=SC2086
+  kill $app_pids 2>/dev/null || true
 fi
 sleep 5
-mapfile -t app_pids < <(collect_app_pids | sort -u)
-if [[ "${#app_pids[@]}" -gt 0 ]]; then
-  kill -9 "${app_pids[@]}" 2>/dev/null || true
+app_pids="$(collect_app_pids | sort -u | tr '\n' ' ')"
+if [[ -n "$app_pids" ]]; then
+  # shellcheck disable=SC2086
+  kill -9 $app_pids 2>/dev/null || true
 fi
 sleep 1
 
