@@ -38,14 +38,25 @@ The deploy script refuses to run if the Mac Mini checkout has local changes.
 
 The workflow `.github/workflows/deploy-mac.yml` runs on pushes to `main`.
 
-Required GitHub repository secrets:
+It runs on the Mac Mini self-hosted GitHub Actions runner:
 
-- `MAC_MINI_HOST` — Tailscale/IP/DNS for the Mac Mini
-- `MAC_MINI_USER` — macOS username, currently `moeedahmed`
-- `MAC_MINI_SSH_KEY` — private SSH key allowed to connect to the Mac Mini
-- `MAC_MINI_SSH_PORT` — optional; defaults to `22`
+- Runner directory: `~/actions-runner-portfolio-guru`
+- Runner name: `mac-mini-portfolio-guru`
+- Runner labels: `self-hosted`, `macOS`, `ARM64`, `portfolio-guru`, `mac-mini`
+- Runner service: `actions.runner.moeedahmed-portfolio-guru.mac-mini-portfolio-guru`
 
-The workflow SSHes into the Mac Mini and runs `scripts/deploy_mac.sh`.
+No SSH deployment secrets are required. The previous SSH approach would not work
+reliably with the Mac Mini's Tailscale-only `100.x` address because GitHub-hosted
+runners cannot reach that private address by default.
+
+Runner service check:
+
+```bash
+cd ~/actions-runner-portfolio-guru
+./svc.sh status
+```
+
+The workflow runs directly on the Mac Mini and executes `scripts/deploy_mac.sh`.
 
 ## Runtime Proof
 
