@@ -77,6 +77,15 @@ launchctl enable "gui/$(id -u)/${SERVICE_LABEL}" 2>/dev/null || true
 
 sleep 3
 
+service_pid="$(launchctl print "gui/$(id -u)/${SERVICE_LABEL}" | awk '/pid =/ {print $3; exit}')"
+while read -r pid; do
+  [[ -z "$pid" || "$pid" == "$service_pid" ]] && continue
+  if lsof -a -p "$pid" -d cwd 2>/dev/null | grep -q "${APP_DIR}/backend"; then
+    kill "$pid" 2>/dev/null || true
+  fi
+done < <(pgrep -f "bot.py" || true)
+sleep 2
+
 echo "launchd service:"
 launchctl print "gui/$(id -u)/${SERVICE_LABEL}" | sed -n '1,25p'
 
