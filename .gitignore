@@ -3,3 +3,54 @@ node_modules/
 venv/
 __pycache__/
 .env.local
+
+# Local/private environment
+.env.*
+!.env.example
+*.local
+
+# Python/runtime caches
+.venv/
+venv/
+.pytest_cache/
+**/.pytest_cache/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# Local backup/scratch files
+*.bak
+*.bak-*
+*.backup
+*.tmp
+*.scratch
+
+# Local generated/debug artefacts
+*_inspection_results.json
+p0_inspection_results.json
+*_conflict_resolution_*.json
+proc_log_*.json
+reflect_log_*.json
+teach_*.json
+dops_*.json
+equip_service_*.json
+serious_inc_*.json
+jc_ticket_*.json
+us_case_*.json
+*_ticket_*.json
+
+# Local private ticket workspace; sanitise before committing deliberately
+/tickets/
+
+# Browser/session artefacts
+.playwright/
+playwright-report/
+test-results/
+chrome-profile/
+user-data-dir/
+
+# One-off local helper scripts
+backend/dump_ticket.py
+backend/fill_one.py
+backend/tick_kcs_only.py
+backend/ensure_chrome.sh
