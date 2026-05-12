@@ -358,6 +358,7 @@ def extract_explicit_form_type(text: str) -> str | None:
         "log as", "log a", "do a", "fill in a", "fill a",
         "i want a", "i need a", "use a", "as a ", "do this as",
         "make this a", "treat this as", "this is a", "record as",
+        "add as", "add this as", "add this case as", "add this case to",
     ]
 
     has_intent = any(phrase in text_lower for phrase in intent_phrases)

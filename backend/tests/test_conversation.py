@@ -49,3 +49,49 @@ class TestKeyboardBuilding:
                      and not any("show_all" in (b.callback_data or "") for b in r)]
         for row in form_rows:
             assert len(row) <= 2, f"Row has {len(row)} buttons — expected max 2"
+
+class TestExplicitFormRouting:
+    @pytest.mark.asyncio
+    async def test_photo_case_with_procedure_log_instruction_skips_recommender(self, monkeypatch):
+        import bot
+        from models import FormDraft
+
+        message = MagicMock()
+        message.chat.send_action = AsyncMock()
+        ack = MagicMock()
+        ack.message_id = 123
+        ack.chat_id = 456
+        ack.edit_text = AsyncMock()
+        message.reply_text = AsyncMock(return_value=ack)
+
+        context = MagicMock()
+        context.user_data = {}
+
+        draft = FormDraft(
+            form_type="PROC_LOG",
+            uuid="test-uuid",
+            fields={"procedure": "Adult procedural sedation"},
+        )
+
+        async def fail_recommend(*args, **kwargs):
+            raise AssertionError("recommend_form_types should not run for explicit procedure log requests")
+
+        async def fake_analyse(context, user_id, case_text, form_type):
+            context.user_data["chosen_form"] = form_type
+            return draft
+
+        monkeypatch.setattr(bot, "recommend_form_types", fail_recommend)
+        monkeypatch.setattr(bot, "_analyse_selected_form", fake_analyse)
+        monkeypatch.setattr(bot, "_missing_template_fields", lambda *args, **kwargs: ([], [], []))
+        monkeypatch.setattr(bot, "_format_draft_preview", lambda *args, **kwargs: "Procedure Log draft ready")
+
+        state = await bot._process_case_text(
+            message,
+            context,
+            99999,
+            "Add this case as procedural log for adult procedural sedation\n\nSedation for shoulder reduction.",
+            "photo",
+        )
+
+        assert state == bot.AWAIT_APPROVAL
+        assert context.user_data["chosen_form"] == "PROC_LOG"

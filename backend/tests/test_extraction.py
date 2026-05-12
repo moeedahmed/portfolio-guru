@@ -27,6 +27,13 @@ class TestFormTypeExtraction:
         result = extract_explicit_form_type("file a DOPS please")
         assert result == "DOPS"
 
+    def test_explicit_procedure_log_caption_detected(self):
+        from extractor import extract_explicit_form_type
+        result = extract_explicit_form_type(
+            "Add this case as procedural log for adult procedural sedation"
+        )
+        assert result == "PROC_LOG"
+
     def test_bare_form_name_not_detected(self):
         """Bare form name without intent phrase should NOT trigger."""
         from extractor import extract_explicit_form_type

@@ -2492,7 +2492,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
     context.user_data["case_text"] = case_text
     context.user_data["case_input_source"] = input_source
 
-    explicit_form = extract_explicit_form_type(case_text) if input_source != "photo" else None
+    explicit_form = extract_explicit_form_type(case_text)
     if explicit_form:
         await message.chat.send_action(constants.ChatAction.TYPING)
         ack = await message.reply_text(f"🧩 Reviewing {_form_display_name(explicit_form)} template…")
@@ -3208,6 +3208,9 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             if case_text.strip() == "NOT_CLINICAL":
                 await ack.edit_text("This image doesn't look like a clinical case. Send a text description or a photo of clinical notes/findings.")
                 return ConversationHandler.END
+            caption = (update.message.caption or "").strip()
+            if caption:
+                case_text = f"{caption}\n\n{case_text}".strip()
             await ack.edit_text("📷 Image read. Finding matching forms…")
             context.user_data["status_msg_id"] = ack.message_id
             context.user_data["status_msg_chat"] = ack.chat_id
