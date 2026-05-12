@@ -7,12 +7,8 @@
         'APPROVE|draft',
       ),
       tuple(
-        '🚀 File & submit',
-        'APPROVE|submit',
-      ),
-      tuple(
-        '📝 Review draft',
-        'REVIEW|draft',
+        '✨ Quick improve',
+        'IMPROVE|reflection',
       ),
       tuple(
         '✏️ Edit',
@@ -24,7 +20,9 @@
       ),
     ]),
     'text': '''
-      🩺 *Draft Case-Based Discussion — Review before filing*
+      🩺 *Case-Based Discussion draft ready*
+
+      Coach note: Good enough to save. Quick improve can make the reflection stronger.
       
       📅 *Date:* 17 Mar 2026
       
@@ -72,12 +70,12 @@
       ),
     ]),
     'text': '''
-      Suggested WPBA types for this case:
+      I think these forms fit your case:
       
       • Case-Based Discussion — Best fit for a reflective clinical case.
       • Acute Care Assessment Tool — The case spans multiple patients across a shift.
       
-      Pick one and I'll show that template plus anything still missing.
+      Pick one and I'll draft it. If a required Kaizen field is missing, I'll ask for just that detail.
     ''',
   })
 # ---
@@ -96,8 +94,8 @@
     'text': '''
       🩺 Portfolio Guru — your WPBA entries, filed in seconds.
       
-      Describe a case by text, voice note, photo, or document.
-      I'll suggest the best WPBA types, show the template, and draft the entry when you approve.
+      Send me what happened. Rough notes are fine — text, voice note, photo, or document.
+      I'll suggest the best WPBA types, then draft the one you pick.
       
       Your credentials are encrypted and never shared.
       

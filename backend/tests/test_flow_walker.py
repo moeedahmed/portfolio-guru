@@ -114,7 +114,59 @@ class TestFlowWalker:
         update = sim._make_callback_update('ACTION|continue_thin')
         result = await handle_callback(update, context)
         assert result == AWAIT_APPROVAL
-        assert {'APPROVE|draft', 'EDIT|draft'} <= {data for _, data in sim.get_last_buttons()}
+        button_data = {data for _, data in sim.get_last_buttons()}
+        assert {'APPROVE|draft', 'IMPROVE|reflection', 'EDIT|draft', 'CANCEL|draft'} <= button_data
+        assert 'APPROVE|submit' not in button_data
+
+    @pytest.mark.asyncio
+    async def test_optional_missing_fields_do_not_block_draft_preview(self, thin_draft):
+        from bot import AWAIT_APPROVAL, handle_form_choice
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('FORM|CBD')
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+
+        optional_field = {'label': 'Supervisor', 'key': 'supervisor_name'}
+        with patch('bot._analyse_selected_form', new_callable=AsyncMock, return_value=thin_draft), \
+             patch('bot._missing_template_fields', return_value=([], [optional_field], [])):
+            result = await handle_form_choice(update, context)
+
+        assert result == AWAIT_APPROVAL
+        assert 'draft ready' in sim.get_last_text().lower()
+        assert any(data == 'APPROVE|draft' for _, data in sim.get_last_buttons())
+
+    @pytest.mark.asyncio
+    async def test_quick_improve_updates_reflection_only(self, thin_draft):
+        from bot import AWAIT_APPROVAL, handle_quick_improve
+        from models import FormDraft
+
+        improved = FormDraft(
+            form_type='CBD',
+            uuid='uuid-cbd',
+            fields={**thin_draft.fields, 'reflection': 'I will escalate dynamic ECG changes earlier and document the decision-making more clearly.'},
+        )
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('IMPROVE|reflection')
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': 'CBD',
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+
+        with patch('bot.get_voice_profile', return_value=''), \
+             patch('bot.extract_form_data', new_callable=AsyncMock, return_value=improved):
+            result = await handle_quick_improve(update, context)
+
+        assert result == AWAIT_APPROVAL
+        updated_fields = context.user_data['draft_data']['fields']
+        assert updated_fields['reflection'] == improved.fields['reflection']
+        assert updated_fields['clinical_reasoning'] == thin_draft.fields['clinical_reasoning']
+        assert any(data == 'APPROVE|draft' for _, data in sim.get_last_buttons())
 
     @pytest.mark.asyncio
     async def test_all_forms_screen_has_navigation(self):
@@ -202,7 +254,7 @@ class TestFlowWalker:
                 'voice_examples': ['one', 'two', 'three'],
             })
 
-            with patch('bot.has_credentials', return_value=True),                  patch('bot.get_credentials', return_value=('user', 'pass')),                  patch('bot.get_training_level', return_value='ST5'),                  patch('bot.get_curriculum', return_value='2025'),                  patch('bot.store_curriculum'),                  patch('bot.store_training_level'),                  patch('bot.clear_voice_profile'),                  patch('bot.route_filing', new_callable=AsyncMock, return_value={'status': 'success', 'filled': [], 'skipped': [], 'method': 'deterministic'}),                  patch('bot._analyse_selected_form', new_callable=AsyncMock, return_value=thin_draft),                  patch('bot._missing_template_fields', return_value=([], [], [])),                  patch('bot._build_voice_profile', new_callable=AsyncMock, return_value=ConversationHandler.END):
+            with patch('bot.has_credentials', return_value=True),                  patch('bot.get_credentials', return_value=('user', 'pass')),                  patch('bot.get_training_level', return_value='ST5'),                  patch('bot.get_curriculum', return_value='2025'),                  patch('bot.store_curriculum'),                  patch('bot.store_training_level'),                  patch('bot.get_voice_profile', return_value=None),                  patch('bot.clear_voice_profile'),                  patch('bot.route_filing', new_callable=AsyncMock, return_value={'status': 'success', 'filled': [], 'skipped': [], 'method': 'deterministic'}),                  patch('bot._analyse_selected_form', new_callable=AsyncMock, return_value=thin_draft),                  patch('bot._missing_template_fields', return_value=([], [], [])),                  patch('bot._build_voice_profile', new_callable=AsyncMock, return_value=ConversationHandler.END):
                 if callback.startswith('ACTION|') and callback not in {'ACTION|file', 'ACTION|reset', 'ACTION|cancel', 'ACTION|add_detail', 'ACTION|continue_thin', 'ACTION|retry_filing'}:
                     await handle_action_button(update, context)
                 elif callback.startswith('INFO|'):

@@ -421,14 +421,14 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"{reason}\n\nYour case is still in progress — use the latest message below and I'll carry on from there.",
         )
         missing_required, missing_optional, _ = _missing_template_fields(pending_draft, chosen_form)
-        if not missing_required and not missing_optional:
+        if not missing_required:
             _store_draft(context, pending_draft)
             context.user_data.pop("awaiting_detail", None)
             context.user_data.pop("pending_draft_data", None)
             await _send_latest_message(
                 message,
                 context,
-                _format_draft_preview(pending_draft),
+                _format_draft_preview(pending_draft, _chosen_form_reason(context, chosen_form)),
                 reply_markup=_build_approval_keyboard(),
                 parse_mode="Markdown",
             )
@@ -471,12 +471,12 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
             return ConversationHandler.END
 
         missing_required, missing_optional, _ = _missing_template_fields(refreshed_draft, chosen_form)
-        if not missing_required and not missing_optional:
+        if not missing_required:
             _store_draft(context, refreshed_draft)
             await _send_latest_message(
                 message,
                 context,
-                _format_draft_preview(refreshed_draft),
+                _format_draft_preview(refreshed_draft, _chosen_form_reason(context, chosen_form)),
                 reply_markup=_build_approval_keyboard(),
                 parse_mode="Markdown",
             )
@@ -601,8 +601,8 @@ _SLUG_TO_CAT = {v: k for k, v in _CAT_SLUGS.items()}
 
 WELCOME_MSG = """🩺 Portfolio Guru — your WPBA entries, filed in seconds.
 
-Describe a case by text, voice note, photo, or document.
-I'll suggest the best WPBA types, show the template, and draft the entry when you approve.
+Send me what happened. Rough notes are fine — text, voice note, photo, or document.
+I'll suggest the best WPBA types, then draft the one you pick.
 
 Your credentials are encrypted and never shared.
 
@@ -610,7 +610,8 @@ Tap 🔗 Connect to get started."""
 
 WELCOME_MSG_CONNECTED = """🩺 Portfolio Guru — ready when you are.
 
-Send me a clinical case (text, voice, photo, or document) and I'll handle the rest.
+Send me what happened. Rough notes are fine — text, voice, photo, or document.
+I'll suggest the best form and draft it once you choose.
 
 Or use the menu below to check your portfolio status."""
 
@@ -620,11 +621,11 @@ WHAT_IS_THIS_MSG = """🩺 Portfolio Guru files your WPBA entries — in seconds
 
 📝 Describe a case → 🔍 I pick the form → ✅ You approve → 📤 Filed to Kaizen
 
-Send a case by text, voice note, photo, or document. I extract the fields, draft the entry, and save it to Kaizen when you approve. Nothing is filed without your OK.
+Send a case by text, voice note, photo, or document. I extract the fields, draft the entry, and save it to Kaizen as a draft when you approve. Nothing touches Kaizen without your OK.
 
 All 45 RCEM forms supported — assessments, reflections, teaching, management, audit, and more."""
 
-FILE_CASE_PROMPT = "Send me a case description — text, voice note, photo, or document (PDF, PowerPoint, Word)."
+FILE_CASE_PROMPT = "Send me what happened. Rough notes are fine — text, voice note, photo, or document (PDF, PowerPoint, Word)."
 
 
 def _build_welcome_keyboard(connected: bool = False):
@@ -926,24 +927,26 @@ def _build_approval_keyboard():
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📤 Save as draft", callback_data="APPROVE|draft"),
-            InlineKeyboardButton("🚀 File & submit", callback_data="APPROVE|submit"),
+            InlineKeyboardButton("✨ Quick improve", callback_data="IMPROVE|reflection"),
         ],
         [
-            InlineKeyboardButton("📝 Review draft", callback_data="REVIEW|draft"),
             InlineKeyboardButton("✏️ Edit", callback_data="EDIT|draft"),
+            InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|draft"),
         ],
-        [InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|draft")],
     ])
 
 
 def _build_post_review_keyboard():
-    """Keyboard shown after draft review — no review button (already reviewed)."""
+    """Keyboard shown after lightweight draft improvement."""
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📤 Save as draft", callback_data="APPROVE|draft"),
-            InlineKeyboardButton("🚀 File & submit", callback_data="APPROVE|submit"),
+            InlineKeyboardButton("✨ Quick improve", callback_data="IMPROVE|reflection"),
         ],
-        [InlineKeyboardButton("✏️ Edit", callback_data="EDIT|draft")],
+        [
+            InlineKeyboardButton("✏️ Edit", callback_data="EDIT|draft"),
+            InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|draft"),
+        ],
     ])
 
 
@@ -980,11 +983,66 @@ def _build_edit_field_keyboard(draft=None):
     ])
 
 
-def _format_draft_preview(draft) -> str:
+def _normalise_form_type(form_type: str) -> str:
+    return form_type[:-5] if form_type.endswith("_2021") else form_type
+
+
+def _draft_form_type(draft) -> str:
+    return draft.form_type if isinstance(draft, FormDraft) else "CBD"
+
+
+def _chosen_form_reason(context, form_type: str) -> str | None:
+    base_form_type = _normalise_form_type(form_type)
+    for rec in context.user_data.get("form_recommendations", []):
+        if _normalise_form_type(rec.form_type) == base_form_type and getattr(rec, "rationale", None):
+            return _safe_markdown_text(rec.rationale)
+    return None
+
+
+def _safe_markdown_text(text: str) -> str:
+    return str(text).replace("_", " ").replace("*", "").replace("`", "").replace("[", "").replace("]", "")
+
+
+def _find_reflection_key(fields: dict) -> str | None:
+    if "reflection" in fields:
+        return "reflection"
+    for key in fields:
+        if "reflection" in key:
+            return key
+    return None
+
+
+def _draft_reflection_text(draft) -> str:
+    if isinstance(draft, CBDData):
+        return draft.reflection or ""
+    if isinstance(draft, FormDraft):
+        key = _find_reflection_key(draft.fields)
+        return str(draft.fields.get(key) or "") if key else ""
+    return ""
+
+
+def _draft_coach_note(draft) -> str:
+    reflection = _draft_reflection_text(draft).strip()
+    if not reflection:
+        return "Coach note: Ready to save if the required fields are present. Quick improve can add a sharper reflection."
+    if len(reflection.split()) < 18:
+        return "Coach note: Good enough to save. Quick improve can make the reflection stronger."
+    return "Coach note: Ready to save. Quick improve can polish the reflection without changing the rest."
+
+
+def _draft_header(title: str, reason: str | None, draft) -> list[str]:
+    lines = [f"📋 *{title} ready*"]
+    if reason:
+        lines.append(f"*Why this form:* {reason}")
+    lines.extend([_draft_coach_note(draft), ""])
+    return lines
+
+
+def _format_draft_preview(draft, reason: str | None = None) -> str:
     """Format draft data as a preview message. Dispatches based on type."""
     if isinstance(draft, FormDraft):
-        return _format_generic_draft(draft)
-    return _format_cbd_draft(draft)
+        return _format_generic_draft(draft, reason=reason)
+    return _format_cbd_draft(draft, reason=reason)
 
 
 def _draft_fields_for_review(draft) -> dict:
@@ -1139,7 +1197,7 @@ def _format_curriculum_hierarchy(curriculum_links, key_capabilities) -> str:
     return "\n".join(lines)
 
 
-def _format_cbd_draft(cbd_data) -> str:
+def _format_cbd_draft(cbd_data, reason: str | None = None) -> str:
     """Format CBD data as a preview message."""
     date_str = cbd_data.date_of_encounter
     try:
@@ -1150,28 +1208,30 @@ def _format_cbd_draft(cbd_data) -> str:
         date_display = date_str
 
     curriculum = _format_curriculum_hierarchy(cbd_data.curriculum_links, cbd_data.key_capabilities)
+    lines = _draft_header("CBD draft", reason, cbd_data)
 
-    return (
-        f"📋 *Draft CBD — Review before filing*\n\n"
-        f"📅 *Date:* {date_display}\n"
-        f"🏥 *Setting:* {cbd_data.clinical_setting}\n"
-        f"🩺 *Presentation:* {cbd_data.patient_presentation}\n\n"
-        f"🗒️ *Case narrative:*\n{cbd_data.clinical_reasoning}\n\n"
-        f"💭 *Reflection:*\n{cbd_data.reflection}\n\n"
-        f"📚 *Curriculum:*\n{curriculum}"
-    )
+    lines.extend([
+        f"📅 *Date:* {date_display}",
+        f"🏥 *Setting:* {cbd_data.clinical_setting}",
+        f"🩺 *Presentation:* {cbd_data.patient_presentation}",
+        "",
+        f"🗒️ *Case narrative:*\n{cbd_data.clinical_reasoning}",
+        "",
+        f"💭 *Reflection:*\n{cbd_data.reflection}",
+        "",
+        f"📚 *Curriculum:*\n{curriculum}",
+    ])
+    return "\n".join(lines)
 
 
-def _format_generic_draft(draft: FormDraft) -> str:
+def _format_generic_draft(draft: FormDraft, reason: str | None = None) -> str:
     """Format a generic FormDraft as a preview message."""
     schema = FORM_SCHEMAS.get(draft.form_type, {})
     form_name = schema.get("name", draft.form_type)
     emoji = FORM_EMOJIS.get(draft.form_type, "📋")
 
-    lines = [
-        f"{emoji} *Draft {form_name} — Review before filing*",
-        ""
-    ]
+    lines = _draft_header(f"{form_name} draft", reason, draft)
+    lines[0] = f"{emoji} *{form_name} draft ready*"
 
     fields = schema.get("fields", [])
     for field in fields:
@@ -1760,7 +1820,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]])
             )
         else:
-            await query.message.reply_text("📋 Send me a case — text, voice note, photo, or document.")
+            await query.message.reply_text(FILE_CASE_PROMPT)
 
     elif action == "help":
         await query.message.edit_text(
@@ -1923,7 +1983,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
     elif action == "back_to_menu":
         await query.message.edit_text(
             "🩺 Portfolio Guru — ready when you are.\n\n"
-            "Send me a clinical case (text, voice, photo, or document) and I'll handle the rest.\n\n"
+            "Send me what happened. Rough notes are fine — text, voice, photo, or document.\n\n"
             "Or use the menu below to check your portfolio status.",
             reply_markup=_build_welcome_keyboard(connected=has_credentials(user_id)),
         )
@@ -2450,10 +2510,10 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
             return ConversationHandler.END
 
         missing_required, missing_optional, _ = _missing_template_fields(draft, explicit_form)
-        if not missing_required and not missing_optional:
+        if not missing_required:
             # All fields filled — skip template review, go to draft preview
             _store_draft(context, draft)
-            preview = _format_draft_preview(draft)
+            preview = _format_draft_preview(draft, _chosen_form_reason(context, explicit_form))
             await _safe_edit_text(
                 ack,
                 preview,
@@ -2502,20 +2562,16 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
         )
         return AWAIT_FORM_CHOICE
 
-    def _safe_rationale(text: str) -> str:
-        """Strip characters that break Telegram entity parsing in plain-text messages."""
-        return text.replace("_", " ").replace("*", "").replace("`", "").replace("[", "").replace("]", "")
-
-    rationale_lines = [f"• {_form_display_name(r.form_type)} — {_safe_rationale(r.rationale)}" for r in recommendations if r.uuid]
+    rationale_lines = [f"• {_form_display_name(r.form_type)} — {_safe_markdown_text(r.rationale)}" for r in recommendations if r.uuid]
     rationale_text = "\n".join(rationale_lines) if rationale_lines else "• Case-Based Discussion — Clinical case discussion."
 
     status_msg = context.user_data.pop("status_msg_id", None)
     status_chat = context.user_data.pop("status_msg_chat", None)
 
     prompt_text = (
-        "Suggested WPBA types for this case:\n\n"
+        "I think these forms fit your case:\n\n"
         f"{rationale_text}\n\n"
-        "Pick one and I'll show that template plus anything still missing."
+        "Pick one and I'll draft it. If a required Kaizen field is missing, I'll ask for just that detail."
     )
     context.user_data["form_recommendations_text"] = prompt_text
 
@@ -2586,7 +2642,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "ACTION|continue_thin":
         await query.answer()
         draft = _load_pending_draft(context)
-        if not draft or not context.user_data.get("chosen_form"):
+        chosen_form = context.user_data.get("chosen_form")
+        if not draft or not chosen_form:
             return await _resume_paused_flow(
                 update,
                 context,
@@ -2595,7 +2652,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _store_draft(context, draft)
         context.user_data.pop("awaiting_detail", None)
         context.user_data.pop("pending_draft_data", None)
-        preview = _format_draft_preview(draft)
+        preview = _format_draft_preview(draft, _chosen_form_reason(context, chosen_form))
         await _safe_edit_text(
             query.message,
             preview,
@@ -2647,9 +2704,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text("⚠️ Could not refresh that template.", reply_markup=_KB_RETRY_RESET)
                 return AWAIT_TEMPLATE_REVIEW
             missing_required, missing_optional, _ = _missing_template_fields(draft, chosen_form)
-            if not missing_required and not missing_optional:
+            if not missing_required:
                 _store_draft(context, draft)
-                preview = _format_draft_preview(draft)
+                preview = _format_draft_preview(draft, _chosen_form_reason(context, chosen_form))
                 await _safe_edit_text(
                     query.message,
                     preview,
@@ -2680,6 +2737,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("APPROVE|"):
         return await handle_approval_approve(update, context)
+
+    elif data.startswith("IMPROVE|"):
+        return await handle_quick_improve(update, context)
 
     elif data.startswith("EDIT|"):
         return await handle_approval_edit(update, context)
@@ -2738,11 +2798,11 @@ async def _accumulate_and_refresh(update: Update, context: ContextTypes.DEFAULT_
         return AWAIT_TEMPLATE_REVIEW
 
     missing_required, missing_optional, _ = _missing_template_fields(draft, chosen_form)
-    if not missing_required and not missing_optional:
+    if not missing_required:
         _store_draft(context, draft)
         context.user_data.pop("accumulating_case", None)
         context.user_data.pop("accumulation_additions", None)
-        preview = _format_draft_preview(draft)
+        preview = _format_draft_preview(draft, _chosen_form_reason(context, chosen_form))
         await _safe_edit_text(
             ack,
             preview,
@@ -3254,9 +3314,9 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return AWAIT_TEMPLATE_REVIEW
 
         missing_required, missing_optional, _ = _missing_template_fields(draft, chosen_form)
-        if not missing_required and not missing_optional:
+        if not missing_required:
             _store_draft(context, draft)
-            preview = _format_draft_preview(draft)
+            preview = _format_draft_preview(draft, _chosen_form_reason(context, chosen_form))
             await _safe_edit_text(
                 ack,
                 preview,
@@ -3414,10 +3474,10 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return ConversationHandler.END
 
     missing_required, missing_optional, _ = _missing_template_fields(draft, form_type)
-    if not missing_required and not missing_optional:
+    if not missing_required:
         # All fields filled — skip template review, go to draft preview
         _store_draft(context, draft)
-        preview = _format_draft_preview(draft)
+        preview = _format_draft_preview(draft, _chosen_form_reason(context, form_type))
         await _safe_edit_text(
             query.message,
             preview,
@@ -3638,24 +3698,10 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def handle_approval_submit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle 'File & submit' — posts entry directly (no assessor step)."""
+    """Legacy submit callback. Live submission is intentionally disabled."""
     query = update.callback_query
     await query.answer()
-
-    # Disarm buttons immediately — prevents double-tap filing
     await query.edit_message_reply_markup(reply_markup=None)
-
-    user_id = update.effective_user.id
-    creds = get_credentials(user_id)
-    if not creds:
-        context.user_data.clear()
-        await query.message.reply_text(
-            "⚠️ Credentials not found.",
-            reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]])
-        )
-        return ConversationHandler.END
-
-    username, password = creds
     draft = _load_draft(context)
     if not draft:
         return await _resume_paused_flow(
@@ -3663,164 +3709,11 @@ async def handle_approval_submit(update: Update, context: ContextTypes.DEFAULT_T
             context,
             "That earlier draft is no longer active.",
         )
-
-    # Unified draft handling
-    if isinstance(draft, FormDraft):
-        form_type = draft.form_type
-        fields = draft.fields
-        curriculum_links = draft.fields.get("curriculum_links", [])
-    else:
-        form_type = "CBD"
-        fields = {
-            "date_of_encounter": draft.date_of_encounter,
-            "end_date": draft.date_of_encounter,
-            "date_of_event": draft.date_of_encounter,
-            "stage_of_training": draft.stage_of_training,
-            "clinical_reasoning": draft.clinical_reasoning,
-            "reflection": draft.reflection,
-        }
-        curriculum_links = draft.curriculum_links or []
-
-    schema = FORM_SCHEMAS.get(form_type, {})
-    form_name = schema.get("name", form_type)
-    form_emoji = FORM_EMOJIS.get(form_type, "📋")
-
-    # Save local JSON backup
-    import json as _json
-    import pathlib
-    from datetime import date
-    drafts_dir = pathlib.Path.home() / ".openclaw/data/portfolio-guru/drafts"
-    drafts_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"{user_id}_{form_type}_{date.today()}.json"
-    with open(drafts_dir / filename, "w") as f:
-        _json.dump({"form_type": form_type, "fields": fields}, f, indent=2)
-
-    platform = "kaizen"
-    await update.effective_chat.send_action(constants.ChatAction.TYPING)
-    ack = await query.message.reply_text(f"🚀 Submitting {form_name}…")
-
-    try:
-        result = await asyncio.wait_for(
-            route_filing(
-                platform=platform,
-                form_type=form_type,
-                fields=fields,
-                credentials={"username": username, "password": password},
-                curriculum_links=curriculum_links,
-                form_name=form_name,
-                submit=True,
-            ),
-            timeout=420,  # 7 min — submit path skips verification, extra buffer
-        )
-    except asyncio.TimeoutError:
-        context.user_data.clear()
-        try:
-            await ack.edit_text("⏱ Taking longer than expected — your entry has likely saved. Check your portfolio to confirm.")
-        except Exception:
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text="⏱ Filing timed out. The entry may have saved — check your portfolio directly.",
-            )
-        return ConversationHandler.END
-    except Exception as e:
-        logger.error(f"Filer error for {form_type}: {e}", exc_info=True)
-        retry_keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_filing")],
-            [InlineKeyboardButton("🆕 Start fresh", callback_data="ACTION|reset")],
-        ])
-        try:
-            await ack.edit_text("❌ Filing failed. Try again or start fresh.", reply_markup=retry_keyboard)
-        except Exception:
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text="❌ Filing failed. Try again or start fresh.",
-                reply_markup=retry_keyboard,
-            )
-        return AWAIT_APPROVAL
-
-    context.user_data.clear()
-
-    status = result["status"]
-    filled = result.get("filled", [])
-    skipped = result.get("skipped", [])
-    error = result.get("error")
-
-    _fb_suffix2 = f"|{form_type}|{status}"
-    _uid_end2 = update.effective_user.id
-    feedback_row2 = [
-        InlineKeyboardButton("👍 Worked", callback_data=f"FEEDBACK|good{_fb_suffix2}"),
-        InlineKeyboardButton("👎 Didn't work", callback_data=f"FEEDBACK|bad{_fb_suffix2}"),
-    ]
-    home_menu2 = _build_welcome_keyboard(connected=has_credentials(_uid_end2))
-    if status in ("success", "partial"):
-        end_keyboard = InlineKeyboardMarkup(
-            [feedback_row2,
-             [InlineKeyboardButton("Something missing?", callback_data=f"FILING|feedback|{form_type}")]]
-            + list(home_menu2.inline_keyboard)
-        )
-    else:
-        end_keyboard = InlineKeyboardMarkup([feedback_row2] + list(home_menu2.inline_keyboard))
-
-    # Track usage for successful filings
-    usage_line = ""
-    if status in ("success", "partial"):
-        try:
-            await record_case_filed(user_id, form_type, "submitted")
-            allowed, used, limit, tier = await check_can_file(user_id)
-            tier_label = {"free": "Free tier", "pro": "Pro", "pro_plus": "Pro+"}.get(tier, tier)
-            if limit == -1:
-                usage_line = f"\n\n📊 {used} cases this month ({tier_label})"
-            else:
-                usage_line = f"\n\n📊 {used}/{limit} cases this month ({tier_label})"
-        except Exception:
-            logger.warning("Usage tracking failed", exc_info=True)
-
-    if status == "success":
-        msg = f"✅ *{form_name} submitted.*\n\nPosted directly to your portfolio.{usage_line}"
-        status_line = "✅ Filing finished."
-    elif status == "partial":
-        skipped_names = [s.replace("_", " ").title() for s in skipped]
-        if len(skipped_names) > 3:
-            skipped_display = ", ".join(skipped_names[:3]) + f" + {len(skipped_names) - 3} more"
-        else:
-            skipped_display = ", ".join(skipped_names)
-        if error:
-            kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS.get(form_type, '')}" if FORM_UUIDS.get(form_type) else ""
-            link_text = f"\n\n[Open {form_name} manually in Kaizen]({kaizen_url})" if kaizen_url else ""
-            msg = (
-                f"⚠️ *{form_name} — filing had issues.*\n\n"
-                f"{len(filled)} fields filled, but: {error}\n\n"
-                f"Check your portfolio — the entry may not have saved.{link_text}{usage_line}"
-            )
-            status_line = "⚠️ Filing needs attention."
-        else:
-            msg = (
-                f"✅ *{form_name} submitted.*\n\n"
-                f"{len(filled)} fields filled from your case.\n"
-                f"{len(skipped)} left blank: {skipped_display}.\n\n"
-                f"Posted directly to your portfolio.{usage_line}"
-            )
-            status_line = "✅ Filing finished."
-    else:
-        if platform == "kaizen" and FORM_UUIDS.get(form_type):
-            kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS[form_type]}"
-            msg = f"❌ *Filing failed.* {error or ''}\n\n[Open {form_name} manually in Kaizen]({kaizen_url})"
-            status_line = "❌ Filing stopped."
-        else:
-            msg = f"❌ *Filing failed.* {error or ''}\n\nTry again or fill the form manually in your portfolio."
-            status_line = "❌ Filing stopped."
-
-    try:
-        await ack.edit_text(status_line)
-    except Exception:
-        logger.warning("Could not update filing status line")
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=msg,
-        reply_markup=end_keyboard,
-        parse_mode="Markdown",
+    await query.message.reply_text(
+        "Portfolio Guru only saves Kaizen entries as drafts. Use Save as draft when you're ready.",
+        reply_markup=_build_approval_keyboard(),
     )
-    return ConversationHandler.END
+    return AWAIT_APPROVAL
 
 
 async def handle_review_draft(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -3923,6 +3816,85 @@ async def handle_review_draft(update: Update, context: ContextTypes.DEFAULT_TYPE
         reply_markup=_build_post_review_keyboard(),
         parse_mode="Markdown",
     )
+    return AWAIT_APPROVAL
+
+
+async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Improve the reflection only, keeping the rest of the draft stable."""
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_reply_markup(reply_markup=None)
+
+    draft = _load_draft(context)
+    if not draft:
+        return await _resume_paused_flow(
+            update,
+            context,
+            "That earlier draft is no longer active.",
+        )
+
+    form_type = _draft_form_type(draft)
+    reflection_key = "reflection" if isinstance(draft, CBDData) else _find_reflection_key(draft.fields)
+    if not reflection_key:
+        await query.message.reply_text(
+            "This form does not have a reflection field to improve. You can still save it as a draft or tap Edit.",
+            reply_markup=_build_approval_keyboard(),
+        )
+        return AWAIT_APPROVAL
+
+    ack = await query.message.reply_text("✨ Tightening the reflection only…")
+    case_text = context.user_data.get("case_text", "")
+    current_draft_text = _format_draft_preview(draft, _chosen_form_reason(context, form_type))
+    feedback = (
+        "Improve the reflection only. Keep the clinical facts, date, setting, curriculum links, "
+        "and every non-reflection field unchanged. Make the reflection concise, first-person, "
+        "specific, and useful for a UK EM WPBA assessor."
+    )
+    vp = get_voice_profile(update.effective_user.id) or ""
+
+    try:
+        if isinstance(draft, CBDData):
+            regenerated = await asyncio.wait_for(
+                extract_cbd_data(
+                    case_text,
+                    edit_feedback=feedback,
+                    current_draft=current_draft_text,
+                    voice_profile_json=vp,
+                ),
+                timeout=45,
+            )
+            improved_reflection = (regenerated.reflection or "").strip()
+            if not improved_reflection:
+                raise ValueError("Improved reflection was empty")
+            updated = draft.model_copy(update={"reflection": improved_reflection})
+        else:
+            regenerated = await asyncio.wait_for(
+                extract_form_data(
+                    case_text,
+                    form_type,
+                    edit_feedback=feedback,
+                    current_draft=current_draft_text,
+                    voice_profile_json=vp,
+                ),
+                timeout=45,
+            )
+            improved_reflection = str(regenerated.fields.get(reflection_key) or "").strip()
+            if not improved_reflection:
+                raise ValueError("Improved reflection was empty")
+            fields = dict(draft.fields)
+            fields[reflection_key] = improved_reflection
+            updated = FormDraft(form_type=draft.form_type, fields=fields, uuid=draft.uuid)
+        _store_draft(context, updated)
+    except asyncio.TimeoutError:
+        await ack.edit_text("⏳ Quick improve timed out. Your original draft is still ready.", reply_markup=_build_approval_keyboard())
+        return AWAIT_APPROVAL
+    except Exception as exc:
+        logger.error("Quick improve failed for %s: %s", form_type, exc, exc_info=True)
+        await ack.edit_text("⚠️ Quick improve failed. Your original draft is still ready.", reply_markup=_build_approval_keyboard())
+        return AWAIT_APPROVAL
+
+    preview = _format_draft_preview(updated, _chosen_form_reason(context, form_type))
+    await _safe_edit_text(ack, preview, reply_markup=_build_approval_keyboard(), parse_mode="Markdown")
     return AWAIT_APPROVAL
 
 
@@ -4067,7 +4039,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
     if intent == "chitchat":
         if has_draft:
             await update.message.reply_text(
-                "Still here — your draft is ready above. Tap *Approve* to file it, or *Edit* to change a field.",
+                "Still here — your draft is ready above. Tap *Save as draft* when ready, or *Edit* to change it.",
                 parse_mode="Markdown"
             )
             return AWAIT_APPROVAL
@@ -4089,7 +4061,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
             answer = await answer_question(raw_text, case_context=case_text)
             if has_draft:
                 await update.message.reply_text(
-                    f"{answer}\n\nYour draft is ready above — tap Approve when ready."
+                    f"{answer}\n\nYour draft is ready above — tap Save as draft when ready."
                 )
                 return AWAIT_APPROVAL
             if in_flow:
@@ -4349,6 +4321,7 @@ def build_application() -> Application:
             AWAIT_APPROVAL: [
                 CallbackQueryHandler(handle_approval_submit, pattern=r"^APPROVE\|submit$"),
                 CallbackQueryHandler(handle_approval_approve, pattern=r"^APPROVE\|draft$"),
+                CallbackQueryHandler(handle_quick_improve, pattern=r"^IMPROVE\|reflection$"),
                 CallbackQueryHandler(handle_review_draft, pattern=r"^REVIEW\|draft$"),
                 CallbackQueryHandler(handle_approval_edit, pattern=r"^EDIT\|"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
