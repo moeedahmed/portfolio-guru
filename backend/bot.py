@@ -13,7 +13,7 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler, PicklePersistence,
 )
 from store import store_credentials, get_credentials, has_credentials, init
-from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, review_draft, analyse_portfolio_health, combine_case_inputs
+from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, review_draft, analyse_portfolio_health, summarise_recent_activity, combine_case_inputs
 from usage import record_case_filed, get_cases_this_month, check_can_file, get_user_tier, set_user_tier, get_case_history, TIER_LIMITS, get_all_active_users, get_cases_this_week
 from filer_router import route_filing
 from kaizen_form_filer import FORM_UUIDS
@@ -3737,6 +3737,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
 
     # Track usage for successful filings
     usage_line = ""
+    observation_line = ""
     if status in ("success", "partial"):
         try:
             await record_case_filed(user_id, form_type, "filed")
@@ -3749,13 +3750,23 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         except Exception:
             logger.warning("Usage tracking failed", exc_info=True)
 
+    # One-line portfolio observation after a clean save
+    if status == "success":
+        try:
+            history = await get_case_history(user_id, months=3)
+            observation = await summarise_recent_activity(history, form_type)
+            if observation:
+                observation_line = f"\n\n💡 {observation}"
+        except Exception:
+            logger.warning("Post-file observation failed", exc_info=True)
+
     if status == "success":
         date_val = fields.get("date_of_encounter", fields.get("date_of_event", ""))
         slo_str = ", ".join(curriculum_links) if curriculum_links else ""
         summary = f"\n\n📅 {date_val}" if date_val else ""
         if slo_str:
             summary += f"  ·  📚 {slo_str}"
-        msg = f"✅ *{form_name} draft saved.*\n\nFiled to your portfolio as a draft — open Kaizen to assign an assessor when ready.{summary}{usage_line}"
+        msg = f"✅ *{form_name} draft saved.*\n\nFiled to your portfolio as a draft — open Kaizen to assign an assessor when ready.{summary}{usage_line}{observation_line}"
         status_line = "✅ Filing finished."
     elif status == "partial":
         skipped_names = [s.replace("_", " ").title() for s in skipped]

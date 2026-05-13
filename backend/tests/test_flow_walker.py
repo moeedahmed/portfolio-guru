@@ -505,6 +505,61 @@ class TestFlowWalker:
         assert ('Status', 'ACTION|status') in buttons
 
     @pytest.mark.asyncio
+    async def test_successful_filing_includes_observation_line(self, thin_draft):
+        from bot import handle_approval_approve
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('APPROVE|draft')
+        context = sim._make_context()
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin_draft.form_type,
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+
+        observation = "Fourth CBD this month — strong CBD coverage, time to look at DOPS."
+
+        with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.route_filing', new_callable=AsyncMock, return_value={
+                 'status': 'success', 'filled': ['date'], 'skipped': [], 'method': 'deterministic',
+             }), \
+             patch('bot.get_case_history', new=AsyncMock(return_value=[{'form_type': 'CBD', 'filed_at': '2026-05-01', 'status': 'filed'}] * 4)), \
+             patch('bot.summarise_recent_activity', new=AsyncMock(return_value=observation)):
+            await handle_approval_approve(update, context)
+
+        text = sim.get_last_text()
+        assert observation in text
+        assert '💡' in text
+
+    @pytest.mark.asyncio
+    async def test_failed_filing_skips_observation_line(self, thin_draft):
+        from bot import handle_approval_approve
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('APPROVE|draft')
+        context = sim._make_context()
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin_draft.form_type,
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+
+        summarise_mock = AsyncMock(return_value="should not be called")
+
+        with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.route_filing', new_callable=AsyncMock, return_value={
+                 'status': 'failed', 'filled': [], 'skipped': [], 'method': 'deterministic',
+                 'error': 'Save was clicked, but I could not confirm the entry.',
+             }), \
+             patch('bot.summarise_recent_activity', new=summarise_mock):
+            await handle_approval_approve(update, context)
+
+        summarise_mock.assert_not_called()
+        assert '💡' not in (sim.get_last_text() or '')
+
+    @pytest.mark.asyncio
     async def test_menu_intent_short_text_routes_to_status(self):
         from bot import handle_case_input
 

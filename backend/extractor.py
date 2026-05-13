@@ -1466,6 +1466,60 @@ verdict rules: "ready" if overall_score >= 3.5, "improve" if 2.5-3.4, "weak" if 
     return json.loads(text)
 
 
+async def summarise_recent_activity(case_history: list, just_filed_form_type: str) -> str:
+    """One-line observation about the user's recent portfolio activity after a
+    successful filing. Returns "" when there is not enough history to say
+    anything useful or when the LLM call fails.
+    """
+    if not case_history or len(case_history) < 2:
+        return ""
+
+    from collections import Counter
+    from datetime import datetime, timedelta, timezone
+
+    counts = dict(Counter(c.get("form_type", "unknown") for c in case_history))
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=42)
+    recent_types: set[str] = set()
+    for c in case_history:
+        filed_at_raw = c.get("filed_at")
+        if not filed_at_raw:
+            continue
+        parsed = None
+        try:
+            parsed = datetime.fromisoformat(str(filed_at_raw).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+                try:
+                    parsed = datetime.strptime(str(filed_at_raw), fmt).replace(tzinfo=timezone.utc)
+                    break
+                except ValueError:
+                    continue
+        if parsed and parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        if parsed and parsed > cutoff:
+            recent_types.add(c.get("form_type", "unknown"))
+
+    prompt = f"""A doctor just filed a {just_filed_form_type} for their UK Emergency Medicine ARCP portfolio.
+
+Their last 3 months of activity:
+- Total cases: {len(case_history)}
+- Counts by form type: {counts}
+- Form types seen in the last 6 weeks: {sorted(recent_types) or 'none other than what was just filed'}
+
+Write ONE friendly, concrete sentence under 25 words. Either acknowledge their progress on the form type they just filed, or point out a specific gap they should consider next. No sycophancy, no exclamation marks, no repeating the raw count number. Just the sentence, no quotes."""
+
+    try:
+        text = (await _generate(prompt)).strip().strip('"').strip("'").strip()
+    except Exception as e:
+        logger.warning("summarise_recent_activity failed: %s", e)
+        return ""
+
+    if not text or len(text) > 220:
+        return ""
+    return text
+
+
 async def analyse_portfolio_health(case_history: list, training_level: str) -> dict:
     """Analyse filed cases against ARCP requirements.
     case_history: list of dicts with form_type, filed_at, status.
