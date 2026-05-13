@@ -60,6 +60,9 @@ async def test_repeated_tickets_create_new_forms_by_default():
         "end_date": "2026-03-17",
         "stage_of_training": "Higher",
         "year_of_training": "ST5",
+        "higher_procedural_skill": "Adult sedation",
+        "intermediate_procedural_skill": "- n/a -",
+        "accs_procedural_skill": "- n/a -",
         "age_of_patient": "Adult",
         "reflective_comments": "Procedure completed with senior support.",
     }

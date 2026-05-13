@@ -462,6 +462,11 @@ FORM_FIELD_MAP = {
         "end_date": "endDate",
         "stage_of_training": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
         "year_of_training": "036fe50f-5357-4da5-9fd6-d5c2e8d96ba4",
+        # Procedural skill dropdowns — UUIDs reused from TEACH (same 2025 Update
+        # dropdown content; verify with DOM scrape if filling silently fails).
+        "higher_procedural_skill": "8def931e-3a00-43ac-8529-44cdaf34be2d",
+        "intermediate_procedural_skill": "31bd55b7-0e32-4918-8cc0-4ba33af83772",
+        "accs_procedural_skill": "eed0e8dc-075d-4661-aea5-2c3238af4c5b",
         "age_of_patient": "ca4f531c-ea4b-4587-a964-ee471abf1193",
         "reflective_comments": "f4557928-23fa-40b0-9f14-9357f5e7e1f3",
     },
@@ -1084,22 +1089,35 @@ async def _fill_select(page: Page, dom_id: str, value: str) -> bool:
 
 # ─── Curriculum links (SLO expansion + KC ticking) ──────────────────────────
 
-async def _fill_curriculum_links(page: Page, kc_prefixes: List[str], stage_label: str) -> tuple:
-    """Expand SLOs and tick KCs. Returns (ticked, errors)."""
+async def _fill_curriculum_links(
+    page: Page,
+    slo_codes: List[str],
+    kc_targets: List[str],
+    stage_label: str,
+) -> tuple:
+    """Expand the relevant SLO accordions and tick the matching KCs.
+
+    slo_codes:  ["SLO1", "SLO6", ...] — used to expand the SLO containers.
+    kc_targets: full KC strings or KC codes ("SLO6 KC1: ...") — what to tick.
+                Falls back to slo_codes if no kc_targets given (legacy callers).
+    """
     ticked = []
     errors = []
 
-    if not kc_prefixes:
+    if not kc_targets:
+        kc_targets = slo_codes
+    if not slo_codes and not kc_targets:
         return ticked, errors
 
-    # Extract unique SLO numbers from KC list
+    # Derive SLO numbers from whichever list we have. KC strings like
+    # "SLO6 KC1: ..." also contain the SLO number, so this works for both.
     slos = set()
-    for kc in kc_prefixes:
-        m = re.search(r"SLO(\d+)", kc)
-        if m:
-            slos.add(m.group(0))
+    for source in (slo_codes, kc_targets):
+        for entry in source:
+            m = re.search(r"SLO(\d+)", entry)
+            if m:
+                slos.add(m.group(0))
 
-    # Determine stage prefix for SLO anchors
     stage_prefix = "Higher"
     if stage_label:
         for s in ("Higher", "Intermediate", "ACCS", "PEM"):
@@ -1107,7 +1125,6 @@ async def _fill_curriculum_links(page: Page, kc_prefixes: List[str], stage_label
                 stage_prefix = s
                 break
 
-    # Expand each SLO
     for slo in sorted(slos):
         slo_text = f"{stage_prefix} {slo}:"
         expanded = await page.evaluate(EXPAND_SLO_JS, slo_text)
@@ -1118,16 +1135,15 @@ async def _fill_curriculum_links(page: Page, kc_prefixes: List[str], stage_label
             errors.append(f"SLO expand failed: {slo_text}")
         await asyncio.sleep(3)  # MUST wait 3s for Angular to render KCs
 
-    # Tick each KC
-    for prefix in kc_prefixes:
-        result = await page.evaluate(TICK_KC_JS, prefix)
+    for target in kc_targets:
+        result = await page.evaluate(TICK_KC_JS, target)
         if result.get("found") and result.get("checked"):
-            ticked.append(prefix)
-            logger.info(f"KC ticked: {prefix}")
+            ticked.append(target)
+            logger.info(f"KC ticked: {target}")
         elif result.get("found") and result.get("no_cb"):
-            errors.append(f"KC found but no checkbox: {prefix}")
+            errors.append(f"KC found but no checkbox: {target}")
         else:
-            errors.append(f"KC not found: {prefix}")
+            errors.append(f"KC not found: {target}")
         await asyncio.sleep(0.5)
 
     return ticked, errors
@@ -1319,10 +1335,11 @@ async def fill_kaizen_form(
                 errors.append(f"{key}: fill failed (tag={tag})")
 
         # ─── STEP 4: Curriculum links (SLO expansion + KC ticking) ───────────
-        kc_prefixes = fields.get("curriculum_links", [])
-        if kc_prefixes:
+        slo_codes = fields.get("curriculum_links", [])
+        kc_targets = fields.get("key_capabilities", []) or slo_codes
+        if slo_codes or kc_targets:
             ticked, kc_errors = await _fill_curriculum_links(
-                page, kc_prefixes, stage_value or "Higher"
+                page, slo_codes, kc_targets, stage_value or "Higher"
             )
             if ticked:
                 filled.append(f"curriculum_links ({len(ticked)} KCs)")
@@ -2113,12 +2130,11 @@ async def file_to_kaizen(
 
         # Curriculum links
         if curriculum_links:
-            # Use the new filer's curriculum link filling if SLO prefix format
-            kc_prefixes = curriculum_links
-            if kc_prefixes:
-                ticked, kc_errors = await _fill_curriculum_links(
-                    page, kc_prefixes, fields.get("stage_of_training", "Higher")
-                )
+            slo_codes = curriculum_links
+            kc_targets = fields.get("key_capabilities", []) or curriculum_links
+            ticked, kc_errors = await _fill_curriculum_links(
+                page, slo_codes, kc_targets, fields.get("stage_of_training", "Higher")
+            )
 
         # Handle file attachment
         temp_attachment = None
