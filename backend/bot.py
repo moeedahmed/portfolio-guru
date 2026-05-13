@@ -185,8 +185,9 @@ def _build_nudge_message(stats: dict) -> tuple[str, InlineKeyboardMarkup]:
 async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send weekly gap-detection nudge to all active users.
 
-    Guard: file-based dedup (survives bot restarts + pickle flush failures).
-    Skips if run within 24 hours of last send.
+    Guard: file-based dedup (survives bot restarts + persistence flush failures).
+    Skips if run within 6 days of last send — keeps a true weekly cadence even
+    if the bot restarts daily.
     """
     import os
     sentinel = os.path.expanduser("~/.openclaw/data/portfolio-guru/weekly_push_last_run")
@@ -194,8 +195,8 @@ async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
     now = time.time()
     if os.path.exists(sentinel):
         last_run = float(open(sentinel).read().strip())
-        if now - last_run < 86400:
-            logger.info("weekly_push skipped — ran %.1f hours ago", (now - last_run) / 3600)
+        if now - last_run < 518400:
+            logger.info("weekly_push skipped — ran %.1f days ago", (now - last_run) / 86400)
             return
 
     with open(sentinel, "w") as f:
