@@ -704,14 +704,11 @@ def _build_welcome_keyboard(connected: bool = False):
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("📋 File a case", callback_data="ACTION|file")],
             [
-                InlineKeyboardButton("📬 Unsigned tickets", callback_data="ACTION|unsigned"),
                 InlineKeyboardButton("📊 My status", callback_data="ACTION|status"),
+                InlineKeyboardButton("📈 Portfolio health", callback_data="ACTION|health"),
             ],
             [
-                InlineKeyboardButton("📈 ARCP health", callback_data="ACTION|health"),
                 InlineKeyboardButton("ℹ️ Help", callback_data="INFO|what"),
-            ],
-            [
                 InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings"),
             ],
         ])
@@ -1036,24 +1033,24 @@ def _build_post_filing_keyboard(
 ) -> InlineKeyboardMarkup:
     """Compact keyboard shown after a filing attempt."""
     feedback_row = [
-        InlineKeyboardButton("Worked", callback_data=f"FEEDBACK|good|{form_type}|{status}"),
-        InlineKeyboardButton("Didn't work", callback_data=f"FEEDBACK|bad|{form_type}|{status}"),
+        InlineKeyboardButton("👍 It worked", callback_data=f"FEEDBACK|good|{form_type}|{status}"),
+        InlineKeyboardButton("👎 Didn't work", callback_data=f"FEEDBACK|bad|{form_type}|{status}"),
     ]
 
     if uncertain and FORM_UUIDS.get(form_type):
         primary_row = [InlineKeyboardButton(
-            "Open in Kaizen",
+            "🔗 Open in Kaizen",
             url=f"https://kaizenep.com/events/new-section/{FORM_UUIDS[form_type]}",
         )]
     elif status == "failed":
-        primary_row = [InlineKeyboardButton("Try again", callback_data="ACTION|retry_filing")]
+        primary_row = [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")]
     else:
-        primary_row = [InlineKeyboardButton("File another case", callback_data="ACTION|file")]
+        primary_row = [InlineKeyboardButton("📋 File another case", callback_data="ACTION|file")]
 
     return InlineKeyboardMarkup([
         primary_row,
         feedback_row,
-        [InlineKeyboardButton("More", callback_data=f"ACTION|post_file_more|{form_type}|{status}")],
+        [InlineKeyboardButton("⋯ More options", callback_data=f"ACTION|post_file_more|{form_type}|{status}")],
     ])
 
 
@@ -1540,11 +1537,49 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 "Please delete it manually for security."
             )
 
-    # Test credentials before saving
-    progress_msg = await update.effective_chat.send_message("🔄 Testing your Kaizen login...")
-    login_ok = await asyncio.wait_for(
-        _test_kaizen_login(username, password), timeout=60
-    )
+    # Test credentials before saving — with progress edits so the user can
+    # see we're still alive during the 60s Kaizen handshake.
+    progress_msg = await update.effective_chat.send_message("🔄 Testing your Kaizen login…")
+
+    async def _progress_updates():
+        try:
+            await asyncio.sleep(15)
+            try:
+                await progress_msg.edit_text("🔄 Still checking — Kaizen can be slow to respond…")
+            except Exception:
+                pass
+            await asyncio.sleep(20)
+            try:
+                await progress_msg.edit_text("🔄 Almost there — finalising the login check…")
+            except Exception:
+                pass
+        except asyncio.CancelledError:
+            pass
+
+    progress_task = asyncio.create_task(_progress_updates())
+    try:
+        login_ok = await asyncio.wait_for(
+            _test_kaizen_login(username, password), timeout=60
+        )
+    except asyncio.TimeoutError:
+        progress_task.cancel()
+        await progress_msg.edit_text(
+            "⏱ Kaizen took too long to respond. This is usually a brief outage on their side.\n\n"
+            "Try the setup again — or send the case anyway, you can connect later."
+        )
+        context.user_data.pop("setup_username", None)
+        return ConversationHandler.END
+    except Exception as exc:
+        progress_task.cancel()
+        logger.warning("Credential test errored: %s", exc, exc_info=True)
+        await progress_msg.edit_text(
+            "⚠️ Couldn't reach Kaizen to verify the login. Try again in a moment.\n\n"
+            "📧 What's your Kaizen username (email)?"
+        )
+        context.user_data.pop("setup_username", None)
+        return AWAIT_USERNAME
+    finally:
+        progress_task.cancel()
 
     if not login_ok:
         await progress_msg.edit_text(
@@ -1580,7 +1615,7 @@ async def setup_training_level(update: Update, context: ContextTypes.DEFAULT_TYP
     user_id = update.effective_user.id
     store_training_level(user_id, level)
     await query.edit_message_text(
-        f"Training level saved as {level}.\n\nWhich curriculum are you working under?",
+        f"Training level saved as {level}.\n\nWhich curriculum are you working under? Most trainees starting now are on the 2025 Update. If your deanery still uses the 2021 forms, pick that.",
         reply_markup=_build_curriculum_keyboard()
     )
     return AWAIT_CURRICULUM
@@ -1595,7 +1630,10 @@ async def setup_curriculum(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     store_curriculum(user_id, curriculum)
     label = "2025 curriculum" if curriculum == "2025" else "2021 curriculum"
     await query.edit_message_text(
-        f"✅ Set to {label} — I'll only show you the relevant forms.\n\nYou can file a case whenever you're ready."
+        f"✅ Set to {label} — I'll only show you the relevant forms.\n\nReady when you are.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📋 File a case", callback_data="ACTION|file")],
+        ]),
     )
     return ConversationHandler.END
 
@@ -1934,16 +1972,16 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         form_type = parts[1] if len(parts) > 1 else "unknown"
         status = parts[2] if len(parts) > 2 else "unknown"
         rows = [
-            [InlineKeyboardButton("File another case", callback_data="ACTION|file")],
-            [InlineKeyboardButton("Something missing?", callback_data=f"FILING|feedback|{form_type}")],
+            [InlineKeyboardButton("📋 File another case", callback_data="ACTION|file")],
+            [InlineKeyboardButton("💬 Something missing?", callback_data=f"FILING|feedback|{form_type}")],
             [
-                InlineKeyboardButton("Status", callback_data="ACTION|status"),
-                InlineKeyboardButton("Settings", callback_data="ACTION|settings"),
+                InlineKeyboardButton("📊 Status", callback_data="ACTION|status"),
+                InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings"),
             ],
         ]
         if status in {"failed", "partial"} and _load_draft(context):
-            rows.insert(0, [InlineKeyboardButton("Try again", callback_data="ACTION|retry_filing")])
-        rows.append([InlineKeyboardButton("Main menu", callback_data="ACTION|back_to_menu")])
+            rows.insert(0, [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")])
+        rows.append([InlineKeyboardButton("🏠 Main menu", callback_data="ACTION|back_to_menu")])
         await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(rows))
 
     elif action == "help":
@@ -3684,6 +3722,29 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         parse_mode=None,
     )
 
+    # Progress edits during the long filing wait so the user doesn't see a
+    # static message for up to 5 minutes.
+    async def _filing_progress():
+        try:
+            await asyncio.sleep(20)
+            try:
+                await ack.edit_text(f"📤 Still saving {form_name} — Kaizen is loading the form…")
+            except Exception:
+                pass
+            await asyncio.sleep(40)
+            try:
+                await ack.edit_text(f"📤 Filling fields in {form_name} — almost there…")
+            except Exception:
+                pass
+            await asyncio.sleep(60)
+            try:
+                await ack.edit_text(f"📤 Verifying the save on Kaizen — this is the last step…")
+            except Exception:
+                pass
+        except asyncio.CancelledError:
+            pass
+
+    progress_task = asyncio.create_task(_filing_progress())
     try:
         result = await asyncio.wait_for(
             route_filing(
@@ -3697,16 +3758,24 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             timeout=300,  # 5 min — browser-use path may take longer
         )
     except asyncio.TimeoutError:
-        context.user_data.clear()
+        progress_task.cancel()
+        kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS.get(form_type, '')}" if FORM_UUIDS.get(form_type) else "https://kaizenep.com/activities"
+        timeout_msg = (
+            f"⏱ Filing took too long. The draft might be in your activities list already — "
+            f"[open Kaizen]({kaizen_url}) to check before retrying."
+        )
         try:
-            await ack.edit_text("⏱ Filing timed out. The draft may have saved — check your portfolio directly.")
+            await ack.edit_text(timeout_msg, parse_mode="Markdown")
         except Exception:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text="⏱ Filing timed out. The draft may have saved — check your portfolio directly.",
+                text=timeout_msg,
+                parse_mode="Markdown",
             )
-        return ConversationHandler.END
+        # Keep draft so user can retry without re-typing the case
+        return AWAIT_APPROVAL
     except Exception as e:
+        progress_task.cancel()
         logger.error(f"Filer error for {form_type}: {e}", exc_info=True)
         # Keep draft data for retry — do NOT clear user_data
         retry_keyboard = InlineKeyboardMarkup([
@@ -3722,6 +3791,8 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 reply_markup=retry_keyboard,
             )
         return AWAIT_APPROVAL  # Stay in approval state so retry can pick up draft
+    finally:
+        progress_task.cancel()
 
     status = result["status"]
     filled = result.get("filled", [])
@@ -4690,9 +4761,6 @@ def main():
             ("cancel", "Cancel whatever is happening"),
             ("delete", "Delete all your stored data"),
             ("help", "How to use Portfolio Guru"),
-            ("bulk", "File multiple entries from JSON"),
-            ("unsigned", "Show unsigned tickets awaiting assessors"),
-            ("chase", "Check chase eligibility for an assessor"),
         ])
         # Set bot description (shown on profile page before starting)
         try:

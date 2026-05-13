@@ -445,10 +445,10 @@ class TestFlowWalker:
         assert sim.messages_sent[-1][0] == 'edit'
         assert 'draft saved' in sim.get_last_text().lower()
         buttons = sim.get_last_buttons()
-        assert buttons[0] == ('File another case', 'ACTION|file')
-        assert ('Worked', 'FEEDBACK|good|CBD|success') in buttons
-        assert ("Didn't work", 'FEEDBACK|bad|CBD|success') in buttons
-        assert ('More', 'ACTION|post_file_more|CBD|success') in buttons
+        assert buttons[0] == ('📋 File another case', 'ACTION|file')
+        assert ('👍 It worked', 'FEEDBACK|good|CBD|success') in buttons
+        assert ("👎 Didn't work", 'FEEDBACK|bad|CBD|success') in buttons
+        assert ('⋯ More options', 'ACTION|post_file_more|CBD|success') in buttons
 
     @pytest.mark.asyncio
     async def test_uncertain_save_keeps_draft_and_offers_compact_recovery(self, thin_draft):
@@ -478,9 +478,9 @@ class TestFlowWalker:
         assert context.user_data.get('draft_data')
         assert 'may not have saved' in sim.get_last_text().lower()
         buttons = sim.get_last_buttons()
-        assert ('Worked', 'FEEDBACK|good|CBD|partial') in buttons
-        assert ("Didn't work", 'FEEDBACK|bad|CBD|partial') in buttons
-        assert ('More', 'ACTION|post_file_more|CBD|partial') in buttons
+        assert ('👍 It worked', 'FEEDBACK|good|CBD|partial') in buttons
+        assert ("👎 Didn't work", 'FEEDBACK|bad|CBD|partial') in buttons
+        assert ('⋯ More options', 'ACTION|post_file_more|CBD|partial') in buttons
 
     @pytest.mark.asyncio
     async def test_post_filing_more_expands_secondary_actions(self, thin_draft):
@@ -499,10 +499,10 @@ class TestFlowWalker:
         await handle_action_button(update, context)
 
         buttons = sim.get_last_buttons()
-        assert ('Try again', 'ACTION|retry_filing') in buttons
-        assert ('File another case', 'ACTION|file') in buttons
-        assert ('Something missing?', 'FILING|feedback|CBD') in buttons
-        assert ('Status', 'ACTION|status') in buttons
+        assert ('🔄 Try again', 'ACTION|retry_filing') in buttons
+        assert ('📋 File another case', 'ACTION|file') in buttons
+        assert ('💬 Something missing?', 'FILING|feedback|CBD') in buttons
+        assert ('📊 Status', 'ACTION|status') in buttons
 
     @pytest.mark.asyncio
     async def test_failed_filing_uses_llm_recovery_copy(self, thin_draft):
