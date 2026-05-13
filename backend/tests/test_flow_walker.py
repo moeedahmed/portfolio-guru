@@ -505,6 +505,58 @@ class TestFlowWalker:
         assert ('Status', 'ACTION|status') in buttons
 
     @pytest.mark.asyncio
+    async def test_natural_language_edit_applies_to_draft_and_keeps_approval(self, thin_draft):
+        from bot import handle_mid_conversation_text
+
+        sim = BotSimulator()
+        update = sim._make_text_update('change the date to 2026-05-12')
+        context = sim._make_context()
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin_draft.form_type,
+            'fields': dict(thin_draft.fields),
+            'uuid': thin_draft.uuid,
+        }
+        context.user_data['chosen_form'] = thin_draft.form_type
+        context.user_data['case_text'] = 'short context'
+
+        with patch('bot.classify_intent', new=AsyncMock(return_value='edit_detail')), \
+             patch('bot.extract_field_updates', new=AsyncMock(return_value={
+                 'date_of_encounter': '2026-05-12',
+                 '__summary__': 'Date moved to 12 May 2026.',
+             })):
+            result = await handle_mid_conversation_text(update, context)
+
+        from bot import AWAIT_APPROVAL
+        assert result == AWAIT_APPROVAL
+        assert context.user_data['draft_data']['fields']['date_of_encounter'] == '2026-05-12'
+        text = sim.get_last_text() or ''
+        assert 'Updated: Date moved to 12 May 2026.' in text
+
+    @pytest.mark.asyncio
+    async def test_natural_language_edit_with_no_match_falls_through(self, thin_draft):
+        from bot import handle_mid_conversation_text
+
+        sim = BotSimulator()
+        update = sim._make_text_update('a totally different new case happened today')
+        context = sim._make_context()
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin_draft.form_type,
+            'fields': dict(thin_draft.fields),
+            'uuid': thin_draft.uuid,
+        }
+        context.user_data['chosen_form'] = thin_draft.form_type
+        context.user_data['case_text'] = 'short context'
+
+        with patch('bot.classify_intent', new=AsyncMock(return_value='edit_detail')), \
+             patch('bot.extract_field_updates', new=AsyncMock(return_value={})):
+            await handle_mid_conversation_text(update, context)
+
+        text = sim.get_last_text() or ''
+        assert 'new case' in text.lower()
+
+    @pytest.mark.asyncio
     async def test_nudge_uses_llm_copy_when_available(self):
         from bot import _build_nudge_message
 

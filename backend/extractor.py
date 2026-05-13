@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import List
 
 logger = logging.getLogger(__name__)
@@ -1464,6 +1464,76 @@ verdict rules: "ready" if overall_score >= 3.5, "improve" if 2.5-3.4, "weak" if 
         text = re.sub(r"^```(?:json)?\s*", "", text)
         text = re.sub(r"\s*```$", "", text)
     return json.loads(text)
+
+
+async def extract_field_updates(form_type: str, current_fields: dict, instruction: str) -> dict:
+    """Parse a natural-language edit instruction against an active draft and
+    return a dict of {field_name: new_value} to apply. Returns {} if the
+    instruction can't be confidently mapped to existing fields.
+
+    The instruction is something a user might type at the approval step like
+    "change the date to last Tuesday" or "set patient age to 67".
+    """
+    if not instruction or not current_fields:
+        return {}
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    field_summary = json.dumps(
+        {k: (str(v)[:120] if v is not None else None) for k, v in current_fields.items()},
+        indent=2,
+        default=str,
+    )
+
+    prompt = f"""You are updating a draft of a UK Emergency Medicine portfolio entry based on a freeform edit instruction from the doctor.
+
+Form type: {form_type}
+Today's date (for relative date references): {today}
+
+Current draft fields (JSON):
+{field_summary}
+
+Doctor's instruction:
+\"\"\"
+{instruction}
+\"\"\"
+
+Identify which existing fields (and ONLY those listed above) the doctor wants to change, and what the new value should be.
+
+- Resolve relative dates ("last Tuesday", "yesterday") to absolute YYYY-MM-DD using today's date.
+- If a field can't be matched confidently to one of the listed fields, do NOT include it.
+- If the instruction is not actually an edit (e.g. a question, a new case), return an empty updates object.
+- Keep new values short and matching the existing field's type/format.
+
+Return ONLY valid JSON in this shape:
+{{"updates": {{"field_name": "new_value"}}, "summary": "one short sentence describing what changed"}}
+
+If nothing should change, return: {{"updates": {{}}, "summary": ""}}"""
+
+    try:
+        raw = await _generate(prompt)
+    except Exception as e:
+        logger.warning("extract_field_updates failed: %s", e)
+        return {}
+
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.warning("extract_field_updates JSON parse failed: %s; raw=%r", e, text[:200])
+        return {}
+
+    updates = parsed.get("updates") if isinstance(parsed, dict) else None
+    if not isinstance(updates, dict):
+        return {}
+
+    # Only keep keys that actually exist in the current draft — guards against hallucinated fields
+    safe_updates = {k: v for k, v in updates.items() if k in current_fields}
+    if safe_updates and parsed.get("summary"):
+        safe_updates["__summary__"] = str(parsed["summary"])[:200]
+    return safe_updates
 
 
 async def generate_nudge_copy(stats: dict) -> str:

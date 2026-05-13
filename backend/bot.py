@@ -13,7 +13,7 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler, PicklePersistence,
 )
 from store import store_credentials, get_credentials, has_credentials, init
-from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, review_draft, analyse_portfolio_health, summarise_recent_activity, generate_nudge_copy, combine_case_inputs
+from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, review_draft, analyse_portfolio_health, summarise_recent_activity, generate_nudge_copy, extract_field_updates, combine_case_inputs
 from usage import record_case_filed, get_cases_this_month, check_can_file, get_user_tier, set_user_tier, get_case_history, TIER_LIMITS, get_all_active_users, get_cases_this_week
 from filer_router import route_filing
 from kaizen_form_filer import FORM_UUIDS
@@ -4206,7 +4206,37 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
         return AWAIT_CASE_INPUT
 
     else:
-        # new_case or edit_detail — looks like a new case
+        # When the user has an active draft awaiting approval, try treating
+        # "edit_detail" as a natural-language edit instruction first
+        # (e.g. "change the date to last Tuesday", "set patient age to 67").
+        if intent == "edit_detail" and has_draft:
+            draft = _load_draft(context)
+            chosen_form = context.user_data.get("chosen_form") or getattr(draft, "form_type", None)
+            try:
+                updates = await extract_field_updates(
+                    chosen_form or "",
+                    dict(draft.fields) if hasattr(draft, "fields") else {},
+                    raw_text,
+                )
+            except Exception:
+                logger.warning("extract_field_updates threw", exc_info=True)
+                updates = {}
+
+            summary = updates.pop("__summary__", "") if isinstance(updates, dict) else ""
+            if updates:
+                for field_name, new_value in updates.items():
+                    draft.fields[field_name] = new_value
+                _store_draft(context, draft)
+                preview = _format_draft_preview(draft, _chosen_form_reason(context, chosen_form))
+                ack_line = f"✏️ Updated: {summary}\n\n" if summary else "✏️ Draft updated.\n\n"
+                await update.message.reply_text(
+                    ack_line + preview,
+                    reply_markup=_build_approval_keyboard(),
+                    parse_mode="Markdown",
+                )
+                return AWAIT_APPROVAL
+
+        # new_case or unparseable edit — looks like a new case
         if in_flow:
             await update.message.reply_text(
                 "It looks like you want to file a new case.",
