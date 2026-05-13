@@ -454,6 +454,49 @@ Respond with ONLY one of: chitchat, question_general, new_case"""
         return "new_case"
 
 
+async def classify_menu_intent(text: str) -> str:
+    """Route a short non-clinical message to a top-level command.
+
+    Returns one of: file_case, show_stats, open_settings, manage_credentials,
+    show_help, chitchat, ambiguous. Returns ambiguous if the message could be
+    a clinical case or otherwise doesn't clearly map to a navigation action.
+    """
+    prompt = f"""You are routing a short message from a doctor using a medical portfolio bot. Pick the SINGLE best matching command. If the message could plausibly be the start of a clinical case description, return ambiguous.
+
+Commands:
+- file_case: user wants to file or draft a clinical case ("file a case", "log a procedure", "draft a CBD")
+- show_stats: user wants to see their filing stats, usage, or how many cases this month/week
+- open_settings: user wants to change settings (curriculum, training level, voice profile, preferences)
+- manage_credentials: user wants to change/update/reconnect their Kaizen login
+- show_help: user is asking what the bot does, how to use it, what forms are supported
+- chitchat: greeting, thanks, social message ("hi", "thanks", "you there")
+- ambiguous: cannot determine OR could be the start of a clinical case
+
+Message: {text}
+
+Reply with ONE word only from the list."""
+
+    try:
+        response = (await _generate(prompt)).strip().lower()
+    except Exception as e:
+        logger.warning("classify_menu_intent failed: %s", e)
+        return "ambiguous"
+
+    valid = (
+        "file_case",
+        "show_stats",
+        "open_settings",
+        "manage_credentials",
+        "show_help",
+        "chitchat",
+        "ambiguous",
+    )
+    for label in valid:
+        if label in response:
+            return label
+    return "ambiguous"
+
+
 async def answer_question(text: str, case_context: str = "") -> str:
     """Generate a helpful answer about the bot's capabilities.
 

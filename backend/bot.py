@@ -13,7 +13,7 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler, PicklePersistence,
 )
 from store import store_credentials, get_credentials, has_credentials, init
-from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, answer_question, extract_explicit_form_type, review_draft, analyse_portfolio_health, combine_case_inputs
+from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, review_draft, analyse_portfolio_health, combine_case_inputs
 from usage import record_case_filed, get_cases_this_month, check_can_file, get_user_tier, set_user_tier, get_case_history, TIER_LIMITS, get_all_active_users, get_cases_this_week
 from filer_router import route_filing
 from kaizen_form_filer import FORM_UUIDS
@@ -664,6 +664,34 @@ Send a case by text, voice note, photo, or document. I extract the fields, draft
 All 45 RCEM forms supported — assessments, reflections, teaching, management, audit, and more."""
 
 FILE_CASE_PROMPT = "Send me what happened. Rough notes are fine — text, voice note, photo, or document (PDF, PowerPoint, Word)."
+
+
+def _settings_view_components(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
+    """Render the settings page text + keyboard so it can be sent from
+    either a callback action or the free-text intent router."""
+    curriculum = get_curriculum(user_id) or "2025"
+    curriculum_label = "2021 Curriculum" if curriculum == "2021" else "2025 Update"
+    training_level = get_training_level(user_id) or "Not set"
+    voice_profile = get_voice_profile(user_id)
+    voice_status = "✅ Active" if voice_profile else "Not set"
+
+    buttons = [
+        [InlineKeyboardButton("📘 Switch to 2025 Update", callback_data="SET_CURRICULUM|2025"),
+         InlineKeyboardButton("📗 Switch to 2021 Curriculum", callback_data="SET_CURRICULUM|2021")],
+        [InlineKeyboardButton("🎓 Change training level", callback_data="ACTION|change_level")],
+        [InlineKeyboardButton("✍️ Voice profile" if not voice_profile else "🔄 Rebuild voice profile", callback_data="ACTION|voice"),
+         InlineKeyboardButton("🔗 Update credentials", callback_data="ACTION|setup")],
+        [InlineKeyboardButton("🗑️ Delete all my data", callback_data="ACTION|delete")],
+        [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu")],
+    ]
+    text = (
+        f"⚙️ Your settings\n\n"
+        f"📚 Curriculum: {curriculum_label}\n"
+        f"🎓 Training level: {training_level}\n"
+        f"✍️ Voice profile: {voice_status}\n\n"
+        f"Tap to change any setting."
+    )
+    return text, InlineKeyboardMarkup(buttons)
 
 
 def _build_welcome_keyboard(connected: bool = False):
@@ -2032,30 +2060,8 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         )
 
     elif action == "settings":
-        curriculum = get_curriculum(user_id) or "2025"
-        curriculum_label = "2021 Curriculum" if curriculum == "2021" else "2025 Update"
-        training_level = get_training_level(user_id) or "Not set"
-        voice_profile = get_voice_profile(user_id)
-        voice_status = "✅ Active" if voice_profile else "Not set"
-
-        buttons = [
-            [InlineKeyboardButton("📘 Switch to 2025 Update", callback_data="SET_CURRICULUM|2025"),
-             InlineKeyboardButton("📗 Switch to 2021 Curriculum", callback_data="SET_CURRICULUM|2021")],
-            [InlineKeyboardButton("🎓 Change training level", callback_data="ACTION|change_level")],
-            [InlineKeyboardButton("✍️ Voice profile" if not voice_profile else "🔄 Rebuild voice profile", callback_data="ACTION|voice"),
-             InlineKeyboardButton("🔗 Update credentials", callback_data="ACTION|setup")],
-            [InlineKeyboardButton("🗑️ Delete all my data", callback_data="ACTION|delete")],
-            [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu")],
-        ]
-
-        await query.message.edit_text(
-            f"⚙️ Your settings\n\n"
-            f"📚 Curriculum: {curriculum_label}\n"
-            f"🎓 Training level: {training_level}\n"
-            f"✍️ Voice profile: {voice_status}\n\n"
-            f"Tap to change any setting.",
-            reply_markup=InlineKeyboardMarkup(buttons),
-        )
+        text, keyboard = _settings_view_components(user_id)
+        await query.message.edit_text(text, reply_markup=keyboard)
 
     elif action == "change_level":
         keyboard = InlineKeyboardMarkup([
@@ -3201,19 +3207,52 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             import re
             is_question_pattern = any(re.search(p, words_lower) for p in _QUESTION_PATTERNS)
 
+            _CLINICAL_KEYWORDS = {"patient", "presented", "diagnosed", "examined", "management",
+                                  "symptoms", "clinical", "assessment", "treatment", "referred",
+                                  "history", "examination", "investigation", "procedure", "resuscitation",
+                                  "chest pain", "shortness of breath", "abdominal", "fracture", "suture",
+                                  "intubation", "cannulation", "triage", "observations", "bloods"}
+            clinical_hits = sum(1 for kw in _CLINICAL_KEYWORDS if kw in words_lower)
+
+            # Menu intent router: short non-clinical text may be a navigation
+            # command ("stats", "settings", "how many cases this month") rather
+            # than a case or a generic question. Runs before the question-pattern
+            # fast-path so "how many ..." routes to /status, not answer_question.
+            nav_intent = None
+            if 1 <= word_count < 12 and clinical_hits == 0:
+                try:
+                    await update.effective_chat.send_action(constants.ChatAction.TYPING)
+                    nav_intent = await classify_menu_intent(raw_text)
+                except Exception:
+                    nav_intent = None
+
+            if nav_intent == "show_stats":
+                context.user_data.clear()
+                return await status(update, context)
+            if nav_intent == "show_help":
+                context.user_data.clear()
+                return await help_command(update, context)
+            if nav_intent == "open_settings":
+                context.user_data.clear()
+                settings_text, settings_kb = _settings_view_components(user_id)
+                await update.message.reply_text(settings_text, reply_markup=settings_kb)
+                return ConversationHandler.END
+            if nav_intent == "manage_credentials":
+                context.user_data.clear()
+                await update.message.reply_text(
+                    "Want to update your Kaizen login?",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")]
+                    ]),
+                )
+                return ConversationHandler.END
+
             if is_question_pattern and word_count < 15:
                 # Short question — answer directly without classify
                 intent = "question"
             else:
                 # Fast heuristic: long clinical-sounding messages skip classify entirely
                 # Saves ~3-5s of Gemini latency for obvious cases
-                _CLINICAL_KEYWORDS = {"patient", "presented", "diagnosed", "examined", "management",
-                                      "symptoms", "clinical", "assessment", "treatment", "referred",
-                                      "history", "examination", "investigation", "procedure", "resuscitation",
-                                      "chest pain", "shortness of breath", "abdominal", "fracture", "suture",
-                                      "intubation", "cannulation", "triage", "observations", "bloods"}
-                clinical_hits = sum(1 for kw in _CLINICAL_KEYWORDS if kw in words_lower)
-
                 if word_count > 30 and clinical_hits >= 2:
                     intent = "case"
                 elif word_count < 8 and clinical_hits == 0:

@@ -503,3 +503,81 @@ class TestFlowWalker:
         assert ('File another case', 'ACTION|file') in buttons
         assert ('Something missing?', 'FILING|feedback|CBD') in buttons
         assert ('Status', 'ACTION|status') in buttons
+
+    @pytest.mark.asyncio
+    async def test_menu_intent_short_text_routes_to_status(self):
+        from bot import handle_case_input
+
+        sim = BotSimulator()
+        update = sim._make_text_update('how many cases this month')
+        context = sim._make_context()
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.classify_menu_intent', new=AsyncMock(return_value='show_stats')), \
+             patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_curriculum', return_value='2025'), \
+             patch('bot.get_voice_profile', return_value=None):
+            await handle_case_input(update, context)
+
+        text = sim.get_last_text()
+        assert 'training level' in text.lower() or 'portfolio connected' in text.lower()
+
+    @pytest.mark.asyncio
+    async def test_menu_intent_short_text_routes_to_settings(self):
+        from bot import handle_case_input
+
+        sim = BotSimulator()
+        update = sim._make_text_update('open settings please')
+        context = sim._make_context()
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.classify_menu_intent', new=AsyncMock(return_value='open_settings')), \
+             patch('bot.get_curriculum', return_value='2025'), \
+             patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_voice_profile', return_value=None):
+            await handle_case_input(update, context)
+
+        text = sim.get_last_text()
+        assert 'your settings' in text.lower()
+        buttons = sim.get_last_buttons()
+        assert any(data == 'ACTION|change_level' for _, data in buttons)
+
+    @pytest.mark.asyncio
+    async def test_menu_intent_clinical_text_skips_router(self, recommended_forms):
+        from bot import handle_case_input
+
+        sim = BotSimulator()
+        update = sim._make_text_update(
+            '45 year old male presented with chest pain, diagnosed as ACS, '
+            'management included aspirin and referral to cardiology. '
+            'I reflected on early ECG escalation.'
+        )
+        context = sim._make_context()
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.classify_menu_intent', new=AsyncMock(return_value='show_stats')) as menu_mock, \
+             patch('bot.recommend_form_types', new=AsyncMock(return_value=recommended_forms)):
+            await handle_case_input(update, context)
+
+        menu_mock.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_menu_intent_ambiguous_falls_through_to_case_flow(self, recommended_forms):
+        from bot import handle_case_input
+
+        sim = BotSimulator()
+        update = sim._make_text_update('quick chest pain note')
+        context = sim._make_context()
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.classify_menu_intent', new=AsyncMock(return_value='ambiguous')), \
+             patch('bot.classify_intent', new=AsyncMock(return_value='new_case')), \
+             patch('bot.recommend_form_types', new=AsyncMock(return_value=recommended_forms)):
+            await handle_case_input(update, context)
+
+        text = sim.get_last_text() or ''
+        assert 'fit your case' in text.lower() or 'recommend' in text.lower() or 'matching forms' in text.lower()
