@@ -344,18 +344,55 @@ def _get_client():
 
 
 def extract_explicit_form_type(text: str) -> str | None:
-    """
-    Check if the user is EXPLICITLY REQUESTING a specific form type.
-    Only triggers when the user states intent to create a named form
-    (e.g. "make me a CBD", "I want to file a DOPS").
-    Does NOT trigger when the case text merely mentions clinical concepts
-    that happen to match form names (e.g. "leadership" in a QIP case).
+    """Check if the user is EXPLICITLY REQUESTING a specific form type.
+
+    Two-tier match so a clear directive like "Procedure log for ES Block"
+    always wins over a short code that happens to appear as a substring
+    elsewhere (e.g. "statin" → "stat").
+
+    1. PRIMARY phrases (e.g. "procedure log", "case-based discussion") are
+       full-form names. If any appears anywhere in the text, that's a strong
+       enough signal — return that form, no intent phrase required.
+    2. SECONDARY keys (e.g. "stat", "cbd") are short codes that only count
+       when (a) an intent phrase is present and (b) the code appears as a
+       whole word (word boundary), not as part of "statin"/"status"/etc.
+
     Returns the short form key (e.g. "CBD", "DOPS") or None.
-    No AI call — pure pattern match for speed.
     """
     text_lower = text.lower()
 
-    # Intent phrases — user must use one of these to signal explicit form request
+    primary_patterns = {
+        "PROC_LOG":     ["procedural log", "procedure log", "proc log"],
+        "MINI_CEX":     ["mini cex", "mini-cex", "minicex", "clinical evaluation exercise"],
+        "CBD":          ["case-based discussion", "case based discussion"],
+        "DOPS":         ["directly observed procedural"],
+        "LAT":          ["leadership assessment tool"],
+        "ACAT":         ["acute care assessment tool"],
+        "ACAF":         ["applied critical appraisal", "critical appraisal form"],
+        "STAT":         ["structured teaching assessment"],
+        "MSF":          ["multi source feedback", "multi-source feedback"],
+        "QIAT":         ["quality improvement assessment"],
+        "JCF":          ["journal club"],
+        "TEACH":        ["teach form", "teaching delivered", "teaching session form"],
+        "SDL":          ["self-directed learning", "self directed learning"],
+        "US_CASE":      ["ultrasound case", "us case", "pocus case"],
+        "ESLE":         ["significant learning event"],
+        "COMPLAINT":    ["complaint reflection", "complaint form"],
+        "SERIOUS_INC":  ["serious incident", "si reflection", "never event"],
+        "EDU_ACT":      ["educational activity", "teaching attended"],
+        "FORMAL_COURSE":["formal course", "atls course", "apls course", "als course", "epals"],
+    }
+
+    primary_hits = []
+    for form_type, keywords in primary_patterns.items():
+        for kw in keywords:
+            idx = text_lower.find(kw)
+            if idx != -1:
+                primary_hits.append((idx, len(kw), form_type))
+    if primary_hits:
+        primary_hits.sort(key=lambda h: (h[0], -h[1]))
+        return primary_hits[0][2]
+
     intent_phrases = [
         "make me a", "create a", "file a", "file as", "submit as",
         "log as", "log a", "do a", "fill in a", "fill a",
@@ -363,36 +400,27 @@ def extract_explicit_form_type(text: str) -> str | None:
         "make this a", "treat this as", "this is a", "record as",
         "add as", "add this as", "add this case as", "add this case to",
     ]
-
     has_intent = any(phrase in text_lower for phrase in intent_phrases)
     if not has_intent:
         return None
 
-    # Only match if user expressed explicit intent AND named the form
-    patterns = {
-        "CBD":          ["cbd", "case-based discussion", "case based discussion"],
-        "DOPS":         ["dops", "directly observed procedural"],
-        "MINI_CEX":     ["mini cex", "mini-cex", "minicex", "clinical evaluation exercise"],
-        "LAT":          ["leadership assessment tool"],
-        "ACAT":         ["acat", "acute care assessment tool"],
-        "ACAF":         ["acaf", "applied critical appraisal", "critical appraisal form"],
-        "STAT":         ["stat", "structured teaching assessment"],
-        "MSF":          ["msf", "multi source feedback", "multi-source feedback"],
-        "QIAT":         ["qiat", "quality improvement assessment"],
-        "JCF":          ["jcf", "journal club"],
-        "TEACH":        ["teach form", "teaching delivered", "teaching session form"],
-        "PROC_LOG":     ["proc log", "procedural log", "procedure log"],
-        "SDL":          ["sdl", "self-directed learning", "self directed learning"],
-        "US_CASE":      ["ultrasound case", "us case", "pocus case"],
-        "ESLE":         ["esle", "significant learning event"],
-        "COMPLAINT":    ["complaint reflection", "complaint form"],
-        "SERIOUS_INC":  ["serious incident", "si reflection", "never event"],
-        "EDU_ACT":      ["educational activity", "edu act", "teaching attended"],
-        "FORMAL_COURSE":["formal course", "atls", "apls", "als course", "epals"],
+    secondary_codes = {
+        "CBD":         ["cbd"],
+        "DOPS":        ["dops"],
+        "ACAT":        ["acat"],
+        "ACAF":        ["acaf"],
+        "STAT":        ["stat"],
+        "MSF":         ["msf"],
+        "QIAT":        ["qiat"],
+        "JCF":         ["jcf"],
+        "SDL":         ["sdl"],
+        "ESLE":        ["esle"],
+        "EDU_ACT":     ["edu act"],
     }
-    for form_type, keywords in patterns.items():
-        if any(kw in text_lower for kw in keywords):
-            return form_type
+    for form_type, codes in secondary_codes.items():
+        for code in codes:
+            if re.search(rf'\b{re.escape(code)}\b', text_lower):
+                return form_type
     return None
 
 

@@ -40,6 +40,33 @@ class TestFormTypeExtraction:
         result = extract_explicit_form_type("CBD")
         assert result is None, f"Bare 'CBD' should not trigger, got: {result}"
 
+    def test_procedure_log_caption_wins_over_statin_substring(self):
+        """A caption that names PROC_LOG must beat 'statin' triggering STAT.
+        Regression: 'Procedure log for ES Block' + patient on a statin used
+        to return STAT because 'stat' is a substring of 'statin' and STAT
+        was checked before PROC_LOG in the lookup."""
+        from extractor import extract_explicit_form_type
+        text = (
+            "Procedure log for ES Block\n\n"
+            "Patient on statin for IHD. This is a procedural skill demonstration. "
+            "Ultrasound used to find the transverse process. Levobupivacaine injected."
+        )
+        result = extract_explicit_form_type(text)
+        assert result == "PROC_LOG", f"Expected PROC_LOG, got: {result}"
+
+    def test_statin_does_not_false_trigger_stat(self):
+        """'statin' must not match the short 'stat' code even with an intent phrase."""
+        from extractor import extract_explicit_form_type
+        text = "Make this a reflection on patient on statin for years."
+        result = extract_explicit_form_type(text)
+        assert result != "STAT", f"'statin' should not trigger STAT, got: {result}"
+
+    def test_explicit_stat_command_still_detected(self):
+        """Genuine STAT request via the short code should still work."""
+        from extractor import extract_explicit_form_type
+        result = extract_explicit_form_type("make me a STAT for my teaching session")
+        assert result == "STAT", f"Expected STAT, got: {result}"
+
 class TestFormSchemas:
     """Verify form schemas are complete and well-formed."""
 
