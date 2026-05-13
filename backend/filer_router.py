@@ -209,6 +209,7 @@ async def _route_deterministic(
             password=credentials["password"],
             curriculum_links=curriculum_links,
             submit=submit,
+            reuse_draft=False,
         )
         result["method"] = "deterministic"
         return result

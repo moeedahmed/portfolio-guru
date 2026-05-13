@@ -1621,15 +1621,67 @@ async def _submit_entry(page: Page) -> bool:
     return False
 
 
-async def _verify_entry_saved(page: Page, form_type: str) -> bool:
+def _saved_draft_url(url: str) -> bool:
+    """Return True when Kaizen has moved from new form creation to a saved draft URL."""
+    if not url:
+        return False
+    return "/events/fillin/" in url or ("kaizenep.com/events/" in url and "doc=" in url)
+
+
+def _activity_date_variants(fields: Optional[Dict[str, Any]] = None) -> List[str]:
+    """Dates Kaizen may show in activities for a saved entry."""
+    if not fields:
+        fields = {}
+
+    candidates = []
+    for key in (
+        "date_of_activity",
+        "date_of_encounter",
+        "date_of_event",
+        "date_of_education",
+        "date_of_teaching",
+        "date_of_case",
+        "date_of_complaint",
+        "date_of_incident",
+        "end_date",
+    ):
+        value = fields.get(key)
+        if value:
+            candidates.append(str(value))
+
+    today = date.today()
+    candidates.append(f"{today.day}/{today.month}/{today.year}")
+
+    variants = []
+    for raw in candidates:
+        uk_date = _to_uk_date(raw)
+        parts = uk_date.split("/")
+        if len(parts) == 3:
+            try:
+                dt = date(int(parts[2]), int(parts[1]), int(parts[0]))
+                variants.extend([
+                    f"{dt.day}/{dt.month}/{dt.year}",
+                    f"{dt.day:02d}/{dt.month:02d}/{dt.year}",
+                    dt.strftime("%-d %b %Y"),
+                    dt.strftime("%d %b %Y"),
+                    dt.strftime("%-d %B %Y"),
+                    dt.strftime("%d %B %Y"),
+                ])
+                continue
+            except ValueError:
+                pass
+        variants.append(raw)
+        variants.append(uk_date)
+
+    return list(dict.fromkeys(v for v in variants if v))
+
+
+async def _verify_entry_saved(page: Page, form_type: str, fields: Optional[Dict[str, Any]] = None) -> bool:
     """
     After saving, navigate to the activities list and confirm a new entry
-    with today's date AND the correct form type name exists.
+    with the activity date (not necessarily today's date) AND the correct form
+    type name exists.
     """
-    today = date.today()
-    today_str = today.strftime("%d/%m/%Y")
-    today_str_alt = today.strftime("%-d %b %Y")
-
     form_type_keywords = {
         "CBD": ["case-based discussion", "case based discussion", "cbd"],
         "DOPS": ["dops", "direct observation"],
@@ -1642,7 +1694,7 @@ async def _verify_entry_saved(page: Page, form_type: str) -> bool:
         "QIAT": ["qiat", "quality improvement"],
         "JCF": ["jcf", "journal club"],
         "TEACH": ["teach", "teaching observation"],
-        "PROC_LOG": ["proc", "procedural skills", "procedure log"],
+        "PROC_LOG": ["proc", "procedural log", "procedural skills", "procedure log"],
         "SDL": ["sdl", "self-directed learning", "self directed"],
         "US_CASE": ["us case", "ultrasound"],
         "COMPLAINT": ["complaint"],
@@ -1654,6 +1706,11 @@ async def _verify_entry_saved(page: Page, form_type: str) -> bool:
     }
 
     keywords = form_type_keywords.get(form_type, [form_type.lower().replace("_", " ")])
+    expected_dates = _activity_date_variants(fields)
+
+    if _saved_draft_url(page.url):
+        logger.info(f"Post-save verification: saved draft URL detected ({page.url})")
+        return True
 
     try:
         await page.goto("https://kaizenep.com/activities", wait_until="domcontentloaded", timeout=40000)
@@ -1661,27 +1718,27 @@ async def _verify_entry_saved(page: Page, form_type: str) -> bool:
 
         body_text = await page.inner_text("body")
 
-        has_today = today_str in body_text or today_str_alt in body_text
-        if not has_today:
-            logger.warning(f"Post-save verification FAILED: today's date ({today_str}) not found in activities list")
+        matching_dates = [d for d in expected_dates if d in body_text]
+        if not matching_dates:
+            logger.warning(f"Post-save verification FAILED: expected date(s) {expected_dates} not found in activities list")
             return False
 
         for line in body_text.split("\n"):
-            line_has_date = today_str in line or today_str_alt in line
+            line_has_date = any(d in line for d in matching_dates)
             if not line_has_date:
                 continue
             line_lower = line.lower()
             for kw in keywords:
                 if kw in line_lower:
-                    logger.info(f"Post-save verification: found '{kw}' with today's date in activities list")
+                    logger.info(f"Post-save verification: found '{kw}' with expected date in activities list")
                     return True
 
         for kw in keywords:
             if kw in body_text.lower():
-                logger.info(f"Post-save verification: found form keyword '{kw}' on activities page with today's date (weak match)")
+                logger.info(f"Post-save verification: found form keyword '{kw}' on activities page with expected date (weak match)")
                 return True
 
-        logger.warning(f"Post-save verification FAILED: today's date found but no '{form_type}' entry detected")
+        logger.warning(f"Post-save verification FAILED: expected date found but no '{form_type}' entry detected")
         return False
 
     except Exception as e:
@@ -1972,7 +2029,7 @@ async def file_to_kaizen(
     submit: bool = False,
     attachment_path: Optional[str] = None,
     attachment_drive_url: Optional[str] = None,
-    reuse_draft: bool = True,
+    reuse_draft: bool = False,
 ) -> Dict[str, Any]:
     """
     File a form to Kaizen as a draft (legacy API).
@@ -2015,7 +2072,8 @@ async def file_to_kaizen(
             if not await _login(page, username, password):
                 return {"status": "failed", "filled": [], "skipped": [], "error": "Login failed"}
 
-        # Navigate to form (reuse existing draft if enabled)
+        # Navigate to a new form by default. Reusing same-form drafts can
+        # overwrite repeated ARCP tickets that legitimately share form type/date.
         reused_draft = False
         if reuse_draft:
             reused_draft = await _find_existing_draft(page, form_type)
@@ -2092,7 +2150,7 @@ async def file_to_kaizen(
         # Post-save verification
         verified = None
         if saved and len(filled) > 0 and not submit:
-            verified = await _verify_entry_saved(page, form_type)
+            verified = await _verify_entry_saved(page, form_type, fields)
 
         # Determine status
         if not saved:
