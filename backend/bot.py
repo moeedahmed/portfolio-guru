@@ -13,7 +13,7 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler, PicklePersistence,
 )
 from store import store_credentials, get_credentials, has_credentials, init
-from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, review_draft, analyse_portfolio_health, summarise_recent_activity, combine_case_inputs
+from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, review_draft, analyse_portfolio_health, summarise_recent_activity, generate_nudge_copy, combine_case_inputs
 from usage import record_case_filed, get_cases_this_month, check_can_file, get_user_tier, set_user_tier, get_case_history, TIER_LIMITS, get_all_active_users, get_cases_this_week
 from filer_router import route_filing
 from kaizen_form_filer import FORM_UUIDS
@@ -150,12 +150,11 @@ async def _compute_weekly_stats(user_id: int) -> dict:
     return {"cases": cases, "gap": gap}
 
 
-def _build_nudge_message(stats: dict) -> tuple[str, InlineKeyboardMarkup]:
-    """Build weekly nudge message text and inline keyboard."""
+def _static_nudge_text(stats: dict) -> str:
+    """Fallback static weekly nudge text \u2014 used when the LLM call fails."""
     cases = stats["cases"]
     gap = stats["gap"]
     lines = []
-
     if cases > 0:
         lines.append("\U0001f4cb Your portfolio this week")
         lines.append("")
@@ -164,22 +163,28 @@ def _build_nudge_message(stats: dict) -> tuple[str, InlineKeyboardMarkup]:
         lines.append("\U0001f4cb Portfolio check-in")
         lines.append("")
         lines.append("No cases filed this week \u2014 that's fine, but worth a nudge.")
-
     if gap:
         label, days = gap
         lines.append("")
         lines.append(f"Longest gap: no {label} in {days} days")
-
     lines.append("")
     if cases > 0:
         lines.append("Keep the momentum going \u2014 tap below to file a case.")
     else:
         lines.append("One case takes 2 minutes. Tap below to get started.")
+    return "\n".join(lines)
 
+
+async def _build_nudge_message(stats: dict) -> tuple[str, InlineKeyboardMarkup]:
+    """Build weekly nudge message text and inline keyboard. Tries an LLM-written
+    fresh copy first; falls back to a static template if generation fails."""
+    text = await generate_nudge_copy(stats)
+    if not text:
+        text = _static_nudge_text(stats)
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("\U0001f4cb File a case", callback_data="ACTION|file")]
     ])
-    return "\n".join(lines), keyboard
+    return text, keyboard
 
 
 async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -210,7 +215,7 @@ async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
     for user_id in users:
         try:
             stats = await _compute_weekly_stats(user_id)
-            text, keyboard = _build_nudge_message(stats)
+            text, keyboard = await _build_nudge_message(stats)
             await context.bot.send_message(
                 chat_id=user_id,
                 text=text,

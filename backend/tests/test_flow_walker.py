@@ -505,6 +505,32 @@ class TestFlowWalker:
         assert ('Status', 'ACTION|status') in buttons
 
     @pytest.mark.asyncio
+    async def test_nudge_uses_llm_copy_when_available(self):
+        from bot import _build_nudge_message
+
+        stats = {"cases": 3, "gap": ("Mini-CEX", 28)}
+        llm_copy = "📋 Solid week — three cases logged.\n\nMini-CEX gap is showing. Tap below to file a case."
+
+        with patch('bot.generate_nudge_copy', new=AsyncMock(return_value=llm_copy)):
+            text, keyboard = await _build_nudge_message(stats)
+
+        assert text == llm_copy
+        buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
+        assert ('📋 File a case', 'ACTION|file') in buttons
+
+    @pytest.mark.asyncio
+    async def test_nudge_falls_back_to_static_when_llm_empty(self):
+        from bot import _build_nudge_message
+
+        stats = {"cases": 0, "gap": None}
+
+        with patch('bot.generate_nudge_copy', new=AsyncMock(return_value="")):
+            text, _ = await _build_nudge_message(stats)
+
+        assert 'Portfolio check-in' in text
+        assert 'No cases filed this week' in text
+
+    @pytest.mark.asyncio
     async def test_successful_filing_includes_observation_line(self, thin_draft):
         from bot import handle_approval_approve
 

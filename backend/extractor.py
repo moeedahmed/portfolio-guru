@@ -1466,6 +1466,43 @@ verdict rules: "ready" if overall_score >= 3.5, "improve" if 2.5-3.4, "weak" if 
     return json.loads(text)
 
 
+async def generate_nudge_copy(stats: dict) -> str:
+    """Compose a fresh weekly portfolio check-in. Returns the message body
+    (no keyboard) or "" on failure so the caller can fall back to a static
+    template. Kept short and varied — same stats should produce different
+    phrasings each week.
+    """
+    cases = stats.get("cases", 0)
+    gap = stats.get("gap")  # tuple (label, days) or None
+    if gap:
+        label, days = gap
+        gap_text = f"Longest gap: no {label} in {days} days."
+    else:
+        gap_text = "No notable gaps."
+
+    prompt = f"""You are writing a friendly weekly portfolio check-in for a UK Emergency Medicine doctor using a Telegram bot.
+
+This week's facts:
+- Cases filed this week: {cases}
+- Gap status: {gap_text}
+
+Write 2-3 short sentences (under 60 words total). Lead with a clipboard emoji and a punchy heading on its own line, then encouragement or observation, then a one-liner inviting them to start ("Tap below to file a case." or similar).
+
+Vary the phrasing — don't sound robotic. No exclamation marks, no bullet lists, no lecturing. Just plain sentences.
+
+Reply with the message text only, no quotes."""
+
+    try:
+        text = (await _generate(prompt)).strip().strip('"').strip("'").strip()
+    except Exception as e:
+        logger.warning("generate_nudge_copy failed: %s", e)
+        return ""
+
+    if not text or len(text) > 500:
+        return ""
+    return text
+
+
 async def summarise_recent_activity(case_history: list, just_filed_form_type: str) -> str:
     """One-line observation about the user's recent portfolio activity after a
     successful filing. Returns "" when there is not enough history to say
