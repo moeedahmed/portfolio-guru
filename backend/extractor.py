@@ -1466,6 +1466,63 @@ verdict rules: "ready" if overall_score >= 3.5, "improve" if 2.5-3.4, "weak" if 
     return json.loads(text)
 
 
+_RECOVERY_COPY_CACHE: dict[str, str] = {}
+
+
+def _categorise_filing_error(error_text: str) -> str:
+    """Coarse bucket for filing errors, used as a cache key."""
+    if not error_text:
+        return "unknown"
+    e = error_text.lower()
+    if "login" in e or "credential" in e or "auth" in e or "password" in e:
+        return "login_failed"
+    if "timed out" in e or "timeout" in e:
+        return "timeout"
+    if "could not confirm" in e or "verify" in e or "verification" in e:
+        return "unverified_save"
+    if "navigation" in e or "load" in e or "page" in e:
+        return "load_failed"
+    if "missing" in e or "required" in e:
+        return "validation"
+    return "unknown"
+
+
+async def compose_filing_recovery_copy(status: str, error_text: str) -> str:
+    """One short sentence the bot can show after a failed or partially-saved
+    filing — explains what happened in plain terms and suggests a next step.
+    Returns "" on LLM failure so the caller can fall back to static text.
+    Cached by (status, error_category) so repeated failures don't burn calls.
+    """
+    category = _categorise_filing_error(error_text)
+    cache_key = f"{status}|{category}"
+    if cache_key in _RECOVERY_COPY_CACHE:
+        return _RECOVERY_COPY_CACHE[cache_key]
+
+    prompt = f"""You are writing a short, calm recovery message for a doctor whose UK Emergency Medicine portfolio filing did not complete cleanly. They are mid-flow and want to know what happened.
+
+Filing status: {status}  (one of: failed, partial)
+Underlying error text (may be empty): {error_text or '(none)'}
+Error category: {category}
+
+Write ONE sentence (under 25 words) that:
+1. States plainly what likely happened (no jargon).
+2. Suggests the most useful next step the user can take.
+
+Do not promise that Kaizen has saved the entry. Do not invent details. No exclamation marks. Reply with the sentence only, no quotes."""
+
+    try:
+        text = (await _generate(prompt)).strip().strip('"').strip("'").strip()
+    except Exception as e:
+        logger.warning("compose_filing_recovery_copy failed: %s", e)
+        return ""
+
+    if not text or len(text) > 240:
+        return ""
+
+    _RECOVERY_COPY_CACHE[cache_key] = text
+    return text
+
+
 async def extract_field_updates(form_type: str, current_fields: dict, instruction: str) -> dict:
     """Parse a natural-language edit instruction against an active draft and
     return a dict of {field_name: new_value} to apply. Returns {} if the

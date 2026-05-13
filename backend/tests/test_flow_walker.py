@@ -505,6 +505,60 @@ class TestFlowWalker:
         assert ('Status', 'ACTION|status') in buttons
 
     @pytest.mark.asyncio
+    async def test_failed_filing_uses_llm_recovery_copy(self, thin_draft):
+        from bot import handle_approval_approve
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('APPROVE|draft')
+        context = sim._make_context()
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin_draft.form_type,
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+
+        recovery_line = "Kaizen rejected the login — your password may have changed. Update credentials and retry."
+
+        with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.route_filing', new_callable=AsyncMock, return_value={
+                 'status': 'failed', 'filled': [], 'skipped': [], 'method': 'deterministic',
+                 'error': 'Login failed',
+             }), \
+             patch('bot.compose_filing_recovery_copy', new=AsyncMock(return_value=recovery_line)):
+            await handle_approval_approve(update, context)
+
+        text = sim.get_last_text()
+        assert recovery_line in text
+        assert "Filing didn't complete" in text
+
+    @pytest.mark.asyncio
+    async def test_failed_filing_falls_back_to_static_when_llm_empty(self, thin_draft):
+        from bot import handle_approval_approve
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('APPROVE|draft')
+        context = sim._make_context()
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin_draft.form_type,
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+
+        with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.route_filing', new_callable=AsyncMock, return_value={
+                 'status': 'failed', 'filled': [], 'skipped': [], 'method': 'deterministic',
+                 'error': 'Something went wrong',
+             }), \
+             patch('bot.compose_filing_recovery_copy', new=AsyncMock(return_value="")):
+            await handle_approval_approve(update, context)
+
+        text = sim.get_last_text()
+        assert 'Try again' in text or 'manually' in text
+        assert 'Something went wrong' in text
+
+    @pytest.mark.asyncio
     async def test_natural_language_edit_applies_to_draft_and_keeps_approval(self, thin_draft):
         from bot import handle_mid_conversation_text
 

@@ -13,7 +13,7 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler, PicklePersistence,
 )
 from store import store_credentials, get_credentials, has_credentials, init
-from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, review_draft, analyse_portfolio_health, summarise_recent_activity, generate_nudge_copy, extract_field_updates, combine_case_inputs
+from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, review_draft, analyse_portfolio_health, summarise_recent_activity, generate_nudge_copy, extract_field_updates, compose_filing_recovery_copy, combine_case_inputs
 from usage import record_case_filed, get_cases_this_month, check_can_file, get_user_tier, set_user_tier, get_case_history, TIER_LIMITS, get_all_active_users, get_cases_this_week
 from filer_router import route_filing
 from kaizen_form_filer import FORM_UUIDS
@@ -3783,10 +3783,16 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             # Partial with error — save may not have worked
             kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS.get(form_type, '')}" if FORM_UUIDS.get(form_type) else ""
             link_text = f"\n\n[Open {form_name} manually in Kaizen]({kaizen_url})" if kaizen_url else ""
+            recovery = ""
+            try:
+                recovery = await compose_filing_recovery_copy("partial", error)
+            except Exception:
+                logger.warning("Recovery copy generation failed", exc_info=True)
+            recovery_block = recovery or f"Check your portfolio — the draft may not have saved.\n\nDetails: {error}"
             msg = (
                 f"⚠️ *{form_name} — filing had issues.*\n\n"
-                f"{len(filled)} fields filled, but: {error}\n\n"
-                f"Check your portfolio — the draft may not have saved.{link_text}{usage_line}"
+                f"{len(filled)} fields filled.\n\n"
+                f"{recovery_block}{link_text}{usage_line}"
             )
             status_line = "⚠️ Filing needs attention."
         else:
@@ -3799,12 +3805,23 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             status_line = "✅ Filing finished."
     else:
         # Show manual link for Kaizen; generic message for other platforms
+        recovery = ""
+        try:
+            recovery = await compose_filing_recovery_copy("failed", error or "")
+        except Exception:
+            logger.warning("Recovery copy generation failed", exc_info=True)
         if platform == "kaizen" and FORM_UUIDS.get(form_type):
             kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS[form_type]}"
-            msg = f"❌ *Filing failed.* {error or ''}\n\n[Open {form_name} manually in Kaizen]({kaizen_url})"
+            recovery_block = recovery or "Try again, or open the form in Kaizen and fill it manually."
+            msg = f"❌ *Filing didn't complete.*\n\n{recovery_block}\n\n[Open {form_name} manually in Kaizen]({kaizen_url})"
+            if not recovery and error:
+                msg += f"\n\n_Details: {error}_"
             status_line = "❌ Filing stopped."
         else:
-            msg = f"❌ *Filing failed.* {error or ''}\n\nTry again or fill the form manually in your portfolio."
+            recovery_block = recovery or "Try again, or fill the form manually in your portfolio."
+            msg = f"❌ *Filing didn't complete.*\n\n{recovery_block}"
+            if not recovery and error:
+                msg += f"\n\n_Details: {error}_"
             status_line = "❌ Filing stopped."
 
     try:
