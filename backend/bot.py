@@ -1431,11 +1431,11 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         grade_str = f"📊 Training level: {training_level}" if training_level else "📊 Training level: not set"
         curriculum = get_curriculum(user_id)
         cur_str = f"📘 Curriculum: {curriculum}"
-        # Count drafts filed
-        import pathlib
-        drafts_dir = pathlib.Path.home() / ".openclaw/data/portfolio-guru/drafts"
-        draft_count = len(list(drafts_dir.glob(f"{user_id}_*"))) if drafts_dir.exists() else 0
-        drafts_str = f"📂 Drafts filed: {draft_count}"
+        try:
+            month_count = await get_cases_this_month(user_id)
+        except Exception:
+            month_count = 0
+        drafts_str = f"📂 Cases filed this month: {month_count}"
         vp = get_voice_profile(user_id)
         voice_str = "✍️ Voice profile: active" if vp else "✍️ Voice profile: not set"
         buttons = [
@@ -3826,13 +3826,15 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         except Exception:
             logger.warning("Usage tracking failed", exc_info=True)
 
-    # One-line portfolio observation after a clean save
+    # One-line portfolio observation after a clean save. Skip for brand-new
+    # users — there's nothing meaningful to say with one or two cases on file.
     if status == "success":
         try:
             history = await get_case_history(user_id, months=3)
-            observation = await summarise_recent_activity(history, form_type)
-            if observation:
-                observation_line = f"\n\n💡 {observation}"
+            if len(history) >= 3:
+                observation = await summarise_recent_activity(history, form_type)
+                if observation:
+                    observation_line = f"\n\n💡 {observation}"
         except Exception:
             logger.warning("Post-file observation failed", exc_info=True)
 
@@ -3845,7 +3847,24 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         msg = f"✅ *{form_name} draft saved.*\n\nFiled to your portfolio as a draft — open Kaizen to assign an assessor when ready.{summary}{usage_line}{observation_line}"
         status_line = "✅ Filing finished."
     elif status == "partial":
-        skipped_names = [s.replace("_", " ").title() for s in skipped]
+        _FIELD_FRIENDLY = {
+            "curriculum_links": "SLO links",
+            "key_capabilities": "Key Capabilities",
+            "year_of_training": "Year of training",
+            "age_of_patient": "Patient age",
+            "end_date": "End date",
+            "date_of_activity": "Date of activity",
+            "date_of_encounter": "Date of encounter",
+            "stage_of_training": "Stage of training",
+            "higher_procedural_skill": "Procedural skill (Higher)",
+            "intermediate_procedural_skill": "Procedural skill (Intermediate)",
+            "accs_procedural_skill": "Procedural skill (ACCS)",
+            "reflective_comments": "Reflection",
+            "reflection": "Reflection",
+            "clinical_setting": "Clinical setting",
+            "patient_presentation": "Patient presentation",
+        }
+        skipped_names = [_FIELD_FRIENDLY.get(s, s.replace("_", " ").capitalize()) for s in skipped]
         if len(skipped_names) > 3:
             skipped_display = ", ".join(skipped_names[:3]) + f" + {len(skipped_names) - 3} more"
         else:
@@ -4110,7 +4129,8 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
         return AWAIT_APPROVAL
 
     preview = _format_draft_preview(updated, _chosen_form_reason(context, form_type))
-    await _safe_edit_text(ack, preview, reply_markup=_build_approval_keyboard(), parse_mode="Markdown")
+    header = "✨ *Reflection polished.* Here's the updated draft:\n\n"
+    await _safe_edit_text(ack, header + preview, reply_markup=_build_approval_keyboard(), parse_mode="Markdown")
     return AWAIT_APPROVAL
 
 
@@ -4324,7 +4344,16 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
                 )
                 return AWAIT_APPROVAL
 
-        # new_case or unparseable edit — looks like a new case
+            # Edit instruction but nothing matched — don't pretend it was a new case
+            await update.message.reply_text(
+                "I couldn't tell which field to change from that. Tap *Edit* below to pick a field, or rephrase ("
+                "e.g. \"change the date to 12 May 2026\").",
+                reply_markup=_build_approval_keyboard(),
+                parse_mode="Markdown",
+            )
+            return AWAIT_APPROVAL
+
+        # new_case — looks like a new case
         if in_flow:
             await update.message.reply_text(
                 "It looks like you want to file a new case.",

@@ -588,11 +588,11 @@ class TestFlowWalker:
         assert 'Updated: Date moved to 12 May 2026.' in text
 
     @pytest.mark.asyncio
-    async def test_natural_language_edit_with_no_match_falls_through(self, thin_draft):
-        from bot import handle_mid_conversation_text
+    async def test_natural_language_edit_with_no_match_asks_to_rephrase(self, thin_draft):
+        from bot import handle_mid_conversation_text, AWAIT_APPROVAL
 
         sim = BotSimulator()
-        update = sim._make_text_update('a totally different new case happened today')
+        update = sim._make_text_update('change the doodad to flibble')
         context = sim._make_context()
         context.user_data['draft_data'] = {
             '_type': 'FORM',
@@ -605,10 +605,12 @@ class TestFlowWalker:
 
         with patch('bot.classify_intent', new=AsyncMock(return_value='edit_detail')), \
              patch('bot.extract_field_updates', new=AsyncMock(return_value={})):
-            await handle_mid_conversation_text(update, context)
+            result = await handle_mid_conversation_text(update, context)
 
-        text = sim.get_last_text() or ''
-        assert 'new case' in text.lower()
+        text = (sim.get_last_text() or '').lower()
+        assert result == AWAIT_APPROVAL
+        assert "couldn't tell" in text or "rephrase" in text
+        assert "new case" not in text
 
     @pytest.mark.asyncio
     async def test_nudge_uses_llm_copy_when_available(self):
