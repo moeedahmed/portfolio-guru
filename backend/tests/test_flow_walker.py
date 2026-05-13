@@ -444,5 +444,62 @@ class TestFlowWalker:
         assert result == ConversationHandler.END
         assert sim.messages_sent[-1][0] == 'edit'
         assert 'draft saved' in sim.get_last_text().lower()
-        # Home menu buttons present (ACTION|file if connected, ACTION|setup if not)
-        assert any(data.startswith('ACTION|') for _, data in sim.get_last_buttons())
+        buttons = sim.get_last_buttons()
+        assert buttons[0] == ('File another case', 'ACTION|file')
+        assert ('Worked', 'FEEDBACK|good|CBD|success') in buttons
+        assert ("Didn't work", 'FEEDBACK|bad|CBD|success') in buttons
+        assert ('More', 'ACTION|post_file_more|CBD|success') in buttons
+
+    @pytest.mark.asyncio
+    async def test_uncertain_save_keeps_draft_and_offers_compact_recovery(self, thin_draft):
+        from bot import handle_approval_approve
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('APPROVE|draft')
+        context = sim._make_context()
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin_draft.form_type,
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+
+        with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.route_filing', new_callable=AsyncMock, return_value={
+                 'status': 'partial',
+                 'filled': ['date_of_encounter'],
+                 'skipped': [],
+                 'error': 'Save was clicked, but I could not confirm the entry in the activities list.',
+                 'method': 'deterministic',
+             }):
+            result = await handle_approval_approve(update, context)
+
+        assert result == ConversationHandler.END
+        assert context.user_data.get('draft_data')
+        assert 'may not have saved' in sim.get_last_text().lower()
+        buttons = sim.get_last_buttons()
+        assert ('Worked', 'FEEDBACK|good|CBD|partial') in buttons
+        assert ("Didn't work", 'FEEDBACK|bad|CBD|partial') in buttons
+        assert ('More', 'ACTION|post_file_more|CBD|partial') in buttons
+
+    @pytest.mark.asyncio
+    async def test_post_filing_more_expands_secondary_actions(self, thin_draft):
+        from bot import handle_action_button
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('ACTION|post_file_more|CBD|partial')
+        context = sim._make_context()
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin_draft.form_type,
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+
+        await handle_action_button(update, context)
+
+        buttons = sim.get_last_buttons()
+        assert ('Try again', 'ACTION|retry_filing') in buttons
+        assert ('File another case', 'ACTION|file') in buttons
+        assert ('Something missing?', 'FILING|feedback|CBD') in buttons
+        assert ('Status', 'ACTION|status') in buttons

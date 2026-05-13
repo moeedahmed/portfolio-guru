@@ -994,6 +994,35 @@ def _build_post_review_keyboard():
     ])
 
 
+def _build_post_filing_keyboard(
+    form_type: str,
+    status: str,
+    *,
+    uncertain: bool = False,
+) -> InlineKeyboardMarkup:
+    """Compact keyboard shown after a filing attempt."""
+    feedback_row = [
+        InlineKeyboardButton("Worked", callback_data=f"FEEDBACK|good|{form_type}|{status}"),
+        InlineKeyboardButton("Didn't work", callback_data=f"FEEDBACK|bad|{form_type}|{status}"),
+    ]
+
+    if uncertain and FORM_UUIDS.get(form_type):
+        primary_row = [InlineKeyboardButton(
+            "Open in Kaizen",
+            url=f"https://kaizenep.com/events/new-section/{FORM_UUIDS[form_type]}",
+        )]
+    elif status == "failed":
+        primary_row = [InlineKeyboardButton("Try again", callback_data="ACTION|retry_filing")]
+    else:
+        primary_row = [InlineKeyboardButton("File another case", callback_data="ACTION|file")]
+
+    return InlineKeyboardMarkup([
+        primary_row,
+        feedback_row,
+        [InlineKeyboardButton("More", callback_data=f"ACTION|post_file_more|{form_type}|{status}")],
+    ])
+
+
 def _build_edit_field_keyboard(draft=None):
     """Build edit field keyboard. For FormDraft, generates buttons dynamically from schema."""
     if draft and isinstance(draft, FormDraft):
@@ -1866,6 +1895,23 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         else:
             await query.message.reply_text(FILE_CASE_PROMPT)
 
+    elif action.startswith("post_file_more|"):
+        parts = action.split("|")
+        form_type = parts[1] if len(parts) > 1 else "unknown"
+        status = parts[2] if len(parts) > 2 else "unknown"
+        rows = [
+            [InlineKeyboardButton("File another case", callback_data="ACTION|file")],
+            [InlineKeyboardButton("Something missing?", callback_data=f"FILING|feedback|{form_type}")],
+            [
+                InlineKeyboardButton("Status", callback_data="ACTION|status"),
+                InlineKeyboardButton("Settings", callback_data="ACTION|settings"),
+            ],
+        ]
+        if status in {"failed", "partial"} and _load_draft(context):
+            rows.insert(0, [InlineKeyboardButton("Try again", callback_data="ACTION|retry_filing")])
+        rows.append([InlineKeyboardButton("Main menu", callback_data="ACTION|back_to_menu")])
+        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(rows))
+
     elif action == "help":
         await query.message.edit_text(
             WHAT_IS_THIS_MSG,
@@ -2095,12 +2141,14 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     except Exception as _e:
         logger.warning("Feedback Notion log failed: %s", _e)
 
-    # Disarm the feedback buttons only — leave the next-step row intact
+    # Disarm the feedback buttons only — leave next-step rows intact.
     try:
         current_markup = query.message.reply_markup
         if current_markup:
-            # Keep all rows except the feedback row (first row)
-            remaining_rows = current_markup.inline_keyboard[1:]
+            remaining_rows = [
+                row for row in current_markup.inline_keyboard
+                if not any((button.callback_data or "").startswith("FEEDBACK|") for button in row)
+            ]
             new_markup = InlineKeyboardMarkup(remaining_rows) if remaining_rows else None
             await query.edit_message_reply_markup(reply_markup=new_markup)
     except Exception:
@@ -3572,11 +3620,14 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     import json as _json
     import pathlib
     from datetime import date
-    drafts_dir = pathlib.Path.home() / ".openclaw/data/portfolio-guru/drafts"
-    drafts_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"{user_id}_{form_type}_{date.today()}.json"
-    with open(drafts_dir / filename, "w") as f:
-        _json.dump({"form_type": form_type, "fields": fields}, f, indent=2)
+    try:
+        drafts_dir = pathlib.Path.home() / ".openclaw/data/portfolio-guru/drafts"
+        drafts_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"{user_id}_{form_type}_{date.today()}.json"
+        with open(drafts_dir / filename, "w") as f:
+            _json.dump({"form_type": form_type, "fields": fields}, f, indent=2)
+    except OSError:
+        logger.warning("Local draft JSON backup failed; continuing with Kaizen filing", exc_info=True)
 
     # Determine platform (default: kaizen; future: from user profile)
     platform = "kaizen"
@@ -3627,8 +3678,6 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             )
         return AWAIT_APPROVAL  # Stay in approval state so retry can pick up draft
 
-    context.user_data.clear()
-
     status = result["status"]
     filled = result.get("filled", [])
     skipped = result.get("skipped", [])
@@ -3636,22 +3685,15 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
 
     method = result.get("method", "deterministic")
 
-    # Build end keyboard — feedback row + full home menu
-    _fb_suffix = f"|{form_type}|{status}"
-    _uid_end = update.effective_user.id
-    feedback_row = [
-        InlineKeyboardButton("👍 Worked", callback_data=f"FEEDBACK|good{_fb_suffix}"),
-        InlineKeyboardButton("👎 Didn't work", callback_data=f"FEEDBACK|bad{_fb_suffix}"),
-    ]
-    home_menu = _build_welcome_keyboard(connected=has_credentials(_uid_end))
-    if status in ("success", "partial"):
-        # feedback + "Something missing?" + home menu rows
-        extra_rows = [[InlineKeyboardButton("Something missing?", callback_data=f"FILING|feedback|{form_type}")]]
-        end_keyboard = InlineKeyboardMarkup(
-            [feedback_row] + extra_rows + list(home_menu.inline_keyboard)
-        )
-    else:
-        end_keyboard = InlineKeyboardMarkup([feedback_row] + list(home_menu.inline_keyboard))
+    uncertain_save = status == "partial" and bool(error)
+    if status in ("success", "partial") and not uncertain_save:
+        context.user_data.clear()
+
+    end_keyboard = _build_post_filing_keyboard(
+        form_type,
+        status,
+        uncertain=uncertain_save,
+    )
 
     # Track usage for successful filings
     usage_line = ""
