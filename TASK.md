@@ -1,44 +1,32 @@
-# TASK: Portfolio Guru recovery sprint — docs, hygiene, and filing confidence
+# TASK: Portfolio Guru continuity refresh — product hub + repo truth
 
 ## Goal
 
-Make Portfolio Guru restartable from repo state, not memory.
+Make Portfolio Guru restartable after a break from durable records, not chat memory. The product hub should tell Moeed what exists and what is next; repo context should let agents safely continue the build.
 
 ## Scope
 
-1. Refresh `CLAUDE.md` to match current product:
-   - all-form routing
-   - deterministic Playwright + browser-use fallback
-   - real log paths
-   - current disabled/coming-soon commands
-2. Clean repo hygiene:
-   - classify untracked backups, tickets, docs
-   - keep needed tickets under a clear tracked or ignored home
-   - archive/remove stale backup files safely
-3. Resolve command inconsistencies:
-   - decide whether `/unsigned` and `/chase` are disabled or enabled
-   - remove unreachable code or re-enable intentionally
-4. Restore Kaizen filing verification:
-   - rewrite or replace skipped Kaizen filer tests
-   - add at least one non-live deterministic smoke test for `route_filing`
-5. Run test suite and record current known-live limitations.
-
-## Verification
-
-- `git status --short`
-- `python -m pytest tests/ -q --ignore=tests/test_e2e.py --ignore=tests/test_e2e_live.py --ignore=tests/test_kaizen_integration.py`
-- grep confirms docs no longer claim CBD-only filing
-
-## Current evidence
-
-- Offline tests passed during recovery audit: 51 passed, 22 skipped.
-- Skipped tests include Kaizen filer/integration/live tests, so real browser filing confidence is not fully verified.
-- Bot is running locally and polling.
-- Gemini standardisation in Portfolio Guru backend appears done.
+1. Refresh product skill standard for solo-builder continuity.
+2. Update `CLAUDE.md` so it reflects the current live bot: launchd runtime, Mac Mini deploy, current feature state, disabled commands, evidence-first restart protocol.
+3. Refresh the Notion Portfolio Guru hub Status/Architecture so stale MVP/CBD-first/Builder-era text no longer reads as current truth.
+4. Record the current limitations clearly:
+   - live Kaizen filing confidence still partially verified
+   - `/bulk`, `/unsigned`, `/chase` are coming soon despite legacy code paths
+   - Notion Brief may retain historical March framing unless rewritten separately
+5. Verify with direct inspection: git diff/status, launchd status, current docs, and Notion readback.
 
 ## Out of scope
 
-- New portfolio features
-- Live Kaizen filing without explicit approval
-- Public/external sends
-- EMGurus model cleanup, which belongs to a separate EMGurus sprint
+- New bot features
+- Live Kaizen filing
+- Public beta launch
+- Rewriting the full Notion Brief into a polished product narrative
+- Removing legacy disabled command code
+
+## Definition of done
+
+- Product skill contains the Solo Builder Continuity Standard.
+- `CLAUDE.md` is short, present-tense, and accurate enough for coding agents.
+- Notion hub Status/Architecture reflect current product state.
+- Change is logged locally.
+- Remaining product gaps are explicit, not hidden.
