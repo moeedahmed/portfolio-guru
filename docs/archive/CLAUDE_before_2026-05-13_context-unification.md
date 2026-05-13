@@ -1,4 +1,4 @@
-# Portfolio Guru — AGENTS.md
+# Portfolio Guru — CLAUDE.md
 
 ## Project
 
@@ -105,8 +105,3 @@ pytest tests/test_kaizen_integration.py -v -m kaizen -s
 ```
 
 Live gates need explicit approval because they can touch Telegram/Kaizen or leave draft artefacts.
-
-
-## Compatibility
-
-`CLAUDE.md` is a symlink to this file for Claude Code compatibility. Do not maintain duplicate long-form agent context files.
