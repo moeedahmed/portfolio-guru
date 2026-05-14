@@ -37,7 +37,7 @@ async def stripe_webhook(request: Request):
     # On upgrade, notify user via Telegram
     if result.get("action") == "upgraded" and TELEGRAM_BOT_TOKEN:
         user_id = result["user_id"]
-        tier_label = "Pro" if result["tier"] == "pro" else "Pro + Review"
+        tier_label = "Pro" if result["tier"] == "pro" else "Portfolio Guru Unlimited"
         text = f"🎉 Welcome to {tier_label}! Your upgrade is active.\n\nSend a case to get started."
         await _send_telegram_message(user_id, text)
 

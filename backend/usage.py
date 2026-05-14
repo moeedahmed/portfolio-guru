@@ -46,6 +46,13 @@ async def _ensure_db():
                 updated_at TEXT DEFAULT (datetime('now'))
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS stripe_webhook_events (
+                event_id TEXT PRIMARY KEY,
+                event_type TEXT NOT NULL,
+                processed_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
         await db.commit()
 
 
@@ -154,6 +161,18 @@ async def get_user_by_stripe_customer(stripe_customer_id: str) -> int | None:
             return row[0] if row else None
 
 
+async def get_user_by_stripe_subscription(stripe_subscription_id: str) -> int | None:
+    """Look up telegram_user_id by Stripe subscription ID. Returns None if not found."""
+    await _ensure_db()
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT telegram_user_id FROM user_profiles WHERE stripe_subscription_id = ?",
+            (stripe_subscription_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+
 async def set_user_tier(user_id: int, tier: str, stripe_customer_id: str = None, stripe_subscription_id: str = None):
     """Set or update a user's subscription tier."""
     await _ensure_db()
@@ -167,5 +186,32 @@ async def set_user_tier(user_id: int, tier: str, stripe_customer_id: str = None,
                    stripe_subscription_id = COALESCE(excluded.stripe_subscription_id, user_profiles.stripe_subscription_id),
                    updated_at = datetime('now')""",
             (user_id, tier, stripe_customer_id, stripe_subscription_id),
+        )
+        await db.commit()
+
+
+async def has_processed_stripe_event(event_id: str) -> bool:
+    """Return whether a Stripe webhook event has already been processed."""
+    if not event_id:
+        return False
+    await _ensure_db()
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT 1 FROM stripe_webhook_events WHERE event_id = ?",
+            (event_id,),
+        ) as cursor:
+            return await cursor.fetchone() is not None
+
+
+async def mark_stripe_event_processed(event_id: str, event_type: str):
+    """Record a Stripe webhook event as processed for idempotency."""
+    if not event_id:
+        return
+    await _ensure_db()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT OR IGNORE INTO stripe_webhook_events (event_id, event_type)
+               VALUES (?, ?)""",
+            (event_id, event_type),
         )
         await db.commit()
