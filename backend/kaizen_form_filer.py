@@ -458,7 +458,12 @@ FORM_FIELD_MAP = {
         "learning_outcomes": "ddd8c881-91c6-46fd-84e9-32e89f617877",
     },
     "PROC_LOG": {
-        "date_of_activity": "startDate",
+        # Kaizen Procedural Log has three date inputs: event start/end dates,
+        # plus the section's visible required "Date of Activity" field. Do not
+        # map date_of_activity to startDate or the required section field stays
+        # blank even when the event dates are populated.
+        "date_occurred_on": "startDate",
+        "date_of_activity": "8f76bc6b-68b7-4654-9116-75e421fceccd",
         "end_date": "endDate",
         "stage_of_training": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
         "year_of_training": "036fe50f-5357-4da5-9fd6-d5c2e8d96ba4",
@@ -1181,7 +1186,7 @@ async def _verify_fields(page: Page, fields: dict, field_map: dict, filled_keys:
     issues = []
 
     # Check date fields
-    for key in ("date", "date_of_encounter", "date_of_education", "date_of_activity",
+    for key in ("date", "date_occurred_on", "date_of_encounter", "date_of_education", "date_of_activity",
                 "date_of_teaching", "date_of_case", "date_of_complaint", "date_of_incident"):
         if key in fields and key in field_map:
             dom_id = field_map[key]
@@ -2065,6 +2070,9 @@ async def file_to_kaizen(
 
     filled = []
     skipped = []
+    if form_type == "PROC_LOG" and fields.get("date_of_activity") and not fields.get("date_occurred_on"):
+        fields = dict(fields)
+        fields["date_occurred_on"] = fields["date_of_activity"]
     browser = None
     cdp_pw = None
     use_cdp = KAIZEN_USE_CDP
