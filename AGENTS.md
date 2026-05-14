@@ -105,7 +105,7 @@ KAIZEN_LIVE_TESTS=1 pytest tests/test_kaizen_integration.py -v -m kaizen -s
 ```
 
 Live gates need explicit approval because they can touch Telegram/Kaizen or leave draft artefacts.
-Kaizen integration tests require `KAIZEN_LIVE_TESTS=1` even when credentials are exported. Delete only private drafts visibly labelled `INTEGRATION TEST — DO NOT USE` after verifying the test result.
+Kaizen integration tests require `KAIZEN_LIVE_TESTS=1` even when credentials are exported. Each live run writes a unique manifest and run token. Delete only drafts whose event ID is listed in that exact manifest and whose content contains that exact run token; never delete by form type, date, or generic test wording.
 
 
 ## Compatibility

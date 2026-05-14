@@ -2171,6 +2171,8 @@ async def file_to_kaizen(
         else:
             saved = await _save_draft_legacy(page)
 
+        saved_url = page.url if saved and not submit else None
+
         # Post-save verification
         verified = None
         if saved and len(filled) > 0 and not submit:
@@ -2200,6 +2202,7 @@ async def file_to_kaizen(
             "filled": filled,
             "skipped": skipped,
             "error": save_error,
+            "saved_url": saved_url,
         }
 
     except Exception as e:

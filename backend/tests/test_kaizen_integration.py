@@ -9,10 +9,16 @@ Safety contract:
   - These tests write real private drafts to Kaizen.
   - Default pytest runs exclude them via pytest.ini.
   - The explicit KAIZEN_LIVE_TESTS=1 gate is required even when credentials exist.
-  - Draft text is visibly prefixed so test artefacts can be identified and deleted safely.
+  - Draft text is visibly prefixed with a unique run token.
+  - Cleanup must use the manifest from that exact run and verify both event ID and run token before deletion.
 """
+import json
 import os
+import re
 import sys
+import uuid
+from pathlib import Path
+
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -20,7 +26,32 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from kaizen_form_filer import file_to_kaizen
 
 
-TEST_PREFIX = "INTEGRATION TEST — DO NOT USE — "
+TEST_RUN_TOKEN = os.environ.get("KAIZEN_TEST_RUN_TOKEN") or f"kaizen-live-{uuid.uuid4().hex[:12]}"
+TEST_PREFIX = f"INTEGRATION TEST — DO NOT USE — RUN {TEST_RUN_TOKEN} — "
+MANIFEST_PATH = Path(os.environ.get("KAIZEN_TEST_MANIFEST", f"/tmp/kaizen-live-test-{TEST_RUN_TOKEN}.json"))
+
+
+def _saved_event_id(result):
+    saved_url = result.get("saved_url") or ""
+    match = re.search(r"/events/fillin/([^/?#]+)", saved_url) or re.search(r"/events/view-section/([^/?#]+)", saved_url)
+    return match.group(1) if match else None
+
+
+def _record_created_test_draft(form_type, result):
+    record = {
+        "run_token": TEST_RUN_TOKEN,
+        "form_type": form_type,
+        "status": result.get("status"),
+        "saved_url": result.get("saved_url"),
+        "event_id": _saved_event_id(result),
+        "required_marker": TEST_PREFIX,
+    }
+    existing = []
+    if MANIFEST_PATH.exists():
+        existing = json.loads(MANIFEST_PATH.read_text())
+    existing.append(record)
+    MANIFEST_PATH.write_text(json.dumps(existing, indent=2))
+    return record
 
 
 def _get_kaizen_credentials():
@@ -34,11 +65,14 @@ def _get_kaizen_credentials():
     return username, password
 
 
-CLEANUP_MSG = (
-    "\n\n⚠️  Live Kaizen integration test complete.\n"
-    "     Delete the private draft labelled 'INTEGRATION TEST — DO NOT USE' once verified.\n"
-    "     URL: https://kaizenep.com/activities (Saved drafts)\n"
-)
+def _cleanup_msg(record):
+    return (
+        "\n\n⚠️  Live Kaizen integration test complete.\n"
+        f"     Run token: {TEST_RUN_TOKEN}\n"
+        f"     Manifest: {MANIFEST_PATH}\n"
+        f"     Draft ID: {record.get('event_id') or 'unknown — inspect saved_url'}\n"
+        "     Cleanup may delete only drafts whose event ID is in the manifest AND whose content contains the run token.\n"
+    )
 
 
 @pytest.mark.kaizen
@@ -69,7 +103,9 @@ class TestKaizenIntegration:
         )
         assert result["status"] in ("success", "partial"), f"CBD filing failed: {result}"
         assert len(result["filled"]) >= 3, f"Expected >=3 filled fields, got {result['filled']}"
-        print(CLEANUP_MSG)
+        record = _record_created_test_draft("CBD", result)
+        assert record["event_id"], f"Saved draft URL did not expose an event ID: {result}"
+        print(_cleanup_msg(record))
 
     async def test_reflect_log_files_and_appears_in_kaizen(self):
         username, password = _get_kaizen_credentials()
@@ -103,7 +139,9 @@ class TestKaizenIntegration:
         assert "reflection" in result["filled"] or "reflection_title" in result["filled"], (
             f"Expected at least reflection or reflection_title filled, got {result['filled']}"
         )
-        print(CLEANUP_MSG)
+        record = _record_created_test_draft("REFLECT_LOG", result)
+        assert record["event_id"], f"Saved draft URL did not expose an event ID: {result}"
+        print(_cleanup_msg(record))
 
     async def test_dops_files_correctly(self):
         username, password = _get_kaizen_credentials()
@@ -120,7 +158,9 @@ class TestKaizenIntegration:
         result = await file_to_kaizen("DOPS", fields, username, password)
         assert result["status"] in ("success", "partial"), f"DOPS filing failed: {result}"
         assert result["status"] != "failed"
-        print(CLEANUP_MSG)
+        record = _record_created_test_draft("DOPS", result)
+        assert record["event_id"], f"Saved draft URL did not expose an event ID: {result}"
+        print(_cleanup_msg(record))
 
     async def test_mini_cex_files_correctly(self):
         username, password = _get_kaizen_credentials()
@@ -142,4 +182,6 @@ class TestKaizenIntegration:
         result = await file_to_kaizen("MINI_CEX", fields, username, password)
         assert result["status"] in ("success", "partial"), f"MINI_CEX filing failed: {result}"
         assert result["status"] != "failed"
-        print(CLEANUP_MSG)
+        record = _record_created_test_draft("MINI_CEX", result)
+        assert record["event_id"], f"Saved draft URL did not expose an event ID: {result}"
+        print(_cleanup_msg(record))
