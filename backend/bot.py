@@ -670,6 +670,66 @@ All 45 RCEM forms supported — assessments, reflections, teaching, management, 
 
 FILE_CASE_PROMPT = "Send me what happened. Rough notes are fine — text, voice note, photo, or document (PDF, PowerPoint, Word)."
 
+FLOW_STATE_LABELS = {
+    "captured": "Captured",
+    "drafted": "Drafted",
+    "needs_you": "Needs you",
+    "filed_as_draft": "Filed as draft",
+    "blocked": "Failed / blocked",
+}
+
+CAPTURED_ACK = (
+    "📥 *Captured.* I’ll turn this into portfolio evidence and flag anything missing "
+    "before filing. Nothing goes to Kaizen until you approve it."
+)
+
+def _format_proof_report(
+    status: str,
+    form_name: str,
+    input_source: str | None,
+    filled: list,
+    skipped: list,
+    error: str | None = None,
+) -> str:
+    """Trust-layer summary shown after filing attempts."""
+    if status == "success":
+        state = FLOW_STATE_LABELS["filed_as_draft"]
+        needs_review = "Review in Kaizen before you submit or assign an assessor."
+    elif status == "partial" and not error:
+        state = FLOW_STATE_LABELS["filed_as_draft"]
+        needs_review = "Complete the blank fields in Kaizen before submission."
+    elif status == "partial":
+        state = FLOW_STATE_LABELS["blocked"]
+        needs_review = "Check whether the draft saved, then retry if needed."
+    else:
+        state = FLOW_STATE_LABELS["blocked"]
+        needs_review = "No final submission was made. Retry or file manually."
+
+    source = input_source or "case input"
+    filled_text = ", ".join(str(f).replace("_", " ") for f in filled[:6]) if filled else "none confirmed"
+    if len(filled) > 6:
+        filled_text += f", +{len(filled) - 6} more"
+    skipped_text = ", ".join(str(f).replace("_", " ") for f in skipped[:4]) if skipped else "none reported"
+    if len(skipped) > 4:
+        skipped_text += f", +{len(skipped) - 4} more"
+
+    lines = [
+        "",
+        "*Portfolio Guru proof report*",
+        f"Status: {state}",
+        f"WPBA type: {form_name}",
+        f"Source: {source}",
+        f"Fields completed: {filled_text}",
+        f"Needs your review: {needs_review}",
+        "Not done: no supervisor request sent, no final submission made",
+    ]
+    if skipped:
+        lines.insert(6, f"Left blank / skipped: {skipped_text}")
+    if error:
+        lines.append(f"Blocker: {error}")
+    return "\n".join(lines)
+
+
 
 def _settings_view_components(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
     """Render the settings page text + keyboard so it can be sent from
@@ -1135,7 +1195,7 @@ def _draft_coach_note(draft) -> str:
 
 
 def _draft_header(title: str, reason: str | None, draft) -> list[str]:
-    lines = [f"📋 *{title} ready*"]
+    lines = [f"🟢 *{FLOW_STATE_LABELS['drafted']} — {title} ready*"]
     if reason:
         lines.append(f"*Why this form:* {reason}")
     lines.extend([_draft_coach_note(draft), ""])
@@ -1202,7 +1262,7 @@ def _format_template_review(form_type: str, draft) -> str:
 
     lines = [
         f"🧩 *{form_name} template*",
-        "I will use this form. Review what I found, then tap Draft with this info.",
+        f"🟡 *{FLOW_STATE_LABELS['needs_you']}* — review what I found, then add missing detail or tap Draft with this info.",
         "",
         "*Required fields*",
         *[f"• {field['label']}" for field in required],
@@ -3487,6 +3547,9 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return AWAIT_TEMPLATE_REVIEW
 
     _clear_case_review_state(context, keep_case=False)
+    if not context.user_data.get("last_bot_msg_id"):
+        ack = await update.message.reply_text(CAPTURED_ACK, parse_mode="Markdown")
+        _track_latest_message(context, ack)
     return await _process_case_text(update.message, context, user_id, case_text, input_source)
 
 
@@ -3798,6 +3861,14 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     filled = result.get("filled", [])
     skipped = result.get("skipped", [])
     error = result.get("error")
+    proof_report = _format_proof_report(
+        status,
+        form_name,
+        context.user_data.get("case_input_source"),
+        filled,
+        skipped,
+        error,
+    )
 
     method = result.get("method", "deterministic")
 
@@ -3844,7 +3915,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         summary = f"\n\n📅 {date_val}" if date_val else ""
         if slo_str:
             summary += f"  ·  📚 {slo_str}"
-        msg = f"✅ *{form_name} draft saved.*\n\nFiled to your portfolio as a draft — open Kaizen to assign an assessor when ready.{summary}{usage_line}{observation_line}"
+        msg = f"✅ *{FLOW_STATE_LABELS['filed_as_draft']}: {form_name} draft saved.*\n\nFiled to your portfolio as a draft — open Kaizen to assign an assessor when ready.{summary}{usage_line}{observation_line}{proof_report}"
         status_line = "✅ Filing finished."
     elif status == "partial":
         _FIELD_FRIENDLY = {
@@ -3882,7 +3953,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             msg = (
                 f"⚠️ *{form_name} — filing had issues.*\n\n"
                 f"{len(filled)} fields filled.\n\n"
-                f"{recovery_block}{link_text}{usage_line}"
+                f"{recovery_block}{link_text}{usage_line}{proof_report}"
             )
             status_line = "⚠️ Filing needs attention."
         else:
@@ -3890,7 +3961,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 f"✅ *{form_name} draft saved to Kaizen.*\n\n"
                 f"{len(filled)} fields filled from your case.\n"
                 f"{len(skipped)} left blank — not enough info to fill without guessing: {skipped_display}.\n\n"
-                f"Open your portfolio, complete those fields, then assign an assessor.{usage_line}"
+                f"Open your portfolio, complete those fields, then assign an assessor.{usage_line}{proof_report}"
             )
             status_line = "✅ Filing finished."
     else:
@@ -3903,13 +3974,13 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         if platform == "kaizen" and FORM_UUIDS.get(form_type):
             kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS[form_type]}"
             recovery_block = recovery or "Try again, or open the form in Kaizen and fill it manually."
-            msg = f"❌ *Filing didn't complete.*\n\n{recovery_block}\n\n[Open {form_name} manually in Kaizen]({kaizen_url})"
+            msg = f"❌ *Filing didn't complete — {FLOW_STATE_LABELS['blocked']}.*\n\n{recovery_block}\n\n[Open {form_name} manually in Kaizen]({kaizen_url}){proof_report}"
             if not recovery and error:
                 msg += f"\n\n_Details: {error}_"
             status_line = "❌ Filing stopped."
         else:
             recovery_block = recovery or "Try again, or fill the form manually in your portfolio."
-            msg = f"❌ *Filing didn't complete.*\n\n{recovery_block}"
+            msg = f"❌ *Filing didn't complete — {FLOW_STATE_LABELS['blocked']}.*\n\n{recovery_block}{proof_report}"
             if not recovery and error:
                 msg += f"\n\n_Details: {error}_"
             status_line = "❌ Filing stopped."
