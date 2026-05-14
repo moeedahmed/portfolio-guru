@@ -101,10 +101,11 @@ Manual/live gates:
 
 ```bash
 pytest tests/ -v -m live
-pytest tests/test_kaizen_integration.py -v -m kaizen -s
+KAIZEN_LIVE_TESTS=1 pytest tests/test_kaizen_integration.py -v -m kaizen -s
 ```
 
 Live gates need explicit approval because they can touch Telegram/Kaizen or leave draft artefacts.
+Kaizen integration tests require `KAIZEN_LIVE_TESTS=1` even when credentials are exported. Delete only private drafts visibly labelled `INTEGRATION TEST — DO NOT USE` after verifying the test result.
 
 
 ## Compatibility

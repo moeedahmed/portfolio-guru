@@ -3,7 +3,13 @@ Kaizen integration tests — real Playwright against live Kaizen.
 Marked @pytest.mark.kaizen — never runs in CI.
 
 Run manually:
-    pytest tests/test_kaizen_integration.py -v -m kaizen -s
+    KAIZEN_LIVE_TESTS=1 pytest tests/test_kaizen_integration.py -v -m kaizen -s
+
+Safety contract:
+  - These tests write real private drafts to Kaizen.
+  - Default pytest runs exclude them via pytest.ini.
+  - The explicit KAIZEN_LIVE_TESTS=1 gate is required even when credentials exist.
+  - Draft text is visibly prefixed so test artefacts can be identified and deleted safely.
 """
 import os
 import sys
@@ -14,8 +20,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from kaizen_form_filer import file_to_kaizen
 
 
+TEST_PREFIX = "INTEGRATION TEST — DO NOT USE — "
+
+
 def _get_kaizen_credentials():
-    """Get Kaizen credentials from environment (loaded by run_local.sh or config.py)."""
+    """Get Kaizen credentials only after an explicit live-write opt-in."""
+    if os.environ.get("KAIZEN_LIVE_TESTS") != "1":
+        pytest.skip("Live Kaizen write tests require KAIZEN_LIVE_TESTS=1")
     username = os.environ.get("KAIZEN_USERNAME")
     password = os.environ.get("KAIZEN_PASSWORD")
     if not username or not password:
@@ -24,8 +35,9 @@ def _get_kaizen_credentials():
 
 
 CLEANUP_MSG = (
-    "\n\n⚠️  Integration test complete — check Kaizen and delete the test draft manually.\n"
-    "     URL: https://kaizenep.com/events (look for today's date)\n"
+    "\n\n⚠️  Live Kaizen integration test complete.\n"
+    "     Delete the private draft labelled 'INTEGRATION TEST — DO NOT USE' once verified.\n"
+    "     URL: https://kaizenep.com/activities (Saved drafts)\n"
 )
 
 
@@ -40,11 +52,13 @@ class TestKaizenIntegration:
             "date_of_event": "2026-03-21",
             "stage_of_training": "Higher",
             "clinical_reasoning": (
-                "72yo male presenting with chest pain. ECG showed ST elevation in leads II, III, aVF. "
+                TEST_PREFIX
+                + "72yo male presenting with chest pain. ECG showed ST elevation in leads II, III, aVF. "
                 "Activated primary PCI pathway. Discussed with cardiology on-call."
             ),
             "reflection": (
-                "This case reinforced the importance of rapid ECG interpretation and early activation "
+                TEST_PREFIX
+                + "This case reinforced the importance of rapid ECG interpretation and early activation "
                 "of the PCI pathway. I felt confident in my initial assessment but need to improve "
                 "my communication with the cath lab team."
             ),
@@ -61,10 +75,11 @@ class TestKaizenIntegration:
         username, password = _get_kaizen_credentials()
         fields = {
             "date_of_encounter": "2026-03-21",
-            "reflection_title": "Integration test — night shift cardiac arrest",
+            "reflection_title": TEST_PREFIX + "night shift cardiac arrest",
             "date_of_event": "2026-03-20",
             "reflection": (
-                "I was the team leader for a cardiac arrest in resus. The patient was a 65yo "
+                TEST_PREFIX
+                + "I was the team leader for a cardiac arrest in resus. The patient was a 65yo "
                 "female who collapsed in the waiting room. PEA arrest on arrival."
             ),
             "replay_differently": (
@@ -94,10 +109,11 @@ class TestKaizenIntegration:
         username, password = _get_kaizen_credentials()
         fields = {
             "date_of_encounter": "2026-03-21",
-            "procedure_name": "Chest drain insertion — Seldinger technique",
+            "procedure_name": TEST_PREFIX + "Chest drain insertion — Seldinger technique",
             "stage_of_training": "Higher",
             "reflection": (
-                "Successfully inserted a chest drain for a large pneumothorax. "
+                TEST_PREFIX
+                + "Successfully inserted a chest drain for a large pneumothorax. "
                 "Used ultrasound to confirm the safe triangle."
             ),
         }
@@ -112,12 +128,14 @@ class TestKaizenIntegration:
             "date_of_encounter": "2026-03-21",
             "clinical_setting": "Emergency Department",
             "patient_presentation": (
-                "45yo female presenting with acute abdominal pain. Systematic history "
+                TEST_PREFIX
+                + "45yo female presenting with acute abdominal pain. Systematic history "
                 "and examination leading to diagnosis of acute appendicitis."
             ),
             "stage_of_training": "Higher",
             "reflection": (
-                "This case demonstrated good systematic approach to the acute abdomen. "
+                TEST_PREFIX
+                + "This case demonstrated good systematic approach to the acute abdomen. "
                 "I need to improve my ultrasound skills for appendicitis assessment."
             ),
         }
