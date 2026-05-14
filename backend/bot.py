@@ -541,7 +541,11 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
                 training_level = get_training_level(user_id)
                 allowed_forms = TRAINING_LEVEL_FORMS.get(training_level, TRAINING_LEVEL_FORMS["ST5"]) if training_level else TRAINING_LEVEL_FORMS["ST5"]
                 recommendations = await asyncio.wait_for(recommend_form_types(case_text), timeout=30)
-                recommendations = [r for r in recommendations if r.form_type in allowed_forms]
+                excluded_form = _normalise_form_type(context.user_data.get("excluded_form_type", ""))
+                recommendations = [
+                    r for r in recommendations
+                    if r.form_type in allowed_forms and _normalise_form_type(r.form_type) != excluded_form
+                ]
                 context.user_data["form_recommendations"] = recommendations
             except Exception as exc:
                 logger.error("Paused flow recommendation rebuild failed: %s", exc, exc_info=True)
@@ -1037,10 +1041,10 @@ def _build_category_forms_keyboard(user_id, cat_slug):
     return InlineKeyboardMarkup(rows)
 
 
-def _build_curriculum_keyboard():
+def _build_curriculum_keyboard(callback_prefix: str = "SET_CURRICULUM"):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📘 2025 Update", callback_data="SET_CURRICULUM|2025"),
-         InlineKeyboardButton("📗 2021 Curriculum", callback_data="SET_CURRICULUM|2021")],
+        [InlineKeyboardButton("📘 2025 Update", callback_data=f"{callback_prefix}|2025"),
+         InlineKeyboardButton("📗 2021 Curriculum", callback_data=f"{callback_prefix}|2021")],
     ])
 
 
@@ -1058,11 +1062,16 @@ def _build_explicit_form_keyboard(form_type: str):
     ])
 
 
-def _build_approval_keyboard():
+def _build_approval_keyboard(improved_once: bool = False):
+    improve_button = (
+        InlineKeyboardButton("Improved once ✅", callback_data="IMPROVE|used")
+        if improved_once
+        else InlineKeyboardButton("✨ Quick improve", callback_data="IMPROVE|reflection")
+    )
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📤 Save as draft", callback_data="APPROVE|draft"),
-            InlineKeyboardButton("✨ Quick improve", callback_data="IMPROVE|reflection"),
+            improve_button,
         ],
         [
             InlineKeyboardButton("✏️ Edit", callback_data="EDIT|draft"),
@@ -1071,18 +1080,9 @@ def _build_approval_keyboard():
     ])
 
 
-def _build_post_review_keyboard():
+def _build_post_review_keyboard(improved_once: bool = False):
     """Keyboard shown after lightweight draft improvement."""
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("📤 Save as draft", callback_data="APPROVE|draft"),
-            InlineKeyboardButton("✨ Quick improve", callback_data="IMPROVE|reflection"),
-        ],
-        [
-            InlineKeyboardButton("✏️ Edit", callback_data="EDIT|draft"),
-            InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|draft"),
-        ],
-    ])
+    return _build_approval_keyboard(improved_once=improved_once)
 
 
 def _build_post_filing_keyboard(
@@ -1090,6 +1090,7 @@ def _build_post_filing_keyboard(
     status: str,
     *,
     uncertain: bool = False,
+    same_case_available: bool = False,
 ) -> InlineKeyboardMarkup:
     """Compact keyboard shown after a filing attempt."""
     feedback_row = [
@@ -1105,13 +1106,19 @@ def _build_post_filing_keyboard(
     elif status == "failed":
         primary_row = [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")]
     else:
-        primary_row = [InlineKeyboardButton("📋 File another case", callback_data="ACTION|file")]
+        if same_case_available:
+            primary_row = [InlineKeyboardButton("🔁 Same case, another WPBA", callback_data="ACTION|same_case_another")]
+        else:
+            primary_row = [InlineKeyboardButton("📋 File another case", callback_data="ACTION|file")]
 
-    return InlineKeyboardMarkup([
-        primary_row,
+    rows = [primary_row]
+    if same_case_available:
+        rows.append([InlineKeyboardButton("📋 File new case", callback_data="ACTION|file")])
+    rows.extend([
         feedback_row,
         [InlineKeyboardButton("⋯ More options", callback_data=f"ACTION|post_file_more|{form_type}|{status}")],
     ])
+    return InlineKeyboardMarkup(rows)
 
 
 def _build_edit_field_keyboard(draft=None):
@@ -1253,6 +1260,57 @@ def _missing_template_fields(draft, form_type: str):
     present_fields = [field for field in required + optional if not _is_missing_field_value(fields.get(field["key"]))]
     return missing_required, missing_optional, present_fields
 
+
+
+
+def _pre_file_missing_fields(form_type: str, fields: dict) -> list[str]:
+    """Required-field guard before touching Kaizen.
+
+    Template review may allow a user to continue with thin data; this final
+    gate prevents a mostly blank Kaizen draft, especially for voice-led DOPS.
+    """
+    base_form = _normalise_form_type(form_type)
+    if base_form != "DOPS":
+        return []
+
+    aliases = {
+        "Date": ["date_of_encounter", "date_of_event", "end_date"],
+        "Procedure / procedural skill": ["procedure_name", "procedural_skill"],
+        "Clinical Setting": ["clinical_setting", "placement"],
+        "Stage of Training": ["stage_of_training", "stage"],
+        "Indication": ["indication", "case_observed"],
+        "Trainee Performance": ["trainee_performance"],
+    }
+    missing = []
+    for label, keys in aliases.items():
+        values = [fields.get(k) for k in keys]
+        if not any(not _is_missing_field_value(v) for v in values):
+            missing.append(label)
+
+    # Thin voice transcriptions often produce one-word/placeholder text; ask
+    # before filing rather than creating an assessor-hostile draft.
+    for label, keys in {
+        "Indication": ["indication", "case_observed"],
+        "Trainee Performance": ["trainee_performance"],
+    }.items():
+        value = next((str(fields.get(k) or "").strip() for k in keys if str(fields.get(k) or "").strip()), "")
+        if value and len(value) < 20 and label not in missing:
+            missing.append(label)
+
+    seen = set()
+    return [m for m in missing if not (m in seen or seen.add(m))]
+
+
+def _format_pre_file_missing_message(form_type: str, missing: list[str]) -> str:
+    form_name = _form_display_name(form_type)
+    shown = missing[:3]
+    questions = "\n".join(f"• {item}" for item in shown)
+    extra = f"\n\nI found {len(missing) - 3} more gaps too, but start with these." if len(missing) > 3 else ""
+    return (
+        f"🟡 *{form_name} needs a bit more detail before I file it.*\n\n"
+        "I’m not going to create a mostly blank Kaizen draft. Please send the missing detail for:\n"
+        f"{questions}{extra}"
+    )
 
 def _format_template_review(form_type: str, draft) -> str:
     form_name = _form_display_name(form_type)
@@ -1676,7 +1734,7 @@ async def setup_training_level(update: Update, context: ContextTypes.DEFAULT_TYP
     store_training_level(user_id, level)
     await query.edit_message_text(
         f"Training level saved as {level}.\n\nWhich curriculum are you working under? Most trainees starting now are on the 2025 Update. If your deanery still uses the 2021 forms, pick that.",
-        reply_markup=_build_curriculum_keyboard()
+        reply_markup=_build_curriculum_keyboard("SETUP_CURRICULUM")
     )
     return AWAIT_CURRICULUM
 
@@ -1689,10 +1747,12 @@ async def setup_curriculum(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     user_id = update.effective_user.id
     store_curriculum(user_id, curriculum)
     label = "2025 curriculum" if curriculum == "2025" else "2021 curriculum"
+    context.user_data.pop("_setup_state_hint", None)
     await query.edit_message_text(
-        f"✅ Set to {label} — I'll only show you the relevant forms.\n\nReady when you are.",
+        f"✅ Setup complete. You're on {label}.\n\nSend your first case when ready — text, voice note, photo, or document.",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📋 File a case", callback_data="ACTION|file")],
+            [InlineKeyboardButton("📋 File first case", callback_data="ACTION|file")],
+            [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")],
         ]),
     )
     return ConversationHandler.END
@@ -2027,6 +2087,23 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         else:
             await query.message.reply_text(FILE_CASE_PROMPT)
 
+    elif action == "same_case_another":
+        case_text = context.user_data.get("last_filed_case_text", "")
+        filed_form = context.user_data.get("last_filed_form_type", "")
+        if not case_text:
+            await query.message.reply_text(
+                "That filed case is no longer available here. Send the case again and I’ll draft another WPBA.",
+                reply_markup=_build_next_step_keyboard(user_id),
+            )
+            return ConversationHandler.END
+        context.user_data.clear()
+        context.user_data["case_text"] = case_text
+        context.user_data["excluded_form_type"] = filed_form
+        await query.message.reply_text(
+            "🔁 Reusing the same case. I’ll suggest a different WPBA type — not the one you already filed."
+        )
+        return await _process_case_text(query.message, context, user_id, case_text, "same case")
+
     elif action.startswith("post_file_more|"):
         parts = action.split("|")
         form_type = parts[1] if len(parts) > 1 else "unknown"
@@ -2039,6 +2116,8 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings"),
             ],
         ]
+        if context.user_data.get("last_filed_case_text") and status == "success":
+            rows.insert(0, [InlineKeyboardButton("🔁 Same case, another WPBA", callback_data="ACTION|same_case_another")])
         if status in {"failed", "partial"} and _load_draft(context):
             rows.insert(0, [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")])
         rows.append([InlineKeyboardButton("🏠 Main menu", callback_data="ACTION|back_to_menu")])
@@ -2712,7 +2791,11 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
     await message.chat.send_action(constants.ChatAction.TYPING)
     try:
         recommendations = await asyncio.wait_for(recommend_form_types(case_text), timeout=30)
-        recommendations = [r for r in recommendations if r.form_type in allowed_forms]
+        excluded_form = _normalise_form_type(context.user_data.get("excluded_form_type", ""))
+        recommendations = [
+            r for r in recommendations
+            if r.form_type in allowed_forms and _normalise_form_type(r.form_type) != excluded_form
+        ]
         if not recommendations:
             await _send_latest_message(
                 message, context,
@@ -3144,7 +3227,11 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
             recommendations = await asyncio.wait_for(
                 recommend_form_types(case_text), timeout=30
             )
-            recommendations = [r for r in recommendations if r.form_type in allowed_forms]
+            excluded_form = _normalise_form_type(context.user_data.get("excluded_form_type", ""))
+            recommendations = [
+                r for r in recommendations
+                if r.form_type in allowed_forms and _normalise_form_type(r.form_type) != excluded_form
+            ]
 
             if recommendations:
                 rationale_lines = [
@@ -3655,6 +3742,10 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return AWAIT_FORM_CHOICE
 
     form_type = data.split("|")[1]
+    excluded_form = _normalise_form_type(context.user_data.get("excluded_form_type", ""))
+    if excluded_form and _normalise_form_type(form_type) == excluded_form:
+        await query.answer("You already filed that WPBA for this case — choose a different type.", show_alert=True)
+        return AWAIT_FORM_CHOICE
 
     # Stale button guard — if case_text is gone, this button belongs to an old flow
     case_text = context.user_data.get("case_text", "")
@@ -3670,6 +3761,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
 
     context.user_data["chosen_form"] = form_type
+    context.user_data.pop("quick_improve_used", None)
 
     await query.edit_message_text(
         f"🧩 Reviewing {_form_display_name(form_type)} template…",
@@ -3761,6 +3853,16 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     schema = FORM_SCHEMAS.get(form_type, {})
     form_name = schema.get("name", form_type)
     form_emoji = FORM_EMOJIS.get(form_type, "📋")
+
+    missing_before_file = _pre_file_missing_fields(form_type, fields)
+    if missing_before_file:
+        await _safe_edit_text(
+            query.message,
+            _format_pre_file_missing_message(form_type, missing_before_file),
+            reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
+            parse_mode="Markdown",
+        )
+        return AWAIT_APPROVAL
 
     # Save local JSON backup
     import json as _json
@@ -3861,6 +3963,12 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     filled = result.get("filled", [])
     skipped = result.get("skipped", [])
     error = result.get("error")
+    required_labels = {field["label"] for field in _template_requirements(form_type)[0]}
+    required_keys = {field["key"] for field in _template_requirements(form_type)[0]}
+    skipped_required = [s for s in skipped if s in required_keys or s in required_labels]
+    if status == "success" and skipped_required:
+        status = "partial"
+        error = error or "Required fields were skipped during filing: " + ", ".join(str(s) for s in skipped_required[:4])
     proof_report = _format_proof_report(
         status,
         form_name,
@@ -3873,13 +3981,18 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     method = result.get("method", "deterministic")
 
     uncertain_save = status == "partial" and bool(error)
+    filed_case_text = context.user_data.get("case_text", "")
     if status in ("success", "partial") and not uncertain_save:
         context.user_data.clear()
+        if filed_case_text:
+            context.user_data["last_filed_case_text"] = filed_case_text
+            context.user_data["last_filed_form_type"] = form_type
 
     end_keyboard = _build_post_filing_keyboard(
         form_type,
         status,
         uncertain=uncertain_save,
+        same_case_available=bool(filed_case_text and status == "success" and not uncertain_save),
     )
 
     # Track usage for successful filings
@@ -4129,6 +4242,9 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
     """Improve the reflection only, keeping the rest of the draft stable."""
     query = update.callback_query
     await query.answer()
+    if query.data == "IMPROVE|used" or context.user_data.get("quick_improve_used"):
+        await query.answer("Already improved once — save, edit, or cancel this draft.", show_alert=False)
+        return AWAIT_APPROVAL
     await query.edit_message_reply_markup(reply_markup=None)
 
     draft = _load_draft(context)
@@ -4144,7 +4260,7 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
     if not reflection_key:
         await query.message.reply_text(
             "This form does not have a reflection field to improve. You can still save it as a draft or tap Edit.",
-            reply_markup=_build_approval_keyboard(),
+            reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
         )
         return AWAIT_APPROVAL
 
@@ -4718,7 +4834,7 @@ def build_application() -> Application:
                 MessageHandler(~filters.TEXT & ~filters.COMMAND, _setup_wrong_input),
             ],
             AWAIT_TRAINING_LEVEL: [CallbackQueryHandler(setup_training_level, pattern=r"^LEVEL\|")],
-            AWAIT_CURRICULUM: [CallbackQueryHandler(setup_curriculum, pattern=r"^SET_CURRICULUM\|")],
+            AWAIT_CURRICULUM: [CallbackQueryHandler(setup_curriculum, pattern=r"^SETUP_CURRICULUM\|")],
         },
         fallbacks=[CommandHandler("cancel", setup_cancel)],
         allow_reentry=True,

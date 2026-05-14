@@ -770,3 +770,49 @@ class TestFlowWalker:
 
         text = sim.get_last_text() or ''
         assert 'fit your case' in text.lower() or 'recommend' in text.lower() or 'matching forms' in text.lower()
+
+class TestRecentPortfolioFixes:
+    @pytest.mark.asyncio
+    async def test_setup_curriculum_completion_offers_file_first_case(self):
+        from bot import setup_curriculum
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('SETUP_CURRICULUM|2025')
+        context = sim._make_context()
+
+        with patch('bot.store_curriculum'):
+            result = await setup_curriculum(update, context)
+
+        assert result == ConversationHandler.END
+        assert 'setup complete' in sim.get_last_text().lower()
+        assert ('📋 File first case', 'ACTION|file') in sim.get_last_buttons()
+
+    def test_quick_improve_keyboard_can_be_locked_after_one_use(self):
+        from bot import _build_approval_keyboard
+
+        keyboard = _build_approval_keyboard(improved_once=True)
+        buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
+
+        assert ('Improved once ✅', 'IMPROVE|used') in buttons
+        assert ('✨ Quick improve', 'IMPROVE|reflection') not in buttons
+
+    def test_dops_pre_file_guard_blocks_blank_voice_draft(self):
+        from bot import _pre_file_missing_fields
+
+        missing = _pre_file_missing_fields('DOPS', {
+            'end_date': '14/5/2026',
+            'stage_of_training': 'Higher/ST4-ST6',
+        })
+
+        assert 'Procedure / procedural skill' in missing
+        assert 'Indication' in missing
+        assert 'Trainee Performance' in missing
+
+    def test_post_filing_keyboard_offers_same_case_another_wpba(self):
+        from bot import _build_post_filing_keyboard
+
+        keyboard = _build_post_filing_keyboard('CBD', 'success', same_case_available=True)
+        buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
+
+        assert ('🔁 Same case, another WPBA', 'ACTION|same_case_another') in buttons
+        assert ('📋 File new case', 'ACTION|file') in buttons

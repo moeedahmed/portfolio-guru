@@ -378,6 +378,9 @@ FORM_FIELD_MAP = {
         "date_of_event": "5391f8de-de63-4db3-9e08-baaa2a380cfe",
         "case_observed": "60772a97-92eb-4dbe-a813-6a5293be82f9",
         "stage_of_training": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
+        # Kaizen exposes one DOPS procedure dropdown; the extractor may call it
+        # either procedure_name (schema label) or procedural_skill (2025 field).
+        "procedure_name": "8def931e-3a00-43ac-8529-44cdaf34be2d",
         "procedural_skill": "8def931e-3a00-43ac-8529-44cdaf34be2d",
         "reflection": "610b5c60-99ac-4902-9407-22974d6a5799",
     },
