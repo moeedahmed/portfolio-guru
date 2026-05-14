@@ -625,6 +625,38 @@ TRAINING_LEVEL_FORMS = {
     ],
 }
 
+
+TRAINING_LEVEL_FORMS["ACCS"] = TRAINING_LEVEL_FORMS["ST3"]
+TRAINING_LEVEL_FORMS["INTERMEDIATE"] = TRAINING_LEVEL_FORMS["ST3"]
+TRAINING_LEVEL_FORMS["HIGHER"] = TRAINING_LEVEL_FORMS["ST6"]
+
+# Kaizen stage groups. Legacy ST3/ST4/ST5/ST6 values are still accepted for old profiles.
+TRAINING_LEVEL_LABELS = {
+    "ACCS": "ACCS (ST1–2)",
+    "INTERMEDIATE": "Intermediate (ST3)",
+    "HIGHER": "Higher (ST4–6)",
+    "SAS": "SAS / Fellow",
+    "ST3": "Intermediate (ST3)",
+    "ST4": "Higher (ST4–6)",
+    "ST5": "Higher (ST4–6)",
+    "ST6": "Higher (ST4–6)",
+}
+
+
+def _training_level_label(level: str | None) -> str:
+    return TRAINING_LEVEL_LABELS.get(level or "", "Unknown")
+
+
+def _default_allowed_forms_for_unknown_training() -> list[str]:
+    seen = set()
+    forms = []
+    for group_forms in TRAINING_LEVEL_FORMS.values():
+        for form in group_forms:
+            if form not in seen:
+                seen.add(form)
+                forms.append(form)
+    return forms
+
 # Category groupings for "See all forms" navigation
 FORM_CATEGORIES = {
     "🩺 Clinical": ["CBD", "DOPS", "MINI_CEX", "ACAT", "LAT", "ACAF", "STAT", "MSF", "QIAT", "JCF", "ESLE_ASSESS", "AUDIT"],
@@ -740,7 +772,7 @@ def _settings_view_components(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
     either a callback action or the free-text intent router."""
     curriculum = get_curriculum(user_id) or "2025"
     curriculum_label = "2021 Curriculum" if curriculum == "2021" else "2025 Update"
-    training_level = get_training_level(user_id) or "Not set"
+    training_level = _training_level_label(get_training_level(user_id))
     voice_profile = get_voice_profile(user_id)
     voice_status = "✅ Active" if voice_profile else "Not set"
 
@@ -983,9 +1015,9 @@ def _get_allowed_forms(user_id):
     training_level = get_training_level(user_id)
     curriculum = get_curriculum(user_id)
     if training_level:
-        allowed = TRAINING_LEVEL_FORMS.get(training_level, TRAINING_LEVEL_FORMS["ST5"])
+        allowed = TRAINING_LEVEL_FORMS.get(training_level, _default_allowed_forms_for_unknown_training())
     else:
-        allowed = TRAINING_LEVEL_FORMS["ST5"]
+        allowed = _default_allowed_forms_for_unknown_training()
     allowed = _filter_forms_by_curriculum(allowed, curriculum)
     # Only include forms that have UUIDs
     return [ft for ft in allowed if FORM_UUIDS.get(ft)]
@@ -1712,9 +1744,7 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data.pop("_setup_state_hint", None)
 
     # Do not make onboarding ask for training level before the user gets value.
-    # Default to broad higher-training coverage; users can refine this later in Settings.
-    if not get_training_level(user_id):
-        store_training_level(user_id, "ST5")
+    # Keep it Unknown until the user explicitly chooses a Kaizen stage group.
     if not get_curriculum(user_id):
         store_curriculum(user_id, "2025")
 
@@ -2152,7 +2182,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
 
             await query.message.edit_text(
                 f"📊 Your status\n\n"
-                f"🎓 Training level: {training_level or 'Not set'}\n"
+                f"🎓 Training level: {_training_level_label(training_level)}\n"
                 f"📚 Curriculum: {curriculum_label}\n"
                 f"⭐ Plan: {tier_label}\n"
                 f"📋 Usage: {usage_str}\n"
@@ -2250,15 +2280,14 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
 
     elif action == "change_level":
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("ST3", callback_data="SETLEVEL|ST3"),
-             InlineKeyboardButton("ST4", callback_data="SETLEVEL|ST4")],
-            [InlineKeyboardButton("ST5", callback_data="SETLEVEL|ST5"),
-             InlineKeyboardButton("ST6", callback_data="SETLEVEL|ST6")],
+            [InlineKeyboardButton("ACCS (ST1–2)", callback_data="SETLEVEL|ACCS")],
+            [InlineKeyboardButton("Intermediate (ST3)", callback_data="SETLEVEL|INTERMEDIATE")],
+            [InlineKeyboardButton("Higher (ST4–6)", callback_data="SETLEVEL|HIGHER")],
             [InlineKeyboardButton("SAS / Fellow", callback_data="SETLEVEL|SAS")],
             [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
         ])
         await query.message.edit_text(
-            "🎓 What's your training level?",
+            "🎓 Which Kaizen training stage applies to you?",
             reply_markup=keyboard,
         )
 
@@ -2728,7 +2757,7 @@ async def handle_set_level(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     user_id = update.effective_user.id
     store_training_level(user_id, level)
     await query.edit_message_text(
-        f"✅ Training level set to {level}.",
+        f"✅ Training level set to {_training_level_label(level)}.",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
         ]),

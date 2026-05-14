@@ -19,7 +19,7 @@ class UserProfile(SQLModel, table=True):
     __tablename__ = "userprofile"
     id: Optional[int] = Field(default=None, primary_key=True)
     telegram_user_id: int = Field(unique=True, index=True)
-    training_level: str = Field(default="ST5")   # ST3|ST4|ST5|ST6|SAS
+    training_level: str = Field(default="UNKNOWN")   # UNKNOWN|ACCS|INTERMEDIATE|HIGHER|SAS, or legacy ST3/ST4/ST5/ST6
     curriculum: Optional[str] = Field(default=None)  # "2025" or "2021"; None treated as "2025"
     voice_profile: Optional[str] = Field(default=None)  # JSON style profile from user examples
     voice_examples_count: int = Field(default=0)  # how many examples were used to build profile
@@ -73,7 +73,10 @@ def get_training_level(telegram_user_id: int) -> Optional[str]:
         profile = session.exec(
             select(UserProfile).where(UserProfile.telegram_user_id == telegram_user_id)
         ).first()
-        return profile.training_level if profile else None
+        
+        if not profile or profile.training_level == "UNKNOWN":
+            return None
+        return profile.training_level
 
 
 def store_voice_profile(telegram_user_id: int, profile_json: str, examples_count: int) -> None:

@@ -259,7 +259,7 @@ class TestFlowWalker:
             'ACTION|setup', 'ACTION|voice', 'ACTION|status', 'ACTION|delete',
             'INFO|what', 'FORM|show_all', 'FORM|disabled', 'FORM|switch_curriculum', 'FORM|back',
             'CANCEL|form', 'CANCEL|draft', 'APPROVE|draft', 'EDIT|draft',
-            'FIELD|date_of_encounter', 'SET_CURRICULUM|2025', 'LEVEL|ST5',
+            'FIELD|date_of_encounter', 'SET_CURRICULUM|2025', 'LEVEL|HIGHER',
             'VOICE|cancel', 'VOICE|remove', 'VOICE|rebuild', 'VOICE|more',
         ]
 
@@ -838,7 +838,34 @@ class TestOnboardingFrictionPatch:
 
         assert result == ConversationHandler.END
         store_credentials.assert_called_once()
-        store_training_level.assert_called_once_with(sim.user_id, 'ST5')
+        store_training_level.assert_not_called()
         store_curriculum.assert_called_once_with(sim.user_id, '2025')
         assert 'ready to file your first case' in sim.get_last_text().lower()
         assert ('📋 File first case', 'ACTION|file') in sim.get_last_buttons()
+
+
+class TestTrainingStageGroups:
+    def test_unknown_training_level_is_displayed_as_unknown(self):
+        from bot import _settings_view_components
+
+        with patch('bot.get_curriculum', return_value='2025'), \
+             patch('bot.get_training_level', return_value=None), \
+             patch('bot.get_voice_profile', return_value=None):
+            text, _ = _settings_view_components(123)
+
+        assert 'Training level: Unknown' in text
+
+    @pytest.mark.asyncio
+    async def test_training_level_options_use_kaizen_stage_groups(self):
+        from bot import handle_action_button
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('ACTION|change_level')
+        context = sim._make_context()
+
+        await handle_action_button(update, context)
+
+        buttons = sim.get_last_buttons()
+        assert ('ACCS (ST1–2)', 'SETLEVEL|ACCS') in buttons
+        assert ('Intermediate (ST3)', 'SETLEVEL|INTERMEDIATE') in buttons
+        assert ('Higher (ST4–6)', 'SETLEVEL|HIGHER') in buttons
