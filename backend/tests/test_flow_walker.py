@@ -853,7 +853,7 @@ class TestTrainingStageGroups:
              patch('bot.get_voice_profile', return_value=None):
             text, _ = _settings_view_components(123)
 
-        assert 'Training level: Unknown' in text
+        assert 'Training stage: Unknown' in text
 
     @pytest.mark.asyncio
     async def test_training_level_options_use_kaizen_stage_groups(self):
@@ -869,3 +869,16 @@ class TestTrainingStageGroups:
         assert ('ACCS (ST1–2)', 'SETLEVEL|ACCS') in buttons
         assert ('Intermediate (ST3)', 'SETLEVEL|INTERMEDIATE') in buttons
         assert ('Higher (ST4–6)', 'SETLEVEL|HIGHER') in buttons
+
+    def test_settings_layout_prioritises_voice_profile(self):
+        from bot import _settings_view_components
+
+        with patch('bot.get_curriculum', return_value='2025'), \
+             patch('bot.get_training_level', return_value=None), \
+             patch('bot.get_voice_profile', return_value=None):
+            text, keyboard = _settings_view_components(123)
+
+        buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
+        assert buttons[0] == ('⭐ Set up voice profile', 'ACTION|voice')
+        assert ('📚 Curriculum: 2025 Update', 'ACTION|change_curriculum') in buttons
+        assert 'Set this once so drafts sound like you' in text

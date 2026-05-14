@@ -774,23 +774,25 @@ def _settings_view_components(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
     curriculum_label = "2021 Curriculum" if curriculum == "2021" else "2025 Update"
     training_level = _training_level_label(get_training_level(user_id))
     voice_profile = get_voice_profile(user_id)
-    voice_status = "✅ Active" if voice_profile else "Not set"
+    voice_status = "✅ Active" if voice_profile else "⭐ Recommended — not set"
+    voice_cta = "⭐ Set up voice profile" if not voice_profile else "✅ Voice profile active / rebuild"
 
     buttons = [
-        [InlineKeyboardButton("📘 Switch to 2025 Update", callback_data="SET_CURRICULUM|2025"),
-         InlineKeyboardButton("📗 Switch to 2021 Curriculum", callback_data="SET_CURRICULUM|2021")],
-        [InlineKeyboardButton("🎓 Change training level", callback_data="ACTION|change_level")],
-        [InlineKeyboardButton("✍️ Voice profile" if not voice_profile else "🔄 Rebuild voice profile", callback_data="ACTION|voice"),
-         InlineKeyboardButton("🔗 Update credentials", callback_data="ACTION|setup")],
-        [InlineKeyboardButton("🗑️ Delete all my data", callback_data="ACTION|delete")],
-        [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu")],
+        [InlineKeyboardButton(voice_cta, callback_data="ACTION|voice")],
+        [InlineKeyboardButton(f"🎓 Training stage: {training_level}", callback_data="ACTION|change_level")],
+        [InlineKeyboardButton(f"📚 Curriculum: {curriculum_label}", callback_data="ACTION|change_curriculum")],
+        [InlineKeyboardButton("🔗 Update Kaizen login", callback_data="ACTION|setup")],
+        [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu"),
+         InlineKeyboardButton("🗑️ Delete data", callback_data="ACTION|delete")],
     ]
+    voice_hint = "Set this once so drafts sound like you." if not voice_profile else "Drafts are already styled to your voice."
     text = (
         f"⚙️ Your settings\n\n"
-        f"📚 Curriculum: {curriculum_label}\n"
-        f"🎓 Training level: {training_level}\n"
-        f"✍️ Voice profile: {voice_status}\n\n"
-        f"Tap to change any setting."
+        f"✍️ Voice profile: {voice_status}\n"
+        f"   {voice_hint}\n\n"
+        f"🎓 Training stage: {training_level}\n"
+        f"📚 Curriculum: {curriculum_label}\n\n"
+        f"Pick what you want to change."
     )
     return text, InlineKeyboardMarkup(buttons)
 
@@ -1838,14 +1840,14 @@ async def voice_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         return AWAIT_VOICE_EXAMPLES
 
     await update.message.reply_text(
-        "✍️ *Voice Profile Setup*\n\n"
-        "Send me 3-5 examples of portfolio entries you've written before. "
-        "These can be:\n"
-        "• Text messages (paste or type)\n"
-        "• Photos of handwritten/printed entries\n"
-        "• Voice notes describing your style\n\n"
-        "I'll analyse your writing style and use it to make all future drafts sound like you.\n\n"
-        "Send your first example now.",
+        "⭐ *Voice Profile Setup*\n\n"
+        "This is the personalisation step that makes Portfolio Guru sound like you, not a generic bot.\n\n"
+        "Send 3-5 examples of real portfolio writing. Best examples are reflections or WPBA text you would actually submit.\n\n"
+        "You can send:\n"
+        "• pasted text — best quality\n"
+        "• screenshots/photos — I’ll extract the text\n"
+        "• voice notes — useful, but pasted examples are cleaner\n\n"
+        "I’ll learn your tone, structure, reflection depth and phrases. Send the first example now.",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
@@ -1884,7 +1886,7 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
         if data == "VOICE|rebuild":
             context.user_data["voice_examples"] = []
             await query.edit_message_text(
-                "🔄 Starting fresh. Send me 3-5 examples of your portfolio writing.\n\n"
+                "🔄 Starting fresh. Send 3-5 examples of real portfolio writing. Pasted text is best; screenshots and voice notes also work.\n\n"
                 "Send your first example now."
             )
             return AWAIT_VOICE_EXAMPLES
@@ -1965,13 +1967,13 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
             [InlineKeyboardButton("➕ Add More", callback_data="VOICE|more")],
         ])
         await (msg or update.callback_query.message).reply_text(
-            f"Got {len(examples)} examples. You can send more (up to 5) or build your profile now.",
+            f"Got {len(examples)} examples. More examples make the voice match better — send up to 5, or build now.",
             reply_markup=keyboard,
         )
     else:
         remaining = 3 - len(examples)
         await (msg or update.callback_query.message).reply_text(
-            f"Got it — example {len(examples)} captured. Send {remaining} more (minimum 3 needed)."
+            f"Got it — example {len(examples)} captured. Send {remaining} more so I can build a reliable voice profile."
         )
 
     return AWAIT_VOICE_EXAMPLES
@@ -2098,12 +2100,9 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             )
         else:
             await query.message.reply_text(
-                "✍️ *Voice Profile Setup*\n\n"
-                "Send me 3-5 examples of portfolio entries you've written before.\n"
-                "• Text messages (paste or type)\n"
-                "• Photos of handwritten/printed entries\n"
-                "• Voice notes describing your style\n\n"
-                "Send your first example now.",
+                "⭐ *Voice Profile Setup*\n\n"
+                "Send 3-5 examples of real portfolio writing. Pasted text is best; screenshots and voice notes also work.\n\n"
+                "I’ll learn your tone, structure, reflection depth and phrases. Send your first example now.",
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
@@ -2277,6 +2276,16 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
     elif action == "settings":
         text, keyboard = _settings_view_components(user_id)
         await query.message.edit_text(text, reply_markup=keyboard)
+
+    elif action == "change_curriculum":
+        await query.message.edit_text(
+            "📚 Which curriculum should I use for form choices and links?",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("2025 Update", callback_data="SET_CURRICULUM|2025")],
+                [InlineKeyboardButton("2021 Curriculum", callback_data="SET_CURRICULUM|2021")],
+                [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
+            ]),
+        )
 
     elif action == "change_level":
         keyboard = InlineKeyboardMarkup([
