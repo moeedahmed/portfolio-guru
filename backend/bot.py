@@ -395,7 +395,7 @@ _KB_FILE_RESET = InlineKeyboardMarkup([[_BTN_FILE], [_BTN_RESET]])
 
 
 def _setup_needs_finishing(user_id: int) -> bool:
-    return not has_credentials(user_id) or not get_training_level(user_id)
+    return not has_credentials(user_id)
 
 
 def _build_next_step_keyboard(user_id: int, *, include_reset: bool = False) -> InlineKeyboardMarkup:
@@ -1709,20 +1709,23 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     store_credentials(user_id, username, password)
     context.user_data.pop("setup_username", None)
+    context.user_data.pop("_setup_state_hint", None)
 
-    # Ask training level before finishing setup
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("ST3", callback_data="LEVEL|ST3"),
-         InlineKeyboardButton("ST4", callback_data="LEVEL|ST4")],
-        [InlineKeyboardButton("ST5", callback_data="LEVEL|ST5"),
-         InlineKeyboardButton("ST6", callback_data="LEVEL|ST6")],
-        [InlineKeyboardButton("SAS / Fellow", callback_data="LEVEL|SAS")],
-    ])
+    # Do not make onboarding ask for training level before the user gets value.
+    # Default to broad higher-training coverage; users can refine this later in Settings.
+    if not get_training_level(user_id):
+        store_training_level(user_id, "ST5")
+    if not get_curriculum(user_id):
+        store_curriculum(user_id, "2025")
+
     await progress_msg.edit_text(
-        "Kaizen connected ✅\n\nOne more thing — what's your training level? I use it to show the forms that actually apply to you.",
-        reply_markup=keyboard
+        "Kaizen connected ✅\n\nYou’re ready to file your first case. You can change training level or curriculum later in Settings.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📋 File first case", callback_data="ACTION|file")],
+            [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")],
+        ]),
     )
-    return AWAIT_TRAINING_LEVEL
+    return ConversationHandler.END
 
 
 async def setup_training_level(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:

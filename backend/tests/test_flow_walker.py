@@ -816,3 +816,29 @@ class TestRecentPortfolioFixes:
 
         assert ('🔁 Same case, another WPBA', 'ACTION|same_case_another') in buttons
         assert ('📋 File new case', 'ACTION|file') in buttons
+
+class TestOnboardingFrictionPatch:
+    @pytest.mark.asyncio
+    async def test_setup_password_skips_training_level_and_goes_to_file_first_case(self):
+        from bot import setup_password
+
+        sim = BotSimulator()
+        update = sim._make_text_update('safe-password')
+        update.message.delete = AsyncMock()
+        context = sim._make_context()
+        context.user_data['setup_username'] = 'doctor@example.com'
+
+        with patch('bot._test_kaizen_login', new_callable=AsyncMock, return_value=True), \
+             patch('bot.store_credentials') as store_credentials, \
+             patch('bot.get_training_level', return_value=None), \
+             patch('bot.store_training_level') as store_training_level, \
+             patch('bot.get_curriculum', return_value=None), \
+             patch('bot.store_curriculum') as store_curriculum:
+            result = await setup_password(update, context)
+
+        assert result == ConversationHandler.END
+        store_credentials.assert_called_once()
+        store_training_level.assert_called_once_with(sim.user_id, 'ST5')
+        store_curriculum.assert_called_once_with(sim.user_id, '2025')
+        assert 'ready to file your first case' in sim.get_last_text().lower()
+        assert ('📋 File first case', 'ACTION|file') in sim.get_last_buttons()
