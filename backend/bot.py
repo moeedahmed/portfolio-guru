@@ -1870,6 +1870,7 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
 
         if data == "VOICE|cancel":
             context.user_data.pop("voice_examples", None)
+            context.user_data.pop("pending_voice_profile", None)
             await query.edit_message_text("Voice profile setup closed.")
             await query.message.reply_text(
                 _cancelled_next_step_text(update.effective_user.id, "Voice profile setup cancelled"),
@@ -1877,14 +1878,51 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
             )
             return ConversationHandler.END
 
+        if data == "VOICE|preview_accept":
+            profile_json = context.user_data.get("pending_voice_profile")
+            if not profile_json:
+                await query.edit_message_text(
+                    "⚠️ That preview has expired. Please rebuild your voice profile.",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🔄 Rebuild Profile", callback_data="ACTION|voice")],
+                    ])
+                )
+                context.user_data.pop("voice_examples", None)
+                return ConversationHandler.END
+
+            store_voice_profile(update.effective_user.id, profile_json, len(examples))
+            context.user_data.pop("pending_voice_profile", None)
+            context.user_data.pop("voice_examples", None)
+            await query.edit_message_text(
+                "✅ Voice profile activated. All future drafts will match your writing voice.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📋 File a case", callback_data="ACTION|file"),
+                     InlineKeyboardButton("🔄 Rebuild", callback_data="ACTION|voice")],
+                ])
+            )
+            return ConversationHandler.END
+
+        if data == "VOICE|preview_reject":
+            context.user_data.pop("pending_voice_profile", None)
+            context.user_data.pop("voice_examples", None)
+            await query.edit_message_text(
+                "No problem — let's try again with different examples.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|voice")],
+                ])
+            )
+            return ConversationHandler.END
+
         if data == "VOICE|remove":
             clear_voice_profile(update.effective_user.id)
             context.user_data.pop("voice_examples", None)
+            context.user_data.pop("pending_voice_profile", None)
             await query.edit_message_text("🗑️ Voice profile removed. Drafts will use standard clinical style.")
             return ConversationHandler.END
 
         if data == "VOICE|rebuild":
             context.user_data["voice_examples"] = []
+            context.user_data.pop("pending_voice_profile", None)
             await query.edit_message_text(
                 "🔄 Starting fresh. Send 3-5 examples of real portfolio writing. Pasted text is best; screenshots and voice notes also work.\n\n"
                 "Send your first example now."
@@ -1979,6 +2017,26 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
     return AWAIT_VOICE_EXAMPLES
 
 
+async def _generate_voice_preview(profile_json: str) -> str:
+    """Generate a sample draft entry using the voice profile for preview."""
+    from voice_profile import build_voice_instruction
+    voice_block = build_voice_instruction(profile_json)
+
+    generic_case = "50-year-old male with chest pain and SOB. ECG showed anterior STEMI. Gave aspirin, ticagrelor. Sent to primary PCI."
+
+    prompt = f"""Using the following writing style guidance, write a realistic CBD-style portfolio entry for the case below.
+
+{voice_block}
+
+CASE:
+{generic_case}
+
+Write a short portfolio entry (2-3 paragraphs) in this doctor's voice. Include a brief clinical summary and a reflective paragraph. Do not wrap in JSON — just the entry text."""
+
+    from extractor import _generate
+    return await _generate(prompt)
+
+
 async def _build_voice_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Build the voice profile from collected examples."""
     examples = context.user_data.get("voice_examples", [])
@@ -1991,23 +2049,23 @@ async def _build_voice_profile(update: Update, context: ContextTypes.DEFAULT_TYP
         profile_json = await asyncio.wait_for(
             generate_voice_profile(examples), timeout=30
         )
-        store_voice_profile(update.effective_user.id, profile_json, len(examples))
-
-        import json
-        profile = json.loads(profile_json)
-        summary = profile.get("voice_summary", "Profile generated successfully.")
+        context.user_data["pending_voice_profile"] = profile_json
+        sample_draft = await _generate_voice_preview(profile_json)
 
         await ack.edit_text(
-            f"✅ Voice profile created from {len(examples)} examples.\n\n"
-            f"Your style: {summary}\n\n"
-            "All future drafts will match your writing voice.",
+            f"🔍 Here's a sample draft using your voice profile:\n\n"
+            f"---\n{sample_draft}\n---\n\n"
+            f"Does this sound like you?",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📋 File a case", callback_data="ACTION|file"),
-                 InlineKeyboardButton("🔄 Rebuild", callback_data="ACTION|voice")],
+                [InlineKeyboardButton("✅ Looks like me — Activate", callback_data="VOICE|preview_accept")],
+                [InlineKeyboardButton("❌ Not quite — try again", callback_data="VOICE|preview_reject")],
             ])
         )
+        return AWAIT_VOICE_EXAMPLES
     except asyncio.TimeoutError:
         logger.warning("Voice profile generation timed out (30s)")
+        context.user_data.pop("pending_voice_profile", None)
+        context.user_data.pop("voice_examples", None)
         await ack.edit_text(
             "⚠️ Analysis took too long — please try again. This usually works on a second attempt.",
             reply_markup=InlineKeyboardMarkup([
@@ -2016,6 +2074,8 @@ async def _build_voice_profile(update: Update, context: ContextTypes.DEFAULT_TYP
         )
     except Exception as e:
         logger.error(f"Voice profile generation failed: {e}", exc_info=True)
+        context.user_data.pop("pending_voice_profile", None)
+        context.user_data.pop("voice_examples", None)
         await ack.edit_text(
             "⚠️ Couldn't analyse your writing style. Try again or send different examples.",
             reply_markup=InlineKeyboardMarkup([
@@ -2023,7 +2083,6 @@ async def _build_voice_profile(update: Update, context: ContextTypes.DEFAULT_TYP
             ])
         )
 
-    context.user_data.pop("voice_examples", None)
     return ConversationHandler.END
 
 
