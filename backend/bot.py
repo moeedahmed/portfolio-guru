@@ -2171,7 +2171,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             curriculum = get_curriculum(user_id) or "2025"
             curriculum_label = "2021 Curriculum" if curriculum == "2021" else "2025 Update"
             tier = await get_user_tier(user_id)
-            tier_label = {"free": "Free", "pro": "Pro", "pro_plus": "Pro+"}.get(tier, "Free")
+            tier_label = {"free": "Free", "pro": "Pro", "pro_plus": "Unlimited"}.get(tier, "Free")
             used = await get_cases_this_month(user_id)
             from usage import TIER_LIMITS
             limit = TIER_LIMITS.get(tier, 10)
@@ -2242,8 +2242,8 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         tier = await get_user_tier(user_id)
         if tier != "pro_plus":
             await query.message.reply_text(
-                "📊 ARCP Health is a Pro+ feature.\n\nUpgrade to get gap analysis and readiness scoring.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⭐⭐ Upgrade to Pro+", callback_data="UPGRADE|pro_plus")]]),
+                "📊 ARCP Health is included in Portfolio Guru Unlimited.\n\nUpgrade to get gap analysis and readiness scoring.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")]]),
             )
             return ConversationHandler.END
         await query.message.chat.send_action(constants.ChatAction.TYPING)
@@ -2521,7 +2521,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 ADMIN_USER_ID = 6912896590
 
-TIER_LABELS = {"free": "Free", "pro": "Pro", "pro_plus": "Pro + Review"}
+TIER_LABELS = {"free": "Free", "pro": "Pro", "pro_plus": "Unlimited"}
 
 
 def _upgrade_buttons(current_tier: str) -> list:
@@ -2530,11 +2530,11 @@ def _upgrade_buttons(current_tier: str) -> list:
     if current_tier == "free":
         buttons.append([
             InlineKeyboardButton("⭐ Upgrade to Pro", callback_data="UPGRADE|pro"),
-            InlineKeyboardButton("⭐⭐ Upgrade to Pro+", callback_data="UPGRADE|pro_plus"),
+            InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus"),
         ])
     elif current_tier == "pro":
         buttons.append([
-            InlineKeyboardButton("⭐⭐ Upgrade to Pro+", callback_data="UPGRADE|pro_plus"),
+            InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus"),
         ])
     return buttons
 
@@ -2548,7 +2548,7 @@ async def upgrade_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     limit_str = "unlimited" if limit == -1 else str(limit)
 
     if tier == "pro_plus":
-        await update.message.reply_text("You're on the top plan! 🎉\n\nPro + Review — unlimited cases, full AI chain, draft review, and portfolio health.")
+        await update.message.reply_text("You're on the top plan! 🎉\n\nPortfolio Guru Unlimited — unlimited Kaizen WPBA filing, AI extraction, draft review, auto-filing, and monthly portfolio health checks.")
         return ConversationHandler.END
 
     text = f"📊 Your plan: {TIER_LABELS.get(tier, tier)} ({used}/{limit_str} cases used this month)\n\n"
@@ -2562,11 +2562,11 @@ async def upgrade_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "• Draft review before filing\n\n"
         )
     text += (
-        "⭐⭐ *Pro + Review* — £9.99/month\n"
-        "• Unlimited cases\n"
-        "• Everything in Pro\n"
-        "• Detailed WPBA feedback\n"
-        "• Monthly portfolio health summary\n"
+        "⭐⭐ *Portfolio Guru Unlimited* — £9.99/month\n"
+        "• Unlimited Kaizen WPBA filing\n"
+        "• AI extraction and draft review\n"
+        "• Auto-filing to Kaizen\n"
+        "• Monthly portfolio health checks\n"
     )
 
     await update.message.reply_text(
@@ -2583,7 +2583,7 @@ async def handle_upgrade_button(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
 
     tier = query.data.split("|")[1]  # "pro" or "pro_plus"
-    tier_label = "Pro" if tier == "pro" else "Pro + Review"
+    tier_label = "Pro" if tier == "pro" else "Portfolio Guru Unlimited"
 
     try:
         from stripe_handler import create_checkout_session
@@ -2633,14 +2633,14 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Handle /health — analyse portfolio health against ARCP requirements."""
     user_id = update.effective_user.id
 
-    # Gate: Pro+ only
+    # Gate: Unlimited only
     tier = await get_user_tier(user_id)
     if tier != "pro_plus":
         await update.message.reply_text(
-            "📊 Portfolio Health is a Pro + Review feature.\n\n"
+            "📊 Portfolio Health is included in Portfolio Guru Unlimited.\n\n"
             "Upgrade to get monthly ARCP readiness analysis.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⭐⭐ Upgrade to Pro+", callback_data="UPGRADE|pro_plus")],
+                [InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
             ]),
         )
         return ConversationHandler.END
@@ -4043,7 +4043,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         try:
             await record_case_filed(user_id, form_type, "filed")
             allowed, used, limit, tier = await check_can_file(user_id)
-            tier_label = {"free": "Free tier", "pro": "Pro", "pro_plus": "Pro+"}.get(tier, tier)
+            tier_label = {"free": "Free tier", "pro": "Pro", "pro_plus": "Unlimited"}.get(tier, tier)
             if limit == -1:
                 usage_line = f"\n\n📊 {used} cases this month ({tier_label})"
             else:
