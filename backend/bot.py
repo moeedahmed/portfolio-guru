@@ -2925,7 +2925,17 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
         )
         return AWAIT_FORM_CHOICE
 
-    rationale_lines = [f"• {_form_display_name(r.form_type)} — {_safe_markdown_text(r.rationale)}" for r in recommendations if r.uuid]
+    def _short_rationale(text: str, max_words: int = 12) -> str:
+        clean = _safe_markdown_text(text or "").strip()
+        words = clean.split()
+        if len(words) <= max_words:
+            return clean
+        return " ".join(words[:max_words]).rstrip(",;:") + "…"
+
+    rationale_lines = [
+        f"• *{_form_display_name(r.form_type)}* — {_short_rationale(r.rationale)}"
+        for r in recommendations if r.uuid
+    ]
     rationale_text = "\n".join(rationale_lines) if rationale_lines else "• Case-Based Discussion — Clinical case discussion."
 
     status_msg = context.user_data.pop("status_msg_id", None)

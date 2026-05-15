@@ -71,8 +71,8 @@
     'text': '''
       I think these forms fit your case:
       
-      • Case-Based Discussion — Best fit for a reflective clinical case.
-      • Acute Care Assessment Tool — The case spans multiple patients across a shift.
+      • *Case-Based Discussion* — Best fit for a reflective clinical case.
+      • *Acute Care Assessment Tool* — The case spans multiple patients across a shift.
       
       Pick one and I'll draft it. If a required Kaizen field is missing, I'll ask for just that detail.
     ''',
