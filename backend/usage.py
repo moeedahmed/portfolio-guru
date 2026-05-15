@@ -11,10 +11,13 @@ _DEFAULT_DB = os.path.expanduser("~/.openclaw/data/portfolio-guru/usage.db")
 DB_PATH = os.environ.get("USAGE_DB_PATH", _DEFAULT_DB)
 
 # Tier limits
+# - free: 5 cases/month (taste-only — gives the user enough to feel the magic)
+# - pro: legacy tier (100/mo). No new sign-ups; existing subscribers honoured.
+# - pro_plus: Unlimited, the only paid tier currently sold (£9.99/mo).
 TIER_LIMITS = {
-    "free": 10,
+    "free": 5,
     "pro": 100,
-    "pro_plus": -1,  # unlimited
+    "pro_plus": -1,
 }
 
 

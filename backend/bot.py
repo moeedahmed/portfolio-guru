@@ -2693,18 +2693,16 @@ TIER_LABELS = {"free": "Free", "pro": "Pro", "pro_plus": "Unlimited"}
 
 
 def _upgrade_buttons(current_tier: str) -> list:
-    """Build upgrade option buttons based on current tier."""
-    buttons = []
-    if current_tier == "free":
-        buttons.append([
-            InlineKeyboardButton("⭐ Upgrade to Pro", callback_data="UPGRADE|pro"),
-            InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus"),
-        ])
-    elif current_tier == "pro":
-        buttons.append([
-            InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus"),
-        ])
-    return buttons
+    """Build upgrade option buttons based on current tier.
+
+    Single paid tier: Unlimited. The legacy Pro tier is no longer offered to
+    new users, so anyone below Unlimited sees one upgrade target.
+    """
+    if current_tier == "pro_plus":
+        return []
+    return [
+        [InlineKeyboardButton("⭐⭐ Upgrade to Unlimited (£9.99/mo)", callback_data="UPGRADE|pro_plus")],
+    ]
 
 
 async def upgrade_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -2712,7 +2710,7 @@ async def upgrade_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user_id = update.effective_user.id
     tier = await get_user_tier(user_id)
     used = await get_cases_this_month(user_id)
-    limit = TIER_LIMITS.get(tier, 10)
+    limit = TIER_LIMITS.get(tier, 5)
     limit_str = "unlimited" if limit == -1 else str(limit)
 
     _flow_done(context, "upgrade")  # fresh start — drop any stale anchor
@@ -2720,28 +2718,20 @@ async def upgrade_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if tier == "pro_plus":
         await _flow_msg(
             update, context,
-            "You're on the top plan! 🎉\n\nPortfolio Guru Unlimited — unlimited Kaizen WPBA filing, AI extraction, draft review, auto-filing, and monthly portfolio health checks.",
+            "You're on the top plan! 🎉\n\nPortfolio Guru Unlimited — unlimited Kaizen WPBA filing, AI extraction, draft review, auto-filing, ARCP health, and unsigned-ticket scanning.",
             flow_key="upgrade",
         )
         _flow_done(context, "upgrade")
         return ConversationHandler.END
 
     text = f"📊 Your plan: {TIER_LABELS.get(tier, tier)} ({used}/{limit_str} cases used this month)\n\n"
-    text += "Upgrade options:\n\n"
-
-    if tier == "free":
-        text += (
-            "⭐ *Pro* — £5.99/month\n"
-            "• 100 cases/month\n"
-            "• Full AI model chain\n"
-            "• Draft review before filing\n\n"
-        )
     text += (
         "⭐⭐ *Portfolio Guru Unlimited* — £9.99/month\n"
         "• Unlimited Kaizen WPBA filing\n"
-        "• AI extraction and draft review\n"
-        "• Auto-filing to Kaizen\n"
-        "• Monthly portfolio health checks\n"
+        "• Draft Review (AI critique before filing)\n"
+        "• ARCP Health — gap analysis & readiness scoring\n"
+        "• Unsigned ticket scanning with chase guardrails\n"
+        "• Bulk filing\n"
     )
 
     await _flow_msg(
@@ -2759,8 +2749,12 @@ async def handle_upgrade_button(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer()
 
-    tier = query.data.split("|")[1]  # "pro" or "pro_plus"
-    tier_label = "Pro" if tier == "pro" else "Portfolio Guru Unlimited"
+    tier = query.data.split("|")[1]  # "pro" (legacy) or "pro_plus"
+    # Pro tier is no longer sold. Redirect any stale UPGRADE|pro taps from old
+    # chat history to the single current paid tier.
+    if tier == "pro":
+        tier = "pro_plus"
+    tier_label = "Portfolio Guru Unlimited"
 
     try:
         from stripe_handler import create_checkout_session
@@ -3624,7 +3618,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if not allowed:
         await update.message.reply_text(
             f"📊 You've used all {limit} free cases this month.\n\n"
-            "Upgrade to Pro for 100 cases/month (£5.99) or wait until next month.",
+            "Upgrade to Portfolio Guru Unlimited (£9.99/mo) for unlimited filing and premium features — or wait until next month.",
             reply_markup=InlineKeyboardMarkup(_upgrade_buttons(tier)),
         )
         return ConversationHandler.END
@@ -4411,14 +4405,14 @@ async def handle_review_draft(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     await query.answer()
 
-    # Gate: Pro and above
+    # Gate: Unlimited (and legacy Pro subscribers, who already paid for it).
     tier = await get_user_tier(update.effective_user.id)
     if tier == "free":
         await query.message.reply_text(
-            "📝 Draft Review is a Pro feature.\n\n"
-            "Upgrade to unlock AI review of your entries before filing.",
+            "📝 Draft Review is included in Portfolio Guru Unlimited.\n\n"
+            "Upgrade to unlock AI critique of your entries before filing — catches missed reflections, weak reasoning, and curriculum mismatches.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⭐ Upgrade to Pro", callback_data="UPGRADE|pro")],
+                [InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
             ]),
         )
         return AWAIT_APPROVAL
