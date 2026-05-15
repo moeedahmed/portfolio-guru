@@ -343,7 +343,31 @@ def _get_client():
     return _client
 
 
-def extract_explicit_form_type(text: str) -> str | None:
+_REUSE_SIGNALS = (
+    "same case", "same one", "previous case", "earlier case", "last case",
+    "do this as", "do it as", "file as", "file it as", "log this as", "log it as",
+    "make this a", "make it a", "make this an", "make it an",
+    "another wpba", "another form", "another type", "different form", "different type",
+    "reuse", "redo as", "redo this as", "use the same", "use this for", "use that for",
+    "also as", "also do", "also file", "also log",
+)
+
+
+def is_reuse_request(text: str) -> bool:
+    """Cheap heuristic: does this message look like 'reuse the last case as X'?
+
+    Should be paired with a `last_filed_case_text` existence check by the caller
+    before routing. Keeps the gate cheap (no LLM call) so we don't slow down
+    every clinical case input. Returns False for long messages (>200 chars)
+    since a real reuse instruction is typically short.
+    """
+    text_lower = text.lower().strip()
+    if not text_lower or len(text_lower) > 200:
+        return False
+    return any(signal in text_lower for signal in _REUSE_SIGNALS)
+
+
+def extract_explicit_form_type(text: str, *, require_intent: bool = True) -> str | None:
     """Check if the user is EXPLICITLY REQUESTING a specific form type.
 
     Two-tier match so a clear directive like "Procedure log for ES Block"
@@ -356,6 +380,11 @@ def extract_explicit_form_type(text: str) -> str | None:
     2. SECONDARY keys (e.g. "stat", "cbd") are short codes that only count
        when (a) an intent phrase is present and (b) the code appears as a
        whole word (word boundary), not as part of "statin"/"status"/etc.
+
+    When `require_intent=False`, the intent phrase gate on SECONDARY codes is
+    skipped — callers that have already established intent (e.g. the reuse-
+    request handler) can use the relaxed match without false positives from
+    unrelated text. Word-boundary check still applies.
 
     Returns the short form key (e.g. "CBD", "DOPS") or None.
     """
@@ -400,9 +429,10 @@ def extract_explicit_form_type(text: str) -> str | None:
         "make this a", "treat this as", "this is a", "record as",
         "add as", "add this as", "add this case as", "add this case to",
     ]
-    has_intent = any(phrase in text_lower for phrase in intent_phrases)
-    if not has_intent:
-        return None
+    if require_intent:
+        has_intent = any(phrase in text_lower for phrase in intent_phrases)
+        if not has_intent:
+            return None
 
     secondary_codes = {
         "CBD":         ["cbd"],
@@ -1308,10 +1338,13 @@ Field definitions:
 
 ===== REQUIRED vs OPTIONAL FIELDS =====
 
-Fields marked required: yes MUST be filled. If the case does not explicitly mention the needed
-information, infer it from context where reasonable (e.g. clinical setting from the department
-mentioned, stage of training from the trainee's grade if stated). If inference is not possible,
-write a placeholder that will make the field reviewable rather than leaving it blank.
+Fields marked required: yes SHOULD be filled from the case where possible. You may infer
+ONLY when the inference is directly supported by the doctor's words (e.g. clinical setting
+from the department they named, stage of training if their grade is stated). If the case
+genuinely does not provide enough to fill a required field, LEAVE IT BLANK ("" or []) —
+the user will see the gap and complete it themselves in Kaizen. DO NOT write a placeholder,
+DO NOT guess plausible content, DO NOT pad with generic clinical language to make the field
+look complete. A blank required field is far better than a fabricated one.
 
 Fields marked required: no are OPTIONAL. Fill them ONLY if the case genuinely provides
 information that belongs in that field. If a field is optional and the case does not provide

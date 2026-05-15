@@ -775,11 +775,13 @@ class TestFlowWalker:
         from bot import handle_case_input
 
         sim = BotSimulator()
-        update = sim._make_text_update('quick chest pain note')
+        # Needs enough content to clear the anti-fabrication gate
+        # (_looks_like_clinical_case requires >= 6 words).
+        update = sim._make_text_update('quick chest pain note: 45M ED, ACS managed')
         context = sim._make_context()
 
         with patch('bot.has_credentials', return_value=True), \
-             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 5, 'free'))), \
              patch('bot.classify_menu_intent', new=AsyncMock(return_value='ambiguous')), \
              patch('bot.classify_intent', new=AsyncMock(return_value='new_case')), \
              patch('bot.get_training_level', return_value='ST5'), \
@@ -789,6 +791,64 @@ class TestFlowWalker:
 
         text = sim.get_last_text() or ''
         assert 'fit your case' in text.lower() or 'recommend' in text.lower() or 'matching forms' in text.lower()
+
+    @pytest.mark.asyncio
+    async def test_reuse_request_routes_to_last_filed_case_not_extraction(self):
+        """A typed 'use the same case for DOPS' must reuse the previously filed
+        case_text and never feed the instruction to the extractor — otherwise
+        the LLM fabricates clinical fields. See feedback-no-fabrication memory."""
+        from bot import handle_case_input
+
+        sim = BotSimulator()
+        update = sim._make_text_update('use the same case for DOPS')
+        context = sim._make_context()
+        # Simulate a prior successful filing.
+        context.user_data['last_filed_case_text'] = (
+            '45M with chest pain, troponin positive, managed as ACS. Reflected '
+            'on early ECG recognition and escalation.'
+        )
+        context.user_data['last_filed_form_type'] = 'CBD'
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 5, 'free'))), \
+             patch('bot.recommend_form_types', new=AsyncMock(return_value=[])) as recommend, \
+             patch('bot._analyse_selected_form', new=AsyncMock()) as analyse:
+            await handle_case_input(update, context)
+
+        # Recommender must NOT be called — explicit form (DOPS) was named.
+        recommend.assert_not_awaited()
+        # The case_text in user_data must be the previously filed case, NOT the instruction.
+        assert 'chest pain' in (context.user_data.get('case_text') or '').lower()
+        assert 'use the same case' not in (context.user_data.get('case_text') or '').lower()
+        # Form is pre-selected to DOPS.
+        assert context.user_data.get('chosen_form') == 'DOPS'
+
+    @pytest.mark.asyncio
+    async def test_thin_input_blocked_before_extraction(self):
+        """A too-short non-clinical message routed into _process_case_text
+        must be blocked by the anti-fabrication gate — no recommender, no
+        extractor calls, and the user is asked for real clinical detail."""
+        from bot import _process_case_text
+
+        sim = BotSimulator()
+        update = sim._make_text_update('please file a case')
+        context = sim._make_context()
+        user_id = sim.user_id
+
+        with patch('bot.recommend_form_types', new=AsyncMock()) as recommend, \
+             patch('bot._analyse_selected_form', new=AsyncMock()) as analyse:
+            result = await _process_case_text(
+                update.message, context, user_id, 'please file a case', 'text'
+            )
+
+        assert result == ConversationHandler.END
+        # Neither the recommender nor the extractor should fire — the input is
+        # below the minimum-content threshold.
+        recommend.assert_not_awaited()
+        analyse.assert_not_awaited()
+        text = (sim.get_last_text() or '').lower()
+        assert 'clinical detail' in text or 'what happened' in text
+
 
 class TestRecentPortfolioFixes:
     @pytest.mark.asyncio

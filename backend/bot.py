@@ -13,7 +13,7 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler, PicklePersistence,
 )
 from store import store_credentials, get_credentials, has_credentials, init
-from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, review_draft, analyse_portfolio_health, summarise_recent_activity, generate_nudge_copy, extract_field_updates, compose_filing_recovery_copy, combine_case_inputs
+from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, is_reuse_request, review_draft, analyse_portfolio_health, summarise_recent_activity, generate_nudge_copy, extract_field_updates, compose_filing_recovery_copy, combine_case_inputs
 from usage import record_case_filed, get_cases_this_month, check_can_file, get_user_tier, set_user_tier, get_case_history, TIER_LIMITS, get_all_active_users, get_cases_this_week
 from filer_router import route_filing
 from kaizen_form_filer import FORM_UUIDS
@@ -1334,6 +1334,13 @@ def _is_missing_field_value(value) -> bool:
     return False
 
 
+# Marker rendered when a required field has no content. Surfacing this in the
+# preview is part of the anti-fabrication strategy: the user sees exactly
+# what's missing rather than a falsely-complete-looking draft. See
+# `feedback-no-fabrication` memory.
+_MISSING_MARKER = "_— needs your detail_"
+
+
 def _summarise_field_value(value) -> str:
     if isinstance(value, list):
         return ", ".join(str(item) for item in value if str(item).strip())
@@ -1520,26 +1527,36 @@ def _format_curriculum_hierarchy(curriculum_links, key_capabilities) -> str:
 
 
 def _format_cbd_draft(cbd_data, reason: str | None = None) -> str:
-    """Format CBD data as a preview message."""
+    """Format CBD data as a preview message. Empty required fields are
+    rendered with an explicit "needs your detail" marker so the user never
+    sees a falsely-complete-looking draft."""
+    def display(value):
+        return _MISSING_MARKER if _is_missing_field_value(value) else str(value).strip()
+
     date_str = cbd_data.date_of_encounter
-    try:
-        from datetime import datetime
-        dt = datetime.strptime(date_str, "%Y-%m-%d")
-        date_display = dt.strftime("%-d %b %Y")
-    except (ValueError, AttributeError):
-        date_display = date_str
+    if _is_missing_field_value(date_str):
+        date_display = _MISSING_MARKER
+    else:
+        try:
+            from datetime import datetime
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+            date_display = dt.strftime("%-d %b %Y")
+        except (ValueError, AttributeError):
+            date_display = date_str
 
     curriculum = _format_curriculum_hierarchy(cbd_data.curriculum_links, cbd_data.key_capabilities)
-    lines = _draft_header("CBD draft", reason, cbd_data)
+    if not curriculum.strip():
+        curriculum = _MISSING_MARKER
 
+    lines = _draft_header("CBD draft", reason, cbd_data)
     lines.extend([
         f"📅 *Date:* {date_display}",
-        f"🏥 *Setting:* {cbd_data.clinical_setting}",
-        f"🩺 *Presentation:* {cbd_data.patient_presentation}",
+        f"🏥 *Setting:* {display(cbd_data.clinical_setting)}",
+        f"🩺 *Presentation:* {display(cbd_data.patient_presentation)}",
         "",
-        f"🗒️ *Case narrative:*\n{cbd_data.clinical_reasoning}",
+        f"🗒️ *Case narrative:*\n{display(cbd_data.clinical_reasoning)}",
         "",
-        f"💭 *Reflection:*\n{cbd_data.reflection}",
+        f"💭 *Reflection:*\n{display(cbd_data.reflection)}",
         "",
         f"📚 *Curriculum:*\n{curriculum}",
     ])
@@ -1559,13 +1576,22 @@ def _format_generic_draft(draft: FormDraft, reason: str | None = None) -> str:
     for field in fields:
         key = field["key"]
         field_type = field["type"]
+        is_required = field.get("required", False)
 
         # These fields are rendered via the curriculum hierarchy — never render separately
         if key in ("key_capabilities", "curriculum_section", "section_of_curriculum"):
             continue
 
         value = draft.fields.get(key)
-        if not value:
+        empty = _is_missing_field_value(value)
+        if empty and not is_required:
+            # Optional + empty: skip silently. Required + empty: render the
+            # missing-marker so the user knows what to complete.
+            continue
+        if empty:
+            label = field["label"]
+            fe = FIELD_EMOJIS.get(key, "📌")
+            lines.append(f"{fe} *{label}:* {_MISSING_MARKER}\n")
             continue
         label = field["label"]
 
@@ -2929,6 +2955,20 @@ async def handle_set_level(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 # === CALLBACK QUERY HANDLERS ===
 
+_MIN_CASE_WORDS = 6
+
+
+def _looks_like_clinical_case(case_text: str) -> bool:
+    """Deterministic gate: does the input have enough content to plausibly
+    contain clinical detail? Used as a last-line check before extraction so
+    the LLM never sees a one-word or fragmented input that would force it
+    to invent fields. False negatives are tolerable — the user gets asked
+    for more detail rather than a fabricated draft."""
+    if not case_text or not case_text.strip():
+        return False
+    return len(case_text.split()) >= _MIN_CASE_WORDS
+
+
 async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: int, case_text: str, form_type: str):
     """Create an explicit-only draft snapshot for the selected form."""
     # Set tier for provider chain gating
@@ -2963,8 +3003,65 @@ async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: in
     return draft
 
 
+async def _handle_reuse_request(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int, raw_text: str) -> int:
+    """Route a 'use the same case for X' message through the same flow as the
+    🔁 button. We re-extract from last_filed_case_text rather than from the
+    user's instruction — otherwise the extractor would hallucinate clinical
+    content to fill the WPBA fields. See `feedback-no-fabrication` memory."""
+    last_case = context.user_data.get("last_filed_case_text", "")
+    if not last_case:
+        await update.message.reply_text(
+            "I don't have a previous case to reuse here. Send the case details "
+            "(text, voice, photo, or document) and I'll draft it for you."
+        )
+        return ConversationHandler.END
+
+    filed_form = context.user_data.get("last_filed_form_type", "")
+    # The reuse phrase IS the intent — match form codes without the standard
+    # intent-phrase gate so "use the same case for DOPS" picks up DOPS.
+    explicit_form = extract_explicit_form_type(raw_text, require_intent=False)
+
+    # Wipe stale flow state but preserve the reuse-source.
+    context.user_data.clear()
+    context.user_data["case_text"] = last_case
+    context.user_data["last_filed_case_text"] = last_case
+    context.user_data["last_filed_form_type"] = filed_form
+    context.user_data["excluded_form_type"] = filed_form
+
+    if explicit_form:
+        context.user_data["chosen_form"] = explicit_form
+        await update.message.reply_text(
+            f"🔁 Reusing your previous case for *{_form_display_name(explicit_form)}*.\n\n"
+            f"Tap Draft to extract the fields from the case you already filed — "
+            f"I won't invent any new clinical details.",
+            parse_mode="Markdown",
+            reply_markup=_build_explicit_form_keyboard(explicit_form),
+        )
+        return AWAIT_FORM_CHOICE
+
+    # Reuse intent but no form named — show recommendations (excluding the
+    # one already filed) so the user picks.
+    await update.message.reply_text(
+        "🔁 Reusing your previous case. Pick which WPBA type to file it as — "
+        "I'll skip the one you already filed."
+    )
+    return await _process_case_text(update.message, context, user_id, last_case, "same case")
+
+
 async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_id: int, case_text: str, input_source: str) -> int:
     """Store case text, suggest form types, or move directly to the chosen template review."""
+    # Anti-fabrication gate: never feed a too-thin input to the recommender or
+    # the field extractor. The LLM is instructed not to fabricate, but with no
+    # content to ground against it can still hallucinate plausible-sounding
+    # clinical details. Better to ask the user for more.
+    if not _looks_like_clinical_case(case_text):
+        await message.reply_text(
+            "I don't have enough clinical detail to draft this. Tell me what happened — "
+            "patient (age/sex/presentation), what you did, what came of it, and what you learned. "
+            "Rough notes are fine."
+        )
+        return ConversationHandler.END
+
     context.user_data["case_text"] = case_text
     context.user_data["case_input_source"] = input_source
 
@@ -3570,6 +3667,15 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         label = f"{from_date.strftime('%d/%m/%Y')} – {to_date.strftime('%d/%m/%Y')}"
         await _run_unsigned_scan(update.message, context, user_id, from_date, to_date, label)
         return ConversationHandler.END
+
+    # Reuse-last-case intent: "use the same case for DOPS", "file as Mini-CEX
+    # too", etc. We must route this BEFORE extraction — otherwise the LLM
+    # would try to extract clinical fields from the instruction text and
+    # hallucinate content. See feedback-no-fabrication memory.
+    if update.message and update.message.text and context.user_data.get("last_filed_case_text"):
+        raw_text = update.message.text.strip()
+        if is_reuse_request(raw_text):
+            return await _handle_reuse_request(update, context, user_id, raw_text)
 
     # Clear post_reset flag if set (belt and braces)
     context.user_data.pop("post_reset", None)
