@@ -1683,7 +1683,12 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     if update.callback_query:
         await update.callback_query.answer()
     _flow_done(context, "setup")  # fresh start — drop any stale anchor
-    await _flow_msg(update, context, "📧 What's your Kaizen username (email)?", flow_key="setup")
+    await _flow_msg(
+        update, context,
+        "📧 What's your Kaizen username (email)?\n\n"
+        "🔒 Stored encrypted. Used only to file your drafts on Kaizen — never shared.",
+        flow_key="setup",
+    )
     return AWAIT_USERNAME
 
 
@@ -1694,7 +1699,13 @@ async def setup_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return AWAIT_USERNAME
     context.user_data["setup_username"] = text
     context.user_data["_setup_state_hint"] = "password"
-    await _flow_msg(update, context, "🔒 What's your Kaizen password?", flow_key="setup")
+    await _flow_msg(
+        update, context,
+        "🔒 What's your Kaizen password?\n\n"
+        "_I'll delete this message right after you send it._",
+        parse_mode="Markdown",
+        flow_key="setup",
+    )
     return AWAIT_PASSWORD
 
 
