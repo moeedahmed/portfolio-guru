@@ -41,6 +41,10 @@ class BotSimulator:
         chat = self._make_chat()
         message = MagicMock(spec=Message)
         message.text = text
+        message.voice = None
+        message.photo = []
+        message.document = None
+        message.caption = None
         message.chat = chat
         message.chat_id = chat.id
         message.message_id = self.message_id_counter
