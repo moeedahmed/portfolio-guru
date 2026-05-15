@@ -67,6 +67,12 @@ def store_training_level(telegram_user_id: int, training_level: str) -> None:
             ))
         session.commit()
 
+    try:
+        from supabase_sync import mirror_profile
+        mirror_profile(telegram_user_id, training_level=training_level)
+    except Exception:
+        pass
+
 
 def get_training_level(telegram_user_id: int) -> Optional[str]:
     with Session(engine) as session:
@@ -98,6 +104,16 @@ def store_voice_profile(telegram_user_id: int, profile_json: str, examples_count
             ))
         session.commit()
 
+    try:
+        from supabase_sync import mirror_profile
+        mirror_profile(
+            telegram_user_id,
+            voice_profile_json=profile_json,
+            voice_examples_count=examples_count,
+        )
+    except Exception:
+        pass
+
 
 def get_voice_profile(telegram_user_id: int) -> Optional[str]:
     """Get the stored voice/writing style profile JSON. Returns None if not set."""
@@ -121,6 +137,12 @@ def clear_voice_profile(telegram_user_id: int) -> None:
             session.add(existing)
             session.commit()
 
+    try:
+        from supabase_sync import mirror_profile
+        mirror_profile(telegram_user_id, voice_profile_json={}, voice_examples_count=0)
+    except Exception:
+        pass
+
 
 def store_curriculum(telegram_user_id: int, curriculum: str) -> None:
     """Store curriculum preference ("2025" or "2021")."""
@@ -138,6 +160,12 @@ def store_curriculum(telegram_user_id: int, curriculum: str) -> None:
                 curriculum=curriculum
             ))
         session.commit()
+
+    try:
+        from supabase_sync import mirror_profile
+        mirror_profile(telegram_user_id, curriculum=curriculum)
+    except Exception:
+        pass
 
 
 def get_curriculum(telegram_user_id: int) -> str:

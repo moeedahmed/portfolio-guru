@@ -4375,6 +4375,32 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         except Exception:
             logger.warning("Usage tracking failed", exc_info=True)
 
+        # Mirror the filed case to Supabase portfolio_cases so the web app's
+        # case browser can render it. Encrypt the case_text with the same
+        # Fernet key used for credentials — plaintext clinical narratives
+        # never leave the bot. See feedback-no-fabrication for context.
+        try:
+            from supabase_sync import mirror_case
+            from credentials import _fernet
+            case_text_encrypted = None
+            if filed_case_text:
+                try:
+                    case_text_encrypted = _fernet().encrypt(filed_case_text.encode())
+                except Exception:
+                    case_text_encrypted = None
+            mirror_case(
+                user_id,
+                form_type=form_type,
+                status=status,
+                kaizen_event_id=result.get("event_id") or result.get("kaizen_event_id"),
+                case_text_encrypted=case_text_encrypted,
+                extracted_fields=fields,
+                curriculum_links=fields.get("curriculum_links") or curriculum_links or [],
+                key_capabilities=fields.get("key_capabilities") or [],
+            )
+        except Exception:
+            logger.debug("Case mirror to Supabase failed (non-fatal)", exc_info=True)
+
     # One-line portfolio observation after a clean save. Skip for brand-new
     # users — there's nothing meaningful to say with one or two cases on file.
     if status == "success":
@@ -5188,7 +5214,7 @@ async def handle_chase_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     email = data
-    entry = chase_guard.log_chase(email=email, name=email, method="manual")
+    entry = chase_guard.log_chase(email=email, name=email, method="manual", telegram_user_id=update.effective_user.id)
     await query.edit_message_text(
         f"✅ Chase #{entry['chase_number']} logged for {email} on {entry['date']}"
     )

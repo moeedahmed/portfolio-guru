@@ -69,6 +69,12 @@ async def record_case_filed(user_id: int, form_type: str, status: str = "filed")
         )
         await db.commit()
 
+    try:
+        from supabase_sync import mirror_usage
+        mirror_usage(user_id, form_type)
+    except Exception:
+        pass
+
 
 async def get_cases_this_month(user_id: int) -> int:
     """Count cases filed this month."""
@@ -191,6 +197,12 @@ async def set_user_tier(user_id: int, tier: str, stripe_customer_id: str = None,
             (user_id, tier, stripe_customer_id, stripe_subscription_id),
         )
         await db.commit()
+
+    try:
+        from supabase_sync import mirror_tier
+        mirror_tier(user_id, tier, stripe_customer_id=stripe_customer_id, stripe_subscription_id=stripe_subscription_id)
+    except Exception:
+        pass
 
 
 async def has_processed_stripe_event(event_id: str) -> bool:

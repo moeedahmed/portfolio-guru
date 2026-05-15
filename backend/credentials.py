@@ -66,6 +66,12 @@ def store_credentials(telegram_user_id: int, username: str, password: str) -> No
             session.add(cred)
         session.commit()
 
+    try:
+        from supabase_sync import mirror_credentials
+        mirror_credentials(telegram_user_id, enc_user, enc_pass)
+    except Exception:
+        pass
+
 
 def get_credentials(telegram_user_id: int) -> Optional[tuple[str, str]]:
     """Return (username, password) or None if not found."""

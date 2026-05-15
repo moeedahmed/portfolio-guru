@@ -83,8 +83,10 @@ def check_allowed(email: str) -> tuple[bool, str]:
     return True, f"Allowed — {len(chases)} previous chase(s), last {days_since} days ago"
 
 
-def log_chase(email: str, name: str, method: str = "manual", ticket_summary: str = "") -> dict:
-    """Log a chase that was confirmed by the user."""
+def log_chase(email: str, name: str, method: str = "manual", ticket_summary: str = "",
+              telegram_user_id: int | None = None) -> dict:
+    """Log a chase that was confirmed by the user. When telegram_user_id is
+    given, also mirror the entry to Supabase portfolio_chase_log."""
     data = _load_log()
     chases_for = [c for c in data["chases"] if c["assessor_email"].lower() == email.lower()]
     entry = {
@@ -97,4 +99,20 @@ def log_chase(email: str, name: str, method: str = "manual", ticket_summary: str
     }
     data["chases"].append(entry)
     _save_log(data)
+
+    if telegram_user_id is not None:
+        try:
+            from supabase_sync import mirror_chase
+            mirror_chase(
+                telegram_user_id,
+                assessor_email=entry["assessor_email"],
+                assessor_name=entry["assessor_name"],
+                chase_date=entry["date"],
+                method=entry["method"],
+                ticket_summary=entry["tickets"],
+                chase_number=entry["chase_number"],
+            )
+        except Exception:
+            pass
+
     return entry
