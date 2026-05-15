@@ -512,7 +512,7 @@ class TestFlowWalker:
         assert ('🔄 Try again', 'ACTION|retry_filing') in buttons
         assert ('📋 File another case', 'ACTION|file') in buttons
         assert ('💬 Something missing?', 'FILING|feedback|CBD') in buttons
-        assert ('📊 Status', 'ACTION|status') in buttons
+        assert ('⚙️ Settings', 'ACTION|settings') in buttons
 
     @pytest.mark.asyncio
     async def test_failed_filing_uses_llm_recovery_copy(self, thin_draft):
@@ -705,7 +705,8 @@ class TestFlowWalker:
         assert '💡' not in (sim.get_last_text() or '')
 
     @pytest.mark.asyncio
-    async def test_menu_intent_short_text_routes_to_status(self):
+    async def test_menu_intent_short_text_routes_to_settings_for_stats(self):
+        """show_stats intent now routes to the merged settings/status dashboard."""
         from bot import handle_case_input
 
         sim = BotSimulator()
@@ -713,15 +714,20 @@ class TestFlowWalker:
         context = sim._make_context()
 
         with patch('bot.has_credentials', return_value=True), \
-             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 5, 'free'))), \
              patch('bot.classify_menu_intent', new=AsyncMock(return_value='show_stats')), \
+             patch('bot.get_user_tier', new=AsyncMock(return_value='free')), \
+             patch('bot.get_cases_this_month', new=AsyncMock(return_value=2)), \
              patch('bot.get_training_level', return_value='ST5'), \
              patch('bot.get_curriculum', return_value='2025'), \
              patch('bot.get_voice_profile', return_value=None):
             await handle_case_input(update, context)
 
         text = sim.get_last_text()
-        assert 'training level' in text.lower() or 'portfolio connected' in text.lower()
+        assert 'your settings' in text.lower()
+        # The merged dashboard surfaces plan + usage that used to be in /status.
+        assert 'plan: free' in text.lower()
+        assert '2/5 cases' in text.lower()
 
     @pytest.mark.asyncio
     async def test_menu_intent_short_text_routes_to_settings(self):

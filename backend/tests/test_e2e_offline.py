@@ -176,7 +176,7 @@ async def offline_app(monkeypatch, tmp_path):
         fallbacks=[
             CommandHandler("start", bot.start),
             CommandHandler("help", bot.help_command),
-            CommandHandler("status", bot.status),
+            CommandHandler("settings", bot.settings_command),
             CommandHandler("reset", bot.reset),
             CommandHandler("cancel", bot.setup_cancel),
             CallbackQueryHandler(
@@ -216,7 +216,7 @@ async def offline_app(monkeypatch, tmp_path):
 
     # Top-level command handlers
     app.add_handler(CommandHandler("start", bot.start))
-    app.add_handler(CommandHandler("status", bot.status))
+    app.add_handler(CommandHandler("settings", bot.settings_command))
     app.add_handler(CommandHandler("reset", bot.reset))
     app.add_handler(CommandHandler("cancel", bot.cancel_command))
     app.add_handler(CommandHandler("delete", bot.delete_data))
@@ -324,8 +324,9 @@ class TestOfflineE2E:
         buttons = [btn.callback_data for row in markup.inline_keyboard for btn in row]
         # Filing is initiated by sending the case; no re-prompt button needed.
         assert "ACTION|file" not in buttons
-        # But the user still has direct access to status/help/settings.
-        assert "ACTION|status" in buttons
+        # /status has been merged into /settings, so the welcome keyboard no
+        # longer carries a "My status" button. Settings covers both.
+        assert "ACTION|status" not in buttons
         assert "ACTION|settings" in buttons
 
     async def test_case_text_reaches_form_choice(self, offline_app, monkeypatch):

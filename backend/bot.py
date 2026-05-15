@@ -227,7 +227,7 @@ def _static_nudge_text(stats: dict) -> str:
 async def _build_nudge_message(stats: dict) -> tuple[str, InlineKeyboardMarkup | None]:
     """Build weekly nudge message text. No CTA button \u2014 the user types or sends
     media directly to start a case (the Menu button at bottom-left gives
-    access to /status, /settings, /voice, etc.)."""
+    access to /settings, /voice, etc.)."""
     text = await generate_nudge_copy(stats)
     if not text:
         text = _static_nudge_text(stats)
@@ -452,7 +452,7 @@ def _build_next_step_keyboard(user_id: int, *, include_reset: bool = False) -> I
     # Connected user — the primary action is to send a case (just type it).
     # Surface secondary destinations only.
     rows = [
-        [InlineKeyboardButton("📊 Check status", callback_data="ACTION|status"),
+        [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings"),
          InlineKeyboardButton("ℹ️ Help", callback_data="INFO|what")],
     ]
     return InlineKeyboardMarkup(rows)
@@ -812,27 +812,53 @@ def _format_proof_report(
 
 
 
-def _settings_view_components(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
-    """Render the settings page text + keyboard so it can be sent from
-    either a callback action or the free-text intent router."""
+def _settings_view_components(
+    user_id: int,
+    *,
+    tier: str | None = None,
+    used: int | None = None,
+    connected: bool | None = None,
+) -> tuple[str, InlineKeyboardMarkup]:
+    """Render the settings page text + keyboard.
+
+    This is also the merged "status" view. When tier/used/connected are
+    supplied, a plan + usage + connection block is rendered at the top.
+    """
     curriculum = get_curriculum(user_id) or "2025"
     curriculum_label = "2021 Curriculum" if curriculum == "2021" else "2025 Update"
     training_level = _training_level_label(get_training_level(user_id))
     voice_profile = get_voice_profile(user_id)
     voice_status = "✅ Active" if voice_profile else "⭐ Recommended — not set"
     voice_cta = "⭐ Set up voice profile" if not voice_profile else "✅ Voice profile active / rebuild"
+    voice_hint = "Set this once so drafts sound like you." if not voice_profile else "Drafts are already styled to your voice."
+
+    plan_lines = []
+    if connected is False:
+        plan_lines.append("🔗 Kaizen: not connected")
+    if tier is not None:
+        tier_pretty = {"free": "Free", "pro": "Pro", "pro_plus": "Unlimited"}.get(tier, tier.title())
+        plan_lines.append(f"⭐ Plan: {tier_pretty}")
+        if used is not None:
+            limit = TIER_LIMITS.get(tier, 5)
+            if limit == -1:
+                plan_lines.append(f"📋 Usage: {used} cases this month")
+            else:
+                plan_lines.append(f"📋 Usage: {used}/{limit} cases this month")
+    plan_block = ("\n".join(plan_lines) + "\n\n") if plan_lines else ""
+
+    setup_button_label = "🔗 Connect Kaizen" if connected is False else "🔗 Update Kaizen login"
 
     buttons = [
         [InlineKeyboardButton(voice_cta, callback_data="ACTION|voice")],
         [InlineKeyboardButton(f"🎓 Training stage: {training_level}", callback_data="ACTION|change_level")],
         [InlineKeyboardButton(f"📚 Curriculum: {curriculum_label}", callback_data="ACTION|change_curriculum")],
-        [InlineKeyboardButton("🔗 Update Kaizen login", callback_data="ACTION|setup")],
+        [InlineKeyboardButton(setup_button_label, callback_data="ACTION|setup")],
         [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu"),
          InlineKeyboardButton("🗑️ Delete data", callback_data="ACTION|delete")],
     ]
-    voice_hint = "Set this once so drafts sound like you." if not voice_profile else "Drafts are already styled to your voice."
     text = (
         f"⚙️ Your settings\n\n"
+        f"{plan_block}"
         f"✍️ Voice profile: {voice_status}\n"
         f"   {voice_hint}\n\n"
         f"🎓 Training stage: {training_level}\n"
@@ -848,7 +874,7 @@ def _build_welcome_keyboard(connected: bool = False):
         # Surface secondary destinations only.
         return InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("📊 My status", callback_data="ACTION|status"),
+                InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings"),
                 InlineKeyboardButton("📈 Portfolio health", callback_data="ACTION|health"),
             ],
             [
@@ -1628,36 +1654,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 
-async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    user_id = update.effective_user.id
-    if has_credentials(user_id):
-        training_level = get_training_level(user_id)
-        grade_str = f"📊 Training level: {training_level}" if training_level else "📊 Training level: not set"
-        curriculum = get_curriculum(user_id)
-        cur_str = f"📘 Curriculum: {curriculum}"
-        try:
-            month_count = await get_cases_this_month(user_id)
-        except Exception:
-            month_count = 0
-        drafts_str = f"📂 Cases filed this month: {month_count}"
-        vp = get_voice_profile(user_id)
-        voice_str = "✍️ Voice profile: active" if vp else "✍️ Voice profile: not set"
-        buttons = []
-        if not vp:
-            buttons.append([InlineKeyboardButton("✍️ Set up voice profile", callback_data="ACTION|voice")])
-        if not training_level:
-            buttons.append([InlineKeyboardButton("🔗 Update setup", callback_data="ACTION|setup")])
-        buttons.append([InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")])
-        await update.message.reply_text(
-            f"✅ Portfolio connected and ready.\n\n{grade_str}\n{cur_str}\n{drafts_str}\n{voice_str}\n\n"
-            f"Just send your next case to file it.",
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
-    else:
-        await update.message.reply_text("🔗 No credentials stored.", reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")]
-        ]))
-    return ConversationHandler.END
 
 
 # === SETUP FLOW ===
@@ -2326,10 +2322,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         rows = [
             [InlineKeyboardButton("📋 File another case", callback_data="ACTION|file")],
             [InlineKeyboardButton("💬 Something missing?", callback_data=f"FILING|feedback|{form_type}")],
-            [
-                InlineKeyboardButton("📊 Status", callback_data="ACTION|status"),
-                InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings"),
-            ],
+            [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")],
         ]
         if context.user_data.get("last_filed_case_text") and status == "success":
             rows.insert(0, [InlineKeyboardButton("🔁 Same case, another WPBA", callback_data="ACTION|same_case_another")])
@@ -2345,36 +2338,6 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu")],
             ]),
         )
-
-    elif action == "status":
-        # Inline status — same as /status command
-        if has_credentials(user_id):
-            training_level = get_training_level(user_id)
-            curriculum = get_curriculum(user_id) or "2025"
-            curriculum_label = "2021 Curriculum" if curriculum == "2021" else "2025 Update"
-            tier = await get_user_tier(user_id)
-            tier_label = {"free": "Free", "pro": "Pro", "pro_plus": "Unlimited"}.get(tier, "Free")
-            used = await get_cases_this_month(user_id)
-            from usage import TIER_LIMITS
-            limit = TIER_LIMITS.get(tier, 10)
-            usage_str = f"{used} cases this month" if limit == -1 else f"{used}/{limit} cases this month"
-            vp = get_voice_profile(user_id)
-            voice_str = "✅ Active" if vp else "Not set"
-
-            await query.message.edit_text(
-                f"📊 Your status\n\n"
-                f"🎓 Training level: {_training_level_label(training_level)}\n"
-                f"📚 Curriculum: {curriculum_label}\n"
-                f"⭐ Plan: {tier_label}\n"
-                f"📋 Usage: {usage_str}\n"
-                f"✍️ Voice profile: {voice_str}\n\n"
-                f"Just send your next case to file it.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu")],
-                ])
-            )
-        else:
-            await query.message.edit_text("🔗 Not connected yet.", reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]]))
 
     elif action == "unsigned":
         if not has_credentials(user_id):
@@ -2435,7 +2398,14 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         )
 
     elif action == "settings":
-        text, keyboard = _settings_view_components(user_id)
+        tier = await get_user_tier(user_id)
+        try:
+            used = await get_cases_this_month(user_id)
+        except Exception:
+            used = 0
+        text, keyboard = _settings_view_components(
+            user_id, tier=tier, used=used, connected=has_credentials(user_id)
+        )
         await query.message.edit_text(text, reply_markup=keyboard)
 
     elif action == "change_curriculum":
@@ -2661,8 +2631,8 @@ Suggest the best form, extract all the fields, show you a draft to review and ed
 /start — Main menu
 /setup — Connect or update Kaizen credentials
 /voice — Set up your writing style profile
+/settings — Plan, usage, preferences
 /upgrade — View subscription plans
-/status — Check your usage and settings
 /help — This message"""
 
 
@@ -2672,7 +2642,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
             [_BTN_SETUP, _BTN_VOICE],
-            [InlineKeyboardButton("📊 Status", callback_data="ACTION|status"),
+            [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings"),
              _BTN_RESET],
         ])
     )
@@ -2680,9 +2650,16 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 
 async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle /settings — show settings page (same view as the Settings button)."""
+    """Handle /settings — single dashboard for plan, usage, connection, preferences."""
     user_id = update.effective_user.id
-    text, keyboard = _settings_view_components(user_id)
+    tier = await get_user_tier(user_id)
+    try:
+        used = await get_cases_this_month(user_id)
+    except Exception:
+        used = 0
+    text, keyboard = _settings_view_components(
+        user_id, tier=tier, used=used, connected=has_credentials(user_id)
+    )
     await update.message.reply_text(text, reply_markup=keyboard)
     return ConversationHandler.END
 
@@ -3678,13 +3655,29 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
             if nav_intent == "show_stats":
                 context.user_data.clear()
-                return await status(update, context)
+                tier = await get_user_tier(user_id)
+                try:
+                    used = await get_cases_this_month(user_id)
+                except Exception:
+                    used = 0
+                stats_text, stats_kb = _settings_view_components(
+                    user_id, tier=tier, used=used, connected=has_credentials(user_id)
+                )
+                await update.message.reply_text(stats_text, reply_markup=stats_kb)
+                return ConversationHandler.END
             if nav_intent == "show_help":
                 context.user_data.clear()
                 return await help_command(update, context)
             if nav_intent == "open_settings":
                 context.user_data.clear()
-                settings_text, settings_kb = _settings_view_components(user_id)
+                tier = await get_user_tier(user_id)
+                try:
+                    used = await get_cases_this_month(user_id)
+                except Exception:
+                    used = 0
+                settings_text, settings_kb = _settings_view_components(
+                    user_id, tier=tier, used=used, connected=has_credentials(user_id)
+                )
                 await update.message.reply_text(settings_text, reply_markup=settings_kb)
                 return ConversationHandler.END
             if nav_intent == "manage_credentials":
@@ -5184,7 +5177,7 @@ def build_application() -> Application:
         fallbacks=[
             CommandHandler("start", start),
             CommandHandler("help", help_command),
-            CommandHandler("status", status),
+            CommandHandler("settings", settings_command),
             CommandHandler("reset", reset),
             CommandHandler("cancel", setup_cancel),
             CallbackQueryHandler(
@@ -5222,7 +5215,6 @@ def build_application() -> Application:
 
     # Register handlers
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("status", status))
     application.add_handler(CommandHandler("reset", reset))
     application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(CommandHandler("delete", delete_data))
@@ -5354,8 +5346,7 @@ def main():
             ("start", "Open Portfolio Guru and get started"),
             ("setup", "Connect your portfolio account"),
             ("voice", "Set up your personal writing voice"),
-            ("settings", "View and change preferences"),
-            ("status", "Check connection and stats"),
+            ("settings", "View status, usage, and preferences"),
             ("reset", "Clear current session and start fresh"),
             ("cancel", "Cancel whatever is happening"),
             ("delete", "Delete all your stored data"),
