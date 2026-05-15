@@ -19,3 +19,4 @@ respx>=0.22.0
 syrupy>=4.8.1
 telethon>=1.39.0
 stripe>=7.0.0
+supabase>=2.9.0
