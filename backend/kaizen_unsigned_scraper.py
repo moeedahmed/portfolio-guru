@@ -20,7 +20,6 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 logger = logging.getLogger(__name__)
 
 CDP_URL = os.environ.get("KAIZEN_CDP_URL", "http://localhost:18800")
-CUTOFF_DATE = datetime(2025, 1, 1)
 
 
 def _parse_date(date_str: str) -> datetime | None:
@@ -55,12 +54,18 @@ async def _login_via_rcem(page, username: str, password: str) -> bool:
         return False
 
 
-async def scrape_unsigned_tickets(username: str = "", password: str = "") -> list[dict]:
+async def scrape_unsigned_tickets(
+    username: str = "",
+    password: str = "",
+    from_date: datetime | None = None,
+    to_date: datetime | None = None,
+) -> list[dict]:
     """Scrape unsigned tickets from Kaizen activities page.
 
     Connects via CDP when available, otherwise launches a headless Chromium
-    and logs in fresh using the supplied credentials. Returns a structured
-    list of unsigned tickets dated after CUTOFF_DATE.
+    and logs in fresh using the supplied credentials. Filters by event_date
+    when from_date / to_date are provided (inclusive on both ends). Pass
+    both as None to scan everything Kaizen returns.
     """
     results = []
     pw = None
@@ -165,11 +170,17 @@ async def scrape_unsigned_tickets(username: str = "", password: str = "") -> lis
                             "is_unsigned": True,
                         }
 
-                        # Filter by cutoff date
+                        # Filter by date range when supplied
                         if event_date:
                             ticket_dt = datetime.strptime(event_date, "%Y-%m-%d")
-                            if ticket_dt >= CUTOFF_DATE:
-                                results.append(ticket)
+                            if from_date and ticket_dt < from_date:
+                                continue
+                            if to_date and ticket_dt > to_date:
+                                continue
+                            results.append(ticket)
+                        elif not from_date and not to_date:
+                            # Undated ticket: include only when no filter
+                            results.append(ticket)
                     except Exception:
                         continue
             except Exception:

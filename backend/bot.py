@@ -2393,35 +2393,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 ]),
             )
             return ConversationHandler.END
-        creds = get_credentials(user_id)
-        msg = await query.message.reply_text("🔍 Scanning Kaizen for unsigned tickets — this can take up to a minute…")
-        try:
-            tickets = await asyncio.wait_for(scrape_unsigned_tickets(creds[0], creds[1]), timeout=90)
-        except asyncio.TimeoutError:
-            await msg.edit_text("⏱ Kaizen took too long to respond. Try again in a moment.")
-            return ConversationHandler.END
-        except Exception as exc:
-            logger.warning("Unsigned scrape errored: %s", exc, exc_info=True)
-            await msg.edit_text("Could not scan Kaizen — try again in a moment.")
-            return ConversationHandler.END
-        if not tickets:
-            await msg.edit_text("✅ No unsigned tickets found (looking back to Jan 2025).")
-            return ConversationHandler.END
-        by_assessor: dict[str, list] = {}
-        for t in tickets:
-            name = t.get("assessor_name") or "Unknown"
-            by_assessor.setdefault(name, []).append(t)
-        lines = [f"📬 *Unsigned tickets: {len(tickets)} total*\n"]
-        for assessor, tix in sorted(by_assessor.items(), key=lambda kv: -len(kv[1])):
-            dates = [t["event_date"] for t in tix if t.get("event_date")]
-            oldest = min(dates) if dates else "?"
-            allowed, reason = chase_guard.check_allowed(assessor)
-            chase_icon = "🟢" if allowed else "🔴"
-            lines.append(f"{chase_icon} *{assessor}* — {len(tix)} ticket(s), oldest {oldest}")
-            lines.append(f"   _{reason}_")
-        lines.append("\n🟢 = chase allowed   🔴 = chase blocked (cooldown / cap reached)")
-        lines.append("\nOpen Kaizen to send a reminder: https://kaizenep.com/activities")
-        await msg.edit_text("\n".join(lines), parse_mode="Markdown", disable_web_page_preview=True)
+        await _show_unsigned_range_picker(query.message, context)
 
     elif action == "health":
         # Inline ARCP health check — same as /health command
@@ -3604,6 +3576,28 @@ async def handle_edit_value_with_intent(update: Update, context: ContextTypes.DE
 async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle text, voice, photo, or document input for case description."""
     user_id = update.effective_user.id
+
+    # If the user just tapped "Custom range" in the /unsigned picker, the next
+    # text reply is their date range — intercept it before treating as a case.
+    if context.user_data.get("awaiting_unsigned_range") and update.message and update.message.text:
+        text = update.message.text.strip()
+        parsed = _parse_unsigned_range(text)
+        if not parsed:
+            await update.message.reply_text(
+                "❌ Couldn't read that as a date range. Try again, like `01/04/2025 to 31/03/2026`.",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("❌ Cancel", callback_data="UNSIGNED|cancel")],
+                ]),
+            )
+            return ConversationHandler.END
+        from_date, to_date = parsed
+        if from_date > to_date:
+            from_date, to_date = to_date, from_date
+        context.user_data.pop("awaiting_unsigned_range", None)
+        label = f"{from_date.strftime('%d/%m/%Y')} – {to_date.strftime('%d/%m/%Y')}"
+        await _run_unsigned_scan(update.message, context, user_id, from_date, to_date, label)
+        return ConversationHandler.END
 
     # Clear post_reset flag if set (belt and braces)
     context.user_data.pop("post_reset", None)
@@ -4880,8 +4874,147 @@ async def bulk_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await msg.edit_text("\n".join(lines))
 
 
+async def _show_unsigned_range_picker(target_message, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show the date-range picker for the unsigned-tickets scan."""
+    context.user_data.pop("awaiting_unsigned_range", None)
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📅 Last 3 months", callback_data="UNSIGNED|3m"),
+         InlineKeyboardButton("📅 Last 6 months", callback_data="UNSIGNED|6m")],
+        [InlineKeyboardButton("📅 Last 12 months", callback_data="UNSIGNED|12m"),
+         InlineKeyboardButton("📅 All-time", callback_data="UNSIGNED|all")],
+        [InlineKeyboardButton("✏️ Custom range", callback_data="UNSIGNED|custom")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="UNSIGNED|cancel")],
+    ])
+    await target_message.reply_text(
+        "📅 Pick a date range for the unsigned-ticket scan.",
+        reply_markup=keyboard,
+    )
+
+
+def _parse_unsigned_range(text: str) -> tuple["datetime | None", "datetime | None"] | None:
+    """Parse a typed date range like '01/04/2025 to 31/03/2026'.
+
+    Accepts d/m/yyyy or dd/mm/yyyy with " to " or "-" or "→" between dates.
+    Returns (from_date, to_date) or None if unparseable.
+    """
+    from datetime import datetime
+    cleaned = text.strip().lower().replace("→", " to ").replace(" - ", " to ").replace(" – ", " to ")
+    parts = [p.strip() for p in cleaned.split(" to ") if p.strip()]
+    if len(parts) != 2:
+        return None
+    formats = ["%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d", "%d-%m-%Y"]
+    parsed = []
+    for part in parts:
+        d = None
+        for fmt in formats:
+            try:
+                d = datetime.strptime(part, fmt)
+                break
+            except ValueError:
+                continue
+        if not d:
+            return None
+        parsed.append(d)
+    return parsed[0], parsed[1]
+
+
+async def _run_unsigned_scan(
+    target_message,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    from_date,
+    to_date,
+    label: str,
+) -> None:
+    """Run the unsigned-tickets scan with the given date range and report results."""
+    creds = get_credentials(user_id)
+    msg = await target_message.reply_text(
+        f"🔍 Scanning Kaizen for unsigned tickets ({label}) — this can take up to a minute…"
+    )
+    try:
+        tickets = await asyncio.wait_for(
+            scrape_unsigned_tickets(creds[0], creds[1], from_date=from_date, to_date=to_date),
+            timeout=90,
+        )
+    except asyncio.TimeoutError:
+        await msg.edit_text("⏱ Kaizen took too long to respond. Try again in a moment.")
+        return
+    except Exception as exc:
+        logger.warning("Unsigned scrape errored: %s", exc, exc_info=True)
+        await msg.edit_text("Could not scan Kaizen — try again in a moment.")
+        return
+
+    if not tickets:
+        await msg.edit_text(f"✅ No unsigned tickets found ({label}).")
+        return
+
+    by_assessor: dict[str, list] = {}
+    for t in tickets:
+        name = t.get("assessor_name") or "Unknown"
+        by_assessor.setdefault(name, []).append(t)
+
+    lines = [f"📬 *Unsigned tickets — {label}: {len(tickets)} total*\n"]
+    for assessor, tix in sorted(by_assessor.items(), key=lambda kv: -len(kv[1])):
+        dates = [t["event_date"] for t in tix if t.get("event_date")]
+        oldest = min(dates) if dates else "?"
+        allowed, reason = chase_guard.check_allowed(assessor)
+        chase_icon = "🟢" if allowed else "🔴"
+        lines.append(f"{chase_icon} *{assessor}* — {len(tix)} ticket(s), oldest {oldest}")
+        lines.append(f"   _{reason}_")
+    lines.append("\n🟢 = chase allowed   🔴 = chase blocked (cooldown / cap reached)")
+    lines.append("\nOpen Kaizen to send a reminder: https://kaizenep.com/activities")
+    await msg.edit_text("\n".join(lines), parse_mode="Markdown", disable_web_page_preview=True)
+
+
+async def handle_unsigned_range_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle UNSIGNED|<choice> callback — runs preset scans or prompts for custom range."""
+    from datetime import datetime, timedelta
+    query = update.callback_query
+    await query.answer()
+    choice = query.data.split("|", 1)[1] if "|" in query.data else ""
+    user_id = update.effective_user.id
+
+    if choice == "cancel":
+        context.user_data.pop("awaiting_unsigned_range", None)
+        await query.edit_message_text("Cancelled.")
+        return
+
+    if choice == "custom":
+        context.user_data["awaiting_unsigned_range"] = True
+        await query.edit_message_text(
+            "✏️ Send the date range, like:\n\n"
+            "`01/04/2025 to 31/03/2026`\n\n"
+            "Format: dd/mm/yyyy on each side, separated by ' to '.",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("❌ Cancel", callback_data="UNSIGNED|cancel")],
+            ]),
+        )
+        return
+
+    today = datetime.now()
+    if choice == "3m":
+        from_date, to_date, label = today - timedelta(days=92), today, "last 3 months"
+    elif choice == "6m":
+        from_date, to_date, label = today - timedelta(days=183), today, "last 6 months"
+    elif choice == "12m":
+        from_date, to_date, label = today - timedelta(days=365), today, "last 12 months"
+    elif choice == "all":
+        from_date, to_date, label = None, None, "all-time"
+    else:
+        await query.edit_message_text("Unknown choice.")
+        return
+
+    # Replace the picker with an acknowledgement; the scan reply is a fresh message.
+    try:
+        await query.edit_message_text(f"📅 Scanning {label}…")
+    except Exception:
+        pass
+    await _run_unsigned_scan(query.message, context, user_id, from_date, to_date, label)
+
+
 async def unsigned_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /unsigned — Unlimited feature. Scans Kaizen for unsigned tickets."""
+    """Handle /unsigned — Unlimited feature. Shows date-range picker, then scans Kaizen."""
     user_id = update.effective_user.id
 
     if not has_credentials(user_id):
@@ -4904,40 +5037,7 @@ async def unsigned_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         return
 
-    creds = get_credentials(user_id)
-    msg = await update.message.reply_text("🔍 Scanning Kaizen for unsigned tickets — this can take up to a minute…")
-
-    try:
-        tickets = await asyncio.wait_for(scrape_unsigned_tickets(creds[0], creds[1]), timeout=90)
-    except asyncio.TimeoutError:
-        await msg.edit_text("⏱ Kaizen took too long to respond. Try again in a moment.")
-        return
-    except Exception as exc:
-        logger.warning("Unsigned scrape errored: %s", exc, exc_info=True)
-        await msg.edit_text("Could not scan Kaizen — try again in a moment.")
-        return
-
-    if not tickets:
-        await msg.edit_text("✅ No unsigned tickets found (looking back to Jan 2025).")
-        return
-
-    by_assessor: dict[str, list] = {}
-    for t in tickets:
-        name = t.get("assessor_name") or "Unknown"
-        by_assessor.setdefault(name, []).append(t)
-
-    lines = [f"📬 *Unsigned tickets: {len(tickets)} total*\n"]
-    for assessor, tix in sorted(by_assessor.items(), key=lambda kv: -len(kv[1])):
-        dates = [t["event_date"] for t in tix if t.get("event_date")]
-        oldest = min(dates) if dates else "?"
-        allowed, reason = chase_guard.check_allowed(assessor)
-        chase_icon = "🟢" if allowed else "🔴"
-        lines.append(f"{chase_icon} *{assessor}* — {len(tix)} ticket(s), oldest {oldest}")
-        lines.append(f"   _{reason}_")
-
-    lines.append("\n🟢 = chase allowed   🔴 = chase blocked (cooldown / cap reached)")
-    lines.append("\nOpen Kaizen to send a reminder: https://kaizenep.com/activities")
-    await msg.edit_text("\n".join(lines), parse_mode="Markdown", disable_web_page_preview=True)
+    await _show_unsigned_range_picker(update.message, context)
 
 
 async def chase_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -5143,6 +5243,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("plan", upgrade_command))
     application.add_handler(CommandHandler("settier", settier_command))
     application.add_handler(CallbackQueryHandler(handle_upgrade_button, pattern=r"^UPGRADE\|"))
+    application.add_handler(CallbackQueryHandler(handle_unsigned_range_pick, pattern=r"^UNSIGNED\|"))
     application.add_handler(CallbackQueryHandler(handle_set_curriculum, pattern=r"^SET_CURRICULUM\|"))
     application.add_handler(CallbackQueryHandler(handle_set_level, pattern=r"^SETLEVEL\|"))
     application.add_handler(CallbackQueryHandler(handle_chase_log, pattern=r"^CHASE_LOG\|"))
