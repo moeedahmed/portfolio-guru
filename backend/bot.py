@@ -429,39 +429,37 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
  AWAIT_CURRICULUM, AWAIT_FORM_SEARCH) = range(12)
 
 # Common button patterns used across the bot
-_BTN_RESET = InlineKeyboardButton("🆕 Start fresh", callback_data="ACTION|reset")
 _BTN_SETUP = InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")
 _BTN_CANCEL = InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel")
 _BTN_HELP = InlineKeyboardButton("ℹ️ Help", callback_data="INFO|what")
 _BTN_VOICE = InlineKeyboardButton("✍️ Voice Profile", callback_data="ACTION|voice")
 _BTN_CONTINUE_THIN = InlineKeyboardButton("✅ Show me the draft", callback_data="ACTION|continue_thin")
 
-_KB_RETRY_RESET = InlineKeyboardMarkup([[_BTN_RESET]])
+# Single-button "❌ Cancel" keyboard used in error / recovery surfaces where
+# the user needs an obvious way out. ACTION|cancel clears flow state and
+# returns the user to a clean "ready to file" message.
+_KB_CANCEL = InlineKeyboardMarkup([[_BTN_CANCEL]])
 
 
 def _setup_needs_finishing(user_id: int) -> bool:
     return not has_credentials(user_id)
 
 
-def _build_next_step_keyboard(user_id: int, *, include_reset: bool = False) -> InlineKeyboardMarkup:
+def _build_next_step_keyboard(user_id: int) -> InlineKeyboardMarkup | None:
+    """Keyboard shown after a cancellation / recovery. None for connected
+    users — the next action is to send a case, so no button is needed.
+    Disconnected users see a single Connect button (the one essential CTA)."""
     if _setup_needs_finishing(user_id):
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")],
-            [InlineKeyboardButton("ℹ️ How does this work?", callback_data="INFO|what")],
         ])
-    # Connected user — the primary action is to send a case (just type it).
-    # Surface secondary destinations only.
-    rows = [
-        [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings"),
-         InlineKeyboardButton("ℹ️ Help", callback_data="INFO|what")],
-    ]
-    return InlineKeyboardMarkup(rows)
+    return None
 
 
 def _cancelled_next_step_text(user_id: int, scope: str = "Cancelled") -> str:
     if _setup_needs_finishing(user_id):
-        return f"❌ {scope}. Finish setup when you're ready to file."
-    return f"❌ {scope}. You can file another case whenever you're ready."
+        return f"❌ {scope}. Connect Kaizen to start filing."
+    return f"✅ {scope}. Just send your next case when ready."
 
 
 def _expired_prompt_text(user_id: int) -> str:
@@ -545,7 +543,7 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
                 message,
                 context,
                 "That case is still saved, but rebuilding the latest step timed out. Start a new case below and I'll rebuild it with you.",
-                reply_markup=_build_next_step_keyboard(user_id, include_reset=True),
+                reply_markup=_build_next_step_keyboard(user_id),
             )
             return ConversationHandler.END
         except Exception as exc:
@@ -554,7 +552,7 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
                 message,
                 context,
                 "That case is still saved, but I couldn't rebuild the latest step just now. Start a new case below and I'll rebuild it with you.",
-                reply_markup=_build_next_step_keyboard(user_id, include_reset=True),
+                reply_markup=_build_next_step_keyboard(user_id),
             )
             return ConversationHandler.END
 
@@ -619,7 +617,7 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
         message,
         context,
         "That draft has expired, but your setup is still saved. Start a new case and I'll rebuild it with you.",
-        reply_markup=_build_next_step_keyboard(user_id, include_reset=True),
+        reply_markup=_build_next_step_keyboard(user_id),
     )
     return ConversationHandler.END
 
@@ -735,9 +733,7 @@ Tap 🔗 Connect to get started."""
 WELCOME_MSG_CONNECTED = """🩺 Portfolio Guru — ready when you are.
 
 Send me what happened. Rough notes are fine — text, voice, photo, or document.
-I'll suggest the best form and draft it once you choose.
-
-Or use the menu below to check your portfolio status."""
+I'll suggest the best form and draft it once you choose."""
 
 _WHAT_IS_THIS_FORM_COUNT = max(len(v) for v in TRAINING_LEVEL_FORMS.values())
 
@@ -869,25 +865,18 @@ def _settings_view_components(
 
 
 def _build_welcome_keyboard(connected: bool = False):
+    """Return the welcome inline keyboard, or None when no button is needed.
+
+    Connected users: no buttons. The welcome text says "send your case" — that
+    IS the action. Settings/Health/Help live in the Telegram Menu (☰).
+    Disconnected users: a single Connect Kaizen button — the one required
+    action before anything else is possible.
+    """
     if connected:
-        # Filing is initiated by sending the case directly — no button needed.
-        # Surface secondary destinations only.
-        return InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("📈 Portfolio health", callback_data="ACTION|health"),
-                InlineKeyboardButton("ℹ️ Help", callback_data="INFO|what"),
-            ],
-            [
-                InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings"),
-            ],
-        ])
-    else:
-        return InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("❓ What is this?", callback_data="INFO|what"),
-                InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup"),
-            ],
-        ])
+        return None
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")],
+    ])
 
 
 FORM_EMOJIS = {
@@ -2243,15 +2232,11 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         else:
             await setup_start(update, context)
 
-    elif action == "reset":
+    elif action == "reset" or action == "cancel":
+        # ACTION|reset kept as a quiet alias of cancel so stale "Start fresh"
+        # buttons in old chat history still work gracefully.
         context.user_data.clear()
-        await query.message.reply_text(
-            "✅ Cleared — back to the main menu.",
-            reply_markup=_build_welcome_keyboard(connected=has_credentials(user_id))
-        )
-
-    elif action == "cancel":
-        context.user_data.clear()
+        context.user_data["post_reset"] = True
         try:
             await query.message.edit_text(
                 _cancelled_next_step_text(user_id),
@@ -2457,11 +2442,11 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         )
 
     elif action == "back_to_menu":
+        connected = has_credentials(user_id)
+        msg_text = WELCOME_MSG_CONNECTED if connected else WELCOME_MSG
         await query.message.edit_text(
-            "🩺 Portfolio Guru — ready when you are.\n\n"
-            "Send me what happened. Rough notes are fine — text, voice, photo, or document.\n\n"
-            "Or use the menu below to check your portfolio status.",
-            reply_markup=_build_welcome_keyboard(connected=has_credentials(user_id)),
+            msg_text,
+            reply_markup=_build_welcome_keyboard(connected=connected),
         )
 
     elif action == "delete":
@@ -2582,12 +2567,15 @@ async def handle_pushback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Top-level /cancel — clears state and returns to main menu."""
+    """Top-level /cancel — wipes flow state and returns the user to a clean
+    'ready to file' state. No menu keyboard for connected users; the next
+    typed/sent message is treated as a fresh case."""
     user_id = update.effective_user.id
     context.user_data.clear()
+    context.user_data["post_reset"] = True
     await update.message.reply_text(
-        "❌ Cancelled — back to the main menu.",
-        reply_markup=_build_welcome_keyboard(connected=has_credentials(user_id)),
+        _cancelled_next_step_text(user_id),
+        reply_markup=_build_next_step_keyboard(user_id),
     )
     return ConversationHandler.END
 
@@ -2627,18 +2615,6 @@ async def delete_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     return ConversationHandler.END
 
 
-async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Reset conversation state and clear user data."""
-    user_id = update.effective_user.id
-    context.user_data.clear()
-    context.user_data["post_reset"] = True
-    await update.message.reply_text(
-        "✅ Cleared — back to the main menu.",
-        reply_markup=_build_welcome_keyboard(connected=has_credentials(user_id))
-    )
-    return ConversationHandler.END
-
-
 HELP_MSG = """📖 *Portfolio Guru — Help*
 
 *How it works:*
@@ -2667,8 +2643,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
             [_BTN_SETUP, _BTN_VOICE],
-            [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings"),
-             _BTN_RESET],
+            [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")],
         ])
     )
     return ConversationHandler.END
@@ -3188,7 +3163,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 draft = await _analyse_selected_form(context, user_id, merged, chosen_form)
             except Exception as exc:
                 logger.error("Template review failed for improve: %s", exc, exc_info=True)
-                await query.edit_message_text("⚠️ Could not refresh that template.", reply_markup=_KB_RETRY_RESET)
+                await query.edit_message_text("⚠️ Could not refresh that template.", reply_markup=_KB_CANCEL)
                 return AWAIT_TEMPLATE_REVIEW
             missing_required, missing_optional, _ = _missing_template_fields(draft, chosen_form)
             if not missing_required:
@@ -3240,9 +3215,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_reply_markup(reply_markup=None)
         user_id = update.effective_user.id
         context.user_data.clear()
+        context.user_data["post_reset"] = True
         await query.message.reply_text(
-            "❌ Cancelled — back to the main menu.",
-            reply_markup=_build_welcome_keyboard(connected=has_credentials(user_id)),
+            _cancelled_next_step_text(user_id),
+            reply_markup=_build_next_step_keyboard(user_id),
         )
         return ConversationHandler.END
 
@@ -3283,7 +3259,7 @@ async def _accumulate_and_refresh(update: Update, context: ContextTypes.DEFAULT_
         return AWAIT_TEMPLATE_REVIEW
     except Exception as exc:
         logger.error("Accumulation refresh failed for %s: %s", chosen_form, exc, exc_info=True)
-        await ack.edit_text("⚠️ Could not refresh that template.", reply_markup=_KB_RETRY_RESET)
+        await ack.edit_text("⚠️ Could not refresh that template.", reply_markup=_KB_CANCEL)
         return AWAIT_TEMPLATE_REVIEW
 
     missing_required, missing_optional, _ = _missing_template_fields(draft, chosen_form)
@@ -3891,7 +3867,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return AWAIT_TEMPLATE_REVIEW
         except Exception as exc:
             logger.error("Template review refresh failed for %s: %s", chosen_form, exc, exc_info=True)
-            await ack.edit_text("⚠️ Could not refresh that template.", reply_markup=_KB_RETRY_RESET)
+            await ack.edit_text("⚠️ Could not refresh that template.", reply_markup=_KB_CANCEL)
             return AWAIT_TEMPLATE_REVIEW
 
         missing_required, missing_optional, _ = _missing_template_fields(draft, chosen_form)
@@ -4055,11 +4031,11 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         draft = await _analyse_selected_form(context, update.effective_user.id, case_text, form_type)
     except asyncio.TimeoutError:
         logger.error("Template review timed out after 45s for %s", form_type)
-        await query.edit_message_text("⏳ Template review timed out.", reply_markup=_KB_RETRY_RESET)
+        await query.edit_message_text("⏳ Template review timed out.", reply_markup=_KB_CANCEL)
         return ConversationHandler.END
     except Exception as e:
         logger.error("Template review failed in form_choice: %s", e, exc_info=True)
-        await query.edit_message_text("⚠️ Could not review that template.", reply_markup=_KB_RETRY_RESET)
+        await query.edit_message_text("⚠️ Could not review that template.", reply_markup=_KB_CANCEL)
         return ConversationHandler.END
 
     missing_required, missing_optional, _ = _missing_template_fields(draft, form_type)
@@ -4711,10 +4687,10 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             ), timeout=45)
         _store_draft(context, updated)
     except asyncio.TimeoutError:
-        await ack.edit_text("⏳ Regeneration timed out.", reply_markup=_KB_RETRY_RESET)
+        await ack.edit_text("⏳ Regeneration timed out.", reply_markup=_KB_CANCEL)
         return AWAIT_APPROVAL
     except Exception as e:
-        await ack.edit_text("⚠️ Couldn't regenerate.", reply_markup=_KB_RETRY_RESET)
+        await ack.edit_text("⚠️ Couldn't regenerate.", reply_markup=_KB_CANCEL)
         return AWAIT_APPROVAL
 
     preview = _format_draft_preview(updated)
@@ -4826,10 +4802,8 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
         # new_case — looks like a new case
         if in_flow:
             await update.message.reply_text(
-                "It looks like you want to file a new case.",
-                reply_markup=InlineKeyboardMarkup([
-                    [_BTN_RESET, _BTN_CANCEL],
-                ])
+                "It looks like you want to file a new case. Tap Cancel to abandon the current draft, then send your new case.",
+                reply_markup=_KB_CANCEL,
             )
             return AWAIT_CASE_INPUT
         else:
@@ -5203,7 +5177,6 @@ def build_application() -> Application:
             CommandHandler("start", start),
             CommandHandler("help", help_command),
             CommandHandler("settings", settings_command),
-            CommandHandler("reset", reset),
             CommandHandler("cancel", setup_cancel),
             CallbackQueryHandler(
                 handle_callback,
@@ -5240,7 +5213,6 @@ def build_application() -> Application:
 
     # Register handlers
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("reset", reset))
     application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(CommandHandler("delete", delete_data))
     application.add_handler(CommandHandler("help", help_command))
@@ -5372,7 +5344,6 @@ def main():
             ("setup", "Connect your portfolio account"),
             ("voice", "Set up your personal writing voice"),
             ("settings", "View status, usage, and preferences"),
-            ("reset", "Clear current session and start fresh"),
             ("cancel", "Cancel whatever is happening"),
             ("delete", "Delete all your stored data"),
             ("help", "How to use Portfolio Guru"),

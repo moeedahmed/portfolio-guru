@@ -69,12 +69,11 @@ class TestFlowWalker:
             result = await start(update, context)
 
         assert result == ConversationHandler.END
-        # Connected user: the welcome message should explain how to send a case,
-        # and the keyboard surfaces secondary destinations (Status, Help).
-        # The "File a case" button was removed — users just send their case.
+        # Connected user: the welcome message tells them to send a case. The
+        # keyboard is intentionally empty — no inline buttons, no re-prompt.
+        # Settings/Health/Help are reachable via the Telegram Menu (☰).
         assert 'send' in sim.get_last_text().lower()
-        button_data = {data for _, data in sim.get_last_buttons()}
-        assert 'ACTION|status' in button_data or 'INFO|what' in button_data
+        assert sim.get_last_buttons() == []
 
     @pytest.mark.asyncio
     async def test_case_input_walks_to_form_choice(self, recommended_forms):
@@ -341,10 +340,10 @@ class TestFlowWalker:
 
         assert result == ConversationHandler.END
         assert 'cancelled' in sim.get_last_text().lower()
-        # Post-cancel for a connected user surfaces Status/Help only. Filing is
-        # initiated by sending a fresh case, not by tapping a re-prompt button.
-        button_data = {data for _, data in sim.get_last_buttons()}
-        assert 'ACTION|status' in button_data or 'INFO|what' in button_data
+        # Post-cancel for a connected user shows NO inline buttons — the next
+        # action is to type/send a fresh case, and Settings etc. live in the
+        # Telegram Menu (☰).
+        assert sim.get_last_buttons() == []
 
     @pytest.mark.asyncio
     async def test_cancel_path_uses_setup_button_when_setup_incomplete(self):
@@ -377,9 +376,8 @@ class TestFlowWalker:
         assert result == ConversationHandler.END
         assert sim.messages_sent[-1][0] == 'reply'
         assert 'start a new case' in sim.get_last_text().lower()
-        # Same as above — connected user gets Status/Help, not a re-prompt button.
-        button_data = {data for _, data in sim.get_last_buttons()}
-        assert 'ACTION|status' in button_data or 'INFO|what' in button_data
+        # Connected user post-recovery: no inline buttons; user types the case.
+        assert sim.get_last_buttons() == []
 
     @pytest.mark.asyncio
     async def test_expired_draft_recovery_updates_latest_template_message(self, thin_draft):

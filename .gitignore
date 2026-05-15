@@ -49,6 +49,9 @@ test-results/
 chrome-profile/
 user-data-dir/
 
+# Local agent/editor settings
+.claude/
+
 # One-off local helper scripts
 backend/dump_ticket.py
 backend/fill_one.py

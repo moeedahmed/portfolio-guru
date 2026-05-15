@@ -31,9 +31,9 @@ if [[ -n "$(git status --porcelain -- backend/filing_coverage.json)" ]]; then
   git restore -- backend/filing_coverage.json
 fi
 
-if [[ -n "$(git status --porcelain)" ]]; then
+if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
   echo "ERROR: deployment checkout has local changes. Refusing to deploy."
-  git status --short
+  git status --short --untracked-files=no
   exit 1
 fi
 

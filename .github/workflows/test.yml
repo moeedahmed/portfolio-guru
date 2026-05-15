@@ -27,7 +27,6 @@ jobs:
         run: python -m pytest tests/ -v --ignore=tests/test_e2e.py
 
   e2e:
-    if: ${{ secrets.TELETHON_API_ID != '' && secrets.TELETHON_API_HASH != '' && secrets.TELETHON_SESSION != '' }}
     runs-on: ubuntu-latest
     env:
       FERNET_SECRET_KEY: test
@@ -42,10 +41,23 @@ jobs:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
+      - name: Check E2E secrets
+        id: e2e-secrets
+        shell: bash
+        run: |
+          if [[ -n "$TELETHON_API_ID" && -n "$TELETHON_API_HASH" && -n "$TELETHON_SESSION" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "E2E secrets are not configured; skipping E2E tests."
+          fi
       - uses: actions/setup-python@v5
+        if: steps.e2e-secrets.outputs.available == 'true'
         with:
           python-version: "3.14"
       - name: Install dependencies
+        if: steps.e2e-secrets.outputs.available == 'true'
         run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
       - name: Run E2E tests
+        if: steps.e2e-secrets.outputs.available == 'true'
         run: python -m pytest tests/ -v -m e2e

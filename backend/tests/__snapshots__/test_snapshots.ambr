@@ -82,10 +82,6 @@
   dict({
     'buttons': list([
       tuple(
-        '❓ What is this?',
-        'INFO|what',
-      ),
-      tuple(
         '🔗 Connect Kaizen',
         'ACTION|setup',
       ),

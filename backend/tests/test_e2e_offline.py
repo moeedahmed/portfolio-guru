@@ -177,7 +177,6 @@ async def offline_app(monkeypatch, tmp_path):
             CommandHandler("start", bot.start),
             CommandHandler("help", bot.help_command),
             CommandHandler("settings", bot.settings_command),
-            CommandHandler("reset", bot.reset),
             CommandHandler("cancel", bot.setup_cancel),
             CallbackQueryHandler(
                 bot.handle_callback,
@@ -217,7 +216,6 @@ async def offline_app(monkeypatch, tmp_path):
     # Top-level command handlers
     app.add_handler(CommandHandler("start", bot.start))
     app.add_handler(CommandHandler("settings", bot.settings_command))
-    app.add_handler(CommandHandler("reset", bot.reset))
     app.add_handler(CommandHandler("cancel", bot.cancel_command))
     app.add_handler(CommandHandler("delete", bot.delete_data))
     app.add_handler(CommandHandler("help", bot.help_command))
@@ -304,8 +302,9 @@ class TestOfflineE2E:
         assert "ACTION|setup" in buttons
 
     async def test_start_with_credentials_shows_file(self, offline_app, monkeypatch):
-        """Send /start to a connected user → welcome guides them to send a case directly.
-        The keyboard surfaces secondary destinations (Status, Help, Settings, Health)."""
+        """Send /start to a connected user → welcome text only, no inline keyboard.
+        The user sends their case as the next action; Settings/Health/Help are
+        reachable via the Telegram Menu (☰)."""
         app, collector = offline_app
         monkeypatch.setattr("bot.has_credentials", lambda uid: True)
         monkeypatch.setattr("bot.get_training_level", lambda uid: "ST5")
@@ -319,15 +318,8 @@ class TestOfflineE2E:
         text = collector.texts[0]
         assert "ready when you are" in text
         sent = collector.sent[0]
-        markup = sent.get("reply_markup")
-        assert markup is not None
-        buttons = [btn.callback_data for row in markup.inline_keyboard for btn in row]
-        # Filing is initiated by sending the case; no re-prompt button needed.
-        assert "ACTION|file" not in buttons
-        # /status has been merged into /settings, so the welcome keyboard no
-        # longer carries a "My status" button. Settings covers both.
-        assert "ACTION|status" not in buttons
-        assert "ACTION|settings" in buttons
+        # Connected welcome has no inline keyboard.
+        assert sent.get("reply_markup") is None
 
     async def test_case_text_reaches_form_choice(self, offline_app, monkeypatch):
         """Send clinical case text → bot processes through extraction → shows form buttons."""
