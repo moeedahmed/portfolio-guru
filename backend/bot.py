@@ -388,7 +388,7 @@ _BTN_SETUP = InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|s
 _BTN_CANCEL = InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel")
 _BTN_HELP = InlineKeyboardButton("ℹ️ Help", callback_data="INFO|what")
 _BTN_VOICE = InlineKeyboardButton("✍️ Voice Profile", callback_data="ACTION|voice")
-_BTN_CONTINUE_THIN = InlineKeyboardButton("✅ Draft with this info", callback_data="ACTION|continue_thin")
+_BTN_CONTINUE_THIN = InlineKeyboardButton("✅ Show me the draft", callback_data="ACTION|continue_thin")
 
 _KB_RETRY_RESET = InlineKeyboardMarkup([[_BTN_RESET]])
 _KB_FILE_RESET = InlineKeyboardMarkup([[_BTN_FILE], [_BTN_RESET]])
@@ -1227,19 +1227,25 @@ def _draft_reflection_text(draft) -> str:
 
 
 def _draft_coach_note(draft) -> str:
+    """Return a coach note only when the reflection genuinely needs help.
+    Returns "" for solid reflections so the preview isn't padded with noise."""
     reflection = _draft_reflection_text(draft).strip()
     if not reflection:
-        return "Coach note: Ready to save if the required fields are present. Quick improve can add a sharper reflection."
+        return "Coach note: Tap Quick improve to draft a stronger reflection."
     if len(reflection.split()) < 18:
-        return "Coach note: Good enough to save. Quick improve can make the reflection stronger."
-    return "Coach note: Ready to save. Quick improve can polish the reflection without changing the rest."
+        return "Coach note: Reflection is short — Quick improve can flesh it out."
+    return ""
 
 
 def _draft_header(title: str, reason: str | None, draft) -> list[str]:
     lines = [f"🟢 *{FLOW_STATE_LABELS['drafted']} — {title} ready*"]
     if reason:
         lines.append(f"*Why this form:* {reason}")
-    lines.extend([_draft_coach_note(draft), ""])
+    coach = _draft_coach_note(draft)
+    if coach:
+        lines.extend([coach, ""])
+    else:
+        lines.append("")
     return lines
 
 
@@ -1354,7 +1360,7 @@ def _format_template_review(form_type: str, draft) -> str:
 
     lines = [
         f"🧩 *{form_name} template*",
-        f"🟡 *{FLOW_STATE_LABELS['needs_you']}* — review what I found, then add missing detail or tap Draft with this info.",
+        f"🟡 *{FLOW_STATE_LABELS['needs_you']}* — review what I found, then add missing detail or tap Show me the draft.",
         "",
         "*Required fields*",
         *[f"• {field['label']}" for field in required],
@@ -3353,7 +3359,7 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
                 return AWAIT_FORM_CHOICE
             else:
                 await update.message.reply_text(
-                    f"Based on your case, {form_name} is still the best fit. Tap Draft with this info to carry on, or Cancel to start again."
+                    f"Based on your case, {form_name} is still the best fit. Tap Show me the draft to carry on, or Cancel to start again."
                 )
                 return AWAIT_TEMPLATE_REVIEW
         except Exception:
@@ -3508,8 +3514,18 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             # command ("stats", "settings", "how many cases this month") rather
             # than a case or a generic question. Runs before the question-pattern
             # fast-path so "how many ..." routes to /status, not answer_question.
+            # Gated on menu-ish keywords so short clinical notes ("stitched lac")
+            # don't pay 2-3s of LLM latency for nothing.
+            _MENU_HINTS = (
+                "setting", "stat", "stats", "help", "menu", "usage", "limit",
+                "password", "credential", "login", "kaizen account", "reconnect",
+                "how many", "how much", "what's my", "whats my", "show me", "show my",
+                "this month", "this week", "tier", "upgrade", "plan", "subscription",
+                "voice profile", "curriculum", "training level",
+            )
+            looks_menu_ish = any(hint in words_lower for hint in _MENU_HINTS)
             nav_intent = None
-            if 1 <= word_count < 12 and clinical_hits == 0:
+            if looks_menu_ish and 1 <= word_count < 14 and clinical_hits == 0:
                 try:
                     await update.effective_chat.send_action(constants.ChatAction.TYPING)
                     nav_intent = await classify_menu_intent(raw_text)
@@ -3585,9 +3601,14 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await ack.edit_text("🎙️ Voice note read. Finding matching forms…")
             _track_latest_message(context, ack)
         except Exception as e:
-            context.user_data.clear()
-            await ack.edit_text("⚠️ Couldn't transcribe voice note. Try again.")
-            return ConversationHandler.END
+            await ack.edit_text(
+                "⚠️ Couldn't transcribe that voice note — send it again or type the case as text.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel")],
+                ]),
+            )
+            # Stay in AWAIT_CASE_INPUT so the next voice/text/photo continues the flow
+            return AWAIT_CASE_INPUT
         finally:
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
