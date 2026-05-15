@@ -763,6 +763,8 @@ class TestFlowWalker:
         with patch('bot.has_credentials', return_value=True), \
              patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
              patch('bot.classify_menu_intent', new=AsyncMock(return_value='show_stats')) as menu_mock, \
+             patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_curriculum', return_value='2025'), \
              patch('bot.recommend_form_types', new=AsyncMock(return_value=recommended_forms)):
             await handle_case_input(update, context)
 
@@ -780,6 +782,8 @@ class TestFlowWalker:
              patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
              patch('bot.classify_menu_intent', new=AsyncMock(return_value='ambiguous')), \
              patch('bot.classify_intent', new=AsyncMock(return_value='new_case')), \
+             patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_curriculum', return_value='2025'), \
              patch('bot.recommend_form_types', new=AsyncMock(return_value=recommended_forms)):
             await handle_case_input(update, context)
 
