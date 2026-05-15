@@ -2359,28 +2359,53 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         await _show_unsigned_range_picker(query.message, context)
 
     elif action == "health":
-        # Inline ARCP health check — same as /health command
+        # Inline ARCP health check — morphs the menu in place rather than
+        # popping a new message, with a Back button to return to the welcome.
+        back_btn = InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu")
+
         if not has_credentials(user_id):
-            await query.message.reply_text("🔗 Connect your Kaizen account first.", reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]]))
-            return ConversationHandler.END
-        tier = await get_user_tier(user_id)
-        if tier != "pro_plus":
-            await query.message.reply_text(
-                "📊 ARCP Health is included in Portfolio Guru Unlimited.\n\nUpgrade to get gap analysis and readiness scoring.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")]]),
+            await query.message.edit_text(
+                "🔗 Connect your Kaizen account first.",
+                reply_markup=InlineKeyboardMarkup([[_BTN_SETUP], [back_btn]]),
             )
             return ConversationHandler.END
+
+        tier = await get_user_tier(user_id)
+        if tier != "pro_plus":
+            await query.message.edit_text(
+                "📊 ARCP Health is included in Portfolio Guru Unlimited.\n\nUpgrade to get gap analysis and readiness scoring.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
+                    [back_btn],
+                ]),
+            )
+            return ConversationHandler.END
+
         await query.message.chat.send_action(constants.ChatAction.TYPING)
+        # Show "analysing" in place so the user knows we're working.
+        try:
+            await query.message.edit_text("🔍 Analysing your portfolio…")
+        except Exception:
+            pass
+
         training_level = get_training_level(user_id) or "ST4"
         history = await get_case_history(user_id, months=6)
         if not history:
-            await query.message.reply_text("📊 No cases filed yet — start filing and come back to check your ARCP readiness.")
+            await query.message.edit_text(
+                "📊 No cases filed yet — start filing and come back to check your ARCP readiness.",
+                reply_markup=InlineKeyboardMarkup([[back_btn]]),
+            )
             return ConversationHandler.END
+
         try:
             analysis = await analyse_portfolio_health(history, training_level)
         except Exception:
-            await query.message.reply_text("Could not run health check — try again later.")
+            await query.message.edit_text(
+                "Could not run health check — try again later.",
+                reply_markup=InlineKeyboardMarkup([[back_btn]]),
+            )
             return ConversationHandler.END
+
         from datetime import datetime as _dt
         month_label = _dt.now().strftime("%B %Y")
         gaps = analysis.get("gaps", [])
@@ -2389,12 +2414,13 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         suggestions_str = "\n".join(f"• {s}" for s in suggestions) if suggestions else "• Keep filing"
         readiness = analysis.get("arcp_readiness", "needs_attention")
         readiness_str = {"on_track": "🟢 On track", "needs_attention": "🟡 Needs attention", "at_risk": "🔴 At risk"}.get(readiness, readiness)
-        await query.message.reply_text(
+        await query.message.edit_text(
             f"📊 *Portfolio Health — {month_label}*\n\n"
             f"⚠️ *Gaps:*\n{gaps_str}\n\n"
             f"💡 *Suggestions:*\n{suggestions_str}\n\n"
             f"ARCP readiness: {readiness_str}",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[back_btn]]),
         )
 
     elif action == "settings":
