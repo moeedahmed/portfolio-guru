@@ -1,7 +1,8 @@
 """
 Kaizen Unsigned Tickets Scraper — async version for Portfolio Guru.
-Ported from Medic's kaizen_scraper_structured.py.
-Uses CDP connection to managed browser at localhost:18800.
+Connects via CDP when a managed browser is available (localhost:18800);
+otherwise launches a headless Chromium and logs in directly using stored
+credentials. Same pattern as kaizen_form_filer._connect_cdp.
 """
 
 import asyncio
@@ -32,68 +33,80 @@ def _parse_date(date_str: str) -> datetime | None:
     return None
 
 
+async def _login_via_rcem(page, username: str, password: str) -> bool:
+    """Log in to Kaizen via the RCEM portal (two-step username then password)."""
+    try:
+        await page.goto("https://eportfolio.rcem.ac.uk", wait_until="networkidle", timeout=30000)
+        await asyncio.sleep(2)
+        login_input = page.locator('input[name="login"]')
+        if await login_input.count() > 0:
+            await login_input.fill(username)
+            await page.locator('button[type="submit"]').click()
+            await asyncio.sleep(2)
+        pwd_input = page.locator('input[name="password"]')
+        if await pwd_input.count() > 0:
+            await pwd_input.fill(password)
+            await page.locator('button[type="submit"]').click()
+        await page.wait_for_url("**/kaizenep.com/**", timeout=30000)
+        await asyncio.sleep(3)
+        return True
+    except Exception as e:
+        logger.error(f"RCEM login failed: {e}")
+        return False
+
+
 async def scrape_unsigned_tickets(username: str = "", password: str = "") -> list[dict]:
-    """
-    Scrape unsigned tickets from Kaizen activities page.
-    Returns structured list of unsigned tickets after CUTOFF_DATE.
+    """Scrape unsigned tickets from Kaizen activities page.
+
+    Connects via CDP when available, otherwise launches a headless Chromium
+    and logs in fresh using the supplied credentials. Returns a structured
+    list of unsigned tickets dated after CUTOFF_DATE.
     """
     results = []
     pw = None
+    browser_to_close = None  # only set when we launched our own browser
 
     try:
         pw = await async_playwright().start()
-        browser = await pw.chromium.connect_over_cdp(CDP_URL)
-
-        # Find existing Kaizen page or create new one
         target_page = None
-        for ctx in browser.contexts:
-            for page in ctx.pages:
-                if "kaizenep.com" in page.url:
-                    target_page = page
-                    logger.info(f"CDP: reusing existing Kaizen page: {page.url}")
-                    break
-            if target_page:
-                break
 
-        if not target_page:
-            if browser.contexts:
-                target_page = await browser.contexts[0].new_page()
-            else:
-                ctx = await browser.new_context()
-                target_page = await ctx.new_page()
+        # Try CDP first
+        try:
+            browser = await pw.chromium.connect_over_cdp(CDP_URL)
+            for ctx in browser.contexts:
+                for page in ctx.pages:
+                    if "kaizenep.com" in page.url:
+                        target_page = page
+                        logger.info(f"CDP: reusing existing Kaizen page: {page.url}")
+                        break
+                if target_page:
+                    break
+            if not target_page:
+                if browser.contexts:
+                    target_page = await browser.contexts[0].new_page()
+                else:
+                    ctx = await browser.new_context()
+                    target_page = await ctx.new_page()
+        except Exception as e:
+            logger.info(f"CDP unavailable ({e}) — launching headless Chromium")
+            browser_to_close = await pw.chromium.launch(headless=True)
+            ctx = await browser_to_close.new_context()
+            target_page = await ctx.new_page()
 
         # Navigate to activities
         await target_page.goto("https://kaizenep.com/activities", wait_until="domcontentloaded")
         await asyncio.sleep(4)
 
-        # Check if login needed
-        if "auth." in target_page.url or "login" in target_page.url.lower():
+        # Check if login needed (true for fresh headless browser, false for CDP with existing session)
+        if "auth." in target_page.url or "login" in target_page.url.lower() or "eportfolio.rcem.ac.uk" in target_page.url:
             if not username or not password:
                 logger.error("Login required but no credentials provided")
                 return []
-
-            logger.info("Logging in to Kaizen...")
-            try:
-                await target_page.fill('input[type="email"], input[name="login"]', username)
-                await target_page.keyboard.press("Enter")
-                await asyncio.sleep(2)
-                await target_page.fill('input[type="password"]', password)
-                await target_page.keyboard.press("Enter")
-                await asyncio.sleep(4)
-
-                # Handle org selector
-                rcem = target_page.locator('text=Royal College of Emergency Medicine').first
-                if await rcem.is_visible():
-                    await rcem.click()
-                    await asyncio.sleep(1)
-                    await target_page.click('button[type="submit"]')
-                    await asyncio.sleep(3)
-
-                await target_page.goto("https://kaizenep.com/activities", wait_until="domcontentloaded")
-                await asyncio.sleep(3)
-            except Exception as e:
-                logger.error(f"Login error: {e}")
+            logger.info("Logging in to Kaizen via RCEM…")
+            if not await _login_via_rcem(target_page, username, password):
                 return []
+            await target_page.goto("https://kaizenep.com/activities", wait_until="domcontentloaded")
+            await asyncio.sleep(3)
 
         # Get page content
         body_text = await target_page.inner_text("body")
@@ -167,6 +180,11 @@ async def scrape_unsigned_tickets(username: str = "", password: str = "") -> lis
     except Exception as e:
         logger.error(f"Unsigned scraper error: {e}")
     finally:
+        if browser_to_close:
+            try:
+                await browser_to_close.close()
+            except Exception:
+                pass
         if pw:
             try:
                 await pw.stop()

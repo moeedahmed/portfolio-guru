@@ -2377,44 +2377,51 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             await query.message.edit_text("🔗 Not connected yet.", reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]]))
 
     elif action == "unsigned":
-        await query.message.edit_text(
-            "📬 Unsigned ticket scanning is coming soon.\n\n"
-            "This feature will show your pending assessments and let you send reminders to assessors.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu")],
-            ]),
-        )
-        return ConversationHandler.END
-        # --- Original implementation below (needs CDP browser) ---
         if not has_credentials(user_id):
             await query.message.reply_text(
                 "🔗 Connect your Kaizen account first.",
                 reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]])
             )
             return ConversationHandler.END
+        tier = await get_user_tier(user_id)
+        if tier != "pro_plus":
+            await query.message.reply_text(
+                "📬 Unsigned ticket scanning is included in Portfolio Guru Unlimited.\n\n"
+                "Upgrade to see all your pending assessments grouped by assessor, with chase guardrails (14-day cooldown, max 3 per assessor).",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
+                ]),
+            )
+            return ConversationHandler.END
         creds = get_credentials(user_id)
-        msg = await query.message.reply_text("🔍 Scanning for unsigned tickets...")
+        msg = await query.message.reply_text("🔍 Scanning Kaizen for unsigned tickets — this can take up to a minute…")
         try:
-            tickets = await scrape_unsigned_tickets(creds[0], creds[1])
-        except Exception as e:
-            await msg.edit_text(f"Could not scan Kaizen — try again in a moment.")
+            tickets = await asyncio.wait_for(scrape_unsigned_tickets(creds[0], creds[1]), timeout=90)
+        except asyncio.TimeoutError:
+            await msg.edit_text("⏱ Kaizen took too long to respond. Try again in a moment.")
+            return ConversationHandler.END
+        except Exception as exc:
+            logger.warning("Unsigned scrape errored: %s", exc, exc_info=True)
+            await msg.edit_text("Could not scan Kaizen — try again in a moment.")
             return ConversationHandler.END
         if not tickets:
-            await msg.edit_text("✅ No unsigned tickets found after Jan 2025.")
+            await msg.edit_text("✅ No unsigned tickets found (looking back to Jan 2025).")
             return ConversationHandler.END
         by_assessor: dict[str, list] = {}
         for t in tickets:
             name = t.get("assessor_name") or "Unknown"
             by_assessor.setdefault(name, []).append(t)
-        lines = [f"📋 Unsigned tickets: {len(tickets)} total\n"]
-        for assessor, tix in sorted(by_assessor.items()):
+        lines = [f"📬 *Unsigned tickets: {len(tickets)} total*\n"]
+        for assessor, tix in sorted(by_assessor.items(), key=lambda kv: -len(kv[1])):
             dates = [t["event_date"] for t in tix if t.get("event_date")]
             oldest = min(dates) if dates else "?"
             allowed, reason = chase_guard.check_allowed(assessor)
             chase_icon = "🟢" if allowed else "🔴"
-            lines.append(f"{chase_icon} {assessor}: {len(tix)} ticket(s), oldest: {oldest}")
-            lines.append(f"   Chase: {reason}")
-        await msg.edit_text("\n".join(lines))
+            lines.append(f"{chase_icon} *{assessor}* — {len(tix)} ticket(s), oldest {oldest}")
+            lines.append(f"   _{reason}_")
+        lines.append("\n🟢 = chase allowed   🔴 = chase blocked (cooldown / cap reached)")
+        lines.append("\nOpen Kaizen to send a reminder: https://kaizenep.com/activities")
+        await msg.edit_text("\n".join(lines), parse_mode="Markdown", disable_web_page_preview=True)
 
     elif action == "health":
         # Inline ARCP health check — same as /health command
@@ -4874,54 +4881,63 @@ async def bulk_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def unsigned_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /unsigned — coming soon."""
-    await update.message.reply_text(
-        "📬 Unsigned ticket scanning is coming soon.\n\n"
-        "This feature will show your pending assessments and let you send reminders to assessors."
-    )
-    return
-    # --- Original implementation below (needs CDP browser) ---
+    """Handle /unsigned — Unlimited feature. Scans Kaizen for unsigned tickets."""
     user_id = update.effective_user.id
-    creds = get_credentials(user_id)
 
-    if not creds or not creds[0]:
+    if not has_credentials(user_id):
         await update.message.reply_text(
-            "You need to connect your Kaizen account first.\n\nUse /setup to get started.",
+            "🔗 Connect your Kaizen account first.\n\nUse /setup to get started.",
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("⚙️ Connect Kaizen", callback_data="ACTION|setup")
             ]])
         )
         return
 
-    msg = await update.message.reply_text("🔍 Scanning for unsigned tickets...")
+    tier = await get_user_tier(user_id)
+    if tier != "pro_plus":
+        await update.message.reply_text(
+            "📬 Unsigned ticket scanning is included in Portfolio Guru Unlimited.\n\n"
+            "Upgrade to see all your pending assessments grouped by assessor, with chase guardrails (14-day cooldown, max 3 per assessor).",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
+            ]),
+        )
+        return
+
+    creds = get_credentials(user_id)
+    msg = await update.message.reply_text("🔍 Scanning Kaizen for unsigned tickets — this can take up to a minute…")
 
     try:
-        tickets = await scrape_unsigned_tickets(creds[0], creds[1])
-    except Exception as e:
-        await msg.edit_text(f"Scraper error: {e}")
+        tickets = await asyncio.wait_for(scrape_unsigned_tickets(creds[0], creds[1]), timeout=90)
+    except asyncio.TimeoutError:
+        await msg.edit_text("⏱ Kaizen took too long to respond. Try again in a moment.")
+        return
+    except Exception as exc:
+        logger.warning("Unsigned scrape errored: %s", exc, exc_info=True)
+        await msg.edit_text("Could not scan Kaizen — try again in a moment.")
         return
 
     if not tickets:
-        await msg.edit_text("No unsigned tickets found after 2025-01-01.")
+        await msg.edit_text("✅ No unsigned tickets found (looking back to Jan 2025).")
         return
 
-    # Group by assessor
     by_assessor: dict[str, list] = {}
     for t in tickets:
         name = t.get("assessor_name") or "Unknown"
         by_assessor.setdefault(name, []).append(t)
 
-    lines = [f"Unsigned tickets: {len(tickets)} total\n"]
-    for assessor, tix in sorted(by_assessor.items()):
+    lines = [f"📬 *Unsigned tickets: {len(tickets)} total*\n"]
+    for assessor, tix in sorted(by_assessor.items(), key=lambda kv: -len(kv[1])):
         dates = [t["event_date"] for t in tix if t.get("event_date")]
         oldest = min(dates) if dates else "?"
-        # Check chase eligibility
         allowed, reason = chase_guard.check_allowed(assessor)
         chase_icon = "🟢" if allowed else "🔴"
-        lines.append(f"{chase_icon} {assessor}: {len(tix)} ticket(s), oldest: {oldest}")
-        lines.append(f"   Chase: {reason}")
+        lines.append(f"{chase_icon} *{assessor}* — {len(tix)} ticket(s), oldest {oldest}")
+        lines.append(f"   _{reason}_")
 
-    await msg.edit_text("\n".join(lines))
+    lines.append("\n🟢 = chase allowed   🔴 = chase blocked (cooldown / cap reached)")
+    lines.append("\nOpen Kaizen to send a reminder: https://kaizenep.com/activities")
+    await msg.edit_text("\n".join(lines), parse_mode="Markdown", disable_web_page_preview=True)
 
 
 async def chase_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
