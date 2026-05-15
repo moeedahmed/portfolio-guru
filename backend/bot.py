@@ -874,11 +874,10 @@ def _build_welcome_keyboard(connected: bool = False):
         # Surface secondary destinations only.
         return InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings"),
                 InlineKeyboardButton("📈 Portfolio health", callback_data="ACTION|health"),
+                InlineKeyboardButton("ℹ️ Help", callback_data="INFO|what"),
             ],
             [
-                InlineKeyboardButton("ℹ️ Help", callback_data="INFO|what"),
                 InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings"),
             ],
         ])
