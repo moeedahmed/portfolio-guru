@@ -69,7 +69,12 @@ class TestFlowWalker:
             result = await start(update, context)
 
         assert result == ConversationHandler.END
-        assert any(data == 'ACTION|file' for _, data in sim.get_last_buttons())
+        # Connected user: the welcome message should explain how to send a case,
+        # and the keyboard surfaces secondary destinations (Status, Help).
+        # The "File a case" button was removed — users just send their case.
+        assert 'send' in sim.get_last_text().lower()
+        button_data = {data for _, data in sim.get_last_buttons()}
+        assert 'ACTION|status' in button_data or 'INFO|what' in button_data
 
     @pytest.mark.asyncio
     async def test_case_input_walks_to_form_choice(self, recommended_forms):
@@ -336,7 +341,10 @@ class TestFlowWalker:
 
         assert result == ConversationHandler.END
         assert 'cancelled' in sim.get_last_text().lower()
-        assert any(data == 'ACTION|file' for _, data in sim.get_last_buttons())
+        # Post-cancel for a connected user surfaces Status/Help only. Filing is
+        # initiated by sending a fresh case, not by tapping a re-prompt button.
+        button_data = {data for _, data in sim.get_last_buttons()}
+        assert 'ACTION|status' in button_data or 'INFO|what' in button_data
 
     @pytest.mark.asyncio
     async def test_cancel_path_uses_setup_button_when_setup_incomplete(self):
@@ -369,7 +377,9 @@ class TestFlowWalker:
         assert result == ConversationHandler.END
         assert sim.messages_sent[-1][0] == 'reply'
         assert 'start a new case' in sim.get_last_text().lower()
-        assert any(data == 'ACTION|file' for _, data in sim.get_last_buttons())
+        # Same as above — connected user gets Status/Help, not a re-prompt button.
+        button_data = {data for _, data in sim.get_last_buttons()}
+        assert 'ACTION|status' in button_data or 'INFO|what' in button_data
 
     @pytest.mark.asyncio
     async def test_expired_draft_recovery_updates_latest_template_message(self, thin_draft):
@@ -617,14 +627,15 @@ class TestFlowWalker:
         from bot import _build_nudge_message
 
         stats = {"cases": 3, "gap": ("Mini-CEX", 28)}
-        llm_copy = "📋 Solid week — three cases logged.\n\nMini-CEX gap is showing. Tap below to file a case."
+        llm_copy = "📋 Solid week — three cases logged.\n\nMini-CEX gap is showing — just send me what happened next time."
 
         with patch('bot.generate_nudge_copy', new=AsyncMock(return_value=llm_copy)):
             text, keyboard = await _build_nudge_message(stats)
 
         assert text == llm_copy
-        buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
-        assert ('📋 File a case', 'ACTION|file') in buttons
+        # Nudge no longer carries a re-prompt button — the user starts a case
+        # by sending text/voice/photo/document directly.
+        assert keyboard is None
 
     @pytest.mark.asyncio
     async def test_nudge_falls_back_to_static_when_llm_empty(self):
@@ -785,7 +796,9 @@ class TestRecentPortfolioFixes:
 
         assert result == ConversationHandler.END
         assert 'setup complete' in sim.get_last_text().lower()
-        assert ('📋 File first case', 'ACTION|file') in sim.get_last_buttons()
+        # Post-setup completion no longer has a "File first case" button —
+        # the user is invited to send their case directly.
+        assert 'send your first case' in sim.get_last_text().lower()
 
     def test_quick_improve_keyboard_can_be_locked_after_one_use(self):
         from bot import _build_approval_keyboard
@@ -840,8 +853,9 @@ class TestOnboardingFrictionPatch:
         store_credentials.assert_called_once()
         store_training_level.assert_not_called()
         store_curriculum.assert_called_once_with(sim.user_id, '2025')
-        assert 'ready to file your first case' in sim.get_last_text().lower()
-        assert ('📋 File first case', 'ACTION|file') in sim.get_last_buttons()
+        # Post-setup completion invites the user to send their first case directly
+        # rather than tapping a re-prompt button.
+        assert 'send your first case' in sim.get_last_text().lower()
 
 
 class TestTrainingStageGroups:

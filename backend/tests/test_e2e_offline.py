@@ -304,7 +304,8 @@ class TestOfflineE2E:
         assert "ACTION|setup" in buttons
 
     async def test_start_with_credentials_shows_file(self, offline_app, monkeypatch):
-        """Send /start to a user with stored credentials → bot sends File a case button."""
+        """Send /start to a connected user → welcome guides them to send a case directly.
+        The keyboard surfaces secondary destinations (Status, Help, Settings, Health)."""
         app, collector = offline_app
         monkeypatch.setattr("bot.has_credentials", lambda uid: True)
         monkeypatch.setattr("bot.get_training_level", lambda uid: "ST5")
@@ -321,7 +322,11 @@ class TestOfflineE2E:
         markup = sent.get("reply_markup")
         assert markup is not None
         buttons = [btn.callback_data for row in markup.inline_keyboard for btn in row]
-        assert "ACTION|file" in buttons
+        # Filing is initiated by sending the case; no re-prompt button needed.
+        assert "ACTION|file" not in buttons
+        # But the user still has direct access to status/help/settings.
+        assert "ACTION|status" in buttons
+        assert "ACTION|settings" in buttons
 
     async def test_case_text_reaches_form_choice(self, offline_app, monkeypatch):
         """Send clinical case text → bot processes through extraction → shows form buttons."""

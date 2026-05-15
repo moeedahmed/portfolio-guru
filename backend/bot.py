@@ -218,22 +218,20 @@ def _static_nudge_text(stats: dict) -> str:
         lines.append(f"Longest gap: no {label} in {days} days")
     lines.append("")
     if cases > 0:
-        lines.append("Keep the momentum going \u2014 tap below to file a case.")
+        lines.append("Keep the momentum going \u2014 just send me what happened.")
     else:
-        lines.append("One case takes 2 minutes. Tap below to get started.")
+        lines.append("One case takes 2 minutes. Just send me what happened \u2014 text, voice, photo, or document.")
     return "\n".join(lines)
 
 
-async def _build_nudge_message(stats: dict) -> tuple[str, InlineKeyboardMarkup]:
-    """Build weekly nudge message text and inline keyboard. Tries an LLM-written
-    fresh copy first; falls back to a static template if generation fails."""
+async def _build_nudge_message(stats: dict) -> tuple[str, InlineKeyboardMarkup | None]:
+    """Build weekly nudge message text. No CTA button \u2014 the user types or sends
+    media directly to start a case (the Menu button at bottom-left gives
+    access to /status, /settings, /voice, etc.)."""
     text = await generate_nudge_copy(stats)
     if not text:
         text = _static_nudge_text(stats)
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("\U0001f4cb File a case", callback_data="ACTION|file")]
-    ])
-    return text, keyboard
+    return text, None
 
 
 async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -432,7 +430,6 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
 
 # Common button patterns used across the bot
 _BTN_RESET = InlineKeyboardButton("🆕 Start fresh", callback_data="ACTION|reset")
-_BTN_FILE = InlineKeyboardButton("📋 File a case", callback_data="ACTION|file")
 _BTN_SETUP = InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")
 _BTN_CANCEL = InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel")
 _BTN_HELP = InlineKeyboardButton("ℹ️ Help", callback_data="INFO|what")
@@ -440,7 +437,6 @@ _BTN_VOICE = InlineKeyboardButton("✍️ Voice Profile", callback_data="ACTION|
 _BTN_CONTINUE_THIN = InlineKeyboardButton("✅ Show me the draft", callback_data="ACTION|continue_thin")
 
 _KB_RETRY_RESET = InlineKeyboardMarkup([[_BTN_RESET]])
-_KB_FILE_RESET = InlineKeyboardMarkup([[_BTN_FILE], [_BTN_RESET]])
 
 
 def _setup_needs_finishing(user_id: int) -> bool:
@@ -453,9 +449,9 @@ def _build_next_step_keyboard(user_id: int, *, include_reset: bool = False) -> I
             [InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")],
             [InlineKeyboardButton("ℹ️ How does this work?", callback_data="INFO|what")],
         ])
-    # Connected user — show the three things they actually need
+    # Connected user — the primary action is to send a case (just type it).
+    # Surface secondary destinations only.
     rows = [
-        [InlineKeyboardButton("📋 File a case", callback_data="ACTION|file")],
         [InlineKeyboardButton("📊 Check status", callback_data="ACTION|status"),
          InlineKeyboardButton("ℹ️ Help", callback_data="INFO|what")],
     ]
@@ -848,8 +844,9 @@ def _settings_view_components(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
 
 def _build_welcome_keyboard(connected: bool = False):
     if connected:
+        # Filing is initiated by sending the case directly — no button needed.
+        # Surface secondary destinations only.
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("📋 File a case", callback_data="ACTION|file")],
             [
                 InlineKeyboardButton("📊 My status", callback_data="ACTION|status"),
                 InlineKeyboardButton("📈 Portfolio health", callback_data="ACTION|health"),
@@ -1645,15 +1642,15 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         drafts_str = f"📂 Cases filed this month: {month_count}"
         vp = get_voice_profile(user_id)
         voice_str = "✍️ Voice profile: active" if vp else "✍️ Voice profile: not set"
-        buttons = [
-            [InlineKeyboardButton("📋 File a case", callback_data="ACTION|file")],
-        ]
+        buttons = []
         if not vp:
             buttons.append([InlineKeyboardButton("✍️ Set up voice profile", callback_data="ACTION|voice")])
         if not training_level:
             buttons.append([InlineKeyboardButton("🔗 Update setup", callback_data="ACTION|setup")])
+        buttons.append([InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")])
         await update.message.reply_text(
-            f"✅ Portfolio connected and ready.\n\n{grade_str}\n{cur_str}\n{drafts_str}\n{voice_str}",
+            f"✅ Portfolio connected and ready.\n\n{grade_str}\n{cur_str}\n{drafts_str}\n{voice_str}\n\n"
+            f"Just send your next case to file it.",
             reply_markup=InlineKeyboardMarkup(buttons)
         )
     else:
@@ -1825,11 +1822,10 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     await _flow_edit(
         update, context,
-        "Kaizen connected ✅\n\nYou’re ready to file your first case. You can change training level or curriculum later in Settings.",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📋 File first case", callback_data="ACTION|file")],
-            [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")],
-        ]),
+        "Kaizen connected ✅\n\n"
+        "Send your first case — text, voice, photo, or document — and I'll get started.\n\n"
+        "Use the *Menu* (☰ bottom-left) any time for Settings, Status, or Voice profile.",
+        parse_mode="Markdown",
         flow_key="setup",
     )
     _flow_done(context, "setup")
@@ -1860,11 +1856,10 @@ async def setup_curriculum(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     label = "2025 curriculum" if curriculum == "2025" else "2021 curriculum"
     context.user_data.pop("_setup_state_hint", None)
     await query.edit_message_text(
-        f"✅ Setup complete. You're on {label}.\n\nSend your first case when ready — text, voice note, photo, or document.",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📋 File first case", callback_data="ACTION|file")],
-            [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")],
-        ]),
+        f"✅ Setup complete. You're on {label}.\n\n"
+        f"Send your first case when ready — text, voice note, photo, or document.\n\n"
+        f"Use the *Menu* (☰ bottom-left) any time for Settings, Status, or Voice profile.",
+        parse_mode="Markdown",
     )
     return ConversationHandler.END
 
@@ -1975,10 +1970,10 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
             context.user_data.pop("voice_examples", None)
             await _flow_edit(
                 update, context,
-                "✅ Voice profile activated. All future drafts will match your writing voice.",
+                "✅ Voice profile activated. All future drafts will match your writing voice.\n\n"
+                "Send a case any time to try it.",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📋 File a case", callback_data="ACTION|file"),
-                     InlineKeyboardButton("🔄 Rebuild", callback_data="ACTION|voice")],
+                    [InlineKeyboardButton("🔄 Rebuild profile", callback_data="ACTION|voice")],
                 ]),
                 flow_key="voice",
             )
@@ -2221,12 +2216,14 @@ async def handle_info_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
+    primary = [_BTN_SETUP] if not has_credentials(user_id) else []
+    rows = []
+    if primary:
+        rows.append(primary)
+    rows.append([InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu")])
     await query.message.edit_text(
         WHAT_IS_THIS_MSG,
-        reply_markup=InlineKeyboardMarkup([
-            [_BTN_FILE if has_credentials(user_id) else _BTN_SETUP],
-            [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu")],
-        ]),
+        reply_markup=InlineKeyboardMarkup(rows),
     )
 
 
@@ -2246,10 +2243,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
     if action == "setup":
         if has_credentials(user_id):
             await query.message.reply_text(
-                "Your Kaizen account is already connected.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📋 File a case", callback_data="ACTION|file")]
-                ])
+                "Your Kaizen account is already connected. Just send your next case to file it."
             )
         else:
             await setup_start(update, context)
@@ -2348,7 +2342,6 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.message.edit_text(
             WHAT_IS_THIS_MSG,
             reply_markup=InlineKeyboardMarkup([
-                [_BTN_FILE],
                 [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu")],
             ]),
         )
@@ -2374,9 +2367,9 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 f"📚 Curriculum: {curriculum_label}\n"
                 f"⭐ Plan: {tier_label}\n"
                 f"📋 Usage: {usage_str}\n"
-                f"✍️ Voice profile: {voice_str}",
+                f"✍️ Voice profile: {voice_str}\n\n"
+                f"Just send your next case to file it.",
                 reply_markup=InlineKeyboardMarkup([
-                    [_BTN_FILE],
                     [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu")],
                 ])
             )
@@ -2699,12 +2692,19 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         HELP_MSG,
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
-            [_BTN_FILE],
             [_BTN_SETUP, _BTN_VOICE],
             [InlineKeyboardButton("📊 Status", callback_data="ACTION|status"),
              _BTN_RESET],
         ])
     )
+    return ConversationHandler.END
+
+
+async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle /settings — show settings page (same view as the Settings button)."""
+    user_id = update.effective_user.id
+    text, keyboard = _settings_view_components(user_id)
+    await update.message.reply_text(text, reply_markup=keyboard)
     return ConversationHandler.END
 
 
@@ -5117,6 +5117,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(CommandHandler("delete", delete_data))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("settings", settings_command))
     application.add_handler(CommandHandler("bulk", bulk_command))
     application.add_handler(CommandHandler("unsigned", unsigned_command))
     application.add_handler(CommandHandler("chase", chase_command))
@@ -5242,6 +5243,7 @@ def main():
             ("start", "Open Portfolio Guru and get started"),
             ("setup", "Connect your portfolio account"),
             ("voice", "Set up your personal writing voice"),
+            ("settings", "View and change preferences"),
             ("status", "Check connection and stats"),
             ("reset", "Clear current session and start fresh"),
             ("cancel", "Cancel whatever is happening"),
