@@ -77,6 +77,42 @@ async def _safe_edit_text(target, text: str, **kwargs):
         )
 
 
+async def _flow_msg(update, context, text, reply_markup=None, parse_mode=None, flow_key="setup"):
+    """Send or edit the flow's anchor message — collapses multi-step flows into one bubble.
+
+    The first call sends a new message and stores its id in user_data; subsequent
+    calls with the same flow_key edit that message in place. If the edit fails
+    (anchor gone, too old, identical content), falls back to sending a fresh one.
+    """
+    anchor_key = f"_flow_anchor_{flow_key}"
+    anchor = context.user_data.get(anchor_key)
+    if anchor:
+        chat_id, msg_id = anchor
+        try:
+            return await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=msg_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode,
+            )
+        except Exception as exc:
+            logger.debug("Flow anchor edit failed (%s): %s", flow_key, exc)
+            context.user_data.pop(anchor_key, None)
+
+    chat = update.effective_chat
+    msg = await chat.send_message(
+        text=text,
+        reply_markup=reply_markup,
+        parse_mode=parse_mode,
+    )
+    context.user_data[anchor_key] = (msg.chat_id, msg.message_id)
+    return msg
+
+
+def _flow_done(context, flow_key="setup"):
+    """Clear the flow's anchor — call when the flow ends (success/cancel/error)."""
+    context.user_data.pop(f"_flow_anchor_{flow_key}", None)
 
 
 # ---------------------------------------------------------------------------
@@ -1630,23 +1666,22 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             await update.callback_query.answer()
         return ConversationHandler.END
 
-    # Can be triggered by command or callback
+    # Can be triggered by command or callback. Anchor the setup flow message.
     if update.callback_query:
         await update.callback_query.answer()
-        await update.callback_query.message.reply_text("📧 What's your Kaizen username (email)?")
-    else:
-        await update.message.reply_text("📧 What's your Kaizen username (email)?")
+    _flow_done(context, "setup")  # fresh start — drop any stale anchor
+    await _flow_msg(update, context, "📧 What's your Kaizen username (email)?", flow_key="setup")
     return AWAIT_USERNAME
 
 
 async def setup_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     text = update.message.text.strip()
     if "@" not in text or "." not in text:
-        await update.message.reply_text("⚠️ That doesn't look like an email. What's your Kaizen username?")
+        await _flow_msg(update, context, "⚠️ That doesn't look like an email. What's your Kaizen username?", flow_key="setup")
         return AWAIT_USERNAME
     context.user_data["setup_username"] = text
     context.user_data["_setup_state_hint"] = "password"
-    await update.message.reply_text("🔒 What's your Kaizen password?")
+    await _flow_msg(update, context, "🔒 What's your Kaizen password?", flow_key="setup")
     return AWAIT_PASSWORD
 
 
@@ -1695,20 +1730,20 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 "Please delete it manually for security."
             )
 
-    # Test credentials before saving — with progress edits so the user can
-    # see we're still alive during the 60s Kaizen handshake.
-    progress_msg = await update.effective_chat.send_message("🔄 Testing your Kaizen login…")
+    # Test credentials before saving — edit the same flow message through
+    # progress updates so the chat stays clean during the 60s Kaizen handshake.
+    await _flow_msg(update, context, "🔄 Testing your Kaizen login…", flow_key="setup")
 
     async def _progress_updates():
         try:
             await asyncio.sleep(15)
             try:
-                await progress_msg.edit_text("🔄 Still checking — Kaizen can be slow to respond…")
+                await _flow_msg(update, context, "🔄 Still checking — Kaizen can be slow to respond…", flow_key="setup")
             except Exception:
                 pass
             await asyncio.sleep(20)
             try:
-                await progress_msg.edit_text("🔄 Almost there — finalising the login check…")
+                await _flow_msg(update, context, "🔄 Almost there — finalising the login check…", flow_key="setup")
             except Exception:
                 pass
         except asyncio.CancelledError:
@@ -1721,18 +1756,23 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
     except asyncio.TimeoutError:
         progress_task.cancel()
-        await progress_msg.edit_text(
+        await _flow_msg(
+            update, context,
             "⏱ Kaizen took too long to respond. This is usually a brief outage on their side.\n\n"
-            "Try the setup again — or send the case anyway, you can connect later."
+            "Try the setup again — or send the case anyway, you can connect later.",
+            flow_key="setup",
         )
         context.user_data.pop("setup_username", None)
+        _flow_done(context, "setup")
         return ConversationHandler.END
     except Exception as exc:
         progress_task.cancel()
         logger.warning("Credential test errored: %s", exc, exc_info=True)
-        await progress_msg.edit_text(
+        await _flow_msg(
+            update, context,
             "⚠️ Couldn't reach Kaizen to verify the login. Try again in a moment.\n\n"
-            "📧 What's your Kaizen username (email)?"
+            "📧 What's your Kaizen username (email)?",
+            flow_key="setup",
         )
         context.user_data.pop("setup_username", None)
         return AWAIT_USERNAME
@@ -1740,9 +1780,11 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         progress_task.cancel()
 
     if not login_ok:
-        await progress_msg.edit_text(
+        await _flow_msg(
+            update, context,
             "❌ Login failed — please check your username and password.\n\n"
-            "📧 What's your Kaizen username (email)?"
+            "📧 What's your Kaizen username (email)?",
+            flow_key="setup",
         )
         context.user_data.pop("setup_username", None)
         return AWAIT_USERNAME
@@ -1756,13 +1798,16 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not get_curriculum(user_id):
         store_curriculum(user_id, "2025")
 
-    await progress_msg.edit_text(
+    await _flow_msg(
+        update, context,
         "Kaizen connected ✅\n\nYou’re ready to file your first case. You can change training level or curriculum later in Settings.",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("📋 File first case", callback_data="ACTION|file")],
             [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")],
         ]),
+        flow_key="setup",
     )
+    _flow_done(context, "setup")
     return ConversationHandler.END
 
 
@@ -1810,18 +1855,12 @@ async def _setup_wrong_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def setup_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data.clear()
     if update.callback_query:
         await update.callback_query.answer()
-        await update.callback_query.message.reply_text(
-            _cancelled_next_step_text(update.effective_user.id, "Setup cancelled"),
-            reply_markup=_build_next_step_keyboard(update.effective_user.id),
-        )
-    else:
-        await update.message.reply_text(
-            _cancelled_next_step_text(update.effective_user.id, "Setup cancelled"),
-            reply_markup=_build_next_step_keyboard(update.effective_user.id),
-        )
+    text = _cancelled_next_step_text(update.effective_user.id, "Setup cancelled")
+    keyboard = _build_next_step_keyboard(update.effective_user.id)
+    await _flow_msg(update, context, text, reply_markup=keyboard, flow_key="setup")
+    context.user_data.clear()
     return ConversationHandler.END
 
 
@@ -1831,6 +1870,7 @@ async def voice_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     """Start voice profile collection — /voice command."""
     user_id = update.effective_user.id
     existing = get_voice_profile(user_id)
+    _flow_done(context, "voice")  # fresh start — drop any stale anchor
 
     if existing:
         keyboard = InlineKeyboardMarkup([
@@ -1838,14 +1878,17 @@ async def voice_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
              InlineKeyboardButton("🗑️ Remove Profile", callback_data="VOICE|remove")],
             [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
         ])
-        await update.message.reply_text(
+        await _flow_msg(
+            update, context,
             "✍️ You already have a voice profile active. Your drafts are styled to match your writing.\n\n"
             "What would you like to do?",
-            reply_markup=keyboard
+            reply_markup=keyboard,
+            flow_key="voice",
         )
         return AWAIT_VOICE_EXAMPLES
 
-    await update.message.reply_text(
+    await _flow_msg(
+        update, context,
         "⭐ *Voice Profile Setup*\n\n"
         "This is the personalisation step that makes Portfolio Guru sound like you, not a generic bot.\n\n"
         "Send 3-5 examples of real portfolio writing. Best examples are reflections or WPBA text you would actually submit.\n\n"
@@ -1857,7 +1900,8 @@ async def voice_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
-        ])
+        ]),
+        flow_key="voice",
     )
     context.user_data["voice_examples"] = []
     return AWAIT_VOICE_EXAMPLES
@@ -1877,61 +1921,82 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
         if data == "VOICE|cancel":
             context.user_data.pop("voice_examples", None)
             context.user_data.pop("pending_voice_profile", None)
-            await query.edit_message_text("Voice profile setup closed.")
-            await query.message.reply_text(
+            await _flow_msg(
+                update, context,
                 _cancelled_next_step_text(update.effective_user.id, "Voice profile setup cancelled"),
                 reply_markup=_build_next_step_keyboard(update.effective_user.id),
+                flow_key="voice",
             )
+            _flow_done(context, "voice")
             return ConversationHandler.END
 
         if data == "VOICE|preview_accept":
             profile_json = context.user_data.get("pending_voice_profile")
             if not profile_json:
-                await query.edit_message_text(
+                await _flow_msg(
+                    update, context,
                     "⚠️ That preview has expired. Please rebuild your voice profile.",
                     reply_markup=InlineKeyboardMarkup([
                         [InlineKeyboardButton("🔄 Rebuild Profile", callback_data="ACTION|voice")],
-                    ])
+                    ]),
+                    flow_key="voice",
                 )
                 context.user_data.pop("voice_examples", None)
+                _flow_done(context, "voice")
                 return ConversationHandler.END
 
             store_voice_profile(update.effective_user.id, profile_json, len(examples))
             context.user_data.pop("pending_voice_profile", None)
             context.user_data.pop("voice_examples", None)
-            await query.edit_message_text(
+            await _flow_msg(
+                update, context,
                 "✅ Voice profile activated. All future drafts will match your writing voice.",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("📋 File a case", callback_data="ACTION|file"),
                      InlineKeyboardButton("🔄 Rebuild", callback_data="ACTION|voice")],
-                ])
+                ]),
+                flow_key="voice",
             )
+            _flow_done(context, "voice")
             return ConversationHandler.END
 
         if data == "VOICE|preview_reject":
             context.user_data.pop("pending_voice_profile", None)
             context.user_data.pop("voice_examples", None)
-            await query.edit_message_text(
+            await _flow_msg(
+                update, context,
                 "No problem — let's try again with different examples.",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|voice")],
-                ])
+                ]),
+                flow_key="voice",
             )
+            _flow_done(context, "voice")
             return ConversationHandler.END
 
         if data == "VOICE|remove":
             clear_voice_profile(update.effective_user.id)
             context.user_data.pop("voice_examples", None)
             context.user_data.pop("pending_voice_profile", None)
-            await query.edit_message_text("🗑️ Voice profile removed. Drafts will use standard clinical style.")
+            await _flow_msg(
+                update, context,
+                "🗑️ Voice profile removed. Drafts will use standard clinical style.",
+                flow_key="voice",
+            )
+            _flow_done(context, "voice")
             return ConversationHandler.END
 
         if data == "VOICE|rebuild":
             context.user_data["voice_examples"] = []
             context.user_data.pop("pending_voice_profile", None)
-            await query.edit_message_text(
+            await _flow_msg(
+                update, context,
                 "🔄 Starting fresh. Send 3-5 examples of real portfolio writing. Pasted text is best; screenshots and voice notes also work.\n\n"
-                "Send your first example now."
+                "Send your first example now.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
+                ]),
+                flow_key="voice",
             )
             return AWAIT_VOICE_EXAMPLES
 
@@ -1947,17 +2012,20 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
             if text.lower() == "/done" and len(examples) >= 3:
                 return await _build_voice_profile(update, context)
             context.user_data.pop("voice_examples", None)
-            await msg.reply_text(
+            await _flow_msg(
+                update, context,
                 _cancelled_next_step_text(update.effective_user.id, "Voice profile setup cancelled"),
                 reply_markup=_build_next_step_keyboard(update.effective_user.id),
+                flow_key="voice",
             )
+            _flow_done(context, "voice")
             return ConversationHandler.END
         examples.append(text)
 
     # Photo example — extract text from image
     elif msg and msg.photo:
         from vision import extract_from_image
-        ack = await msg.reply_text("📷 Reading image…")
+        await _flow_msg(update, context, "📷 Reading image…", flow_key="voice")
         try:
             photo = msg.photo[-1]
             photo_file = await photo.get_file()
@@ -1970,17 +2038,16 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
             os.unlink(tmp_path)
             if text and text.strip() != "NOT_CLINICAL":
                 examples.append(text)
-                await ack.edit_text(f"📷 Got it — example {len(examples)} captured.")
             else:
-                await ack.edit_text("⚠️ Couldn't extract text from that image. Try another.")
+                await _flow_msg(update, context, "⚠️ Couldn't extract text from that image. Try another.", flow_key="voice")
                 return AWAIT_VOICE_EXAMPLES
         except Exception:
-            await ack.edit_text("⚠️ Couldn't read image. Try pasting text instead.")
+            await _flow_msg(update, context, "⚠️ Couldn't read image. Try pasting text instead.", flow_key="voice")
             return AWAIT_VOICE_EXAMPLES
 
     # Voice note
     elif msg and msg.voice:
-        ack = await msg.reply_text("🎙️ Transcribing…")
+        await _flow_msg(update, context, "🎙️ Transcribing…", flow_key="voice")
         try:
             voice_file = await msg.voice.get_file()
             import tempfile
@@ -1992,12 +2059,11 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
             os.unlink(tmp_path)
             if text:
                 examples.append(text)
-                await ack.edit_text(f"🎙️ Transcribed — example {len(examples)} captured.")
             else:
-                await ack.edit_text("⚠️ Couldn't transcribe. Try pasting text instead.")
+                await _flow_msg(update, context, "⚠️ Couldn't transcribe. Try pasting text instead.", flow_key="voice")
                 return AWAIT_VOICE_EXAMPLES
         except Exception:
-            await ack.edit_text("⚠️ Transcription failed. Try pasting text instead.")
+            await _flow_msg(update, context, "⚠️ Transcription failed. Try pasting text instead.", flow_key="voice")
             return AWAIT_VOICE_EXAMPLES
 
     context.user_data["voice_examples"] = examples
@@ -2010,14 +2076,21 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
             [InlineKeyboardButton(f"✅ Build Profile ({len(examples)} examples)", callback_data="VOICE|done")],
             [InlineKeyboardButton("➕ Add More", callback_data="VOICE|more")],
         ])
-        await (msg or update.callback_query.message).reply_text(
+        await _flow_msg(
+            update, context,
             f"Got {len(examples)} examples. More examples make the voice match better — send up to 5, or build now.",
             reply_markup=keyboard,
+            flow_key="voice",
         )
     else:
         remaining = 3 - len(examples)
-        await (msg or update.callback_query.message).reply_text(
-            f"Got it — example {len(examples)} captured. Send {remaining} more so I can build a reliable voice profile."
+        await _flow_msg(
+            update, context,
+            f"Got it — example {len(examples)} captured. Send {remaining} more so I can build a reliable voice profile.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
+            ]),
+            flow_key="voice",
         )
 
     return AWAIT_VOICE_EXAMPLES
@@ -2046,9 +2119,8 @@ Write a short portfolio entry (2-3 paragraphs) in this doctor's voice. Include a
 async def _build_voice_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Build the voice profile from collected examples."""
     examples = context.user_data.get("voice_examples", [])
-    target = update.callback_query.message if update.callback_query else update.message
 
-    ack = await target.reply_text("🔍 Analysing your writing style…")
+    await _flow_msg(update, context, "🔍 Analysing your writing style…", flow_key="voice")
 
     try:
         from voice_profile import generate_voice_profile
@@ -2058,36 +2130,44 @@ async def _build_voice_profile(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data["pending_voice_profile"] = profile_json
         sample_draft = await _generate_voice_preview(profile_json)
 
-        await ack.edit_text(
+        await _flow_msg(
+            update, context,
             f"🔍 Here's a sample draft using your voice profile:\n\n"
             f"---\n{sample_draft}\n---\n\n"
             f"Does this sound like you?",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("✅ Looks like me — Activate", callback_data="VOICE|preview_accept")],
                 [InlineKeyboardButton("❌ Not quite — try again", callback_data="VOICE|preview_reject")],
-            ])
+            ]),
+            flow_key="voice",
         )
         return AWAIT_VOICE_EXAMPLES
     except asyncio.TimeoutError:
         logger.warning("Voice profile generation timed out (30s)")
         context.user_data.pop("pending_voice_profile", None)
         context.user_data.pop("voice_examples", None)
-        await ack.edit_text(
+        await _flow_msg(
+            update, context,
             "⚠️ Analysis took too long — please try again. This usually works on a second attempt.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|voice")],
-            ])
+            ]),
+            flow_key="voice",
         )
+        _flow_done(context, "voice")
     except Exception as e:
         logger.error(f"Voice profile generation failed: {e}", exc_info=True)
         context.user_data.pop("pending_voice_profile", None)
         context.user_data.pop("voice_examples", None)
-        await ack.edit_text(
+        await _flow_msg(
+            update, context,
             "⚠️ Couldn't analyse your writing style. Try again or send different examples.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|voice")],
-            ])
+            ]),
+            flow_key="voice",
         )
+        _flow_done(context, "voice")
 
     return ConversationHandler.END
 
@@ -2612,8 +2692,15 @@ async def upgrade_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     limit = TIER_LIMITS.get(tier, 10)
     limit_str = "unlimited" if limit == -1 else str(limit)
 
+    _flow_done(context, "upgrade")  # fresh start — drop any stale anchor
+
     if tier == "pro_plus":
-        await update.message.reply_text("You're on the top plan! 🎉\n\nPortfolio Guru Unlimited — unlimited Kaizen WPBA filing, AI extraction, draft review, auto-filing, and monthly portfolio health checks.")
+        await _flow_msg(
+            update, context,
+            "You're on the top plan! 🎉\n\nPortfolio Guru Unlimited — unlimited Kaizen WPBA filing, AI extraction, draft review, auto-filing, and monthly portfolio health checks.",
+            flow_key="upgrade",
+        )
+        _flow_done(context, "upgrade")
         return ConversationHandler.END
 
     text = f"📊 Your plan: {TIER_LABELS.get(tier, tier)} ({used}/{limit_str} cases used this month)\n\n"
@@ -2634,10 +2721,12 @@ async def upgrade_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         "• Monthly portfolio health checks\n"
     )
 
-    await update.message.reply_text(
+    await _flow_msg(
+        update, context,
         text,
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(_upgrade_buttons(tier)),
+        flow_key="upgrade",
     )
     return ConversationHandler.END
 
@@ -2653,17 +2742,23 @@ async def handle_upgrade_button(update: Update, context: ContextTypes.DEFAULT_TY
     try:
         from stripe_handler import create_checkout_session
         url = await create_checkout_session(update.effective_user.id, tier)
-        await query.edit_message_text(
+        await _flow_msg(
+            update, context,
             f"⭐ Upgrade to {tier_label}\n\nTap below to complete payment:",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("💳 Complete payment", url=url)],
             ]),
+            flow_key="upgrade",
         )
+        _flow_done(context, "upgrade")
     except Exception as e:
         logger.error("Stripe checkout failed: %s", e)
-        await query.edit_message_text(
-            f"⚠️ Payment setup unavailable right now. Contact support or try /settier for testing."
+        await _flow_msg(
+            update, context,
+            f"⚠️ Payment setup unavailable right now. Contact support or try /settier for testing.",
+            flow_key="upgrade",
         )
+        _flow_done(context, "upgrade")
 
 
 async def settier_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:

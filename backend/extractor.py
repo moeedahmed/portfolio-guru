@@ -112,7 +112,7 @@ async def _generate(prompt, retries: int = 1, tier: str = ""):
     """Call LLM with multi-provider fallback chain.
     Iterates through PROVIDERS in order. Skips providers whose env key is missing.
     On rate limit (429) or server error (5xx), moves to the next provider.
-    Free tier only uses the first provider (Gemini). Pro/Pro+ uses the full chain.
+    Free tier only uses the first provider (Gemini). Pro/Unlimited uses the full chain.
     Returns the response as a plain string.
     """
     import time as _time

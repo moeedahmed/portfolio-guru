@@ -109,7 +109,7 @@ async def get_user_tier(user_id: int) -> str:
 
 
 async def get_monthly_limit(tier: str) -> int:
-    """Return case limit for tier: free=10, pro=100, pro_plus=unlimited (-1)."""
+    """Return case limit for tier: free=10, pro=100, pro_plus/Unlimited=-1."""
     return TIER_LIMITS.get(tier, 10)
 
 
