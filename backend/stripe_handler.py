@@ -62,14 +62,25 @@ async def _find_user_for_subscription(subscription) -> int | None:
     return user_id
 
 
-async def create_checkout_session(telegram_user_id: int, tier: str) -> str:
-    """Create a Stripe Checkout session and return the URL."""
+async def create_checkout_session(
+    telegram_user_id: int,
+    tier: str,
+    *,
+    success_url: str | None = None,
+    cancel_url: str | None = None,
+) -> str:
+    """Create a Stripe Checkout session and return the URL.
+
+    Defaults for success_url / cancel_url route back to the Telegram bot
+    (used when the upgrade flow starts inside the bot). Web callers pass
+    their own URLs so the user lands back on the hub dashboard.
+    """
     price_id = PRO_PRICE_ID if tier == "pro" else PRO_PLUS_PRICE_ID
     session = stripe.checkout.Session.create(
         mode="subscription",
         line_items=[{"price": price_id, "quantity": 1}],
-        success_url="https://t.me/PortfolioGuruBot?start=upgraded",
-        cancel_url="https://t.me/PortfolioGuruBot?start=cancelled",
+        success_url=success_url or "https://t.me/PortfolioGuruBot?start=upgraded",
+        cancel_url=cancel_url or "https://t.me/PortfolioGuruBot?start=cancelled",
         metadata={"telegram_user_id": str(telegram_user_id)},
     )
     return session.url
