@@ -2663,6 +2663,37 @@ Suggest the best form, extract all the fields, show you a draft to review and ed
 /help — This message"""
 
 
+async def link_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Consume a /link <token> from the EM Gurus Hub web app and bind this
+    Telegram user to that auth.users id. Tokens are generated at
+    emgurus.com/portfolio and have a short TTL."""
+    args = context.args or []
+    if not args:
+        await update.message.reply_text(
+            "To link your bot to your EM Gurus Hub account:\n\n"
+            "1. Open https://emgurus.com/portfolio\n"
+            "2. Sign in and tap 'Link Telegram'\n"
+            "3. Copy the code shown there\n"
+            "4. Send `/link <code>` here\n\n"
+            "After linking, your portfolio data is visible at emgurus.com/portfolio.",
+            parse_mode="Markdown",
+            disable_web_page_preview=True,
+        )
+        return ConversationHandler.END
+
+    token = args[0].strip()
+    try:
+        from supabase_sync import consume_link_token
+        ok, message = consume_link_token(token, update.effective_user.id)
+    except Exception as exc:
+        logger.warning("link_command errored: %s", exc, exc_info=True)
+        ok, message = False, "Couldn't reach the web service. Try again in a moment."
+
+    icon = "✅" if ok else "⚠️"
+    await update.message.reply_text(f"{icon} {message}")
+    return ConversationHandler.END
+
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text(
         HELP_MSG,
@@ -5349,6 +5380,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("delete", delete_data))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("settings", settings_command))
+    application.add_handler(CommandHandler("link", link_command))
     application.add_handler(CommandHandler("bulk", bulk_command))
     application.add_handler(CommandHandler("unsigned", unsigned_command))
     application.add_handler(CommandHandler("chase", chase_command))
@@ -5476,6 +5508,7 @@ def main():
             ("setup", "Connect your portfolio account"),
             ("voice", "Set up your personal writing voice"),
             ("settings", "View status, usage, and preferences"),
+            ("link", "Link to your EM Gurus Hub web account"),
             ("cancel", "Cancel whatever is happening"),
             ("delete", "Delete all your stored data"),
             ("help", "How to use Portfolio Guru"),

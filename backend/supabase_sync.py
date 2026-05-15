@@ -338,3 +338,89 @@ def link_status(telegram_user_id: int) -> dict:
     uid = _resolve_emgurus_user_id(telegram_user_id)
     info["emgurus_user_id"] = uid
     return info
+
+def consume_link_token(token: str, telegram_user_id: int) -> tuple[bool, str]:
+    """Consume a portfolio_link_token row, link the Telegram user to the
+    emgurus_user_id it points at, and mark it consumed. Returns
+    (success: bool, message: str) where the message is shown to the user.
+    Best-effort backfill: any existing SQLite credentials / profile rows for
+    this telegram_user_id are immediately mirrored to Supabase after the
+    link is established."""
+    sb = _supabase()
+    if sb is None:
+        return False, "Web sync isn't configured on this bot. Try again later."
+
+    try:
+        resp = (
+            sb.table("portfolio_link_tokens")
+            .select("emgurus_user_id, expires_at, consumed_at")
+            .eq("token", token)
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:
+        logger.warning("consume_link_token lookup failed: %s", exc)
+        return False, "Couldn't reach the web service. Try again in a moment."
+
+    if not resp.data:
+        return False, "That link code wasn't recognised. Generate a new one on emgurus.com/portfolio and try again."
+
+    row = resp.data[0]
+    if row.get("consumed_at"):
+        return False, "That link code has already been used. Generate a fresh one if you need to re-link."
+
+    from datetime import datetime, timezone
+    expires_at = row.get("expires_at")
+    if expires_at:
+        try:
+            exp_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+            if datetime.now(timezone.utc) > exp_dt:
+                return False, "That link code has expired. Generate a fresh one on the web."
+        except (ValueError, TypeError):
+            pass
+
+    emgurus_user_id = row["emgurus_user_id"]
+    linked_uid = _ensure_user(telegram_user_id, emgurus_user_id)
+    if not linked_uid:
+        return False, "Couldn't link your account just now. Try again in a moment."
+
+    try:
+        sb.table("portfolio_link_tokens").update({
+            "consumed_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("token", token).execute()
+    except Exception as exc:
+        logger.debug("token mark-consumed failed (non-fatal): %s", exc)
+
+    _backfill_existing_user(telegram_user_id)
+    return True, "Linked to your EM Gurus Hub account. Your portfolio data is now visible at emgurus.com/portfolio."
+
+
+def _backfill_existing_user(telegram_user_id: int) -> None:
+    """After a fresh link, copy whatever the bot already has for this user
+    in SQLite into the corresponding Supabase tables. Skips silently on any
+    failure - the bot keeps working either way."""
+    try:
+        from credentials import engine as cred_engine, UserCredential
+        from sqlmodel import Session, select as sm_select
+        with Session(cred_engine) as session:
+            row = session.exec(sm_select(UserCredential).where(UserCredential.telegram_user_id == telegram_user_id)).first()
+            if row:
+                mirror_credentials(telegram_user_id, bytes(row.kaizen_username_enc), bytes(row.kaizen_password_enc))
+    except Exception as exc:
+        logger.debug("backfill credentials failed: %s", exc)
+
+    try:
+        from profile_store import engine as prof_engine, UserProfile
+        from sqlmodel import Session, select as sm_select
+        with Session(prof_engine) as session:
+            row = session.exec(sm_select(UserProfile).where(UserProfile.telegram_user_id == telegram_user_id)).first()
+            if row:
+                mirror_profile(
+                    telegram_user_id,
+                    training_level=row.training_level,
+                    curriculum=row.curriculum or "2025",
+                    voice_profile_json=row.voice_profile,
+                    voice_examples_count=row.voice_examples_count or 0,
+                )
+    except Exception as exc:
+        logger.debug("backfill profile failed: %s", exc)
