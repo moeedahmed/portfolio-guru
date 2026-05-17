@@ -1120,7 +1120,7 @@ INSTRUCTIONS:
 1. Read the full case description.
 2. For each SLO that is relevant to the case, read KC2, KC3, KC4... FIRST. Ask: does this case directly demonstrate THIS specific numbered capability?
 3. Only consider KC1 for an SLO after checking the higher KCs. KC1 is a broad fallback — only include it if the case demonstrates something KC2+ does not already cover for that SLO.
-4. Target at least 3 distinct SLO codes per case. Most clinical cases span 3-5 SLOs. Select exactly what fits — but aim for adequate curriculum coverage.
+4. Target at least 3 Key Capabilities per case. Most clinical cases demonstrate 3-6 KCs. Select exactly what fits — but aim for adequate curriculum coverage.
 5. Use the FULL KC text exactly as written above (including the "(2025 Update)" suffix).
 6. Format each as: "SLO_CODE KC_NUM: full description text (2025 Update)"
 
