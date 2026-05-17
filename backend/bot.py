@@ -4487,7 +4487,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         }
         skipped_names = [_FIELD_FRIENDLY.get(s, s.replace("_", " ").capitalize()) for s in skipped]
         if len(skipped_names) > 3:
-            skipped_display = ", ".join(skipped_names[:3]) + f" + {len(skipped_names) - 3} more"
+            skipped_display = ", ".join(skipped_names[:3]) + f" and {len(skipped_names) - 3} other{'s' if len(skipped_names) - 3 != 1 else ''}"
         else:
             skipped_display = ", ".join(skipped_names)
         if error:
@@ -4500,18 +4500,20 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             except Exception:
                 logger.warning("Recovery copy generation failed", exc_info=True)
             recovery_block = recovery or f"Check your portfolio — the draft may not have saved.\n\nDetails: {error}"
+            fields_filled_str = f"{len(filled)} field{'s' if len(filled) != 1 else ''} filled"
             msg = (
                 f"⚠️ *{form_name} — filing had issues.*\n\n"
-                f"{len(filled)} fields filled.\n\n"
+                f"{fields_filled_str}.\n\n"
                 f"{recovery_block}{link_text}{usage_line}{proof_report}"
             )
             status_line = "⚠️ Filing needs attention."
         else:
+            fields_filled_str = f"{len(filled)} field{'s' if len(filled) != 1 else ''} filled"
             msg = (
                 f"✅ *{form_name} draft saved to Kaizen.*\n\n"
-                f"{len(filled)} fields filled from your case.\n"
-                f"{len(skipped)} left blank — not enough info to fill without guessing: {skipped_display}.\n\n"
-                f"Open your portfolio, complete those fields, then assign an assessor.{usage_line}{proof_report}"
+                f"{fields_filled_str} from your case.\n"
+                f"{len(skipped)} field{'s' if len(skipped) != 1 else ''} need{'s' if len(skipped) == 1 else ''} your review: {skipped_display}.\n\n"
+                f"Open your portfolio, fill them in, then assign an assessor.{usage_line}{proof_report}"
             )
             status_line = "✅ Filing finished."
     else:
