@@ -457,7 +457,7 @@ class TestFlowWalker:
         assert sim.messages_sent[-1][0] == 'send'
         # Also restores the draft preview on the original message
         assert any(msg[0] == 'edit' for msg in sim.messages_sent)
-        assert 'draft saved' in sim.get_last_text().lower()
+        assert 'case-based discussion saved' in sim.get_last_text().lower()
         buttons = sim.get_last_buttons()
         # First button may be File another case or the amend button row
         assert ('📋 File another case', 'ACTION|file') in buttons

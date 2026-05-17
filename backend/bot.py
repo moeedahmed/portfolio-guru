@@ -4473,10 +4473,15 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     if status == "success":
         date_val = fields.get("date_of_encounter", fields.get("date_of_event", ""))
         slo_str = ", ".join(curriculum_links) if curriculum_links else ""
-        summary = f"\n\n📅 {date_val}" if date_val else ""
+        summary = f"\n📅 {date_val}" if date_val else ""
         if slo_str:
             summary += f"  ·  📚 {slo_str}"
-        msg = f"✅ *{FLOW_STATE_LABELS['filed_as_draft']}: {form_name} draft saved.*\n\nFiled to your portfolio as a draft — open Kaizen to assign an assessor when ready.{summary}{usage_line}{observation_line}{proof_report}"
+        # Clean success message — no verbose proof report
+        filled_count = len(filled)
+        fields_summary = f"\n{filled_count} field{'s' if filled_count != 1 else ''} completed." if filled_count > 0 else ""
+        msg = (
+            f"✅ *{form_name} saved.{summary}{fields_summary}{usage_line}{observation_line}"
+        )
         status_line = "✅ Filing finished."
     elif status == "partial":
         _FIELD_FRIENDLY = {
@@ -4521,10 +4526,10 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         else:
             fields_filled_str = f"{len(filled)} field{'s' if len(filled) != 1 else ''} filled"
             msg = (
-                f"✅ *{form_name} draft saved to Kaizen.*\n\n"
-                f"{fields_filled_str} from your case.\n"
+                f"✅ *{form_name} saved.*\n\n"
+                f"{fields_filled_str} from your case. "
                 f"{len(skipped)} field{'s' if len(skipped) != 1 else ''} need{'s' if len(skipped) == 1 else ''} your review: {skipped_display}.\n\n"
-                f"Open your portfolio, fill them in, then assign an assessor.{usage_line}{proof_report}"
+                f"Open Kaizen to fill them in, then assign an assessor.{usage_line}"
             )
             status_line = "✅ Filing finished."
     else:
@@ -4558,12 +4563,15 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     except Exception:
         logger.warning("Could not restore draft preview after filing")
 
-    # Add amend button to the post-filing keyboard
+    # Add amend button to the primary row — compact, no extra row
+    amend_btn = InlineKeyboardButton("✏️ Amend this draft", callback_data="AMEND|amend")
     existing_rows = list(end_keyboard.inline_keyboard) if end_keyboard else []
     existing_rows = [list(row) for row in existing_rows]
-    existing_rows.append([
-        InlineKeyboardButton("✏️ Amend this draft", callback_data="AMEND|amend")
-    ])
+    if existing_rows:
+        # Add amend to the primary (first) row
+        existing_rows[0].append(amend_btn)
+    else:
+        existing_rows = [[amend_btn]]
     end_keyboard = InlineKeyboardMarkup(existing_rows)
 
     # Send the filing report as a fresh new message (don't overwrite the draft)

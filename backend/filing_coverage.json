@@ -28,20 +28,22 @@
     "last_updated": "2026-03-16"
   },
   "REFLECT_LOG": {
-    "playwright_runs": 0,
+    "playwright_runs": 1,
     "browser_use_runs": 4,
     "field_fill_rates": {
       "date_of_encounter": 1.0,
-      "reflection": 0.51,
-      "learned": 0.51,
-      "replay_differently": 0.51,
-      "different_outcome": 0.51,
-      "why": 0.51,
-      "focussing_on": 0.51,
-      "date_of_event": 0.3
+      "reflection": 0.657,
+      "learned": 0.657,
+      "replay_differently": 0.657,
+      "different_outcome": 0.657,
+      "why": 0.657,
+      "focussing_on": 0.657,
+      "date_of_event": 0.51,
+      "reflection_title": 0.3,
+      "event_type": 0.0
     },
     "user_pushbacks": [],
-    "last_updated": "2026-03-21"
+    "last_updated": "2026-05-17"
   },
   "CBD": {
     "playwright_runs": 1,
