@@ -1211,7 +1211,7 @@ def _build_post_filing_keyboard(
 
     rows = [primary_row]
     if same_case_available:
-        rows.append([InlineKeyboardButton("📋 File new case", callback_data="ACTION|file")])
+        rows.append([InlineKeyboardButton("📋 File another case", callback_data="ACTION|file")])
     rows.extend([
         feedback_row,
         [InlineKeyboardButton("⋯ More options", callback_data=f"ACTION|post_file_more|{form_type}|{status}")],
@@ -3751,11 +3751,13 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     # Tier enforcement — check usage limit
     allowed, used, limit, tier = await check_can_file(user_id)
     if not allowed:
-        await update.message.reply_text(
+        limit_msg = await update.message.reply_text(
             f"📊 You've used all {limit} free cases this month.\n\n"
             "Upgrade to Portfolio Guru Unlimited (£9.99/mo) for unlimited filing and premium features — or wait until next month.",
             reply_markup=InlineKeyboardMarkup(_upgrade_buttons(tier)),
         )
+        # Store as upgrade flow anchor so the upgrade button edits this message in place
+        context.user_data["_flow_anchor_upgrade"] = (limit_msg.chat_id, limit_msg.message_id)
         return ConversationHandler.END
     context.user_data["user_tier"] = tier
 

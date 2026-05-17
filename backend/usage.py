@@ -15,7 +15,7 @@ DB_PATH = os.environ.get("USAGE_DB_PATH", _DEFAULT_DB)
 # - pro: legacy tier (100/mo). No new sign-ups; existing subscribers honoured.
 # - pro_plus: Unlimited, the only paid tier currently sold (£9.99/mo).
 TIER_LIMITS = {
-    "free": 5,
+    "free": 25,
     "pro": 100,
     "pro_plus": -1,
 }

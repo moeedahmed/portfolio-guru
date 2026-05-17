@@ -735,7 +735,7 @@ class TestFlowWalker:
         assert 'your settings' in text.lower()
         # The merged dashboard surfaces plan + usage that used to be in /status.
         assert 'plan: free' in text.lower()
-        assert '2/5 cases' in text.lower()
+        assert '2/25 cases' in text.lower()
 
     @pytest.mark.asyncio
     async def test_menu_intent_short_text_routes_to_settings(self):
@@ -908,7 +908,7 @@ class TestRecentPortfolioFixes:
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
 
         assert ('🔁 Same case, another WPBA', 'ACTION|same_case_another') in buttons
-        assert ('📋 File new case', 'ACTION|file') in buttons
+        assert ('📋 File another case', 'ACTION|file') in buttons
 
 class TestOnboardingFrictionPatch:
     @pytest.mark.asyncio
