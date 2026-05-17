@@ -242,6 +242,67 @@ def mirror_tier(
         logger.warning("mirror_tier failed for %s: %s", telegram_user_id, exc)
 
 
+# --- Beta request helpers ---
+
+
+def store_beta_request(user_id: int, username: str | None) -> None:
+    """Record a beta access request from a user."""
+    from datetime import datetime
+    sb = _supabase()
+    if sb is None:
+        return
+    try:
+        sb.table("beta_requests").insert({
+            "user_id": user_id,
+            "username": username or "",
+            "tier_requested": "beta",
+            "status": "pending",
+            "created_at": datetime.utcnow().isoformat(),
+        }).execute()
+    except Exception as exc:
+        logger.warning("store_beta_request failed for %s: %s", user_id, exc)
+
+
+def get_beta_request_by_username(username: str) -> dict | None:
+    """Find a pending beta request by Telegram @username."""
+    sb = _supabase()
+    if sb is None:
+        return None
+    clean = username.lstrip("@")
+    try:
+        result = (
+            sb.table("beta_requests")
+            .select("*")
+            .eq("username", clean)
+            .eq("status", "pending")
+            .execute()
+        )
+        rows = result.data
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("get_beta_request_by_username failed for %s: %s", username, exc)
+        return None
+
+
+def approve_beta_request(user_id: int, tier: str = "pro") -> bool:
+    """Mark a beta request as approved and update the user's tier.
+    Returns True if the request was found and updated."""
+    from datetime import datetime
+    sb = _supabase()
+    if sb is None:
+        return False
+    try:
+        sb.table("beta_requests").update({
+            "status": "approved",
+            "approved_at": datetime.utcnow().isoformat(),
+        }).eq("user_id", user_id).eq("status", "pending").execute()
+        return True
+    except Exception as exc:
+        logger.warning("approve_beta_request failed for %s: %s", user_id, exc)
+        return False
+
+
+
 def mirror_chase(
     telegram_user_id: int,
     assessor_email: str,

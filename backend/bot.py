@@ -2860,6 +2860,80 @@ async def settier_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     return ConversationHandler.END
 
 
+async def beta_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle /beta — request beta tester access."""
+    user_id = update.effective_user.id
+    username = update.effective_user.username or ""
+
+    # Check if already on an upgraded plan
+    tier = await get_user_tier(user_id)
+    if tier in ("pro", "pro_plus"):
+        await update.message.reply_text("You're already on an upgraded plan! No need to request beta.")
+        return ConversationHandler.END
+
+    # Check for existing pending request
+    from supabase_sync import get_beta_request_by_username
+    existing = get_beta_request_by_username(username) if username else None
+    if existing:
+        await update.message.reply_text("Your beta request is already pending! Tell Dr Ahmed your @username.")
+        return ConversationHandler.END
+
+    # Store the request
+    from supabase_sync import store_beta_request
+    store_beta_request(user_id, username)
+
+    reply = "✅ Beta request submitted!"
+    if username:
+        reply += f"\n\nTell Dr Ahmed your Telegram @username is **@{username}**. He'll upgrade you shortly."
+    else:
+        reply += "\n\nSet a Telegram @username in Settings → Username, then try /beta again."
+    await update.message.reply_text(reply, parse_mode="Markdown")
+    return ConversationHandler.END
+
+
+async def assignbeta_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle /assignbeta @username — admin-only beta approval."""
+    if update.effective_user.id != ADMIN_USER_ID:
+        await update.message.reply_text("🚫 Admin only.")
+        return ConversationHandler.END
+
+    args = context.args
+    if not args:
+        await update.message.reply_text("Usage: /assignbeta @username")
+        return ConversationHandler.END
+
+    username = args[0].lstrip("@")
+
+    from supabase_sync import get_beta_request_by_username, approve_beta_request
+    request = get_beta_request_by_username(username)
+
+    if not request:
+        await update.message.reply_text(
+            f"❌ No pending beta request found for @{username}. Ask them to send /beta first."
+        )
+        return ConversationHandler.END
+
+    target_id = request["user_id"]
+
+    # Approve: set tier to pro (100/month)
+    await set_user_tier(target_id, "pro")
+    approve_beta_request(target_id)
+
+    # Notify the approved user
+    try:
+        await context.bot.send_message(
+            chat_id=target_id,
+            text="🎉 You've been upgraded to Portfolio Guru Beta! You can now file up to 100 cases per month. Happy filing!",
+        )
+    except Exception:
+        logger.warning("Could not notify user %s about beta approval", target_id)
+
+    await update.message.reply_text(
+        f"✅ @{username} upgraded to 100 cases/month. They've been notified."
+    )
+    return ConversationHandler.END
+
+
 async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle /health — analyse portfolio health against ARCP requirements."""
     user_id = update.effective_user.id
@@ -5535,6 +5609,8 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("upgrade", upgrade_command))
     application.add_handler(CommandHandler("plan", upgrade_command))
     application.add_handler(CommandHandler("settier", settier_command))
+    application.add_handler(CommandHandler("beta", beta_command))
+    application.add_handler(CommandHandler("assignbeta", assignbeta_command))
     application.add_handler(CallbackQueryHandler(handle_upgrade_button, pattern=r"^UPGRADE\|"))
     application.add_handler(CallbackQueryHandler(handle_unsigned_range_pick, pattern=r"^UNSIGNED\|"))
     application.add_handler(CallbackQueryHandler(handle_set_curriculum, pattern=r"^SET_CURRICULUM\|"))
