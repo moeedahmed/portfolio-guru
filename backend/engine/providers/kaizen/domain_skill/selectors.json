@@ -1,0 +1,278 @@
+{
+  "site": {
+    "name": "RCEM Kaizen ePortfolio",
+    "base_url": "https://kaizenep.com",
+    "auth_url": "https://auth.kaizenep.com",
+    "platform": "risr/advance",
+    "stack": "AngularJS 1.x + Formly + ui-select + Twitter Typeahead, Bootstrap 3",
+    "org": "org_rcem",
+    "client": "kaizen",
+    "verified": "2026-05-16 by Moeed Ahmed"
+  },
+  "authentication": {
+    "interaction_url_pattern": "https://auth.kaizenep.com/interaction/{uuid}/login",
+    "username_selector": "input[name=\"login\"]",
+    "password_selector": "input[name=\"password\"]",
+    "submit_selector": "button[type=\"submit\"]",
+    "hidden_fields": {
+      "org": "input[name=\"org\"]",
+      "client": "input[name=\"client\"]",
+      "type": "input[name=\"type\"]",
+      "uuid": "input[name=\"uuid\"]",
+      "lang": "input[name=\"lang\"]"
+    },
+    "login_redirect": "/dashboard",
+    "trust_device_buttons": {
+      "trust": "button.btn-info:contains(\"I trust this device\")",
+      "shared": "button.btn-info:contains(\"This is a shared device\")"
+    },
+    "double_character_workaround": "Use nativeInputValueSetter \u2014 fill_input doubles chars on Formly inputs. See kaizen_set_field in agent_helpers.py."
+  },
+  "routes": {
+    "dashboard": "/dashboard",
+    "timeline_list": "/events/list/{category}",
+    "timeline_all": "/events/list/All",
+    "event_view": "/events/view/{event_uuid}",
+    "event_view_section": "/events/view-section/{section_uuid}",
+    "event_new_picker": "/events/new",
+    "event_new_form": "/events/new-section/{event_type_uuid}",
+    "goals_list_curriculum": "/goals/list/{curriculum_encoded}",
+    "goals_list_all": "/goals/list/all",
+    "goals_work_detail": "/goals/work/{goal_uuid}",
+    "reports_index": "/report_templates",
+    "report_run": "/report_templates/run/{template_uuid}",
+    "report_org_coverage": "/reports/view/organisation/coverage/{report_uuid}",
+    "files": "/files",
+    "faqs": "/faqs",
+    "profile_view": "/profile/view",
+    "settings_offline": "/settings/offline",
+    "settings_diagnose": "/settings/test",
+    "activities": "/activities",
+    "inbox": "/inbox"
+  },
+  "timeline": {
+    "categories": {
+      "all": "All",
+      "assessments": "Assessments",
+      "training_post_supervisor": "Post%20%26%20Supervisor",
+      "educational_reviews": "Educational%20Review%20%26%20Meetings",
+      "progression": "Progression",
+      "procedural_logs": "Procedural%20Logs",
+      "reflections": "Reflection",
+      "msf": "MSF",
+      "teaching": "Teaching%20%26%20Education",
+      "research_audit_qi": "Research%2C%20Audit%20%26%20QI",
+      "management": "Manage%2C%20Administer%20%26%20Lead",
+      "elearning": "e-Learning",
+      "exams": "Exams",
+      "absence": "Absence",
+      "cct": "CCT",
+      "documents": "Documents"
+    },
+    "selectors": {
+      "row": ".row.event-inner",
+      "row_title": ".row.event-inner h2.entry-title",
+      "row_title_text": ".row.event-inner h2.entry-title span[data-ng-bind-html]",
+      "row_link": ".row.event-inner a[router-link]",
+      "row_right_meta": ".row.event-inner .col-right .list-inline.list-unstyled",
+      "row_state_badge": ".row.event-inner .event-section-progress-state",
+      "total_count_regex": "(\\d+)\\s+items",
+      "search_input": "input[name=\"text\"][placeholder=\"Start typing to search\"]",
+      "bookmark_search_input": "input[name=\"title\"][placeholder=\"Bookmark current search\"]",
+      "filter_dropdowns": ".ui-select-container.ui-select-multiple",
+      "create_new_button": "button.btn-success:contains(\"Create new\")"
+    }
+  },
+  "event_detail_readonly": {
+    "page_title": "h1",
+    "field_group": ".form-text__form-group, .form-readonly__form-group",
+    "field_section_heading": ".form-text__heading",
+    "field_section_description": ".form-text__description",
+    "field_label": ".form-text__control-label, .control-label",
+    "field_value": ".form-text__field-value, dd, .field-value",
+    "readonly_wrapper": ".form-readonly, .form-readonly--fancy",
+    "progress_state": ".event-section-progress-state",
+    "progress_state_complete": ".event-section-progress-state--complete",
+    "tag_chip": ".event-tag",
+    "filled_in_by": ".event-users",
+    "audit_log_toggle": "button:contains(\"Show audit log\")",
+    "download_pdf_button": "button:contains(\"Download PDF\"), a:contains(\"Download PDF\")",
+    "back_button": "button:contains(\"Back\"), a:contains(\"Back\")",
+    "edit_button": "button:contains(\"Edit\"), a:contains(\"Edit\")"
+  },
+  "event_new_form": {
+    "wrapper": "form[name=\"newForm\"]",
+    "start_date": "input#startDate",
+    "end_date": "input#endDate",
+    "description": "textarea#event-description, textarea[name=\"event-description\"]",
+    "field_by_uuid": "input#{uuid}, textarea#{uuid}, select#{uuid}",
+    "field_group": ".form-group",
+    "field_label": ".form-group .control-label",
+    "ui_select_container": ".ui-select-container",
+    "assessor_input": "input#invites",
+    "assessor_listbox": "#invites_listbox",
+    "tag_button": "button:contains(\"Add tags\")",
+    "link_to_dropdown": "button.dropdown-toggle:contains(\"Link to ...\")",
+    "curriculum_buttons": [
+      "button:contains(\"All added curricula\")",
+      "button:contains(\"Higher EM curriculum (2025 Update)\")",
+      "button:contains(\"Intermediate Curriculum 2021\")",
+      "button:contains(\"Higher Curriculum 2021\")",
+      "button:contains(\"PEM sub-specialty curriculum Reformatted (AUG16-JUL18)\")"
+    ],
+    "upload_button": "button.btn-info:contains(\"Upload\")",
+    "submit_button": "button.btn-success.btn-raised:contains(\"Send to assessor\")",
+    "submit_ng_click": "eventCtrl.save(eventCtrl.form, 'publish')"
+  },
+  "event_type_picker": {
+    "url": "/events/new",
+    "h1": "What would you like to create?",
+    "type_link_selector": "a[ng-click=\"newEventCtrl.getRouteForEventType(eventType._id)\"]",
+    "click_method": "el.click()  (href is / so do not goto_url)"
+  },
+  "goals": {
+    "list_page": {
+      "h1": "h1",
+      "slo_link": "a[href*=\"/goals/work/\"]",
+      "slo_heading": "h3"
+    },
+    "work_page": {
+      "h1": "h1",
+      "target_repeat": "[ng-repeat=\"target in goalCtrl.goal.targets track by target._id\"]",
+      "target_title": "h5.entry-title.text-gray",
+      "target_progress_count": ".col-sm-12.text-info.ng-binding",
+      "target_link_event_button": "button:contains(\"Link event to this target\")",
+      "target_select_existing_button": "button:contains(\"Select existing event\")",
+      "target_create_new_button": "button:contains(\"Create new\")",
+      "sibling_sidebar": "[ng-repeat=\"goal in list.items track by goal.doc._id\"]"
+    }
+  },
+  "reports": {
+    "index": {
+      "h1": "Reports",
+      "report_link": "a[href*=\"/reports\"], a[href*=\"/report_templates/\"]",
+      "section_heading": "h2, h3"
+    },
+    "coverage": {
+      "h1": "h1",
+      "node_repeat": "[ng-repeat=\"node in nodes track by node._id\"]",
+      "state_repeat": "[ng-repeat=\"state in states track by $index\"]"
+    }
+  },
+  "files": {
+    "url": "/files",
+    "uses_timeline_selectors": true,
+    "row": ".row.event-inner",
+    "filename_title": "h2.entry-title",
+    "linked_event_text_regex": "linked to:\\s+(.+)"
+  },
+  "dashboard": {
+    "url": "/dashboard",
+    "h1": "h1",
+    "stage_h2": "h2",
+    "widget": ".widget.panel.panel-default",
+    "widget_title": ".widget .panel-title, .widget h2.panel-title",
+    "widget_body": ".widget .panel-body",
+    "widget_titles": [
+      "2025 Update on its way!",
+      "Alerts",
+      "Quick notes",
+      "Profile",
+      "Higher Clinical Specialty Learning outcomes (2025 Update)",
+      "Higher Generic Specialty Learning Outcomes (2025 Update)",
+      "Higher EM procedural skills (2025 Update)",
+      "Create event",
+      "All Higher Clinical SLO Entrustments 2025 update",
+      "Progression: Please read",
+      "Need Help?"
+    ]
+  },
+  "profile": {
+    "url": "/profile/view",
+    "h1": "h1",
+    "section_headings": [
+      "Details",
+      "Emails",
+      "Information",
+      "Login information",
+      "Audit log"
+    ]
+  },
+  "navigation_chrome": {
+    "skip_to_content": "button.btn.kz-skip-navigation",
+    "icon_menu": "#icon-menu",
+    "logout_button": "button:contains(\"Logout\")[ng-click=\"avatarCardCtrl.logout()\"]",
+    "view_profile_button": "a.btn.bg-white.btn-xs.text-primary",
+    "settings_button": "a.btn.btn-xs.border.border-primary.text-primary",
+    "trust_device_modal": ".btn-info"
+  },
+  "common": {
+    "page_title": "h1",
+    "ng_repeat_attr": "[ng-repeat]",
+    "loading_spinner": ".spinner, .loading",
+    "twitter_typeahead": ".twitter-typeahead",
+    "ui_select": ".ui-select-container",
+    "online_indicator_prefix_in_title": [
+      "\ud83d\udfe2",
+      "\ud83d\udd34"
+    ]
+  },
+  "verified_field_uuids": {
+    "cbd_2025_update": {
+      "stage_of_training_select": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
+      "date_of_event_input": "5391f8de-de63-4db3-9e08-baaa2a380cfe",
+      "case_to_be_discussed_textarea": "60772a97-92eb-4dbe-a813-6a5293be82f9",
+      "reflection_of_event_textarea": "610b5c60-99ac-4902-9407-22974d6a5799"
+    }
+  },
+  "verified_curriculum_uuids": {
+    "higher_slo1_2025_update": "0244ab81-206c-48e7-ae68-3c6d73065ff0",
+    "higher_slo2_2025_update": "e579968f-55a4-4bba-9656-76ce329cc94c",
+    "higher_slo3_2025_update": "08a91989-e6d3-4c2e-a2e3-2f220f226256",
+    "higher_slo4_2025_update": "1a29800c-d3bc-4e62-8787-55868ce371ff",
+    "higher_slo5_2025_update": "3c6f4183-e4bb-4814-a475-bb37b7477c99",
+    "higher_slo6_2025_update": "e336ebe6-e444-4438-b9a0-3d4c4f5f3813",
+    "higher_slo7_2025_update": "d91c7dcc-c2a4-4917-b658-601f9a72234a",
+    "higher_slo8_2025_update": "cba6f593-1949-43e2-af64-5dc3159b5919",
+    "higher_slo9_2025_update": "e9224d66-a1cc-4b9e-b60e-14eb5561dd1e",
+    "higher_slo10_2025_update": "3055421e-efc1-43a3-9d4a-b179181e5d95",
+    "higher_slo11_2025_update": "bb91c31a-23e8-450c-bd73-a52f3ed8718d",
+    "higher_slo12_2025_update": "82257e01-b931-4b1b-944a-15e21019e1ea"
+  },
+  "verified_report_uuids": {
+    "2021_em_curriculum": "4564c4f2-f649-41a5-a040-abffa0c3947d",
+    "pem_subspecialty": "2af7a427-0cbf-4308-a284-3c493128bbbd",
+    "2021_em_curriculum_2025_update": "8bc374b7-4b07-4e16-984a-4af6eae806ef"
+  },
+  "delete_dialog": {
+    "delete_link": "a.text-danger",
+    "confirm_button": "button.confirm",
+    "cancel_button": "button.cancel",
+    "dialog_type": "SweetAlert2",
+    "drafts_url": "/activities",
+    "drafts_header": "Saved drafts",
+    "view_section_url": "/events/view-section/{uuid}",
+    "note": "Use class selectors, not text matching. SweetAlert2 renders outside the main Angular app."
+  },
+  "form_types_by_role": {
+    "accs": {
+      "ASAT": "ed5c4835-644c-45d9-b714-b133e951f0f7",
+      "EPA1": "eabcb525-f333-4a4e-888f-28bef609785f",
+      "EPA2": "b385d12b-9dcb-4ff1-8d6f-91e68f46ee0c",
+      "DOPS_ACCS": "fea13c0a-4027-410a-a8cd-f66f526cfde6",
+      "PROCEDURAL_LOG_ACCS": "d13ccff4-4aac-495c-ae2f-aca1056c5d15",
+      "HALO_ICM": "21c38d4f-d3ca-4888-975f-0493ed55268d",
+      "IAC": "67c11970-9683-47f6-aa40-10970277c46a"
+    },
+    "assessor": {
+      "note": "Assessors do not create forms. They receive fillin requests from trainees.",
+      "assessor_paths": {
+        "pending_sections": "/admin/pending-sections",
+        "inbox": "/inbox",
+        "announcements": "/announcements",
+        "user_management": "/users"
+      },
+      "workflow": "Trainee creates form \u2192 sends to assessor \u2192 assessor opens via pending \u2192 fills assessor portion \u2192 submits"
+    }
+  }
+}

@@ -494,8 +494,8 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
         await _send_latest_message(
             message,
             context,
-            _format_draft_preview(draft),
-            reply_markup=_build_approval_keyboard(),
+            _format_draft_preview(draft) + _REPLY_HINT_SUFFIX,
+            reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
             parse_mode="Markdown",
         )
         return AWAIT_APPROVAL
@@ -514,8 +514,8 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
             await _send_latest_message(
                 message,
                 context,
-                _format_draft_preview(pending_draft, _chosen_form_reason(context, chosen_form)),
-                reply_markup=_build_approval_keyboard(),
+                _format_draft_preview(pending_draft, _chosen_form_reason(context, chosen_form)) + _REPLY_HINT_SUFFIX,
+                reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
                 parse_mode="Markdown",
             )
             return AWAIT_APPROVAL
@@ -562,8 +562,8 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
             await _send_latest_message(
                 message,
                 context,
-                _format_draft_preview(refreshed_draft, _chosen_form_reason(context, chosen_form)),
-                reply_markup=_build_approval_keyboard(),
+                _format_draft_preview(refreshed_draft, _chosen_form_reason(context, chosen_form)) + _REPLY_HINT_SUFFIX,
+                reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
                 parse_mode="Markdown",
             )
             return AWAIT_APPROVAL
@@ -1168,7 +1168,6 @@ def _build_approval_keyboard(improved_once: bool = False):
             improve_button,
         ],
         [
-            InlineKeyboardButton("✏️ Edit", callback_data="EDIT|draft"),
             InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|draft"),
         ],
     ])
@@ -1339,6 +1338,10 @@ def _is_missing_field_value(value) -> bool:
 # what's missing rather than a falsely-complete-looking draft. See
 # `feedback-no-fabrication` memory.
 _MISSING_MARKER = "_— needs your detail_"
+
+# Appended to draft previews shown with the approval keyboard so the user
+# knows they can reply to refine, instead of relying on a removed Edit button.
+_REPLY_HINT_SUFFIX = "\n\n💬 Reply to refine this draft, or send a new case after saving/cancelling."
 
 
 def _summarise_field_value(value) -> str:
@@ -1716,32 +1719,19 @@ async def setup_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return AWAIT_PASSWORD
 
 
-async def _test_kaizen_login(username: str, password: str) -> bool:
-    """Quick headless login test — returns True if credentials work."""
+async def _test_kaizen_login(username: str, password: str) -> bool | str:
+    """Test Kaizen credentials via the engine and detect portfolio type.
+    Returns role string ("hst", "accs", "assessor") or False on failure."""
     try:
-        from playwright.async_api import async_playwright
-        pw = await async_playwright().start()
-        browser = await pw.chromium.launch(headless=True)
-        page = await browser.new_page()
-        try:
-            await page.goto("https://eportfolio.rcem.ac.uk", wait_until="networkidle", timeout=30000)
-            await asyncio.sleep(2)
-            login_input = page.locator('input[name="login"]')
-            if await login_input.count() > 0:
-                await login_input.fill(username)
-                await page.locator('button[type="submit"]').click()
-                await asyncio.sleep(2)
-            pwd_input = page.locator('input[name="password"]')
-            if await pwd_input.count() > 0:
-                await pwd_input.fill(password)
-                await page.locator('button[type="submit"]').click()
-            await page.wait_for_url("**/kaizenep.com/**", timeout=30000)
-            return True
-        finally:
-            await browser.close()
-            await pw.stop()
+        from engine.providers.kaizen import KaizenProvider
+        provider = KaizenProvider(username, password)
+        if not provider.connect():
+            return False
+        role = provider.portfolio_type
+        provider.disconnect()
+        return role if role != "unknown" else "unknown"
     except Exception as e:
-        logger.warning(f"Credential test failed: {e}")
+        logger.warning(f"Engine credential test failed: {e}")
         return False
 
 
@@ -1825,19 +1815,43 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data.pop("setup_username", None)
     context.user_data.pop("_setup_state_hint", None)
 
-    # Do not make onboarding ask for training level before the user gets value.
-    # Keep it Unknown until the user explicitly chooses a Kaizen stage group.
+    # Auto-detect training level from engine
+    detected_role = login_ok if isinstance(login_ok, str) else ""
+    role_map = {"hst": "HIGHER", "accs": "ACCS", "accs_intermediate": "INTERMEDIATE", "assessor": "ASSESSOR"}
+    label_map = {"hst": "Higher Specialist Trainee", "accs": "ACCS Trainee", "accs_intermediate": "ACCS + Intermediate Trainee", "assessor": "Clinical Supervisor / Assessor"}
+    
+    auto_level = role_map.get(detected_role)
+    if auto_level:
+        store_training_level(user_id, auto_level)
+
     if not get_curriculum(user_id):
         store_curriculum(user_id, "2025")
 
-    await _flow_edit(
-        update, context,
-        "Kaizen connected ✅\n\n"
-        "Send your first case — text, voice, photo, or document — and I'll get started.\n\n"
-        "Use the *Menu* (☰ bottom-left) any time for Settings, Status, or Voice profile.",
-        parse_mode="Markdown",
-        flow_key="setup",
-    )
+    if auto_level:
+        role_name = label_map.get(detected_role, detected_role)
+        await _flow_edit(
+            update, context,
+            f"✅ Kaizen connected — detected as *{role_name}*.\n\n"
+            "Send your first case — text, voice, photo, or document — and I'll get started.\n\n"
+            "Use the *Menu* (☰ bottom-left) any time for Settings or Voice profile.\n"
+            f"Use */settings* if your portfolio type is different.",
+            parse_mode="Markdown",
+            flow_key="setup",
+        )
+    else:
+        await _flow_edit(
+            update, context,
+            "✅ Kaizen connected! I couldn't auto-detect your portfolio type.\n\nWhat training stage are you in?",
+            flow_key="setup",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("ACCS (ST1–2)", callback_data="SETLEVEL|ACCS")],
+                [InlineKeyboardButton("Intermediate (ST3)", callback_data="SETLEVEL|INTERMEDIATE")],
+                [InlineKeyboardButton("Higher (ST4+)", callback_data="SETLEVEL|HIGHER")],
+                [InlineKeyboardButton("Assessor / Non-Trainee", callback_data="SETLEVEL|ASSESSOR")],
+            ])
+        )
+        return AWAIT_TRAINING_LEVEL
+
     _flow_done(context, "setup")
     return ConversationHandler.END
 
@@ -1868,7 +1882,7 @@ async def setup_curriculum(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await query.edit_message_text(
         f"✅ Setup complete. You're on {label}.\n\n"
         f"Send your first case when ready — text, voice note, photo, or document.\n\n"
-        f"Use the *Menu* (☰ bottom-left) any time for Settings, Status, or Voice profile.",
+        f"Use the *Menu* (☰ bottom-left) any time for Settings or Voice profile.",
         parse_mode="Markdown",
     )
     return ConversationHandler.END
@@ -2460,6 +2474,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             [InlineKeyboardButton("Intermediate (ST3)", callback_data="SETLEVEL|INTERMEDIATE")],
             [InlineKeyboardButton("Higher (ST4–6)", callback_data="SETLEVEL|HIGHER")],
             [InlineKeyboardButton("SAS / Fellow", callback_data="SETLEVEL|SAS")],
+            [InlineKeyboardButton("Assessor / Non-Trainee", callback_data="SETLEVEL|ASSESSOR")],
             [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
         ])
         await query.message.edit_text(
@@ -3245,8 +3260,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         preview = _format_draft_preview(draft, _chosen_form_reason(context, chosen_form))
         await _safe_edit_text(
             query.message,
-            preview,
-            reply_markup=_build_approval_keyboard(),
+            preview + _REPLY_HINT_SUFFIX,
+            reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
             parse_mode="Markdown",
         )
         return AWAIT_APPROVAL
@@ -3299,8 +3314,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 preview = _format_draft_preview(draft, _chosen_form_reason(context, chosen_form))
                 await _safe_edit_text(
                     query.message,
-                    preview,
-                    reply_markup=_build_approval_keyboard(),
+                    preview + _REPLY_HINT_SUFFIX,
+                    reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
                     parse_mode="Markdown",
                 )
                 return AWAIT_APPROVAL
@@ -3398,8 +3413,8 @@ async def _accumulate_and_refresh(update: Update, context: ContextTypes.DEFAULT_
         preview = _format_draft_preview(draft, _chosen_form_reason(context, chosen_form))
         await _safe_edit_text(
             ack,
-            preview,
-            reply_markup=_build_approval_keyboard(),
+            preview + _REPLY_HINT_SUFFIX,
+            reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
             parse_mode="Markdown",
         )
         return AWAIT_APPROVAL
@@ -4013,8 +4028,8 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             preview = _format_draft_preview(draft, _chosen_form_reason(context, chosen_form))
             await _safe_edit_text(
                 ack,
-                preview,
-                reply_markup=_build_approval_keyboard(),
+                preview + _REPLY_HINT_SUFFIX,
+                reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
                 parse_mode="Markdown",
             )
             return AWAIT_APPROVAL
@@ -4182,8 +4197,8 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         preview = _format_draft_preview(draft, _chosen_form_reason(context, form_type))
         await _safe_edit_text(
             query.message,
-            preview,
-            reply_markup=_build_approval_keyboard(),
+            preview + _REPLY_HINT_SUFFIX,
+            reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
             parse_mode="Markdown",
         )
         return AWAIT_APPROVAL
@@ -4729,17 +4744,18 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
             fields[reflection_key] = improved_reflection
             updated = FormDraft(form_type=draft.form_type, fields=fields, uuid=draft.uuid)
         _store_draft(context, updated)
+        context.user_data["quick_improve_used"] = True
     except asyncio.TimeoutError:
-        await ack.edit_text("⏳ Quick improve timed out. Your original draft is still ready.", reply_markup=_build_approval_keyboard())
+        await ack.edit_text("⏳ Quick improve timed out. Your original draft is still ready.", reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)))
         return AWAIT_APPROVAL
     except Exception as exc:
         logger.error("Quick improve failed for %s: %s", form_type, exc, exc_info=True)
-        await ack.edit_text("⚠️ Quick improve failed. Your original draft is still ready.", reply_markup=_build_approval_keyboard())
+        await ack.edit_text("⚠️ Quick improve failed. Your original draft is still ready.", reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)))
         return AWAIT_APPROVAL
 
     preview = _format_draft_preview(updated, _chosen_form_reason(context, form_type))
     header = "✨ *Reflection polished.* Here's the updated draft:\n\n"
-    await _safe_edit_text(ack, header + preview, reply_markup=_build_approval_keyboard(), parse_mode="Markdown")
+    await _safe_edit_text(ack, header + preview + _REPLY_HINT_SUFFIX, reply_markup=_build_approval_keyboard(improved_once=True), parse_mode="Markdown")
     return AWAIT_APPROVAL
 
 
@@ -4857,7 +4873,7 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return AWAIT_APPROVAL
 
     preview = _format_draft_preview(updated)
-    await _safe_edit_text(ack, preview, reply_markup=_build_approval_keyboard(), parse_mode="Markdown")
+    await _safe_edit_text(ack, preview + _REPLY_HINT_SUFFIX, reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)), parse_mode="Markdown")
     return AWAIT_APPROVAL
 
 
@@ -4947,17 +4963,62 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
                 preview = _format_draft_preview(draft, _chosen_form_reason(context, chosen_form))
                 ack_line = f"✏️ Updated: {summary}\n\n" if summary else "✏️ Draft updated.\n\n"
                 await update.message.reply_text(
-                    ack_line + preview,
-                    reply_markup=_build_approval_keyboard(),
+                    ack_line + preview + _REPLY_HINT_SUFFIX,
+                    reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
                     parse_mode="Markdown",
                 )
                 return AWAIT_APPROVAL
+            # No matched fields — fall through to regeneration below.
 
-            # Edit instruction but nothing matched — don't pretend it was a new case
-            await update.message.reply_text(
-                "I couldn't tell which field to change from that. Tap *Edit* below to pick a field, or rephrase ("
-                "e.g. \"change the date to 12 May 2026\").",
-                reply_markup=_build_approval_keyboard(),
+        # Treat any text reply as edit feedback when we have a draft to refine.
+        # (Explicit "new_case" intent still routes to the warning path below.)
+        if has_draft and intent != "new_case" and case_text:
+            draft = _load_draft(context)
+            ack = await update.message.reply_text("✏️ Regenerating draft with your feedback…")
+            try:
+                form_type = draft.form_type if isinstance(draft, FormDraft) else "CBD"
+                current_draft_text = _format_draft_preview(draft)
+                vp = get_voice_profile(update.effective_user.id) or ""
+
+                if form_type == "CBD":
+                    updated = await asyncio.wait_for(
+                        extract_cbd_data(
+                            case_text,
+                            edit_feedback=raw_text,
+                            current_draft=current_draft_text,
+                            voice_profile_json=vp,
+                        ),
+                        timeout=45,
+                    )
+                else:
+                    updated = await asyncio.wait_for(
+                        extract_form_data(
+                            case_text,
+                            form_type,
+                            edit_feedback=raw_text,
+                            current_draft=current_draft_text,
+                            voice_profile_json=vp,
+                        ),
+                        timeout=45,
+                    )
+                _store_draft(context, updated)
+            except asyncio.TimeoutError:
+                await ack.edit_text(
+                    "⏳ That took too long. Your previous draft is still ready above — try again or use the buttons.",
+                )
+                return AWAIT_APPROVAL
+            except Exception as exc:
+                logger.error("Inline feedback regeneration failed: %s", exc, exc_info=True)
+                await ack.edit_text(
+                    "⚠️ Couldn't regenerate the draft with that feedback. Your previous draft is still ready above.",
+                )
+                return AWAIT_APPROVAL
+
+            preview = _format_draft_preview(updated)
+            await _safe_edit_text(
+                ack,
+                preview + _REPLY_HINT_SUFFIX,
+                reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
                 parse_mode="Markdown",
             )
             return AWAIT_APPROVAL

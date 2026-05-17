@@ -142,7 +142,8 @@ class TestFlowWalker:
         result = await handle_callback(update, context)
         assert result == AWAIT_APPROVAL
         button_data = {data for _, data in sim.get_last_buttons()}
-        assert {'APPROVE|draft', 'IMPROVE|reflection', 'EDIT|draft', 'CANCEL|draft'} <= button_data
+        assert {'APPROVE|draft', 'IMPROVE|reflection', 'CANCEL|draft'} <= button_data
+        assert 'EDIT|draft' not in button_data
         assert 'APPROVE|submit' not in button_data
 
     @pytest.mark.asyncio
@@ -262,7 +263,7 @@ class TestFlowWalker:
         callbacks = [
             'ACTION|setup', 'ACTION|voice', 'ACTION|status', 'ACTION|delete',
             'INFO|what', 'FORM|show_all', 'FORM|disabled', 'FORM|switch_curriculum', 'FORM|back',
-            'CANCEL|form', 'CANCEL|draft', 'APPROVE|draft', 'EDIT|draft',
+            'CANCEL|form', 'CANCEL|draft', 'APPROVE|draft',
             'FIELD|date_of_encounter', 'SET_CURRICULUM|2025', 'LEVEL|HIGHER',
             'VOICE|cancel', 'VOICE|remove', 'VOICE|rebuild', 'VOICE|more',
         ]
@@ -429,7 +430,9 @@ class TestFlowWalker:
         assert result == AWAIT_APPROVAL
         assert sim.messages_sent[-1][0] == 'bot_edit'
         assert 'still in progress' in sim.messages_sent[-2][1].lower()
-        assert {'APPROVE|draft', 'EDIT|draft'} <= {data for _, data in sim.get_last_buttons()}
+        button_data = {data for _, data in sim.get_last_buttons()}
+        assert {'APPROVE|draft'} <= button_data
+        assert 'EDIT|draft' not in button_data
 
     @pytest.mark.asyncio
     async def test_filing_completion_updates_current_message(self, thin_draft):
@@ -596,11 +599,11 @@ class TestFlowWalker:
         assert 'Updated: Date moved to 12 May 2026.' in text
 
     @pytest.mark.asyncio
-    async def test_natural_language_edit_with_no_match_asks_to_rephrase(self, thin_draft):
+    async def test_natural_language_edit_with_no_match_regenerates_draft(self, thin_draft):
         from bot import handle_mid_conversation_text, AWAIT_APPROVAL
 
         sim = BotSimulator()
-        update = sim._make_text_update('change the doodad to flibble')
+        update = sim._make_text_update('make the reflection focus on leadership')
         context = sim._make_context()
         context.user_data['draft_data'] = {
             '_type': 'FORM',
@@ -612,13 +615,15 @@ class TestFlowWalker:
         context.user_data['case_text'] = 'short context'
 
         with patch('bot.classify_intent', new=AsyncMock(return_value='edit_detail')), \
-             patch('bot.extract_field_updates', new=AsyncMock(return_value={})):
+             patch('bot.extract_field_updates', new=AsyncMock(return_value={})), \
+             patch('bot.extract_cbd_data', new=AsyncMock(return_value=thin_draft)):
             result = await handle_mid_conversation_text(update, context)
 
         text = (sim.get_last_text() or '').lower()
         assert result == AWAIT_APPROVAL
-        assert "couldn't tell" in text or "rephrase" in text
-        assert "new case" not in text
+        # The regeneration succeeded — the ack message was replaced with the draft preview
+        assert 'case-based discussion draft ready' in sim.get_last_text().lower()
+        assert 'refine this draft' in sim.get_last_text().lower()
 
     @pytest.mark.asyncio
     async def test_nudge_uses_llm_copy_when_available(self):
@@ -900,7 +905,7 @@ class TestRecentPortfolioFixes:
 
 class TestOnboardingFrictionPatch:
     @pytest.mark.asyncio
-    async def test_setup_password_skips_training_level_and_goes_to_file_first_case(self):
+    async def test_setup_password_auto_detects_training_level(self):
         from bot import setup_password
 
         sim = BotSimulator()
@@ -909,7 +914,7 @@ class TestOnboardingFrictionPatch:
         context = sim._make_context()
         context.user_data['setup_username'] = 'doctor@example.com'
 
-        with patch('bot._test_kaizen_login', new_callable=AsyncMock, return_value=True), \
+        with patch('bot._test_kaizen_login', new_callable=AsyncMock, return_value='hst'), \
              patch('bot.store_credentials') as store_credentials, \
              patch('bot.get_training_level', return_value=None), \
              patch('bot.store_training_level') as store_training_level, \
@@ -919,11 +924,10 @@ class TestOnboardingFrictionPatch:
 
         assert result == ConversationHandler.END
         store_credentials.assert_called_once()
-        store_training_level.assert_not_called()
+        store_training_level.assert_called_once_with(sim.user_id, 'HIGHER')
         store_curriculum.assert_called_once_with(sim.user_id, '2025')
-        # Post-setup completion invites the user to send their first case directly
-        # rather than tapping a re-prompt button.
-        assert 'send your first case' in sim.get_last_text().lower()
+        # Auto-detected role shown in welcome message
+        assert 'higher specialist' in sim.get_last_text().lower()
 
 
 class TestTrainingStageGroups:

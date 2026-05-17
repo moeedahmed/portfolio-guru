@@ -11,10 +11,6 @@
         'IMPROVE|reflection',
       ),
       tuple(
-        '✏️ Edit',
-        'EDIT|draft',
-      ),
-      tuple(
         '❌ Cancel',
         'CANCEL|draft',
       ),
@@ -44,7 +40,9 @@
         ↳ KC1: to be expert in assessing and…
       • *SLO3 — Clinical questions & decisions*
         ↳ KC1: able to support the pre-hospital, medical,…
-  
+      
+      
+      💬 Reply to refine this draft, or send a new case after saving/cancelling.
     ''',
   })
 # ---
