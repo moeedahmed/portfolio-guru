@@ -4288,6 +4288,12 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     except OSError:
         logger.warning("Local draft JSON backup failed; continuing with Kaizen filing", exc_info=True)
 
+    # Save draft preview and data for later restore + amend feature
+    draft_preview_text = _format_draft_preview(draft, _chosen_form_reason(context, form_type)) + _REPLY_HINT_SUFFIX
+    amend_draft_data = _serialise_draft(draft)
+    amend_case_text = context.user_data.get("case_text", "")
+    amend_chosen_form_type = form_type
+
     # Determine platform (default: kaizen; future: from user profile)
     platform = "kaizen"
     await update.effective_chat.send_action(constants.ChatAction.TYPING)
@@ -4398,6 +4404,11 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         if filed_case_text:
             context.user_data["last_filed_case_text"] = filed_case_text
             context.user_data["last_filed_form_type"] = form_type
+        # Store amend data after clear so it's available for the button
+        context.user_data["last_draft_preview"] = draft_preview_text
+        context.user_data["last_amend_draft"] = amend_draft_data
+        context.user_data["last_amend_case_text"] = amend_case_text
+        context.user_data["last_amend_chosen_form"] = amend_chosen_form_type
 
     end_keyboard = _build_post_filing_keyboard(
         form_type,
@@ -4537,21 +4548,43 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 msg += f"\n\n_Details: {error}_"
             status_line = "❌ Filing stopped."
 
+    # Restore the draft preview on the original message so the user can still see what was filed
     try:
         await _safe_edit_text(
             ack,
-            msg,
-            reply_markup=end_keyboard,
+            draft_preview_text,
             parse_mode="Markdown",
         )
     except Exception:
-        logger.warning("Could not update filing result line")
+        logger.warning("Could not restore draft preview after filing")
+
+    # Add amend button to the post-filing keyboard
+    existing_rows = list(end_keyboard.inline_keyboard) if end_keyboard else []
+    existing_rows = [list(row) for row in existing_rows]
+    existing_rows.append([
+        InlineKeyboardButton("✏️ Amend this draft", callback_data="AMEND|amend")
+    ])
+    end_keyboard = InlineKeyboardMarkup(existing_rows)
+
+    # Send the filing report as a fresh new message (don't overwrite the draft)
+    try:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text=msg,
             reply_markup=end_keyboard,
             parse_mode="Markdown",
         )
+    except Exception:
+        logger.warning("Could not send filing report, falling back to edit")
+        try:
+            await _safe_edit_text(
+                ack,
+                msg,
+                reply_markup=end_keyboard,
+                parse_mode="Markdown",
+            )
+        except Exception:
+            pass
     return ConversationHandler.END
 
 
@@ -4785,6 +4818,40 @@ async def handle_approval_edit(update: Update, context: ContextTypes.DEFAULT_TYP
 async def handle_edit_field(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Unused — kept for state compatibility."""
     return AWAIT_EDIT_VALUE
+
+
+async def handle_amend_draft(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle 'Amend this draft' button — reload last filed draft for editing."""
+    query = update.callback_query
+    await query.answer("Loading last draft...")
+
+    amend_draft = context.user_data.get("last_amend_draft")
+    amend_case = context.user_data.get("last_amend_case_text")
+    amend_form = context.user_data.get("last_amend_chosen_form")
+
+    if not amend_draft or not amend_case:
+        await query.edit_message_text(
+            "That draft is no longer available. Send a new case to start fresh."
+        )
+        return AWAIT_CASE_INPUT
+
+    # Reload the draft data
+    context.user_data["case_text"] = amend_case
+    context.user_data["chosen_form"] = amend_form
+    context.user_data["draft_data"] = amend_draft
+
+    # Show the draft and enter approval state
+    draft = _load_draft(context)
+    preview = _format_draft_preview(draft, _chosen_form_reason(context, amend_form))
+    await query.message.reply_text(
+        preview + _REPLY_HINT_SUFFIX,
+        reply_markup=_build_approval_keyboard(improved_once=False),
+        parse_mode="Markdown",
+    )
+    # Clear the amend data so it can't be re-used after a fresh flow
+    context.user_data.pop("last_amend_draft", None)
+    context.user_data.pop("last_amend_case_text", None)
+    return AWAIT_APPROVAL
 
 
 async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -5343,6 +5410,7 @@ def build_application() -> Application:
             # Let thin-case buttons re-enter the case conversation even if the
             # user taps them after the active state has been lost.
             CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:file|reset|cancel|continue_thin|unsigned|status|health|help|voice)$"),
+            CallbackQueryHandler(handle_amend_draft, pattern=r"^AMEND\|"),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_case_input),
             MessageHandler(filters.VOICE, handle_case_input),
             MessageHandler(filters.PHOTO, handle_case_input),

@@ -453,11 +453,16 @@ class TestFlowWalker:
             result = await handle_approval_approve(update, context)
 
         assert result == ConversationHandler.END
-        assert sim.messages_sent[-1][0] == 'edit'
+        # Report is now sent as a fresh message (not edited in place)
+        assert sim.messages_sent[-1][0] == 'send'
+        # Also restores the draft preview on the original message
+        assert any(msg[0] == 'edit' for msg in sim.messages_sent)
         assert 'draft saved' in sim.get_last_text().lower()
         buttons = sim.get_last_buttons()
-        assert buttons[0] == ('📋 File another case', 'ACTION|file')
+        # First button may be File another case or the amend button row
+        assert ('📋 File another case', 'ACTION|file') in buttons
         assert ('👍 It worked', 'FEEDBACK|good|CBD|success') in buttons
+        assert ('✏️ Amend this draft', 'AMEND|amend') in buttons
         assert ("👎 Didn't work", 'FEEDBACK|bad|CBD|success') in buttons
         assert ('⋯ More options', 'ACTION|post_file_more|CBD|success') in buttons
 
