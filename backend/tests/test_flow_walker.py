@@ -884,8 +884,10 @@ class TestRecentPortfolioFixes:
         keyboard = _build_approval_keyboard(improved_once=True)
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
 
-        assert ('Improved once ✅', 'IMPROVE|used') in buttons
+        # After one use, the improve button is removed entirely
+        assert ('Improved once ✅', 'IMPROVE|used') not in buttons
         assert ('✨ Quick improve', 'IMPROVE|reflection') not in buttons
+        assert ('📤 Save as draft', 'APPROVE|draft') in buttons
 
     def test_dops_pre_file_guard_blocks_blank_voice_draft(self):
         from bot import _pre_file_missing_fields

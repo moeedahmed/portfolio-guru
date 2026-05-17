@@ -1157,15 +1157,20 @@ def _build_explicit_form_keyboard(form_type: str):
 
 
 def _build_approval_keyboard(improved_once: bool = False):
-    improve_button = (
-        InlineKeyboardButton("Improved once ✅", callback_data="IMPROVE|used")
-        if improved_once
-        else InlineKeyboardButton("✨ Quick improve", callback_data="IMPROVE|reflection")
-    )
+    if improved_once:
+        # After Quick Improve is used, remove the improve button entirely
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("📤 Save as draft", callback_data="APPROVE|draft"),
+            ],
+            [
+                InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|draft"),
+            ],
+        ])
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📤 Save as draft", callback_data="APPROVE|draft"),
-            improve_button,
+            InlineKeyboardButton("✨ Quick improve", callback_data="IMPROVE|reflection"),
         ],
         [
             InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|draft"),
