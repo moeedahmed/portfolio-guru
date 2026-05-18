@@ -42,7 +42,7 @@
         ↳ KC1: able to support the pre-hospital, medical,…
       
       
-      💬 Reply to refine this draft, or send a new case after saving/cancelling.
+      💬 Reply to refine this draft. Save or cancel before sending a new case.
     ''',
   })
 # ---
@@ -85,14 +85,13 @@
       ),
     ]),
     'text': '''
-      🩺 Portfolio Guru — your WPBA entries, filed in seconds.
+      🩺 Portfolio Guru — WPBA drafts from rough notes.
       
-      Send me what happened. Rough notes are fine — text, voice note, photo, or document.
-      I'll suggest the best WPBA types, then draft the one you pick.
+      Send a case by text, voice, photo, or document. I’ll suggest the best forms, then draft only after you choose one.
       
-      Your credentials are encrypted and never shared.
+      Your Kaizen login is encrypted and never shared.
       
-      Tap 🔗 Connect to get started.
+      Tap 🔗 Connect to start.
     ''',
   })
 # ---

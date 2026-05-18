@@ -26,6 +26,7 @@ from profile_store import init_profile_db, store_training_level, get_training_le
 from bulk_filer import bulk_file
 from kaizen_unsigned_scraper import scrape_unsigned_tickets
 from conversational_router import route_message
+from message_policy import render_message
 import chase_guard
 
 from dotenv import load_dotenv
@@ -765,31 +766,15 @@ _CAT_SLUGS = {
 }
 _SLUG_TO_CAT = {v: k for k, v in _CAT_SLUGS.items()}
 
-WELCOME_MSG = """🩺 Portfolio Guru — your WPBA entries, filed in seconds.
+WELCOME_MSG = render_message("welcome_disconnected")
 
-Send me what happened. Rough notes are fine — text, voice note, photo, or document.
-I'll suggest the best WPBA types, then draft the one you pick.
-
-Your credentials are encrypted and never shared.
-
-Tap 🔗 Connect to get started."""
-
-WELCOME_MSG_CONNECTED = """🩺 Portfolio Guru — ready when you are.
-
-Send me what happened. Rough notes are fine — text, voice, photo, or document.
-I'll suggest the best form and draft it once you choose."""
+WELCOME_MSG_CONNECTED = render_message("welcome_connected")
 
 _WHAT_IS_THIS_FORM_COUNT = max(len(v) for v in TRAINING_LEVEL_FORMS.values())
 
-WHAT_IS_THIS_MSG = """🩺 Portfolio Guru files your WPBA entries — in seconds.
+WHAT_IS_THIS_MSG = render_message("what_is_this")
 
-📝 Describe a case → 🔍 I pick the form → ✅ You approve → 📤 Filed to Kaizen
-
-Send a case by text, voice note, photo, or document. I extract the fields, draft the entry, and save it to Kaizen as a draft when you approve. Nothing touches Kaizen without your OK.
-
-All 45 RCEM forms supported — assessments, reflections, teaching, management, audit, and more."""
-
-FILE_CASE_PROMPT = "Send me what happened. Rough notes are fine — text, voice note, photo, or document (PDF, PowerPoint, Word)."
+FILE_CASE_PROMPT = render_message("file_case_prompt")
 
 FLOW_STATE_LABELS = {
     "captured": "Captured",
@@ -799,10 +784,7 @@ FLOW_STATE_LABELS = {
     "blocked": "Failed / blocked",
 }
 
-CAPTURED_ACK = (
-    "📥 *Captured.* I’ll turn this into portfolio evidence and flag anything missing "
-    "before filing. Nothing goes to Kaizen until you approve it."
-)
+CAPTURED_ACK = render_message("captured_ack")
 
 def _format_proof_report(
     status: str,
@@ -1327,7 +1309,7 @@ def _short_plain_text(text: str, max_words: int = 10) -> str:
 def _privacy_nudge_for_source(input_source: str | None) -> str:
     if input_source not in {"photo", "image"}:
         return ""
-    return "\n\nPrivacy check: I extracted this from a photo. Remove names, NHS numbers, DOBs or addresses before drafting."
+    return render_message("photo_privacy_nudge")
 
 
 def _build_form_recommendation_text(
@@ -1342,7 +1324,13 @@ def _build_form_recommendation_text(
         for r in recommendations if getattr(r, "uuid", None)
     ]
     rationale_text = "\n".join(rationale_lines) if rationale_lines else "- Case-Based Discussion: Clinical case discussion."
-    return f"{opening}\n\n{rationale_text}\n\n{closing}{_privacy_nudge_for_source(input_source)}"
+    return render_message(
+        "form_recommendation",
+        opening=opening,
+        recommendations=rationale_text,
+        closing=closing,
+        privacy_nudge=_privacy_nudge_for_source(input_source),
+    )
 
 
 def _find_reflection_key(fields: dict) -> str | None:
@@ -1419,7 +1407,7 @@ _MISSING_MARKER = "_— needs your detail_"
 
 # Appended to draft previews shown with the approval keyboard so the user
 # knows they can reply to refine, instead of relying on a removed Edit button.
-_REPLY_HINT_SUFFIX = "\n\n💬 Reply to refine this draft, or send a new case after saving/cancelling."
+_REPLY_HINT_SUFFIX = render_message("draft_reply_hint")
 
 
 def _summarise_field_value(value) -> str:
@@ -3256,9 +3244,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
     # clinical details. Better to ask the user for more.
     if not _looks_like_clinical_case(case_text):
         await message.reply_text(
-            "I don't have enough clinical detail to draft this. Tell me what happened — "
-            "patient (age/sex/presentation), what you did, what came of it, and what you learned. "
-            "Rough notes are fine."
+            render_message("thin_case_detail_request")
         )
         return ConversationHandler.END
 
@@ -3306,7 +3292,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
         logger.error("Form recommendation failed across all providers: %s", exc)
         await _send_latest_message(
             message, context,
-            "⚠️ AI is temporarily unavailable. Tap below to try again or pick a form manually.",
+            render_message("ai_temporarily_unavailable"),
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_recommend")],
                 [InlineKeyboardButton("📋 Pick form manually", callback_data="FORM|show_all")],

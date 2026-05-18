@@ -50,6 +50,43 @@ class TestKeyboardBuilding:
         for row in form_rows:
             assert len(row) <= 2, f"Row has {len(row)} buttons — expected max 2"
 
+
+class TestMessagePolicy:
+    def test_policy_has_no_raw_markdown_in_plain_templates(self):
+        from message_policy import plain_text_policy_violations
+
+        assert plain_text_policy_violations() == []
+
+    def test_policy_classifies_fixed_templated_and_llm_assisted(self):
+        from message_policy import MessageClass, message_audit_summary
+
+        summary = message_audit_summary()
+
+        assert summary[MessageClass.FIXED.value] >= 1
+        assert summary[MessageClass.TEMPLATED.value] >= 1
+        assert MessageClass.LLM_ASSISTED.value in summary
+
+    def test_form_recommendation_template_is_mobile_first_and_privacy_safe(self):
+        from bot import _build_form_recommendation_text
+        from extractor import FORM_UUIDS
+        from models import FormTypeRecommendation
+
+        text = _build_form_recommendation_text(
+            [
+                FormTypeRecommendation(
+                    form_type="PROC_LOG",
+                    rationale="Procedure note: ultrasound-guided regional block for rib fractures.",
+                    uuid=FORM_UUIDS["PROC_LOG"],
+                )
+            ],
+            input_source="photo",
+        )
+
+        assert "Procedural Log" in text
+        assert "Privacy check" in text
+        assert "Pick a form" in text
+        assert "*" not in text
+
 class TestExplicitFormRouting:
     @pytest.mark.asyncio
     async def test_photo_recommendation_copy_is_plain_and_includes_privacy_nudge(self, monkeypatch):

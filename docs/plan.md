@@ -118,6 +118,16 @@ Status:
 - Draft fields from image sources are sanitised to strip unsupported high-risk resuscitation/cardiac narrative while preserving doctor-authored text/voice resuscitation cases.
 - Phase 3 remains paused until this survives real image/photo usage.
 
+### Phase 2.6 - Message and workflow hardening
+
+Status:
+- Added before Phase 3 to avoid brittle fixed copy and unsafe free-form bot wording.
+- Deterministic workflow states remain the source of truth.
+- Safety-critical messages stay fixed: filing, billing, credentials, confirmations, privacy warnings, and blockers.
+- High-value user-facing surfaces now route through a small message policy/template layer: welcome, about/help, case prompt, captured acknowledgement, recommendation copy, privacy nudge, thin-case blocker, AI unavailable, and draft reply hint.
+- LLM-assisted wording remains limited to low-risk explanation/recovery paths already designed for it; it does not control filing or safety actions.
+- Phase 3 remains paused until the message policy/tests are green.
+
 ### Phase 3 - Safe activation for low-risk intents
 
 Activate router for:
