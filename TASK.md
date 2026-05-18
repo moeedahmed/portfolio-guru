@@ -1,26 +1,25 @@
-# Active Task - Conversational Router Phase 2
+# Active Task - Phase 2.5 Source-Grounded Image Drafting
 
 ## Objective
 
-Run the conversational router in passive shadow mode so Portfolio Guru can learn from real ordinary text messages without changing user-visible behaviour.
+Stop image/photo-derived cases from producing fabricated portfolio drafts before conversational routing is activated further.
 
 ## Scope
 
-Phase 2 only:
+Phase 2.5 only:
 
-- Call the standalone router for ordinary text messages.
-- Log intent, confidence, signals, handler name, and message length.
-- Preserve all existing handler decisions and replies.
-- Do not use router output to control workflow yet.
-- Add tests proving shadow logging is passive.
+- Tighten image extraction so screenshots/photos produce source-grounded facts only.
+- Pass `input_source` into form recommendation and draft extraction.
+- Add image-source prompt guards for recommendation and extraction.
+- Strip high-risk unsupported resuscitation/cardiac narrative from image-derived draft fields.
+- Add regression tests for the rib fracture / regional block fabrication incident.
 
 ## Done
 
-- `handle_case_input` schedules shadow routing for ordinary text.
-- `handle_mid_conversation_text` schedules shadow routing for ordinary text.
-- Shadow routing logs structured router output only.
-- Router failures are caught and logged without affecting the user flow.
-- Tests prove a deliberately wrong shadow intent does not override existing menu routing or mid-conversation behaviour.
+- Phase 2 shadow routing remains implemented and passive.
+- Source-grounding guard added for photo/image-derived recommendations and drafts.
+- Image-derived draft regeneration keeps using the original input source.
+- Regression tests cover the CPR/ALS/ROSC fabrication failure mode.
 
 ## Guardrails
 
@@ -29,15 +28,17 @@ Phase 2 only:
 - No billing or credential behaviour changes.
 - No router-controlled Telegram replies yet.
 - Existing buttons/workflows remain intact.
+- Text/voice-authored resuscitation cases must not be stripped just because they mention CPR/ROSC.
 
 ## Verification
 
-- Focused router + flow-walker tests pass.
+- Source-grounding tests pass.
+- Focused extraction/conversation/flow tests pass.
 - Full offline pre-commit test gate must pass before commit.
 
 ## Next Phase
 
-Phase 3: activate the router only for low-risk intents:
+Phase 3 stays paused until the source-grounding patch has survived real image/photo usage. Then activate the router only for low-risk intents:
 
 - `portfolio_question`
 - `unknown`

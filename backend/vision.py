@@ -3,12 +3,48 @@ Image-to-text extraction using Gemini Vision.
 Extracts clinical case descriptions from photos/screenshots.
 """
 import base64
+import logging
 import os
 from google import genai
 from google.genai import types
 from model_config import gemini_fallback_models, openai_fallback_model
 
+logger = logging.getLogger(__name__)
+
 _client = None
+
+
+# Source-grounded image extraction prompt. The earlier version invited the
+# model to "describe what you see in clinical terms that could be used for a
+# case discussion" — which let it pattern-match imaging findings (e.g. rib
+# fractures) into invented ATLS/resuscitation narratives. The rules below
+# force facts-only output and explicitly forbid extrapolation into typical
+# management or case-discussion framing.
+IMAGE_EXTRACTION_PROMPT = """You are extracting clinical evidence from an image for a UK medical e-portfolio entry.
+
+Source-grounding rules — non-negotiable:
+- Output ONLY what is explicitly visible in this image.
+- Do NOT add interpretation, typical management, or expected next steps.
+- Do NOT extrapolate from imaging findings into clinical narrative. Seeing rib fractures, ECG changes, or any imaging finding does NOT mean writing about ATLS, resuscitation, defibrillation, ROSC, CPR, trauma calls, coronary angiography, CT head, or any management the image does not directly document.
+- Do NOT add "case discussion" framing — do not invent reflection, learning points, or what the doctor did. Facts only.
+
+Decide what the image is and respond accordingly.
+
+If the image is NON-CLINICAL (selfie, food, scenery, pet, random object, meme, screenshot of unrelated UI):
+Respond with EXACTLY the word: NOT_CLINICAL
+
+If the image is TEXT CONTENT (notes, message, document, imaging report, screenshot of a clinical record):
+Transcribe the visible clinical text verbatim. Do not summarise. Do not interpret. Skip non-clinical text (timestamps, system headers, app chrome) unless directly relevant.
+
+If the image shows IMAGING or a CLINICAL PHOTO (X-ray, CT, ECG, ultrasound, wound, rash, procedure picture):
+List ONLY the findings you can see, in neutral clinical terms. Do not infer cause, severity, management, or outcome.
+Example output: "Right-sided rib fractures (ribs 4 to 7). No visible pneumothorax. Right chest wall soft tissue haematoma."
+NOT example: "Patient with multiple rib fractures requiring ATLS resuscitation and CT trauma series."
+
+If important information cannot be determined from the image, write: "[Not visible in image: <what is missing>]"
+Do NOT guess.
+
+Return the extracted facts only — no preamble, no summary, no commentary."""
 
 
 def _get_client():
@@ -38,16 +74,7 @@ async def extract_from_image(image_path: str) -> str:
     }
     mime_type = mime_types.get(ext, "image/jpeg")
 
-    prompt = """Extract the clinical case description from this image.
-
-If this is a photo of a non-clinical subject (selfie, food, scenery, pet, random object, meme, etc.),
-respond with EXACTLY the word: NOT_CLINICAL
-
-If this is a screenshot of text (e.g. from notes, a message, or a document), transcribe all the clinical text.
-
-If this is a clinical photo, describe what you see in clinical terms that could be used for a case discussion.
-
-Return ONLY the extracted/described text, no additional commentary."""
+    prompt = IMAGE_EXTRACTION_PROMPT
 
     # Build content with image
     contents = [

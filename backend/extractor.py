@@ -350,6 +350,103 @@ def _get_client():
     return _client
 
 
+# Resuscitation / cardiac / advanced-imaging tropes the LLM tends to hallucinate
+# when an image-derived case is sparse (e.g. a rib-fracture screenshot becoming a
+# CPR/ALS/ROSC CBD). For image-derived input only, narrative sentences that
+# contain any of these terms are stripped unless the source text itself
+# anchors the term — see enforce_image_source_grounding.
+HIGH_RISK_FABRICATION_TERMS = [
+    "cpr", "cardiopulmonary resuscitation",
+    "cardiac arrest", "arrest call",
+    "als", "advanced life support", "bls",
+    "defibrillation", "defibrillator", "shocks delivered",
+    "adrenaline", "epinephrine",
+    "rosc", "return of spontaneous circulation",
+    "asystole", "ventricular fibrillation",
+    "ct head", "ct brain",
+    "coronary angiography", "primary pci", "cath lab",
+]
+
+_IMAGE_INPUT_SOURCES = {"photo", "image", "img"}
+
+
+def _is_image_source(input_source: str | None) -> bool:
+    if not input_source:
+        return False
+    return input_source.lower() in _IMAGE_INPUT_SOURCES
+
+
+def _source_supports_term(term: str, source_text: str) -> bool:
+    """Conservative lexical anchor check: term (or a six-char stem of its
+    first word) appears in the source. Used by enforce_image_source_grounding
+    to keep terms that the doctor's image evidence actually documents."""
+    if not source_text:
+        return False
+    src_lower = source_text.lower()
+    term_lower = term.lower()
+    if term_lower in src_lower:
+        return True
+    first_word = term_lower.split()[0]
+    if len(first_word) >= 6 and first_word[:6] in src_lower:
+        return True
+    return False
+
+
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+
+
+def _strip_unsupported_sentences(text: str, source_text: str, banned_terms: list[str]) -> tuple[str, list[str]]:
+    """Remove sentences that look wholly fabricated.
+
+    A sentence is stripped only when it contains banned terms AND none of
+    those terms appear in the source. If at least one banned term in the
+    sentence is anchored in the source, the sentence is plausibly the
+    doctor's own narrative — keep it intact (don't second-guess details
+    like dose or drug name within an otherwise-supported sentence).
+
+    Returns (cleaned_text, sorted unique list of terms removed).
+    """
+    if not text or not isinstance(text, str):
+        return text, []
+    stripped: list[str] = []
+    sentences = _SENTENCE_SPLIT.split(text)
+    kept: list[str] = []
+    for sentence in sentences:
+        sentence_lower = sentence.lower()
+        banned_in_sentence = [t for t in banned_terms if t in sentence_lower]
+        if not banned_in_sentence:
+            kept.append(sentence)
+            continue
+        supported = [t for t in banned_in_sentence if _source_supports_term(t, source_text)]
+        if supported:
+            kept.append(sentence)
+            continue
+        stripped.extend(banned_in_sentence)
+    cleaned = " ".join(s.strip() for s in kept if s.strip()).strip()
+    return cleaned, sorted(set(stripped))
+
+
+def enforce_image_source_grounding(fields: dict, source_text: str) -> tuple[dict, list[str]]:
+    """Strip narrative-field sentences that contain HIGH_RISK_FABRICATION_TERMS
+    not anchored in `source_text`. Returns (cleaned_fields, stripped_terms).
+
+    Only applied when the case came from a photo/image — text input is treated
+    as user-authored and is not second-guessed. A no-op when source_text is
+    empty so callers don't need to special-case it.
+    """
+    if not source_text:
+        return fields, []
+    all_stripped: list[str] = []
+    for key in list(fields.keys()):
+        if key in _HUMANIZE_FIELDS and isinstance(fields[key], str) and fields[key]:
+            cleaned, stripped = _strip_unsupported_sentences(
+                fields[key], source_text, HIGH_RISK_FABRICATION_TERMS
+            )
+            fields[key] = cleaned
+            all_stripped.extend(stripped)
+    return fields, sorted(set(all_stripped))
+
+
 _REUSE_SIGNALS = (
     "same case", "same one", "previous case", "earlier case", "last case",
     "do this as", "do it as", "file as", "file it as", "log this as", "log it as",
@@ -739,8 +836,36 @@ def _humanize_all_fields(data: dict) -> dict:
     return data
 
 
-async def recommend_form_types(case_description: str) -> List[FormTypeRecommendation]:
-    """Recommend applicable WPBA form types based on case description."""
+_IMAGE_RECOMMENDER_GUARD = """
+===== IMAGE-DERIVED INPUT GUARD =====
+This case was extracted from a photo/screenshot. The text below contains
+only what was visible in the image — it is NOT a free-text case write-up.
+
+Rules for image-derived input:
+- Do not invent clinical context. Do not fabricate management decisions,
+  resuscitation steps, drugs, or outcomes that the source text does not
+  explicitly contain.
+- Image evidence is typically procedural, imaging-finding, or note-fragment
+  evidence — rarely a full patient management discussion.
+- PREFER procedure / reflection / imaging forms: PROC_LOG, DOPS, US_CASE,
+  REFLECT_LOG, COMPLAINT, SERIOUS_INC, ESLE.
+- Only suggest CBD if the source explicitly documents the trainee's clinical
+  reasoning, differentials, management decisions and outcomes. A procedure
+  note, imaging finding, or short observation IS NOT a CBD.
+- If the source is sparse and procedural (e.g. a regional block note, an
+  X-ray finding), PROC_LOG or DOPS should appear before any case-management
+  form, and REFLECT_LOG is preferable to CBD.
+"""
+
+
+async def recommend_form_types(case_description: str, input_source: str = "text") -> List[FormTypeRecommendation]:
+    """Recommend applicable WPBA form types based on case description.
+
+    `input_source` is "text", "voice", "photo"/"image", or "document". For
+    image-derived input the prompt adds a source-grounding guard and biases
+    recommendations toward procedure/reflection forms rather than CBD — image
+    evidence is usually a procedure or imaging finding, not a managed case.
+    """
     system_prompt = """You are an expert RCEM portfolio advisor. Analyse the clinical or educational event described and
 recommend the 1-3 most appropriate RCEM Kaizen WPBA form types.
 
@@ -979,6 +1104,9 @@ MGMT_* (Management Portfolio forms — Rota, Complaint, Critical Incident, Risk,
 
 === END DEFINITIONS ==="""
 
+    if _is_image_source(input_source):
+        system_prompt += "\n" + _IMAGE_RECOMMENDER_GUARD
+
     prompt = f"{system_prompt}\n\nCase description:\n{case_description}"
     text = await _generate(prompt)
     raw = text.strip()
@@ -1048,6 +1176,23 @@ def _normalise_dropdown_field(value, options: list, leave_missing_blank: bool):
     return "" if leave_missing_blank else (options[0] if options else "")
 
 
+_IMAGE_EXTRACTOR_GUARD = """
+===== IMAGE-DERIVED INPUT GUARD (NON-NEGOTIABLE) =====
+The case description below was extracted from a photo/screenshot — it
+contains ONLY what was visible in the image, not a doctor's free-text case.
+- Do NOT invent clinical context, management decisions, drugs, outcomes,
+  reflections, or learning points that are not explicitly present in the
+  source text.
+- Do NOT extrapolate from imaging findings into resuscitation, ATLS,
+  trauma-team, CPR, defibrillation, ALS, ROSC, CT head, or coronary
+  angiography narrative unless those words appear verbatim in the source.
+- Leave narrative fields (clinical_reasoning, reflection, description,
+  learning_points, etc.) BLANK ("") if the source does not contain content
+  for them. A blank field is correct — the doctor will fill it themselves
+  in Kaizen. Fabricating content is the worst failure mode.
+"""
+
+
 async def extract_cbd_data(
     case_description: str,
     edit_feedback: str = "",
@@ -1055,9 +1200,16 @@ async def extract_cbd_data(
     voice_profile_json: str = "",
     leave_missing_blank: bool = True,
     preserve_original_content: bool = True,
+    input_source: str = "text",
 ) -> CBDData:
-    """Extract structured CBD data from free-text case description."""
-    client = _get_client()
+    """Extract structured CBD data from free-text case description.
+
+    `input_source` defaults to "text". When the case came from an image, the
+    prompt receives _IMAGE_EXTRACTOR_GUARD and the resulting fields are run
+    through enforce_image_source_grounding so any unsupported resuscitation /
+    advanced-imaging narrative the LLM tries to inject is stripped before the
+    user sees the draft.
+    """
     missing_text_instruction = (
         'If a field cannot be filled from the case description, return an empty string "" for text/date/dropdown fields, null for nullable fields, and [] for list fields.'
         if leave_missing_blank
@@ -1166,6 +1318,8 @@ Write the reflection in direct, first-person clinical language:
 - It is better to leave a field sparse than to fabricate content. Doctors will reject inaccurate drafts.
 - Return ONLY the JSON. No explanation."""
     system_prompt += preserve_instruction
+    if _is_image_source(input_source):
+        system_prompt += "\n" + _IMAGE_EXTRACTOR_GUARD
 
     # Inject personal voice profile if available
     if voice_profile_json:
@@ -1245,6 +1399,16 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
     # Apply humanizer to ALL narrative fields before user sees the draft
     normalised = _humanize_all_fields(normalised)
 
+    # For image-derived input, strip any resuscitation / advanced-imaging
+    # narrative the LLM injected that isn't anchored in the source text.
+    if _is_image_source(input_source):
+        normalised, stripped = enforce_image_source_grounding(normalised, case_description)
+        if stripped:
+            logger.warning(
+                "Stripped %d fabricated term(s) from image-derived CBD draft: %s",
+                len(stripped), stripped,
+            )
+
     return CBDData(**normalised)
 
 
@@ -1256,15 +1420,20 @@ async def extract_form_data(
     voice_profile_json: str = "",
     leave_missing_blank: bool = True,
     preserve_original_content: bool = True,
+    input_source: str = "text",
 ) -> FormDraft:
-    """Extract structured data for any non-CBD form type."""
+    """Extract structured data for any non-CBD form type.
+
+    `input_source` controls source-grounding: image inputs get an extra
+    prompt block forbidding fabrication and have their narrative fields
+    sanitised by enforce_image_source_grounding before returning.
+    """
     # _2021 variants share the same schema as the base form — strip suffix for lookup
     schema_key = form_type[:-5] if form_type.endswith("_2021") and form_type not in FORM_SCHEMAS else form_type
     if schema_key not in FORM_SCHEMAS:
         raise ValueError(f"Unknown form type: {form_type}")
 
     schema = FORM_SCHEMAS[schema_key]
-    client = _get_client()
     missing_text_instruction = (
         'If a field cannot be filled from the case description, return an empty string "" for text/date/dropdown fields and [] for multi-select or curriculum fields.'
         if leave_missing_blank
@@ -1393,6 +1562,8 @@ Rules:
 Case description:
 {case_description}"""
     system_prompt += preserve_instruction
+    if _is_image_source(input_source):
+        system_prompt += "\n" + _IMAGE_EXTRACTOR_GUARD
 
     # Inject personal voice profile if available
     if voice_profile_json:
@@ -1460,6 +1631,17 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
 
     # Apply humanizer to ALL narrative fields before user sees the draft
     normalised = _humanize_all_fields(normalised)
+
+    # For image-derived input, strip any unsupported resuscitation / advanced-
+    # imaging narrative the LLM tried to inject. Rib-fracture screenshots
+    # were being turned into ALS/ROSC drafts — see test_source_grounding.
+    if _is_image_source(input_source):
+        normalised, stripped = enforce_image_source_grounding(normalised, case_description)
+        if stripped:
+            logger.warning(
+                "Stripped %d fabricated term(s) from image-derived %s draft: %s",
+                len(stripped), form_type, stripped,
+            )
 
     return FormDraft(
         form_type=form_type,

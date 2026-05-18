@@ -109,6 +109,15 @@ Status:
 - Current implementation is log-only. It does not change routing, replies, buttons, filing, billing, or credentials.
 - Tests prove existing decisions are preserved even when the shadow router returns a conflicting intent.
 
+### Phase 2.5 - Source-grounding before more conversational routing
+
+Status:
+- Added after a real photo-derived draft fabricated a CPR/ALS/ROSC CBD from screenshots that only supported rib fractures, regional anaesthesia, imaging findings and follow-up.
+- Image extraction now uses a facts-only prompt and explicitly forbids extrapolating visible findings into management narrative.
+- Photo/image-derived recommendations and drafts now receive source-grounding guards.
+- Draft fields from image sources are sanitised to strip unsupported high-risk resuscitation/cardiac narrative while preserving doctor-authored text/voice resuscitation cases.
+- Phase 3 remains paused until this survives real image/photo usage.
+
 ### Phase 3 - Safe activation for low-risk intents
 
 Activate router for:

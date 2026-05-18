@@ -622,7 +622,13 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
             try:
                 training_level = get_training_level(user_id)
                 allowed_forms = TRAINING_LEVEL_FORMS.get(training_level, TRAINING_LEVEL_FORMS["ST5"]) if training_level else TRAINING_LEVEL_FORMS["ST5"]
-                recommendations = await asyncio.wait_for(recommend_form_types(case_text), timeout=30)
+                recommendations = await asyncio.wait_for(
+                    recommend_form_types(
+                        case_text,
+                        input_source=context.user_data.get("case_input_source", "text"),
+                    ),
+                    timeout=30,
+                )
                 excluded_form = _normalise_form_type(context.user_data.get("excluded_form_type", ""))
                 recommendations = [
                     r for r in recommendations
@@ -3175,6 +3181,7 @@ async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: in
                 voice_profile_json=vp,
                 leave_missing_blank=True,
                 preserve_original_content=True,
+                input_source=context.user_data.get("case_input_source", "text"),
             ),
             timeout=45,
         )
@@ -3186,6 +3193,7 @@ async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: in
                 voice_profile_json=vp,
                 leave_missing_blank=True,
                 preserve_original_content=True,
+                input_source=context.user_data.get("case_input_source", "text"),
             ),
             timeout=45,
         )
@@ -3274,7 +3282,10 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
 
     await message.chat.send_action(constants.ChatAction.TYPING)
     try:
-        recommendations = await asyncio.wait_for(recommend_form_types(case_text), timeout=30)
+        recommendations = await asyncio.wait_for(
+            recommend_form_types(case_text, input_source=input_source),
+            timeout=30,
+        )
         excluded_form = _normalise_form_type(context.user_data.get("excluded_form_type", ""))
         recommendations = [
             r for r in recommendations
@@ -3706,7 +3717,11 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
             training_level = get_training_level(update.effective_user.id)
             allowed_forms = TRAINING_LEVEL_FORMS.get(training_level, TRAINING_LEVEL_FORMS["ST5"]) if training_level else TRAINING_LEVEL_FORMS["ST5"]
             recommendations = await asyncio.wait_for(
-                recommend_form_types(case_text), timeout=30
+                recommend_form_types(
+                    case_text,
+                    input_source=context.user_data.get("case_input_source", "text"),
+                ),
+                timeout=30,
             )
             excluded_form = _normalise_form_type(context.user_data.get("excluded_form_type", ""))
             recommendations = [
@@ -4893,6 +4908,7 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
                     edit_feedback=feedback,
                     current_draft=current_draft_text,
                     voice_profile_json=vp,
+                    input_source=context.user_data.get("case_input_source", "text"),
                 ),
                 timeout=45,
             )
@@ -4908,6 +4924,7 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
                     edit_feedback=feedback,
                     current_draft=current_draft_text,
                     voice_profile_json=vp,
+                    input_source=context.user_data.get("case_input_source", "text"),
                 ),
                 timeout=45,
             )
@@ -5063,6 +5080,7 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 edit_feedback=feedback,
                 current_draft=current_draft_text,
                 voice_profile_json=vp,
+                input_source=context.user_data.get("case_input_source", "text"),
             ), timeout=45)
         else:
             updated = await asyncio.wait_for(extract_form_data(
@@ -5071,6 +5089,7 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 edit_feedback=feedback,
                 current_draft=current_draft_text,
                 voice_profile_json=vp,
+                input_source=context.user_data.get("case_input_source", "text"),
             ), timeout=45)
         _store_draft(context, updated)
     except asyncio.TimeoutError:
@@ -5197,6 +5216,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
                             edit_feedback=raw_text,
                             current_draft=current_draft_text,
                             voice_profile_json=vp,
+                            input_source=context.user_data.get("case_input_source", "text"),
                         ),
                         timeout=45,
                     )
@@ -5208,6 +5228,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
                             edit_feedback=raw_text,
                             current_draft=current_draft_text,
                             voice_profile_json=vp,
+                            input_source=context.user_data.get("case_input_source", "text"),
                         ),
                         timeout=45,
                     )

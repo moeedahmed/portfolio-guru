@@ -1,0 +1,375 @@
+"""Anti-fabrication tests for image-derived case input.
+
+Regression for the rib-fracture incident: screenshots of a regional block /
+right-sided rib fractures / pulmonary nodule follow-up were turned into a
+CBD draft full of CPR, ALS, ROSC and other invented resuscitation content.
+
+These tests assert defense-in-depth:
+  1. The vision prompt forbids extrapolation from imaging into clinical
+     narrative.
+  2. recommend_form_types is told the input came from an image and is biased
+     toward procedure / reflection / DOPS-style forms when the source is
+     sparse or procedural.
+  3. extract_cbd_data / extract_form_data inject an image-source grounding
+     block when input_source indicates a photo.
+  4. enforce_image_source_grounding strips sentences containing high-risk
+     fabrication terms (CPR, ALS, ROSC, CT head, coronary angiography, …)
+     that are not anchored in the source text.
+"""
+
+from __future__ import annotations
+
+import json
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+
+RIB_FRACTURE_IMAGE_TEXT = (
+    "Right-sided rib fractures (ribs 4 to 7). Serratus anterior plane (SA/ES) "
+    "block performed under ultrasound guidance with levobupivacaine. "
+    "No pneumothorax visible on follow-up CT chest. Right chest wall soft "
+    "tissue haematoma. Incidental pulmonary nodule noted, plan for outpatient "
+    "follow-up imaging."
+)
+
+BANNED_RESUS_TERMS = [
+    "cpr",
+    "cardiac arrest",
+    "als",
+    "advanced life support",
+    "defibrillation",
+    "adrenaline",
+    "rosc",
+    "ct head",
+    "coronary angiography",
+]
+
+
+class TestVisionPromptIsSourceGrounded:
+    def test_vision_prompt_forbids_extrapolation_from_imaging(self):
+        """The image extraction prompt must explicitly forbid inferring
+        management/resuscitation narrative from imaging findings."""
+        from vision import IMAGE_EXTRACTION_PROMPT
+
+        prompt_lower = IMAGE_EXTRACTION_PROMPT.lower()
+        # Must mention source-grounding / verbatim transcription
+        assert "explicitly visible" in prompt_lower or "only what" in prompt_lower
+        # Must forbid extrapolation
+        assert "do not" in prompt_lower
+        assert "infer" in prompt_lower or "extrapolate" in prompt_lower or "interpretation" in prompt_lower
+        # Must mention the case-discussion framing must NOT be added
+        assert "case discussion" in prompt_lower or "narrative" in prompt_lower
+        # Must keep the existing NOT_CLINICAL contract
+        assert "NOT_CLINICAL" in IMAGE_EXTRACTION_PROMPT
+
+
+class TestRecommenderHonoursImageSource:
+    @pytest.mark.asyncio
+    async def test_recommend_with_image_source_injects_image_guard(self):
+        """When input_source is 'photo', the recommender prompt must include
+        the image-derived bias toward procedure/reflection forms."""
+        from extractor import recommend_form_types
+
+        captured = {}
+
+        async def fake_generate(prompt, retries=1, tier=""):
+            captured["prompt"] = prompt
+            return json.dumps([
+                {"form_type": "PROC_LOG", "rationale": "Regional block performed."}
+            ])
+
+        with patch("extractor._generate", new=AsyncMock(side_effect=fake_generate)):
+            await recommend_form_types(RIB_FRACTURE_IMAGE_TEXT, input_source="photo")
+
+        prompt = captured["prompt"].lower()
+        assert "image" in prompt or "photo" in prompt
+        # The prompt must instruct against extrapolating beyond what is in the source
+        assert "do not invent" in prompt or "do not fabricate" in prompt or "only the facts" in prompt
+        # The prompt must bias toward procedure/reflection-style forms
+        assert "proc_log" in prompt or "procedure" in prompt
+        assert "reflect" in prompt
+
+    @pytest.mark.asyncio
+    async def test_recommend_with_text_source_omits_image_guard(self):
+        """Text-input cases should not get the image guard — doctors who
+        typed their case have authored the content themselves."""
+        from extractor import recommend_form_types
+
+        captured = {}
+
+        async def fake_generate(prompt, retries=1, tier=""):
+            captured["prompt"] = prompt
+            return json.dumps([
+                {"form_type": "CBD", "rationale": "ED case management."}
+            ])
+
+        case_text = (
+            "45 year old male presented to ED with central chest pain radiating "
+            "to left arm. Troponin positive. Managed as ACS with aspirin and "
+            "clopidogrel, escalated to cardiology, transferred for PCI."
+        )
+        with patch("extractor._generate", new=AsyncMock(side_effect=fake_generate)):
+            await recommend_form_types(case_text, input_source="text")
+
+        prompt = captured["prompt"].lower()
+        # No image-specific guard should be in a text-source prompt
+        assert "image-derived" not in prompt and "this case was extracted from a photo" not in prompt
+
+
+class TestExtractorHonoursImageSource:
+    @pytest.mark.asyncio
+    async def test_extract_form_data_with_image_source_injects_grounding_block(self):
+        """extract_form_data must add a stronger source-grounding block when
+        input_source is 'photo' so the LLM only fills fields from explicit
+        content in the source."""
+        from extractor import extract_form_data
+
+        captured = {}
+
+        async def fake_generate(prompt, retries=1, tier=""):
+            captured["prompt"] = prompt
+            # Return a minimal, grounded PROC_LOG JSON
+            return json.dumps({
+                "date_of_activity": "",
+                "stage_of_training": "",
+                "year_of_training": "",
+                "higher_procedural_skill": "Other",
+                "higher_procedural_skill_other": "Serratus anterior plane block",
+                "intermediate_procedural_skill": "",
+                "accs_procedural_skill": "",
+                "age_of_patient": "",
+                "reflective_comments": "",
+                "curriculum_links": ["SLO6"],
+                "key_capabilities": [],
+            })
+
+        with patch("extractor._generate", new=AsyncMock(side_effect=fake_generate)):
+            await extract_form_data(
+                RIB_FRACTURE_IMAGE_TEXT,
+                "PROC_LOG",
+                input_source="photo",
+                leave_missing_blank=True,
+            )
+
+        prompt = captured["prompt"].lower()
+        assert "image" in prompt or "photo" in prompt
+        # Must instruct facts-only mode and forbid resuscitation-style
+        # narrative continuations that don't appear in the source.
+        assert "do not invent" in prompt or "do not infer" in prompt or "do not fabricate" in prompt
+
+    @pytest.mark.asyncio
+    async def test_extract_cbd_data_with_image_source_injects_grounding_block(self):
+        from extractor import extract_cbd_data
+
+        captured = {}
+
+        async def fake_generate(prompt, retries=1, tier=""):
+            captured["prompt"] = prompt
+            return json.dumps({
+                "form_type": "CBD",
+                "date_of_encounter": "",
+                "patient_age": "",
+                "patient_presentation": "Right-sided rib fractures",
+                "clinical_setting": "",
+                "stage_of_training": None,
+                "trainee_role": "",
+                "clinical_reasoning": "",
+                "reflection": "",
+                "level_of_supervision": "",
+                "supervisor_name": None,
+                "curriculum_links": [],
+                "key_capabilities": [],
+            })
+
+        with patch("extractor._generate", new=AsyncMock(side_effect=fake_generate)):
+            await extract_cbd_data(
+                RIB_FRACTURE_IMAGE_TEXT,
+                input_source="photo",
+                leave_missing_blank=True,
+            )
+
+        prompt = captured["prompt"].lower()
+        assert "image" in prompt or "photo" in prompt
+        assert "do not invent" in prompt or "do not fabricate" in prompt or "do not infer" in prompt
+
+
+class TestEnforceImageSourceGrounding:
+    def test_strips_unsupported_resuscitation_terms(self):
+        """Narrative sentences containing CPR/ALS/ROSC/etc that are NOT in
+        the source text must be removed."""
+        from extractor import enforce_image_source_grounding
+
+        fields = {
+            "clinical_reasoning": (
+                "I performed CPR and delivered three shocks via defibrillation. "
+                "I administered adrenaline and achieved ROSC. "
+                "I performed a serratus anterior block under ultrasound for "
+                "right-sided rib fractures."
+            ),
+            "reflection": (
+                "On reflection, the ALS protocol was applied correctly and the "
+                "trauma CT head was unremarkable. The regional block provided "
+                "good analgesia."
+            ),
+        }
+
+        cleaned, stripped = enforce_image_source_grounding(
+            fields, RIB_FRACTURE_IMAGE_TEXT
+        )
+
+        for term in BANNED_RESUS_TERMS:
+            for value in cleaned.values():
+                assert term not in value.lower(), (
+                    f"Banned term {term!r} not stripped from field {value!r}"
+                )
+
+        # The legitimate source-anchored content must survive in some form.
+        joined = " ".join(cleaned.values()).lower()
+        assert "rib fracture" in joined or "ribs 4" in joined or "serratus" in joined or "block" in joined
+
+        assert stripped, "Should have reported at least one stripped term"
+
+    def test_keeps_terms_when_anchored_in_source(self):
+        """A term that DOES appear in the source must not be stripped — the
+        validator is only meant to remove fabricated, source-less content."""
+        from extractor import enforce_image_source_grounding
+
+        source = (
+            "Trauma call. Patient had cardiac arrest on arrival, CPR in progress. "
+            "ALS protocol followed, two cycles. ROSC achieved at 6 minutes."
+        )
+        fields = {
+            "reflection": (
+                "We followed ALS, gave adrenaline as per protocol, "
+                "achieved ROSC after CPR cycles."
+            ),
+        }
+        cleaned, _ = enforce_image_source_grounding(fields, source)
+        # "als", "rosc", "cpr" all appear in source so they should be retained.
+        assert "rosc" in cleaned["reflection"].lower()
+        assert "als" in cleaned["reflection"].lower()
+        assert "cpr" in cleaned["reflection"].lower()
+
+    def test_noop_when_source_text_empty(self):
+        """With no source text, the validator must not destructively edit
+        fields — that would break the text-input path."""
+        from extractor import enforce_image_source_grounding
+
+        fields = {"reflection": "Patient had CPR and ROSC."}
+        cleaned, stripped = enforce_image_source_grounding(fields, "")
+        assert cleaned["reflection"] == "Patient had CPR and ROSC."
+        assert stripped == []
+
+
+class TestRibFractureFailureMode:
+    """End-to-end: extract_form_data with a misbehaving LLM that wants to
+    invent CPR/ROSC narrative from a rib-fracture image must NOT produce a
+    draft containing the banned resuscitation terms. The legitimate facts
+    (rib fractures, regional block) must remain visible."""
+
+    @pytest.mark.asyncio
+    async def test_image_derived_draft_strips_fabricated_resus_content(self):
+        from extractor import extract_form_data
+
+        # Simulate a misbehaving LLM that tries to embellish the image content
+        # with a fabricated trauma resuscitation narrative.
+        bad_payload = json.dumps({
+            "date_of_activity": "",
+            "stage_of_training": "",
+            "year_of_training": "",
+            "higher_procedural_skill": "Other",
+            "higher_procedural_skill_other": "Serratus anterior plane block for right rib fractures",
+            "intermediate_procedural_skill": "",
+            "accs_procedural_skill": "",
+            "age_of_patient": "",
+            "reflective_comments": (
+                "Patient had cardiac arrest on arrival. I led ALS with CPR and "
+                "two cycles of defibrillation, gave adrenaline, achieved ROSC. "
+                "CT head was clear. Coronary angiography was arranged. "
+                "I performed a serratus anterior block under ultrasound after "
+                "the patient was stabilised."
+            ),
+            "curriculum_links": ["SLO6"],
+            "key_capabilities": [
+                "SLO6 KC2: the knowledge and psychomotor skills to perform EM procedural skills safely and in a timely fashion (2025 Update)"
+            ],
+        })
+
+        async def fake_generate(prompt, retries=1, tier=""):
+            return bad_payload
+
+        with patch("extractor._generate", new=AsyncMock(side_effect=fake_generate)):
+            draft = await extract_form_data(
+                RIB_FRACTURE_IMAGE_TEXT,
+                "PROC_LOG",
+                input_source="photo",
+                leave_missing_blank=True,
+            )
+
+        joined = " ".join(
+            str(v) for v in draft.fields.values() if isinstance(v, str)
+        ).lower()
+
+        for term in BANNED_RESUS_TERMS:
+            assert term not in joined, (
+                f"Banned term {term!r} leaked into final image-derived draft: {joined!r}"
+            )
+
+        # The legitimate procedural facts must still be present.
+        assert (
+            "serratus" in joined
+            or "block" in joined
+            or "rib fracture" in joined
+            or "ribs 4" in joined
+        )
+
+    @pytest.mark.asyncio
+    async def test_text_derived_draft_preserves_user_resus_content(self):
+        """Text-derived input is trusted: when a doctor types CPR/ROSC into
+        their own case, we must NOT strip it. The image-source guard must
+        only apply to image-derived input."""
+        from extractor import extract_form_data
+
+        text_case = (
+            "Trauma call: cardiac arrest on arrival, ALS led by me, two cycles "
+            "of CPR, defibrillation x1, adrenaline x2, ROSC at 6 min. "
+            "Post-ROSC CT head normal."
+        )
+        payload = json.dumps({
+            "date_of_activity": "",
+            "stage_of_training": "",
+            "year_of_training": "",
+            "higher_procedural_skill": "Other",
+            "higher_procedural_skill_other": "Adult resuscitation",
+            "intermediate_procedural_skill": "",
+            "accs_procedural_skill": "",
+            "age_of_patient": "",
+            "reflective_comments": (
+                "I led the ALS team, delivered CPR cycles, defibrillation and "
+                "adrenaline, achieved ROSC. CT head was normal."
+            ),
+            "curriculum_links": ["SLO3"],
+            "key_capabilities": [],
+        })
+
+        async def fake_generate(prompt, retries=1, tier=""):
+            return payload
+
+        with patch("extractor._generate", new=AsyncMock(side_effect=fake_generate)):
+            draft = await extract_form_data(
+                text_case,
+                "PROC_LOG",
+                input_source="text",
+                leave_missing_blank=True,
+            )
+
+        joined = " ".join(
+            str(v) for v in draft.fields.values() if isinstance(v, str)
+        ).lower()
+        # Doctor-authored CPR/ROSC content must survive the text path.
+        assert "rosc" in joined
+        assert "cpr" in joined or "resuscitation" in joined
