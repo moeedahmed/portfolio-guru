@@ -52,6 +52,88 @@ class TestKeyboardBuilding:
 
 class TestExplicitFormRouting:
     @pytest.mark.asyncio
+    async def test_photo_recommendation_copy_is_plain_and_includes_privacy_nudge(self, monkeypatch):
+        import bot
+        from extractor import FORM_UUIDS
+        from models import FormTypeRecommendation
+
+        message = MagicMock()
+        message.chat.send_action = AsyncMock()
+        sent_message = MagicMock()
+        sent_message.message_id = 123
+        sent_message.chat_id = 456
+        message.reply_text = AsyncMock(return_value=sent_message)
+
+        context = MagicMock()
+        context.user_data = {}
+        context.bot = MagicMock()
+
+        recommendations = [
+            FormTypeRecommendation(
+                form_type="CBD",
+                rationale="Best *fit* for an ED_case [review] with reflection on escalation and team learning.",
+                uuid=FORM_UUIDS.get("CBD"),
+            )
+        ]
+
+        monkeypatch.setattr(bot, "recommend_form_types", AsyncMock(return_value=recommendations))
+        monkeypatch.setattr(bot, "get_training_level", lambda _user_id: "ST5")
+        monkeypatch.setattr(bot, "get_curriculum", lambda _user_id: "2025")
+
+        state = await bot._process_case_text(
+            message,
+            context,
+            99999,
+            "45M with chest pain, ECG changes, ACS treatment, cardiology escalation, and reflection.",
+            "photo",
+        )
+
+        assert state == bot.AWAIT_FORM_CHOICE
+        sent_text = message.reply_text.await_args.args[0]
+        assert "*" not in sent_text
+        assert "[" not in sent_text
+        assert "]" not in sent_text
+        assert "ED case" in sent_text
+        assert "Privacy check" in sent_text
+        assert "names, NHS numbers, DOBs or addresses" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_question_about_case_recommendation_uses_same_plain_photo_copy(self, monkeypatch):
+        import bot
+        from extractor import FORM_UUIDS
+        from models import FormTypeRecommendation
+        from tests.bot_simulator import BotSimulator
+
+        sim = BotSimulator()
+        update = sim._make_text_update("Is CBD really the right form?")
+        context = sim._make_context()
+        context.user_data["case_text"] = "45M ACS case with escalation, treatment, outcome, and reflection."
+        context.user_data["chosen_form"] = "CBD"
+        context.user_data["case_input_source"] = "photo"
+
+        recommendations = [
+            FormTypeRecommendation(
+                form_type="ACAT",
+                rationale="Better *fit* for a multi_patient shift and team-flow reflection.",
+                uuid=FORM_UUIDS.get("ACAT"),
+            )
+        ]
+
+        monkeypatch.setattr(bot, "classify_intent", AsyncMock(return_value="question_about_case"))
+        monkeypatch.setattr(bot, "recommend_form_types", AsyncMock(return_value=recommendations))
+        monkeypatch.setattr(bot, "get_training_level", lambda _user_id: "ST5")
+        monkeypatch.setattr(bot, "get_curriculum", lambda _user_id: "2025")
+
+        state = await bot.handle_template_review_text(update, context)
+
+        assert state == bot.AWAIT_FORM_CHOICE
+        sent_text = sim.get_last_text()
+        assert "Other options that fit:" in sent_text
+        assert "*" not in sent_text
+        assert "multi patient" in sent_text
+        assert "Privacy check" in sent_text
+
+    @pytest.mark.asyncio
     async def test_photo_case_with_procedure_log_instruction_skips_recommender(self, monkeypatch):
         import bot
 

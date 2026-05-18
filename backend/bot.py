@@ -647,7 +647,6 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
                 context,
                 prompt_text,
                 reply_markup=_build_form_choice_keyboard(recommendations, curriculum=get_curriculum(user_id)),
-                parse_mode="Markdown",
             )
             return AWAIT_FORM_CHOICE
 
@@ -1309,6 +1308,35 @@ def _chosen_form_reason(context, form_type: str) -> str | None:
 
 def _safe_markdown_text(text: str) -> str:
     return str(text).replace("_", " ").replace("*", "").replace("`", "").replace("[", "").replace("]", "")
+
+
+def _short_plain_text(text: str, max_words: int = 10) -> str:
+    clean = _safe_markdown_text(text or "").strip()
+    words = clean.split()
+    if len(words) <= max_words:
+        return clean
+    return " ".join(words[:max_words]).rstrip(",;:") + "..."
+
+
+def _privacy_nudge_for_source(input_source: str | None) -> str:
+    if input_source not in {"photo", "image"}:
+        return ""
+    return "\n\nPrivacy check: I extracted this from a photo. Remove names, NHS numbers, DOBs or addresses before drafting."
+
+
+def _build_form_recommendation_text(
+    recommendations,
+    *,
+    input_source: str | None = None,
+    opening: str = "Forms that fit your case:",
+    closing: str = "Pick a form to draft. Missing fields come next.",
+) -> str:
+    rationale_lines = [
+        f"- {_form_display_name(r.form_type)}: {_short_plain_text(getattr(r, 'rationale', ''))}"
+        for r in recommendations if getattr(r, "uuid", None)
+    ]
+    rationale_text = "\n".join(rationale_lines) if rationale_lines else "- Case-Based Discussion: Clinical case discussion."
+    return f"{opening}\n\n{rationale_text}\n\n{closing}{_privacy_nudge_for_source(input_source)}"
 
 
 def _find_reflection_key(fields: dict) -> str | None:
@@ -3275,26 +3303,12 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
         )
         return AWAIT_FORM_CHOICE
 
-    def _short_rationale(text: str, max_words: int = 12) -> str:
-        clean = _safe_markdown_text(text or "").strip()
-        words = clean.split()
-        if len(words) <= max_words:
-            return clean
-        return " ".join(words[:max_words]).rstrip(",;:") + "…"
-
-    rationale_lines = [
-        f"• *{_form_display_name(r.form_type)}* — {_short_rationale(r.rationale)}"
-        for r in recommendations if r.uuid
-    ]
-    rationale_text = "\n".join(rationale_lines) if rationale_lines else "• Case-Based Discussion — Clinical case discussion."
-
     status_msg = context.user_data.pop("status_msg_id", None)
     status_chat = context.user_data.pop("status_msg_chat", None)
 
-    prompt_text = (
-        "I think these forms fit your case:\n\n"
-        f"{rationale_text}\n\n"
-        "Pick one and I'll draft it. If a required Kaizen field is missing, I'll ask for just that detail."
+    prompt_text = _build_form_recommendation_text(
+        recommendations,
+        input_source=input_source,
     )
     context.user_data["form_recommendations_text"] = prompt_text
 
@@ -3701,21 +3715,17 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
             ]
 
             if recommendations:
-                rationale_lines = [
-                    f"• *{_form_display_name(r.form_type)}* — {r.rationale}"
-                    for r in recommendations if r.uuid
-                ]
-                rationale_text = "\n".join(rationale_lines)
-                prompt_text = (
-                    f"Sure — here's what fits your case:\n\n"
-                    f"{rationale_text}\n\n"
-                    f"Pick one to switch, or keep going with {form_name}."
+                prompt_text = _build_form_recommendation_text(
+                    recommendations,
+                    input_source=context.user_data.get("case_input_source"),
+                    opening="Other options that fit:",
+                    closing=f"Pick one to switch, or keep going with {form_name}.",
                 )
                 context.user_data["form_recommendations"] = recommendations
+                context.user_data["form_recommendations_text"] = prompt_text
                 await update.message.reply_text(
                     prompt_text,
                     reply_markup=_build_form_choice_keyboard(recommendations, curriculum=get_curriculum(update.effective_user.id)),
-                    parse_mode="Markdown",
                 )
                 return AWAIT_FORM_CHOICE
             else:
