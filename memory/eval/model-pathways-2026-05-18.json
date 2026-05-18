@@ -1,0 +1,750 @@
+{
+  "generated_at": "2026-05-18T21:32:48.260945",
+  "total_cases": 8,
+  "providers_tested": [
+    "deepseek-v4",
+    "gemini-fast"
+  ],
+  "results": [
+    {
+      "provider": "gemini-fast",
+      "model": "gemini-3-flash-preview",
+      "case_id": 1,
+      "title": "STEMI in Resus",
+      "status": "completed",
+      "steps": [
+        {
+          "step": "form_recommendation",
+          "recommended": [
+            "CBD",
+            "Mini-CEX"
+          ],
+          "expected": [
+            "CBD",
+            "DOPS"
+          ],
+          "matched": true,
+          "time_s": 3.44
+        },
+        {
+          "step": "extraction",
+          "output": {
+            "clinical_reasoning_cut": "The patient arrived within a two-hour window of symptom onset, making them a candidate for reperfusion therapy. I used the NIHSS to quantify the stroke severity (score of 14) and ordered a CT brain/CTA to exclude intracranial haemorrhage and identify large vessel occlusion. I reviewed the patient's ",
+            "reflection_cut": "I managed the time-critical nature of this case well by pre-alerting the radiology and stroke teams before the patient even arrived. This streamlined the 'door-to-CT' time significantly. During the process, I found the discussion regarding the risks of thrombolysis with the patient's spouse difficul",
+            "kcs": [
+              "SLO1 KC1: to be expert in assessing and managing all adult patients attending the ED. These capabilities will apply to patients attending with both physical and psychological ill health (2025 Update)",
+              "SLO3 KC3: manage all the life-threatening conditions including peri-arrest & arrest situations in the ED (2025 Update)",
+              "SLO7 KC1: have expert communication skills to negotiate, manage complicated or evolving interactions (2025 Update)",
+              "SLO7 KC3: work professionally and effectively with those outside the ED (2025 Update)"
+            ],
+            "slos": [
+              "SLO1",
+              "SLO3",
+              "SLO7"
+            ]
+          },
+          "time_s": 9.46
+        },
+        {
+          "step": "draft_review",
+          "scores": {
+            "clinical_accuracy": {
+              "score": 1,
+              "feedback": "Critical error: The clinical details in the draft (Acute Stroke, NIHSS 14, alteplase) bear no relation to the original case (Acute STEMI, PPCI). You have documented an entirely different medical emergency."
+            },
+            "voice_preservation": {
+              "score": 1,
+              "feedback": "The draft does not preserve the original case; it replaces it entirely with a different scenario. As an assessor, I cannot validate this as a reflection of the STEMI encounter."
+            },
+            "kc_slo_mapping": {
+              "score": 2,
+              "feedback": "While SLO1, 3, and 7 are appropriate for high-acuity EM cases, the mapping is moot because the clinical content is for the wrong patient."
+            },
+            "completeness": {
+              "score": 1,
+              "feedback": "While fields are filled, they are factually incorrect based on the original encounter. The 'patient_presentation' field explicitly contradicts the 'Original Case' summary."
+            },
+            "reflection_depth": {
+              "score": 2,
+              "feedback": "The reflection on the 'time-critical' nature of thrombolysis and the difficulty of consenting is actually well-written for a stroke case, but it is totally irrelevant to the STEMI patient described."
+            }
+          },
+          "overall_score": 1.2,
+          "verdict": "weak",
+          "top_issue": "The draft fields describe an Acute Stroke/Thrombolysis case, whereas the original case was an Acute MI/STEMI. This is a total data mismatch.",
+          "time_s": 6.58
+        },
+        {
+          "step": "kc_analysis",
+          "kc_count": 4,
+          "slo_count": 3,
+          "reflection_chars": 555,
+          "reasoning_chars": 485
+        }
+      ]
+    },
+    {
+      "provider": "deepseek-v4",
+      "model": "deepseek-chat",
+      "case_id": 1,
+      "title": "STEMI in Resus",
+      "status": "completed",
+      "steps": [
+        {
+          "step": "form_recommendation",
+          "recommended": [
+            "CBD",
+            "ACAT",
+            "REFLECT_LOG"
+          ],
+          "expected": [
+            "CBD",
+            "DOPS"
+          ],
+          "matched": true,
+          "time_s": 1.45
+        },
+        {
+          "step": "extraction",
+          "output": {
+            "clinical_reasoning_cut": "The patient presented with central chest pain and dyspnoea. ECG showed anterior ST elevation. I activated the cardiac catheter lab team and administered aspirin and nitrates while awaiting transfer.",
+            "reflection_cut": "I learned the importance of rapid ECG interpretation and early activation of the primary PCI pathway. I will ensure I continue to practice ECG interpretation regularly to maintain speed and accuracy.",
+            "kcs": [
+              "SLO1 KC1: to be expert in assessing and managing all adult patients attending the ED. These capabilities will apply to patients attending with both physical and psychological ill health (2025 Update)",
+              "SLO3 KC3: manage all the life-threatening conditions including peri-arrest & arrest situations in the ED (2025 Update)"
+            ],
+            "slos": [
+              "SLO1",
+              "SLO3"
+            ]
+          },
+          "time_s": 3.02
+        },
+        {
+          "step": "draft_review",
+          "scores": {
+            "clinical_accuracy": {
+              "score": 4,
+              "feedback": "Accurate management of STEMI with appropriate actions. However, missing details like oxygen target and GTN dose."
+            },
+            "voice_preservation": {
+              "score": 3,
+              "feedback": "Draft uses first-person but is somewhat generic; lacks personal narrative and specific details from the case."
+            },
+            "kc_slo_mapping": {
+              "score": 3,
+              "feedback": "KCs are relevant but too broad; SLO1 and SLO3 are appropriate but could be more specific to STEMI management."
+            },
+            "completeness": {
+              "score": 3,
+              "feedback": "Missing key elements: differential diagnoses, complications considered, and team communication details."
+            },
+            "reflection_depth": {
+              "score": 3,
+              "feedback": "Reflection is superficial; lacks analysis of challenges, emotions, or specific learning points."
+            }
+          },
+          "overall_score": 3.2,
+          "verdict": "improve",
+          "top_issue": "Reflection lacks depth and personal insight",
+          "time_s": 2.76
+        },
+        {
+          "step": "kc_analysis",
+          "kc_count": 2,
+          "slo_count": 2,
+          "reflection_chars": 199,
+          "reasoning_chars": 198
+        }
+      ]
+    },
+    {
+      "provider": "gemini-fast",
+      "model": "gemini-3-flash-preview",
+      "case_id": 2,
+      "title": "Reflection on Difficult Airways",
+      "status": "error",
+      "steps": [],
+      "error": "429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests"
+    },
+    {
+      "provider": "deepseek-v4",
+      "model": "deepseek-chat",
+      "case_id": 2,
+      "title": "Reflection on Difficult Airways",
+      "status": "completed",
+      "steps": [
+        {
+          "step": "form_recommendation",
+          "recommended": [
+            "CBD",
+            "REFLECT_LOG"
+          ],
+          "expected": [
+            "REFLECT_LOG",
+            "CBD"
+          ],
+          "matched": true,
+          "time_s": 1.34
+        },
+        {
+          "step": "extraction",
+          "output": {
+            "clinical_reasoning_cut": "The patient had central chest pain radiating to the left arm with ST elevation in leads II, III, aVF on ECG, so I diagnosed inferior STEMI and activated the cath lab team.",
+            "reflection_cut": "I learned the importance of rapid ECG interpretation and clear communication with the cardiology team to minimise door-to-balloon time. I will continue to practise ECG interpretation to improve speed and accuracy.",
+            "kcs": [
+              "SLO1 KC1: to be expert in assessing and managing all adult patients attending the ED. These capabilities will apply to patients attending with both physical and psychological ill health (2025 Update)",
+              "SLO3 KC3: manage all the life-threatening conditions including peri-arrest & arrest situations in the ED (2025 Update)"
+            ],
+            "slos": [
+              "SLO1",
+              "SLO3"
+            ]
+          },
+          "time_s": 3.25
+        },
+        {
+          "step": "draft_review",
+          "scores": {
+            "clinical_accuracy": {
+              "score": 1,
+              "feedback": "The draft describes a difficult airway case but the clinical reasoning field describes an inferior STEMI, which is inconsistent with the original case. The reflection and presentation also do not match the case."
+            },
+            "voice_preservation": {
+              "score": 3,
+              "feedback": "The draft uses generic language and does not reflect the trainee's personal voice or specific learning from the difficult airway case."
+            },
+            "kc_slo_mapping": {
+              "score": 3,
+              "feedback": "The selected KCs (SLO1 KC1, SLO3 KC3) are relevant to airway management, but the mapping is generic and not tailored to the specific learning points."
+            },
+            "completeness": {
+              "score": 2,
+              "feedback": "The draft is incomplete as it describes a different clinical scenario (STEMI) than the original case (difficult airway). Key elements like Mallampati assessment are missing."
+            },
+            "reflection_depth": {
+              "score": 2,
+              "feedback": "The reflection is superficial and does not demonstrate deep insight into the difficult airway management or specific actions for improvement."
+            }
+          },
+          "overall_score": 2.2,
+          "verdict": "weak",
+          "top_issue": "Clinical scenario mismatch: draft describes STEMI instead of difficult airway",
+          "time_s": 3.09
+        },
+        {
+          "step": "kc_analysis",
+          "kc_count": 2,
+          "slo_count": 2,
+          "reflection_chars": 213,
+          "reasoning_chars": 171
+        }
+      ]
+    },
+    {
+      "provider": "gemini-fast",
+      "model": "gemini-3-flash-preview",
+      "case_id": 3,
+      "title": "Chest Drain Procedure (DOPS)",
+      "status": "error",
+      "steps": [],
+      "error": "429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests"
+    },
+    {
+      "provider": "deepseek-v4",
+      "model": "deepseek-chat",
+      "case_id": 3,
+      "title": "Chest Drain Procedure (DOPS)",
+      "status": "completed",
+      "steps": [
+        {
+          "step": "form_recommendation",
+          "recommended": [
+            "DOPS",
+            "CBD"
+          ],
+          "expected": [
+            "DOPS",
+            "PROC_LOG"
+          ],
+          "matched": true,
+          "time_s": 1.14
+        },
+        {
+          "step": "extraction",
+          "output": {
+            "clinical_reasoning_cut": "The patient presented with central chest pain radiating to the left arm, associated with nausea and diaphoresis. Given the high pre-test probability for acute coronary syndrome, I performed an ECG immediately, which showed ST elevation in leads II, III, and aVF. I diagnosed STEMI and activated the P",
+            "reflection_cut": "I learned the importance of rapid ECG acquisition and interpretation in patients with chest pain. The case reinforced my ability to recognise STEMI and initiate timely reperfusion. I will continue to practise ECG interpretation to improve speed and accuracy.",
+            "kcs": [
+              "SLO1 KC1: to be expert in assessing and managing all adult patients attending the ED. These capabilities will apply to patients attending with both physical and psychological ill health (2025 Update)",
+              "SLO3 KC3: manage all the life-threatening conditions including peri-arrest & arrest situations in the ED (2025 Update)"
+            ],
+            "slos": [
+              "SLO1",
+              "SLO3"
+            ]
+          },
+          "time_s": 3.53
+        },
+        {
+          "step": "draft_review",
+          "scores": {
+            "clinical_accuracy": {
+              "score": 1,
+              "feedback": "The clinical reasoning describes a completely different case (STEMI) than the original chest drain insertion for pleural effusion. This is a critical mismatch."
+            },
+            "voice_preservation": {
+              "score": 1,
+              "feedback": "The draft does not reflect the trainee's original narrative or actions; it is a generic STEMI description."
+            },
+            "kc_slo_mapping": {
+              "score": 2,
+              "feedback": "The selected KCs (SLO1, SLO3) are relevant to emergency care but not specifically to the chest drain procedure performed. The mapping is generic."
+            },
+            "completeness": {
+              "score": 1,
+              "feedback": "The draft omits all details of the actual procedure (ultrasound, Seldinger, drain size, fluid drained) and includes irrelevant STEMI details."
+            },
+            "reflection_depth": {
+              "score": 1,
+              "feedback": "The reflection is generic and unrelated to the actual case; it does not demonstrate learning from the chest drain experience."
+            }
+          },
+          "overall_score": 1.2,
+          "verdict": "weak",
+          "top_issue": "The draft describes a completely different clinical case (STEMI) instead of the chest drain insertion performed.",
+          "time_s": 3.11
+        },
+        {
+          "step": "kc_analysis",
+          "kc_count": 2,
+          "slo_count": 2,
+          "reflection_chars": 258,
+          "reasoning_chars": 342
+        }
+      ]
+    },
+    {
+      "provider": "gemini-fast",
+      "model": "gemini-3-flash-preview",
+      "case_id": 4,
+      "title": "Shift Leadership in Majors",
+      "status": "error",
+      "steps": [],
+      "error": "429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests"
+    },
+    {
+      "provider": "deepseek-v4",
+      "model": "deepseek-chat",
+      "case_id": 4,
+      "title": "Shift Leadership in Majors",
+      "status": "completed",
+      "steps": [
+        {
+          "step": "form_recommendation",
+          "recommended": [
+            "ACAT",
+            "STAT",
+            "MSF"
+          ],
+          "expected": [
+            "LAT",
+            "ESLE",
+            "ACAT"
+          ],
+          "matched": true,
+          "time_s": 1.97
+        },
+        {
+          "step": "extraction",
+          "output": {
+            "clinical_reasoning_cut": "The patient had central chest pain radiating to the left arm with diaphoresis and hypotension. I performed an ECG which showed anterior ST elevation. I diagnosed STEMI and activated the primary PCI pathway because of the clear ECG findings and haemodynamic instability.",
+            "reflection_cut": "I learned the importance of rapid ECG acquisition and interpretation in chest pain patients. I also realised that involving the cardiology team early improves outcomes. Next time I will ensure I document the time of first medical contact clearly.",
+            "kcs": [
+              "SLO1 KC1: to be expert in assessing and managing all adult patients attending the ED. These capabilities will apply to patients attending with both physical and psychological ill health (2025 Update)",
+              "SLO3 KC3: manage all the life-threatening conditions including peri-arrest & arrest situations in the ED (2025 Update)"
+            ],
+            "slos": [
+              "SLO1",
+              "SLO3"
+            ]
+          },
+          "time_s": 3.3
+        },
+        {
+          "step": "draft_review",
+          "scores": {
+            "clinical_accuracy": {
+              "score": 4,
+              "feedback": "Clinical reasoning is sound: ECG findings and haemodynamic instability correctly trigger STEMI and PCI pathway. However, the case description is generic and lacks specific patient details (e.g., age, risk factors, response to treatment)."
+            },
+            "voice_preservation": {
+              "score": 1,
+              "feedback": "The draft does not reflect the trainee's own voice or experience. The clinical reasoning and reflection appear generic and could apply to any trainee. The original case was about flow coordination, but the draft describes a STEMI case, which is inconsistent."
+            },
+            "kc_slo_mapping": {
+              "score": 3,
+              "feedback": "The selected KCs (SLO1 KC1, SLO3 KC3) are relevant to the clinical scenario, but the mapping is superficial. The draft does not demonstrate how the trainee met these capabilities in the context of the original case (flow coordination)."
+            },
+            "completeness": {
+              "score": 2,
+              "feedback": "Missing key elements: no patient demographics, no differential diagnosis, no management details beyond PCI activation, no outcome. The reflection lacks specific learning points tied to the original case."
+            },
+            "reflection_depth": {
+              "score": 2,
+              "feedback": "Reflection is shallow: 'importance of rapid ECG' is basic. No mention of challenges faced, alternative actions, or how this experience changed practice. Does not align with the original case (flow coordination)."
+            }
+          },
+          "overall_score": 2.8,
+          "verdict": "improve",
+          "top_issue": "Voice preservation: the draft describes a different case (STEMI) than the original (flow coordination), making it inauthentic.",
+          "time_s": 4.34
+        },
+        {
+          "step": "kc_analysis",
+          "kc_count": 2,
+          "slo_count": 2,
+          "reflection_chars": 246,
+          "reasoning_chars": 269
+        }
+      ]
+    },
+    {
+      "provider": "gemini-fast",
+      "model": "gemini-3-flash-preview",
+      "case_id": 5,
+      "title": "Teaching on ECG Interpretation",
+      "status": "error",
+      "steps": [],
+      "error": "429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests"
+    },
+    {
+      "provider": "deepseek-v4",
+      "model": "deepseek-chat",
+      "case_id": 5,
+      "title": "Teaching on ECG Interpretation",
+      "status": "completed",
+      "steps": [
+        {
+          "step": "form_recommendation",
+          "recommended": [
+            "TEACH",
+            "CBD"
+          ],
+          "expected": [
+            "TEACH",
+            "STAT"
+          ],
+          "matched": true,
+          "time_s": 1.18
+        },
+        {
+          "step": "extraction",
+          "output": {
+            "clinical_reasoning_cut": "The patient presented with central chest pain radiating to the left arm, associated with nausea and diaphoresis. ECG showed ST elevation in leads II, III, aVF. I diagnosed STEMI and initiated immediate management including aspirin, oxygen, and nitrates, then activated the catheter lab.",
+            "reflection_cut": "I learned the importance of rapid ECG interpretation and early activation of the primary PCI pathway. The case reinforced my ability to manage acute coronary syndrome in a time-critical manner. I will continue to practise systematic ECG interpretation and team communication during cardiac arrests.",
+            "kcs": [
+              "SLO1 KC1: to be expert in assessing and managing all adult patients attending the ED. These capabilities will apply to patients attending with both physical and psychological ill health (2025 Update)",
+              "SLO3 KC3: manage all the life-threatening conditions including peri-arrest & arrest situations in the ED (2025 Update)"
+            ],
+            "slos": [
+              "SLO1",
+              "SLO3"
+            ]
+          },
+          "time_s": 3.62
+        },
+        {
+          "step": "draft_review",
+          "scores": {
+            "clinical_accuracy": {
+              "score": 4,
+              "feedback": "The clinical reasoning is accurate for an inferior STEMI case, but the original case was a teaching session, not a real patient. The draft describes a patient presentation that was not part of the original case."
+            },
+            "voice_preservation": {
+              "score": 2,
+              "feedback": "The draft does not reflect the original case (a teaching session). It describes a real patient encounter, which is a different scenario."
+            },
+            "kc_slo_mapping": {
+              "score": 3,
+              "feedback": "The selected key capabilities and curriculum links are appropriate for managing life-threatening conditions, but they do not align with the teaching activity described in the original case."
+            },
+            "completeness": {
+              "score": 2,
+              "feedback": "The draft is missing key details from the original case: it was a teaching session with 5 ECGs, not a single patient. The reflection and reasoning should focus on teaching, not clinical management."
+            },
+            "reflection_depth": {
+              "score": 3,
+              "feedback": "The reflection mentions learning points about ECG interpretation and team communication, but it does not address the teaching aspect or the specific ECGs used."
+            }
+          },
+          "overall_score": 2.8,
+          "verdict": "improve",
+          "top_issue": "The draft describes a clinical case that did not occur; the original case was a teaching session.",
+          "time_s": 3.03
+        },
+        {
+          "step": "kc_analysis",
+          "kc_count": 2,
+          "slo_count": 2,
+          "reflection_chars": 298,
+          "reasoning_chars": 286
+        }
+      ]
+    },
+    {
+      "provider": "gemini-fast",
+      "model": "gemini-3-flash-preview",
+      "case_id": 6,
+      "title": "Procedural Sedation for Fracture Reduction",
+      "status": "error",
+      "steps": [],
+      "error": "429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests"
+    },
+    {
+      "provider": "deepseek-v4",
+      "model": "deepseek-chat",
+      "case_id": 6,
+      "title": "Procedural Sedation for Fracture Reduction",
+      "status": "completed",
+      "steps": [
+        {
+          "step": "form_recommendation",
+          "recommended": [
+            "DOPS",
+            "CBD"
+          ],
+          "expected": [
+            "PROC_LOG",
+            "CBD"
+          ],
+          "matched": true,
+          "time_s": 1.39
+        },
+        {
+          "step": "extraction",
+          "output": {
+            "clinical_reasoning_cut": "Given the patient's age, risk factors, and presentation with chest pain and dyspnoea, I suspected acute coronary syndrome. I performed an ECG which showed ST elevation in anterior leads, confirming STEMI. I activated the primary PCI pathway, administered aspirin and nitrates, and arranged urgent tra",
+            "reflection_cut": "I learned the importance of rapid recognition and management of STEMI. The case reinforced my ability to lead a resuscitation team and coordinate with cardiology. I need to improve my confidence in managing complications such as arrhythmias during transfer.",
+            "kcs": [
+              "SLO1 KC1: to be expert in assessing and managing all adult patients attending the ED. These capabilities will apply to patients attending with both physical and psychological ill health (2025 Update)",
+              "SLO3 KC3: manage all the life-threatening conditions including peri-arrest & arrest situations in the ED (2025 Update)",
+              "SLO3 KC5: effectively lead and support resuscitation teams (2025 Update)",
+              "SLO6 KC1: the clinical knowledge to identify when key EM practical/emergency skills are indicated (2025 Update)",
+              "SLO6 KC2: the knowledge and psychomotor skills to perform EM procedural skills safely and in a timely fashion (2025 Update)"
+            ],
+            "slos": [
+              "SLO1",
+              "SLO3",
+              "SLO6"
+            ]
+          },
+          "time_s": 4.15
+        },
+        {
+          "step": "draft_review",
+          "scores": {
+            "clinical_accuracy": {
+              "score": 1,
+              "feedback": "The clinical reasoning describes a STEMI case, but the original case is a Colles fracture with procedural sedation. The draft is completely mismatched."
+            },
+            "voice_preservation": {
+              "score": 1,
+              "feedback": "The draft does not reflect the trainee's voice or the original case details; it appears to be a generic template for a different scenario."
+            },
+            "kc_slo_mapping": {
+              "score": 2,
+              "feedback": "The selected key capabilities and curriculum links are appropriate for a STEMI case but not for the actual Colles fracture case. Some capabilities (e.g., SLO6) could apply to procedural sedation, but the reasoning is wrong."
+            },
+            "completeness": {
+              "score": 1,
+              "feedback": "The draft is missing essential details from the original case: no mention of fracture, sedation, monitoring, or reduction. It is incomplete."
+            },
+            "reflection_depth": {
+              "score": 1,
+              "feedback": "The reflection is about STEMI management, not relevant to the actual case. No reflection on procedural sedation or fracture management."
+            }
+          },
+          "overall_score": 1.2,
+          "verdict": "weak",
+          "top_issue": "The entire draft describes a different clinical scenario (STEMI) instead of the Colles fracture with procedural sedation.",
+          "time_s": 3.05
+        },
+        {
+          "step": "kc_analysis",
+          "kc_count": 5,
+          "slo_count": 3,
+          "reflection_chars": 257,
+          "reasoning_chars": 326
+        }
+      ]
+    },
+    {
+      "provider": "gemini-fast",
+      "model": "gemini-3-flash-preview",
+      "case_id": 7,
+      "title": "QI Project on Door-to-Needle Times",
+      "status": "error",
+      "steps": [],
+      "error": "429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests"
+    },
+    {
+      "provider": "deepseek-v4",
+      "model": "deepseek-chat",
+      "case_id": 7,
+      "title": "QI Project on Door-to-Needle Times",
+      "status": "completed",
+      "steps": [
+        {
+          "step": "form_recommendation",
+          "recommended": [
+            "QIAT",
+            "SERIOUS_INC",
+            "EDU_ACT"
+          ],
+          "expected": [
+            "QIAT",
+            "CBD"
+          ],
+          "matched": true,
+          "time_s": 1.53
+        },
+        {
+          "step": "extraction",
+          "output": {
+            "clinical_reasoning_cut": "Given the patient's age, risk factors, and presentation with central chest pain radiating to the left arm associated with dyspnoea, I suspected acute coronary syndrome. I performed an ECG which showed ST elevation in leads V2-V4, confirming ST-elevation myocardial infarction (STEMI). I administered ",
+            "reflection_cut": "I learned the importance of rapid recognition and management of STEMI, including the need to involve cardiology early. I also realised the value of clear communication with the patient and team during a time-critical situation.",
+            "kcs": [
+              "SLO1 KC1: to be expert in assessing and managing all adult patients attending the ED. These capabilities will apply to patients attending with both physical and psychological ill health (2025 Update)",
+              "SLO3 KC3: manage all the life-threatening conditions including peri-arrest & arrest situations in the ED (2025 Update)"
+            ],
+            "slos": [
+              "SLO1",
+              "SLO3"
+            ]
+          },
+          "time_s": 3.41
+        },
+        {
+          "step": "draft_review",
+          "scores": {
+            "clinical_accuracy": {
+              "score": 4,
+              "feedback": "Clinical reasoning is appropriate for STEMI management, but the CBD is about a QI project, not a specific patient case. The clinical scenario is generic and not linked to the QI project."
+            },
+            "voice_preservation": {
+              "score": 2,
+              "feedback": "The draft does not reflect the trainee's own voice; it reads like a generic textbook description. The QI project experience is not integrated into the reflection or clinical reasoning."
+            },
+            "kc_slo_mapping": {
+              "score": 3,
+              "feedback": "Selected KCs are relevant but too broad. The QI project specifically demonstrates SLO4 (improvement of quality and safety) and SLO2 (teamworking/leadership), which are not mapped."
+            },
+            "completeness": {
+              "score": 2,
+              "feedback": "The draft lacks a clear link to the QI project. The clinical reasoning and reflection do not mention the audit, checklist, or outcomes. The patient presentation is vague and not tied to the project."
+            },
+            "reflection_depth": {
+              "score": 2,
+              "feedback": "Reflection is superficial and generic. It does not discuss challenges, data analysis, team engagement, or how the project changed practice. No mention of barriers or learning from the QI process."
+            }
+          },
+          "overall_score": 2.6,
+          "verdict": "improve",
+          "top_issue": "The CBD draft does not reflect the QI project described; it is a generic STEMI case with no connection to the audit, checklist, or outcomes.",
+          "time_s": 4.12
+        },
+        {
+          "step": "kc_analysis",
+          "kc_count": 2,
+          "slo_count": 2,
+          "reflection_chars": 227,
+          "reasoning_chars": 409
+        }
+      ]
+    },
+    {
+      "provider": "gemini-fast",
+      "model": "gemini-3-flash-preview",
+      "case_id": 8,
+      "title": "Reflection on Missed PE Diagnosis",
+      "status": "error",
+      "steps": [],
+      "error": "429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests"
+    },
+    {
+      "provider": "deepseek-v4",
+      "model": "deepseek-chat",
+      "case_id": 8,
+      "title": "Reflection on Missed PE Diagnosis",
+      "status": "completed",
+      "steps": [
+        {
+          "step": "form_recommendation",
+          "recommended": [
+            "CBD",
+            "REFLECT_LOG"
+          ],
+          "expected": [
+            "REFLECT_LOG",
+            "CBD"
+          ],
+          "matched": true,
+          "time_s": 1.38
+        },
+        {
+          "step": "extraction",
+          "output": {
+            "clinical_reasoning_cut": "The patient presented with central chest pain radiating to the left arm, associated with nausea and diaphoresis. Given the high suspicion of acute coronary syndrome, I performed an ECG which showed ST elevation in leads V2-V4. I diagnosed ST-elevation myocardial infarction (STEMI) and activated the ",
+            "reflection_cut": "I learned the importance of rapid recognition and management of STEMI, including the need to coordinate with the cardiology team and ensure timely transfer. I felt confident in my clinical reasoning but realised I need to improve my communication with the patient and family during the acute phase.",
+            "kcs": [
+              "SLO1 KC1: to be expert in assessing and managing all adult patients attending the ED. These capabilities will apply to patients attending with both physical and psychological ill health (2025 Update)",
+              "SLO3 KC3: manage all the life-threatening conditions including peri-arrest & arrest situations in the ED (2025 Update)"
+            ],
+            "slos": [
+              "SLO1",
+              "SLO3"
+            ]
+          },
+          "time_s": 4.07
+        },
+        {
+          "step": "draft_review",
+          "scores": {
+            "clinical_accuracy": {
+              "score": 1,
+              "feedback": "The draft describes a STEMI case, but the original case was about PE. The clinical reasoning is completely mismatched."
+            },
+            "voice_preservation": {
+              "score": 2,
+              "feedback": "The draft does not reflect the trainee's original narrative or learning points; it is a generic STEMI description."
+            },
+            "kc_slo_mapping": {
+              "score": 3,
+              "feedback": "The selected KCs and SLOs are appropriate for a life-threatening condition, but they do not align with the actual case (PE)."
+            },
+            "completeness": {
+              "score": 2,
+              "feedback": "The draft is internally consistent but fails to address the original case details, missing key elements like Wells/PERC and anchoring bias."
+            },
+            "reflection_depth": {
+              "score": 2,
+              "feedback": "Reflection is generic and does not engage with the specific cognitive bias (anchoring) or the missed diagnosis of PE."
+            }
+          },
+          "overall_score": 2.0,
+          "verdict": "weak",
+          "top_issue": "Clinical reasoning does not match the original case; it describes STEMI instead of PE.",
+          "time_s": 2.8
+        },
+        {
+          "step": "kc_analysis",
+          "kc_count": 2,
+          "slo_count": 2,
+          "reflection_chars": 298,
+          "reasoning_chars": 479
+        }
+      ]
+    }
+  ]
+}

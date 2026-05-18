@@ -63,6 +63,10 @@ def _strip_emojis(text: str) -> str:
     return _EMOJI_RE.sub("", text).strip()
 
 
+def _is_other_choice(value: Any) -> bool:
+    return "other" in str(value or "").strip().lower()
+
+
 # ─── Date helper ──────────────────────────────────────────────────────────────
 
 def _to_uk_date(raw: str) -> str:
@@ -473,6 +477,8 @@ FORM_FIELD_MAP = {
         # Procedural skill dropdowns — UUIDs reused from TEACH (same 2025 Update
         # dropdown content; verify with DOM scrape if filling silently fails).
         "higher_procedural_skill": "8def931e-3a00-43ac-8529-44cdaf34be2d",
+        "higher_procedural_skill_other": "4fea8fcc-185c-4917-bfe0-2dc63f7dccb3",
+        "procedure_other": "4fea8fcc-185c-4917-bfe0-2dc63f7dccb3",
         "intermediate_procedural_skill": "31bd55b7-0e32-4918-8cc0-4ba33af83772",
         "accs_procedural_skill": "eed0e8dc-075d-4661-aea5-2c3238af4c5b",
         "age_of_patient": "ca4f531c-ea4b-4587-a964-ee471abf1193",
@@ -1285,6 +1291,19 @@ async def fill_kaizen_form(
         if not field_map:
             return {"status": "failed", "filled": [], "skipped": [], "errors": [f"No field map for: {form_type}"], "screenshot": None}
 
+        if (
+            form_type == "PROC_LOG"
+            and _is_other_choice(fields.get("higher_procedural_skill"))
+            and not (fields.get("higher_procedural_skill_other") or fields.get("procedure_other"))
+        ):
+            return {
+                "status": "failed",
+                "filled": [],
+                "skipped": [],
+                "errors": ["higher_procedural_skill is Other but higher_procedural_skill_other/procedure_other is missing"],
+                "screenshot": None,
+            }
+
         # ─── STEP 1: Stage of training (MUST be first — loads curriculum) ─────
         stage_value = fields.get("stage") or fields.get("stage_of_training")
         stage_dom_id = field_map.get("stage") or field_map.get("stage_of_training")
@@ -1311,6 +1330,12 @@ async def fill_kaizen_form(
         # ─── STEP 3: Text and select fields ──────────────────────────────────
         skip_keys = {"stage", "stage_of_training", "curriculum_links", "assessor_email"}
         skip_keys.update(date_keys)
+        delayed_proc_log_other = {}
+        if form_type == "PROC_LOG":
+            for other_key in ("higher_procedural_skill_other", "procedure_other"):
+                if fields.get(other_key):
+                    delayed_proc_log_other[other_key] = fields[other_key]
+                    skip_keys.add(other_key)
 
         for key, value in fields.items():
             if key in skip_keys or not value:
@@ -1341,6 +1366,21 @@ async def fill_kaizen_form(
                 filled.append(key)
             else:
                 errors.append(f"{key}: fill failed (tag={tag})")
+
+        for key, value in delayed_proc_log_other.items():
+            dom_id = field_map.get(key)
+            ok = await _fill_text(page, dom_id, str(value)) if dom_id else False
+            if ok:
+                filled.append(key)
+            else:
+                errors.append(f"{key}: fill failed")
+
+        if (
+            form_type == "PROC_LOG"
+            and _is_other_choice(fields.get("higher_procedural_skill"))
+            and not any(k in filled for k in ("higher_procedural_skill_other", "procedure_other"))
+        ):
+            errors.append("Other procedural skill detail was not filled")
 
         # ─── STEP 4: Curriculum links (SLO expansion + KC ticking) ───────────
         slo_codes = fields.get("curriculum_links", [])
@@ -2127,6 +2167,8 @@ async def file_to_kaizen(
         # Fill remaining mapped fields
         for field_key, dom_id in field_map.items():
             if field_key == "stage_of_training":
+                continue
+            if field_key not in fields:
                 continue
             value = fields.get(field_key)
             if value is None or value == "" or value == []:

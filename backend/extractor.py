@@ -10,7 +10,7 @@ from typing import List
 logger = logging.getLogger(__name__)
 from models import CBDData, FormTypeRecommendation, FormDraft
 from form_schemas import FORM_SCHEMAS
-from model_config import gemini_fast_model, openai_fallback_model
+from model_config import gemini_premium_model
 
 # RCEM Higher EM Curriculum (2025 Update) — Exact Kaizen checkbox labels
 # Source: Live Kaizen CBD form screenshot (verified 2026-03-08)
@@ -84,14 +84,10 @@ SLO12: Lead & Manage (2025 Update)
 
 _client = None
 
-# Provider chain — tried in order. Each must implement generate(prompt) → text
+# Extraction model policy:
+# - DeepSeek is the default for recommendation/extraction/review.
+# - Gemini Pro is reserved for explicit premium override/escalation.
 PROVIDERS = [
-    {
-        "name": "gemini-fast",
-        "type": "gemini",
-        "model": gemini_fast_model,
-        "env_key": "GOOGLE_API_KEY",
-    },
     {
         "name": "deepseek-v4",
         "type": "openai_compat",
@@ -99,20 +95,33 @@ PROVIDERS = [
         "base_url": "https://api.deepseek.com",
         "env_key": "DEEPSEEK_API_KEY",
     },
+]
+
+PREMIUM_PROVIDERS = [
     {
-        "name": "openai-fallback",
-        "type": "openai",
-        "model": openai_fallback_model,
-        "env_key": "OPENAI_API_KEY",
+        "name": "gemini-pro",
+        "type": "gemini",
+        "model": gemini_premium_model,
+        "env_key": "GOOGLE_API_KEY",
     },
 ]
 
 
+def _select_providers(tier: str = ""):
+    requested = (
+        tier
+        or os.environ.get("PORTFOLIO_GURU_EXTRACTOR_PROVIDER")
+        or os.environ.get("EXTRACTOR_PROVIDER")
+        or "deepseek-v4"
+    ).lower().replace("_", "-")
+    if requested in {"gemini-pro", "gemini-premium", "premium"}:
+        return PREMIUM_PROVIDERS
+    return PROVIDERS
+
+
 async def _generate(prompt, retries: int = 1, tier: str = ""):
-    """Call LLM with multi-provider fallback chain.
-    Iterates through PROVIDERS in order. Skips providers whose env key is missing.
-    On rate limit (429) or server error (5xx), moves to the next provider.
-    Free tier only uses the first provider (Gemini). Pro/Unlimited uses the full chain.
+    """Call the configured extractor LLM.
+    Defaults to DeepSeek. Gemini Pro is available only through explicit override.
     Returns the response as a plain string.
     """
     import time as _time
@@ -120,9 +129,7 @@ async def _generate(prompt, retries: int = 1, tier: str = ""):
     last_error = None
     t0 = _time.monotonic()
 
-    # Resolve tier: explicit param > env var > full chain
-    effective_tier = tier or os.environ.get("CURRENT_USER_TIER", "pro")
-    providers = PROVIDERS[:1] if effective_tier == "free" else PROVIDERS
+    providers = _select_providers(tier)
 
     for provider in providers:
         api_key = os.environ.get(provider["env_key"])
@@ -734,8 +741,6 @@ def _humanize_all_fields(data: dict) -> dict:
 
 async def recommend_form_types(case_description: str) -> List[FormTypeRecommendation]:
     """Recommend applicable WPBA form types based on case description."""
-    client = _get_client()
-
     system_prompt = """You are an expert RCEM portfolio advisor. Analyse the clinical or educational event described and
 recommend the 1-3 most appropriate RCEM Kaizen WPBA form types.
 

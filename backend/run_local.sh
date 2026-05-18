@@ -55,7 +55,7 @@ OPENAI_API_KEY="$(try_secret 2772c5c3-b357-4015-8252-b3ea00939469)"
 if [ -n "$OPENAI_API_KEY" ]; then
   export OPENAI_API_KEY
 fi
-DEEPSEEK_API_KEY="$(get_secret 1628cc03-0446-4455-b801-b3eb014c82fb)"
+DEEPSEEK_API_KEY="$(get_secret c5d82503-3d1d-427b-9be1-b44e01564203)"
 export DEEPSEEK_API_KEY
 # Stripe (Portfolio Guru account)
 STRIPE_SECRET_KEY="$(get_secret 4450d6ac-f7a2-4802-a27a-b428006488c9)"

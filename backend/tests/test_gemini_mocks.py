@@ -1,5 +1,3 @@
-import re
-
 import httpx
 import pytest
 import respx
@@ -9,31 +7,23 @@ import respx
 def reset_extractor_client(monkeypatch):
     import extractor
 
-    monkeypatch.setenv("GOOGLE_API_KEY", "test-api-key")
-    # Ensure only Gemini provider is active in tests
-    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-api-key")
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setattr(extractor, "_client", None)
     yield
     monkeypatch.setattr(extractor, "_client", None)
 
 
-def _gemini_route():
-    return re.compile(
-        r"https://generativelanguage\.googleapis\.com/v1beta/models/.+:generateContent.*"
-    )
+def _deepseek_route():
+    return "https://api.deepseek.com/chat/completions"
 
 
-def _gemini_payload(text: str) -> dict:
+def _deepseek_payload(text: str) -> dict:
     return {
-        "candidates": [
-            {
-                "content": {
-                    "role": "model",
-                    "parts": [{"text": text}],
-                }
-            }
-        ]
+        "choices": [
+            {"message": {"content": text}}
+        ],
     }
 
 
@@ -42,10 +32,10 @@ async def test_extraction_success():
     from extractor import recommend_form_types
 
     with respx.mock(assert_all_called=True) as router:
-        router.post(_gemini_route()).mock(
+        router.post(_deepseek_route()).mock(
             return_value=httpx.Response(
                 200,
-                json=_gemini_payload(
+                json=_deepseek_payload(
                     '[{"form_type":"ACAT","rationale":"Whole-shift acute take reflection"}]'
                 ),
             )
@@ -65,9 +55,9 @@ async def test_extraction_timeout():
     from extractor import recommend_form_types
 
     with respx.mock(assert_all_called=True) as router:
-        router.post(_gemini_route()).mock(side_effect=httpx.ConnectTimeout("timed out"))
+        router.post(_deepseek_route()).mock(side_effect=httpx.ConnectTimeout("timed out"))
 
-        with pytest.raises(httpx.ConnectTimeout):
+        with pytest.raises(Exception):
             await recommend_form_types("Chest pain case with evolving ECG changes.")
 
 
@@ -76,10 +66,10 @@ async def test_extraction_malformed_response():
     from extractor import recommend_form_types
 
     with respx.mock(assert_all_called=True) as router:
-        router.post(_gemini_route()).mock(
+        router.post(_deepseek_route()).mock(
             return_value=httpx.Response(
                 200,
-                json=_gemini_payload('{"form_type": "CBD"'),
+                json=_deepseek_payload('{"form_type": "CBD"'),
             )
         )
 

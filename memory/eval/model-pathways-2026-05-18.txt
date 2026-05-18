@@ -1,0 +1,61 @@
+========================================================================
+  PORTFOLIO GURU — MODEL PATHWAY EVALUATION REPORT
+  2026-05-18  |  9 runs, 0 skipped
+========================================================================
+
+  ── DEEPSEEK-V4 (deepseek-chat) ──
+    Overall score:      2.25/5.0
+    Verdicts:            4×improve | 4×weak | 0×ready
+    Form type match:     8/8 (100%)
+    Avg KCs:             2.4
+    Avg speed:           1.4s recommend | 3.5s extract | 3.3s review
+    Total per case:      2.8s
+
+    Case-by-case:
+      ✓ #1 STEMI in Resus                     3.2/5  improve  KC: 2  ['CBD', 'ACAT', 'REFLECT_LOG']
+      ✓ #2 Reflection on Difficult Airways    2.2/5     weak  KC: 2  ['CBD', 'REFLECT_LOG']
+      ✓ #3 Chest Drain Procedure (DOPS)       1.2/5     weak  KC: 2  ['DOPS', 'CBD']
+      ✓ #4 Shift Leadership in Majors         2.8/5  improve  KC: 2  ['ACAT', 'STAT', 'MSF']
+      ✓ #5 Teaching on ECG Interpretation     2.8/5  improve  KC: 2  ['TEACH', 'CBD']
+      ✓ #6 Procedural Sedation for Fracture Reduction   1.2/5     weak  KC: 5  ['DOPS', 'CBD']
+      ✓ #7 QI Project on Door-to-Needle Times   2.6/5  improve  KC: 2  ['QIAT', 'SERIOUS_INC', 'EDU_ACT']
+      ✓ #8 Reflection on Missed PE Diagnosis   2.0/5     weak  KC: 2  ['CBD', 'REFLECT_LOG']
+
+  ── GEMINI-FAST (gemini-3-flash-preview) ──
+    Overall score:      1.20/5.0
+    Verdicts:            1×weak | 0×ready | 0×improve
+    Form type match:     1/1 (100%)
+    Avg KCs:             4.0
+    Avg speed:           3.4s recommend | 9.5s extract | 6.6s review
+    Total per case:      6.5s
+
+    Case-by-case:
+      ✓ #1 STEMI in Resus                     1.2/5     weak  KC: 4  ['CBD', 'Mini-CEX']
+
+  ── COST / BILLING ROUTE ──
+
+    • deepseek-v4 (deepseek-chat)
+      Auth: API pay-as-you-go ~$0.14/1M input
+    • gemini-fast (gemini-3-flash-preview)
+      Auth: Free tier / Google One AI Premium
+
+    Note: GOOGLE_API_KEY appears to be a pay-as-you-go key.
+    Using Google One AI Premium (subscription) would cover Gemini Pro at no extra per-call cost.
+
+  ── RECOMMENDATION ──
+
+  Default extraction policy (proposed):
+
+    Primary: Gemini Flash (fast, cheapest, good enough for most cases)
+    Fallback: DeepSeek V4 (when Gemini quota exhausted)
+    Premium escalation: Gemini Pro (ambiguous cases, complex multi-form)
+
+  Kaizen filing pathway:
+    Primary: Playwright deterministic (fast, cheap, DOM-mapped)
+    AI escalation: Browser-use harness (unreliable fields, new forms)
+
+  This eval does not commit DeepSeek as default. It provides
+  measured comparison data for an informed decision. Run with
+  --all to test all 8 cases across all providers for fuller data.
+
+  Full results: /Users/moeedahmed/projects/portfolio-guru/memory/eval/model-pathways-2026-05-18.json

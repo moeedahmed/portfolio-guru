@@ -19,10 +19,21 @@ def test_gemini_fallback_models_honours_env(monkeypatch):
     assert gemini_fallback_models() == ["gemini-custom-fast", "gemini-custom-stable"]
 
 
-def test_extractor_provider_reads_fast_model_at_runtime(monkeypatch):
-    monkeypatch.setenv("GEMINI_FAST_MODEL", "gemini-runtime-fast")
+def test_extractor_defaults_to_deepseek(monkeypatch):
+    monkeypatch.delenv("PORTFOLIO_GURU_EXTRACTOR_PROVIDER", raising=False)
 
-    from extractor import PROVIDERS
+    from extractor import _select_providers
 
-    gemini_provider = next(p for p in PROVIDERS if p["type"] == "gemini")
-    assert gemini_provider["model"]() == "gemini-runtime-fast"
+    providers = _select_providers()
+    assert [p["name"] for p in providers] == ["deepseek-v4"]
+
+
+def test_extractor_gemini_pro_override_reads_model_at_runtime(monkeypatch):
+    monkeypatch.setenv("PORTFOLIO_GURU_EXTRACTOR_PROVIDER", "gemini-pro")
+    monkeypatch.setenv("GEMINI_PREMIUM_MODEL", "gemini-runtime-pro")
+
+    from extractor import _select_providers
+
+    provider = _select_providers()[0]
+    assert provider["name"] == "gemini-pro"
+    assert provider["model"]() == "gemini-runtime-pro"
