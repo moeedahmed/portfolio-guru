@@ -25,6 +25,7 @@ from documents import extract_from_document, is_supported_document
 from profile_store import init_profile_db, store_training_level, get_training_level, get_voice_profile, store_voice_profile, clear_voice_profile, store_curriculum, get_curriculum
 from bulk_filer import bulk_file
 from kaizen_unsigned_scraper import scrape_unsigned_tickets
+from conversational_router import route_message
 import chase_guard
 
 from dotenv import load_dotenv
@@ -34,6 +35,44 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 MAX_TELEGRAM_MSG = 4096
+
+
+async def _log_conversational_router_shadow(
+    text: str,
+    user_id: int | None,
+    handler_name: str,
+) -> None:
+    """Run the Phase 2 conversational router without affecting live flow."""
+    try:
+        result = route_message(text)
+        logger.info(
+            "Conversational router shadow route handler=%s user_id=%s intent=%s confidence=%.2f signals=%s chars=%d",
+            handler_name,
+            user_id,
+            result.intent.value,
+            result.confidence,
+            result.signals,
+            len(text),
+        )
+    except Exception:
+        logger.warning(
+            "Conversational router shadow route failed handler=%s user_id=%s chars=%d",
+            handler_name,
+            user_id,
+            len(text),
+            exc_info=True,
+        )
+
+
+def _start_conversational_router_shadow(update: Update, handler_name: str) -> None:
+    """Schedule shadow routing for ordinary text messages only."""
+    message = getattr(update, "message", None)
+    text = (getattr(message, "text", None) or "").strip()
+    if not text:
+        return
+    user = getattr(update, "effective_user", None)
+    user_id = getattr(user, "id", None)
+    asyncio.create_task(_log_conversational_router_shadow(text, user_id, handler_name))
 
 
 async def _safe_edit_text(target, text: str, **kwargs):
@@ -3770,6 +3809,7 @@ async def handle_edit_value_with_intent(update: Update, context: ContextTypes.DE
 async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle text, voice, photo, or document input for case description."""
     user_id = update.effective_user.id
+    _start_conversational_router_shadow(update, "handle_case_input")
 
     # If the user just tapped "Custom range" in the /unsigned picker, the next
     # text reply is their date range — intercept it before treating as a case.
@@ -5041,6 +5081,8 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
     if context.user_data.pop("post_reset", False):
         context.user_data.clear()
         return await handle_case_input(update, context)
+
+    _start_conversational_router_shadow(update, "handle_mid_conversation_text")
 
     raw_text = update.message.text.strip()
     case_text = context.user_data.get("case_text", "")

@@ -104,6 +104,11 @@ Verification:
 - shadow logs show correct intent on at least 20 representative prompts
 - no user-facing workflow changes
 
+Status:
+- Implemented for ordinary text in `handle_case_input` and `handle_mid_conversation_text`.
+- Current implementation is log-only. It does not change routing, replies, buttons, filing, billing, or credentials.
+- Tests prove existing decisions are preserved even when the shadow router returns a conflicting intent.
+
 ### Phase 3 - Safe activation for low-risk intents
 
 Activate router for:

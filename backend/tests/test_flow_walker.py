@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -736,6 +737,66 @@ class TestFlowWalker:
         # The merged dashboard surfaces plan + usage that used to be in /status.
         assert 'plan: free' in text.lower()
         assert '2/25 cases' in text.lower()
+
+    @pytest.mark.asyncio
+    async def test_conversational_router_shadow_logs_text_without_routing(self):
+        from conversational_router import ConversationalIntent, RouterResult
+        from bot import handle_case_input
+
+        sim = BotSimulator()
+        update = sim._make_text_update('how many cases this month')
+        context = sim._make_context()
+        shadow_result = RouterResult(
+            intent=ConversationalIntent.FILE_TO_KAIZEN,
+            confidence=0.99,
+            signals={'action': 'file_to_kaizen', 'form_type': 'CBD'},
+        )
+
+        with patch('bot.route_message', return_value=shadow_result) as route_mock, \
+             patch('bot.logger.info') as log_mock, \
+             patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.classify_menu_intent', new=AsyncMock(return_value='show_stats')), \
+             patch('bot.get_user_tier', new=AsyncMock(return_value='free')), \
+             patch('bot.get_cases_this_month', new=AsyncMock(return_value=2)), \
+             patch('bot.get_curriculum', return_value='2025'), \
+             patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_voice_profile', return_value=None):
+            result = await handle_case_input(update, context)
+            await asyncio.sleep(0)
+
+        assert result == ConversationHandler.END
+        assert 'your settings' in sim.get_last_text().lower()
+        route_mock.assert_called_once_with('how many cases this month')
+        log_mock.assert_called_once()
+        assert log_mock.call_args.args[0].startswith('Conversational router shadow route')
+
+    @pytest.mark.asyncio
+    async def test_mid_conversation_shadow_preserves_existing_decision(self):
+        from conversational_router import ConversationalIntent, RouterResult
+        from bot import AWAIT_APPROVAL, handle_mid_conversation_text
+
+        sim = BotSimulator()
+        update = sim._make_text_update('thanks')
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        shadow_result = RouterResult(
+            intent=ConversationalIntent.UNKNOWN,
+            confidence=0.2,
+            signals={},
+            clarification='shadow only',
+        )
+
+        with patch('bot.route_message', return_value=shadow_result) as route_mock, \
+             patch('bot.logger.info'), \
+             patch('bot._load_draft', return_value=MagicMock()), \
+             patch('bot.classify_intent', new=AsyncMock(return_value='chitchat')):
+            result = await handle_mid_conversation_text(update, context)
+            await asyncio.sleep(0)
+
+        assert result == AWAIT_APPROVAL
+        assert 'your draft is ready above' in sim.get_last_text().lower()
+        route_mock.assert_called_once_with('thanks')
 
     @pytest.mark.asyncio
     async def test_menu_intent_short_text_routes_to_settings(self):

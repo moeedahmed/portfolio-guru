@@ -1,48 +1,47 @@
-# Active Task - Conversational Router Phase 1
+# Active Task - Conversational Router Phase 2
 
 ## Objective
 
-Add a tested, non-invasive conversational intent router so Portfolio Guru can later understand natural messages without breaking existing deterministic workflows.
+Run the conversational router in passive shadow mode so Portfolio Guru can learn from real ordinary text messages without changing user-visible behaviour.
 
 ## Scope
 
-Build Phase 1 only:
+Phase 2 only:
 
-- Create a router contract for ordinary user messages.
-- Classify user intent into known route types.
-- Return structured output only.
-- Add focused tests for representative Portfolio Guru messages.
-- Do not wire the router into live Telegram handling yet.
+- Call the standalone router for ordinary text messages.
+- Log intent, confidence, signals, handler name, and message length.
+- Preserve all existing handler decisions and replies.
+- Do not use router output to control workflow yet.
+- Add tests proving shadow logging is passive.
 
-## Intent Types
+## Done
 
-- `new_case`
-- `portfolio_question`
-- `edit_draft`
-- `file_to_kaizen`
-- `account_or_billing`
-- `setup_or_credentials`
-- `unknown`
+- `handle_case_input` schedules shadow routing for ordinary text.
+- `handle_mid_conversation_text` schedules shadow routing for ordinary text.
+- Shadow routing logs structured router output only.
+- Router failures are caught and logged without affecting the user flow.
+- Tests prove a deliberately wrong shadow intent does not override existing menu routing or mid-conversation behaviour.
 
 ## Guardrails
 
 - No separate bot.
-- No Kaizen filing behaviour changes in Phase 1.
-- No billing or credential behaviour changes in Phase 1.
-- Buttons and existing workflows remain intact.
-- Unknown input must produce a useful clarification route, not silence.
+- No Kaizen filing behaviour changes.
+- No billing or credential behaviour changes.
+- No router-controlled Telegram replies yet.
+- Existing buttons/workflows remain intact.
 
 ## Verification
 
-Before this task is complete:
+- Focused router + flow-walker tests pass.
+- Full offline pre-commit test gate must pass before commit.
 
-- New router tests pass.
-- Existing relevant bot/extractor tests pass.
-- Full offline pre-commit test gate passes before commit.
+## Next Phase
 
-## Git
+Phase 3: activate the router only for low-risk intents:
 
-Branch: `feature/conversational-router`
+- `portfolio_question`
+- `unknown`
+- `account_or_billing`
+- `setup_or_credentials`
 
-Checkpoint before implementation:
-- DeepSeek primary extractor work committed and pushed on `main`.
+Keep case creation and filing on existing deterministic paths until shadow logs prove reliability.
