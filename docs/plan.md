@@ -1,65 +1,172 @@
-# Portfolio Guru — Workflow Overhaul Plan
+# Portfolio Guru - Conversational Router Plan
 
 ## Goal
-Smooth, auto-detecting, role-aware setup that works for any Kaizen portfolio type (HST, ACCS, Intermediate, Assessor, Non-Trainee). No confusing manual steps, no Playwright leftover, no stale config.
 
-## Phase 1: Auto-detect during setup ✅
-Replace the manual training level picker with automatic detection. When user enters credentials, test them via the engine, read the dashboard title, set the role automatically. Only fall back to manual picker if detection fails.
+Make Portfolio Guru feel like a natural portfolio assistant while preserving the deterministic Kaizen workflows that already work.
 
-**Done:**
-- `_test_kaizen_login()` → uses `engine.KaizenProvider.connect()` + `portfolio_type`
-- Returns `bool | str` (role string or False)
-- `setup_password()` → stores detected role via `store_training_level()`
-- Shows "detected as Higher Specialist Trainee / ACCS / Clinical Supervisor"
-- Fallback manual picker if detection fails
-- ASSESSOR added to `TRAINING_LEVEL_LABELS` and `TRAINING_LEVEL_FORMS`
+The product should accept messy doctor-language, understand intent, ask one useful clarifying question when needed, then route into safe structured execution. Filing, billing, credential handling, and Kaizen submission remain deterministic and confirm-before-action.
 
-## Phase 2: Credential verification via engine ✅
-`_test_kaizen_login()` uses `engine.KaizenProvider` instead of Playwright headless Chromium.
+## Product Decision
 
-**Done:**
-- Old Playwright login code removed from bot.py
-- Uses real Chrome CDP via browser-harness
-- Auto-discovers CDP WebSocket URL from `localhost:9222`
+Keep one bot. Do not create a separate conversational bot.
 
-## Phase 3: /start setup nudge ✅ (pre-existing)
-If user has no stored credentials, `/start` shows "🔗 Connect Kaizen" button.
+Reason: a separate bot would duplicate auth, persistence, Kaizen credentials, billing, usage limits, support surface, and user memory. The better architecture is one Portfolio Guru bot with a conversational layer in front of the existing workflow engine.
 
-**Done:** `_BTN_SETUP` shown when `not has_credentials()`
+## Architecture
 
-## Phase 4: Multi-curriculum support ❌
-Store all curricula detected during setup. Add curriculum switching in settings.
+### Layer 1 - Natural conversation intake
 
-**Not yet done.** Would need:
-- `store_curricula()` / `get_curricula()` in profile_store.py
-- Detect from dashboard Goals page
-- Curriculum switch in /settings
+Accept ordinary messages, not just command/button flows.
 
-## Phase 5: Old Playwright code cleanup ❌
-`kaizen_form_filer.py` still has old Playwright code. Should be archived.
+Examples:
+- "Had a difficult airway case, can this go in Kaizen?"
+- "What forms would this support?"
+- "File this as CBD and reflection."
+- "Actually make it more concise."
+- "Why is this asking me to pay?"
 
----
+### Layer 2 - Intent router
 
-## Bugs encountered
+Classify every non-command message into one intent:
 
-1. **ACP edit collision** — acpx session overwrote manual edits to bot.py because uncommitted changes weren't stashed before spawning.
-   *Fix:* `git stash` before ACP, `git stash pop` after.
+- `new_case` - user is describing portfolio evidence
+- `portfolio_question` - user asks advice about forms, curriculum, ARCP, or Kaizen
+- `edit_draft` - user wants to revise an existing draft
+- `file_to_kaizen` - user wants a draft filed
+- `account_or_billing` - user asks about limits, tiers, payments, or access
+- `setup_or_credentials` - user needs Kaizen connection help
+- `unknown` - unclear message; ask one clarifying question
 
-2. **Variable name mismatch** — auto-detect code used `login_result` but try/except stored to `login_ok`.
-   *Fix:* Changed to consistent variable name.
+The router must return structured JSON only. No direct user-facing prose from the router.
 
-3. **Rogue bot process** — old launchd instance (PID 23015) survived and held Telegram connection, causing 409 Conflicts for new instances.
-   *Fix:* Kill all bot processes before restarting.
+### Layer 3 - Existing deterministic workflows
 
-4. **Chrome CDP not running** — engine couldn't connect because Chrome with `--remote-debugging-port=9222` wasn't started.
-   *Fix:* Start Chrome with remote debugging before bot starts.
-   *Better fix:* KaizenProvider auto-discovers CDP URL from `localhost:9222/json/version`.
+Do not rewrite the working machinery. Route into existing handlers:
 
-5. **Stale .env TELEGRAM_BOT_TOKEN** — portfolio .env had career-guru token under TELEGRAM_BOT_TOKEN, causing token conflict.
-   *Fix:* Removed TELEGRAM_BOT_TOKEN from portfolio .env; using PORTFOLIO_GURU_TOKEN instead.
+- case extraction and recommendation
+- draft generation
+- improve/rewrite flows
+- Kaizen credential setup
+- Kaizen filing
+- payment and usage-limit flows
+- voice profile flows
 
-## Known issues
+Buttons remain available at confirmation points, but they stop being the only way to operate the bot.
 
-- Clearing Telegram chat history does NOT clear stored credentials (stored in PicklePersistence on server)
-- Bot doesn't auto-restart Chrome if it crashes
-- Career-guru bot's launchd may restart and conflict if using same token (separate launchd jobs, should use different tokens)
+### Layer 4 - Safety and recovery
+
+Hard rules:
+
+- Never file to Kaizen without explicit user confirmation.
+- Never change billing or credentials without explicit confirmation.
+- Never hallucinate portfolio facts; ask if the case lacks required detail.
+- Never go silent on unknown input. Ask one useful clarifying question.
+- If routing confidence is low, explain what the bot can do next in one short message.
+
+## Implementation Phases
+
+### Phase 0 - Checkpoint and branch
+
+Done:
+- DeepSeek model-pathway work committed.
+- Main pushed to GitHub.
+- New branch created for this work.
+
+### Phase 1 - Router contract and tests
+
+Add a small router module with:
+
+- intent enum
+- structured router result
+- confidence score
+- extracted signals, such as form type, action, and target draft
+- fallback clarification text
+
+Add tests for the highest-value messages:
+
+- case description routes to `new_case`
+- form advice routes to `portfolio_question`
+- "file this" routes to `file_to_kaizen`
+- "make it shorter" routes to `edit_draft`
+- billing/access messages route to `account_or_billing`
+- nonsense or underspecified messages route to `unknown`
+
+No production routing changes in this phase.
+
+### Phase 2 - Passive shadow mode
+
+Run router in the background for ordinary text messages and log the intended route without changing user behaviour.
+
+Purpose: prove the router understands real messages before handing it control.
+
+Verification:
+- existing tests pass
+- shadow logs show correct intent on at least 20 representative prompts
+- no user-facing workflow changes
+
+### Phase 3 - Safe activation for low-risk intents
+
+Activate router for:
+
+- `portfolio_question`
+- `unknown`
+- `account_or_billing`
+- `setup_or_credentials`
+
+Keep case creation and filing on existing paths until the router proves stable.
+
+Verification:
+- ordinary "what can you do?" and "why am I blocked?" messages receive useful replies
+- no disruption to existing button workflows
+
+### Phase 4 - Case-intake activation
+
+Route natural case descriptions into the existing case extraction flow.
+
+The output should be the same structured draft/recommendation flow users already know, but the input can be natural text.
+
+Verification:
+- existing case flows still pass
+- natural case prompts create drafts without requiring command/button setup first
+- unclear cases ask one clarifying question instead of failing silently
+
+### Phase 5 - Filing command activation
+
+Allow natural filing instructions only when a draft already exists and the action is clear.
+
+Examples:
+- "file this as a CBD"
+- "send this to Kaizen"
+- "also make a reflection log"
+
+Verification:
+- filing still requires explicit confirmation
+- wrong/ambiguous form requests ask a clarification
+- no duplicate Kaizen drafts
+
+## Non-Goals
+
+- No separate bot.
+- No rewrite of Kaizen filing.
+- No removal of buttons.
+- No free-form agent with permission to file autonomously.
+- No migration away from current Telegram bot until the router proves value.
+
+## Success Criteria
+
+The change is successful when:
+
+- a doctor can use the bot naturally without knowing commands
+- existing deterministic workflows still pass tests
+- unknown messages get helpful recovery responses
+- Kaizen filing remains confirm-first and auditable
+- fewer users hit dead-end silence or "dumb bot" behaviour
+
+## First Build Slice
+
+Build Phase 1 only:
+
+1. Add the router contract and tests.
+2. Do not wire it into live message handling yet.
+3. Run the test suite.
+4. Commit the branch checkpoint.

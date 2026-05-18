@@ -1,30 +1,48 @@
-# ✅ DONE: Collapse setup flows into single live messages
+# Active Task - Conversational Router Phase 1
 
-**Status:** Implemented and tested. All 86 offline tests pass.
+## Objective
 
-## What changed
+Add a tested, non-invasive conversational intent router so Portfolio Guru can later understand natural messages without breaking existing deterministic workflows.
 
-Login setup, voice profile setup, and pro upgrade flows now use a single "live" message that updates in place as each step progresses, instead of sending a new message for every prompt. This keeps the chat clean — no more stack of stale prompts (username, password, voice setup, upgrade) cluttering the conversation.
+## Scope
 
-## How it works
+Build Phase 1 only:
 
-New helpers in `backend/bot.py`:
+- Create a router contract for ordinary user messages.
+- Classify user intent into known route types.
+- Return structured output only.
+- Add focused tests for representative Portfolio Guru messages.
+- Do not wire the router into live Telegram handling yet.
 
-- `_flow_msg(update, context, text, ..., flow_key=...)` — sends a new flow anchor on first call; subsequent calls with the same `flow_key` edit that anchor in place. Falls back to sending a fresh message if the anchor is gone or too old to edit.
-- `_flow_done(context, flow_key=...)` — clears the anchor when the flow ends (success/cancel/error).
+## Intent Types
 
-Three flow keys in use:
+- `new_case`
+- `portfolio_question`
+- `edit_draft`
+- `file_to_kaizen`
+- `account_or_billing`
+- `setup_or_credentials`
+- `unknown`
 
-- `setup` — credentials (username → password → testing → connected)
-- `voice` — voice profile (intro → examples → analyse → preview → activate)
-- `upgrade` — pro upgrade (plan listing → tier selection → payment prompt)
+## Guardrails
 
-## Also fixed during sweep
-
-- Two stale internal docstrings still said "Pro/Pro+" — updated to "Pro/Unlimited" (`extractor.py:115`, `usage.py:112`).
+- No separate bot.
+- No Kaizen filing behaviour changes in Phase 1.
+- No billing or credential behaviour changes in Phase 1.
+- Buttons and existing workflows remain intact.
+- Unknown input must produce a useful clarification route, not silence.
 
 ## Verification
 
-- All 86 offline tests pass (`pytest tests/ --ignore=test_e2e.py --ignore=test_e2e_live.py`).
-- `test_bot_imports`, `test_setup_password_skips_training_level_and_goes_to_file_first_case`, and all snapshot tests still pass.
-- Existing dynamic edits in the case-filing flow are unchanged.
+Before this task is complete:
+
+- New router tests pass.
+- Existing relevant bot/extractor tests pass.
+- Full offline pre-commit test gate passes before commit.
+
+## Git
+
+Branch: `feature/conversational-router`
+
+Checkpoint before implementation:
+- DeepSeek primary extractor work committed and pushed on `main`.
