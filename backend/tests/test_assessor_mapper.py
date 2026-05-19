@@ -30,6 +30,14 @@ def test_normalise_summary_extracts_uuid_and_state():
     assert summary.state == "Pending"
 
 
+def test_redact_ticket_title_removes_owner_suffix():
+    assert (
+        assessor_mapper.redact_ticket_title("CBD - Case Based Discussion (2025 update) for Jane Example")
+        == "CBD - Case Based Discussion (2025 update)"
+    )
+    assert assessor_mapper.redact_ticket_title("DOPS - Direct Observation") == "DOPS - Direct Observation"
+
+
 def test_mapper_keeps_write_actions_deny_listed():
     labels = assessor_mapper.WRITE_ACTION_LABELS
 
@@ -70,6 +78,20 @@ def test_summarise_ticket_shape_redacts_field_values():
     assert shape.needs_write_side_mapping is True
     assert shape.route_kind == "view-section"
     assert "Patient-specific narrative" not in repr(shape)
+
+
+def test_completion_shape_defaults_to_not_saved_or_submitted():
+    shape = assessor_mapper.AssessorCompletionShape(
+        ticket_type="CBD - Case Based Discussion",
+        post_fill_heading="CBD - Case Based Discussion",
+        route_kind="/events/fillin/<uuid>",
+        field_labels=["Feedback"],
+        input_shapes=[{"tag": "textarea", "type": None, "id_present": True, "name_present": True}],
+        write_controls=["Submit", "Save as draft"],
+        safe_controls=["View profile"],
+    )
+
+    assert shape.saved_or_submitted is False
 
 
 def test_mapper_does_not_click_write_controls():

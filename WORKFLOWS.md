@@ -172,6 +172,25 @@ Implication:
     one-ticket approval gate exists.
 ```
 
+First mapped assessor completion shape after explicit approval:
+
+```
+Ticket type: CBD - Case Based Discussion (2025 update)
+Route after Fill in: fillin
+Assessor-side fields/inputs:
+  - Assessor Registration Number
+  - Job title
+  - Entrustment Scale
+  - Feedback
+  - Recommendation for further learning or development
+Write-side controls detected but not clicked:
+  - Submit
+  - Save as draft
+Product implication:
+  - Assessor action can use the same draft/review/approve engine as filing,
+    but final submit must remain a one-ticket explicit approval action.
+```
+
 ---
 
 ## Flow 3 — Edit Before Filing

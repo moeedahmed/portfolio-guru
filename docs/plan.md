@@ -149,8 +149,11 @@ Status:
 - It can output a PHI-free ticket shape (`--shape-only`) so mapping can record field labels/control labels without storing patient narrative.
 - First read-only live shape mapped a CBD assessor ticket with visible fields: date occurred on, end date, case to be discussed, attach files.
 - The same live shape exposed write-side controls: Fill in and Save. These are detected but not clicked.
+- After explicit approval, the mapper opened Fill in once and captured the CBD assessor completion shape without saving or submitting.
+- CBD assessor completion requires assessor registration number, job title, entrustment scale, feedback, and recommendation for further learning/development.
+- The completion surface exposes Submit and Save as draft; these are detected but not clicked.
 - It does not click write controls and has tests guarding the read-only boundary.
-- Full assessor feedback/sign-off field mapping is not complete yet.
+- Full assessor feedback/sign-off field mapping is now mapped for CBD only; other ticket types remain unmapped.
 - Live read-only mapping can use an existing authenticated browser session; supplied credentials are only needed if login is required, and the mapper must stop at 2FA/captcha.
 
 ### Phase 3 - Safe activation for low-risk intents

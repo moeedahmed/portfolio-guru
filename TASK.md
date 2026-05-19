@@ -42,11 +42,16 @@ Phase 2.7 only:
 - Mapper now classifies safe navigation controls separately from write-side controls.
 - Mapper now supports PHI-free shape output for live mapping without storing patient narrative.
 - First live read-only shape mapped a CBD assessor ticket and detected `Fill in` / `Save` as write-side controls without clicking either.
+- After explicit approval, `Fill in` was opened once for a CBD assessor ticket.
+- The CBD assessor completion shape was mapped without typing, saving, submitting, signing, approving, rejecting, or sending feedback.
+- Completion fields detected: assessor registration number, job title, entrustment scale, feedback, recommendation for further learning/development.
+- Completion write controls detected: `Submit`, `Save as draft`.
 
 ## Verification
 
 - Assessor mapper unit tests pass.
 - Read-only live shape smoke passed against an authenticated browser session.
+- Explicitly approved completion-shape smoke passed and reported `saved_or_submitted=False`.
 - Flow/snapshot tests still pass.
 - Full offline pre-commit gate must pass before commit.
 
@@ -59,5 +64,6 @@ Run live read-only mapping only when an authenticated assessor session or approv
 - Detail page read-only field structure.
 - Assessor-specific fields/buttons.
 - Exact submit/sign button selectors for later approval-gated implementation once write-side mapping is explicitly approved.
+- Remaining ticket types beyond CBD.
 
 Do not perform any write action during mapping.
