@@ -128,6 +128,28 @@ Status:
 - LLM-assisted wording remains limited to low-risk explanation/recovery paths already designed for it; it does not control filing or safety actions.
 - Phase 3 remains paused until the message policy/tests are green.
 
+### Phase 2.7 - Assessor workflow mapping
+
+Product direction:
+- One engine, two entry points.
+- `file_evidence`: user sends their own case → bot drafts evidence → user approves → bot saves a Kaizen draft.
+- `assess_ticket`: ticket arrives for review → bot shows ticket content → assessor gives intent → bot drafts feedback/sign-off text → assessor approves → bot submits the assessor action.
+- No persistent user-facing modes unless task routing proves confusing.
+
+Safety contract:
+- Assessor mapping starts read-only.
+- Browser harness may navigate, list assessment tickets, open tickets, and extract field/button metadata.
+- Browser harness must not sign, submit, save, delete, approve, reject, send feedback, or create drafts during mapping.
+- Any future assessor submit/sign action needs a separate explicit approval gate for one named ticket and one reviewed response.
+- Colleague/consultant credentials are treated as high-risk: no noisy test artefacts, no spam drafts, and no destructive actions.
+
+Status:
+- Read-only assessor mapper scaffold added in `backend/assessor_mapper.py`.
+- It can list visible assessment timeline rows and optionally extract ticket detail fields/tags/buttons for mapping.
+- It does not click write controls and has tests guarding the read-only boundary.
+- Full assessor feedback/sign-off field mapping is not complete yet.
+- Live read-only mapping still needs an authenticated assessor session or supplied credentials, and must stop at login/2FA.
+
 ### Phase 3 - Safe activation for low-risk intents
 
 Activate router for:

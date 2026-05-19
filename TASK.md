@@ -1,53 +1,59 @@
-# Active Task - Phase 2.6 Message and Workflow Hardening
+# Active Task - Phase 2.7 Assessor Workflow Mapping
 
 ## Objective
 
-Make Portfolio Guru's user-facing workflow messages less brittle before conversational routing is activated further, without letting the bot free-write safety-critical copy.
+Map the assessor-side Kaizen workflow safely so Portfolio Guru can support the second real-life entry point:
+
+- File evidence: user provides their own case, bot drafts evidence, user approves, bot saves a Kaizen draft.
+- Assess ticket: ticket arrives for review, bot shows ticket content, assessor gives intent, bot drafts feedback/sign-off, assessor approves, bot submits/signs.
+
+No persistent user-facing modes for now. Route by task.
 
 ## Scope
 
-Phase 2.6 only:
+Phase 2.7 only:
 
-- Add a small message policy/template layer for high-value fixed and templated messages.
-- Classify message surfaces as fixed, templated, or LLM-assisted.
-- Keep deterministic workflow states, filing, billing, credentials, and safety warnings fixed.
-- Tighten mobile copy for welcome, help/about, case prompt, captured ack, thin-case blocker, recommendation, AI unavailable, privacy nudge, and draft reply hint.
-- Add tests proving plain fixed/templates do not leak raw Markdown markers.
-
-## Done
-
-- Phase 2 shadow routing remains implemented and passive.
-- Source-grounding guard added for photo/image-derived recommendations and drafts.
-- Image-derived draft regeneration keeps using the original input source.
-- Regression tests cover the CPR/ALS/ROSC fabrication failure mode.
-- Source prioritisation now treats lone/admin "For CPR" screenshot text as a weak anchor, removes CBD from image recommendations unless case-management reasoning is explicit, and forces procedure evidence toward Procedural Log/DOPS.
-- Message policy layer added for the first high-value workflow surfaces.
-- Snapshot tests updated for changed visible copy.
+- Capture the assessor workflow in repo context.
+- Add a read-only assessor mapper scaffold.
+- Allow browser navigation and extraction only.
+- List visible assessment tickets.
+- Extract read-only ticket fields, tags, state, and visible button labels for mapping.
+- Keep final assessor submit/sign disabled.
 
 ## Guardrails
 
-- No separate bot.
-- No Kaizen filing behaviour changes.
-- No billing or credential behaviour changes.
-- No router-controlled Telegram replies yet.
-- Existing buttons/workflows remain intact.
-- Text/voice-authored resuscitation cases must not be stripped just because they mention CPR/ROSC.
-- No free-form LLM control of filing, billing, credentials, confirmations, or safety warnings.
+- No signing.
+- No submitting.
+- No deleting.
+- No approving/rejecting.
+- No saving drafts.
+- No feedback submission.
+- No draft artefacts in a colleague/consultant portfolio.
+- Stop at login, 2FA, captcha, or unclear side effect.
+- Any future assessor write action needs explicit approval for one named ticket and one reviewed response.
+
+## Done
+
+- Product direction settled: one engine, two entry points.
+- `docs/plan.md` updated with Phase 2.7 assessor mapping direction and safety contract.
+- `WORKFLOWS.md` updated with the planned Assess Ticket flow and hard constraints.
+- `backend/assessor_mapper.py` added as read-only mapping scaffold.
+- `backend/tests/test_assessor_mapper.py` added for parser and read-only guard coverage.
 
 ## Verification
 
-- Source-grounding tests pass.
-- Focused extraction/conversation/flow tests pass.
-- Message policy and snapshot tests pass.
-- Full offline pre-commit test gate must pass before commit.
+- Assessor mapper unit tests pass.
+- Flow/snapshot tests still pass.
+- Full offline pre-commit gate must pass before commit.
 
-## Next Phase
+## Next
 
-Phase 3 stays paused until the source-grounding patch has survived real image/photo usage. Then activate the router only for low-risk intents:
+Run live read-only mapping only when an authenticated assessor session or approved credentials are available. Capture:
 
-- `portfolio_question`
-- `unknown`
-- `account_or_billing`
-- `setup_or_credentials`
+- Where pending assessment tickets appear.
+- Ticket list row selectors and states.
+- Detail page read-only field structure.
+- Assessor-specific fields/buttons.
+- Exact submit/sign button selectors for later approval-gated implementation.
 
-Keep case creation and filing on existing deterministic paths until shadow logs prove reliability.
+Do not perform any write action during mapping.

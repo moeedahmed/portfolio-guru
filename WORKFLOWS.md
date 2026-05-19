@@ -106,6 +106,54 @@ User taps [form type]
 
 ---
 
+## Flow 2A — Assess Ticket (Read-Only Mapping / Planned)
+
+This is the assessor-side equivalent of Flow 2. It is not a persistent "mode";
+it is a second entry point into the same review-and-approve engine.
+
+```
+Ticket appears in assessor portfolio
+→ Portfolio Guru notification: "You have a ticket awaiting assessment"
+→ User opens ticket from bot or Kaizen link
+→ Bot extracts ticket content read-only
+→ Bot shows:
+   - ticket type
+   - trainee/doctor details visible on the ticket
+   - ticket fields and attachments metadata
+   - Kaizen link as backup
+→ Assessor gives intent:
+   "Looks fine, sign it"
+   "Ask them to add more reflection"
+   "Mention clearer clinical reasoning"
+   "Approve but add X"
+→ Bot drafts assessor feedback/sign-off text
+→ Bot shows missing assessor fields or risk notes if present
+→ Bot shows draft response
+→ User approves one named action
+→ Bot submits/signs that one assessor action
+```
+
+Current implementation status:
+
+```
+Read-only mapping scaffold exists:
+  backend/assessor_mapper.py
+
+Allowed during mapping:
+  - navigate to Assessments timeline
+  - list visible assessment rows
+  - open ticket detail pages
+  - extract read-only fields, tags, state, visible buttons
+
+Not built yet:
+  - notification polling
+  - assessor feedback/sign-off field mapping
+  - submit/sign action
+  - Telegram assessor review UI
+```
+
+---
+
 ## Flow 3 — Edit Before Filing
 
 ```
@@ -245,6 +293,8 @@ BWS secrets (at startup only):
 ## Hard Constraints (never violate)
 
 - NEVER submit a form to supervisor — draft save only, every time
+- NEVER submit/sign an assessor ticket without explicit approval for that one ticket and reviewed response
+- NEVER create drafts, sign, submit, delete, approve, reject, or send feedback while running assessor mapping
 - NEVER store credentials in plaintext — always Fernet-encrypt before writing to DB
 - NEVER open Kaizen before the user taps [✅ File this draft]
 - NEVER select a KC unless the trainee directly demonstrated it in this case
