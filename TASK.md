@@ -11,11 +11,11 @@ Make Portfolio Guru feel better than the Medic Portfolio topic for Kaizen filing
 
 ## Current Slice
 
-Build the smallest high-impact UX improvement from dogfood feedback:
+Build the next draft-quality improvement from dogfood feedback:
 
-- make draft review easier to scan on Telegram
-- split long draft narrative blocks into short readable paragraphs in the preview
-- preserve saved Kaizen field values and clinical facts exactly as extracted
+- import reusable Claude/Medic portfolio skill standards into Portfolio Guru's own draft engine
+- improve form choice, field-specific drafting, assessor-safe wording, privacy/de-identification, and KC/SLO discipline
+- use text + image/OCR notes as one evidence bundle
 - preserve existing form-choice, template-review, draft-review, and approval gates
 
 ## Guardrails
@@ -35,16 +35,19 @@ Build the smallest high-impact UX improvement from dogfood feedback:
 - Added regression coverage for the best-fit path and updated recommendation copy/snapshot tests.
 - Added a display-only draft preview readability guard that splits long narrative text into short paragraphs for Telegram review without mutating stored draft fields.
 - Added regression coverage proving long preview paragraphs are split and blank required fields still show the missing-detail marker.
+- Imported a product-owned Portfolio Skill Quality Rubric from Claude Code portfolio and Medic Portfolio standards, covering form choice, actual Kaizen field purpose, Driscoll-style reflection, de-identification, KC-first mapping, and pre-preview quality checks.
+- Added deterministic preview cleanup for blunt judgement wording, transcription artefacts, overconfident septation/transudate phrasing, confusing ITU wording, third-party names, named tertiary centres, and historic surgery years.
+- Added regression coverage for the rubric appearing in form recommendation and extraction prompts, and for deterministic de-identification/wording cleanup.
 
 ## Verification
 
-- Focused flow/snapshot tests pass.
-- Full offline suite passes before commit.
-- Local bot restart required before reporting live; not done in this slice.
+- Focused extraction/source-grounding tests pass.
+- Full backend offline suite passes when run from the backend pytest config.
+- Local bot restart required before reporting live.
 
 ## Next
 
 - Dogfood 5 anonymised cases in Medic Portfolio and Portfolio Guru.
 - Score time-to-draft, taps/replies, correction burden, draft quality, and trust.
-- Confirm whether shorter preview paragraphs reduce correction burden.
-- If `Use best fit` and smoother review win, move to draft-first for high-confidence obvious cases.
+- Dogfood this pleural-effusion/possible-heart-failure case again and compare draft quality.
+- If the quality rubric holds across 3-5 cases, move to draft-first behaviour only for high-confidence obvious cases.

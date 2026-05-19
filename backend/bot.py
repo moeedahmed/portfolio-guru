@@ -5319,7 +5319,10 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
     feedback = (
         "Improve the reflection only. Keep the clinical facts, date, setting, curriculum links, "
         "and every non-reflection field unchanged. Make the reflection concise, first-person, "
-        "specific, and useful for a UK EM WPBA assessor."
+        "specific, and useful for a UK EM WPBA assessor. If the case involves a judgement issue, "
+        "frame it as initially narrow reasoning or a plan changed after senior challenge, not as "
+        "a blunt admission of wrong judgement. Anchor the learning to the available evidence and "
+        "the concrete practice change."
     )
     vp = get_voice_profile(update.effective_user.id) or ""
 

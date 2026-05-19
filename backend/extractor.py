@@ -973,6 +973,86 @@ def _humanize_text(text: str) -> str:
     return result
 
 
+def _portfolio_quality_polish(text: str) -> str:
+    """Apply small, clinically safer wording fixes before preview.
+
+    This is deliberately conservative: it removes phrases that make portfolio
+    drafts sound punitive or overconfident without changing the case facts.
+    """
+    if not text or len(text) < 10:
+        return text
+
+    result = text
+    replacements = [
+        (r"\bwrong judgement\b", "initial judgement that changed after senior discussion"),
+        (r"\bwrong judgment\b", "initial judgement that changed after senior discussion"),
+        (r"\bbad judgement\b", "initial judgement that needed senior challenge"),
+        (r"\bbad judgment\b", "initial judgement that needed senior challenge"),
+        (r"\bmistake\b", "learning point"),
+        (r"\brocket train\b", "Rocket drain"),
+        (r"\bchest strain\b", "chest drain"),
+        (
+            r"\b(?:without|with no) (?:any )?septations?,?\s*(?:which )?(?:suggesting|suggested|meaning|meant) (?:it (?:is|was) )?(?:a )?transudative effusion\b",
+            "without septations, supporting a non-complex effusion; the wider clinical picture still needed to guide the likely cause and treatment",
+        ),
+        (
+            r"\bno septations? = transudative\b",
+            "no septations supported a non-complex effusion, but did not prove the underlying cause",
+        ),
+        (
+            r"\badmit(?:ted)? under ITU on board\b",
+            "discussed with ITU/HDU because of the oxygen requirement, with medical admission kept under review",
+        ),
+        (
+            r"\badmit(?:ted)? under ITU on-board\b",
+            "discussed with ITU/HDU because of the oxygen requirement, with medical admission kept under review",
+        ),
+    ]
+    for pattern, replacement in replacements:
+        result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
+    result = re.sub(r"  +", " ", result)
+    return result.strip()
+
+
+def _deidentify_portfolio_text(text: str) -> str:
+    """Remove common third-party/person-identifying details from narrative fields."""
+    if not text or len(text) < 10:
+        return text
+
+    result = text
+    # Names of clinicians/third parties should not appear in portfolio prose.
+    result = re.sub(
+        r"\bDr\.?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}\b",
+        "the doctor",
+        result,
+    )
+    result = re.sub(
+        r"\b(?:Mr|Mrs|Ms|Miss)\.?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}\b",
+        "the patient",
+        result,
+    )
+
+    tertiary_centre_patterns = [
+        r"\bRoyal Brompton(?: Hospital)?\b",
+        r"\bGreat Ormond Street(?: Hospital)?\b",
+        r"\bSt Thomas'? Hospital\b",
+        r"\bGuy'?s Hospital\b",
+        r"\bKing'?s College Hospital\b",
+    ]
+    for pattern in tertiary_centre_patterns:
+        result = re.sub(pattern, "a tertiary centre", result, flags=re.IGNORECASE)
+
+    # Rare historical specifics identify patients surprisingly quickly.
+    result = re.sub(
+        r"\b(last|previous|initial|first|second|third)\s+(repair|operation|surgery|procedure)\s+in\s+(19|20)\d{2}\b",
+        r"\1 \2 previously",
+        result,
+        flags=re.IGNORECASE,
+    )
+    result = re.sub(r"  +", " ", result)
+    return result.strip()
+
+
 def _humanize_reflection(text: str) -> str:
     """Legacy alias — calls _humanize_text."""
     return _humanize_text(text)
@@ -983,7 +1063,9 @@ def _humanize_all_fields(data: dict) -> dict:
     Non-narrative fields (dates, dropdowns, names, lists) are left untouched."""
     for key, value in data.items():
         if key in _HUMANIZE_FIELDS and isinstance(value, str) and len(value) > 20:
-            data[key] = _humanize_text(value)
+            data[key] = _deidentify_portfolio_text(
+                _portfolio_quality_polish(_humanize_text(value))
+            )
     return data
 
 
@@ -1255,6 +1337,7 @@ MGMT_* (Management Portfolio forms — Rota, Complaint, Critical Incident, Risk,
 
 === END DEFINITIONS ==="""
 
+    system_prompt += "\n" + _PORTFOLIO_SKILL_QUALITY_RUBRIC
     if _is_image_source(input_source):
         system_prompt += "\n" + _IMAGE_RECOMMENDER_GUARD
 
@@ -1346,6 +1429,90 @@ contains ONLY what was visible in the image, not a doctor's free-text case.
   learning_points, etc.) BLANK ("") if the source does not contain content
   for them. A blank field is correct — the doctor will fill it themselves
   in Kaizen. Fabricating content is the worst failure mode.
+"""
+
+
+_CASE_SYNTHESIS_GUIDE = """
+===== CASE SYNTHESIS QUALITY BAR =====
+Treat the case description as one evidence bundle. It may contain the doctor's
+free-text story, voice transcription artefacts, OCR from screenshots, and
+clinical note fragments. Use all of it; do not let the first narrative drown
+out later image/note evidence.
+
+For clinical reasoning fields:
+- Pull in documented objective evidence when present: investigations, BNP,
+  ECG rhythm/conduction, bedside echo impression, CXR/CT findings, oxygen
+  device/requirement, treatment plan, escalation, and patient communication.
+- Reconcile the initial plan with the revised plan. Good CBD drafts should
+  show: initial hypothesis/plan -> senior challenge or new evidence -> revised
+  management and escalation.
+- If pleural ultrasound says "no septations", describe it as a non-complex or
+  simple-appearing effusion. Do not state that this proves a transudate unless
+  the source explicitly says transudative.
+
+For reflection fields:
+- Frame judgement issues as assessable learning, not self-punishment. Avoid
+  "wrong judgement", "bad judgement", and "mistake" unless quoting the user.
+  Prefer "initially narrow reasoning", "procedure-first plan", "anchoring",
+  "fixation", or "senior challenge changed my decision".
+- Include the practice change, not just the emotion: integrate bedside
+  findings, investigations and senior input before choosing an invasive
+  procedure; treat the likely cause; escalate appropriately; communicate the
+  plan clearly.
+"""
+
+
+_PORTFOLIO_SKILL_QUALITY_RUBRIC = """
+===== PORTFOLIO SKILL QUALITY RUBRIC =====
+This product-level rubric imports the durable drafting standards from the
+Claude Code portfolio skill and the Medic Portfolio skill. Apply it as product
+behaviour, not as a runtime dependency on those skills.
+
+Form choice:
+- Match what actually happened, not keywords. CBD is for single-patient
+  clinical reasoning and management. DOPS is observed procedure. Procedural Log
+  is self-logged procedure. Mini-CEX requires observed patient interaction.
+  LAT requires a real leadership role. ACAT/ESLE require shift-level or
+  multi-patient observation. Teaching forms require actual teaching.
+- Prefer the most specific form before CBD. If the case is mainly POCUS, use
+  Ultrasound Case Reflection unless ultrasound was only adjunct to a broader
+  CBD/Mini-CEX. If it is mainly a procedure, use DOPS/Procedural Log.
+- Suggest multiple entries only when the case genuinely has multiple evidence
+  dimensions, such as clinical reasoning plus leadership, procedure plus CBD,
+  or teaching plus procedure. Do not collapse distinct evidence into one form.
+
+Drafting:
+- Draft into the actual Kaizen field purpose, not a generic prose block.
+  Case/clinical-reasoning fields should show what happened, what was considered,
+  what decision was made, and why. Reflection fields should show learning and
+  future behaviour change.
+- Use Driscoll naturally: what happened, why it mattered, what will change.
+  Do not label those sections.
+- Keep only clinically useful detail. Remove padding, generic lessons and
+  assessor-flattering prose.
+- If a learning angle is not explicitly in the doctor's words, either leave it
+  out or make it clearly grounded in the provided evidence. Never invent
+  clinical facts, outcomes, timings, diagnoses or procedures.
+
+Safety and privacy:
+- Refer to third parties by role, not by name. Use "the ED consultant", "the
+  medical registrar", "the nurse in charge", or "the specialty registrar".
+- De-identify patients beyond names. Avoid named hospitals/tertiary centres,
+  exact historic years, unusual non-clinical circumstances, and rare detail
+  combinations that could identify someone.
+
+Curriculum:
+- Select Key Capabilities first, then derive SLOs. Never select a broad KC just
+  because it technically fits. Prefer leaf, specific KCs that the case actually
+  demonstrates. Aim for 3-6 KCs on substantive cases, but do not pad.
+- Bias toward weaker portfolio domains such as leadership, QI/governance,
+  research and management only when genuinely supported by the case.
+
+Pre-preview quality check:
+- Before showing a draft, scan for: wrong form type, missing objective evidence,
+  unsupported clinical claims, blunt self-punitive wording, third-party names,
+  over-specific patient identifiers, generic reflection, overbroad KC mapping,
+  AI-tell phrasing, and long unscannable paragraphs.
 """
 
 
@@ -1461,6 +1628,10 @@ Write the reflection in direct, first-person clinical language:
 - Use "I" statements
 - Be specific about learning points
 - Avoid: em dashes, "delve", "navigate", "crucial", "importantly", "comprehensive", "moreover", "furthermore", "on the other hand", "in summary"
+
+{_CASE_SYNTHESIS_GUIDE}
+
+{_PORTFOLIO_SKILL_QUALITY_RUBRIC}
 
 ===== FORMATTING =====
 - Break any narrative field (reflection, clinical_reasoning, description) into 2-3 short paragraphs if it exceeds ~80 words.
@@ -1700,6 +1871,10 @@ Rules:
 - For text fields: extract directly from the case and keep the doctor's original wording where possible
 - Write in direct, first-person clinical language ("I assessed...", "I managed...")
 - NEVER use: em dashes, "delve", "navigate", "crucial", "importantly", "comprehensive", "moreover", "furthermore", "holistic", "robust", "multifaceted", "pivotal", "seamless", "facilitate", "leverage", "unlock", "embark", "meticulous", "overarching", "in summary", "it's worth noting", "this case highlights", "moving forward"
+
+{_CASE_SYNTHESIS_GUIDE}
+
+{_PORTFOLIO_SKILL_QUALITY_RUBRIC}
 
 ===== FORMATTING =====
 - Break any narrative field (reflection, clinical_reasoning, description) into 2-3 short paragraphs if it exceeds ~80 words.

@@ -79,6 +79,32 @@ class TestVisionPromptIsSourceGrounded:
 
 class TestRecommenderHonoursImageSource:
     @pytest.mark.asyncio
+    async def test_recommend_form_types_includes_portfolio_skill_rubric(self):
+        """Form choice should inherit the durable Claude/Medic portfolio
+        heuristics without depending on those skills at runtime."""
+        from extractor import recommend_form_types
+
+        captured = {}
+
+        async def fake_generate(prompt, retries=1, tier=""):
+            captured["prompt"] = prompt
+            return json.dumps([
+                {"form_type": "CBD", "rationale": "Single-patient clinical reasoning."}
+            ])
+
+        with patch("extractor._generate", new=AsyncMock(side_effect=fake_generate)):
+            await recommend_form_types(
+                "I managed a patient with breathlessness and changed management after senior discussion.",
+                input_source="text",
+            )
+
+        prompt = captured["prompt"].lower()
+        assert "portfolio skill quality rubric" in prompt
+        assert "match what actually happened, not keywords" in prompt
+        assert "prefer the most specific form before cbd" in prompt
+        assert "select key capabilities first" in prompt
+
+    @pytest.mark.asyncio
     async def test_recommend_with_image_source_injects_image_guard(self):
         """When input_source is 'photo', the recommender prompt must include
         the image-derived bias toward procedure/reflection forms."""
@@ -152,6 +178,52 @@ class TestRecommenderHonoursImageSource:
 
 
 class TestExtractorHonoursImageSource:
+    @pytest.mark.asyncio
+    async def test_extract_cbd_prompt_requires_synthesis_across_notes_and_story(self):
+        """The CBD prompt must tell the model to use later image/OCR note
+        evidence, not just the first free-text narrative."""
+        from extractor import extract_cbd_data
+
+        captured = {}
+
+        async def fake_generate(prompt, retries=1, tier=""):
+            captured["prompt"] = prompt
+            return json.dumps({
+                "form_type": "CBD",
+                "date_of_encounter": "",
+                "patient_age": "",
+                "patient_presentation": "Shortness of breath",
+                "clinical_setting": "",
+                "stage_of_training": None,
+                "trainee_role": "",
+                "clinical_reasoning": "I considered pleural effusion and changed the plan after consultant discussion.",
+                "reflection": "I learned to integrate the wider clinical picture before choosing an invasive procedure.",
+                "level_of_supervision": "",
+                "supervisor_name": None,
+                "curriculum_links": [],
+                "key_capabilities": [],
+            })
+
+        case_text = (
+            "I initially planned to drain a pleural effusion after CXR and ultrasound.\n\n"
+            "Image/OCR notes: BNP raised. AF with LBBB. Bedside echo possible reduced "
+            "contractility. Plan antibiotics, furosemide, OptiFlow, ITU review, medical team aware."
+        )
+
+        with patch("extractor._generate", new=AsyncMock(side_effect=fake_generate)):
+            await extract_cbd_data(case_text, input_source="text", leave_missing_blank=True)
+
+        prompt = captured["prompt"].lower()
+        assert "one evidence bundle" in prompt
+        assert "first narrative drown" in prompt
+        assert "later image/note evidence" in prompt
+        assert "portfolio skill quality rubric" in prompt
+        assert "third parties by role" in prompt
+        assert "key capabilities first" in prompt
+        assert "bnp" in prompt
+        assert "senior challenge" in prompt
+        assert "no septations" in prompt
+
     @pytest.mark.asyncio
     async def test_extract_form_data_with_image_source_injects_grounding_block(self):
         """extract_form_data must add a stronger source-grounding block when
@@ -229,6 +301,55 @@ class TestExtractorHonoursImageSource:
 
 
 class TestEnforceImageSourceGrounding:
+    def test_portfolio_quality_polish_softens_judgement_language(self):
+        """Draft previews should not file blunt self-punitive judgement
+        language or overstate simple effusion ultrasound findings."""
+        from extractor import _humanize_all_fields
+
+        fields = {
+            "reflection": (
+                "This was wrong judgement. I made a mistake and was narrowly "
+                "focused on a chest strain."
+            ),
+            "clinical_reasoning": (
+                "Ultrasound showed effusion with no septation, suggesting a "
+                "transudative effusion. Plan was to admit under ITU on board."
+            ),
+        }
+
+        polished = _humanize_all_fields(fields)
+        joined = " ".join(polished.values()).lower()
+
+        assert "wrong judgement" not in joined
+        assert "wrong judgment" not in joined
+        assert "mistake" not in joined
+        assert "chest strain" not in joined
+        assert "no septation, suggesting a transudative effusion" not in joined
+        assert "initial judgement" in joined
+        assert "non-complex effusion" in joined
+        assert "medical admission kept under review" in joined
+
+    def test_portfolio_quality_polish_deidentifies_third_parties_and_centres(self):
+        """Narrative fields should use roles/generic centres rather than
+        third-party names or identifiable tertiary centres."""
+        from extractor import _humanize_all_fields
+
+        fields = {
+            "reflection": (
+                "I discussed the case with Dr Alice Smith after the patient had "
+                "previous surgery in 2009 at Royal Brompton Hospital."
+            )
+        }
+
+        polished = _humanize_all_fields(fields)
+        value = polished["reflection"]
+
+        assert "Dr Alice Smith" not in value
+        assert "Royal Brompton" not in value
+        assert "2009" not in value
+        assert "the doctor" in value
+        assert "tertiary centre" in value
+
     def test_weak_admin_cpr_anchor_does_not_support_resus_narrative(self):
         """The second failure: OCR saw 'For CPR' in the admin/header area,
         then allowed a full CPR/ALS/ROSC story. That phrase is not enough."""
