@@ -136,16 +136,24 @@ class TestFlowWalker:
         }
 
         assert result == AWAIT_TEMPLATE_REVIEW
-        assert {'ACTION|continue_thin'} <= {data for _, data in sim.get_last_buttons()}
+        assert {'ACTION|add_detail', 'ACTION|continue_thin'} <= {data for _, data in sim.get_last_buttons()}
+        assert 'Missing detail that would improve this' in sim.get_last_text()
 
         sim.clear_messages()
         update = sim._make_callback_update('ACTION|continue_thin')
         result = await handle_callback(update, context)
         assert result == AWAIT_APPROVAL
         button_data = {data for _, data in sim.get_last_buttons()}
-        assert {'APPROVE|draft', 'IMPROVE|reflection', 'CANCEL|draft'} <= button_data
+        assert {'APPROVE|draft', 'IMPROVE|reflection', 'ACTION|back_to_missing', 'CANCEL|draft'} <= button_data
         assert 'EDIT|draft' not in button_data
         assert 'APPROVE|submit' not in button_data
+
+        sim.clear_messages()
+        update = sim._make_callback_update('ACTION|back_to_missing')
+        result = await handle_callback(update, context)
+        assert result == AWAIT_TEMPLATE_REVIEW
+        assert 'Missing detail that would improve this' in sim.get_last_text()
+        assert {'ACTION|add_detail', 'ACTION|continue_thin'} <= {data for _, data in sim.get_last_buttons()}
 
     @pytest.mark.asyncio
     async def test_optional_missing_fields_do_not_block_draft_preview(self, thin_draft):
@@ -263,6 +271,7 @@ class TestFlowWalker:
 
         callbacks = [
             'ACTION|setup', 'ACTION|voice', 'ACTION|status', 'ACTION|delete',
+            'ACTION|back_to_missing',
             'INFO|what', 'FORM|show_all', 'FORM|disabled', 'FORM|switch_curriculum', 'FORM|back',
             'CANCEL|form', 'CANCEL|draft', 'APPROVE|draft',
             'FIELD|date_of_encounter', 'SET_CURRICULUM|2025', 'LEVEL|HIGHER',
@@ -284,7 +293,7 @@ class TestFlowWalker:
             })
 
             with patch('bot.has_credentials', return_value=True),                  patch('bot.get_credentials', return_value=('user', 'pass')),                  patch('bot.get_training_level', return_value='ST5'),                  patch('bot.get_curriculum', return_value='2025'),                  patch('bot.store_curriculum'),                  patch('bot.store_training_level'),                  patch('bot.get_voice_profile', return_value=None),                  patch('bot.clear_voice_profile'),                  patch('bot.route_filing', new_callable=AsyncMock, return_value={'status': 'success', 'filled': [], 'skipped': [], 'method': 'deterministic'}),                  patch('bot._analyse_selected_form', new_callable=AsyncMock, return_value=thin_draft),                  patch('bot._missing_template_fields', return_value=([], [], [])),                  patch('bot._build_voice_profile', new_callable=AsyncMock, return_value=ConversationHandler.END):
-                if callback.startswith('ACTION|') and callback not in {'ACTION|file', 'ACTION|reset', 'ACTION|cancel', 'ACTION|add_detail', 'ACTION|continue_thin', 'ACTION|retry_filing'}:
+                if callback.startswith('ACTION|') and callback not in {'ACTION|file', 'ACTION|reset', 'ACTION|cancel', 'ACTION|add_detail', 'ACTION|continue_thin', 'ACTION|back_to_missing', 'ACTION|retry_filing'}:
                     await handle_action_button(update, context)
                 elif callback.startswith('INFO|'):
                     await handle_info_button(update, context)

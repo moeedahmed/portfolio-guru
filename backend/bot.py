@@ -473,7 +473,9 @@ _BTN_SETUP = InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|s
 _BTN_CANCEL = InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel")
 _BTN_HELP = InlineKeyboardButton("ℹ️ Help", callback_data="INFO|what")
 _BTN_VOICE = InlineKeyboardButton("✍️ Voice Profile", callback_data="ACTION|voice")
+_BTN_ADD_DETAIL = InlineKeyboardButton("✍️ Add missing detail", callback_data="ACTION|add_detail")
 _BTN_CONTINUE_THIN = InlineKeyboardButton("✅ Show me the draft", callback_data="ACTION|continue_thin")
+_BTN_BACK_TO_MISSING = InlineKeyboardButton("⬅️ Back to missing details", callback_data="ACTION|back_to_missing")
 
 # Single-button "❌ Cancel" keyboard used in error / recovery surfaces where
 # the user needs an obvious way out. ACTION|cancel clears flow state and
@@ -1170,6 +1172,7 @@ def _build_curriculum_keyboard(callback_prefix: str = "SET_CURRICULUM"):
 
 def _build_template_review_keyboard():
     return InlineKeyboardMarkup([
+        [_BTN_ADD_DETAIL],
         [_BTN_CONTINUE_THIN],
         [_BTN_CANCEL],
     ])
@@ -1182,26 +1185,22 @@ def _build_explicit_form_keyboard(form_type: str):
     ])
 
 
-def _build_approval_keyboard(improved_once: bool = False):
+def _build_approval_keyboard(improved_once: bool = False, can_back_to_missing: bool = False):
+    rows = []
     if improved_once:
         # After Quick Improve is used, remove the improve button entirely
-        return InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("📤 Save as draft", callback_data="APPROVE|draft"),
-            ],
-            [
-                InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|draft"),
-            ],
+        rows.append([
+            InlineKeyboardButton("📤 Save as draft", callback_data="APPROVE|draft"),
         ])
-    return InlineKeyboardMarkup([
-        [
+    else:
+        rows.append([
             InlineKeyboardButton("📤 Save as draft", callback_data="APPROVE|draft"),
             InlineKeyboardButton("✨ Quick improve", callback_data="IMPROVE|reflection"),
-        ],
-        [
-            InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|draft"),
-        ],
-    ])
+        ])
+    if can_back_to_missing:
+        rows.append([_BTN_BACK_TO_MISSING])
+    rows.append([InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|draft")])
+    return InlineKeyboardMarkup(rows)
 
 
 def _build_post_review_keyboard(improved_once: bool = False):
@@ -1496,7 +1495,7 @@ def _format_template_review(form_type: str, draft) -> str:
 
     lines = [
         f"🧩 *{form_name} template*",
-        f"🟡 *{FLOW_STATE_LABELS['needs_you']}* — review what I found, then add missing detail or tap Show me the draft.",
+        f"🟡 *{FLOW_STATE_LABELS['needs_you']}* — I found some useful detail. Add the gaps below for a stronger ticket, or show the draft anyway.",
         "",
         "*Required fields*",
         *[f"• {field['label']}" for field in required],
@@ -1517,19 +1516,19 @@ def _format_template_review(form_type: str, draft) -> str:
                 value = f"{value[:117].rstrip()}..."
             lines.append(f"• {field['label']}: {value}")
 
-    lines.extend(["", "*Still missing*"])
+    lines.extend(["", "*Missing detail that would improve this*"])
     if missing_required:
         lines.extend(f"• {field['label']}" for field in missing_required)
     else:
         lines.append("• No required fields")
 
     if missing_optional:
-        lines.extend(["", "*Optional not filled*"])
+        lines.extend(["", "*Helpful extras if you want a stronger reflection*"])
         lines.extend(f"• {field['label']}" for field in missing_optional[:3])
 
     lines.extend([
         "",
-        "💬 Send anything to add more detail, or tap below.",
+        "💬 Send text, voice, or another image to add detail.",
     ])
     return "\n".join(lines)
 
@@ -3369,8 +3368,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return AWAIT_CASE_INPUT
 
     elif data == "ACTION|add_detail":
-        # Legacy button — just acknowledge; users now send detail directly
-        await query.answer("Just send your detail — no button needed!")
+        await query.answer("Send the missing detail as text, voice, or another image.")
         return AWAIT_TEMPLATE_REVIEW
 
     elif data == "ACTION|continue_thin":
@@ -3385,15 +3383,38 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         _store_draft(context, draft)
         context.user_data.pop("awaiting_detail", None)
-        context.user_data.pop("pending_draft_data", None)
         preview = _format_draft_preview(draft, _chosen_form_reason(context, chosen_form))
         await _safe_edit_text(
             query.message,
             preview + _REPLY_HINT_SUFFIX,
-            reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
+            reply_markup=_build_approval_keyboard(
+                improved_once=context.user_data.get("quick_improve_used", False),
+                can_back_to_missing=True,
+            ),
             parse_mode="Markdown",
         )
         return AWAIT_APPROVAL
+
+    elif data == "ACTION|back_to_missing":
+        await query.answer()
+        draft = _load_pending_draft(context)
+        chosen_form = context.user_data.get("chosen_form")
+        if not draft or not chosen_form:
+            return await _resume_paused_flow(
+                update,
+                context,
+                "That earlier button is no longer active.",
+            )
+        review_text = _format_template_review(chosen_form, draft)
+        await _safe_edit_text(
+            query.message,
+            review_text,
+            reply_markup=_build_template_review_keyboard(),
+            parse_mode="Markdown",
+        )
+        context.user_data["last_bot_msg_id"] = query.message.message_id
+        context.user_data["last_bot_chat_id"] = query.message.chat_id
+        return AWAIT_TEMPLATE_REVIEW
 
     elif data == "ACTION|retry_recommend":
         await query.answer("Retrying…")
