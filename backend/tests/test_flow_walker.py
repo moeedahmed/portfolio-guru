@@ -196,6 +196,58 @@ class TestFlowWalker:
         assert 'draft ready' in sim.get_last_text().lower()
         assert any(data == 'APPROVE|draft' for _, data in sim.get_last_buttons())
 
+    def test_draft_preview_splits_long_narrative_without_mutating_fields(self, thin_draft):
+        from bot import _format_draft_preview
+        from models import FormDraft
+
+        long_reflection = (
+            "I initially focused on the abnormal ECG and chest pain pathway while the department was busy. "
+            "I reviewed the observations, repeated the ECG, discussed the dynamic changes with the medical registrar, "
+            "and escalated to cardiology when the symptoms persisted. "
+            "The case reminded me to keep reassessing the working diagnosis when the initial treatment does not settle the symptoms. "
+            "In future I will set an earlier review point for high-risk chest pain patients and document the escalation plan more clearly."
+        )
+        draft = FormDraft(
+            form_type='CBD',
+            uuid='uuid-cbd',
+            fields={
+                **thin_draft.fields,
+                'reflection': long_reflection,
+            },
+        )
+
+        preview = _format_draft_preview(draft)
+        reflection_block = preview.split('💭 *Reflection of event:*', 1)[1].split('🎚️', 1)[0]
+        paragraphs = [p.strip() for p in reflection_block.split('\n\n') if p.strip()]
+
+        assert len(paragraphs) >= 2
+        assert all(len(paragraph.split()) <= 55 for paragraph in paragraphs)
+        assert draft.fields['reflection'] == long_reflection
+
+    def test_draft_preview_keeps_missing_markers_for_blank_required_fields(self):
+        from bot import _MISSING_MARKER, _format_draft_preview
+        from models import FormDraft
+
+        draft = FormDraft(
+            form_type='DOPS',
+            uuid='uuid-dops',
+            fields={
+                'date_of_encounter': '2026-03-17',
+                'clinical_setting': '',
+                'stage_of_training': 'ST5',
+                'procedural_skill': '',
+                'indication': 'Shoulder reduction under procedural sedation.',
+                'trainee_performance': '',
+                'level_of_supervision': 'Indirect',
+            },
+        )
+
+        preview = _format_draft_preview(draft)
+
+        assert _MISSING_MARKER in preview
+        assert draft.fields['clinical_setting'] == ''
+        assert draft.fields['procedural_skill'] == ''
+
     @pytest.mark.asyncio
     async def test_quick_improve_updates_reflection_only(self, thin_draft):
         from bot import AWAIT_APPROVAL, handle_quick_improve

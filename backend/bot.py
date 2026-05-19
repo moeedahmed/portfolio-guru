@@ -1483,11 +1483,101 @@ _MISSING_MARKER = "_— needs your detail_"
 # knows they can reply to refine, instead of relying on a removed Edit button.
 _REPLY_HINT_SUFFIX = render_message("draft_reply_hint")
 
+_NARRATIVE_PREVIEW_KEYS = {
+    "actions_taken",
+    "case_discussion",
+    "case_observed",
+    "case_to_be_discussed",
+    "clinical_reasoning",
+    "clinical_scenario",
+    "description",
+    "different_outcome",
+    "esle_description",
+    "feedback_received",
+    "focussing_on",
+    "further_action",
+    "how_used",
+    "incident_summary",
+    "learned",
+    "learning_objectives",
+    "learning_outcomes",
+    "learning_points",
+    "lessons_learned",
+    "patient_presentation",
+    "project_description",
+    "reflective_comments",
+    "reflective_notes",
+    "reflection",
+    "replay_differently",
+    "trainee_performance",
+    "trainee_role",
+    "us_findings",
+    "why",
+}
+
 
 def _summarise_field_value(value) -> str:
     if isinstance(value, list):
         return ", ".join(str(item) for item in value if str(item).strip())
     return str(value).strip()
+
+
+def _split_sentences_for_preview(text: str) -> list[str]:
+    import re as _re
+    return [
+        sentence.strip()
+        for sentence in _re.split(r"(?<=[.!?])\s+", text)
+        if sentence.strip()
+    ]
+
+
+def _short_preview_paragraphs(text: str, *, max_words: int = 45) -> list[str]:
+    """Split long preview prose into readable paragraphs without rewriting it."""
+    paragraphs: list[str] = []
+    for raw_paragraph in str(text).splitlines():
+        clean = " ".join(raw_paragraph.split())
+        if not clean:
+            continue
+        if len(clean.split()) <= max_words:
+            paragraphs.append(clean)
+            continue
+
+        current: list[str] = []
+        current_words = 0
+        for sentence in _split_sentences_for_preview(clean):
+            sentence_words = len(sentence.split())
+            if current and current_words + sentence_words > max_words:
+                paragraphs.append(" ".join(current))
+                current = [sentence]
+                current_words = sentence_words
+            else:
+                current.append(sentence)
+                current_words += sentence_words
+        if current:
+            paragraphs.append(" ".join(current))
+
+    return paragraphs
+
+
+def _format_preview_text_value(key: str, value) -> str:
+    """Display-only readability guard for draft previews.
+
+    This intentionally returns formatted text for Telegram review only. It must
+    not mutate `draft.fields` or CBDData values, because Kaizen filing should
+    keep the extracted field values exactly as approved.
+    """
+    if _is_missing_field_value(value):
+        return _MISSING_MARKER
+
+    text = str(value).strip()
+    if key not in _NARRATIVE_PREVIEW_KEYS:
+        return text
+
+    if len(text.split()) < 70 and "\n" not in text:
+        return text
+
+    paragraphs = _short_preview_paragraphs(text)
+    return "\n\n".join(paragraphs) if paragraphs else text
 
 
 def _template_requirements(form_type: str):
@@ -1673,8 +1763,8 @@ def _format_cbd_draft(cbd_data, reason: str | None = None) -> str:
     """Format CBD data as a preview message. Empty required fields are
     rendered with an explicit "needs your detail" marker so the user never
     sees a falsely-complete-looking draft."""
-    def display(value):
-        return _MISSING_MARKER if _is_missing_field_value(value) else str(value).strip()
+    def display(key, value):
+        return _format_preview_text_value(key, value)
 
     date_str = cbd_data.date_of_encounter
     if _is_missing_field_value(date_str):
@@ -1694,12 +1784,12 @@ def _format_cbd_draft(cbd_data, reason: str | None = None) -> str:
     lines = _draft_header("CBD draft", reason, cbd_data)
     lines.extend([
         f"📅 *Date:* {date_display}",
-        f"🏥 *Setting:* {display(cbd_data.clinical_setting)}",
-        f"🩺 *Presentation:* {display(cbd_data.patient_presentation)}",
+        f"🏥 *Setting:* {display('clinical_setting', cbd_data.clinical_setting)}",
+        f"🩺 *Presentation:* {display('patient_presentation', cbd_data.patient_presentation)}",
         "",
-        f"🗒️ *Case narrative:*\n{display(cbd_data.clinical_reasoning)}",
+        f"🗒️ *Case narrative:*\n{display('clinical_reasoning', cbd_data.clinical_reasoning)}",
         "",
-        f"💭 *Reflection:*\n{display(cbd_data.reflection)}",
+        f"💭 *Reflection:*\n{display('reflection', cbd_data.reflection)}",
         "",
         f"📚 *Curriculum:*\n{curriculum}",
     ])
@@ -1782,10 +1872,12 @@ def _format_generic_draft(draft: FormDraft, reason: str | None = None) -> str:
                 lines.append(f"{label_str}\n{value}\n")
             else:
                 lines.append(f"{label_str}\n  • None\n")
-        elif len(str(value)) > 100:
-            lines.append(f"{label_str}\n{value}\n")
         else:
-            lines.append(f"{label_str} {value}\n")
+            formatted_value = _format_preview_text_value(key, value)
+            if len(str(value)) > 100 or "\n" in formatted_value:
+                lines.append(f"{label_str}\n{formatted_value}\n")
+            else:
+                lines.append(f"{label_str} {formatted_value}\n")
 
     return "\n".join(lines)
 
