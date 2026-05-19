@@ -875,6 +875,94 @@ class TestFlowWalker:
         assert 'fit your case' in text.lower() or 'recommend' in text.lower() or 'matching forms' in text.lower()
 
     @pytest.mark.asyncio
+    async def test_wait_for_pictures_holds_case_bundle(self):
+        from bot import AWAIT_CASE_INPUT, handle_case_input
+
+        sim = BotSimulator()
+        update = sim._make_text_update(
+            'Patient presented with worsening shortness of breath and bilateral effusions. '
+            'Please wait for pictures before drafting.'
+        )
+        context = sim._make_context()
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.classify_intent', new=AsyncMock(return_value='case')) as classify_mock, \
+             patch('bot._process_case_text', new=AsyncMock()) as process_mock:
+            result = await handle_case_input(update, context)
+
+        assert result == AWAIT_CASE_INPUT
+        assert context.user_data['pending_case_bundle']['parts'][0]['source'] == 'text'
+        assert 'wait for the images/files' in sim.get_last_text().lower()
+        classify_mock.assert_not_called()
+        process_mock.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_pending_case_bundle_done_processes_combined_case(self):
+        from bot import AWAIT_APPROVAL, handle_case_input
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['pending_case_bundle'] = {
+            'parts': [
+                {'source': 'text', 'text': 'Initial respiratory case text'},
+                {'source': 'photo', 'text': 'Image findings show bilateral effusions'},
+            ],
+            'sources': ['text', 'photo'],
+        }
+        update = sim._make_text_update('done')
+
+        async def fake_process(message, ctx, user_id, case_text, input_source):
+            ctx.user_data['processed_case_text'] = case_text
+            ctx.user_data['processed_input_source'] = input_source
+            return AWAIT_APPROVAL
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot._process_case_text', new=AsyncMock(side_effect=fake_process)):
+            result = await handle_case_input(update, context)
+
+        assert result == AWAIT_APPROVAL
+        assert 'Initial respiratory case text' in context.user_data['processed_case_text']
+        assert 'Image findings show bilateral effusions' in context.user_data['processed_case_text']
+        assert context.user_data['processed_input_source'] == 'mixed'
+        assert 'pending_case_bundle' not in context.user_data
+
+    @pytest.mark.asyncio
+    async def test_approval_photo_regenerates_existing_draft_with_image_text(self):
+        from bot import AWAIT_APPROVAL, _store_draft, handle_approval_media_feedback
+        from models import CBDData
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['case_text'] = 'Original case text'
+        context.user_data['case_input_source'] = 'text'
+        _store_draft(context, CBDData(patient_presentation='Shortness of breath'))
+
+        update = sim._make_text_update('')
+        photo = MagicMock()
+        file_obj = MagicMock()
+        file_obj.download_to_drive = AsyncMock()
+        photo.get_file = AsyncMock(return_value=file_obj)
+        update.message.photo = [photo]
+        update.message.text = None
+
+        updated = CBDData(
+            patient_presentation='Shortness of breath with bilateral effusions',
+            clinical_reasoning='Image evidence added',
+        )
+
+        with patch('bot.extract_from_image', new=AsyncMock(return_value='Bilateral pleural effusions on imaging')), \
+             patch('bot.extract_cbd_data', new=AsyncMock(return_value=updated)) as extract_mock, \
+             patch('bot.get_voice_profile', return_value=None):
+            result = await handle_approval_media_feedback(update, context)
+
+        assert result == AWAIT_APPROVAL
+        assert 'Bilateral pleural effusions on imaging' in context.user_data['case_text']
+        assert context.user_data['case_input_source'] == 'mixed'
+        extract_mock.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_reuse_request_routes_to_last_filed_case_not_extraction(self):
         """A typed 'use the same case for DOPS' must reuse the previously filed
         case_text and never feed the instruction to the extractor — otherwise

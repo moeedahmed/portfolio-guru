@@ -5,6 +5,7 @@ Multimodal input (text/voice/image) with approval flow before filing.
 import asyncio
 import logging
 import os
+import re
 import tempfile
 import time
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
@@ -455,10 +456,60 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
         "document_name",
         "accumulating_case",
         "accumulation_additions",
+        "pending_case_bundle",
     ):
         context.user_data.pop(key, None)
     if not keep_case:
         context.user_data.pop("case_text", None)
+
+
+_WAIT_FOR_MEDIA_RE = re.compile(
+    r"\b("
+    r"wait(?:ing)? for (?:the )?(?:image|images|picture|pictures|photo|photos|screenshot|screenshots|attachment|attachments|media)"
+    r"|(?:image|images|picture|pictures|photo|photos|screenshot|screenshots|attachment|attachments|media) (?:are |is )?(?:coming|to follow|next)"
+    r"|(?:will|going to|gonna) send (?:the )?(?:image|images|picture|pictures|photo|photos|screenshot|screenshots|attachment|attachments|media)"
+    r"|don'?t start yet"
+    r"|do not start yet"
+    r"|hold (?:on|off)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_BUNDLE_DONE_RE = re.compile(
+    r"^\s*(done|all done|finished|that'?s all|that is all|no more|complete|process now)\s*[.!?]*\s*$",
+    re.IGNORECASE,
+)
+
+
+def _is_waiting_for_media_request(text: str) -> bool:
+    return bool(text and _WAIT_FOR_MEDIA_RE.search(text))
+
+
+def _is_case_bundle_done(text: str) -> bool:
+    return bool(text and _BUNDLE_DONE_RE.match(text))
+
+
+def _append_pending_case_bundle(context, text: str, source: str) -> None:
+    text = (text or "").strip()
+    if not text:
+        return
+    bundle = context.user_data.setdefault("pending_case_bundle", {"parts": [], "sources": []})
+    bundle.setdefault("parts", []).append({"source": source, "text": text})
+    sources = bundle.setdefault("sources", [])
+    if source not in sources:
+        sources.append(source)
+
+
+def _combined_pending_case_bundle(context) -> tuple[str, str]:
+    bundle = context.user_data.get("pending_case_bundle") or {}
+    parts = [
+        part.get("text", "").strip()
+        for part in bundle.get("parts", [])
+        if part.get("text", "").strip()
+    ]
+    sources = bundle.get("sources") or ["text"]
+    source = "mixed" if len(sources) > 1 else sources[0]
+    return combine_case_inputs(parts[0], parts[1:]) if parts else "", source
 
 # ConversationHandler states
 (AWAIT_USERNAME, AWAIT_PASSWORD,
@@ -3578,6 +3629,84 @@ async def _accumulate_and_refresh(update: Update, context: ContextTypes.DEFAULT_
     return AWAIT_TEMPLATE_REVIEW
 
 
+async def _regenerate_active_draft_with_feedback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    feedback_text: str,
+    *,
+    append_to_case: bool = False,
+    input_source: str = "text",
+) -> int:
+    """Regenerate an active approval draft using extra text or extracted media."""
+    msg = update.message
+    draft = _load_draft(context)
+    case_text = context.user_data.get("case_text", "")
+    if not draft or not case_text:
+        return await handle_case_input(update, context)
+
+    feedback_text = (feedback_text or "").strip()
+    if not feedback_text:
+        await msg.reply_text("I couldn't read any useful extra detail from that. Try again with text, voice, image, or document.")
+        return AWAIT_APPROVAL
+
+    if append_to_case:
+        case_text = combine_case_inputs(case_text, [feedback_text])
+        context.user_data["case_text"] = case_text
+        previous_source = context.user_data.get("case_input_source", "text")
+        context.user_data["case_input_source"] = previous_source if previous_source == input_source else "mixed"
+
+    ack = await msg.reply_text("✏️ Regenerating draft with your extra information…")
+    try:
+        form_type = draft.form_type if isinstance(draft, FormDraft) else "CBD"
+        current_draft_text = _format_draft_preview(draft)
+        vp = get_voice_profile(update.effective_user.id) or ""
+
+        if form_type == "CBD":
+            updated = await asyncio.wait_for(
+                extract_cbd_data(
+                    case_text,
+                    edit_feedback=feedback_text,
+                    current_draft=current_draft_text,
+                    voice_profile_json=vp,
+                    input_source=context.user_data.get("case_input_source", "text"),
+                ),
+                timeout=45,
+            )
+        else:
+            updated = await asyncio.wait_for(
+                extract_form_data(
+                    case_text,
+                    form_type,
+                    edit_feedback=feedback_text,
+                    current_draft=current_draft_text,
+                    voice_profile_json=vp,
+                    input_source=context.user_data.get("case_input_source", "text"),
+                ),
+                timeout=45,
+            )
+        _store_draft(context, updated)
+    except asyncio.TimeoutError:
+        await ack.edit_text(
+            "⏳ That took too long. Your previous draft is still ready above — try again or use the buttons.",
+        )
+        return AWAIT_APPROVAL
+    except Exception as exc:
+        logger.error("Inline feedback regeneration failed: %s", exc, exc_info=True)
+        await ack.edit_text(
+            "⚠️ Couldn't regenerate the draft with that feedback. Your previous draft is still ready above.",
+        )
+        return AWAIT_APPROVAL
+
+    preview = _format_draft_preview(updated)
+    await _safe_edit_text(
+        ack,
+        preview + _REPLY_HINT_SUFFIX,
+        reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
+        parse_mode="Markdown",
+    )
+    return AWAIT_APPROVAL
+
+
 async def handle_template_review_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle voice, photo, video, or document during AWAIT_TEMPLATE_REVIEW — implicit accumulation."""
     msg = update.message
@@ -3676,6 +3805,116 @@ async def handle_template_review_media(update: Update, context: ContextTypes.DEF
         return AWAIT_TEMPLATE_REVIEW
 
     return await _accumulate_and_refresh(update, context, extracted_text)
+
+
+async def handle_approval_media_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle voice, photo, video, or document replies once a draft is awaiting approval."""
+    msg = update.message
+    extracted_text = None
+    input_source = "media"
+
+    if msg.voice:
+        input_source = "voice"
+        ack = await msg.reply_text("🎙️ Transcribing voice note…")
+        tmp_path = None
+        try:
+            voice_file = await msg.voice.get_file()
+            with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+                tmp_path = tmp.name
+                await voice_file.download_to_drive(tmp_path)
+                extracted_text = await transcribe_voice(tmp_path)
+            await ack.edit_text("🎙️ Got it — updating draft…")
+        except Exception:
+            await ack.edit_text("⚠️ Couldn't transcribe voice note. Try again or send text.")
+            return AWAIT_APPROVAL
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+    elif msg.photo:
+        input_source = "photo"
+        ack = await msg.reply_text("📷 Reading image…")
+        tmp_path = None
+        try:
+            photo = msg.photo[-1]
+            photo_file = await photo.get_file()
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                tmp_path = tmp.name
+                await photo_file.download_to_drive(tmp_path)
+                extracted_text = await extract_from_image(tmp_path)
+            if extracted_text and extracted_text.strip() == "NOT_CLINICAL":
+                await ack.edit_text("That image doesn't look clinical — send text or another photo.")
+                return AWAIT_APPROVAL
+            caption = (msg.caption or "").strip()
+            if caption:
+                extracted_text = combine_case_inputs(caption, [extracted_text or ""])
+            await ack.edit_text("📷 Got it — updating draft…")
+        except Exception:
+            await ack.edit_text("⚠️ Couldn't read image. Try a clearer photo or text.")
+            return AWAIT_APPROVAL
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+    elif msg.video:
+        input_source = "video"
+        ack = await msg.reply_text("🎬 Extracting audio from video…")
+        tmp_path = None
+        try:
+            video_file = await msg.video.get_file()
+            with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+                tmp_path = tmp.name
+                await video_file.download_to_drive(tmp_path)
+                extracted_text = await transcribe_voice(tmp_path)
+            await ack.edit_text("🎬 Got it — updating draft…")
+        except Exception:
+            await ack.edit_text("⚠️ Couldn't extract audio from video. Try a voice note or text.")
+            return AWAIT_APPROVAL
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+    elif msg.document:
+        input_source = "document"
+        doc = msg.document
+        file_name = doc.file_name or "document"
+        if not is_supported_document(file_name):
+            await msg.reply_text("I can only read PDF, PowerPoint, Word, and text files here.")
+            return AWAIT_APPROVAL
+        ack = await msg.reply_text(f"📄 Reading *{file_name}*…", parse_mode="Markdown")
+        tmp_path = None
+        try:
+            doc_file = await doc.get_file()
+            suffix = os.path.splitext(file_name)[1] or ".tmp"
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                tmp_path = tmp.name
+                await doc_file.download_to_drive(tmp_path)
+                extracted_text = await extract_from_document(tmp_path)
+            if not extracted_text or not extracted_text.strip():
+                await ack.edit_text("⚠️ Couldn't extract text from that file.")
+                return AWAIT_APPROVAL
+            max_chars = 15000
+            if len(extracted_text) > max_chars:
+                extracted_text = extracted_text[:max_chars]
+            await ack.edit_text("📄 Got it — updating draft…")
+        except Exception:
+            await ack.edit_text("⚠️ Couldn't read that file. Try text instead.")
+            return AWAIT_APPROVAL
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+    else:
+        await msg.reply_text("Send text, voice, image, or a document with the extra detail.")
+        return AWAIT_APPROVAL
+
+    return await _regenerate_active_draft_with_feedback(
+        update,
+        context,
+        extracted_text or "",
+        append_to_case=True,
+        input_source=input_source,
+    )
 
 
 # === TEMPLATE REVIEW TEXT HANDLER ===
@@ -3910,6 +4149,29 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if update.message.text:
         raw_text = update.message.text.strip()
+        if context.user_data.get("pending_case_bundle"):
+            if _is_case_bundle_done(raw_text):
+                case_text, input_source = _combined_pending_case_bundle(context)
+                context.user_data.pop("pending_case_bundle", None)
+                if not case_text:
+                    await update.message.reply_text("I was waiting for the rest of the case, but nothing readable came through. Send the case again when ready.")
+                    return AWAIT_CASE_INPUT
+                ack = await update.message.reply_text(CAPTURED_ACK, parse_mode="Markdown")
+                _track_latest_message(context, ack)
+                return await _process_case_text(update.message, context, user_id, case_text, input_source)
+
+            _append_pending_case_bundle(context, raw_text, "text")
+            await update.message.reply_text("Added. I’ll keep waiting — send `done` when you’ve shared everything.", parse_mode="Markdown")
+            return AWAIT_CASE_INPUT
+
+        if not (context.user_data.get("awaiting_detail") and context.user_data.get("chosen_form")) and _is_waiting_for_media_request(raw_text):
+            _append_pending_case_bundle(context, raw_text, "text")
+            await update.message.reply_text(
+                "Got it — I’ll wait for the images/files before drafting. Send `done` when you’ve shared everything.",
+                parse_mode="Markdown",
+            )
+            return AWAIT_CASE_INPUT
+
         if context.user_data.get("awaiting_detail") and context.user_data.get("chosen_form"):
             case_text = raw_text
         else:
@@ -4154,6 +4416,11 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         input_source = "document"
     else:
         input_source = "text"
+
+    if context.user_data.get("pending_case_bundle"):
+        _append_pending_case_bundle(context, case_text, input_source)
+        await update.message.reply_text("Added. I’ll keep waiting — send `done` when you’ve shared everything.", parse_mode="Markdown")
+        return AWAIT_CASE_INPUT
 
     chosen_form = context.user_data.get("chosen_form")
     if chosen_form and context.user_data.get("awaiting_detail"):
@@ -5207,57 +5474,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
         # Treat any text reply as edit feedback when we have a draft to refine.
         # (Explicit "new_case" intent still routes to the warning path below.)
         if has_draft and intent != "new_case" and case_text:
-            draft = _load_draft(context)
-            ack = await update.message.reply_text("✏️ Regenerating draft with your feedback…")
-            try:
-                form_type = draft.form_type if isinstance(draft, FormDraft) else "CBD"
-                current_draft_text = _format_draft_preview(draft)
-                vp = get_voice_profile(update.effective_user.id) or ""
-
-                if form_type == "CBD":
-                    updated = await asyncio.wait_for(
-                        extract_cbd_data(
-                            case_text,
-                            edit_feedback=raw_text,
-                            current_draft=current_draft_text,
-                            voice_profile_json=vp,
-                            input_source=context.user_data.get("case_input_source", "text"),
-                        ),
-                        timeout=45,
-                    )
-                else:
-                    updated = await asyncio.wait_for(
-                        extract_form_data(
-                            case_text,
-                            form_type,
-                            edit_feedback=raw_text,
-                            current_draft=current_draft_text,
-                            voice_profile_json=vp,
-                            input_source=context.user_data.get("case_input_source", "text"),
-                        ),
-                        timeout=45,
-                    )
-                _store_draft(context, updated)
-            except asyncio.TimeoutError:
-                await ack.edit_text(
-                    "⏳ That took too long. Your previous draft is still ready above — try again or use the buttons.",
-                )
-                return AWAIT_APPROVAL
-            except Exception as exc:
-                logger.error("Inline feedback regeneration failed: %s", exc, exc_info=True)
-                await ack.edit_text(
-                    "⚠️ Couldn't regenerate the draft with that feedback. Your previous draft is still ready above.",
-                )
-                return AWAIT_APPROVAL
-
-            preview = _format_draft_preview(updated)
-            await _safe_edit_text(
-                ack,
-                preview + _REPLY_HINT_SUFFIX,
-                reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
-                parse_mode="Markdown",
-            )
-            return AWAIT_APPROVAL
+            return await _regenerate_active_draft_with_feedback(update, context, raw_text)
 
         # new_case — looks like a new case
         if in_flow:
@@ -5621,6 +5838,10 @@ def build_application() -> Application:
                 CallbackQueryHandler(handle_approval_edit, pattern=r"^EDIT\|"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
+                MessageHandler(filters.VOICE, handle_approval_media_feedback),
+                MessageHandler(filters.PHOTO, handle_approval_media_feedback),
+                MessageHandler(filters.VIDEO, handle_approval_media_feedback),
+                MessageHandler(filters.Document.ALL, handle_approval_media_feedback),
             ],
             AWAIT_EDIT_FIELD: [
                 CallbackQueryHandler(handle_edit_field, pattern=r"^FIELD\|"),
