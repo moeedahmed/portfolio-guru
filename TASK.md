@@ -20,6 +20,7 @@ Phase 2.6 only:
 - Source-grounding guard added for photo/image-derived recommendations and drafts.
 - Image-derived draft regeneration keeps using the original input source.
 - Regression tests cover the CPR/ALS/ROSC fabrication failure mode.
+- Source prioritisation now treats lone/admin "For CPR" screenshot text as a weak anchor, removes CBD from image recommendations unless case-management reasoning is explicit, and forces procedure evidence toward Procedural Log/DOPS.
 - Message policy layer added for the first high-value workflow surfaces.
 - Snapshot tests updated for changed visible copy.
 

@@ -369,6 +369,77 @@ HIGH_RISK_FABRICATION_TERMS = [
 
 _IMAGE_INPUT_SOURCES = {"photo", "image", "img"}
 
+_WEAK_ADMIN_RESCUE_ANCHORS = [
+    "for cpr",
+    "resus: for cpr",
+    "reason: for cpr",
+    "presenting complaint: for cpr",
+    "presentation: for cpr",
+]
+
+_SUBSTANTIVE_RESCUE_ANCHORS = [
+    "cardiac arrest",
+    "arrested",
+    "cpr in progress",
+    "cpr commenced",
+    "chest compressions",
+    "compressions started",
+    "defibrillation",
+    "defibrillated",
+    "shock delivered",
+    "adrenaline",
+    "epinephrine",
+    "rosc",
+    "return of spontaneous circulation",
+    "peri-arrest",
+]
+
+_IMAGE_PROCEDURE_SIGNALS = [
+    "procedure note",
+    "performed",
+    "block",
+    "serratus",
+    "erector spinae",
+    "local anaesthetic",
+    "levobupivacaine",
+    "lidocaine",
+    "ultrasound-guided",
+    "ultrasound guidance",
+    "cannulation",
+    "intubation",
+    "chest drain",
+    "central line",
+    "lumbar puncture",
+]
+
+_IMAGE_IMAGING_SIGNALS = [
+    "ct",
+    "x-ray",
+    "xray",
+    "report",
+    "fracture",
+    "pneumothorax",
+    "haematoma",
+    "nodule",
+    "impression",
+    "findings",
+    "no acute",
+]
+
+_IMAGE_CBD_REASONING_SIGNALS = [
+    "i assessed",
+    "i managed",
+    "i decided",
+    "i considered",
+    "i discussed",
+    "differential",
+    "clinical reasoning",
+    "management decision",
+    "decision-making",
+    "treatment plan",
+    "escalated",
+]
+
 
 def _is_image_source(input_source: str | None) -> bool:
     if not input_source:
@@ -384,12 +455,92 @@ def _source_supports_term(term: str, source_text: str) -> bool:
         return False
     src_lower = source_text.lower()
     term_lower = term.lower()
+    if term_lower in {"cpr", "cardiopulmonary resuscitation"}:
+        if any(anchor in src_lower for anchor in _SUBSTANTIVE_RESCUE_ANCHORS):
+            return True
+        # A lone admin/header phrase like "Resus: For CPR" is too weak to
+        # support an invented arrest narrative from image OCR.
+        if any(anchor in src_lower for anchor in _WEAK_ADMIN_RESCUE_ANCHORS):
+            return False
     if term_lower in src_lower:
         return True
     first_word = term_lower.split()[0]
     if len(first_word) >= 6 and first_word[:6] in src_lower:
         return True
     return False
+
+
+def _source_has_any(source_text: str, signals: list[str]) -> bool:
+    src_lower = (source_text or "").lower()
+    return any(signal in src_lower for signal in signals)
+
+
+def _image_source_supports_cbd(source_text: str) -> bool:
+    """Image OCR must contain actual case-management reasoning before CBD is
+    allowed to survive as a recommendation."""
+    return _source_has_any(source_text, _IMAGE_CBD_REASONING_SIGNALS)
+
+
+def _source_has_image_procedure_evidence(source_text: str) -> bool:
+    return _source_has_any(source_text, _IMAGE_PROCEDURE_SIGNALS)
+
+
+def _source_has_image_imaging_evidence(source_text: str) -> bool:
+    return _source_has_any(source_text, _IMAGE_IMAGING_SIGNALS)
+
+
+def _dedupe_recommendations(recommendations: list[FormTypeRecommendation]) -> list[FormTypeRecommendation]:
+    seen: set[str] = set()
+    deduped: list[FormTypeRecommendation] = []
+    for rec in recommendations:
+        if rec.form_type in seen:
+            continue
+        seen.add(rec.form_type)
+        deduped.append(rec)
+    return deduped
+
+
+def enforce_image_recommendation_grounding(
+    recommendations: list[FormTypeRecommendation],
+    source_text: str,
+) -> list[FormTypeRecommendation]:
+    """Post-process image-derived form recommendations.
+
+    The LLM prompt is advisory; this deterministic layer prevents sparse OCR
+    and admin/header text from pushing the user into a CBD when the visible
+    evidence is really a procedure note, imaging report, or fragment.
+    """
+    if not source_text:
+        return recommendations
+
+    supports_cbd = _image_source_supports_cbd(source_text)
+    has_procedure = _source_has_image_procedure_evidence(source_text)
+    has_imaging = _source_has_image_imaging_evidence(source_text)
+
+    grounded = list(recommendations)
+    if not supports_cbd:
+        grounded = [rec for rec in grounded if rec.form_type != "CBD"]
+
+    additions: list[FormTypeRecommendation] = []
+    if has_procedure:
+        additions.append(FormTypeRecommendation(
+            form_type="PROC_LOG",
+            rationale="Visible source documents a procedure; log the procedure unless a formal observed assessment is confirmed.",
+            uuid=FORM_UUIDS.get("PROC_LOG"),
+        ))
+        additions.append(FormTypeRecommendation(
+            form_type="DOPS",
+            rationale="Use if an assessor directly observed the documented procedure.",
+            uuid=FORM_UUIDS.get("DOPS"),
+        ))
+    elif has_imaging and not grounded:
+        additions.append(FormTypeRecommendation(
+            form_type="REFLECT_LOG",
+            rationale="Visible source is an imaging/report fragment without enough case-management reasoning for CBD.",
+            uuid=FORM_UUIDS.get("REFLECT_LOG"),
+        ))
+
+    return _dedupe_recommendations(additions + grounded)[:3]
 
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
@@ -1131,6 +1282,11 @@ MGMT_* (Management Portfolio forms — Rota, Complaint, Critical Incident, Risk,
             rationale=item.get("rationale", ""),
             uuid=FORM_UUIDS.get(form_type)
         ))
+
+    if _is_image_source(input_source):
+        recommendations = enforce_image_recommendation_grounding(
+            recommendations, case_description
+        )
 
     return recommendations
 

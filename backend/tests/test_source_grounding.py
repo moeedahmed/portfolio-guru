@@ -36,6 +36,16 @@ RIB_FRACTURE_IMAGE_TEXT = (
     "follow-up imaging."
 )
 
+RIB_FRACTURE_WITH_WEAK_ADMIN_CPR_TEXT = (
+    "Links Documentation Scheduling. Age 68. Sex Male. Resus: For CPR. "
+    "Procedure note: right-sided displaced rib fractures. Serratus anterior "
+    "and erector spinae block performed under ultrasound guidance. "
+    "Levobupivacaine and lidocaine used. Patient tolerated the procedure well "
+    "with no complications. CT report: multilevel right-sided rib fractures, "
+    "no pneumothorax, right iliac subcutaneous haematoma, small right lower "
+    "lobe pulmonary nodule for 3-month CT follow-up. Plan: SA and ES block."
+)
+
 BANNED_RESUS_TERMS = [
     "cpr",
     "cardiac arrest",
@@ -92,6 +102,27 @@ class TestRecommenderHonoursImageSource:
         # The prompt must bias toward procedure/reflection-style forms
         assert "proc_log" in prompt or "procedure" in prompt
         assert "reflect" in prompt
+
+    @pytest.mark.asyncio
+    async def test_image_recommendation_drops_cbd_when_only_admin_cpr_anchor_exists(self):
+        """A header/admin phrase like 'Resus: For CPR' must not make CBD
+        survive when the body evidence is a regional block procedure note."""
+        from extractor import recommend_form_types
+
+        async def fake_generate(prompt, retries=1, tier=""):
+            return json.dumps([
+                {"form_type": "CBD", "rationale": "For CPR in resus."}
+            ])
+
+        with patch("extractor._generate", new=AsyncMock(side_effect=fake_generate)):
+            recommendations = await recommend_form_types(
+                RIB_FRACTURE_WITH_WEAK_ADMIN_CPR_TEXT,
+                input_source="photo",
+            )
+
+        form_types = [rec.form_type for rec in recommendations]
+        assert "CBD" not in form_types
+        assert form_types[:2] == ["PROC_LOG", "DOPS"]
 
     @pytest.mark.asyncio
     async def test_recommend_with_text_source_omits_image_guard(self):
@@ -198,6 +229,29 @@ class TestExtractorHonoursImageSource:
 
 
 class TestEnforceImageSourceGrounding:
+    def test_weak_admin_cpr_anchor_does_not_support_resus_narrative(self):
+        """The second failure: OCR saw 'For CPR' in the admin/header area,
+        then allowed a full CPR/ALS/ROSC story. That phrase is not enough."""
+        from extractor import enforce_image_source_grounding
+
+        fields = {
+            "reflection": (
+                "I led CPR in resus and followed ALS. ROSC was achieved. "
+                "The regional block was performed under ultrasound guidance."
+            )
+        }
+
+        cleaned, stripped = enforce_image_source_grounding(
+            fields, RIB_FRACTURE_WITH_WEAK_ADMIN_CPR_TEXT
+        )
+
+        value = cleaned["reflection"].lower()
+        assert "cpr" not in value
+        assert "als" not in value
+        assert "rosc" not in value
+        assert "regional block" in value or "ultrasound" in value
+        assert stripped
+
     def test_strips_unsupported_resuscitation_terms(self):
         """Narrative sentences containing CPR/ALS/ROSC/etc that are NOT in
         the source text must be removed."""
