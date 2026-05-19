@@ -13,7 +13,10 @@ while ! mkdir "$LOCK_DIR" 2>/dev/null; do
   if [ -n "$EXISTING_PID" ] && kill -0 "$EXISTING_PID" 2>/dev/null; then
     EXISTING_CWD="$(lsof -a -p "$EXISTING_PID" -d cwd 2>/dev/null | awk 'NR==2 {print $NF}')"
     if [ "$EXISTING_CWD" = "$SCRIPT_DIR" ]; then
-      echo "Portfolio Guru bot already running as PID $EXISTING_PID"
+      echo "Portfolio Guru bot already running as PID $EXISTING_PID; holding launcher open"
+      while kill -0 "$EXISTING_PID" 2>/dev/null; do
+        sleep 60
+      done
       exit 0
     fi
   fi
