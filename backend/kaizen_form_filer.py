@@ -1101,6 +1101,83 @@ async def _fill_select(page: Page, dom_id: str, value: str) -> bool:
             return False
 
 
+async def _fill_assessor_invite(page: Page, query: str, expected_name: str = "") -> bool:
+    """Pick one assessor from Kaizen's typeahead before sending a WPBA.
+
+    This is deliberately stricter than ordinary text filling because selecting
+    the wrong assessor sends live portfolio work to a real person.
+    """
+    query = str(query or "").strip()
+    expected_name = str(expected_name or "").strip()
+    if not query:
+        return False
+
+    invite = page.locator("input#invites").first
+    if not await invite.count():
+        logger.warning("Assessor invite field not found")
+        return False
+
+    await invite.click()
+    await page.keyboard.press("Meta+A")
+    await invite.type(query, delay=40)
+    await asyncio.sleep(3)
+
+    suggestions = await page.locator("#invites_listbox .tt-suggestion").all()
+    if not suggestions:
+        logger.warning(f"No assessor suggestions for query: {query}")
+        return False
+
+    target_tokens = [t.lower() for t in re.findall(r"[A-Za-z]+", expected_name or query) if len(t) > 2]
+    for suggestion in suggestions:
+        text = (await suggestion.inner_text()).strip()
+        haystack = text.lower()
+        if target_tokens and not all(token in haystack for token in target_tokens):
+            continue
+        try:
+            await suggestion.click(timeout=3000, force=True)
+        except TypeError:
+            await suggestion.click()
+        except Exception:
+            clicked = await page.evaluate(
+                """(label) => {
+                  const items = Array.from(document.querySelectorAll('#invites_listbox .tt-suggestion'));
+                  const item = items.find(el => (el.textContent || '').trim() === label);
+                  if (!item) return false;
+                  item.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+                  item.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+                  item.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                  return true;
+                }""",
+                text,
+            )
+            if not clicked:
+                raise
+        await asyncio.sleep(1)
+        selection_verified = await page.evaluate(
+            """(tokens) => {
+              const root = document.querySelector('#invites')?.closest('.form-group, .twitter-typeahead, body') || document.body;
+              const text = (root.textContent || '') + ' ' + (document.querySelector('#invites')?.value || '');
+              const haystack = text.toLowerCase();
+              return tokens.every(token => haystack.includes(token));
+            }""",
+            target_tokens,
+        )
+        if target_tokens and not selection_verified:
+            logger.warning("Assessor typeahead click did not verify selected assessor")
+            return False
+        logger.info(f"Assessor selected from typeahead: {text}")
+        return True
+
+    visible = []
+    for suggestion in suggestions[:5]:
+        try:
+            visible.append((await suggestion.inner_text()).strip())
+        except Exception:
+            pass
+    logger.warning(f"Assessor suggestions did not match expected target: {visible}")
+    return False
+
+
 # ─── Curriculum links (SLO expansion + KC ticking) ──────────────────────────
 
 async def _fill_curriculum_links(
@@ -1186,6 +1263,19 @@ async def _save_form(page: Page, as_draft: bool) -> bool:
         return True
     logger.warning("Save may have failed — 'LAST SAVED' not found in body")
     return True  # Proceed anyway — save might have worked
+
+
+async def _verify_sent_to_assessor(page: Page, expected_assessor: str = "") -> bool:
+    """Best-effort verification that a WPBA left the trainee-side draft state."""
+    body = (await page.inner_text("body")).lower()
+    expected_tokens = [t.lower() for t in re.findall(r"[A-Za-z]+", expected_assessor or "") if len(t) > 2]
+    if "awaiting response" in body or "awaiting assessor" in body or "awaiting completion" in body:
+        return not expected_tokens or all(token in body for token in expected_tokens)
+    # A trainee-owned draft/section still showing these controls has not reached
+    # the assessor queue, even if Kaizen accepted the form save.
+    if "fill in" in body and "delete" in body and "preview" in body:
+        return False
+    return False
 
 
 # ─── Verification pass ───────────────────────────────────────────────────────
@@ -1328,7 +1418,7 @@ async def fill_kaizen_form(
                 errors.append(f"{key}: date fill failed")
 
         # ─── STEP 3: Text and select fields ──────────────────────────────────
-        skip_keys = {"stage", "stage_of_training", "curriculum_links", "assessor_email"}
+        skip_keys = {"stage", "stage_of_training", "curriculum_links", "assessor_email", "assessor_query", "assessor_name"}
         skip_keys.update(date_keys)
         delayed_proc_log_other = {}
         if form_type == "PROC_LOG":
@@ -1393,19 +1483,51 @@ async def fill_kaizen_form(
                 filled.append(f"curriculum_links ({len(ticked)} KCs)")
             errors.extend(kc_errors)
 
-        # ─── STEP 5: Verification pass ───────────────────────────────────────
+        # ─── STEP 5: Assessor invite before live send ────────────────────────
+        if not save_as_draft:
+            assessor_query = fields.get("assessor_query") or fields.get("assessor_email")
+            if assessor_query:
+                assessor_ok = await _fill_assessor_invite(
+                    page,
+                    str(assessor_query),
+                    str(fields.get("assessor_name") or ""),
+                )
+                if assessor_ok:
+                    filled.append("assessor")
+                else:
+                    errors.append("assessor: selection failed")
+            else:
+                errors.append("assessor: missing assessor_query/assessor_email for live send")
+
+        # ─── STEP 6: Verification pass ───────────────────────────────────────
         verify_issues = await _verify_fields(page, fields, field_map, filled)
         if verify_issues:
             for issue in verify_issues:
                 logger.warning(f"Verify: {issue}")
             errors.extend(verify_issues)
 
-        # ─── STEP 6: Save ────────────────────────────────────────────────────
+        if not save_as_draft and any(error.startswith("assessor:") for error in errors):
+            return {
+                "status": "failed",
+                "filled": filled,
+                "skipped": skipped,
+                "errors": errors + ["Live send blocked because assessor selection was not verified"],
+                "screenshot": None,
+            }
+
+        # ─── STEP 7: Save ────────────────────────────────────────────────────
         saved = await _save_form(page, save_as_draft)
         if not saved:
             errors.append("Save may have failed")
+        elif not save_as_draft:
+            sent = await _verify_sent_to_assessor(
+                page,
+                str(fields.get("assessor_name") or fields.get("assessor_query") or fields.get("assessor_email") or ""),
+            )
+            if not sent:
+                errors.append("assessor: live send was not verified after saving")
 
-        # ─── STEP 7: Screenshot ──────────────────────────────────────────────
+        # ─── STEP 8: Screenshot ──────────────────────────────────────────────
         if screenshot_path:
             try:
                 await page.screenshot(path=screenshot_path, full_page=True)
@@ -1427,6 +1549,7 @@ async def fill_kaizen_form(
             "filled": filled,
             "skipped": skipped,
             "errors": errors,
+            "final_url": page.url,
             "screenshot": screenshot_path,
         }
 
