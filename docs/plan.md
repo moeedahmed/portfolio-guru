@@ -146,9 +146,12 @@ Safety contract:
 Status:
 - Read-only assessor mapper scaffold added in `backend/assessor_mapper.py`.
 - It can list visible assessment timeline rows and optionally extract ticket detail fields/tags/buttons for mapping.
+- It can output a PHI-free ticket shape (`--shape-only`) so mapping can record field labels/control labels without storing patient narrative.
+- First read-only live shape mapped a CBD assessor ticket with visible fields: date occurred on, end date, case to be discussed, attach files.
+- The same live shape exposed write-side controls: Fill in and Save. These are detected but not clicked.
 - It does not click write controls and has tests guarding the read-only boundary.
 - Full assessor feedback/sign-off field mapping is not complete yet.
-- Live read-only mapping still needs an authenticated assessor session or supplied credentials, and must stop at login/2FA.
+- Live read-only mapping can use an existing authenticated browser session; supplied credentials are only needed if login is required, and the mapper must stop at 2FA/captcha.
 
 ### Phase 3 - Safe activation for low-risk intents
 

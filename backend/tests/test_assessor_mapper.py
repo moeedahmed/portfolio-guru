@@ -33,7 +33,43 @@ def test_normalise_summary_extracts_uuid_and_state():
 def test_mapper_keeps_write_actions_deny_listed():
     labels = assessor_mapper.WRITE_ACTION_LABELS
 
-    assert {"approve", "delete", "save", "send", "sign", "submit"} <= set(labels)
+    assert {"approve", "delete", "fill in", "save", "send", "sign", "submit"} <= set(labels)
+
+
+def test_classify_controls_separates_safe_navigation_from_write_controls():
+    write_controls, safe_controls = assessor_mapper.classify_controls(
+        ["View profile", "Fill in", "Save", "Show more", "Logout"]
+    )
+
+    assert write_controls == ["Fill in", "Save"]
+    assert safe_controls == ["View profile", "Show more", "Logout"]
+
+
+def test_summarise_ticket_shape_redacts_field_values():
+    summary = assessor_mapper.AssessorTicketSummary(
+        title="CBD - Case Based Discussion",
+        href="https://kaizenep.com/events/view-section/12345678-1234-1234-1234-123456789abc",
+        section_view=True,
+    )
+    detail = assessor_mapper.AssessorTicketDetail(
+        summary=summary,
+        event_type="CBD - Case Based Discussion",
+        fields=[
+            {"label": "Case to be discussed", "value": "Patient-specific narrative"},
+            {"label": "Date occurred on", "value": "17 May, 2026"},
+        ],
+        available_buttons=["Fill in", "Save", "View profile"],
+    )
+
+    shape = assessor_mapper.summarise_ticket_shape(detail)
+
+    assert shape.event_type == "CBD - Case Based Discussion"
+    assert shape.field_labels == ["Case to be discussed", "Date occurred on"]
+    assert shape.write_controls == ["Fill in", "Save"]
+    assert shape.safe_controls == ["View profile"]
+    assert shape.needs_write_side_mapping is True
+    assert shape.route_kind == "view-section"
+    assert "Patient-specific narrative" not in repr(shape)
 
 
 def test_mapper_does_not_click_write_controls():

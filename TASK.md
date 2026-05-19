@@ -39,10 +39,14 @@ Phase 2.7 only:
 - `WORKFLOWS.md` updated with the planned Assess Ticket flow and hard constraints.
 - `backend/assessor_mapper.py` added as read-only mapping scaffold.
 - `backend/tests/test_assessor_mapper.py` added for parser and read-only guard coverage.
+- Mapper now classifies safe navigation controls separately from write-side controls.
+- Mapper now supports PHI-free shape output for live mapping without storing patient narrative.
+- First live read-only shape mapped a CBD assessor ticket and detected `Fill in` / `Save` as write-side controls without clicking either.
 
 ## Verification
 
 - Assessor mapper unit tests pass.
+- Read-only live shape smoke passed against an authenticated browser session.
 - Flow/snapshot tests still pass.
 - Full offline pre-commit gate must pass before commit.
 
@@ -54,6 +58,6 @@ Run live read-only mapping only when an authenticated assessor session or approv
 - Ticket list row selectors and states.
 - Detail page read-only field structure.
 - Assessor-specific fields/buttons.
-- Exact submit/sign button selectors for later approval-gated implementation.
+- Exact submit/sign button selectors for later approval-gated implementation once write-side mapping is explicitly approved.
 
 Do not perform any write action during mapping.

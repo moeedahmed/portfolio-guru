@@ -32,10 +32,20 @@ ASSESSMENTS_URL = "https://kaizenep.com/events/list/Assessments"
 WRITE_ACTION_LABELS = (
     "approve",
     "delete",
+    "fill in",
+    "fill-in",
     "save",
     "send",
     "sign",
     "submit",
+)
+
+SAFE_NAVIGATION_LABELS = (
+    "logout",
+    "settings",
+    "show more",
+    "skip to content",
+    "view profile",
 )
 
 
@@ -57,7 +67,23 @@ class AssessorTicketDetail:
     fields: list[dict[str, str | None]] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     available_buttons: list[str] = field(default_factory=list)
+    write_controls: list[str] = field(default_factory=list)
+    safe_controls: list[str] = field(default_factory=list)
     url: str | None = None
+
+
+@dataclass
+class AssessorTicketShape:
+    """PHI-free shape for mapping ticket types without storing ticket content."""
+
+    event_type: str | None
+    state: str | None
+    field_labels: list[str]
+    tag_count: int
+    write_controls: list[str]
+    safe_controls: list[str]
+    needs_write_side_mapping: bool
+    route_kind: str | None
 
 
 def _event_uuid_from_href(href: str | None) -> tuple[str | None, bool | None]:
@@ -77,6 +103,47 @@ def _normalise_summary(row: dict[str, Any]) -> AssessorTicketSummary:
         uuid=uuid,
         state=row.get("state"),
         section_view=section_view,
+    )
+
+
+def _dedupe(values: list[str | None]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        normalised = (value or "").strip()
+        if not normalised or normalised in seen:
+            continue
+        seen.add(normalised)
+        out.append(normalised)
+    return out
+
+
+def _control_matches(label: str, candidates: tuple[str, ...]) -> bool:
+    normalised = re.sub(r"\s+", " ", label.strip().lower())
+    return any(candidate in normalised for candidate in candidates)
+
+
+def classify_controls(labels: list[str]) -> tuple[list[str], list[str]]:
+    """Split controls into safe navigation and write-side controls."""
+    deduped = _dedupe(labels)
+    write_controls = [label for label in deduped if _control_matches(label, WRITE_ACTION_LABELS)]
+    safe_controls = [label for label in deduped if _control_matches(label, SAFE_NAVIGATION_LABELS)]
+    return write_controls, safe_controls
+
+
+def summarise_ticket_shape(detail: AssessorTicketDetail) -> AssessorTicketShape:
+    """Return a mapping shape without patient/user-entered field values."""
+    field_labels = _dedupe([field.get("label") for field in detail.fields])
+    write_controls, safe_controls = classify_controls(detail.available_buttons)
+    return AssessorTicketShape(
+        event_type=detail.event_type or detail.summary.title,
+        state=detail.state or detail.summary.state,
+        field_labels=field_labels,
+        tag_count=len(detail.tags),
+        write_controls=write_controls,
+        safe_controls=safe_controls,
+        needs_write_side_mapping=bool(write_controls),
+        route_kind="view-section" if detail.summary.section_view else "view",
     )
 
 
@@ -144,7 +211,9 @@ async def extract_assessment_detail(page: Page, summary: AssessorTicketSummary) 
           };
         }"""
     )
-    return AssessorTicketDetail(summary=summary, **payload)
+    detail = AssessorTicketDetail(summary=summary, **payload)
+    detail.write_controls, detail.safe_controls = classify_controls(detail.available_buttons)
+    return detail
 
 
 async def map_assessor_tickets(
@@ -186,13 +255,16 @@ async def _amain() -> None:
     parser = argparse.ArgumentParser(description="Read-only Kaizen assessor ticket mapper")
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--details", action="store_true")
+    parser.add_argument("--shape-only", action="store_true", help="Output PHI-free ticket mapping shapes")
     args = parser.parse_args()
     result = await map_assessor_tickets(
         username=os.environ.get("KAIZEN_USERNAME", ""),
         password=os.environ.get("KAIZEN_PASSWORD", ""),
         limit=args.limit,
-        include_details=args.details,
+        include_details=args.details or args.shape_only,
     )
+    if args.shape_only:
+        result = [summarise_ticket_shape(item) for item in result if isinstance(item, AssessorTicketDetail)]
     print(json.dumps([asdict(item) for item in result], indent=2))
 
 

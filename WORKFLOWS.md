@@ -144,12 +144,32 @@ Allowed during mapping:
   - list visible assessment rows
   - open ticket detail pages
   - extract read-only fields, tags, state, visible buttons
+  - output PHI-free ticket shapes for mapping
 
 Not built yet:
   - notification polling
   - assessor feedback/sign-off field mapping
   - submit/sign action
   - Telegram assessor review UI
+```
+
+First mapped read-only ticket shape:
+
+```
+Ticket type: CBD - Case Based Discussion (2025 update)
+Route: view-section
+Visible read-only fields:
+  - Date occurred on
+  - End date
+  - Case to be discussed
+  - Attach files
+Write-side controls detected but not clicked:
+  - Fill in
+  - Save
+Implication:
+  - The next mapping gap is the post-Fill in assessor form. Opening it may create
+    or modify assessor-side state, so it stays blocked until an explicit
+    one-ticket approval gate exists.
 ```
 
 ---
