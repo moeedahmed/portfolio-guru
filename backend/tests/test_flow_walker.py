@@ -89,8 +89,9 @@ class TestFlowWalker:
 
         assert result == AWAIT_FORM_CHOICE
         button_data = [data for _, data in sim.get_last_buttons()]
-        assert 'FORM|CBD' in button_data
+        assert 'FORM|best' in button_data
         assert 'FORM|show_all' in button_data
+        assert context.user_data['last_funnel_event'] == 'recommendation_shown'
         assert context.user_data['case_text'] == SAMPLE_CASES['valid']
 
     @pytest.mark.asyncio
@@ -156,6 +157,26 @@ class TestFlowWalker:
         assert 'Missing detail that would improve this' in sim.get_last_text()
         assert {'ACTION|continue_thin'} <= {data for _, data in sim.get_last_buttons()}
         assert 'ACTION|add_detail' not in {data for _, data in sim.get_last_buttons()}
+
+    @pytest.mark.asyncio
+    async def test_best_fit_button_uses_top_recommendation(self, thin_draft, recommended_forms):
+        from bot import AWAIT_APPROVAL, handle_form_choice
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        context.user_data['form_recommendations'] = recommended_forms
+
+        update = sim._make_callback_update('FORM|best')
+        with patch('bot.get_curriculum', return_value='2025'), \
+             patch('bot._analyse_selected_form', new_callable=AsyncMock, return_value=thin_draft), \
+             patch('bot._missing_template_fields', return_value=([], [], [])):
+            result = await handle_form_choice(update, context)
+
+        assert result == AWAIT_APPROVAL
+        assert context.user_data['chosen_form'] == 'CBD'
+        assert context.user_data['last_funnel_event'] == 'draft_shown'
+        assert {'APPROVE|draft', 'CANCEL|draft'} <= {data for _, data in sim.get_last_buttons()}
 
     @pytest.mark.asyncio
     async def test_optional_missing_fields_do_not_block_draft_preview(self, thin_draft):

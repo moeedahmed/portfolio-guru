@@ -50,8 +50,8 @@
   dict({
     'buttons': list([
       tuple(
-        '🩺 CBD',
-        'FORM|CBD',
+        '✅ Use best fit: CBD',
+        'FORM|best',
       ),
       tuple(
         '📋 ACAT',
@@ -72,7 +72,7 @@
       - Case-Based Discussion: Best fit for a reflective clinical case.
       - Acute Care Assessment Tool: The case spans multiple patients across a shift.
       
-      Pick a form to draft. Missing fields come next.
+      Tap Use best fit for the fastest draft, or choose another form.
     ''',
   })
 # ---

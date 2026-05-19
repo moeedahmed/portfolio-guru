@@ -1087,27 +1087,44 @@ def _form_display_name(form_type: str) -> str:
     return schema.get("name", form_type)
 
 
-def _build_form_choice_keyboard(recommendations, curriculum="2025"):
-    """Build inline keyboard for form type selection — AI suggestions + See all forms escape hatch.
-    Filters recommendations by curriculum preference."""
+def _track_funnel_event(context, event: str, **metadata) -> None:
+    """Log PHI-free UX funnel events for friction analysis."""
+    safe = {
+        key: value
+        for key, value in metadata.items()
+        if key in {"source", "form_type", "state", "count", "has_draft", "has_missing"}
+    }
+    try:
+        context.user_data["last_funnel_event"] = event
+    except Exception:
+        pass
+    logger.info("Portfolio Guru funnel event=%s metadata=%s", event, safe)
+
+
+def _filtered_recommendations_for_curriculum(recommendations, curriculum="2025"):
     from extractor import FORM_UUIDS
-    # Apply curriculum filter to recommendations
+
     filtered = []
     has_2021_variant = {k[:-5] for k in FORM_UUIDS if k.endswith("_2021")}
     for rec in recommendations:
         ft = rec.form_type
         if curriculum == "2021" and ft in has_2021_variant:
-            # Swap to _2021 variant
-            ft_2021 = ft + "_2021"
             from models import FormTypeRecommendation
+            ft_2021 = ft + "_2021"
             filtered.append(FormTypeRecommendation(
                 form_type=ft_2021, rationale=rec.rationale, uuid=FORM_UUIDS.get(ft_2021)
             ))
         elif curriculum == "2025" and ft.endswith("_2021"):
-            # Skip _2021 forms on 2025 curriculum
             continue
         else:
             filtered.append(rec)
+    return filtered
+
+
+def _build_form_choice_keyboard(recommendations, curriculum="2025"):
+    """Build inline keyboard for form type selection — AI suggestions + See all forms escape hatch.
+    Filters recommendations by curriculum preference."""
+    filtered = _filtered_recommendations_for_curriculum(recommendations, curriculum)
 
     buttons = []
     for rec in filtered:
@@ -1118,7 +1135,16 @@ def _build_form_choice_keyboard(recommendations, curriculum="2025"):
             buttons.append(InlineKeyboardButton(f"{emoji} {label}", callback_data=f"FORM|{rec.form_type}"))
         else:
             buttons.append(InlineKeyboardButton(f"{emoji} {label} (soon)", callback_data="FORM|disabled"))
-    rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
+
+    rows = []
+    best = next((rec for rec in filtered if getattr(rec, "uuid", None)), None)
+    if best:
+        base_ft = best.form_type.replace("_2021", "") if best.form_type.endswith("_2021") else best.form_type
+        best_label = FORM_BUTTON_LABELS.get(best.form_type) or FORM_BUTTON_LABELS.get(base_ft) or _form_display_name(base_ft)
+        rows.append([InlineKeyboardButton(f"✅ Use best fit: {best_label}", callback_data="FORM|best")])
+        buttons = [button for button in buttons if button.callback_data != f"FORM|{best.form_type}"]
+
+    rows.extend([buttons[i:i+2] for i in range(0, len(buttons), 2)])
     rows.append([
         InlineKeyboardButton("📋 See all forms", callback_data="FORM|show_all"),
         InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|form"),
@@ -1365,7 +1391,7 @@ def _build_form_recommendation_text(
     *,
     input_source: str | None = None,
     opening: str = "Forms that fit your case:",
-    closing: str = "Pick a form to draft. Missing fields come next.",
+    closing: str = "Tap Use best fit for the fastest draft, or choose another form.",
 ) -> str:
     rationale_lines = [
         f"- {_form_display_name(r.form_type)}: {_short_plain_text(getattr(r, 'rationale', ''))}"
@@ -3286,6 +3312,7 @@ async def _handle_reuse_request(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_id: int, case_text: str, input_source: str) -> int:
     """Store case text, suggest form types, or move directly to the chosen template review."""
+    _track_funnel_event(context, "input_received", source=input_source)
     # Anti-fabrication gate: never feed a too-thin input to the recommender or
     # the field extractor. The LLM is instructed not to fabricate, but with no
     # content to ground against it can still hallucinate plausible-sounding
@@ -3326,6 +3353,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
             if r.form_type in allowed_forms and _normalise_form_type(r.form_type) != excluded_form
         ]
         if not recommendations:
+            _track_funnel_event(context, "recommendation_empty", source=input_source)
             await _send_latest_message(
                 message, context,
                 "Couldn't determine the best form — browse all types below.",
@@ -3338,6 +3366,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
         context.user_data["form_recommendations"] = recommendations
     except Exception as exc:
         logger.error("Form recommendation failed across all providers: %s", exc)
+        _track_funnel_event(context, "recommendation_failed", source=input_source)
         await _send_latest_message(
             message, context,
             render_message("ai_temporarily_unavailable"),
@@ -3356,6 +3385,12 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
         input_source=input_source,
     )
     context.user_data["form_recommendations_text"] = prompt_text
+    _track_funnel_event(
+        context,
+        "recommendation_shown",
+        source=input_source,
+        count=len(recommendations),
+    )
 
     if status_msg and status_chat:
         try:
@@ -3432,6 +3467,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         _store_draft(context, draft)
         context.user_data.pop("awaiting_detail", None)
+        _track_funnel_event(context, "draft_shown", form_type=chosen_form, has_missing=True)
         preview = _format_draft_preview(draft, _chosen_form_reason(context, chosen_form))
         await _safe_edit_text(
             query.message,
@@ -3556,6 +3592,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Disarm buttons immediately — prevents double-tap
         await query.edit_message_reply_markup(reply_markup=None)
         user_id = update.effective_user.id
+        _track_funnel_event(context, "cancel_reset", state=data)
         context.user_data.clear()
         context.user_data["post_reset"] = True
         await query.message.reply_text(
@@ -3644,6 +3681,7 @@ async def _regenerate_active_draft_with_feedback(
     if not draft or not case_text:
         return await handle_case_input(update, context)
 
+    _track_funnel_event(context, "refine_reply_received", source=input_source, has_draft=True)
     feedback_text = (feedback_text or "").strip()
     if not feedback_text:
         await msg.reply_text("I couldn't read any useful extra detail from that. Try again with text, voice, image, or document.")
@@ -4570,7 +4608,25 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return AWAIT_FORM_CHOICE
 
-    form_type = data.split("|")[1]
+    if data == "FORM|best":
+        recommendations = context.user_data.get("form_recommendations", [])
+        filtered = _filtered_recommendations_for_curriculum(
+            recommendations,
+            curriculum=get_curriculum(update.effective_user.id),
+        )
+        best = next((rec for rec in filtered if getattr(rec, "uuid", None)), None)
+        if not best:
+            await query.edit_message_text(
+                "I couldn't find a best-fit form from the recommendations. Pick one manually:",
+                reply_markup=_build_category_picker_keyboard(update.effective_user.id),
+            )
+            return AWAIT_FORM_CHOICE
+        form_type = best.form_type
+        _track_funnel_event(context, "best_fit_chosen", form_type=form_type)
+    else:
+        form_type = data.split("|")[1]
+        _track_funnel_event(context, "form_chosen", form_type=form_type)
+
     excluded_form = _normalise_form_type(context.user_data.get("excluded_form_type", ""))
     if excluded_form and _normalise_form_type(form_type) == excluded_form:
         await query.answer("You already filed that WPBA for this case — choose a different type.", show_alert=True)
@@ -4612,6 +4668,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not missing_required:
         # All fields filled — skip template review, go to draft preview
         _store_draft(context, draft)
+        _track_funnel_event(context, "draft_shown", form_type=form_type, has_missing=False)
         preview = _format_draft_preview(draft, _chosen_form_reason(context, form_type))
         await _safe_edit_text(
             query.message,
@@ -4621,6 +4678,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return AWAIT_APPROVAL
 
+    _track_funnel_event(context, "template_gaps_shown", form_type=form_type, has_missing=True)
     review_text = _format_template_review(form_type, draft)
     await _safe_edit_text(
         query.message,
@@ -4659,6 +4717,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             context,
             "That earlier draft is no longer active.",
         )
+    _track_funnel_event(context, "save_attempted", has_draft=True)
 
     # Handle FormDraft (non-CBD forms)
     # Unified filing for ALL forms (CBD and non-CBD)

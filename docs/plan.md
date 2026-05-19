@@ -156,6 +156,16 @@ Status:
 - Full assessor feedback/sign-off field mapping is now mapped for CBD only; other ticket types remain unmapped.
 - Live read-only mapping can use an existing authenticated browser session; supplied credentials are only needed if login is required, and the mapper must stop at 2FA/captcha.
 
+### Phase 2.8 - Public UX upgrade
+
+Status:
+- Added after real usage feedback that Medic Portfolio feels smoother than the public Portfolio Guru bot.
+- Product diagnosis: Portfolio Guru was exposing the state machine too early: choose form, review missing fields, then draft. That is safe, but it feels brittle compared with an assistant that accepts context and chooses the next sensible action.
+- Current slice keeps the deterministic safety contract but makes the recommendation step more assistant-like.
+- Added PHI-free funnel event labels for input received, recommendation shown, best-fit/form chosen, template gaps shown, draft shown, refinement replies, save attempt, and cancel/reset.
+- Added `Use best fit` as the primary recommendation action. Other suggested forms and `See all forms` remain available as overrides.
+- Next UX move: dogfood the same anonymised cases in Medic Portfolio and Portfolio Guru, then move to draft-first behaviour only for high-confidence obvious cases.
+
 ### Phase 3 - Safe activation for low-risk intents
 
 Activate router for:

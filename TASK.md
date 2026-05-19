@@ -1,69 +1,46 @@
-# Active Task - Phase 2.7 Assessor Workflow Mapping
+# Active Task - Phase 2.8 Public UX Upgrade
 
 ## Objective
 
-Map the assessor-side Kaizen workflow safely so Portfolio Guru can support the second real-life entry point:
+Make Portfolio Guru feel better than the Medic Portfolio topic for Kaizen filing while keeping the product safety contract:
 
-- File evidence: user provides their own case, bot drafts evidence, user approves, bot saves a Kaizen draft.
-- Assess ticket: ticket arrives for review, bot shows ticket content, assessor gives intent, bot drafts feedback/sign-off, assessor approves, bot submits/signs.
+- user can send rough context naturally
+- bot guides toward the fastest sensible draft
+- user can still override the form choice
+- nothing is saved to Kaizen without explicit approval
 
-No persistent user-facing modes for now. Route by task.
+## Current Slice
 
-## Scope
+Build the smallest high-impact UX improvement:
 
-Phase 2.7 only:
-
-- Capture the assessor workflow in repo context.
-- Add a read-only assessor mapper scaffold.
-- Allow browser navigation and extraction only.
-- List visible assessment tickets.
-- Extract read-only ticket fields, tags, state, and visible button labels for mapping.
-- Keep final assessor submit/sign disabled.
+- PHI-free friction telemetry for the core funnel
+- primary `Use best fit` route from recommendations
+- keep `See all forms` as the manual escape hatch
+- preserve existing form-choice, template-review, draft-review, and approval gates
 
 ## Guardrails
 
-- No signing.
-- No submitting.
-- No deleting.
-- No approving/rejecting.
-- No saving drafts.
-- No feedback submission.
-- No draft artefacts in a colleague/consultant portfolio.
-- Stop at login, 2FA, captcha, or unclear side effect.
-- Any future assessor write action needs explicit approval for one named ticket and one reviewed response.
+- No automatic Kaizen save.
+- No supervisor submission.
+- No clinical content in telemetry/log metadata.
+- No removal of manual form selection.
+- No draft-first automation until this one-tap recommendation path is verified.
 
 ## Done
 
-- Product direction settled: one engine, two entry points.
-- `docs/plan.md` updated with Phase 2.7 assessor mapping direction and safety contract.
-- `WORKFLOWS.md` updated with the planned Assess Ticket flow and hard constraints.
-- `backend/assessor_mapper.py` added as read-only mapping scaffold.
-- `backend/tests/test_assessor_mapper.py` added for parser and read-only guard coverage.
-- Mapper now classifies safe navigation controls separately from write-side controls.
-- Mapper now supports PHI-free shape output for live mapping without storing patient narrative.
-- First live read-only shape mapped a CBD assessor ticket and detected `Fill in` / `Save` as write-side controls without clicking either.
-- After explicit approval, `Fill in` was opened once for a CBD assessor ticket.
-- The CBD assessor completion shape was mapped without typing, saving, submitting, signing, approving, rejecting, or sending feedback.
-- Completion fields detected: assessor registration number, job title, entrustment scale, feedback, recommendation for further learning/development.
-- Completion write controls detected: `Submit`, `Save as draft`.
+- Public UX upgrade plan logged from Moeed's feedback that Medic Portfolio feels smoother than Portfolio Guru.
+- Implemented PHI-free funnel event labels for input, recommendation, form selection, best-fit selection, template gaps, draft display, refinement, save attempt, and cancel/reset.
+- Added `Use best fit` as the primary recommendation action while keeping other suggested forms and `See all forms`.
+- Added regression coverage for the best-fit path and updated recommendation copy/snapshot tests.
 
 ## Verification
 
-- Assessor mapper unit tests pass.
-- Read-only live shape smoke passed against an authenticated browser session.
-- Explicitly approved completion-shape smoke passed and reported `saved_or_submitted=False`.
-- Flow/snapshot tests still pass.
-- Full offline pre-commit gate must pass before commit.
+- Focused flow/conversation/snapshot tests must pass.
+- Full offline suite must pass before commit.
+- Local bot restart required before reporting live.
 
 ## Next
 
-Run live read-only mapping only when an authenticated assessor session or approved credentials are available. Capture:
-
-- Where pending assessment tickets appear.
-- Ticket list row selectors and states.
-- Detail page read-only field structure.
-- Assessor-specific fields/buttons.
-- Exact submit/sign button selectors for later approval-gated implementation once write-side mapping is explicitly approved.
-- Remaining ticket types beyond CBD.
-
-Do not perform any write action during mapping.
+- Dogfood 5 anonymised cases in Medic Portfolio and Portfolio Guru.
+- Score time-to-draft, taps/replies, correction burden, draft quality, and trust.
+- If `Use best fit` wins, move to draft-first for high-confidence obvious cases.

@@ -45,7 +45,10 @@ class TestKeyboardBuilding:
         keyboard = _build_form_choice_keyboard(recs, curriculum="2025")
         rows = keyboard.inline_keyboard
 
-        form_rows = [r for r in rows if any("FORM|" in (b.callback_data or "") for b in r)
+        assert rows[0][0].callback_data == "FORM|best"
+        assert rows[0][0].text.startswith("✅ Use best fit")
+
+        form_rows = [r for r in rows[1:] if any("FORM|" in (b.callback_data or "") for b in r)
                      and not any("show_all" in (b.callback_data or "") for b in r)]
         for row in form_rows:
             assert len(row) <= 2, f"Row has {len(row)} buttons — expected max 2"
@@ -84,7 +87,7 @@ class TestMessagePolicy:
 
         assert "Procedural Log" in text
         assert "Privacy check" in text
-        assert "Pick a form" in text
+        assert "Use best fit" in text
         assert "*" not in text
 
 class TestExplicitFormRouting:
