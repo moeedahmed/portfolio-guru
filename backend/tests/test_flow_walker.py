@@ -136,7 +136,8 @@ class TestFlowWalker:
         }
 
         assert result == AWAIT_TEMPLATE_REVIEW
-        assert {'ACTION|add_detail', 'ACTION|continue_thin'} <= {data for _, data in sim.get_last_buttons()}
+        assert {'ACTION|continue_thin'} <= {data for _, data in sim.get_last_buttons()}
+        assert 'ACTION|add_detail' not in {data for _, data in sim.get_last_buttons()}
         assert 'Missing detail that would improve this' in sim.get_last_text()
 
         sim.clear_messages()
@@ -153,7 +154,8 @@ class TestFlowWalker:
         result = await handle_callback(update, context)
         assert result == AWAIT_TEMPLATE_REVIEW
         assert 'Missing detail that would improve this' in sim.get_last_text()
-        assert {'ACTION|add_detail', 'ACTION|continue_thin'} <= {data for _, data in sim.get_last_buttons()}
+        assert {'ACTION|continue_thin'} <= {data for _, data in sim.get_last_buttons()}
+        assert 'ACTION|add_detail' not in {data for _, data in sim.get_last_buttons()}
 
     @pytest.mark.asyncio
     async def test_optional_missing_fields_do_not_block_draft_preview(self, thin_draft):

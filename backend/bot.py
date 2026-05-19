@@ -473,7 +473,6 @@ _BTN_SETUP = InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|s
 _BTN_CANCEL = InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel")
 _BTN_HELP = InlineKeyboardButton("ℹ️ Help", callback_data="INFO|what")
 _BTN_VOICE = InlineKeyboardButton("✍️ Voice Profile", callback_data="ACTION|voice")
-_BTN_ADD_DETAIL = InlineKeyboardButton("✍️ Add missing detail", callback_data="ACTION|add_detail")
 _BTN_CONTINUE_THIN = InlineKeyboardButton("✅ Show me the draft", callback_data="ACTION|continue_thin")
 _BTN_BACK_TO_MISSING = InlineKeyboardButton("⬅️ Back to missing details", callback_data="ACTION|back_to_missing")
 
@@ -1172,7 +1171,6 @@ def _build_curriculum_keyboard(callback_prefix: str = "SET_CURRICULUM"):
 
 def _build_template_review_keyboard():
     return InlineKeyboardMarkup([
-        [_BTN_ADD_DETAIL],
         [_BTN_CONTINUE_THIN],
         [_BTN_CANCEL],
     ])
