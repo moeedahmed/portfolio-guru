@@ -480,6 +480,16 @@ _BUNDLE_DONE_RE = re.compile(
     re.IGNORECASE,
 )
 
+_TEXT_FILING_APPROVAL_RE = re.compile(
+    r"^\s*(file|save|submit)\s+(this|it|the draft)(?:\s+(?:as\s+)?(?:draft|to kaizen|in kaizen))?\s*[.!?]*\s*$",
+    re.IGNORECASE,
+)
+
+_RECENT_FILING_STATUS_RE = re.compile(
+    r"\b(file|filed|filing|save|saved|saving|kaizen|complete|completed|stuck|draft)\b",
+    re.IGNORECASE,
+)
+
 
 def _is_waiting_for_media_request(text: str) -> bool:
     return bool(text and _WAIT_FOR_MEDIA_RE.search(text))
@@ -487,6 +497,25 @@ def _is_waiting_for_media_request(text: str) -> bool:
 
 def _is_case_bundle_done(text: str) -> bool:
     return bool(text and _BUNDLE_DONE_RE.match(text))
+
+
+def _is_text_filing_approval(text: str) -> bool:
+    return bool(text and _TEXT_FILING_APPROVAL_RE.match(text))
+
+
+def _is_recent_filing_status_question(text: str) -> bool:
+    if not text or not _RECENT_FILING_STATUS_RE.search(text):
+        return False
+    lowered = text.lower()
+    return (
+        "?" in text
+        or "what happened" in lowered
+        or "did it" in lowered
+        or "was it" in lowered
+        or "were you" in lowered
+        or "are you" in lowered
+        or "stuck" in lowered
+    )
 
 
 def _append_pending_case_bundle(context, text: str, source: str) -> None:
@@ -4286,6 +4315,33 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if update.message.text:
         raw_text = update.message.text.strip()
+        if _is_text_filing_approval(raw_text):
+            if _load_draft(context):
+                return await handle_approval_approve(update, context)
+            if context.user_data.get("last_filing_status") == "success":
+                form_name = context.user_data.get("last_filing_form_name", "that draft")
+                await update.message.reply_text(
+                    f"✅ {form_name} was already saved to Kaizen as a draft. Send a new case when you're ready."
+                )
+                return ConversationHandler.END
+
+        if _is_recent_filing_status_question(raw_text) and context.user_data.get("last_filing_status"):
+            form_name = context.user_data.get("last_filing_form_name", "your last draft")
+            status = context.user_data.get("last_filing_status")
+            if status == "success":
+                await update.message.reply_text(
+                    f"✅ Yes — {form_name} was saved to Kaizen as a draft."
+                )
+            elif status == "partial":
+                await update.message.reply_text(
+                    f"⚠️ {form_name} was partly filed, but needs checking in Kaizen before you rely on it."
+                )
+            else:
+                await update.message.reply_text(
+                    f"❌ {form_name} did not complete. Try again from the latest draft or start fresh."
+                )
+            return ConversationHandler.END
+
         if context.user_data.get("pending_case_bundle"):
             if _is_case_bundle_done(raw_text):
                 case_text, input_source = _combined_pending_case_bundle(context)
@@ -4814,16 +4870,22 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle 'File this draft' approval."""
     query = update.callback_query
-    await query.answer()
+    is_callback = query is not None
+    if query:
+        await query.answer()
 
     # Disarm buttons immediately — prevents double-tap filing
-    await query.edit_message_reply_markup(reply_markup=None)
+    if query:
+        await query.edit_message_reply_markup(reply_markup=None)
+        source_message = query.message
+    else:
+        source_message = update.message
 
     user_id = update.effective_user.id
     creds = get_credentials(user_id)
     if not creds:
         context.user_data.clear()
-        await query.message.reply_text(
+        await source_message.reply_text(
             "⚠️ Credentials not found.",
             reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]])
         )
@@ -4864,12 +4926,20 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
 
     missing_before_file = _pre_file_missing_fields(form_type, fields)
     if missing_before_file:
-        await _safe_edit_text(
-            query.message,
-            _format_pre_file_missing_message(form_type, missing_before_file),
-            reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
-            parse_mode="Markdown",
-        )
+        message = _format_pre_file_missing_message(form_type, missing_before_file)
+        if is_callback:
+            await _safe_edit_text(
+                source_message,
+                message,
+                reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
+                parse_mode="Markdown",
+            )
+        else:
+            await source_message.reply_text(
+                message,
+                reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
+                parse_mode="Markdown",
+            )
         return AWAIT_APPROVAL
 
     # Save local JSON backup
@@ -4894,12 +4964,15 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     # Determine platform (default: kaizen; future: from user profile)
     platform = "kaizen"
     await update.effective_chat.send_action(constants.ChatAction.TYPING)
-    ack = query.message
-    await _safe_edit_text(
-        ack,
-        f"📤 Saving {form_name} as a Kaizen draft…",
-        parse_mode=None,
-    )
+    if is_callback:
+        ack = source_message
+        await _safe_edit_text(
+            ack,
+            f"📤 Saving {form_name} as a Kaizen draft…",
+            parse_mode=None,
+        )
+    else:
+        ack = await source_message.reply_text(f"📤 Saving {form_name} as a Kaizen draft…")
 
     # Progress edits during the long filing wait so the user doesn't see a
     # static message for up to 5 minutes.
@@ -5077,7 +5150,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         filled_count = len(filled)
         fields_summary = f"\n{filled_count} field{'s' if filled_count != 1 else ''} completed." if filled_count > 0 else ""
         msg = (
-            f"✅ *{form_name} saved.{summary}{fields_summary}{usage_line}{observation_line}"
+            f"✅ *{form_name} saved.*{summary}{fields_summary}{usage_line}{observation_line}"
         )
         status_line = "✅ Filing finished."
     elif status == "partial":
@@ -5150,15 +5223,21 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 msg += f"\n\n_Details: {error}_"
             status_line = "❌ Filing stopped."
 
-    # Restore the draft preview on the original message so the user can still see what was filed
-    try:
-        await _safe_edit_text(
-            ack,
-            draft_preview_text,
-            parse_mode="Markdown",
-        )
-    except Exception:
-        logger.warning("Could not restore draft preview after filing")
+    context.user_data["last_filing_status"] = status
+    context.user_data["last_filing_form_name"] = form_name
+    context.user_data["last_filing_report"] = msg
+
+    # Restore the draft preview on the original message so the user can still see what was filed.
+    # Text approvals use a fresh progress message, so that message becomes the final report instead.
+    if is_callback:
+        try:
+            await _safe_edit_text(
+                ack,
+                draft_preview_text,
+                parse_mode="Markdown",
+            )
+        except Exception:
+            logger.warning("Could not restore draft preview after filing")
 
     # Add amend button to the primary row — compact, no extra row
     amend_btn = InlineKeyboardButton("✏️ Amend this draft", callback_data="AMEND|amend")
@@ -5170,6 +5249,15 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     else:
         existing_rows = [[amend_btn]]
     end_keyboard = InlineKeyboardMarkup(existing_rows)
+
+    if not is_callback:
+        await _safe_edit_text(
+            ack,
+            msg,
+            reply_markup=end_keyboard,
+            parse_mode="Markdown",
+        )
+        return ConversationHandler.END
 
     # Send the filing report as a fresh new message (don't overwrite the draft)
     try:
@@ -5569,6 +5657,8 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
 
     raw_text = update.message.text.strip()
     case_text = context.user_data.get("case_text", "")
+    if _is_text_filing_approval(raw_text) and _load_draft(context):
+        return await handle_approval_approve(update, context)
 
     try:
         intent = await classify_intent(raw_text, case_context=case_text)
@@ -5579,6 +5669,28 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
     has_draft = bool(_load_draft(context))
     has_pending = bool(context.user_data.get("pending_draft_data"))
     in_flow = has_draft or has_pending or bool(case_text)
+
+    if _is_text_filing_approval(raw_text) and context.user_data.get("last_filing_status") == "success":
+        form_name = context.user_data.get("last_filing_form_name", "that draft")
+        await update.message.reply_text(
+            f"✅ {form_name} was already saved to Kaizen as a draft. Send a new case when you're ready."
+        )
+        return ConversationHandler.END
+
+    if _is_recent_filing_status_question(raw_text) and context.user_data.get("last_filing_status"):
+        form_name = context.user_data.get("last_filing_form_name", "your last draft")
+        status = context.user_data.get("last_filing_status")
+        if status == "success":
+            await update.message.reply_text(f"✅ Yes — {form_name} was saved to Kaizen as a draft.")
+        elif status == "partial":
+            await update.message.reply_text(
+                f"⚠️ {form_name} was partly filed, but needs checking in Kaizen before you rely on it."
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ {form_name} did not complete. Try again from the latest draft or start fresh."
+            )
+        return ConversationHandler.END
 
     if intent == "chitchat":
         if has_draft:

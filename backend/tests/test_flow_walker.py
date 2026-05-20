@@ -552,6 +552,54 @@ class TestFlowWalker:
         assert ('⋯ More options', 'ACTION|post_file_more|CBD|success') in buttons
 
     @pytest.mark.asyncio
+    async def test_text_file_this_files_active_draft_when_state_reentered(self, thin_draft):
+        from bot import handle_case_input
+
+        sim = BotSimulator()
+        update = sim._make_text_update('File this')
+        context = sim._make_context()
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin_draft.form_type,
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.route_filing', new=AsyncMock(return_value={
+                 'status': 'success',
+                 'filled': ['date_of_encounter'],
+                 'skipped': [],
+                 'method': 'deterministic',
+             })):
+            result = await handle_case_input(update, context)
+
+        assert result == ConversationHandler.END
+        assert 'case-based discussion saved' in sim.get_last_text().lower()
+        assert context.user_data['last_filing_status'] == 'success'
+
+    @pytest.mark.asyncio
+    async def test_recent_filing_question_reports_saved_status(self):
+        from bot import handle_case_input
+
+        sim = BotSimulator()
+        update = sim._make_text_update('What happened, were you stuck filing this case?')
+        context = sim._make_context()
+        context.user_data.update({
+            'last_filing_status': 'success',
+            'last_filing_form_name': 'Direct Observation of Procedural Skills',
+        })
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))):
+            result = await handle_case_input(update, context)
+
+        assert result == ConversationHandler.END
+        assert 'was saved to kaizen as a draft' in sim.get_last_text().lower()
+
+    @pytest.mark.asyncio
     async def test_uncertain_save_keeps_draft_and_offers_compact_recovery(self, thin_draft):
         from bot import handle_approval_approve
 
