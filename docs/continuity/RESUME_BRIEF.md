@@ -1,13 +1,13 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-05-13T18:16:54+00:00
-Status: ready
+Generated: 2026-05-20T11:18:34+00:00
+Status: stale_or_needs_review
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
-- Branch: main
-- Last commit: b63f77d 2026-05-13 docs: unify coding agent context
-- Uncommitted changes: no
+- Branch: feature/conversational-router
+- Last commit: 2d99db1 2026-05-20 fix: confirm kaizen save completion
+- Uncommitted changes: yes
 
 ## Immediate read before restarting
 1. Product hub Status + Brief in Notion
@@ -15,18 +15,26 @@ Status: ready
 3. `TASK.md` for active sprint state, if present
 4. This resume brief for drift warnings and repo state
 
+## Warnings
+- Repo has uncommitted changes — capture/commit or summarise before switching context
+
 ## Recent commits
-- b63f77d 2026-05-13 docs: unify coding agent context
-- a78d7d4 2026-05-13 docs: refresh portfolio guru resume brief
-- 032961c 2026-05-13 docs: refresh portfolio guru continuity context
-- 07d713c 2026-05-12 fix: reuse media status messages
-- 518b966 2026-05-12 fix: ignore generated coverage during mac deploy
-- 1220010 2026-05-12 fix: streamline explicit form workflow
-- d8b0917 2026-05-12 refactor: centralize ai model configuration
-- bd5d6ff 2026-05-12 fix: honor explicit procedure log captions
+- 2d99db1 2026-05-20 fix: confirm kaizen save completion
+- 7f76282 2026-05-20 fix: reuse media bundle status
+- ec4b910 2026-05-20 fix: guard assessor invite sends
+- 1136410 2026-05-19 test: make root pytest use backend config
+- 5ab446d 2026-05-19 fix: import portfolio draft quality rubric
+- d329994 2026-05-19 fix: improve draft preview readability
+- 6af2da0 2026-05-19 feat: smooth portfolio guru recommendations
+- 86fb44f 2026-05-19 fix: bundle case media and enrich drafts
+
+## Uncommitted change summary
+- M backend/filing_coverage.json
+-  M backend/kaizen_form_filer.py
+-  M backend/tests/test_assessor_invite_guard.py
 
 ## Repo context snapshot
-### AGENTS.md — present, 0 days old
+### AGENTS.md — present, 3 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md
 - ## Project
@@ -41,7 +49,7 @@ Key headings:
 - ## Testing
 - ## Compatibility
 
-### CLAUDE.md — present, 0 days old
+### CLAUDE.md — present, 3 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md
 - ## Project
@@ -58,18 +66,21 @@ Key headings:
 
 ### TASK.md — present, 0 days old
 Key headings:
-- # TASK: Portfolio Guru continuity refresh — product hub + repo truth
-- ## Goal
-- ## Scope
-- ## Out of scope
-- ## Definition of done
+- # Active Task - Phase 2.8 Public UX Upgrade
+- ## Objective
+- ## Current Slice
+- ## Guardrails
+- ## Done
+- ## Verification
+- ## Next
 
-### WORKFLOWS.md — present, 59 days old
+### WORKFLOWS.md — present, 0 days old
 Key headings:
 - # Portfolio Guru — Agent Workflow Reference
 - ## Conversation States
 - ## Flow 1 — First-Time User
 - ## Flow 2 — Core Filing (Happy Path)
+- ## Flow 2A — Assess Ticket (Read-Only Mapping / Planned)
 - ## Flow 3 — Edit Before Filing
 - ## Flow 4 — Edit Previously Filed Draft (v2.1 — NOT YET BUILT)
 - ## Flow 5 — Reset / Recovery
@@ -77,9 +88,8 @@ Key headings:
 - ## Key Capabilities Selection Rules
 - ## Data Flow
 - ## Hard Constraints (never violate)
-- ## FORM_UUIDS (in extractor.py)
 
 ## Recommended restart path
-Continuity context looks sufficient; proceed with normal product-docs workflow.
+Refresh the product hub/Brief and repo context before a new build sprint.
 
 If this product has been idle for weeks, do not start implementation from memory. Refresh the product hub Status/Brief first, then create or update `TASK.md` for the next sprint.

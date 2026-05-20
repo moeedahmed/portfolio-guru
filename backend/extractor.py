@@ -1960,6 +1960,20 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
     if has_kc_tick:
         normalised["key_capabilities"] = _normalise_list_field(data.get("key_capabilities"))
 
+    if form_type == "DOPS" and has_kc_tick:
+        # The LLM tends to pick SLO6 KC1 ("knowledge to identify when …") and
+        # stop there. For unstable AF / cardioversion / sedation cases, that
+        # leaves the resuscitation evidence unrepresented. Supplement with the
+        # SLO3/SLO6 KCs the case text genuinely supports.
+        from dops_filing import suggest_dops_kc_breadth, derive_dops_curriculum_links
+        augmented = suggest_dops_kc_breadth(case_description, normalised.get("key_capabilities", []))
+        if augmented != normalised.get("key_capabilities", []):
+            normalised["key_capabilities"] = augmented
+            existing_links = normalised.get("curriculum_links") or []
+            derived = derive_dops_curriculum_links(augmented)
+            merged = list(dict.fromkeys(list(existing_links) + derived))
+            normalised["curriculum_links"] = merged
+
     # Apply humanizer to ALL narrative fields before user sees the draft
     normalised = _humanize_all_fields(normalised)
 

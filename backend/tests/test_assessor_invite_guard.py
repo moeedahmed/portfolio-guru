@@ -7,6 +7,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from kaizen_form_filer import _fill_assessor_invite, _verify_sent_to_assessor
+import kaizen_form_filer
 
 
 class _LocatorList:
@@ -58,7 +59,8 @@ async def test_assessor_invite_requires_expected_name_match(monkeypatch):
 
     assert await _fill_assessor_invite(page, "Ahmed Mahdi", "Ahmed Mahdi") is True
     assert not wrong.clicked
-    assert right.clicked
+    assert not right.clicked
+    assert page.keyboard.press.await_count == 4  # Meta+A, ArrowDown twice, Enter
 
 
 @pytest.mark.asyncio
@@ -92,3 +94,8 @@ async def test_verify_sent_to_assessor_accepts_awaiting_response_to_named_assess
     page.inner_text = AsyncMock(return_value="Awaiting response from Ahmed Mahdi")
 
     assert await _verify_sent_to_assessor(page, "Ahmed Mahdi") is True
+
+
+def test_kc_ticking_supports_short_kc_codes():
+    assert "Key Capability" in kaizen_form_filer.TICK_KC_JS
+    assert "KC" in kaizen_form_filer.TICK_KC_JS

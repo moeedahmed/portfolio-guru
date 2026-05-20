@@ -38,12 +38,20 @@ Build the next draft-quality improvement from dogfood feedback:
 - Imported a product-owned Portfolio Skill Quality Rubric from Claude Code portfolio and Medic Portfolio standards, covering form choice, actual Kaizen field purpose, Driscoll-style reflection, de-identification, KC-first mapping, and pre-preview quality checks.
 - Added deterministic preview cleanup for blunt judgement wording, transcription artefacts, overconfident septation/transudate phrasing, confusing ITU wording, third-party names, named tertiary centres, and historic surgery years.
 - Added regression coverage for the rubric appearing in form recommendation and extraction prompts, and for deterministic de-identification/wording cleanup.
+- Added DOPS-specific Kaizen filing normalisation and quality gate after dogfood showed most DOPS fields were being left blank.
+- DOPS filing now maps indication, trainee performance, clinical reasoning, procedure, placement and dates into the actual Kaizen DOPS fields before save.
+- DOPS filing now blocks underfilled DOPS saves before browser filing instead of claiming success for a near-empty draft.
+- DOPS KC selection now supplements unstable AF/shock/sedation/cardioversion cases with supported SLO3 and SLO6 key capabilities.
+- Added focused offline DOPS filing quality coverage for the unstable AF with RVR, ketamine sedation, refractory cardioversion, amiodarone/magnesium, echo and ITU/medical escalation case.
 
 ## Verification
 
 - Focused extraction/source-grounding tests pass.
 - Full backend offline suite passes when run from the backend pytest config.
 - Local bot restart required before reporting live.
+- 20 May 2026: focused DOPS/save/assessor tests passed: 24 passed.
+- 20 May 2026: full backend offline suite passed: 160 passed, 22 skipped, 13 deselected.
+- 20 May 2026: live bot restarted via launchd and confirmed running.
 
 ## Next
 

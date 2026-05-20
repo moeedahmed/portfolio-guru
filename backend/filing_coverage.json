@@ -58,5 +58,18 @@
     },
     "user_pushbacks": [],
     "last_updated": "2026-05-19"
+  },
+  "DOPS": {
+    "playwright_runs": 1,
+    "browser_use_runs": 0,
+    "field_fill_rates": {
+      "stage_of_training": 1.0,
+      "date_of_encounter": 1.0,
+      "procedural_skill": 1.0,
+      "procedure_name": 1.0,
+      "reflection": 1.0
+    },
+    "user_pushbacks": [],
+    "last_updated": "2026-05-20"
   }
 }

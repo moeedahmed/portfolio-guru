@@ -877,12 +877,23 @@ EXPAND_SLO_JS = """(sloText) => {
 }"""
 
 TICK_KC_JS = """(prefix) => {
+    function variants(raw) {
+        var out = [raw];
+        var m = raw.match(/\\bSLO\\s*(\\d+)\\s*KC\\s*(\\d+)\\b/i);
+        if (m) {
+            out.push('SLO' + m[1] + ' Key Capability ' + m[2]);
+            out.push('SLO ' + m[1] + ' Key Capability ' + m[2]);
+        }
+        return out.map(function(v) { return v.toLowerCase().replace(/\\s+/g, ' ').trim(); });
+    }
+    var wanted = variants(prefix);
     var selectors = ['span.ng-binding.ng-scope', 'span.ng-binding'];
     for (var s = 0; s < selectors.length; s++) {
         var spans = document.querySelectorAll(selectors[s]);
         for (var i = 0; i < spans.length; i++) {
             var txt = spans[i].textContent.trim();
-            if (txt.indexOf(prefix) === 0) {
+            var normalised = txt.toLowerCase().replace(/\\s+/g, ' ').trim();
+            if (wanted.some(function(v) { return normalised.indexOf(v) !== -1; })) {
                 var li = spans[i].parentElement;
                 while (li && li.tagName !== 'LI') { li = li.parentElement; }
                 if (li) {
@@ -1128,13 +1139,17 @@ async def _fill_assessor_invite(page: Page, query: str, expected_name: str = "")
         return False
 
     target_tokens = [t.lower() for t in re.findall(r"[A-Za-z]+", expected_name or query) if len(t) > 2]
-    for suggestion in suggestions:
+    for index, suggestion in enumerate(suggestions):
         text = (await suggestion.inner_text()).strip()
         haystack = text.lower()
         if target_tokens and not all(token in haystack for token in target_tokens):
             continue
         try:
-            await suggestion.click(timeout=3000, force=True)
+            # Twitter Typeahead reliably updates Angular validators when a
+            # suggestion is selected through keyboard navigation.
+            for _ in range(index + 1):
+                await page.keyboard.press("ArrowDown")
+            await page.keyboard.press("Enter")
         except TypeError:
             await suggestion.click()
         except Exception:
@@ -1155,10 +1170,13 @@ async def _fill_assessor_invite(page: Page, query: str, expected_name: str = "")
         await asyncio.sleep(1)
         selection_verified = await page.evaluate(
             """(tokens) => {
-              const root = document.querySelector('#invites')?.closest('.form-group, .twitter-typeahead, body') || document.body;
-              const text = (root.textContent || '') + ' ' + (document.querySelector('#invites')?.value || '');
+              const input = document.querySelector('#invites');
+              const root = input?.closest('.form-group, .twitter-typeahead, body') || document.body;
+              const text = (root.textContent || '') + ' ' + (input?.value || '');
               const haystack = text.toLowerCase();
-              return tokens.every(token => haystack.includes(token));
+              const tokenMatch = tokens.every(token => haystack.includes(token));
+              const validEmail = !input || input.className.includes('ng-valid-email');
+              return tokenMatch && validEmail;
             }""",
             target_tokens,
         )
@@ -1380,6 +1398,23 @@ async def fill_kaizen_form(
         field_map = FORM_FIELD_MAP.get(form_type, {})
         if not field_map:
             return {"status": "failed", "filled": [], "skipped": [], "errors": [f"No field map for: {form_type}"], "screenshot": None}
+
+        if form_type == "DOPS":
+            from dops_filing import normalise_dops_fields, dops_quality_gate
+            fields = normalise_dops_fields(fields)
+            missing_required = dops_quality_gate(fields)
+            if missing_required:
+                return {
+                    "status": "partial",
+                    "filled": [],
+                    "skipped": list(fields.keys()),
+                    "errors": [
+                        "DOPS draft is missing required Kaizen fields: "
+                        + ", ".join(missing_required)
+                        + ". Not saving — add the detail and try again."
+                    ],
+                    "screenshot": None,
+                }
 
         if (
             form_type == "PROC_LOG"
@@ -2239,6 +2274,25 @@ async def file_to_kaizen(
     if form_type == "PROC_LOG" and fields.get("date_of_activity") and not fields.get("date_occurred_on"):
         fields = dict(fields)
         fields["date_occurred_on"] = fields["date_of_activity"]
+    if form_type == "DOPS":
+        # Adapt extractor-schema keys (indication, trainee_performance, etc.)
+        # into the Kaizen DOM keys defined in FORM_FIELD_MAP["DOPS"], then
+        # refuse to file when required DOM slots are still blank. Stops the
+        # bot from announcing "saved successfully" for a near-empty draft.
+        from dops_filing import normalise_dops_fields, dops_quality_gate
+        fields = normalise_dops_fields(fields)
+        missing_required = dops_quality_gate(fields)
+        if missing_required:
+            return {
+                "status": "partial",
+                "filled": [],
+                "skipped": list(fields.keys()),
+                "error": (
+                    "DOPS draft is missing required Kaizen fields: "
+                    + ", ".join(missing_required)
+                    + ". Not saving — add the detail and try again."
+                ),
+            }
     browser = None
     cdp_pw = None
     use_cdp = KAIZEN_USE_CDP
