@@ -47,9 +47,11 @@ def _str(value) -> str:
 def normalise_dops_fields(fields: dict) -> dict:
     """Return DOPS fields aligned with `FORM_FIELD_MAP["DOPS"]` DOM keys.
 
-    Idempotent. Only fills DOM-aligned keys when they are currently empty —
-    user-supplied values (or values from an earlier normalisation pass) are
-    preserved exactly.
+    Idempotent. DOM-aligned helper keys are filled when currently empty.
+    For `case_observed`, the structured DOPS review fields are the source of
+    truth: if the draft has indication / clinical reasoning / trainee
+    performance, rebuild the Kaizen narrative from those same fields so the
+    saved draft cannot diverge from the preview the user approved.
     """
     out = dict(fields or {})
 
@@ -73,12 +75,20 @@ def normalise_dops_fields(fields: dict) -> dict:
         out["procedure_name"] = procedural_skill
 
     case_observed = _str(out.get("case_observed"))
-    if not case_observed:
-        narrative = _build_case_observed_narrative(out)
-        if narrative:
-            out["case_observed"] = narrative
+    narrative = _build_case_observed_narrative(out)
+    if narrative and _has_structured_dops_narrative(out):
+        out["case_observed"] = narrative
+    elif narrative and not case_observed:
+        out["case_observed"] = narrative
 
     return out
+
+
+def _has_structured_dops_narrative(fields: dict) -> bool:
+    return any(
+        _has_value(fields.get(key))
+        for key in ("indication", "clinical_reasoning", "trainee_performance")
+    )
 
 
 def _build_case_observed_narrative(fields: dict) -> str:

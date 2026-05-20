@@ -84,16 +84,33 @@ def test_normalise_dops_mirrors_procedure_keys_and_dates():
     assert out["date_of_event"] == "2026-05-19"
 
 
-def test_normalise_dops_preserves_user_supplied_case_observed():
+def test_normalise_dops_rebuilds_case_observed_from_reviewed_schema_fields():
+    stale_case_observed = "Existing thin summary that should not be filed."
+    out = normalise_dops_fields({
+        "date_of_encounter": "2026-05-19",
+        "procedure_name": "DC cardioversion",
+        "clinical_setting": "Emergency Department Resus",
+        "case_observed": stale_case_observed,
+        "indication": "Unstable atrial fibrillation with hypotension.",
+        "trainee_performance": (
+            "I prepared the resuscitation team, consented the patient, "
+            "administered ketamine sedation, and delivered synchronised shocks."
+        ),
+    })
+    # The preview fields win, so Kaizen receives the same narrative content the
+    # user reviewed instead of a separate stale model summary.
+    assert stale_case_observed not in out["case_observed"]
+    assert "Unstable atrial fibrillation" in out["case_observed"]
+    assert "prepared the resuscitation team" in out["case_observed"]
+
+
+def test_normalise_dops_preserves_case_observed_without_schema_narrative():
     user_case_observed = "Existing narrative the user typed."
     out = normalise_dops_fields({
         "date_of_encounter": "2026-05-19",
         "procedure_name": "DC cardioversion",
         "case_observed": user_case_observed,
-        "indication": "Unstable AF",
-        "trainee_performance": "Performed cardioversion.",
     })
-    # User content wins — normalisation never overwrites a populated DOM slot.
     assert out["case_observed"] == user_case_observed
 
 
