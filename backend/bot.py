@@ -3682,16 +3682,22 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
                 text=prompt_text,
                 reply_markup=_build_form_choice_keyboard(recommendations, curriculum=get_curriculum(user_id)),
             )
+            context.user_data["last_bot_msg_id"] = status_msg
+            context.user_data["last_bot_chat_id"] = status_chat
+            context.user_data["status_msg_id"] = status_msg
+            context.user_data["status_msg_chat"] = status_chat
         except Exception:
-            await message.reply_text(
+            msg = await message.reply_text(
                 prompt_text,
                 reply_markup=_build_form_choice_keyboard(recommendations, curriculum=get_curriculum(user_id)),
             )
+            _track_latest_message(context, msg)
     else:
-        await message.reply_text(
+        msg = await message.reply_text(
             prompt_text,
             reply_markup=_build_form_choice_keyboard(recommendations, curriculum=get_curriculum(user_id)),
         )
+        _track_latest_message(context, msg)
     return AWAIT_FORM_CHOICE
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):

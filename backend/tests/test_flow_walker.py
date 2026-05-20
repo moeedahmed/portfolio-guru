@@ -93,6 +93,8 @@ class TestFlowWalker:
         assert 'FORM|show_all' in button_data
         assert context.user_data['last_funnel_event'] == 'recommendation_shown'
         assert context.user_data['case_text'] == SAMPLE_CASES['valid']
+        assert context.user_data['status_msg_id']
+        assert context.user_data['last_bot_msg_id'] == context.user_data['status_msg_id']
 
     @pytest.mark.asyncio
     async def test_explicit_form_waits_for_draft_button(self):
@@ -494,6 +496,8 @@ class TestFlowWalker:
             'form_recommendations': recommended_forms,
             'last_bot_msg_id': 42,
             'last_bot_chat_id': sim.user_id,
+            'status_msg_id': 42,
+            'status_msg_chat': sim.user_id,
         })
         extra_text = (
             'This is another section of the same case: the patient remained pale, '
@@ -512,6 +516,7 @@ class TestFlowWalker:
         assert 'It looks like you want to file a new case' not in sim.get_last_text()
         assert extra_text in context.user_data['case_text']
         assert 'Forms that fit your case' in sim.get_last_text()
+        assert sim.messages_sent[-1][0] == 'bot_edit'
 
     @pytest.mark.asyncio
     async def test_expired_draft_recovery_updates_latest_template_message(self, thin_draft):
