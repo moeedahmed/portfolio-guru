@@ -500,6 +500,11 @@ def _append_pending_case_bundle(context, text: str, source: str) -> None:
         sources.append(source)
 
 
+def _pending_case_bundle_source_count(context, source: str) -> int:
+    bundle = context.user_data.get("pending_case_bundle") or {}
+    return sum(1 for part in bundle.get("parts", []) if part.get("source") == source)
+
+
 def _combined_pending_case_bundle(context) -> tuple[str, str]:
     bundle = context.user_data.get("pending_case_bundle") or {}
     parts = [
@@ -4244,11 +4249,13 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     # Clear post_reset flag if set (belt and braces)
     context.user_data.pop("post_reset", None)
 
-    # Clear any stale status message state from previous sessions
-    context.user_data.pop("status_msg_id", None)
-    context.user_data.pop("status_msg_chat", None)
-    context.user_data.pop("last_bot_msg_id", None)
-    context.user_data.pop("last_bot_chat_id", None)
+    # Clear stale status state from previous sessions, but keep the active
+    # bundle message editable while the user is sending multiple files.
+    if not context.user_data.get("pending_case_bundle"):
+        context.user_data.pop("status_msg_id", None)
+        context.user_data.pop("status_msg_chat", None)
+        context.user_data.pop("last_bot_msg_id", None)
+        context.user_data.pop("last_bot_chat_id", None)
 
     # Check credentials
     if not has_credentials(user_id):
@@ -4291,15 +4298,21 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 return await _process_case_text(update.message, context, user_id, case_text, input_source)
 
             _append_pending_case_bundle(context, raw_text, "text")
-            await update.message.reply_text("Added. I’ll keep waiting — send `done` when you’ve shared everything.", parse_mode="Markdown")
+            await _send_latest_message(
+                update.message,
+                context,
+                "Added. I’ll keep waiting — send `done` when you’ve shared everything.",
+                parse_mode="Markdown",
+            )
             return AWAIT_CASE_INPUT
 
         if not (context.user_data.get("awaiting_detail") and context.user_data.get("chosen_form")) and _is_waiting_for_media_request(raw_text):
             _append_pending_case_bundle(context, raw_text, "text")
-            await update.message.reply_text(
+            ack = await update.message.reply_text(
                 "Got it — I’ll wait for the images/files before drafting. Send `done` when you’ve shared everything.",
                 parse_mode="Markdown",
             )
+            _track_latest_message(context, ack)
             return AWAIT_CASE_INPUT
 
         if context.user_data.get("awaiting_detail") and context.user_data.get("chosen_form"):
@@ -4447,7 +4460,10 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 os.unlink(tmp_path)
 
     elif update.message.photo:
-        ack = await update.message.reply_text("📷 Reading image…")
+        bundling = bool(context.user_data.get("pending_case_bundle"))
+        image_number = _pending_case_bundle_source_count(context, "photo") + 1
+        ack_text = f"📷 Reading image {image_number}…" if bundling else "📷 Reading image…"
+        ack = await _send_latest_message(update.message, context, ack_text) if bundling else await update.message.reply_text(ack_text)
         tmp_path = None
         try:
             photo = update.message.photo[-1]
@@ -4462,7 +4478,13 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             caption = (update.message.caption or "").strip()
             if caption:
                 case_text = f"{caption}\n\n{case_text}".strip()
-            await ack.edit_text("📷 Image read. Finding matching forms…")
+            if bundling:
+                await ack.edit_text(
+                    f"📷 Image {image_number} read. I’ll keep waiting — send `done` when you’ve shared everything.",
+                    parse_mode="Markdown",
+                )
+            else:
+                await ack.edit_text("📷 Image read. Finding matching forms…")
             _track_latest_message(context, ack)
         except Exception as e:
             context.user_data.clear()
@@ -4549,7 +4571,13 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if context.user_data.get("pending_case_bundle"):
         _append_pending_case_bundle(context, case_text, input_source)
-        await update.message.reply_text("Added. I’ll keep waiting — send `done` when you’ve shared everything.", parse_mode="Markdown")
+        if input_source != "photo":
+            await _send_latest_message(
+                update.message,
+                context,
+                "Added. I’ll keep waiting — send `done` when you’ve shared everything.",
+                parse_mode="Markdown",
+            )
         return AWAIT_CASE_INPUT
 
     chosen_form = context.user_data.get("chosen_form")
