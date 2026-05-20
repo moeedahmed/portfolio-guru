@@ -1019,7 +1019,7 @@ class TestFlowWalker:
         process_mock.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_wait_for_pictures_edits_one_status_for_multiple_images(self):
+    async def test_wait_for_pictures_then_auto_releases_on_first_image(self):
         from bot import AWAIT_CASE_INPUT, handle_case_input
 
         sim = BotSimulator()
@@ -1030,30 +1030,24 @@ class TestFlowWalker:
 
         with patch('bot.has_credentials', return_value=True), \
              patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
-             patch('bot.extract_from_image', new=AsyncMock(side_effect=['Image one text', 'Image two text'])), \
+             patch('bot.extract_from_image', new=AsyncMock(return_value='Image one text')), \
              patch('bot.classify_intent', new=AsyncMock(return_value='case')), \
              patch('bot._process_case_text', new=AsyncMock()) as process_mock:
             result = await handle_case_input(initial, context)
             assert result == AWAIT_CASE_INPUT
 
-            for _ in range(2):
-                photo_update = sim._make_text_update('')
-                photo = MagicMock()
-                file_obj = MagicMock()
-                file_obj.download_to_drive = AsyncMock()
-                photo.get_file = AsyncMock(return_value=file_obj)
-                photo_update.message.text = None
-                photo_update.message.photo = [photo]
+            # First photo triggers auto-release: goes to _process_case_text, not back to AWAIT_CASE_INPUT
+            photo_update = sim._make_text_update('')
+            photo = MagicMock()
+            file_obj = MagicMock()
+            file_obj.download_to_drive = AsyncMock()
+            photo.get_file = AsyncMock(return_value=file_obj)
+            photo_update.message.text = None
+            photo_update.message.photo = [photo]
 
-                result = await handle_case_input(photo_update, context)
-                assert result == AWAIT_CASE_INPUT
-
-        reply_count = sum(1 for kind, _, _ in sim.messages_sent if kind == 'reply')
-        assert reply_count == 1
-        assert 'image 2 read' in sim.get_last_text().lower()
-        assert 'send `done`' in sim.get_last_text()
-        assert len(context.user_data['pending_case_bundle']['parts']) == 3
-        process_mock.assert_not_called()
+            result = await handle_case_input(photo_update, context)
+            process_mock.assert_called_once()
+            assert 'pending_case_bundle' not in context.user_data
 
     @pytest.mark.asyncio
     async def test_pending_case_bundle_done_processes_combined_case(self):

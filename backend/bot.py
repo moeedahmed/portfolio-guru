@@ -4353,6 +4353,16 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 _track_latest_message(context, ack)
                 return await _process_case_text(update.message, context, user_id, case_text, input_source)
 
+            # If the user already sent images in this bundle (count 1+ photos),
+            # new text is likely extra detail — auto-release without needing "done"
+            if _pending_case_bundle_source_count(context, "photo") > 0:
+                _append_pending_case_bundle(context, raw_text, "text")
+                case_text, input_source = _combined_pending_case_bundle(context)
+                context.user_data.pop("pending_case_bundle", None)
+                ack = await update.message.reply_text(CAPTURED_ACK, parse_mode="Markdown")
+                _track_latest_message(context, ack)
+                return await _process_case_text(update.message, context, user_id, case_text, input_source)
+
             _append_pending_case_bundle(context, raw_text, "text")
             await _send_latest_message(
                 update.message,
@@ -4535,10 +4545,13 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             if caption:
                 case_text = f"{caption}\n\n{case_text}".strip()
             if bundling:
-                await ack.edit_text(
-                    f"📷 Image {image_number} read. I’ll keep waiting — send `done` when you’ve shared everything.",
-                    parse_mode="Markdown",
-                )
+                # User said they'd send images — they just did. Auto-release.
+                _append_pending_case_bundle(context, case_text, "photo")
+                case_text, input_source = _combined_pending_case_bundle(context)
+                context.user_data.pop("pending_case_bundle", None)
+                await ack.edit_text("📷 Images read. Finding matching forms…")
+                _track_latest_message(context, ack)
+                return await _process_case_text(update.message, context, user_id, case_text, input_source)
             else:
                 await ack.edit_text("📷 Image read. Finding matching forms…")
             _track_latest_message(context, ack)
