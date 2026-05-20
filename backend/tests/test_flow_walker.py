@@ -655,6 +655,59 @@ class TestFlowWalker:
         assert 'was saved to kaizen as a draft' in sim.get_last_text().lower()
 
     @pytest.mark.asyncio
+    async def test_thin_dops_save_returns_to_approval_with_missing_detail_copy(self):
+        """A thin DOPS draft must not reach route_filing. The user is kept on
+        the draft-approval screen with a concise list of missing detail and
+        the same Save/Quick improve/Cancel keyboard.
+        """
+        from bot import AWAIT_APPROVAL, handle_approval_approve
+        from models import FormDraft
+
+        thin_dops = FormDraft(
+            form_type='DOPS',
+            uuid='uuid-dops',
+            fields={
+                'date_of_encounter': '2026-05-19',
+                'stage_of_training': 'Higher/ST4-ST6',
+                'clinical_setting': 'Emergency Department',
+                'procedure_name': 'DC cardioversion',
+                # No indication, no trainee performance — label-only narrative.
+                'case_observed': 'Procedure observed: DC cardioversion',
+            },
+        )
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('APPROVE|draft')
+        context = sim._make_context()
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin_dops.form_type,
+            'fields': thin_dops.fields,
+            'uuid': thin_dops.uuid,
+        }
+
+        route_filing_mock = AsyncMock(return_value={
+            'status': 'success', 'filled': [], 'skipped': [], 'method': 'deterministic',
+        })
+
+        with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.route_filing', new=route_filing_mock):
+            result = await handle_approval_approve(update, context)
+
+        # The gate fires BEFORE Kaizen is touched.
+        route_filing_mock.assert_not_awaited()
+        assert result == AWAIT_APPROVAL
+        # Draft is preserved so the user can fix it.
+        assert context.user_data.get('draft_data')
+        text = (sim.get_last_text() or '').lower()
+        assert 'indication' in text
+        assert 'trainee performance' in text
+        # The approval keyboard is still in place so user can edit and resave.
+        buttons = {data for _, data in sim.get_last_buttons()}
+        assert 'APPROVE|draft' in buttons
+        assert 'CANCEL|draft' in buttons
+
+    @pytest.mark.asyncio
     async def test_uncertain_save_keeps_draft_and_offers_compact_recovery(self, thin_draft):
         from bot import handle_approval_approve
 
@@ -1459,6 +1512,49 @@ class TestRecentPortfolioFixes:
         assert 'Procedure / procedural skill' in missing
         assert 'Indication' in missing
         assert 'Trainee Performance' in missing
+
+    def test_dops_pre_file_guard_blocks_thin_normalised_narrative(self):
+        """The real dogfood bug: thin voice notes can produce a label-only
+        case_observed like 'Procedure observed: DC cardioversion'. The
+        existing guard fell through to that field for the Indication check
+        and passed, so a near-empty Kaizen draft slipped through. The
+        strengthened guard must catch it.
+        """
+        from bot import _pre_file_missing_fields
+
+        missing = _pre_file_missing_fields('DOPS', {
+            'date_of_encounter': '2026-05-19',
+            'stage_of_training': 'Higher/ST4-ST6',
+            'clinical_setting': 'Emergency Department',
+            'procedure_name': 'DC cardioversion',
+            # Indication and trainee performance left blank — but
+            # case_observed is populated with a label-only stub the way the
+            # normaliser builds it from a procedure-only DOPS draft.
+            'case_observed': 'Procedure observed: DC cardioversion',
+        })
+
+        assert 'Indication' in missing
+        assert 'Trainee Performance' in missing
+
+    def test_dops_pre_file_guard_blocks_incoherent_reflection(self):
+        """A two-word fragment reflection is worthless to an assessor. The
+        guard surfaces it so the user adds a real reflection before save.
+        """
+        from bot import _pre_file_missing_fields
+
+        missing = _pre_file_missing_fields('DOPS', {
+            'date_of_encounter': '2026-05-19',
+            'stage_of_training': 'Higher/ST4-ST6',
+            'procedure_name': 'DC cardioversion',
+            'indication': 'Unstable AF with RVR and hypotension requiring emergency cardioversion.',
+            'trainee_performance': (
+                'I led the synchronised cardioversion under ketamine sedation, '
+                'delivered three escalating shocks, escalated to ITU.'
+            ),
+            'reflection': 'ok done',
+        })
+
+        assert any('Reflection' in m for m in missing), missing
 
     def test_post_filing_keyboard_offers_same_case_another_wpba(self):
         from bot import _build_post_filing_keyboard

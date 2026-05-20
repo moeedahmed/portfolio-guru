@@ -119,18 +119,108 @@ DOPS_REQUIRED_LABELS = (
 )
 
 
+# Section headers `_build_case_observed_narrative` writes into case_observed.
+# Stripping them gives a rough measure of how much real prose the draft
+# contains versus label scaffolding.
+_NARRATIVE_LABEL_PREFIXES = (
+    "Procedure observed:",
+    "Indication:",
+    "Clinical reasoning:",
+    "Trainee performance:",
+)
+
+
+def _strip_narrative_labels(text: str) -> str:
+    out = text or ""
+    for prefix in _NARRATIVE_LABEL_PREFIXES:
+        out = out.replace(prefix, "")
+    return " ".join(out.split())
+
+
+def _section_body(case_observed: str, header: str) -> str:
+    """Return the prose body of a `Header: ...` section, or '' if absent.
+
+    `_build_case_observed_narrative` separates sections with a blank line, so
+    the body runs until the next double newline or end of string.
+    """
+    if not case_observed:
+        return ""
+    needle = f"{header}:"
+    idx = case_observed.find(needle)
+    if idx < 0:
+        return ""
+    start = idx + len(needle)
+    end = case_observed.find("\n\n", start)
+    return case_observed[start:end if end >= 0 else None].strip()
+
+
+def _is_thin_case_observed(case_observed: str) -> bool:
+    """True if the DOM narrative slot, with section labels stripped, has
+    fewer than 30 characters of real prose — i.e. a label-only stub like
+    'Procedure observed: DC cardioversion'."""
+    return len(_strip_narrative_labels(case_observed)) < 30
+
+
+_INCOHERENT_REFLECTION_MIN_CHARS = 20
+_INCOHERENT_REFLECTION_MIN_WORDS = 4
+
+
+def _is_incoherent_reflection(text: str) -> bool:
+    """Heuristic for reflections too short or fragmentary to file. The user
+    sees a clear ask instead of an embarrassing entry on Kaizen."""
+    if not text:
+        return False
+    cleaned = text.strip()
+    if len(cleaned) < _INCOHERENT_REFLECTION_MIN_CHARS:
+        return True
+    if len(cleaned) < 60 and cleaned == cleaned.upper() and any(c.isalpha() for c in cleaned):
+        return True
+    words = [w for w in cleaned.split() if any(c.isalpha() for c in w)]
+    if len(words) < _INCOHERENT_REFLECTION_MIN_WORDS:
+        return True
+    return False
+
+
 def dops_quality_gate(fields: dict) -> list[str]:
-    """Return required Kaizen DOM fields that would be empty on save.
+    """Return required Kaizen DOM fields that would be empty or thin on save.
 
     Run AFTER `normalise_dops_fields`. An empty result means the DOPS draft
     is safe to save. A non-empty result means the filer must refuse to claim
-    success — saving anyway would create a near-blank Kaizen draft.
+    success — saving anyway would create a near-blank or incoherent Kaizen
+    draft.
+
+    Checks beyond bare presence:
+      - `case_observed` is "thin" (label-only stub like
+        "Procedure observed: DC cardioversion").
+      - The indication / trainee-performance semantic blocks are missing
+        both as explicit fields and as labelled sections in `case_observed`.
+      - `reflection`, if present, is incoherent (too short or fragmented).
     """
     fields = fields or {}
     missing: list[str] = []
     for label, keys in DOPS_REQUIRED_LABELS:
         if not any(_has_value(fields.get(k)) for k in keys):
             missing.append(label)
+
+    case_observed = _str(fields.get("case_observed"))
+    if case_observed and "Case observed narrative" not in missing:
+        if _is_thin_case_observed(case_observed):
+            missing.append("Case observed narrative")
+
+    indication_field = _str(fields.get("indication"))
+    indication_body = _section_body(case_observed, "Indication")
+    if not indication_field and len(indication_body) < 12:
+        missing.append("Indication")
+
+    trainee_field = _str(fields.get("trainee_performance"))
+    trainee_body = _section_body(case_observed, "Trainee performance")
+    if not trainee_field and len(trainee_body) < 12:
+        missing.append("Trainee performance")
+
+    reflection = _str(fields.get("reflection"))
+    if reflection and _is_incoherent_reflection(reflection):
+        missing.append("Reflection (needs clearer wording)")
+
     return missing
 
 

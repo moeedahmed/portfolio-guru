@@ -1,12 +1,12 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-05-20T11:18:34+00:00
+Generated: 2026-05-20T21:56:41+00:00
 Status: stale_or_needs_review
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
 - Branch: feature/conversational-router
-- Last commit: 2d99db1 2026-05-20 fix: confirm kaizen save completion
+- Last commit: 1972984 2026-05-20 Fix Portfolio Guru completion message and bot username
 - Uncommitted changes: yes
 
 ## Immediate read before restarting
@@ -19,19 +19,17 @@ Status: stale_or_needs_review
 - Repo has uncommitted changes — capture/commit or summarise before switching context
 
 ## Recent commits
-- 2d99db1 2026-05-20 fix: confirm kaizen save completion
-- 7f76282 2026-05-20 fix: reuse media bundle status
-- ec4b910 2026-05-20 fix: guard assessor invite sends
-- 1136410 2026-05-19 test: make root pytest use backend config
-- 5ab446d 2026-05-19 fix: import portfolio draft quality rubric
-- d329994 2026-05-19 fix: improve draft preview readability
-- 6af2da0 2026-05-19 feat: smooth portfolio guru recommendations
-- 86fb44f 2026-05-19 fix: bundle case media and enrich drafts
+- 1972984 2026-05-20 Fix Portfolio Guru completion message and bot username
+- 7217fea 2026-05-20 Prevent duplicate form recommendation messages
+- 4425cdf 2026-05-20 Simplify image reading status copy
+- 124a907 2026-05-20 Fix Portfolio Guru new-case boundary after cancel
+- 19a4edc 2026-05-20 Fix amend mode draft boundary
+- 8f7c195 2026-05-20 fix: keep draft visible during filing
+- de9fb31 2026-05-20 fix: isolate image bundle state
+- 30080b7 2026-05-20 fix: auto-release pending image bundle when images arrive
 
 ## Uncommitted change summary
 - M backend/filing_coverage.json
--  M backend/kaizen_form_filer.py
--  M backend/tests/test_assessor_invite_guard.py
 
 ## Repo context snapshot
 ### AGENTS.md — present, 3 days old
@@ -74,7 +72,7 @@ Key headings:
 - ## Verification
 - ## Next
 
-### WORKFLOWS.md — present, 0 days old
+### WORKFLOWS.md — present, 1 days old
 Key headings:
 - # Portfolio Guru — Agent Workflow Reference
 - ## Conversation States

@@ -48,6 +48,11 @@ Build the next draft-quality improvement from dogfood feedback:
 - Added lightweight repeated Telegram typing indicators during long image-reading and Kaizen-filing work, plus a delayed "still reading" image status for slower clinical screenshots.
 - Added amend mode after filed drafts: the reopened draft now stays locked to the current case until Save updated draft or Cancel amend, extra text/media refines the existing draft, and explicit new-case wording asks the user to choose update-vs-new instead of guessing.
 - Refined the post-cancel/new-case boundary: Cancel now fully ends the active conversation state, and extra clinical text sent while choosing a form is folded into the current fresh case instead of producing a second "start new case" warning.
+- Strengthened the DOPS quality gate: it now blocks save when the case_observed narrative is a label-only stub, when the Indication or Trainee Performance semantic blocks are missing both as fields and as labelled narrative sections, and when the reflection is an incoherent fragment.
+- `_pre_file_missing_fields` in bot.py now delegates the semantic checks to `dops_quality_gate`, so the bot and `file_to_kaizen` apply the same rules and the user is returned to draft approval (not to a half-saved Kaizen state) when the gate blocks.
+- `file_to_kaizen` now emits `quality_gate_failed: True` and `missing_for_quality: [...]` alongside the partial-status error, giving the bot a structural signal independent of the English error string.
+- Added a configurable Gemini 3.5 Flash extraction route (`PORTFOLIO_GURU_EXTRACTOR_PROVIDER=gemini-3.5-flash`, model name `gemini-3.5-flash`, env override `GEMINI_3_5_FLASH_MODEL`) without changing the DeepSeek production default.
+- Added a focused DOPS bake-off (`backend/eval_dops_bakeoff.py`) that scores provider extractions on procedure / indication / trainee performance / reflection / KC links / grammar; the deterministic scorer is unit-tested offline.
 
 ## Verification
 
@@ -60,6 +65,7 @@ Build the next draft-quality improvement from dogfood feedback:
 - 20 May 2026: image-bundle regression tests passed; full backend offline suite passed: 162 passed, 22 skipped, 13 deselected.
 - 20 May 2026: amend-mode regression tests passed; full backend offline suite passed: 165 passed, 22 skipped, 13 deselected; live bot restarted and confirmed on the amend-mode commit.
 - 20 May 2026: cancel/new-case boundary regression tests passed; full backend offline suite passed: 167 passed, 22 skipped, 13 deselected.
+- 20 May 2026: strengthened DOPS gate + Gemini 3.5 Flash route + DOPS bake-off scorer landed; focused suites (test_dops_filing_quality, test_model_config, test_eval_dops_bakeoff, test_flow_walker) passed: 98 passed; full backend offline suite passed: 187 passed, 22 skipped, 13 deselected.
 
 ## Next
 

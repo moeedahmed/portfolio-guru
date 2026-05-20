@@ -154,6 +154,124 @@ def test_dops_quality_gate_treats_whitespace_only_values_as_missing():
     assert "Case observed narrative" in dops_quality_gate(fields)
 
 
+# ─── Strengthened quality gate (semantic content checks) ─────────────────────
+
+
+def test_dops_quality_gate_flags_thin_case_observed_built_only_from_procedure_label():
+    # Normalisation produces a case_observed of just "Procedure observed: DC
+    # cardioversion" when only the procedure name is supplied. That is a
+    # one-line label, not a narrative — assessors and Kaizen reviewers would
+    # treat it as blank. The gate must catch it.
+    fields = normalise_dops_fields({
+        "date_of_encounter": "2026-05-19",
+        "stage_of_training": "Higher/ST4-ST6",
+        "procedure_name": "DC cardioversion",
+    })
+    missing = dops_quality_gate(fields)
+    assert "Case observed narrative" in missing
+
+
+def test_dops_quality_gate_flags_missing_indication_section():
+    # Indication is one of three semantic blocks the DOM narrative MUST
+    # contain. If both the extractor field and the narrative are silent on
+    # indication, refuse the save.
+    fields = normalise_dops_fields({
+        "date_of_encounter": "2026-05-19",
+        "stage_of_training": "Higher/ST4-ST6",
+        "procedure_name": "DC cardioversion",
+        "trainee_performance": (
+            "I led the synchronised cardioversion under ketamine sedation. "
+            "Delivered three shocks; the third converted transiently."
+        ),
+    })
+    missing = dops_quality_gate(fields)
+    assert "Indication" in missing
+
+
+def test_dops_quality_gate_flags_missing_trainee_performance_section():
+    fields = normalise_dops_fields({
+        "date_of_encounter": "2026-05-19",
+        "stage_of_training": "Higher/ST4-ST6",
+        "procedure_name": "DC cardioversion",
+        "indication": (
+            "Unstable atrial fibrillation with rapid ventricular response "
+            "and hypotension requiring emergency cardioversion."
+        ),
+    })
+    missing = dops_quality_gate(fields)
+    assert "Trainee performance" in missing
+
+
+def test_dops_quality_gate_flags_incoherent_reflection():
+    fields = normalise_dops_fields({
+        "date_of_encounter": "2026-05-19",
+        "stage_of_training": "Higher/ST4-ST6",
+        "procedure_name": "DC cardioversion",
+        "indication": (
+            "Unstable atrial fibrillation with rapid ventricular response "
+            "and hypotension requiring emergency cardioversion."
+        ),
+        "trainee_performance": (
+            "I led the synchronised cardioversion under ketamine sedation. "
+            "Delivered three shocks; the third converted transiently."
+        ),
+        # Two-word fragment with no verb, no clinical thought.
+        "reflection": "ok done",
+    })
+    missing = dops_quality_gate(fields)
+    assert "Reflection (needs clearer wording)" in missing
+
+
+def test_dops_quality_gate_accepts_full_dogfood_dops():
+    # Realistic dogfood-quality DOPS draft must pass cleanly.
+    fields = normalise_dops_fields({
+        "date_of_encounter": "2026-05-19",
+        "stage_of_training": "Higher/ST4-ST6",
+        "clinical_setting": "Emergency Department - Resus",
+        "procedure_name": "DC cardioversion",
+        "indication": (
+            "Unstable atrial fibrillation with rapid ventricular response, "
+            "hypotensive and peripherally shut down."
+        ),
+        "trainee_performance": (
+            "I led the synchronised cardioversion under ketamine sedation, "
+            "delivered three escalating shocks, recognised refractory rhythm "
+            "and escalated to ITU."
+        ),
+        "reflection": (
+            "Reinforced the value of early ITU escalation when rhythm fails "
+            "to convert and the patient remains compromised."
+        ),
+    })
+    assert dops_quality_gate(fields) == []
+
+
+# ─── file_to_kaizen flag for the bot to detect quality-gate blocks ───────────
+
+
+@pytest.mark.asyncio
+async def test_file_to_kaizen_dops_marks_result_with_quality_gate_failed_flag():
+    # The bot needs a structural signal (not just an English error string) to
+    # route the user back to draft approval rather than reporting "filing
+    # failed".
+    fields_with_blank_narrative = {
+        "date_of_encounter": "2026-05-19",
+        "stage_of_training": "Higher/ST4-ST6",
+        "reflection": "Brief reflection.",
+    }
+
+    with patch("kaizen_form_filer.async_playwright") as ap_mock, \
+         patch("kaizen_form_filer._login", new=AsyncMock(return_value=True)), \
+         patch("kaizen_form_filer._save_draft_legacy", new=AsyncMock(return_value=True)), \
+         patch("kaizen_form_filer._verify_entry_saved", new=AsyncMock(return_value=True)), \
+         patch("kaizen_form_filer.asyncio.sleep", new=AsyncMock()):
+        result = await file_to_kaizen("DOPS", fields_with_blank_narrative, "user", "pass")
+        ap_mock.assert_not_called()
+
+    assert result.get("quality_gate_failed") is True
+    assert result.get("missing_for_quality") and isinstance(result["missing_for_quality"], list)
+
+
 # ─── suggest_dops_kc_breadth ─────────────────────────────────────────────────
 
 

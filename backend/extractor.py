@@ -10,7 +10,7 @@ from typing import List
 logger = logging.getLogger(__name__)
 from models import CBDData, FormTypeRecommendation, FormDraft
 from form_schemas import FORM_SCHEMAS
-from model_config import gemini_premium_model
+from model_config import gemini_premium_model, gemini_three_five_flash_model
 
 # RCEM Higher EM Curriculum (2025 Update) — Exact Kaizen checkbox labels
 # Source: Live Kaizen CBD form screenshot (verified 2026-03-08)
@@ -106,6 +106,17 @@ PREMIUM_PROVIDERS = [
     },
 ]
 
+# Gemini 3.5 Flash is exposed as an explicit override so the eval can compare
+# it against DeepSeek without changing the production default.
+GEMINI_3_5_FLASH_PROVIDERS = [
+    {
+        "name": "gemini-3-5-flash",
+        "type": "gemini",
+        "model": gemini_three_five_flash_model,
+        "env_key": "GOOGLE_API_KEY",
+    },
+]
+
 
 def _select_providers(tier: str = ""):
     requested = (
@@ -113,9 +124,11 @@ def _select_providers(tier: str = ""):
         or os.environ.get("PORTFOLIO_GURU_EXTRACTOR_PROVIDER")
         or os.environ.get("EXTRACTOR_PROVIDER")
         or "deepseek-v4"
-    ).lower().replace("_", "-")
+    ).lower().replace("_", "-").replace(".", "-")
     if requested in {"gemini-pro", "gemini-premium", "premium"}:
         return PREMIUM_PROVIDERS
+    if requested in {"gemini-3-5-flash", "gemini-flash-3-5", "gemini-flash-35"}:
+        return GEMINI_3_5_FLASH_PROVIDERS
     return PROVIDERS
 
 

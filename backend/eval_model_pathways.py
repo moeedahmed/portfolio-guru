@@ -296,6 +296,8 @@ PROVIDERS = [
      "model": "gemini-3-flash-preview",        "env_key": "GOOGLE_API_KEY",       "cost_note": "Free tier / Google One AI Premium"},
     {"name": "gemini-2.5-flash", "caller": "gemini",
      "model": "gemini-2.5-flash",               "env_key": "GOOGLE_API_KEY",       "cost_note": "Free tier / Google One AI Premium"},
+    {"name": "gemini-3-5-flash", "caller": "gemini",
+     "model": "gemini-3.5-flash",               "env_key": "GOOGLE_API_KEY",       "cost_note": "Google API key (pay-as-you-go)"},
     {"name": "gemini-pro",    "caller": "gemini",
      "model": "gemini-3.1-pro-preview",          "env_key": "GOOGLE_API_KEY",       "cost_note": "Google One AI Premium (subscription)"},
     {"name": "deepseek-v4",   "caller": "deepseek",

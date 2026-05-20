@@ -11,6 +11,7 @@ import os
 DEFAULT_GEMINI_FAST_MODEL = "gemini-3-flash-preview"
 DEFAULT_GEMINI_STABLE_MODEL = "gemini-2.5-flash"
 DEFAULT_GEMINI_PREMIUM_MODEL = "gemini-3.1-pro-preview"
+DEFAULT_GEMINI_3_5_FLASH_MODEL = "gemini-3.5-flash"
 DEFAULT_OPENAI_FALLBACK_MODEL = "gpt-4o-mini"
 DEFAULT_BROWSER_FALLBACK_MODEL = "gpt-4o"
 
@@ -25,6 +26,10 @@ def gemini_stable_model() -> str:
 
 def gemini_premium_model() -> str:
     return os.environ.get("GEMINI_PREMIUM_MODEL", DEFAULT_GEMINI_PREMIUM_MODEL)
+
+
+def gemini_three_five_flash_model() -> str:
+    return os.environ.get("GEMINI_3_5_FLASH_MODEL", DEFAULT_GEMINI_3_5_FLASH_MODEL)
 
 
 def gemini_fallback_models(include_premium: bool = False) -> list[str]:

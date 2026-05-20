@@ -1797,6 +1797,10 @@ def _pre_file_missing_fields(form_type: str, fields: dict) -> list[str]:
 
     Template review may allow a user to continue with thin data; this final
     gate prevents a mostly blank Kaizen draft, especially for voice-led DOPS.
+
+    Delegates the semantic content checks (thin narrative, missing indication
+    / trainee-performance sections, incoherent reflection) to
+    `dops_quality_gate` so the bot and `file_to_kaizen` apply the same rules.
     """
     base_form = _normalise_form_type(form_type)
     if base_form != "DOPS":
@@ -1807,27 +1811,33 @@ def _pre_file_missing_fields(form_type: str, fields: dict) -> list[str]:
         "Procedure / procedural skill": ["procedure_name", "procedural_skill"],
         "Clinical Setting": ["clinical_setting", "placement"],
         "Stage of Training": ["stage_of_training", "stage"],
-        "Indication": ["indication", "case_observed"],
-        "Trainee Performance": ["trainee_performance"],
     }
-    missing = []
+    missing: list[str] = []
     for label, keys in aliases.items():
         values = [fields.get(k) for k in keys]
         if not any(not _is_missing_field_value(v) for v in values):
             missing.append(label)
 
-    # Thin voice transcriptions often produce one-word/placeholder text; ask
-    # before filing rather than creating an assessor-hostile draft.
-    for label, keys in {
-        "Indication": ["indication", "case_observed"],
-        "Trainee Performance": ["trainee_performance"],
-    }.items():
-        value = next((str(fields.get(k) or "").strip() for k in keys if str(fields.get(k) or "").strip()), "")
-        if value and len(value) < 20 and label not in missing:
-            missing.append(label)
+    from dops_filing import normalise_dops_fields, dops_quality_gate
+    gate_misses = dops_quality_gate(normalise_dops_fields(fields))
+    # Translate DOM-level gate labels into the friendlier form-schema labels
+    # the UI already uses. "Case observed narrative" maps to "Indication"
+    # because a thin narrative is functionally a missing indication block.
+    gate_to_friendly = {
+        "Date occurred on": "Date",
+        "Stage of training": "Stage of Training",
+        "Procedural skill": "Procedure / procedural skill",
+        "Case observed narrative": "Indication",
+        "Indication": "Indication",
+        "Trainee performance": "Trainee Performance",
+        "Reflection (needs clearer wording)": "Reflection (needs clearer wording)",
+    }
+    for m in gate_misses:
+        friendly = gate_to_friendly.get(m, m)
+        if friendly not in missing:
+            missing.append(friendly)
 
-    seen = set()
-    return [m for m in missing if not (m in seen or seen.add(m))]
+    return missing
 
 
 def _format_pre_file_missing_message(form_type: str, missing: list[str]) -> str:

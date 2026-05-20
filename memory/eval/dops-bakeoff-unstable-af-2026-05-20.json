@@ -1,0 +1,49 @@
+{
+  "case": "unstable-af",
+  "results": [
+    {
+      "provider": "deepseek-v4",
+      "model": "deepseek-chat",
+      "status": "ok",
+      "elapsed_s": 3.61,
+      "scores": {
+        "procedure": 1.0,
+        "indication": 1.0,
+        "trainee_performance": 1.0,
+        "reflection": 1.0,
+        "kc_links": 0.5,
+        "grammar": 1.0,
+        "overall": 0.917
+      },
+      "preview": {
+        "procedure": "Emergency synchronised DC cardioversion",
+        "indication": "Patient in unstable atrial fibrillation with rapid ventricular response, hypotension and clamminess, requiring urgent rh",
+        "trainee_performance": "I performed an emergency synchronised DC cardioversion under ketamine sedation for a 62-year-old in unstable AF with RVR. The first two shocks at 150J did not c",
+        "reflection": "This case highlighted the importance of recognising refractory arrhythmias early and not persisting with repeated shocks without pharmacological support. I learned to have a low threshold for escalati",
+        "kc_count": 2
+      }
+    },
+    {
+      "provider": "gemini-3-5-flash",
+      "model": "gemini-3.5-flash",
+      "status": "ok",
+      "elapsed_s": 14.08,
+      "scores": {
+        "procedure": 1.0,
+        "indication": 1.0,
+        "trainee_performance": 1.0,
+        "reflection": 1.0,
+        "kc_links": 0.5,
+        "grammar": 1.0,
+        "overall": 0.917
+      },
+      "preview": {
+        "procedure": "Emergency synchronised DC cardioversion and procedural sedat",
+        "indication": "Acute atrial fibrillation with rapid ventricular response causing haemodynamic instability, evidenced by hypotension and",
+        "trainee_performance": "I managed a 62-year-old patient who presented to the resuscitation room in unstable atrial fibrillation with a rapid ventricular response. On assessment, the pa",
+        "reflection": "This case highlighted the challenges of managing refractory tachyarrhythmias in a haemodynamically compromised patient. I realised that when initial cardioversion attempts fail, it is vital to quickly",
+        "kc_count": 2
+      }
+    }
+  ]
+}

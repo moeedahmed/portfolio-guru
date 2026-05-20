@@ -1414,6 +1414,8 @@ async def fill_kaizen_form(
                         + ". Not saving — add the detail and try again."
                     ],
                     "screenshot": None,
+                    "quality_gate_failed": True,
+                    "missing_for_quality": missing_required,
                 }
 
         if (
@@ -2279,6 +2281,9 @@ async def file_to_kaizen(
         # into the Kaizen DOM keys defined in FORM_FIELD_MAP["DOPS"], then
         # refuse to file when required DOM slots are still blank. Stops the
         # bot from announcing "saved successfully" for a near-empty draft.
+        # `quality_gate_failed` gives the bot a structural signal so it can
+        # route the user back to draft approval rather than reporting
+        # "filing failed".
         from dops_filing import normalise_dops_fields, dops_quality_gate
         fields = normalise_dops_fields(fields)
         missing_required = dops_quality_gate(fields)
@@ -2292,6 +2297,8 @@ async def file_to_kaizen(
                     + ", ".join(missing_required)
                     + ". Not saving — add the detail and try again."
                 ),
+                "quality_gate_failed": True,
+                "missing_for_quality": missing_required,
             }
     browser = None
     cdp_pw = None
