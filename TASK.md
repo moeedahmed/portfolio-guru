@@ -44,6 +44,8 @@ Build the next draft-quality improvement from dogfood feedback:
 - DOPS KC selection now supplements unstable AF/shock/sedation/cardioversion cases with supported SLO3 and SLO6 key capabilities.
 - Added focused offline DOPS filing quality coverage for the unstable AF with RVR, ketamine sedation, refractory cardioversion, amiodarone/magnesium, echo and ITU/medical escalation case.
 - Fixed image-bundle state so stale "waiting for images" sessions cannot absorb a later new case, and bundle status edits are scoped to the active bundle message instead of mutating an old case/status message.
+- Changed Kaizen save progress UX so approving a draft leaves the reviewed draft message visible; filing progress and final result now appear as separate messages underneath.
+- Added lightweight repeated Telegram typing indicators during long image-reading and Kaizen-filing work, plus a delayed "still reading" image status for slower clinical screenshots.
 
 ## Verification
 

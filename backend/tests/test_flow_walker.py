@@ -538,10 +538,10 @@ class TestFlowWalker:
             result = await handle_approval_approve(update, context)
 
         assert result == ConversationHandler.END
-        # Report is now sent as a fresh message (not edited in place)
+        # The original reviewed draft is not edited into a progress message.
+        assert update.callback_query.message.edit_text.await_count == 0
+        # Report is sent as a fresh message; progress is a separate reply.
         assert sim.messages_sent[-1][0] == 'send'
-        # Also restores the draft preview on the original message
-        assert any(msg[0] == 'edit' for msg in sim.messages_sent)
         assert 'case-based discussion saved' in sim.get_last_text().lower()
         buttons = sim.get_last_buttons()
         # First button may be File another case or the amend button row

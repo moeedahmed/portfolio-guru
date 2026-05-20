@@ -118,6 +118,22 @@ async def _safe_edit_text(target, text: str, **kwargs):
         )
 
 
+async def _typing_until(chat, stop_event: asyncio.Event, interval: float = 4.0) -> None:
+    """Keep Telegram's lightweight typing indicator alive during long work."""
+    try:
+        while not stop_event.is_set():
+            try:
+                await chat.send_action(constants.ChatAction.TYPING)
+            except Exception:
+                logger.debug("Typing indicator failed", exc_info=True)
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=interval)
+            except asyncio.TimeoutError:
+                pass
+    except asyncio.CancelledError:
+        pass
+
+
 async def _flow_msg(update, context, text, reply_markup=None, parse_mode=None, flow_key="setup"):
     """Send a fresh flow message and make it the new anchor.
 
@@ -4642,6 +4658,19 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         image_number = _pending_case_bundle_source_count(context, "photo") + 1
         ack_text = f"📷 Reading image {image_number}…" if bundling else "📷 Reading image…"
         ack = await _send_pending_bundle_status(update.message, context, ack_text) if bundling else await update.message.reply_text(ack_text)
+        typing_stop = asyncio.Event()
+        typing_task = asyncio.create_task(_typing_until(update.effective_chat, typing_stop))
+
+        async def _image_progress():
+            try:
+                await asyncio.sleep(8)
+                await ack.edit_text(f"{ack_text}\nStill reading — clinical screenshots can take a little longer.")
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.debug("Image progress update failed", exc_info=True)
+
+        progress_task = asyncio.create_task(_image_progress())
         tmp_path = None
         try:
             photo = update.message.photo[-1]
@@ -4672,6 +4701,9 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await ack.edit_text("⚠️ Couldn't read image. Try a clearer photo or describe the case in text.")
             return ConversationHandler.END
         finally:
+            typing_stop.set()
+            typing_task.cancel()
+            progress_task.cancel()
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
 
@@ -5088,19 +5120,16 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
 
     # Determine platform (default: kaizen; future: from user profile)
     platform = "kaizen"
-    await update.effective_chat.send_action(constants.ChatAction.TYPING)
     if is_callback:
-        ack = source_message
-        await _safe_edit_text(
-            ack,
-            f"📤 Saving {form_name} as a Kaizen draft…",
-            parse_mode=None,
-        )
+        ack = await source_message.reply_text(f"📤 Saving {form_name} as a Kaizen draft…")
     else:
         ack = await source_message.reply_text(f"📤 Saving {form_name} as a Kaizen draft…")
 
     # Progress edits during the long filing wait so the user doesn't see a
     # static message for up to 5 minutes.
+    typing_stop = asyncio.Event()
+    typing_task = asyncio.create_task(_typing_until(update.effective_chat, typing_stop))
+
     async def _filing_progress():
         try:
             await asyncio.sleep(20)
@@ -5135,6 +5164,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             timeout=300,  # 5 min — browser-use path may take longer
         )
     except asyncio.TimeoutError:
+        typing_stop.set()
         progress_task.cancel()
         kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS.get(form_type, '')}" if FORM_UUIDS.get(form_type) else "https://kaizenep.com/activities"
         timeout_msg = (
@@ -5152,6 +5182,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         # Keep draft so user can retry without re-typing the case
         return AWAIT_APPROVAL
     except Exception as e:
+        typing_stop.set()
         progress_task.cancel()
         logger.error(f"Filer error for {form_type}: {e}", exc_info=True)
         # Keep draft data for retry — do NOT clear user_data
@@ -5169,6 +5200,8 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             )
         return AWAIT_APPROVAL  # Stay in approval state so retry can pick up draft
     finally:
+        typing_stop.set()
+        typing_task.cancel()
         progress_task.cancel()
 
     status = result["status"]
@@ -5352,18 +5385,6 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     context.user_data["last_filing_form_name"] = form_name
     context.user_data["last_filing_report"] = msg
 
-    # Restore the draft preview on the original message so the user can still see what was filed.
-    # Text approvals use a fresh progress message, so that message becomes the final report instead.
-    if is_callback:
-        try:
-            await _safe_edit_text(
-                ack,
-                draft_preview_text,
-                parse_mode="Markdown",
-            )
-        except Exception:
-            logger.warning("Could not restore draft preview after filing")
-
     # Add amend button to the primary row — compact, no extra row
     amend_btn = InlineKeyboardButton("✏️ Amend this draft", callback_data="AMEND|amend")
     existing_rows = list(end_keyboard.inline_keyboard) if end_keyboard else []
@@ -5375,17 +5396,10 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         existing_rows = [[amend_btn]]
     end_keyboard = InlineKeyboardMarkup(existing_rows)
 
-    if not is_callback:
-        await _safe_edit_text(
-            ack,
-            msg,
-            reply_markup=end_keyboard,
-            parse_mode="Markdown",
-        )
-        return ConversationHandler.END
-
-    # Send the filing report as a fresh new message (don't overwrite the draft)
+    # Keep the reviewed draft visible. Progress/status is a separate short
+    # message, and the final filing report is sent fresh underneath.
     try:
+        await ack.edit_text(status_line)
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text=msg,
@@ -5393,7 +5407,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             parse_mode="Markdown",
         )
     except Exception:
-        logger.warning("Could not send filing report, falling back to edit")
+        logger.warning("Could not send filing report, falling back to progress message edit")
         try:
             await _safe_edit_text(
                 ack,
