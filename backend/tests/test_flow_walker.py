@@ -1050,6 +1050,88 @@ class TestFlowWalker:
             assert 'pending_case_bundle' not in context.user_data
 
     @pytest.mark.asyncio
+    async def test_stale_pending_bundle_does_not_capture_new_case_text(self):
+        from bot import handle_case_input
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['pending_case_bundle'] = {
+            'parts': [
+                {'source': 'text', 'text': 'Old case text waiting for images'},
+                {'source': 'photo', 'text': 'Old image text'},
+            ],
+            'sources': ['text', 'photo'],
+            'created_at': 1,
+            'updated_at': 1,
+        }
+        context.user_data['pending_bundle_msg_id'] = 77
+        context.user_data['pending_bundle_chat_id'] = sim.user_id
+        context.user_data['last_bot_msg_id'] = 77
+        context.user_data['last_bot_chat_id'] = sim.user_id
+        update = sim._make_text_update(
+            'So this is another case that I want to file. This patient presented '
+            'with hypotension, tachycardia, resus care, sedation and cardioversion.'
+        )
+
+        async def fake_process(message, ctx, user_id, case_text, input_source):
+            ctx.user_data['processed_case_text'] = case_text
+            ctx.user_data['processed_input_source'] = input_source
+            return ConversationHandler.END
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.classify_menu_intent', new=AsyncMock(return_value='ambiguous')), \
+             patch('bot.classify_intent', new=AsyncMock(return_value='case')), \
+             patch('bot._process_case_text', new=AsyncMock(side_effect=fake_process)) as process_mock:
+            result = await handle_case_input(update, context)
+
+        assert result == ConversationHandler.END
+        process_mock.assert_called_once()
+        assert 'Old case text' not in context.user_data['processed_case_text']
+        assert 'another case' in context.user_data['processed_case_text']
+        assert context.user_data['processed_input_source'] == 'text'
+        assert 'pending_case_bundle' not in context.user_data
+        assert 'pending_bundle_msg_id' not in context.user_data
+
+    @pytest.mark.asyncio
+    async def test_pending_bundle_photo_edits_bundle_anchor_not_old_case_anchor(self):
+        from bot import handle_case_input
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['pending_case_bundle'] = {
+            'parts': [{'source': 'text', 'text': 'Patient with unstable AF. Wait for images.'}],
+            'sources': ['text'],
+            'created_at': 1,
+            'updated_at': 1,
+        }
+        context.user_data['last_bot_msg_id'] = 10
+        context.user_data['last_bot_chat_id'] = sim.user_id
+        context.user_data['pending_bundle_msg_id'] = 20
+        context.user_data['pending_bundle_chat_id'] = sim.user_id
+
+        photo_update = sim._make_text_update('')
+        photo = MagicMock()
+        file_obj = MagicMock()
+        file_obj.download_to_drive = AsyncMock()
+        photo.get_file = AsyncMock(return_value=file_obj)
+        photo_update.message.text = None
+        photo_update.message.photo = [photo]
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.extract_from_image', new=AsyncMock(return_value='Image findings show refractory AF')), \
+             patch('bot._process_case_text', new=AsyncMock(return_value=ConversationHandler.END)):
+            await handle_case_input(photo_update, context)
+
+        edited_message_ids = [
+            call.kwargs.get('message_id')
+            for call in context.bot.edit_message_text.await_args_list
+        ]
+        assert edited_message_ids
+        assert set(edited_message_ids) == {20}
+
+    @pytest.mark.asyncio
     async def test_pending_case_bundle_done_processes_combined_case(self):
         from bot import AWAIT_APPROVAL, handle_case_input
 

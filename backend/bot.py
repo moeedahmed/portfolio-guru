@@ -346,6 +346,16 @@ def _track_latest_message(context, msg):
     context.user_data["status_msg_chat"] = msg.chat_id
 
 
+def _track_pending_bundle_message(context, msg):
+    """Remember only the active media-bundle status message.
+
+    This is intentionally separate from ``last_bot_msg_id`` so a new case
+    cannot mutate an old "reading image..." message from a previous bundle.
+    """
+    context.user_data["pending_bundle_msg_id"] = msg.message_id
+    context.user_data["pending_bundle_chat_id"] = msg.chat_id
+
+
 async def _send_latest_message(message, context, text, reply_markup=None, parse_mode=None):
     """Edit the active bot message when possible, otherwise send and track one."""
     chat_id = getattr(message, "chat_id", None) or getattr(getattr(message, "chat", None), "id", None)
@@ -380,6 +390,45 @@ async def _send_latest_message(message, context, text, reply_markup=None, parse_
             pass
     msg = await message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
     _track_latest_message(context, msg)
+    return msg
+
+
+async def _send_pending_bundle_status(message, context, text, reply_markup=None, parse_mode=None):
+    """Edit the current bundle status only, otherwise send a fresh bundle status."""
+    chat_id = getattr(message, "chat_id", None) or getattr(getattr(message, "chat", None), "id", None)
+    msg_id = context.user_data.get("pending_bundle_msg_id")
+    if chat_id and msg_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=msg_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode,
+            )
+            context.user_data["pending_bundle_chat_id"] = chat_id
+
+            class _TrackedMessage:
+                def __init__(self, bot, chat_id, message_id):
+                    self._bot = bot
+                    self.chat_id = chat_id
+                    self.message_id = message_id
+                    self.chat = getattr(message, "chat", None)
+
+                async def edit_text(self, text, **kwargs):
+                    return await self._bot.edit_message_text(
+                        chat_id=self.chat_id,
+                        message_id=self.message_id,
+                        text=text,
+                        **kwargs,
+                    )
+
+            return _TrackedMessage(context.bot, chat_id, msg_id)
+        except Exception:
+            context.user_data.pop("pending_bundle_msg_id", None)
+            context.user_data.pop("pending_bundle_chat_id", None)
+    msg = await message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+    _track_pending_bundle_message(context, msg)
     return msg
 
 
@@ -457,6 +506,8 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
         "accumulating_case",
         "accumulation_additions",
         "pending_case_bundle",
+        "pending_bundle_msg_id",
+        "pending_bundle_chat_id",
     ):
         context.user_data.pop(key, None)
     if not keep_case:
@@ -490,6 +541,19 @@ _RECENT_FILING_STATUS_RE = re.compile(
     re.IGNORECASE,
 )
 
+_NEW_CASE_START_RE = re.compile(
+    r"\b("
+    r"new case"
+    r"|another case"
+    r"|case (?:that )?i (?:want|would like) to file"
+    r"|this patient (?:came|presented)"
+    r"|patient (?:came|presented) with"
+    r")\b",
+    re.IGNORECASE,
+)
+
+PENDING_CASE_BUNDLE_MAX_IDLE_SECONDS = 20 * 60
+
 
 def _is_waiting_for_media_request(text: str) -> bool:
     return bool(text and _WAIT_FOR_MEDIA_RE.search(text))
@@ -518,11 +582,52 @@ def _is_recent_filing_status_question(text: str) -> bool:
     )
 
 
+def _clear_pending_case_bundle(context) -> None:
+    for key in (
+        "pending_case_bundle",
+        "pending_bundle_msg_id",
+        "pending_bundle_chat_id",
+    ):
+        context.user_data.pop(key, None)
+
+
+def _looks_like_new_case_start(text: str) -> bool:
+    if not text:
+        return False
+    if _NEW_CASE_START_RE.search(text):
+        return True
+    lowered = text.lower()
+    clinical_markers = (
+        "patient",
+        "presented",
+        "blood pressure",
+        "tachycardia",
+        "hypotension",
+        "resus",
+        "sedation",
+        "cardioversion",
+        "procedure",
+    )
+    return len(text.split()) >= 25 and sum(1 for marker in clinical_markers if marker in lowered) >= 2
+
+
+def _pending_case_bundle_is_stale(context) -> bool:
+    bundle = context.user_data.get("pending_case_bundle") or {}
+    updated_at = bundle.get("updated_at") or bundle.get("created_at")
+    return bool(updated_at and time.time() - updated_at > PENDING_CASE_BUNDLE_MAX_IDLE_SECONDS)
+
+
 def _append_pending_case_bundle(context, text: str, source: str) -> None:
     text = (text or "").strip()
     if not text:
         return
-    bundle = context.user_data.setdefault("pending_case_bundle", {"parts": [], "sources": []})
+    now = time.time()
+    bundle = context.user_data.setdefault(
+        "pending_case_bundle",
+        {"parts": [], "sources": [], "created_at": now, "updated_at": now},
+    )
+    bundle.setdefault("created_at", now)
+    bundle["updated_at"] = now
     bundle.setdefault("parts", []).append({"source": source, "text": text})
     sources = bundle.setdefault("sources", [])
     if source not in sources:
@@ -4343,34 +4448,41 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return ConversationHandler.END
 
         if context.user_data.get("pending_case_bundle"):
-            if _is_case_bundle_done(raw_text):
-                case_text, input_source = _combined_pending_case_bundle(context)
-                context.user_data.pop("pending_case_bundle", None)
-                if not case_text:
-                    await update.message.reply_text("I was waiting for the rest of the case, but nothing readable came through. Send the case again when ready.")
-                    return AWAIT_CASE_INPUT
-                ack = await update.message.reply_text(CAPTURED_ACK, parse_mode="Markdown")
-                _track_latest_message(context, ack)
-                return await _process_case_text(update.message, context, user_id, case_text, input_source)
+            if _looks_like_new_case_start(raw_text) and _pending_case_bundle_is_stale(context):
+                _clear_pending_case_bundle(context)
+                context.user_data.pop("last_bot_msg_id", None)
+                context.user_data.pop("last_bot_chat_id", None)
+                context.user_data.pop("status_msg_id", None)
+                context.user_data.pop("status_msg_chat", None)
+            else:
+                if _is_case_bundle_done(raw_text):
+                    case_text, input_source = _combined_pending_case_bundle(context)
+                    _clear_pending_case_bundle(context)
+                    if not case_text:
+                        await update.message.reply_text("I was waiting for the rest of the case, but nothing readable came through. Send the case again when ready.")
+                        return AWAIT_CASE_INPUT
+                    ack = await update.message.reply_text(CAPTURED_ACK, parse_mode="Markdown")
+                    _track_latest_message(context, ack)
+                    return await _process_case_text(update.message, context, user_id, case_text, input_source)
 
-            # If the user already sent images in this bundle (count 1+ photos),
-            # new text is likely extra detail — auto-release without needing "done"
-            if _pending_case_bundle_source_count(context, "photo") > 0:
+                # If the user already sent images in this bundle (count 1+ photos),
+                # new text is likely extra detail — auto-release without needing "done"
+                if _pending_case_bundle_source_count(context, "photo") > 0:
+                    _append_pending_case_bundle(context, raw_text, "text")
+                    case_text, input_source = _combined_pending_case_bundle(context)
+                    _clear_pending_case_bundle(context)
+                    ack = await update.message.reply_text(CAPTURED_ACK, parse_mode="Markdown")
+                    _track_latest_message(context, ack)
+                    return await _process_case_text(update.message, context, user_id, case_text, input_source)
+
                 _append_pending_case_bundle(context, raw_text, "text")
-                case_text, input_source = _combined_pending_case_bundle(context)
-                context.user_data.pop("pending_case_bundle", None)
-                ack = await update.message.reply_text(CAPTURED_ACK, parse_mode="Markdown")
-                _track_latest_message(context, ack)
-                return await _process_case_text(update.message, context, user_id, case_text, input_source)
-
-            _append_pending_case_bundle(context, raw_text, "text")
-            await _send_latest_message(
-                update.message,
-                context,
-                "Added. I’ll keep waiting — send `done` when you’ve shared everything.",
-                parse_mode="Markdown",
-            )
-            return AWAIT_CASE_INPUT
+                await _send_pending_bundle_status(
+                    update.message,
+                    context,
+                    "Added. I’ll keep waiting — send `done` when you’ve shared everything.",
+                    parse_mode="Markdown",
+                )
+                return AWAIT_CASE_INPUT
 
         if not (context.user_data.get("awaiting_detail") and context.user_data.get("chosen_form")) and _is_waiting_for_media_request(raw_text):
             _append_pending_case_bundle(context, raw_text, "text")
@@ -4378,7 +4490,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 "Got it — I’ll wait for the images/files before drafting. Send `done` when you’ve shared everything.",
                 parse_mode="Markdown",
             )
-            _track_latest_message(context, ack)
+            _track_pending_bundle_message(context, ack)
             return AWAIT_CASE_INPUT
 
         if context.user_data.get("awaiting_detail") and context.user_data.get("chosen_form"):
@@ -4529,7 +4641,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         bundling = bool(context.user_data.get("pending_case_bundle"))
         image_number = _pending_case_bundle_source_count(context, "photo") + 1
         ack_text = f"📷 Reading image {image_number}…" if bundling else "📷 Reading image…"
-        ack = await _send_latest_message(update.message, context, ack_text) if bundling else await update.message.reply_text(ack_text)
+        ack = await _send_pending_bundle_status(update.message, context, ack_text) if bundling else await update.message.reply_text(ack_text)
         tmp_path = None
         try:
             photo = update.message.photo[-1]
@@ -4548,7 +4660,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 # User said they'd send images — they just did. Auto-release.
                 _append_pending_case_bundle(context, case_text, "photo")
                 case_text, input_source = _combined_pending_case_bundle(context)
-                context.user_data.pop("pending_case_bundle", None)
+                _clear_pending_case_bundle(context)
                 await ack.edit_text("📷 Images read. Finding matching forms…")
                 _track_latest_message(context, ack)
                 return await _process_case_text(update.message, context, user_id, case_text, input_source)
@@ -4641,7 +4753,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if context.user_data.get("pending_case_bundle"):
         _append_pending_case_bundle(context, case_text, input_source)
         if input_source != "photo":
-            await _send_latest_message(
+            await _send_pending_bundle_status(
                 update.message,
                 context,
                 "Added. I’ll keep waiting — send `done` when you’ve shared everything.",

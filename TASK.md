@@ -43,6 +43,7 @@ Build the next draft-quality improvement from dogfood feedback:
 - DOPS filing now blocks underfilled DOPS saves before browser filing instead of claiming success for a near-empty draft.
 - DOPS KC selection now supplements unstable AF/shock/sedation/cardioversion cases with supported SLO3 and SLO6 key capabilities.
 - Added focused offline DOPS filing quality coverage for the unstable AF with RVR, ketamine sedation, refractory cardioversion, amiodarone/magnesium, echo and ITU/medical escalation case.
+- Fixed image-bundle state so stale "waiting for images" sessions cannot absorb a later new case, and bundle status edits are scoped to the active bundle message instead of mutating an old case/status message.
 
 ## Verification
 
@@ -52,6 +53,7 @@ Build the next draft-quality improvement from dogfood feedback:
 - 20 May 2026: focused DOPS/save/assessor tests passed: 24 passed.
 - 20 May 2026: full backend offline suite passed: 160 passed, 22 skipped, 13 deselected.
 - 20 May 2026: live bot restarted via launchd and confirmed running.
+- 20 May 2026: image-bundle regression tests passed; full backend offline suite passed: 162 passed, 22 skipped, 13 deselected.
 
 ## Next
 
