@@ -4690,8 +4690,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     elif update.message.photo:
         bundling = bool(context.user_data.get("pending_case_bundle"))
-        image_number = _pending_case_bundle_source_count(context, "photo") + 1
-        ack_text = f"📷 Reading image {image_number}…" if bundling else "📷 Reading image…"
+        ack_text = "📷 Reading images…" if bundling else "📷 Reading image…"
         ack = await _send_pending_bundle_status(update.message, context, ack_text) if bundling else await update.message.reply_text(ack_text)
         typing_stop = asyncio.Event()
         typing_task = asyncio.create_task(_typing_until(update.effective_chat, typing_stop))
@@ -4699,7 +4698,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         async def _image_progress():
             try:
                 await asyncio.sleep(8)
-                await ack.edit_text(f"{ack_text}\nStill reading — clinical screenshots can take a little longer.")
+                await ack.edit_text(f"{ack_text}\nStill reading…")
             except asyncio.CancelledError:
                 pass
             except Exception:
