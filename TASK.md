@@ -47,6 +47,7 @@ Build the next draft-quality improvement from dogfood feedback:
 - Changed Kaizen save progress UX so approving a draft leaves the reviewed draft message visible; filing progress and final result now appear as separate messages underneath.
 - Added lightweight repeated Telegram typing indicators during long image-reading and Kaizen-filing work, plus a delayed "still reading" image status for slower clinical screenshots.
 - Added amend mode after filed drafts: the reopened draft now stays locked to the current case until Save updated draft or Cancel amend, extra text/media refines the existing draft, and explicit new-case wording asks the user to choose update-vs-new instead of guessing.
+- Refined the post-cancel/new-case boundary: Cancel now fully ends the active conversation state, and extra clinical text sent while choosing a form is folded into the current fresh case instead of producing a second "start new case" warning.
 
 ## Verification
 
@@ -58,6 +59,7 @@ Build the next draft-quality improvement from dogfood feedback:
 - 20 May 2026: live bot restarted via launchd and confirmed running.
 - 20 May 2026: image-bundle regression tests passed; full backend offline suite passed: 162 passed, 22 skipped, 13 deselected.
 - 20 May 2026: amend-mode regression tests passed; full backend offline suite passed: 165 passed, 22 skipped, 13 deselected; live bot restarted and confirmed on the amend-mode commit.
+- 20 May 2026: cancel/new-case boundary regression tests passed; full backend offline suite passed: 167 passed, 22 skipped, 13 deselected.
 
 ## Next
 

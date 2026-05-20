@@ -165,6 +165,7 @@ Status:
 - Added PHI-free funnel event labels for input received, recommendation shown, best-fit/form chosen, template gaps shown, draft shown, refinement replies, save attempt, and cancel/reset.
 - Added `Use best fit` as the primary recommendation action. Other suggested forms and `See all forms` remain available as overrides.
 - Added a display-only draft preview formatting guard so long clinical narrative/reflection fields are split into readable short paragraphs in Telegram review while saved Kaizen field values remain unchanged.
+- Refined cancel/new-case handling: after Cancel the active conversation state ends cleanly, and extra clinical chunks sent while choosing a form are treated as more detail for the current fresh case rather than a second new-case warning.
 - Next UX move: dogfood the same anonymised cases in Medic Portfolio and Portfolio Guru, then move to draft-first behaviour only for high-confidence obvious cases.
 
 ### Phase 3 - Safe activation for low-risk intents

@@ -432,6 +432,23 @@ class TestFlowWalker:
         assert sim.get_last_buttons() == []
 
     @pytest.mark.asyncio
+    async def test_action_cancel_ends_conversation_state(self):
+        from bot import handle_callback
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('ACTION|cancel')
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.get_training_level', return_value='ST5'):
+            result = await handle_callback(update, context)
+
+        assert result == ConversationHandler.END
+        assert context.user_data == {'post_reset': True}
+        assert 'cancelled' in sim.get_last_text().lower()
+
+    @pytest.mark.asyncio
     async def test_cancel_path_uses_setup_button_when_setup_incomplete(self):
         from bot import handle_callback
 
@@ -464,6 +481,37 @@ class TestFlowWalker:
         assert 'start a new case' in sim.get_last_text().lower()
         # Connected user post-recovery: no inline buttons; user types the case.
         assert sim.get_last_buttons() == []
+
+    @pytest.mark.asyncio
+    async def test_form_choice_extra_case_text_refreshes_recommendation(self, recommended_forms):
+        from bot import AWAIT_FORM_CHOICE, handle_mid_conversation_text
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data.update({
+            'case_text': 'Initial case: hypotensive unstable AF, sedation, cardioversion and amiodarone.',
+            'case_input_source': 'text',
+            'form_recommendations': recommended_forms,
+            'last_bot_msg_id': 42,
+            'last_bot_chat_id': sim.user_id,
+        })
+        extra_text = (
+            'This is another section of the same case: the patient remained pale, '
+            'we checked bedside echo, considered septic shock, gave antibiotics and admitted.'
+        )
+        update = sim._make_text_update(extra_text)
+
+        with patch('bot.classify_intent', new=AsyncMock(return_value='new_case')), \
+             patch('bot.has_credentials', return_value=True), \
+             patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_curriculum', return_value='2025'), \
+             patch('bot.recommend_form_types', new=AsyncMock(return_value=recommended_forms)):
+            result = await handle_mid_conversation_text(update, context)
+
+        assert result == AWAIT_FORM_CHOICE
+        assert 'It looks like you want to file a new case' not in sim.get_last_text()
+        assert extra_text in context.user_data['case_text']
+        assert 'Forms that fit your case' in sim.get_last_text()
 
     @pytest.mark.asyncio
     async def test_expired_draft_recovery_updates_latest_template_message(self, thin_draft):

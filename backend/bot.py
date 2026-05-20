@@ -2708,6 +2708,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 _cancelled_next_step_text(user_id),
                 reply_markup=_build_next_step_keyboard(user_id),
             )
+        return ConversationHandler.END
 
     elif action == "voice":
         # Trigger voice profile flow — simulate /voice command
@@ -6005,6 +6006,29 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
         # (Explicit "new_case" intent still routes to the warning path below.)
         if has_draft and intent != "new_case" and case_text:
             return await _regenerate_active_draft_with_feedback(update, context, raw_text)
+
+        # Before a form has been chosen there is no draft to abandon yet. In
+        # practice Telegram users often send a long case in chunks; fold the
+        # next clinical-looking message into the active case and refresh the
+        # recommendation instead of making them cancel twice.
+        if (
+            case_text
+            and not has_draft
+            and not has_pending
+            and (
+                intent == "new_case"
+                or _looks_like_new_case_start(raw_text)
+                or (len(raw_text.split()) >= 10 and _looks_like_clinical_case(raw_text))
+            )
+        ):
+            combined_case = f"{case_text.strip()}\n\n{raw_text}".strip()
+            return await _process_case_text(
+                update.message,
+                context,
+                update.effective_user.id,
+                combined_case,
+                context.user_data.get("case_input_source", "text"),
+            )
 
         # new_case — looks like a new case
         if in_flow:
