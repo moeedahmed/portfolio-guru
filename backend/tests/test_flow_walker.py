@@ -764,6 +764,116 @@ class TestFlowWalker:
         assert 'refine this draft' in sim.get_last_text().lower()
 
     @pytest.mark.asyncio
+    async def test_amend_mode_locks_long_text_to_existing_draft(self, thin_draft):
+        from bot import AWAIT_APPROVAL, handle_amend_draft, handle_mid_conversation_text
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data.update({
+            'last_amend_draft': {
+                '_type': 'FORM',
+                'form_type': thin_draft.form_type,
+                'fields': dict(thin_draft.fields),
+                'uuid': thin_draft.uuid,
+            },
+            'last_amend_case_text': 'Original filed CBD context',
+            'last_amend_chosen_form': thin_draft.form_type,
+        })
+
+        amend_update = sim._make_callback_update('AMEND|amend')
+        result = await handle_amend_draft(amend_update, context)
+
+        assert result == AWAIT_APPROVAL
+        assert context.user_data['amend_mode'] is True
+        buttons = sim.get_last_buttons()
+        assert ('📤 Save updated draft', 'APPROVE|draft') in buttons
+        assert ('❌ Cancel amend', 'AMEND|cancel') in buttons
+        assert ('📋 File another case', 'ACTION|file') not in buttons
+
+        updated = thin_draft.model_copy(update={
+            'fields': {**thin_draft.fields, 'reflection': 'Updated with leadership learning.'}
+        })
+        text_update = sim._make_text_update(
+            'Add that I escalated to the consultant, delegated nursing tasks, and reflected on leadership.'
+        )
+        with patch('bot.classify_intent', new=AsyncMock(return_value='new_case')), \
+             patch('bot.extract_cbd_data', new=AsyncMock(return_value=updated)), \
+             patch('bot._process_case_text', new_callable=AsyncMock) as process_case:
+            result = await handle_mid_conversation_text(text_update, context)
+
+        assert result == AWAIT_APPROVAL
+        assert process_case.await_count == 0
+        assert context.user_data['draft_data']['fields']['reflection'] == 'Updated with leadership learning.'
+        assert 'Original filed CBD context' in context.user_data['case_text']
+        assert 'delegated nursing tasks' in context.user_data['case_text']
+        buttons = sim.get_last_buttons()
+        assert ('📤 Save updated draft', 'APPROVE|draft') in buttons
+        assert ('📋 File another case', 'ACTION|file') not in buttons
+
+    @pytest.mark.asyncio
+    async def test_amend_mode_explicit_new_case_requires_choice(self, thin_draft):
+        from bot import AWAIT_APPROVAL, AWAIT_FORM_CHOICE, handle_amend_draft, handle_mid_conversation_text
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data.update({
+            'last_amend_draft': {
+                '_type': 'FORM',
+                'form_type': thin_draft.form_type,
+                'fields': dict(thin_draft.fields),
+                'uuid': thin_draft.uuid,
+            },
+            'last_amend_case_text': 'Original filed CBD context',
+            'last_amend_chosen_form': thin_draft.form_type,
+        })
+        await handle_amend_draft(sim._make_callback_update('AMEND|amend'), context)
+
+        new_case_text = 'This is a new case: 72F septic shock needing vasopressors and ICU escalation.'
+        text_update = sim._make_text_update(new_case_text)
+        with patch('bot.classify_intent', new=AsyncMock(return_value='new_case')):
+            result = await handle_mid_conversation_text(text_update, context)
+
+        assert result == AWAIT_APPROVAL
+        assert context.user_data['amend_pending_feedback'] == new_case_text
+        assert 'update this draft or start a new case' in sim.get_last_text().lower()
+        buttons = sim.get_last_buttons()
+        assert ('✏️ Update this draft', 'AMEND|update_current') in buttons
+        assert ('📋 Start new case', 'AMEND|start_new') in buttons
+
+        choice_update = sim._make_callback_update('AMEND|start_new')
+        with patch('bot._process_case_text', new=AsyncMock(return_value=AWAIT_FORM_CHOICE)) as process_case:
+            result = await handle_amend_draft(choice_update, context)
+
+        assert result == AWAIT_FORM_CHOICE
+        assert process_case.await_count == 1
+        assert context.user_data.get('amend_mode') is None
+
+    @pytest.mark.asyncio
+    async def test_cancel_amend_clears_active_amend_state(self, thin_draft):
+        from bot import handle_amend_draft
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data.update({
+            'amend_mode': True,
+            'draft_data': {
+                '_type': 'FORM',
+                'form_type': thin_draft.form_type,
+                'fields': dict(thin_draft.fields),
+                'uuid': thin_draft.uuid,
+            },
+            'case_text': 'Original filed CBD context',
+            'chosen_form': thin_draft.form_type,
+        })
+
+        result = await handle_amend_draft(sim._make_callback_update('AMEND|cancel'), context)
+
+        assert result == ConversationHandler.END
+        assert context.user_data.get('amend_mode') is None
+        assert context.user_data.get('draft_data') is None
+        assert 'unchanged' in sim.get_last_text().lower()
+
+    @pytest.mark.asyncio
     async def test_nudge_uses_llm_copy_when_available(self):
         from bot import _build_nudge_message
 

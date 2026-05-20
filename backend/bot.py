@@ -1433,6 +1433,40 @@ def _build_approval_keyboard(improved_once: bool = False, can_back_to_missing: b
     return InlineKeyboardMarkup(rows)
 
 
+def _build_amend_keyboard(improved_once: bool = False) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton("📤 Save updated draft", callback_data="APPROVE|draft")]]
+    if not improved_once:
+        rows[0].append(InlineKeyboardButton("✨ Quick improve", callback_data="IMPROVE|reflection"))
+    rows.append([InlineKeyboardButton("❌ Cancel amend", callback_data="AMEND|cancel")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _active_draft_keyboard(context) -> InlineKeyboardMarkup:
+    if context.user_data.get("amend_mode"):
+        return _build_amend_keyboard(improved_once=context.user_data.get("quick_improve_used", False))
+    return _build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False))
+
+
+def _build_amend_new_case_choice_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✏️ Update this draft", callback_data="AMEND|update_current")],
+        [InlineKeyboardButton("📋 Start new case", callback_data="AMEND|start_new")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="AMEND|cancel_choice")],
+    ])
+
+
+def _looks_like_explicit_new_case_request(text: str) -> bool:
+    lowered = (text or "").strip().lower()
+    if not lowered:
+        return False
+    patterns = [
+        r"\b(start|file|create|open)\s+(a\s+)?(new|another|different)\s+(case|wpba|ticket)\b",
+        r"\b(new|another|different|separate)\s+(case|wpba|ticket|patient)\b",
+        r"\bthis\s+is\s+(a\s+)?(new|another|different|separate)\s+(case|wpba|ticket)\b",
+    ]
+    return any(re.search(pattern, lowered) for pattern in patterns)
+
+
 def _build_post_review_keyboard(improved_once: bool = False):
     """Keyboard shown after lightweight draft improvement."""
     return _build_approval_keyboard(improved_once=improved_once)
@@ -3922,7 +3956,7 @@ async def _regenerate_active_draft_with_feedback(
     input_source: str = "text",
 ) -> int:
     """Regenerate an active approval draft using extra text or extracted media."""
-    msg = update.message
+    msg = update.message or update.callback_query.message
     draft = _load_draft(context)
     case_text = context.user_data.get("case_text", "")
     if not draft or not case_text:
@@ -3986,7 +4020,7 @@ async def _regenerate_active_draft_with_feedback(
     await _safe_edit_text(
         ack,
         preview + _REPLY_HINT_SUFFIX,
-        reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
+        reply_markup=_active_draft_keyboard(context),
         parse_mode="Markdown",
     )
     return AWAIT_APPROVAL
@@ -5564,7 +5598,7 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
     if not reflection_key:
         await query.message.reply_text(
             "This form does not have a reflection field to improve. You can still save it as a draft or tap Edit.",
-            reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
+            reply_markup=_active_draft_keyboard(context),
         )
         return AWAIT_APPROVAL
 
@@ -5618,16 +5652,16 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
         _store_draft(context, updated)
         context.user_data["quick_improve_used"] = True
     except asyncio.TimeoutError:
-        await ack.edit_text("⏳ Quick improve timed out. Your original draft is still ready.", reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)))
+        await ack.edit_text("⏳ Quick improve timed out. Your original draft is still ready.", reply_markup=_active_draft_keyboard(context))
         return AWAIT_APPROVAL
     except Exception as exc:
         logger.error("Quick improve failed for %s: %s", form_type, exc, exc_info=True)
-        await ack.edit_text("⚠️ Quick improve failed. Your original draft is still ready.", reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)))
+        await ack.edit_text("⚠️ Quick improve failed. Your original draft is still ready.", reply_markup=_active_draft_keyboard(context))
         return AWAIT_APPROVAL
 
     preview = _format_draft_preview(updated, _chosen_form_reason(context, form_type))
     header = "✨ *Reflection polished.* Here's the updated draft:\n\n"
-    await _safe_edit_text(ack, header + preview + _REPLY_HINT_SUFFIX, reply_markup=_build_approval_keyboard(improved_once=True), parse_mode="Markdown")
+    await _safe_edit_text(ack, header + preview + _REPLY_HINT_SUFFIX, reply_markup=_active_draft_keyboard(context), parse_mode="Markdown")
     return AWAIT_APPROVAL
 
 
@@ -5658,8 +5692,54 @@ async def handle_edit_field(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def handle_amend_draft(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle 'Amend this draft' button — reload last filed draft for editing."""
+    """Handle amend-mode buttons for the last filed draft."""
     query = update.callback_query
+    action = query.data.split("|", 1)[1] if "|" in query.data else "amend"
+
+    if action == "cancel":
+        await query.answer("Amend cancelled")
+        for key in (
+            "amend_mode",
+            "draft_data",
+            "case_text",
+            "chosen_form",
+            "amend_pending_feedback",
+            "quick_improve_used",
+        ):
+            context.user_data.pop(key, None)
+        await query.message.reply_text("Amend cancelled. Your filed Kaizen draft is unchanged.")
+        return ConversationHandler.END
+
+    if action == "cancel_choice":
+        await query.answer("Still amending")
+        context.user_data.pop("amend_pending_feedback", None)
+        await query.message.reply_text(
+            "No change made. You're still amending the current draft.",
+            reply_markup=_active_draft_keyboard(context),
+        )
+        return AWAIT_APPROVAL
+
+    if action == "update_current":
+        await query.answer("Updating draft")
+        pending = context.user_data.pop("amend_pending_feedback", "")
+        return await _regenerate_active_draft_with_feedback(
+            update,
+            context,
+            pending,
+            append_to_case=True,
+            input_source="text",
+        )
+
+    if action == "start_new":
+        await query.answer("Starting new case")
+        pending = context.user_data.pop("amend_pending_feedback", "")
+        context.user_data.clear()
+        if pending:
+            await query.message.reply_text("Starting a new case from that message.")
+            return await _process_case_text(query.message, context, update.effective_user.id, pending, "text")
+        await query.message.reply_text(FILE_CASE_PROMPT)
+        return AWAIT_CASE_INPUT
+
     await query.answer("Loading last draft...")
 
     amend_draft = context.user_data.get("last_amend_draft")
@@ -5676,18 +5756,18 @@ async def handle_amend_draft(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data["case_text"] = amend_case
     context.user_data["chosen_form"] = amend_form
     context.user_data["draft_data"] = amend_draft
+    context.user_data["amend_mode"] = True
+    context.user_data["quick_improve_used"] = False
 
     # Show the draft and enter approval state
     draft = _load_draft(context)
     preview = _format_draft_preview(draft, _chosen_form_reason(context, amend_form))
     await query.message.reply_text(
-        preview + _REPLY_HINT_SUFFIX,
-        reply_markup=_build_approval_keyboard(improved_once=False),
+        "✏️ *Amending this draft.* Send changes, then tap *Save updated draft* or *Cancel amend*.\n\n"
+        + preview,
+        reply_markup=_build_amend_keyboard(improved_once=False),
         parse_mode="Markdown",
     )
-    # Clear the amend data so it can't be re-used after a fresh flow
-    context.user_data.pop("last_amend_draft", None)
-    context.user_data.pop("last_amend_case_text", None)
     return AWAIT_APPROVAL
 
 
@@ -5774,14 +5854,14 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             ), timeout=45)
         _store_draft(context, updated)
     except asyncio.TimeoutError:
-        await ack.edit_text("⏳ Regeneration timed out.", reply_markup=_KB_CANCEL)
+        await ack.edit_text("⏳ Regeneration timed out.", reply_markup=_active_draft_keyboard(context))
         return AWAIT_APPROVAL
     except Exception as e:
-        await ack.edit_text("⚠️ Couldn't regenerate.", reply_markup=_KB_CANCEL)
+        await ack.edit_text("⚠️ Couldn't regenerate.", reply_markup=_active_draft_keyboard(context))
         return AWAIT_APPROVAL
 
     preview = _format_draft_preview(updated)
-    await _safe_edit_text(ack, preview + _REPLY_HINT_SUFFIX, reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)), parse_mode="Markdown")
+    await _safe_edit_text(ack, preview + _REPLY_HINT_SUFFIX, reply_markup=_active_draft_keyboard(context), parse_mode="Markdown")
     return AWAIT_APPROVAL
 
 
@@ -5808,6 +5888,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
     has_draft = bool(_load_draft(context))
     has_pending = bool(context.user_data.get("pending_draft_data"))
     in_flow = has_draft or has_pending or bool(case_text)
+    amend_mode = bool(context.user_data.get("amend_mode") and has_draft)
 
     if _is_text_filing_approval(raw_text) and context.user_data.get("last_filing_status") == "success":
         form_name = context.user_data.get("last_filing_form_name", "that draft")
@@ -5830,6 +5911,22 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
                 f"❌ {form_name} did not complete. Try again from the latest draft or start fresh."
             )
         return ConversationHandler.END
+
+    if amend_mode:
+        if _looks_like_explicit_new_case_request(raw_text):
+            context.user_data["amend_pending_feedback"] = raw_text
+            await update.message.reply_text(
+                "Looks like this may be a new case. Do you want to update this draft or start a new case?",
+                reply_markup=_build_amend_new_case_choice_keyboard(),
+            )
+            return AWAIT_APPROVAL
+        return await _regenerate_active_draft_with_feedback(
+            update,
+            context,
+            raw_text,
+            append_to_case=True,
+            input_source="text",
+        )
 
     if intent == "chitchat":
         if has_draft:
@@ -5898,7 +5995,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
                 ack_line = f"✏️ Updated: {summary}\n\n" if summary else "✏️ Draft updated.\n\n"
                 await update.message.reply_text(
                     ack_line + preview + _REPLY_HINT_SUFFIX,
-                    reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
+                    reply_markup=_active_draft_keyboard(context),
                     parse_mode="Markdown",
                 )
                 return AWAIT_APPROVAL
@@ -6269,6 +6366,7 @@ def build_application() -> Application:
                 CallbackQueryHandler(handle_quick_improve, pattern=r"^IMPROVE\|reflection$"),
                 CallbackQueryHandler(handle_review_draft, pattern=r"^REVIEW\|draft$"),
                 CallbackQueryHandler(handle_approval_edit, pattern=r"^EDIT\|"),
+                CallbackQueryHandler(handle_amend_draft, pattern=r"^AMEND\|"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
                 MessageHandler(filters.VOICE, handle_approval_media_feedback),
