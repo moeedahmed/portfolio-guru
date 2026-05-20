@@ -5436,22 +5436,16 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         existing_rows = [[amend_btn]]
     end_keyboard = InlineKeyboardMarkup(existing_rows)
 
-    # Keep the reviewed draft visible. Progress/status is a separate short
-    # message, and the final filing report is sent fresh underneath.
+    # Keep the reviewed draft visible. The temporary progress message becomes
+    # the final report so completion stays to one message.
     try:
-        await ack.edit_text(status_line)
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=msg,
-            reply_markup=end_keyboard,
-            parse_mode="Markdown",
-        )
+        await ack.edit_text(msg, reply_markup=end_keyboard, parse_mode="Markdown")
     except Exception:
-        logger.warning("Could not send filing report, falling back to progress message edit")
+        logger.warning("Could not edit filing report, falling back to fresh message")
         try:
-            await _safe_edit_text(
-                ack,
-                msg,
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=msg,
                 reply_markup=end_keyboard,
                 parse_mode="Markdown",
             )

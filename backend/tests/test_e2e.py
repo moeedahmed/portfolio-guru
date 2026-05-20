@@ -16,7 +16,7 @@ pytestmark = [
 ]
 
 
-BOT_USERNAME = os.environ.get("TELEGRAM_BOT_USERNAME", "PortfolioGuruBot")
+BOT_USERNAME = os.environ.get("TELEGRAM_BOT_USERNAME", "portfolio_guru_bot")
 
 
 @pytest_asyncio.fixture

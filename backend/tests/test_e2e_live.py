@@ -21,7 +21,7 @@ pytestmark = [
     ),
 ]
 
-BOT_USERNAME = "@PortfolioGuruBot"
+BOT_USERNAME = "@portfolio_guru_bot"
 RESPONSE_WAIT = 10  # seconds to wait for bot response
 
 

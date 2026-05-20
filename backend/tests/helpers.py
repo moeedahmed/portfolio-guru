@@ -55,7 +55,7 @@ class OfflineRequest(BaseRequest):
 
 TEST_USER = User(id=99999, is_bot=False, first_name="TestDoctor")
 TEST_CHAT = Chat(id=99999, type=Chat.PRIVATE)
-BOT_USER = User(id=12345, is_bot=True, first_name="PortfolioGuru", username="PortfolioGuruBot")
+BOT_USER = User(id=12345, is_bot=True, first_name="PortfolioGuru", username="portfolio_guru_bot")
 
 
 def make_message(text: str, user: User | None = None, chat: Chat | None = None) -> Message:

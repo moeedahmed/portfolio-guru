@@ -573,7 +573,7 @@ class TestFlowWalker:
         assert 'EDIT|draft' not in button_data
 
     @pytest.mark.asyncio
-    async def test_filing_completion_updates_current_message(self, thin_draft):
+    async def test_filing_completion_updates_progress_message(self, thin_draft):
         from bot import handle_approval_approve
 
         sim = BotSimulator()
@@ -593,9 +593,11 @@ class TestFlowWalker:
         assert result == ConversationHandler.END
         # The original reviewed draft is not edited into a progress message.
         assert update.callback_query.message.edit_text.await_count == 0
-        # Report is sent as a fresh message; progress is a separate reply.
-        assert sim.messages_sent[-1][0] == 'send'
+        # The temporary progress message becomes the final report; no extra
+        # "Filing finished" message is sent before the report.
+        assert sim.messages_sent[-1][0] == 'edit'
         assert 'case-based discussion saved' in sim.get_last_text().lower()
+        assert 'filing finished' not in sim.get_last_text().lower()
         buttons = sim.get_last_buttons()
         # First button may be File another case or the amend button row
         assert ('📋 File another case', 'ACTION|file') in buttons
