@@ -316,7 +316,8 @@ class TestOfflineE2E:
 
         assert len(collector.texts) >= 1
         text = collector.texts[0]
-        assert "ready when you are" in text
+        assert "Portfolio Guru is ready" in text
+        assert "Send what happened" in text
         sent = collector.sent[0]
         # Connected welcome has no inline keyboard.
         assert sent.get("reply_markup") is None
@@ -416,7 +417,7 @@ class TestOfflineE2E:
         _prepare_update(update2, app.bot)
         await app.process_update(update2)
 
-        # Should show a draft with approval buttons or template review
+        # Should show a draft with approval buttons.
         assert len(collector.sent) >= 1
 
     async def test_callback_approve_triggers_filing(self, offline_app, monkeypatch):
@@ -483,23 +484,17 @@ class TestOfflineE2E:
         _prepare_update(update1, app.bot)
         await app.process_update(update1)
 
-        # Step 2: tap FORM|CBD → enters AWAIT_TEMPLATE_REVIEW
+        # Step 2: tap FORM|CBD → enters AWAIT_APPROVAL with the draft-first review
         collector.sent.clear()
         update2 = make_callback_update("FORM|CBD")
         _prepare_update(update2, app.bot)
         await app.process_update(update2)
 
-        # Step 3: tap ACTION|continue_thin to accept template → enters AWAIT_APPROVAL
+        # Step 3: tap APPROVE|draft → triggers filing
         collector.sent.clear()
-        update3 = make_callback_update("ACTION|continue_thin")
+        update3 = make_callback_update("APPROVE|draft")
         _prepare_update(update3, app.bot)
         await app.process_update(update3)
-
-        # Step 4: tap APPROVE|draft → triggers filing
-        collector.sent.clear()
-        update4 = make_callback_update("APPROVE|draft")
-        _prepare_update(update4, app.bot)
-        await app.process_update(update4)
 
         # Bot should have responded with filing result
         assert len(collector.sent) >= 1

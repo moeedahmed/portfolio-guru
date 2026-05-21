@@ -90,6 +90,34 @@ class TestMessagePolicy:
         assert "Use best fit" in text
         assert "*" not in text
 
+    def test_form_recommendation_copy_hides_default_curriculum_and_finishes_lines(self):
+        from bot import _build_form_recommendation_text
+        from extractor import FORM_UUIDS
+        from models import FormTypeRecommendation
+
+        text = _build_form_recommendation_text(
+            [
+                FormTypeRecommendation(
+                    form_type="REFLECT_LOG",
+                    rationale="Reflective case about fixation bias, escalation, learning, and how the trainee would change practice next time...",
+                    uuid=FORM_UUIDS["REFLECT_LOG"],
+                ),
+                FormTypeRecommendation(
+                    form_type="ESLE_ASSESS",
+                    rationale="Could fit if this was observed across a shift...",
+                    uuid=FORM_UUIDS["ESLE_ASSESS"],
+                ),
+            ],
+            curriculum="2025",
+        )
+
+        assert "2025 Update" not in text
+        assert "(2025)" not in text
+        assert "..." not in text
+        assert "…" not in text
+        assert "Strongest fit because" in text
+        assert "Reflective Practice Log:" in text
+
 class TestExplicitFormRouting:
     @pytest.mark.asyncio
     async def test_photo_recommendation_copy_is_plain_and_includes_privacy_nudge(self, monkeypatch):

@@ -527,7 +527,23 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
     ):
         context.user_data.pop(key, None)
     if not keep_case:
-        context.user_data.pop("case_text", None)
+        for key in (
+            "case_text",
+            "draft_data",
+            "current_draft",
+            "pending_new_case_text",
+            "excluded_form_type",
+            "quick_improve_used",
+            "amend_mode",
+            "amend_pending_feedback",
+            "last_draft_preview",
+            "last_amend_draft",
+            "last_amend_case_text",
+            "last_amend_chosen_form",
+            "last_bot_msg_id",
+            "last_bot_chat_id",
+        ):
+            context.user_data.pop(key, None)
 
 
 _WAIT_FOR_MEDIA_RE = re.compile(
@@ -751,30 +767,11 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
         await _send_latest_message(
             message,
             context,
-            f"{reason}\n\nYour case is still in progress — use the latest message below and I'll carry on from there.",
+            f"{reason}\n\nYour draft is still ready below.",
         )
-        missing_required, missing_optional, _ = _missing_template_fields(pending_draft, chosen_form)
-        if not missing_required:
-            _store_draft(context, pending_draft)
-            context.user_data.pop("awaiting_detail", None)
-            context.user_data.pop("pending_draft_data", None)
-            await _send_latest_message(
-                message,
-                context,
-                _format_draft_preview(pending_draft, _chosen_form_reason(context, chosen_form)) + _REPLY_HINT_SUFFIX,
-                reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
-                parse_mode="Markdown",
-            )
-            return AWAIT_APPROVAL
-
-        await _send_latest_message(
-            message,
-            context,
-            _format_template_review(chosen_form, pending_draft),
-            reply_markup=_build_template_review_keyboard(),
-            parse_mode="Markdown",
-        )
-        return AWAIT_TEMPLATE_REVIEW
+        if not _draft_has_useful_content(pending_draft, chosen_form):
+            return await _ask_for_more_detail_before_draft(message, context, edit=False)
+        return await _show_draft_review(message, context, pending_draft, chosen_form, edit=False)
 
     if case_text and chosen_form and context.user_data.get("paused_flow_rebuild"):
         context.user_data.pop("paused_flow_rebuild", None)
@@ -803,26 +800,9 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
             return ConversationHandler.END
 
-        missing_required, missing_optional, _ = _missing_template_fields(refreshed_draft, chosen_form)
-        if not missing_required:
-            _store_draft(context, refreshed_draft)
-            await _send_latest_message(
-                message,
-                context,
-                _format_draft_preview(refreshed_draft, _chosen_form_reason(context, chosen_form)) + _REPLY_HINT_SUFFIX,
-                reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
-                parse_mode="Markdown",
-            )
-            return AWAIT_APPROVAL
-
-        await _send_latest_message(
-            message,
-            context,
-            _format_template_review(chosen_form, refreshed_draft),
-            reply_markup=_build_template_review_keyboard(),
-            parse_mode="Markdown",
-        )
-        return AWAIT_TEMPLATE_REVIEW
+        if not _draft_has_useful_content(refreshed_draft, chosen_form):
+            return await _ask_for_more_detail_before_draft(message, context, edit=False)
+        return await _show_draft_review(message, context, refreshed_draft, chosen_form, edit=False)
 
     if case_text:
         recommendations = context.user_data.get("form_recommendations") or []
@@ -1242,6 +1222,27 @@ def _form_display_name(form_type: str) -> str:
     return schema.get("name", form_type)
 
 
+_DEFAULT_CURRICULUM_SUFFIX_RE = re.compile(
+    r"\s*(?:[-–—]\s*)?(?:\((?:Update\s*)?2025(?:\s*Update)?\)|\b(?:Update\s*)?2025\s*Update\b|\b2025\s*Update\b)\s*",
+    re.IGNORECASE,
+)
+
+
+def _strip_default_curriculum_suffix(text: str) -> str:
+    """Remove default-2025 curriculum suffixes from user-facing form labels."""
+    clean = str(text or "").strip()
+    clean = _DEFAULT_CURRICULUM_SUFFIX_RE.sub(" ", clean)
+    clean = re.sub(r"\s{2,}", " ", clean).strip(" -–—")
+    return clean or str(text or "").strip()
+
+
+def _recommendation_form_display_name(form_type: str, curriculum: str = "2025") -> str:
+    name = _form_display_name(_normalise_form_type(form_type))
+    if curriculum == "2025":
+        return _strip_default_curriculum_suffix(name)
+    return name
+
+
 def _track_funnel_event(context, event: str, **metadata) -> None:
     """Log PHI-free UX funnel events for friction analysis."""
     safe = {
@@ -1285,7 +1286,7 @@ def _build_form_choice_keyboard(recommendations, curriculum="2025"):
     for rec in filtered:
         base_ft = rec.form_type.replace("_2021", "") if rec.form_type.endswith("_2021") else rec.form_type
         emoji = FORM_EMOJIS.get(base_ft, "📄")
-        label = FORM_BUTTON_LABELS.get(rec.form_type) or FORM_BUTTON_LABELS.get(base_ft) or _form_display_name(base_ft)[:24]
+        label = FORM_BUTTON_LABELS.get(rec.form_type) or FORM_BUTTON_LABELS.get(base_ft) or _recommendation_form_display_name(base_ft, curriculum)[:24]
         if rec.uuid:
             buttons.append(InlineKeyboardButton(f"{emoji} {label}", callback_data=f"FORM|{rec.form_type}"))
         else:
@@ -1295,7 +1296,7 @@ def _build_form_choice_keyboard(recommendations, curriculum="2025"):
     best = next((rec for rec in filtered if getattr(rec, "uuid", None)), None)
     if best:
         base_ft = best.form_type.replace("_2021", "") if best.form_type.endswith("_2021") else best.form_type
-        best_label = FORM_BUTTON_LABELS.get(best.form_type) or FORM_BUTTON_LABELS.get(base_ft) or _form_display_name(base_ft)
+        best_label = FORM_BUTTON_LABELS.get(best.form_type) or FORM_BUTTON_LABELS.get(base_ft) or _recommendation_form_display_name(base_ft, curriculum)
         rows.append([InlineKeyboardButton(f"✅ Use best fit: {best_label}", callback_data="FORM|best")])
         buttons = [button for button in buttons if button.callback_data != f"FORM|{best.form_type}"]
 
@@ -1480,12 +1481,12 @@ def _build_post_filing_keyboard(
     same_case_available: bool = False,
 ) -> InlineKeyboardMarkup:
     """Compact keyboard shown after a filing attempt."""
-    feedback_row = [
-        InlineKeyboardButton("👍 It worked", callback_data=f"FEEDBACK|good|{form_type}|{status}"),
-        InlineKeyboardButton("👎 Didn't work", callback_data=f"FEEDBACK|bad|{form_type}|{status}"),
-    ]
-
-    if uncertain and FORM_UUIDS.get(form_type):
+    if status == "partial" and FORM_UUIDS.get(form_type):
+        primary_row = [InlineKeyboardButton(
+            "🔗 Open in Kaizen",
+            url=f"https://kaizenep.com/events/new-section/{FORM_UUIDS[form_type]}",
+        )]
+    elif uncertain and FORM_UUIDS.get(form_type):
         primary_row = [InlineKeyboardButton(
             "🔗 Open in Kaizen",
             url=f"https://kaizenep.com/events/new-section/{FORM_UUIDS[form_type]}",
@@ -1501,10 +1502,14 @@ def _build_post_filing_keyboard(
     rows = [primary_row]
     if same_case_available:
         rows.append([InlineKeyboardButton("📋 File another case", callback_data="ACTION|file")])
-    rows.extend([
-        feedback_row,
-        [InlineKeyboardButton("⋯ More options", callback_data=f"ACTION|post_file_more|{form_type}|{status}")],
-    ])
+    elif status == "partial" and FORM_UUIDS.get(form_type):
+        rows.append([InlineKeyboardButton("📋 File another case", callback_data="ACTION|file")])
+    if status == "success":
+        rows.append([
+            InlineKeyboardButton("👍 It worked", callback_data=f"FEEDBACK|good|{form_type}|{status}"),
+            InlineKeyboardButton("👎 Didn't work", callback_data=f"FEEDBACK|bad|{form_type}|{status}"),
+        ])
+    rows.append([InlineKeyboardButton("⋯ More options", callback_data=f"ACTION|post_file_more|{form_type}|{status}")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -1561,12 +1566,33 @@ def _safe_markdown_text(text: str) -> str:
     return str(text).replace("_", " ").replace("*", "").replace("`", "").replace("[", "").replace("]", "")
 
 
-def _short_plain_text(text: str, max_words: int = 10) -> str:
+def _short_plain_text(text: str, max_words: int = 16) -> str:
     clean = _safe_markdown_text(text or "").strip()
+    clean = clean.replace("...", "").replace("…", "")
+    clean = re.sub(r"\s+", " ", clean).strip(" .")
     words = clean.split()
     if len(words) <= max_words:
-        return clean
-    return " ".join(words[:max_words]).rstrip(",;:") + "..."
+        return clean + "." if clean and clean[-1] not in ".!?" else clean
+    return " ".join(words[:max_words]).rstrip(",;:.") + "."
+
+
+def _recommendation_line(rec, *, index: int, total: int, curriculum: str) -> str:
+    name = _recommendation_form_display_name(rec.form_type, curriculum)
+    rationale = _short_plain_text(getattr(rec, "rationale", ""))
+    if index == 0 and total > 1:
+        alternative_count = total - 1
+        comparison = (
+            "Strongest fit because it matches the main event better than the alternative."
+            if alternative_count == 1
+            else "Strongest fit because it matches the main event better than the alternatives."
+        )
+        if rationale:
+            rationale = f"{rationale} {comparison}"
+        else:
+            rationale = comparison
+    if not rationale:
+        rationale = "Fits the main portfolio evidence in this case."
+    return f"- {name}: {rationale}"
 
 
 def _privacy_nudge_for_source(input_source: str | None) -> str:
@@ -1579,12 +1605,19 @@ def _build_form_recommendation_text(
     recommendations,
     *,
     input_source: str | None = None,
+    curriculum: str = "2025",
     opening: str = "Forms that fit your case:",
     closing: str = "Tap Use best fit for the fastest draft, or choose another form.",
 ) -> str:
+    visible_recommendations = [r for r in recommendations if getattr(r, "uuid", None)]
     rationale_lines = [
-        f"- {_form_display_name(r.form_type)}: {_short_plain_text(getattr(r, 'rationale', ''))}"
-        for r in recommendations if getattr(r, "uuid", None)
+        _recommendation_line(
+            r,
+            index=index,
+            total=len(visible_recommendations),
+            curriculum=curriculum,
+        )
+        for index, r in enumerate(visible_recommendations)
     ]
     rationale_text = "\n".join(rationale_lines) if rationale_lines else "- Case-Based Discussion: Clinical case discussion."
     return render_message(
@@ -1640,8 +1673,10 @@ def _draft_header(title: str, reason: str | None, draft) -> list[str]:
 def _format_draft_preview(draft, reason: str | None = None) -> str:
     """Format draft data as a preview message. Dispatches based on type."""
     if isinstance(draft, FormDraft):
-        return _format_generic_draft(draft, reason=reason)
-    return _format_cbd_draft(draft, reason=reason)
+        preview = _format_generic_draft(draft, reason=reason)
+        return preview + _draft_missing_review_note(draft, draft.form_type)
+    preview = _format_cbd_draft(draft, reason=reason)
+    return preview + _draft_missing_review_note(draft, "CBD")
 
 
 def _draft_fields_for_review(draft) -> dict:
@@ -1788,6 +1823,99 @@ def _missing_template_fields(draft, form_type: str):
     missing_optional = [field for field in optional if _is_missing_field_value(fields.get(field["key"]))]
     present_fields = [field for field in required + optional if not _is_missing_field_value(fields.get(field["key"]))]
     return missing_required, missing_optional, present_fields
+
+
+def _draft_has_useful_content(draft, form_type: str) -> bool:
+    """True when there is enough extracted content to review a partial draft."""
+    fields = _draft_fields_for_review(draft)
+    ignored_keys = {"curriculum_links", "key_capabilities", "curriculum_section", "section_of_curriculum"}
+    present_values = [
+        value for key, value in fields.items()
+        if key not in ignored_keys and not _is_missing_field_value(value)
+    ]
+    if len(present_values) >= 2:
+        return True
+
+    narrative_keys = {
+        "patient_presentation",
+        "clinical_reasoning",
+        "case_discussion",
+        "case_observed",
+        "case_to_be_discussed",
+        "indication",
+        "trainee_performance",
+        "reflection",
+    }
+    for key in narrative_keys:
+        value = fields.get(key)
+        if isinstance(value, str) and len(value.split()) >= 5:
+            return True
+
+    _, _, present_fields = _missing_template_fields(draft, form_type)
+    if len(present_fields) >= 2:
+        return True
+    return False
+
+
+def _draft_missing_review_note(draft, form_type: str) -> str:
+    missing_required, missing_optional, _ = _missing_template_fields(draft, form_type)
+    if not missing_required and not missing_optional:
+        return ""
+
+    lines = ["", "⚠️ *Needs review before this is complete*"]
+    if missing_required:
+        labels = ", ".join(field["label"] for field in missing_required[:6])
+        extra = f" (+{len(missing_required) - 6} more)" if len(missing_required) > 6 else ""
+        lines.append(f"Required detail still needed: {labels}{extra}.")
+    if missing_optional:
+        labels = ", ".join(field["label"] for field in missing_optional[:3])
+        extra = f" (+{len(missing_optional) - 3} more)" if len(missing_optional) > 3 else ""
+        lines.append(f"Helpful detail if you have it: {labels}{extra}.")
+    lines.append("I have left those fields blank rather than inventing them. Reply with extra detail to update the draft.")
+    return "\n".join(lines)
+
+
+async def _show_draft_review(
+    message,
+    context: ContextTypes.DEFAULT_TYPE,
+    draft,
+    form_type: str,
+    *,
+    edit: bool = True,
+) -> int:
+    _store_draft(context, draft)
+    has_missing = bool(_draft_missing_review_note(draft, form_type))
+    _track_funnel_event(context, "draft_shown", form_type=form_type, has_missing=has_missing)
+    preview = _format_draft_preview(draft, _chosen_form_reason(context, form_type))
+    text = preview + _REPLY_HINT_SUFFIX
+    keyboard = _build_approval_keyboard(
+        improved_once=context.user_data.get("quick_improve_used", False),
+    )
+    if edit:
+        await _safe_edit_text(
+            message,
+            text,
+            reply_markup=keyboard,
+            parse_mode="Markdown",
+        )
+    else:
+        await _send_latest_message(
+            message,
+            context,
+            text,
+            reply_markup=keyboard,
+            parse_mode="Markdown",
+        )
+    return AWAIT_APPROVAL
+
+
+async def _ask_for_more_detail_before_draft(message, context: ContextTypes.DEFAULT_TYPE, *, edit: bool = True) -> int:
+    text = render_message("thin_case_detail_request")
+    if edit:
+        await _safe_edit_text(message, text, reply_markup=_KB_CANCEL)
+    else:
+        await _send_latest_message(message, context, text, reply_markup=_KB_CANCEL)
+    return AWAIT_CASE_INPUT
 
 
 
@@ -2752,7 +2880,9 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]])
             )
         else:
+            context.user_data.clear()
             await query.message.reply_text(FILE_CASE_PROMPT)
+        return AWAIT_CASE_INPUT
 
     elif action == "same_case_another":
         case_text = context.user_data.get("last_filed_case_text", "")
@@ -3675,6 +3805,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
     prompt_text = _build_form_recommendation_text(
         recommendations,
         input_source=input_source,
+        curriculum=get_curriculum(user_id),
     )
     context.user_data["form_recommendations_text"] = prompt_text
     _track_funnel_event(
@@ -3746,6 +3877,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return ConversationHandler.END
         else:
+            context.user_data.clear()
             await query.message.reply_text(FILE_CASE_PROMPT)
             return AWAIT_CASE_INPUT
 
@@ -3834,35 +3966,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         if chosen_form:
             context.user_data["case_text"] = merged
-            await query.edit_message_text(f"🧩 Updating {_form_display_name(chosen_form)} template…")
+            await query.edit_message_text(f"🧩 Updating {_form_display_name(chosen_form)} draft…")
             try:
                 draft = await _analyse_selected_form(context, user_id, merged, chosen_form)
             except Exception as exc:
                 logger.error("Template review failed for improve: %s", exc, exc_info=True)
                 await query.edit_message_text("⚠️ Could not refresh that template.", reply_markup=_KB_CANCEL)
                 return AWAIT_TEMPLATE_REVIEW
-            missing_required, missing_optional, _ = _missing_template_fields(draft, chosen_form)
-            if not missing_required:
-                _store_draft(context, draft)
-                preview = _format_draft_preview(draft, _chosen_form_reason(context, chosen_form))
-                await _safe_edit_text(
-                    query.message,
-                    preview + _REPLY_HINT_SUFFIX,
-                    reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
-                    parse_mode="Markdown",
-                )
-                return AWAIT_APPROVAL
-
-            review_text = _format_template_review(chosen_form, draft)
-            await _safe_edit_text(
-                query.message,
-                review_text,
-                reply_markup=_build_template_review_keyboard(),
-                parse_mode="Markdown",
-            )
-            context.user_data["last_bot_msg_id"] = query.message.message_id
-            context.user_data["last_bot_chat_id"] = query.message.chat_id
-            return AWAIT_TEMPLATE_REVIEW
+            if not _draft_has_useful_content(draft, chosen_form):
+                return await _ask_for_more_detail_before_draft(query.message, context)
+            return await _show_draft_review(query.message, context, draft, chosen_form)
         else:
             context.user_data.clear()
             return await _process_case_text(query.message, context, user_id, merged, "text")
@@ -3926,7 +4039,7 @@ async def _accumulate_and_refresh(update: Update, context: ContextTypes.DEFAULT_
     ack = await _send_latest_message(
         update.message,
         context,
-        f"🧩 Updating {form_name} template…",
+        f"🧩 Updating {form_name} draft…",
     )
 
     try:
@@ -3939,29 +4052,12 @@ async def _accumulate_and_refresh(update: Update, context: ContextTypes.DEFAULT_
         await ack.edit_text("⚠️ Could not refresh that template.", reply_markup=_KB_CANCEL)
         return AWAIT_TEMPLATE_REVIEW
 
-    missing_required, missing_optional, _ = _missing_template_fields(draft, chosen_form)
-    if not missing_required:
-        _store_draft(context, draft)
-        context.user_data.pop("accumulating_case", None)
-        context.user_data.pop("accumulation_additions", None)
-        preview = _format_draft_preview(draft, _chosen_form_reason(context, chosen_form))
-        await _safe_edit_text(
-            ack,
-            preview + _REPLY_HINT_SUFFIX,
-            reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
-            parse_mode="Markdown",
-        )
-        return AWAIT_APPROVAL
+    if not _draft_has_useful_content(draft, chosen_form):
+        return await _ask_for_more_detail_before_draft(ack, context)
 
-    review_text = _format_template_review(chosen_form, draft)
-    await _safe_edit_text(
-        ack,
-        review_text,
-        reply_markup=_build_template_review_keyboard(),
-        parse_mode="Markdown",
-    )
-    context.user_data["last_bot_msg_id"] = ack.message_id
-    return AWAIT_TEMPLATE_REVIEW
+    context.user_data.pop("accumulating_case", None)
+    context.user_data.pop("accumulation_additions", None)
+    return await _show_draft_review(ack, context, draft, chosen_form)
 
 
 async def _regenerate_active_draft_with_feedback(
@@ -4313,6 +4409,7 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
                 prompt_text = _build_form_recommendation_text(
                     recommendations,
                     input_source=context.user_data.get("case_input_source"),
+                    curriculum=get_curriculum(update.effective_user.id),
                     opening="Other options that fit:",
                     closing=f"Pick one to switch, or keep going with {form_name}.",
                 )
@@ -4848,7 +4945,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         context.user_data["case_text"] = case_text
         context.user_data["case_input_source"] = input_source
         await update.effective_chat.send_action(constants.ChatAction.TYPING)
-        ack = await update.message.reply_text(f"🧩 Updating {_form_display_name(chosen_form)} template…")
+        ack = await update.message.reply_text(f"🧩 Updating {_form_display_name(chosen_form)} draft…")
         context.user_data["last_bot_msg_id"] = ack.message_id
         context.user_data["last_bot_chat_id"] = ack.chat_id
         try:
@@ -4861,27 +4958,9 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await ack.edit_text("⚠️ Could not refresh that template.", reply_markup=_KB_CANCEL)
             return AWAIT_TEMPLATE_REVIEW
 
-        missing_required, missing_optional, _ = _missing_template_fields(draft, chosen_form)
-        if not missing_required:
-            _store_draft(context, draft)
-            preview = _format_draft_preview(draft, _chosen_form_reason(context, chosen_form))
-            await _safe_edit_text(
-                ack,
-                preview + _REPLY_HINT_SUFFIX,
-                reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
-                parse_mode="Markdown",
-            )
-            return AWAIT_APPROVAL
-
-        review_text = _format_template_review(chosen_form, draft)
-        await _safe_edit_text(
-            ack,
-            review_text,
-            reply_markup=_build_template_review_keyboard(),
-            parse_mode="Markdown",
-        )
-        context.user_data["last_bot_msg_id"] = ack.message_id
-        return AWAIT_TEMPLATE_REVIEW
+        if not _draft_has_useful_content(draft, chosen_form):
+            return await _ask_for_more_detail_before_draft(ack, context)
+        return await _show_draft_review(ack, context, draft, chosen_form)
 
     _clear_case_review_state(context, keep_case=False)
     if not context.user_data.get("last_bot_msg_id"):
@@ -5047,31 +5126,10 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text("⚠️ Could not review that template.", reply_markup=_KB_CANCEL)
         return ConversationHandler.END
 
-    missing_required, missing_optional, _ = _missing_template_fields(draft, form_type)
-    if not missing_required:
-        # All fields filled — skip template review, go to draft preview
-        _store_draft(context, draft)
-        _track_funnel_event(context, "draft_shown", form_type=form_type, has_missing=False)
-        preview = _format_draft_preview(draft, _chosen_form_reason(context, form_type))
-        await _safe_edit_text(
-            query.message,
-            preview + _REPLY_HINT_SUFFIX,
-            reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
-            parse_mode="Markdown",
-        )
-        return AWAIT_APPROVAL
+    if not _draft_has_useful_content(draft, form_type):
+        return await _ask_for_more_detail_before_draft(query.message, context)
 
-    _track_funnel_event(context, "template_gaps_shown", form_type=form_type, has_missing=True)
-    review_text = _format_template_review(form_type, draft)
-    await _safe_edit_text(
-        query.message,
-        review_text,
-        reply_markup=_build_template_review_keyboard(),
-        parse_mode="Markdown",
-    )
-    context.user_data["last_bot_msg_id"] = query.message.message_id
-    context.user_data["last_bot_chat_id"] = query.message.chat_id
-    return AWAIT_TEMPLATE_REVIEW
+    return await _show_draft_review(query.message, context, draft, form_type)
 
 
 async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -5403,13 +5461,17 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             status_line = "⚠️ Filing needs attention."
         else:
             fields_filled_str = f"{len(filled)} field{'s' if len(filled) != 1 else ''} filled"
-            msg = (
-                f"✅ *{form_name} saved.*\n\n"
-                f"{fields_filled_str} from your case. "
-                f"{len(skipped)} field{'s' if len(skipped) != 1 else ''} need{'s' if len(skipped) == 1 else ''} your review: {skipped_display}.\n\n"
-                f"Open Kaizen to fill them in, then assign an assessor.{usage_line}"
+            review_clause = (
+                f"{len(skipped)} field{'s' if len(skipped) != 1 else ''} "
+                f"need{'s' if len(skipped) == 1 else ''} your review"
             )
-            status_line = "✅ Filing finished."
+            msg = (
+                f"⚠️ *{form_name} saved as a draft, but needs manual review.*\n\n"
+                f"{fields_filled_str} from your case. "
+                f"{review_clause}: {skipped_display}.\n\n"
+                f"This is not complete yet. Open Kaizen to fill the missing detail, then assign an assessor.{usage_line}"
+            )
+            status_line = "⚠️ Filing needs manual review."
     else:
         # Show manual link for Kaizen; generic message for other platforms
         recovery = ""
@@ -5435,16 +5497,16 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     context.user_data["last_filing_form_name"] = form_name
     context.user_data["last_filing_report"] = msg
 
-    # Add amend button to the primary row — compact, no extra row
-    amend_btn = InlineKeyboardButton("✏️ Amend this draft", callback_data="AMEND|amend")
-    existing_rows = list(end_keyboard.inline_keyboard) if end_keyboard else []
-    existing_rows = [list(row) for row in existing_rows]
-    if existing_rows:
-        # Add amend to the primary (first) row
-        existing_rows[0].append(amend_btn)
-    else:
-        existing_rows = [[amend_btn]]
-    end_keyboard = InlineKeyboardMarkup(existing_rows)
+    if status == "success":
+        # Add amend button to the primary row — compact, no extra row.
+        amend_btn = InlineKeyboardButton("✏️ Amend this draft", callback_data="AMEND|amend")
+        existing_rows = list(end_keyboard.inline_keyboard) if end_keyboard else []
+        existing_rows = [list(row) for row in existing_rows]
+        if existing_rows:
+            existing_rows[0].append(amend_btn)
+        else:
+            existing_rows = [[amend_btn]]
+        end_keyboard = InlineKeyboardMarkup(existing_rows)
 
     # Keep the reviewed draft visible. The temporary progress message becomes
     # the final report so completion stays to one message.

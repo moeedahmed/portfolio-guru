@@ -53,6 +53,8 @@ Build the next draft-quality improvement from dogfood feedback:
 - `file_to_kaizen` now emits `quality_gate_failed: True` and `missing_for_quality: [...]` alongside the partial-status error, giving the bot a structural signal independent of the English error string.
 - Added a configurable Gemini 3.5 Flash extraction route (`PORTFOLIO_GURU_EXTRACTOR_PROVIDER=gemini-3.5-flash`, model name `gemini-3.5-flash`, env override `GEMINI_3_5_FLASH_MODEL`) without changing the DeepSeek production default.
 - Added a focused DOPS bake-off (`backend/eval_dops_bakeoff.py`) that scores provider extractions on procedure / indication / trainee performance / reflection / KC links / grammar; the deterministic scorer is unit-tested offline.
+- Changed the normal "File another case" path to clear prior case/draft/recommendation state, while keeping explicit same-case and amend/update paths context-aware.
+- Cleaned normal form recommendation UX so default-2025 suggestions hide curriculum suffixes and use complete short one-line rationales instead of chopped descriptions with ellipses.
 
 ## Verification
 
@@ -66,6 +68,8 @@ Build the next draft-quality improvement from dogfood feedback:
 - 20 May 2026: amend-mode regression tests passed; full backend offline suite passed: 165 passed, 22 skipped, 13 deselected; live bot restarted and confirmed on the amend-mode commit.
 - 20 May 2026: cancel/new-case boundary regression tests passed; full backend offline suite passed: 167 passed, 22 skipped, 13 deselected.
 - 20 May 2026: strengthened DOPS gate + Gemini 3.5 Flash route + DOPS bake-off scorer landed; focused suites (test_dops_filing_quality, test_model_config, test_eval_dops_bakeoff, test_flow_walker) passed: 98 passed; full backend offline suite passed: 187 passed, 22 skipped, 13 deselected.
+- 21 May 2026: context-boundary and recommendation-copy fixes verified; focused conversation/flow/snapshot suite passed: 80 passed; full backend offline suite passed: 198 passed, 22 skipped, 13 deselected; live bot restarted via launchd and confirmed running.
+- 21 May 2026 closeout review: py_compile passed for bot.py, dops_filing.py, kaizen_form_filer.py; focused flow/conversation/snapshot/DOPS suite passed: 108 passed. No live Kaizen/browser actions, commit, deploy, or restart were performed.
 
 ## Next
 

@@ -41,6 +41,96 @@ def _str(value) -> str:
     return str(value).strip() if value is not None else ""
 
 
+DOPS_PLACEMENT_FALLBACKS = {
+    "emergency_department": "Emergency Department",
+    "acute_medical_ward": "Acute Medical Ward",
+    "paediatric_emergency_department": "Paediatric Emergency Department",
+    "intensive_care_unit": "Intensive Care Unit",
+    "emergency_department_observation_unit": "Emergency Department Observation Unit",
+    "minor_injury_unit": "Minor Injury Unit",
+}
+
+_DOPS_PLACEMENT_ALIASES: tuple[tuple[str, str], ...] = (
+    ("paediatric_emergency_department", "paediatric emergency department"),
+    ("paediatric_emergency_department", "pediatric emergency department"),
+    ("paediatric_emergency_department", "paeds ed"),
+    ("paediatric_emergency_department", "paeds emergency"),
+    ("paediatric_emergency_department", "ped"),
+    ("emergency_department_observation_unit", "observation unit"),
+    ("emergency_department_observation_unit", "clinical decision unit"),
+    ("emergency_department_observation_unit", "cdu"),
+    ("emergency_department_observation_unit", "ed obs"),
+    ("intensive_care_unit", "intensive care"),
+    ("intensive_care_unit", "critical care"),
+    ("intensive_care_unit", "itu"),
+    ("intensive_care_unit", "icu"),
+    ("acute_medical_ward", "acute medical"),
+    ("acute_medical_ward", "amu"),
+    ("minor_injury_unit", "minor injury"),
+    ("minor_injury_unit", "minors"),
+    ("minor_injury_unit", "miu"),
+    ("emergency_department", "emergency department"),
+    ("emergency_department", "emergency medicine"),
+    ("emergency_department", "resuscitation"),
+    ("emergency_department", "resus"),
+    ("emergency_department", "majors"),
+    ("emergency_department", "ed"),
+    ("emergency_department", "a&e"),
+    ("emergency_department", "ae"),
+)
+
+
+def _normalise_for_match(value: str) -> str:
+    return "".join(ch.lower() if ch.isalnum() else " " for ch in value).strip()
+
+
+def _compact_for_match(value: str) -> str:
+    return "".join(_normalise_for_match(value).split())
+
+
+def _placement_key(value: str) -> str:
+    normalised = f" {_normalise_for_match(value)} "
+    compact = _compact_for_match(value)
+    for key, alias in _DOPS_PLACEMENT_ALIASES:
+        alias_norm = f" {_normalise_for_match(alias)} "
+        alias_compact = _compact_for_match(alias)
+        if alias_norm in normalised or alias_compact == compact:
+            return key
+    return ""
+
+
+def normalise_dops_placement(value: str, options: Iterable[str] | None = None) -> str:
+    """Return a Kaizen-selectable DOPS placement label where possible.
+
+    `options` should be the actual labels currently rendered by Kaizen. When
+    supplied, this returns the exact option text. Without options it falls back
+    to the canonical labels used in the local schema.
+    """
+    raw = _str(value)
+    if not raw:
+        return ""
+
+    option_list = [_str(option) for option in (options or []) if _str(option)]
+    raw_compact = _compact_for_match(raw)
+    for option in option_list:
+        if _compact_for_match(option) == raw_compact:
+            return option
+
+    key = _placement_key(raw)
+    if key and option_list:
+        canonical = DOPS_PLACEMENT_FALLBACKS.get(key, "")
+        canonical_compact = _compact_for_match(canonical)
+        for option in option_list:
+            option_compact = _compact_for_match(option)
+            option_key = _placement_key(option)
+            if option_key == key or option_compact == canonical_compact:
+                return option
+
+    if key:
+        return DOPS_PLACEMENT_FALLBACKS[key]
+    return raw
+
+
 # ─── Field-map adapter ───────────────────────────────────────────────────────
 
 
@@ -65,7 +155,9 @@ def normalise_dops_fields(fields: dict) -> dict:
     clinical_setting = _str(out.get("clinical_setting"))
     placement = _str(out.get("placement"))
     if clinical_setting and not placement:
-        out["placement"] = clinical_setting
+        out["placement"] = normalise_dops_placement(clinical_setting)
+    elif placement:
+        out["placement"] = normalise_dops_placement(placement)
 
     procedure_name = _str(out.get("procedure_name"))
     procedural_skill = _str(out.get("procedural_skill"))

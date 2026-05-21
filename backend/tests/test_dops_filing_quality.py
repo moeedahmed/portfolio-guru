@@ -12,7 +12,7 @@ the `kaizen` marker and are not run here.
 
 import os
 import sys
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -21,10 +21,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from dops_filing import (  # noqa: E402
     derive_dops_curriculum_links,
     dops_quality_gate,
+    normalise_dops_placement,
     normalise_dops_fields,
     suggest_dops_kc_breadth,
 )
-from kaizen_form_filer import FORM_FIELD_MAP, file_to_kaizen  # noqa: E402
+from kaizen_form_filer import FORM_FIELD_MAP, _fill_field_legacy, file_to_kaizen  # noqa: E402
 
 
 UNSTABLE_AF_CASE = (
@@ -126,6 +127,23 @@ def test_normalise_dops_promotes_clinical_setting_to_placement_when_blank():
         "procedure_name": "DC cardioversion",
     })
     assert out["placement"] == "Emergency Department"
+
+
+@pytest.mark.parametrize("clinical_setting", ["ED", "Resus", "Emergency Department - Resus"])
+def test_normalise_dops_maps_ed_resus_aliases_to_placement(clinical_setting):
+    out = normalise_dops_fields({
+        "date_of_encounter": "2026-05-19",
+        "clinical_setting": clinical_setting,
+        "procedure_name": "DC cardioversion",
+    })
+    assert out["placement"] == "Emergency Department"
+
+
+def test_normalise_dops_placement_returns_exact_kaizen_option():
+    options = ["", "Emergency Medicine", "Acute Medical Ward", "Intensive Care Unit"]
+
+    assert normalise_dops_placement("ED Resus", options) == "Emergency Medicine"
+    assert normalise_dops_placement("ITU", options) == "Intensive Care Unit"
 
 
 def test_normalise_dops_is_idempotent():
@@ -410,3 +428,68 @@ async def test_file_to_kaizen_dops_proceeds_when_fields_are_populated():
     # Even if status is partial (e.g. due to mocked verification), the
     # blocking error string from the gate must not appear.
     assert "Case observed narrative" not in (result.get("error") or "")
+
+
+@pytest.mark.asyncio
+async def test_file_to_kaizen_dops_attempts_normalised_placement_from_clinical_setting():
+    fields = {
+        "date_of_encounter": "2026-05-19",
+        "stage_of_training": "Higher/ST4-ST6",
+        "clinical_setting": "ED Resus",
+        "procedure_name": "DC cardioversion",
+        "indication": "Unstable AF with RVR and hypotension.",
+        "trainee_performance": (
+            "I prepared the resuscitation team and delivered synchronised "
+            "cardioversion under direct supervision."
+        ),
+    }
+
+    with patch("kaizen_form_filer.KAIZEN_USE_CDP", False), \
+         patch("kaizen_form_filer.async_playwright") as ap_mock, \
+         patch("kaizen_form_filer._login", new=AsyncMock(return_value=True)), \
+         patch("kaizen_form_filer._fill_field_legacy", new=AsyncMock(return_value=True)) as fill_mock, \
+         patch("kaizen_form_filer._save_draft_legacy", new=AsyncMock(return_value=True)), \
+         patch("kaizen_form_filer._verify_entry_saved", new=AsyncMock(return_value=True)), \
+         patch("kaizen_form_filer._fill_curriculum_links", new=AsyncMock(return_value=([], []))), \
+         patch("kaizen_form_filer.asyncio.sleep", new=AsyncMock()):
+        page = AsyncMock()
+        page.url = "https://kaizenep.com/events/new-section/dops-uuid"
+        page.goto = AsyncMock()
+        browser = AsyncMock()
+        browser.new_page = AsyncMock(return_value=page)
+        pw = AsyncMock()
+        pw.chromium.launch = AsyncMock(return_value=browser)
+        ap_mock.return_value.start = AsyncMock(return_value=pw)
+
+        result = await file_to_kaizen("DOPS", fields, "user", "pass")
+
+    assert result["status"] in ("success", "partial")
+    placement_calls = [
+        call for call in fill_mock.await_args_list
+        if len(call.args) >= 4 and call.args[3] == "placement"
+    ]
+    assert placement_calls, "DOPS placement was not attempted by the deterministic filer"
+    assert placement_calls[0].args[2] == "Emergency Department"
+
+
+@pytest.mark.asyncio
+async def test_legacy_field_fill_selects_exact_dops_placement_option():
+    select = AsyncMock()
+    select.count = AsyncMock(return_value=1)
+    select.evaluate = AsyncMock(return_value="SELECT")
+    select.select_option = AsyncMock()
+
+    page = MagicMock()
+    page.locator = MagicMock(return_value=select)
+    page.evaluate = AsyncMock(return_value=["", "Emergency Medicine", "Intensive Care Unit"])
+
+    ok = await _fill_field_legacy(
+        page,
+        FORM_FIELD_MAP["DOPS"]["placement"],
+        "Resus",
+        "placement",
+        "DOPS",
+    )
+
+    assert ok is True
+    select.select_option.assert_awaited_with(label="Emergency Medicine")

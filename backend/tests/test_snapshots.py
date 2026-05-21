@@ -111,7 +111,17 @@ async def test_draft_preview_snapshot(snapshot, fixed_cbd_form_draft):
         "bot._analyse_selected_form",
         new_callable=AsyncMock,
         return_value=fixed_cbd_form_draft,
-    ), patch("bot._missing_template_fields", return_value=([], [], [])):
+    ), patch(
+        "bot._missing_template_fields",
+        return_value=(
+            [],
+            [],
+            [
+                {"label": "Date", "key": "date_of_encounter"},
+                {"label": "Setting", "key": "clinical_setting"},
+            ],
+        ),
+    ):
         await handle_form_choice(update, context)
 
     assert {

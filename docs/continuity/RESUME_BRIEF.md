@@ -1,12 +1,12 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-05-20T21:56:41+00:00
+Generated: 2026-05-21T16:07:09+00:00
 Status: stale_or_needs_review
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
 - Branch: feature/conversational-router
-- Last commit: 1972984 2026-05-20 Fix Portfolio Guru completion message and bot username
+- Last commit: 3620fe6 2026-05-21 Use natural prose for DOPS case observed
 - Uncommitted changes: yes
 
 ## Immediate read before restarting
@@ -19,20 +19,28 @@ Status: stale_or_needs_review
 - Repo has uncommitted changes — capture/commit or summarise before switching context
 
 ## Recent commits
+- 3620fe6 2026-05-21 Use natural prose for DOPS case observed
+- 843be6c 2026-05-21 Fix DOPS preview-to-filing narrative mismatch
+- 693f343 2026-05-20 Switch Portfolio Guru extractor to Gemini Flash
+- 8f52350 2026-05-20 Improve DOPS quality gate and add Gemini bakeoff
 - 1972984 2026-05-20 Fix Portfolio Guru completion message and bot username
 - 7217fea 2026-05-20 Prevent duplicate form recommendation messages
 - 4425cdf 2026-05-20 Simplify image reading status copy
 - 124a907 2026-05-20 Fix Portfolio Guru new-case boundary after cancel
-- 19a4edc 2026-05-20 Fix amend mode draft boundary
-- 8f7c195 2026-05-20 fix: keep draft visible during filing
-- de9fb31 2026-05-20 fix: isolate image bundle state
-- 30080b7 2026-05-20 fix: auto-release pending image bundle when images arrive
 
 ## Uncommitted change summary
-- M backend/filing_coverage.json
+- M backend/bot.py
+-  M backend/dops_filing.py
+-  M backend/filing_coverage.json
+-  M backend/kaizen_form_filer.py
+-  M backend/tests/test_dops_filing_quality.py
+-  M backend/tests/test_e2e_offline.py
+-  M backend/tests/test_flow_walker.py
+-  M backend/tests/test_snapshots.py
+-  M docs/continuity/RESUME_BRIEF.md
 
 ## Repo context snapshot
-### AGENTS.md — present, 3 days old
+### AGENTS.md — present, 4 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md
 - ## Project
@@ -47,7 +55,7 @@ Key headings:
 - ## Testing
 - ## Compatibility
 
-### CLAUDE.md — present, 3 days old
+### CLAUDE.md — present, 4 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md
 - ## Project

@@ -1112,6 +1112,22 @@ async def _fill_select(page: Page, dom_id: str, value: str) -> bool:
             return False
 
 
+async def _normalise_dops_select_value(page: Page, field_key: str, dom_id: str, value: Any) -> str:
+    """Map DOPS select aliases to exact rendered Kaizen option labels."""
+    if field_key != "placement":
+        return str(value)
+    try:
+        options = await page.evaluate(
+            "(domId) => { var s = document.getElementById(domId); return s ? Array.from(s.options).map(o => o.text) : []; }",
+            dom_id,
+        )
+        from dops_filing import normalise_dops_placement
+        return normalise_dops_placement(str(value), options)
+    except Exception as e:
+        logger.warning(f"DOPS placement option normalisation failed for {dom_id}: {e}")
+        return str(value)
+
+
 async def _fill_assessor_invite(page: Page, query: str, expected_name: str = "") -> bool:
     """Pick one assessor from Kaizen's typeahead before sending a WPBA.
 
@@ -1480,6 +1496,8 @@ async def fill_kaizen_form(
             )
 
             if tag == "SELECT":
+                if form_type == "DOPS":
+                    value = await _normalise_dops_select_value(page, key, dom_id, value)
                 ok = await _fill_select(page, dom_id, str(value))
             elif tag in ("TEXTAREA", "INPUT"):
                 ok = await _fill_text(page, dom_id, str(value))
@@ -1695,7 +1713,7 @@ async def connect_cdp_browser() -> tuple:
 
 # ─── Legacy field filling (used by file_to_kaizen) ──────────────────────────
 
-async def _fill_field_legacy(page: Page, dom_id: str, value: Any, field_key: str) -> bool:
+async def _fill_field_legacy(page: Page, dom_id: str, value: Any, field_key: str, form_type: str = "") -> bool:
     """Fill a single field by its DOM id. Returns True if filled."""
     if value is None or value == "" or value == []:
         return False
@@ -1725,6 +1743,8 @@ async def _fill_field_legacy(page: Page, dom_id: str, value: Any, field_key: str
 
         # Select dropdowns
         if tag == "SELECT":
+            if form_type == "DOPS" and field_key == "placement":
+                value = await _normalise_dops_select_value(page, field_key, dom_id, value)
             return await _fill_select_legacy(el, dom_id, value, field_key)
 
         # Textareas and text inputs
@@ -2343,7 +2363,7 @@ async def file_to_kaizen(
         if "stage_of_training" in field_map:
             st_dom = field_map["stage_of_training"]
             st_val = fields.get("stage_of_training", "Higher")
-            if await _fill_field_legacy(page, st_dom, st_val, "stage_of_training"):
+            if await _fill_field_legacy(page, st_dom, st_val, "stage_of_training", form_type):
                 filled.append("stage_of_training")
             else:
                 skipped.append("stage_of_training")
@@ -2359,7 +2379,7 @@ async def file_to_kaizen(
                 skipped.append(field_key)
                 continue
 
-            success = await _fill_field_legacy(page, dom_id, value, field_key)
+            success = await _fill_field_legacy(page, dom_id, value, field_key, form_type)
             if success:
                 filled.append(field_key)
             else:

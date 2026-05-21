@@ -120,45 +120,48 @@ class TestFlowWalker:
         analyse.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_template_review_buttons_progress(self, thin_draft):
-        from bot import AWAIT_APPROVAL, AWAIT_TEMPLATE_REVIEW, handle_callback, handle_form_choice
+    async def test_form_choice_shows_partial_draft_first(self, thin_draft):
+        from bot import AWAIT_APPROVAL, handle_form_choice
 
         sim = BotSimulator()
         context = sim._make_context()
         context.user_data['case_text'] = SAMPLE_CASES['valid']
 
         update = sim._make_callback_update('FORM|CBD')
-        with patch('bot._analyse_selected_form', new_callable=AsyncMock, return_value=thin_draft),              patch('bot._missing_template_fields', return_value=([{'label': 'Supervisor'}], [], [])):
+        with patch('bot._analyse_selected_form', new_callable=AsyncMock, return_value=thin_draft):
             result = await handle_form_choice(update, context)
 
-        context.user_data['pending_draft_data'] = {
-            '_type': 'FORM',
-            'form_type': 'CBD',
-            'fields': thin_draft.fields,
-            'uuid': thin_draft.uuid,
-        }
-
-        assert result == AWAIT_TEMPLATE_REVIEW
-        assert {'ACTION|continue_thin'} <= {data for _, data in sim.get_last_buttons()}
-        assert 'ACTION|add_detail' not in {data for _, data in sim.get_last_buttons()}
-        assert 'Missing detail that would improve this' in sim.get_last_text()
-
-        sim.clear_messages()
-        update = sim._make_callback_update('ACTION|continue_thin')
-        result = await handle_callback(update, context)
         assert result == AWAIT_APPROVAL
         button_data = {data for _, data in sim.get_last_buttons()}
-        assert {'APPROVE|draft', 'IMPROVE|reflection', 'ACTION|back_to_missing', 'CANCEL|draft'} <= button_data
+        assert {'APPROVE|draft', 'IMPROVE|reflection', 'CANCEL|draft'} <= button_data
+        assert 'ACTION|continue_thin' not in button_data
+        assert 'ACTION|back_to_missing' not in button_data
         assert 'EDIT|draft' not in button_data
         assert 'APPROVE|submit' not in button_data
+        text = sim.get_last_text()
+        assert 'Case-Based Discussion draft ready' in text
+        assert 'Needs review before this is complete' in text
+        assert 'Stage of Training' in text
+        assert 'I have left those fields blank rather than inventing them' in text
 
-        sim.clear_messages()
-        update = sim._make_callback_update('ACTION|back_to_missing')
-        result = await handle_callback(update, context)
-        assert result == AWAIT_TEMPLATE_REVIEW
-        assert 'Missing detail that would improve this' in sim.get_last_text()
-        assert {'ACTION|continue_thin'} <= {data for _, data in sim.get_last_buttons()}
-        assert 'ACTION|add_detail' not in {data for _, data in sim.get_last_buttons()}
+    @pytest.mark.asyncio
+    async def test_form_choice_asks_for_detail_when_extraction_is_too_thin(self):
+        from bot import AWAIT_CASE_INPUT, handle_form_choice
+        from models import FormDraft
+
+        empty_draft = FormDraft(form_type='CBD', uuid='uuid-cbd', fields={})
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['case_text'] = 'Patient seen in ED with some symptoms and reviewed.'
+
+        update = sim._make_callback_update('FORM|CBD')
+        with patch('bot._analyse_selected_form', new_callable=AsyncMock, return_value=empty_draft):
+            result = await handle_form_choice(update, context)
+
+        assert result == AWAIT_CASE_INPUT
+        assert 'need a bit more clinical detail before drafting' in sim.get_last_text()
+        assert 'draft_data' not in context.user_data
+        assert 'APPROVE|draft' not in {data for _, data in sim.get_last_buttons()}
 
     @pytest.mark.asyncio
     async def test_best_fit_button_uses_top_recommendation(self, thin_draft, recommended_forms):
@@ -190,12 +193,14 @@ class TestFlowWalker:
         context.user_data['case_text'] = SAMPLE_CASES['valid']
 
         optional_field = {'label': 'Supervisor', 'key': 'supervisor_name'}
+        present_field = {'label': 'Date', 'key': 'date_of_encounter'}
         with patch('bot._analyse_selected_form', new_callable=AsyncMock, return_value=thin_draft), \
-             patch('bot._missing_template_fields', return_value=([], [optional_field], [])):
+             patch('bot._missing_template_fields', return_value=([], [optional_field], [present_field, present_field])):
             result = await handle_form_choice(update, context)
 
         assert result == AWAIT_APPROVAL
         assert 'draft ready' in sim.get_last_text().lower()
+        assert 'Helpful detail if you have it: Supervisor' in sim.get_last_text()
         assert any(data == 'APPROVE|draft' for _, data in sim.get_last_buttons())
 
     def test_draft_preview_splits_long_narrative_without_mutating_fields(self, thin_draft):
@@ -451,6 +456,37 @@ class TestFlowWalker:
         assert 'cancelled' in sim.get_last_text().lower()
 
     @pytest.mark.asyncio
+    async def test_file_another_case_starts_from_clean_case_state(self, recommended_forms):
+        from bot import AWAIT_CASE_INPUT, handle_callback
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('ACTION|file')
+        context = sim._make_context()
+        context.user_data.update({
+            'case_text': 'Old case: cardioversion and sedation.',
+            'chosen_form': 'DOPS',
+            'draft_data': {
+                '_type': 'FORM',
+                'form_type': 'DOPS',
+                'fields': {'procedure_name': 'DC cardioversion'},
+                'uuid': 'old',
+            },
+            'pending_draft_data': {'_type': 'FORM', 'form_type': 'DOPS', 'fields': {}, 'uuid': 'old'},
+            'form_recommendations': recommended_forms,
+            'form_recommendations_text': 'Old recommendations',
+            'awaiting_detail': True,
+            'quick_improve_used': True,
+            'excluded_form_type': 'DOPS',
+        })
+
+        with patch('bot.has_credentials', return_value=True):
+            result = await handle_callback(update, context)
+
+        assert result == AWAIT_CASE_INPUT
+        assert context.user_data == {}
+        assert 'send' in sim.get_last_text().lower()
+
+    @pytest.mark.asyncio
     async def test_cancel_path_uses_setup_button_when_setup_incomplete(self):
         from bot import handle_callback
 
@@ -520,7 +556,7 @@ class TestFlowWalker:
 
     @pytest.mark.asyncio
     async def test_expired_draft_recovery_updates_latest_template_message(self, thin_draft):
-        from bot import AWAIT_TEMPLATE_REVIEW, handle_approval_edit
+        from bot import AWAIT_APPROVAL, handle_approval_edit
 
         sim = BotSimulator()
         update = sim._make_callback_update('EDIT|draft')
@@ -536,13 +572,16 @@ class TestFlowWalker:
             },
         })
 
-        with patch('bot.has_credentials', return_value=True),              patch('bot.get_training_level', return_value='ST5'),              patch('bot._missing_template_fields', return_value=([{'label': 'Supervisor'}], [], [])):
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.get_training_level', return_value='ST5'):
             result = await handle_approval_edit(update, context)
 
-        assert result == AWAIT_TEMPLATE_REVIEW
+        assert result == AWAIT_APPROVAL
         assert sim.messages_sent[-1][0] == 'bot_edit'
-        assert 'still in progress' in sim.messages_sent[-2][1].lower()
-        assert {'ACTION|continue_thin'} <= {data for _, data in sim.get_last_buttons()}
+        assert 'still ready' in sim.messages_sent[-2][1].lower()
+        button_data = {data for _, data in sim.get_last_buttons()}
+        assert {'APPROVE|draft', 'CANCEL|draft'} <= button_data
+        assert 'ACTION|continue_thin' not in button_data
 
     @pytest.mark.asyncio
     async def test_paused_approval_button_recovers_latest_draft_message(self, thin_draft):
@@ -562,12 +601,15 @@ class TestFlowWalker:
             },
         })
 
-        with patch('bot.get_credentials', return_value=('user', 'pass')),              patch('bot.has_credentials', return_value=True),              patch('bot.get_training_level', return_value='ST5'),              patch('bot._missing_template_fields', return_value=([], [], [])):
+        with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.has_credentials', return_value=True), \
+             patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot._missing_template_fields', return_value=([], [], [])):
             result = await handle_approval_approve(update, context)
 
         assert result == AWAIT_APPROVAL
         assert sim.messages_sent[-1][0] == 'bot_edit'
-        assert 'still in progress' in sim.messages_sent[-2][1].lower()
+        assert 'still ready' in sim.messages_sent[-2][1].lower()
         button_data = {data for _, data in sim.get_last_buttons()}
         assert {'APPROVE|draft'} <= button_data
         assert 'EDIT|draft' not in button_data
@@ -735,9 +777,93 @@ class TestFlowWalker:
         assert context.user_data.get('draft_data')
         assert 'may not have saved' in sim.get_last_text().lower()
         buttons = sim.get_last_buttons()
-        assert ('👍 It worked', 'FEEDBACK|good|CBD|partial') in buttons
-        assert ("👎 Didn't work", 'FEEDBACK|bad|CBD|partial') in buttons
+        assert ('👍 It worked', 'FEEDBACK|good|CBD|partial') not in buttons
+        assert ("👎 Didn't work", 'FEEDBACK|bad|CBD|partial') not in buttons
         assert ('⋯ More options', 'ACTION|post_file_more|CBD|partial') in buttons
+
+    @pytest.mark.asyncio
+    async def test_manual_review_dops_partial_does_not_show_success_buttons(self):
+        from bot import handle_approval_approve
+        from models import FormDraft
+
+        dops_draft = FormDraft(
+            form_type='DOPS',
+            uuid='uuid-dops',
+            fields={
+                'date_of_encounter': '2026-05-19',
+                'stage_of_training': 'Higher/ST4-ST6',
+                'clinical_setting': 'Emergency Department',
+                'placement': 'Emergency Department',
+                'procedure_name': 'Direct current cardioversion',
+                'procedural_skill': 'Direct current cardioversion',
+                'indication': 'unstable atrial fibrillation with hypotension despite initial treatment',
+                'clinical_reasoning': 'I recognised instability, prepared sedation and escalation, and planned synchronised shocks.',
+                'trainee_performance': (
+                    'I led the team briefing, consent discussion, ketamine sedation, synchronised shocks, '
+                    'post-procedure reassessment, and ITU escalation.'
+                ),
+                'reflection': 'I will continue to rehearse pre-sedation checks and closed-loop team communication.',
+                'curriculum_links': ['SLO3', 'SLO6'],
+                'key_capabilities': ['Manages critically ill patients', 'Safely performs practical procedures'],
+            },
+        )
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('APPROVE|draft')
+        context = sim._make_context()
+        context.user_data['case_text'] = 'DOPS cardioversion case'
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': dops_draft.form_type,
+            'fields': dops_draft.fields,
+            'uuid': dops_draft.uuid,
+        }
+
+        with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.record_case_filed', new=AsyncMock()), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 10, -1, 'pro_plus'))), \
+             patch('bot.route_filing', new_callable=AsyncMock, return_value={
+                 'status': 'partial',
+                 'filled': [
+                     'stage_of_training',
+                     'date_of_encounter',
+                     'end_date',
+                     'procedural_skill',
+                     'case_observed',
+                     'reflection',
+                     'curriculum_links',
+                     'key_capabilities',
+                 ],
+                 'skipped': ['placement'],
+                 'method': 'deterministic',
+             }):
+            result = await handle_approval_approve(update, context)
+
+        assert result == ConversationHandler.END
+        text = sim.get_last_text()
+        assert 'saved as a draft, but needs manual review' in text
+        assert '8 fields filled' in text
+        assert 'needs your review: Placement' in text
+        assert 'This is not complete yet' in text
+        assert '10 cases this month (Unlimited)' in text
+        assert '✅ *Direct Observation of Procedural Skills saved.*' not in text
+
+        buttons = sim.get_last_buttons()
+        callbacks = {callback for _, callback in buttons}
+        assert 'FEEDBACK|good|DOPS|partial' not in callbacks
+        assert 'FEEDBACK|bad|DOPS|partial' not in callbacks
+        assert 'AMEND|amend' not in callbacks
+        assert 'ACTION|file' in callbacks
+        assert 'ACTION|post_file_more|DOPS|partial' in callbacks
+
+        markup = sim.messages_sent[-1][2]
+        url_buttons = [
+            button.url
+            for row in markup.inline_keyboard
+            for button in row
+            if getattr(button, 'url', None)
+        ]
+        assert any('kaizenep.com/events/new-section/' in url for url in url_buttons)
 
     @pytest.mark.asyncio
     async def test_post_filing_more_expands_secondary_actions(self, thin_draft):
