@@ -1,12 +1,12 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-05-21T17:47:37+00:00
+Generated: 2026-05-21T18:08:27+00:00
 Status: ready
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
 - Branch: feature/conversational-router
-- Last commit: 9f29356 2026-05-21 fix: preserve draft control during portfolio filing
+- Last commit: 0e607e1 2026-05-21 chore: standardise bot message copy
 - Uncommitted changes: no
 
 ## Immediate read before restarting
@@ -16,6 +16,7 @@ Status: ready
 4. This resume brief for drift warnings and repo state
 
 ## Recent commits
+- 0e607e1 2026-05-21 chore: standardise bot message copy
 - 9f29356 2026-05-21 fix: preserve draft control during portfolio filing
 - 0a1abee 2026-05-21 fix: tighten portfolio filing context boundaries
 - 3620fe6 2026-05-21 Use natural prose for DOPS case observed
@@ -23,7 +24,6 @@ Status: ready
 - 693f343 2026-05-20 Switch Portfolio Guru extractor to Gemini Flash
 - 8f52350 2026-05-20 Improve DOPS quality gate and add Gemini bakeoff
 - 1972984 2026-05-20 Fix Portfolio Guru completion message and bot username
-- 7217fea 2026-05-20 Prevent duplicate form recommendation messages
 
 ## Repo context snapshot
 ### AGENTS.md — present, 4 days old

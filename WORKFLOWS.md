@@ -192,6 +192,30 @@ Product implication:
     but final submit must remain a one-ticket explicit approval action.
 ```
 
+## Flow 2B — Portfolio Readiness / ARCP Health (Planned)
+
+Canonical product spec: `docs/ARCP_HEALTH_DESIGN.md`.
+
+This is a planning/readiness flow, not a Kaizen filing flow.
+
+```
+User opens Portfolio Readiness
+→ confirm training stage, curriculum/requirement preset, and review date if known
+→ user manually adds or updates evidence items
+→ user maps evidence to domains/SLOs/KCs, or confirms assistant-suggested mappings
+→ bot/web shows readiness status with concrete reasons and uncertainties
+→ user can generate a draft review pack for supervisor discussion
+```
+
+MVP boundaries:
+
+- no Kaizen login, scraping, import, browser automation, or submission
+- no supervisor request
+- no ARCP success claim
+- manual/user-entered evidence first
+- "uploaded", "reviewed", and "accepted" are separate user-controlled statuses
+- readiness labels must always show the supporting gaps/reasons
+
 ---
 
 ## Flow 3 — Edit Before Filing

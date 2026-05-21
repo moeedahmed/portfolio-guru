@@ -168,6 +168,15 @@ Status:
 - Refined cancel/new-case handling: after Cancel the active conversation state ends cleanly, and extra clinical chunks sent while choosing a form are treated as more detail for the current fresh case rather than a second new-case warning.
 - Next UX move: dogfood the same anonymised cases in Medic Portfolio and Portfolio Guru, then move to draft-first behaviour only for high-confidence obvious cases.
 
+### Phase 2.9 - Portfolio Readiness / ARCP Health spec
+
+Status:
+- Approved product direction: build Portfolio Readiness as a generic Portfolio Guru feature, not as a Moeed-only tracker or Medic-internal automation.
+- Canonical spec lives in `docs/ARCP_HEALTH_DESIGN.md`.
+- MVP is manual/user-entered first: no Kaizen login, scraping, import, browser automation, supervisor request, or automated submission.
+- Safety contract: readiness is a planning aid only; it must not claim ARCP success or invent requirements, dates, evidence, supervisors, or clinical details.
+- Next build slice is data contracts plus a pure readiness engine with offline tests only. Leave live Telegram filing, Kaizen flows, browser actions, deployment, and service runtime unchanged.
+
 ### Phase 3 - Safe activation for low-risk intents
 
 Activate router for:
