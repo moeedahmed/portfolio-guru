@@ -1984,3 +1984,144 @@ class TestImageOCRProgress:
             assert "Reading image…\n" not in text, (
                 f"Ack must not stack with extra lines — saw: {text!r}"
             )
+
+
+class TestMessageStandardCopy:
+    """Locks the mode-aware error recovery rule from `WORKFLOWS.md`.
+
+    The cause clause is identical across flows; only the recovery clause changes.
+    These tests exercise the actual handlers so a regression in either the cause
+    or the recovery copy fails here, not in production.
+
+    new case        → "describe the case in text"
+    template review → "Try again or send text."
+    existing draft  → "Type your feedback instead."
+    """
+
+    @pytest.mark.asyncio
+    async def test_new_case_voice_error_uses_case_recovery_clause(self):
+        from bot import AWAIT_CASE_INPUT, handle_case_input
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        update = sim._make_text_update('')
+        voice = MagicMock()
+        file_obj = MagicMock()
+        file_obj.download_to_drive = AsyncMock()
+        voice.get_file = AsyncMock(return_value=file_obj)
+        update.message.text = None
+        update.message.voice = voice
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.transcribe_voice', new=AsyncMock(side_effect=RuntimeError('whisper down'))):
+            result = await handle_case_input(update, context)
+
+        assert result == AWAIT_CASE_INPUT
+        edits = [text for kind, text, _ in sim.messages_sent if kind == 'edit' and text]
+        assert edits, f"Expected an error edit, got: {sim.messages_sent}"
+        final = edits[-1]
+        assert "Couldn't transcribe voice note" in final, final
+        assert "describe the case in text" in final, final
+
+    @pytest.mark.asyncio
+    async def test_template_review_image_error_uses_send_text_recovery(self):
+        from bot import AWAIT_TEMPLATE_REVIEW, handle_template_review_media
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        update = sim._make_text_update('')
+        photo = MagicMock()
+        file_obj = MagicMock()
+        file_obj.download_to_drive = AsyncMock()
+        photo.get_file = AsyncMock(return_value=file_obj)
+        update.message.text = None
+        update.message.photo = [photo]
+        update.message.voice = None
+        update.message.video = None
+        update.message.document = None
+
+        with patch('bot.extract_from_image', new=AsyncMock(side_effect=RuntimeError('vision down'))):
+            result = await handle_template_review_media(update, context)
+
+        assert result == AWAIT_TEMPLATE_REVIEW
+        edits = [text for kind, text, _ in sim.messages_sent if kind == 'edit' and text]
+        assert edits, f"Expected an error edit, got: {sim.messages_sent}"
+        final = edits[-1]
+        assert "Couldn't read image" in final, final
+        assert "Try again or send text" in final, final
+        assert "Type your feedback" not in final, final
+
+    @pytest.mark.asyncio
+    async def test_approval_media_voice_error_uses_feedback_recovery(self):
+        from bot import AWAIT_APPROVAL, _store_draft, handle_approval_media_feedback
+        from models import CBDData
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['case_text'] = 'Original case text'
+        context.user_data['case_input_source'] = 'text'
+        _store_draft(context, CBDData(patient_presentation='Chest pain'))
+
+        update = sim._make_text_update('')
+        voice = MagicMock()
+        file_obj = MagicMock()
+        file_obj.download_to_drive = AsyncMock()
+        voice.get_file = AsyncMock(return_value=file_obj)
+        update.message.text = None
+        update.message.voice = voice
+        update.message.photo = []
+        update.message.video = None
+        update.message.document = None
+
+        with patch('bot.transcribe_voice', new=AsyncMock(side_effect=RuntimeError('whisper down'))):
+            result = await handle_approval_media_feedback(update, context)
+
+        assert result == AWAIT_APPROVAL
+        edits = [text for kind, text, _ in sim.messages_sent if kind == 'edit' and text]
+        assert edits, f"Expected an error edit, got: {sim.messages_sent}"
+        final = edits[-1]
+        assert "Couldn't transcribe voice note" in final, final
+        assert "Type your feedback instead" in final, final
+        assert "describe the case in text" not in final, final
+
+    def test_bot_source_has_no_deprecated_recovery_wording(self):
+        """Static lint: deprecated copy variants must not creep back in.
+
+        Each entry is (deprecated literal, where it used to live, replacement).
+        The lint fails fast in CI so a copy-paste regression doesn't ship.
+        """
+        import pathlib
+        bot_src = pathlib.Path(__file__).resolve().parent.parent / "bot.py"
+        text = bot_src.read_text(encoding="utf-8")
+
+        deprecated_lines = [
+            "Try a clearer photo or text.",
+            "Try a voice note or text.",
+            "Try text instead.",
+            "send it again or type the case as text.",
+        ]
+        offenders = [needle for needle in deprecated_lines if needle in text]
+        assert not offenders, (
+            "Deprecated recovery wording resurfaced in bot.py — normalise to "
+            "the mode-aware recovery clauses documented in WORKFLOWS.md "
+            "(User-Facing Message Standard). Offenders: " + ", ".join(offenders)
+        )
+
+    def test_voice_ack_normalised_across_clinical_flows(self):
+        """Voice acks for clinical input always read 'Transcribing voice note…'.
+
+        A short 'Transcribing…' bubble is allowed only in the voice-profile
+        setup flow, but that surface was normalised too — so the bare ack
+        should no longer appear anywhere in bot.py.
+        """
+        import pathlib
+        bot_src = pathlib.Path(__file__).resolve().parent.parent / "bot.py"
+        text = bot_src.read_text(encoding="utf-8")
+
+        # The bare "🎙️ Transcribing…" literal is a regression marker — every
+        # voice ack should now carry the "voice note" noun.
+        assert '"🎙️ Transcribing…"' not in text, (
+            'Found bare "🎙️ Transcribing…" ack — voice acks should read '
+            '"🎙️ Transcribing voice note…" per WORKFLOWS.md.'
+        )

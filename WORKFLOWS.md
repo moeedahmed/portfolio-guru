@@ -345,10 +345,25 @@ BWS secrets (at startup only):
 
 ## User-Facing Message Standard
 
-Applies to every bot message in `backend/bot.py`. Safety-critical templates
-(welcome, captured ack, recommendation, privacy nudge, AI unavailable, thin
-case, draft reply hint) live in `backend/message_policy.py` and must not
-drift from there.
+End-to-end reference for every bot bubble in `backend/bot.py`.
+Safety-critical templates live in `backend/message_policy.py` and must not
+drift from there — see [Safety-critical templates](#safety-critical-templates)
+below.
+
+### Message classes
+
+Every user-facing string falls into exactly one class. The class determines
+where the text lives, who can edit it, and what may flex by context.
+
+| Class            | Lives in                           | Examples                                                                                                               | Allowed to vary?                                          |
+| ---------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `FIXED`          | `message_policy.MESSAGE_TEMPLATES` | welcome, captured ack, privacy nudge, AI unavailable, thin-case detail request, draft reply hint, file-case prompt     | No — copy is locked here and pulled via `render_message`. |
+| `TEMPLATED`      | `message_policy.MESSAGE_TEMPLATES` | form recommendation (composed from rationales)                                                                         | Variable slots only.                                      |
+| `LLM_ASSISTED`   | LLM output, post-filtered          | `answer_question`, `compose_filing_recovery_copy`, post-file `summarise_recent_activity`                               | Yes — bounded to low-risk explanation/recovery paths.     |
+| `CONVERSATIONAL` | Inline in `bot.py`                 | Stage acks, slow-progress edits, mode-aware errors, filing outcomes, gate messages, button replies, recovery scaffolds | Yes — must follow the [Shape](#shape) and tables below.   |
+
+If a `CONVERSATIONAL` line repeats verbatim in more than one handler, prefer
+adding it to `message_policy.MESSAGE_TEMPLATES` rather than duplicating it.
 
 ### Shape
 
@@ -359,16 +374,78 @@ drift from there.
 - Telegram's typing indicator (`_typing_until`) is the ambient progress
   signal for long work. Text reassurance is opt-in, sparing, and replaces
   the ack — it never adds a second line.
+- Markdown only when `parse_mode="Markdown"` is also passed. Raw asterisks
+  in plain-text bubbles are a bug — `plain_text_policy_violations()` in
+  `message_policy.py` is the test surface for `FIXED` templates.
 
-### Vocabulary by stage
+### Vocabulary by stage (new-case flow)
 
-| Stage                             | Photo                                                                       | Voice                                                        | Video                                                             | Document                                         | Kaizen save                                                                                                                                                                         |
-| --------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Ack                               | `📷 Reading image…` / `📷 Reading images…`                                  | `🎙️ Transcribing voice note…`                                | `🎬 Extracting audio from video…`                                 | `📄 Reading *{file_name}*…`                      | `📤 Saving {form_name} as a Kaizen draft…`                                                                                                                                          |
-| Slow-progress (replaces ack)      | `📷 Still reading…` (after 8 s)                                             | —                                                            | —                                                                 | —                                                | `📤 Still saving {form_name} — Kaizen is loading the form…` then `📤 Filling fields in {form_name} — almost there…` then `📤 Verifying the save on Kaizen — this is the last step…` |
-| Success (new case)                | `📷 Image read. Finding matching forms…`                                    | `🎙️ Voice note read. Finding matching forms…`                | n/a                                                               | `📄 *{file_name}* read. Finding matching forms…` | `✅ Saved as a Kaizen draft.`                                                                                                                                                       |
-| Success (refining existing draft) | `📷 Got it — updating draft…`                                               | `🎙️ Got it — updating draft…`                                | `🎬 Got it — updating draft…`                                     | `📄 Got it — updating draft…`                    | n/a                                                                                                                                                                                 |
-| Error                             | `⚠️ Couldn't read image. Try a clearer photo or describe the case in text.` | `⚠️ Couldn't transcribe voice note. Try again or send text.` | `⚠️ Couldn't extract audio from video. Try a voice note or text.` | `⚠️ Couldn't read that file. Try text instead.`  | `❌ Filing failed. Try again or start fresh.`                                                                                                                                       |
+These are the canonical strings for the primary path: user sends a fresh
+clinical case → bot extracts text → bot recommends forms. Other flows
+reuse the acks and adjust the success/error recovery clauses (see
+[Mode-aware error recovery](#mode-aware-error-recovery)).
+
+| Stage                        | Photo                                                                       | Voice                                                                        | Video                                                                                  | Document                                                                                    | Kaizen save                                                                                                                                                                         |
+| ---------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ack                          | `📷 Reading image…` / `📷 Reading images…`                                  | `🎙️ Transcribing voice note…`                                                | `🎬 Extracting audio from video…`                                                      | `📄 Reading *{file_name}*…`                                                                 | `📤 Saving {form_name} as a Kaizen draft…`                                                                                                                                          |
+| Slow-progress (replaces ack) | `📷 Still reading…` (after 8 s)                                             | —                                                                            | —                                                                                      | —                                                                                           | `📤 Still saving {form_name} — Kaizen is loading the form…` then `📤 Filling fields in {form_name} — almost there…` then `📤 Verifying the save on Kaizen — this is the last step…` |
+| Success                      | `📷 Image read. Finding matching forms…`                                    | `🎙️ Voice note read. Finding matching forms…`                                | n/a (video transcribes via `transcribe_voice`)                                         | `📄 *{file_name}* read. Finding matching forms…`                                            | `✅ *{form_name} saved.*` (with a SLO/date summary line)                                                                                                                            |
+| Error                        | `⚠️ Couldn't read image. Try a clearer photo or describe the case in text.` | `⚠️ Couldn't transcribe voice note. Try again or describe the case in text.` | `⚠️ Couldn't extract audio from video. Try a voice note or describe the case in text.` | `⚠️ Couldn't read *{file_name}*. Try a different file format or describe the case in text.` | `❌ Filing failed. Try again or start fresh.` (with retry / start-fresh buttons)                                                                                                    |
+
+`NOT_CLINICAL` extraction (photo doesn't look clinical) gets its own
+recovery line — `This image doesn't look like a clinical case. Send a text
+description or a photo of clinical notes/findings.` — and ends the
+conversation rather than retrying.
+
+Media routing per state (from `build_application`):
+
+- **New case** (`AWAIT_CASE_INPUT`): accepts text, voice, photo, document.
+  Video is **not** routed here — the Video column above is the canonical
+  Ack/Error wording for when video lands in a later state, not a new-case
+  surface.
+- **Template review** (`AWAIT_TEMPLATE_REVIEW`): accepts text, voice,
+  photo, video, document.
+- **Approval** (`AWAIT_APPROVAL`): accepts text, voice, photo, video,
+  document.
+- **Edit value** (`AWAIT_EDIT_VALUE`): accepts text plus a catch-all for
+  voice/photo/document via `handle_edit_value`.
+
+### Mode-aware error recovery
+
+The cause clause stays the same regardless of flow; only the recovery
+clause changes. Three flow modes:
+
+| Flow mode                                              | Where it lives                                                 | Recovery clause                         | Why                                                                  |
+| ------------------------------------------------------ | -------------------------------------------------------------- | --------------------------------------- | -------------------------------------------------------------------- |
+| **New case**                                           | `handle_case_input`                                            | `describe the case in text` (per media) | User hasn't picked a form yet — keep guiding toward providing case.  |
+| **Template review** (form chosen, accumulating detail) | `handle_template_review_media` / `handle_template_review_text` | `Try again or send text.`               | We already have a partial template; text is the simplest next input. |
+| **Existing draft** (preview shown, refining)           | `handle_approval_media_feedback` / `handle_edit_value`         | `Type your feedback instead.`           | User is editing a draft, not starting fresh.                         |
+| **Voice profile setup**                                | `voice_collect_example`                                        | `Try pasting text instead.`             | Examples flow accepts paste; "case" framing doesn't apply.           |
+
+Example: voice failure across the three primary modes:
+
+```
+new case        →  ⚠️ Couldn't transcribe voice note. Try again or describe the case in text.
+template review →  ⚠️ Couldn't transcribe voice note. Try again or send text.
+existing draft  →  ⚠️ Couldn't transcribe voice note. Type your feedback instead.
+```
+
+Apply the same pattern to image / video / document errors.
+
+### Refining-existing-draft success vocabulary
+
+When media is uploaded into an already-active flow, the success edit uses
+"Got it — updating …":
+
+| Flow                    | Success edit (replaces the ack)             | Where it lives                   |
+| ----------------------- | ------------------------------------------- | -------------------------------- |
+| Template review         | `Got it — updating template…` (per media)   | `handle_template_review_media`   |
+| Existing draft feedback | `Got it — updating draft…` (per media)      | `handle_approval_media_feedback` |
+| Edit value (legacy)     | `✏️ Regenerating draft with your feedback…` | `handle_edit_value`              |
+
+Both `template` and `draft` framings are correct — they describe different
+nouns. Keep them separate, but never have an ack say `updating template`
+in a flow that's actually editing a draft.
 
 ### Slow-progress contract
 
@@ -384,14 +461,33 @@ patience window, follow the `_run_image_progress` pattern in `backend/bot.py`:
 Never concatenate `"\n"`-joined status lines onto the ack — that reads as
 the bot repeating itself.
 
-### Errors
+Two long-running surfaces use a richer progress sequence rather than a
+single replacement, because the work has discrete phases:
+
+- **Kaizen filing (`_filing_progress`):** three sequential edits at
+  20 s / 60 s / 120 s — `Still saving…` → `Filling fields…` → `Verifying
+the save…`. Each edit replaces the previous one. Catches any
+  edit-throws-after-success and swallows them.
+- **Kaizen login (`_progress_updates` in `setup_password`):** two
+  sequential edits at 15 s / 35 s — `Still checking — Kaizen can be slow
+to respond…` → `Almost there — finalising the login check…`.
+
+### Errors (general rules)
 
 - One ⚠️ line per error. State the cause in present tense (`Couldn't read
-image`), then a one-clause recovery (`Try a clearer photo or describe the
-case in text.`). No stack traces, no apologies, no "please".
-- Recovery clause is mode-aware: new-case flow says "describe the case in
-  text", existing-draft flow says "Type your feedback instead", template
-  review says "Try again or send text".
+image`), then a one-clause recovery (see [Mode-aware error recovery]
+  (#mode-aware-error-recovery)). No stack traces, no apologies, no
+  "please".
+- Hard failures that lose the draft use ❌ (e.g. `❌ Filing failed.`,
+  `❌ Login failed — please check your username and password.`); recoverable
+  warnings use ⚠️.
+- Timeout uses ⏱ (`⏱ Filing took too long.`, `⏱ Kaizen took too long to
+respond.`); button/state expiry uses ⏳ (`⏳ Quick improve timed out.`,
+  `⏳ Template review timed out. Please try again.`).
+- After an error that keeps the draft alive, the recovery message must be
+  paired with a keyboard the user can act on — usually `🔄 Try Again` plus
+  either `🆕 Start fresh` or `❌ Cancel`. A dead-end ⚠️ with no buttons is a
+  bug.
 
 ### Pre-save gate (Save as draft)
 
@@ -415,27 +511,101 @@ Both tiers always arrive as **new messages**, never by editing the
 reviewed draft preview — the user just approved that preview and should
 not lose the context they were looking at.
 
+### Filing outcomes (after Kaizen save returns)
+
+The progress message edits one last time with the final outcome — the
+reviewed draft preview always stays visible above. Outcome shapes:
+
+| Status                 | Headline                                                      | Body                                                                                                  | Keyboard                                                                 |
+| ---------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `success`              | `✅ *{form_name} saved.*` + SLO/date summary                  | Field count, usage line, optional one-line `💡 {observation}`                                         | `📋 File another` / `🔁 Same case, another WPBA` / `✏️ Amend this draft` |
+| `partial` (with error) | `⚠️ *{form_name} — filing had issues.*`                       | `{n} fields filled.` + LLM-composed recovery clause + `[Open … in Kaizen]({url})` + proof report      | `🔄 Try again` / `🆕 Start fresh`                                        |
+| `partial` (no error)   | `⚠️ *{form_name} saved as a draft, but needs manual review.*` | Filled + skipped count + `Open Kaizen to fill the missing detail, then assign an assessor.`           | Post-file follow-up keyboard                                             |
+| `failed`               | `❌ *Filing didn't complete — Failed / blocked.*`             | LLM recovery clause + `[Open {form_name} manually in Kaizen]({url})` + proof report                   | `🔄 Try again` / `🆕 Start fresh`                                        |
+| Timeout                | `⏱ Filing took too long.`                                     | `The draft might be in your activities list already — [open Kaizen]({url}) to check before retrying.` | Stays on `AWAIT_APPROVAL` so the user can retry                          |
+
+The proof report at the bottom of partial/failed states is generated by
+`_format_proof_report` and lists status, source, fields completed, skipped
+fields, and "Not done: no supervisor request sent, no final submission
+made" — it is the trust layer and should never be dropped.
+
+### Callback / recovery / control messages
+
+| Surface                                 | Helper / function                                                       | Copy                                                                                                                                                           |
+| --------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/cancel` (connected user)              | `_cancelled_next_step_text` → `cancel_command` / `ACTION\|cancel`       | `✅ Cancelled. Just send your next case when ready.`                                                                                                           |
+| `/cancel` (disconnected user)           | `_cancelled_next_step_text`                                             | `❌ Cancelled. Connect Kaizen to start filing.`                                                                                                                |
+| Stale callback (button expired ~30 s)   | `error_handler` → `_resume_paused_flow`                                 | `That earlier button is no longer active.` (+ rebuild paused draft / form choice / start-fresh path)                                                           |
+| Setup-flow stale button                 | `_expired_prompt_text`                                                  | `⏳ That button has expired. Finish setup from the latest message and I'll pick it up from there.`                                                             |
+| Generic stale button (no setup pending) | `_expired_prompt_text`                                                  | `⏳ That button has expired. Start a new case from the latest message and I'll pick it up from there.`                                                         |
+| Unknown error with draft alive          | `error_handler`                                                         | `Something went wrong while filing. Try again or start fresh.` + retry/start-fresh keyboard                                                                    |
+| Unknown error with no draft             | `error_handler`                                                         | `Something went wrong. Use the latest message to start again.` + next-step keyboard                                                                            |
+| Stale "earlier draft" recovery          | `_resume_paused_flow(reason="That earlier draft is no longer active.")` | `That earlier draft is no longer active.` (+ paused-flow rebuild)                                                                                              |
+| Live submit attempt (legacy submit btn) | `handle_approval_submit`                                                | `Portfolio Guru only saves Kaizen entries as drafts. Use Save as draft when you're ready.`                                                                     |
+| Reuse same case after success           | `ACTION\|same_case_another`                                             | `🔁 Reusing the same case. I'll suggest a different WPBA type — not the one you already filed.`                                                                |
+| Amend after a filed draft               | `handle_amend_draft`                                                    | Re-shows the draft preview with the amend keyboard (`📤 Save updated draft` / `❌ Cancel amend`).                                                              |
+| `/health` empty portfolio               | `ACTION\|health`                                                        | `📊 No cases filed yet — start filing and come back to check your ARCP readiness.`                                                                             |
+| `/delete` confirmation                  | `ACTION\|delete`                                                        | `⚠️ This wipes your saved Kaizen login, training level, curriculum choice, and voice profile. It does not affect cases already saved in Kaizen. Are you sure?` |
+
+Conversation-state invariant: every path to `ConversationHandler.END` must
+call `context.user_data.clear()` first. The cancel/recovery surfaces above
+all enforce this.
+
+### Button / control vocabulary
+
+Used across keyboards in `bot.py`. Keep these exact — the emoji and label
+together carry meaning and downstream copy refers to them by name.
+
+| Button label                      | Callback                         | Where                                    |
+| --------------------------------- | -------------------------------- | ---------------------------------------- |
+| `🔗 Connect Kaizen`               | `ACTION\|setup`                  | Welcome, missing-credentials surfaces    |
+| `❌ Cancel`                       | `ACTION\|cancel` (and others)    | Universal cancel                         |
+| `📤 Save as draft`                | `APPROVE\|draft`                 | Approval keyboard                        |
+| `✨ Quick improve`                | `IMPROVE\|reflection`            | Approval keyboard (single-use per draft) |
+| `✏️ Edit` / `✏️ Amend this draft` | `APPROVE\|edit` / `AMEND\|amend` | Approval / post-file keyboards           |
+| `📋 File another case`            | `ACTION\|file`                   | Post-file keyboard                       |
+| `🔁 Same case, another WPBA`      | `ACTION\|same_case_another`      | Post-success keyboard                    |
+| `📝 Review draft` (Unlimited)     | `REVIEW\|draft`                  | Approval keyboard (gated tier)           |
+| `🔄 Try again`                    | `ACTION\|retry_filing`           | Filing error / partial keyboards         |
+| `🆕 Start fresh`                  | `ACTION\|reset`                  | Filing error keyboards                   |
+| `🔙 Back`                         | `ACTION\|back_to_menu`           | Sub-views (settings, health, help, info) |
+
 ### Safety-critical templates
 
-These stay fixed in `backend/message_policy.py` (`MessageClass.FIXED`):
-welcome (connected/disconnected), "what is this?", file-case prompt,
-captured ack, thin-case detail request, AI unavailable, photo privacy
-nudge, and the draft reply hint. LLM-assisted prose is allowed only on
-explicitly low-risk explanation/recovery paths (e.g. `answer_question`).
+These stay fixed in `backend/message_policy.py` (`MessageClass.FIXED`),
+behind `render_message(key)`:
 
-### Known minor inconsistencies (deferred)
+- `welcome_disconnected`, `welcome_connected` — first-touch framing.
+- `what_is_this` — opt-in explanation.
+- `file_case_prompt` — the "send what happened" prompt.
+- `captured_ack` — the bridging ack after a case is received.
+- `thin_case_detail_request` — anti-fabrication guard for empty inputs.
+- `ai_temporarily_unavailable` — LLM-down fallback.
+- `photo_privacy_nudge` — appended to recommendations after a photo input.
+- `draft_reply_hint` — appended to draft previews (`_REPLY_HINT_SUFFIX`).
+- `form_recommendation` (TEMPLATED) — the recommendation message body.
 
-The codebase has a handful of small wording drifts that are noted but not
-worth a churn-PR on their own:
+LLM-assisted prose is allowed only on explicitly low-risk explanation/
+recovery paths: `answer_question`, `compose_filing_recovery_copy`,
+`summarise_recent_activity`. Never let the LLM author safety-critical
+copy (welcome, privacy, captured ack, thin-case detail).
 
-- `🎙️ Transcribing…` vs `🎙️ Transcribing voice note…` — same intent.
-- `Try a clearer photo or text.` vs `Try a clearer photo or describe the
-case in text.` — same intent, different verbosity.
-- `Got it — updating template…` vs `Got it — updating draft…` — separate
-  flow contexts, both correct as-is.
+### Intentional exceptions / non-drift cases
 
-If you touch one of these surfaces for unrelated reasons, normalise to the
-preferred copy in the table above while you're there.
+These look like drift but are correct as-is — don't normalise without
+talking to Moeed first.
+
+- `Got it — updating template…` vs `Got it — updating draft…` — different
+  flow nouns (template review vs existing draft). Both are correct.
+- `📷 Reading image…` vs `📷 Reading images…` — the plural is intentional
+  during bundle mode (`pending_case_bundle`), where multiple photos arrive
+  in one window.
+- `🎙️ Transcribing…` inside `voice_collect_example` may stay generic if
+  the surrounding context already establishes "voice example" framing;
+  prefer `🎙️ Transcribing voice note…` otherwise.
+- Setup-login error `Try again — or send the case anyway, you can connect
+later.` deliberately offers two recovery paths because the user might
+  want to file before fixing credentials.
 
 ---
 

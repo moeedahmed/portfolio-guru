@@ -2724,7 +2724,7 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
 
     # Voice note
     elif msg and msg.voice:
-        await _flow_msg(update, context, "🎙️ Transcribing…", flow_key="voice")
+        await _flow_msg(update, context, "🎙️ Transcribing voice note…", flow_key="voice")
         try:
             voice_file = await msg.voice.get_file()
             import tempfile
@@ -2737,10 +2737,10 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
             if text:
                 examples.append(text)
             else:
-                await _flow_edit(update, context, "⚠️ Couldn't transcribe. Try pasting text instead.", flow_key="voice")
+                await _flow_edit(update, context, "⚠️ Couldn't transcribe voice note. Try pasting text instead.", flow_key="voice")
                 return AWAIT_VOICE_EXAMPLES
         except Exception:
-            await _flow_edit(update, context, "⚠️ Transcription failed. Try pasting text instead.", flow_key="voice")
+            await _flow_edit(update, context, "⚠️ Couldn't transcribe voice note. Try pasting text instead.", flow_key="voice")
             return AWAIT_VOICE_EXAMPLES
 
     context.user_data["voice_examples"] = examples
@@ -4243,7 +4243,7 @@ async def handle_template_review_media(update: Update, context: ContextTypes.DEF
                 return AWAIT_TEMPLATE_REVIEW
             await ack.edit_text("📷 Got it — updating template…")
         except Exception:
-            await ack.edit_text("⚠️ Couldn't read image. Try a clearer photo or text.")
+            await ack.edit_text("⚠️ Couldn't read image. Try again or send text.")
             return AWAIT_TEMPLATE_REVIEW
         finally:
             if tmp_path and os.path.exists(tmp_path):
@@ -4260,7 +4260,7 @@ async def handle_template_review_media(update: Update, context: ContextTypes.DEF
                 extracted_text = await transcribe_voice(tmp_path)
             await ack.edit_text("🎬 Got it — updating template…")
         except Exception:
-            await ack.edit_text("⚠️ Couldn't extract audio from video. Try a voice note or text.")
+            await ack.edit_text("⚠️ Couldn't extract audio from video. Try again or send text.")
             return AWAIT_TEMPLATE_REVIEW
         finally:
             if tmp_path and os.path.exists(tmp_path):
@@ -4289,7 +4289,7 @@ async def handle_template_review_media(update: Update, context: ContextTypes.DEF
                 extracted_text = extracted_text[:max_chars]
             await ack.edit_text(f"📄 Got it — updating template…")
         except Exception:
-            await ack.edit_text("⚠️ Couldn't read that file. Try text instead.")
+            await ack.edit_text("⚠️ Couldn't read that file. Try again or send text.")
             return AWAIT_TEMPLATE_REVIEW
         finally:
             if tmp_path and os.path.exists(tmp_path):
@@ -4323,7 +4323,7 @@ async def handle_approval_media_feedback(update: Update, context: ContextTypes.D
                 extracted_text = await transcribe_voice(tmp_path)
             await ack.edit_text("🎙️ Got it — updating draft…")
         except Exception:
-            await ack.edit_text("⚠️ Couldn't transcribe voice note. Try again or send text.")
+            await ack.edit_text("⚠️ Couldn't transcribe voice note. Type your feedback instead.")
             return AWAIT_APPROVAL
         finally:
             if tmp_path and os.path.exists(tmp_path):
@@ -4348,7 +4348,7 @@ async def handle_approval_media_feedback(update: Update, context: ContextTypes.D
                 extracted_text = combine_case_inputs(caption, [extracted_text or ""])
             await ack.edit_text("📷 Got it — updating draft…")
         except Exception:
-            await ack.edit_text("⚠️ Couldn't read image. Try a clearer photo or text.")
+            await ack.edit_text("⚠️ Couldn't read image. Type your feedback instead.")
             return AWAIT_APPROVAL
         finally:
             if tmp_path and os.path.exists(tmp_path):
@@ -4366,7 +4366,7 @@ async def handle_approval_media_feedback(update: Update, context: ContextTypes.D
                 extracted_text = await transcribe_voice(tmp_path)
             await ack.edit_text("🎬 Got it — updating draft…")
         except Exception:
-            await ack.edit_text("⚠️ Couldn't extract audio from video. Try a voice note or text.")
+            await ack.edit_text("⚠️ Couldn't extract audio from video. Type your feedback instead.")
             return AWAIT_APPROVAL
         finally:
             if tmp_path and os.path.exists(tmp_path):
@@ -4396,7 +4396,7 @@ async def handle_approval_media_feedback(update: Update, context: ContextTypes.D
                 extracted_text = extracted_text[:max_chars]
             await ack.edit_text("📄 Got it — updating draft…")
         except Exception:
-            await ack.edit_text("⚠️ Couldn't read that file. Try text instead.")
+            await ack.edit_text("⚠️ Couldn't read that file. Type your feedback instead.")
             return AWAIT_APPROVAL
         finally:
             if tmp_path and os.path.exists(tmp_path):
@@ -4856,7 +4856,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             _track_latest_message(context, ack)
         except Exception as e:
             await ack.edit_text(
-                "⚠️ Couldn't transcribe that voice note — send it again or type the case as text.",
+                "⚠️ Couldn't transcribe voice note. Try again or describe the case in text.",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel")],
                 ]),
@@ -5930,7 +5930,7 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     photo = msg.photo
 
     if voice:
-        ack = await msg.reply_text("🎙️ Transcribing…")
+        ack = await msg.reply_text("🎙️ Transcribing voice note…")
         tmp_path = None
         try:
             voice_file = await voice.get_file()
