@@ -700,7 +700,9 @@ class TestFlowWalker:
     async def test_thin_dops_save_returns_to_approval_with_missing_detail_copy(self):
         """A thin DOPS draft must not reach route_filing. The user is kept on
         the draft-approval screen with a concise list of missing detail and
-        the same Save/Quick improve/Cancel keyboard.
+        the same Save/Quick improve/Cancel keyboard. The reviewed draft
+        preview message stays intact — the blocker arrives as a separate
+        message so the user can still see what they reviewed.
         """
         from bot import AWAIT_APPROVAL, handle_approval_approve
         from models import FormDraft
@@ -741,6 +743,9 @@ class TestFlowWalker:
         assert result == AWAIT_APPROVAL
         # Draft is preserved so the user can fix it.
         assert context.user_data.get('draft_data')
+        # The reviewed draft preview message text must NOT be overwritten
+        # with the blocker — only the approval keyboard is disarmed.
+        assert update.callback_query.message.edit_text.await_count == 0
         text = (sim.get_last_text() or '').lower()
         assert 'indication' in text
         assert 'trainee performance' in text
@@ -748,6 +753,103 @@ class TestFlowWalker:
         buttons = {data for _, data in sim.get_last_buttons()}
         assert 'APPROVE|draft' in buttons
         assert 'CANCEL|draft' in buttons
+
+    @pytest.mark.asyncio
+    async def test_dops_save_with_missing_date_proceeds_with_separate_warning(self):
+        """A DOPS draft missing only the date is useful enough to file — the
+        bot must respect the user's explicit Save as draft, warn about the
+        gap in a separate message, leave the reviewed draft preview intact,
+        and call route_filing so Kaizen actually receives the draft.
+
+        Dogfood ask: 'missing fields can be warned about, but explicit Save
+        as draft should proceed unless the draft is genuinely unsafe/near-empty'.
+        """
+        from bot import handle_approval_approve
+        from models import FormDraft
+
+        useful_dops = FormDraft(
+            form_type='DOPS',
+            uuid='uuid-dops',
+            fields={
+                # Date intentionally absent.
+                'stage_of_training': 'Higher/ST4-ST6',
+                'clinical_setting': 'Emergency Department',
+                'procedure_name': 'DC cardioversion',
+                'indication': (
+                    'Unstable atrial fibrillation with rapid ventricular '
+                    'response and hypotension despite initial fluid '
+                    'resuscitation.'
+                ),
+                'trainee_performance': (
+                    'I led the synchronised cardioversion under ketamine '
+                    'sedation, delivered three escalating shocks, and '
+                    'escalated to ITU after the rhythm became refractory.'
+                ),
+                'reflection': (
+                    'Reinforced the value of early ITU escalation when the '
+                    'rhythm fails to convert and the patient remains '
+                    'compromised.'
+                ),
+            },
+        )
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('APPROVE|draft')
+        context = sim._make_context()
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': useful_dops.form_type,
+            'fields': useful_dops.fields,
+            'uuid': useful_dops.uuid,
+        }
+
+        route_filing_mock = AsyncMock(return_value={
+            'status': 'success',
+            'filled': ['stage_of_training', 'procedure_name', 'case_observed', 'reflection'],
+            'skipped': [],
+            'method': 'deterministic',
+        })
+
+        with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.route_filing', new=route_filing_mock):
+            result = await handle_approval_approve(update, context)
+
+        # The user's explicit Save was honoured — the save was attempted.
+        route_filing_mock.assert_awaited_once()
+        assert result == ConversationHandler.END
+        # The reviewed draft preview was not overwritten with a blocker.
+        assert update.callback_query.message.edit_text.await_count == 0
+        # A separate warning message mentions the missing Date and frames
+        # it as a recoverable gap (not the "saving..." progress ack).
+        fresh_messages = [
+            text for kind, text, _ in sim.messages_sent
+            if kind in ('reply', 'send') and text
+        ]
+        warning_candidates = [
+            text for text in fresh_messages
+            if 'date' in text.lower()
+            and ('gap' in text.lower() or 'add' in text.lower())
+        ]
+        assert warning_candidates, (
+            'expected a separate warning mentioning the missing Date '
+            'and framing it as a gap to add later; '
+            f'got messages: {[(k, t) for k, t, _ in sim.messages_sent]}'
+        )
+        # And the warning lands BEFORE the save ack — the order matters so
+        # the user reads the gap heads-up first.
+        message_texts = [text for _, text, _ in sim.messages_sent if text]
+        warning_idx = next(
+            (i for i, t in enumerate(message_texts) if t in warning_candidates),
+            -1,
+        )
+        ack_idx = next(
+            (i for i, t in enumerate(message_texts) if 'kaizen draft…' in t.lower()),
+            -1,
+        )
+        assert 0 <= warning_idx < ack_idx, (
+            f'warning should precede save ack; warning idx={warning_idx}, '
+            f'ack idx={ack_idx}, messages={message_texts}'
+        )
 
     @pytest.mark.asyncio
     async def test_uncertain_save_keeps_draft_and_offers_compact_recovery(self, thin_draft):
@@ -1756,3 +1858,129 @@ class TestTrainingStageGroups:
         assert buttons[0] == ('⭐ Set up voice profile', 'ACTION|voice')
         assert ('📚 Curriculum: 2025 Update', 'ACTION|change_curriculum') in buttons
         assert 'Set this once so drafts sound like you' in text
+
+
+class TestImageOCRProgress:
+    """Image OCR progress UX: one calm replacement message, never a stacked
+    "Reading image…\nStill reading…" bubble.
+
+    Background: the original implementation appended "Still reading…" to the
+    initial ack on the same message, which read like the bot repeating itself.
+    The contract now is: a single ack ("Reading image…"), optionally replaced
+    by a single calm reassurance ("Still reading…") if OCR is slow, then
+    replaced again by the success/error message.
+    """
+
+    @pytest.mark.asyncio
+    async def test_progress_helper_skips_edit_when_ocr_finishes_before_delay(self):
+        from bot import _run_image_progress
+
+        ack = MagicMock()
+        ack.edit_text = AsyncMock()
+        ocr_done = asyncio.Event()
+        ocr_done.set()
+
+        await _run_image_progress(
+            ack,
+            still_text="📷 Still reading…",
+            delay_seconds=0.05,
+            ocr_done=ocr_done,
+        )
+
+        ack.edit_text.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_progress_helper_emits_single_replacement_when_ocr_is_slow(self):
+        from bot import _run_image_progress
+
+        ack = MagicMock()
+        ack.edit_text = AsyncMock()
+        ocr_done = asyncio.Event()
+
+        await _run_image_progress(
+            ack,
+            still_text="📷 Still reading…",
+            delay_seconds=0.02,
+            ocr_done=ocr_done,
+        )
+
+        ack.edit_text.assert_awaited_once()
+        args, kwargs = ack.edit_text.await_args
+        edited = args[0] if args else kwargs.get("text", "")
+        assert edited == "📷 Still reading…"
+        assert "\n" not in edited
+        assert "Reading image" not in edited
+        assert "Reading images" not in edited
+
+    @pytest.mark.asyncio
+    async def test_progress_helper_cancellation_is_silent(self):
+        from bot import _run_image_progress
+
+        ack = MagicMock()
+        ack.edit_text = AsyncMock()
+        ocr_done = asyncio.Event()
+
+        task = asyncio.create_task(
+            _run_image_progress(
+                ack,
+                still_text="📷 Still reading…",
+                delay_seconds=10,
+                ocr_done=ocr_done,
+            )
+        )
+        await asyncio.sleep(0)
+        task.cancel()
+        results = await asyncio.gather(task, return_exceptions=True)
+
+        assert results == [None]
+        ack.edit_text.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_progress_helper_swallows_edit_failures(self):
+        """A failed reassurance edit must not crash the parent OCR flow."""
+        from bot import _run_image_progress
+
+        ack = MagicMock()
+        ack.edit_text = AsyncMock(side_effect=RuntimeError("telegram unreachable"))
+        ocr_done = asyncio.Event()
+
+        # Should complete without raising.
+        await _run_image_progress(
+            ack,
+            still_text="📷 Still reading…",
+            delay_seconds=0.02,
+            ocr_done=ocr_done,
+        )
+
+    @pytest.mark.asyncio
+    async def test_fast_photo_ocr_never_shows_still_reading_message(self):
+        from bot import handle_case_input
+
+        sim = BotSimulator()
+        context = sim._make_context()
+
+        photo_update = sim._make_text_update('')
+        photo = MagicMock()
+        file_obj = MagicMock()
+        file_obj.download_to_drive = AsyncMock()
+        photo.get_file = AsyncMock(return_value=file_obj)
+        photo_update.message.text = None
+        photo_update.message.photo = [photo]
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.extract_from_image', new=AsyncMock(return_value='Chest pain with ECG changes')), \
+             patch('bot._process_case_text', new=AsyncMock()):
+            await handle_case_input(photo_update, context)
+
+        ack_texts = [text for _, text, _ in sim.messages_sent if text]
+        assert any("Reading image" in t for t in ack_texts), (
+            f"Expected initial 'Reading image…' ack, got: {ack_texts}"
+        )
+        for text in ack_texts:
+            assert "Still reading" not in text, (
+                f"Fast OCR must not emit 'Still reading…' — saw: {text!r}"
+            )
+            assert "Reading image…\n" not in text, (
+                f"Ack must not stack with extra lines — saw: {text!r}"
+            )

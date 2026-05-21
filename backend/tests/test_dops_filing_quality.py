@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from dops_filing import (  # noqa: E402
     derive_dops_curriculum_links,
+    dops_blocking_misses,
     dops_quality_gate,
     normalise_dops_placement,
     normalise_dops_fields,
@@ -286,6 +287,95 @@ def test_dops_quality_gate_accepts_full_dogfood_dops():
     assert dops_quality_gate(fields) == []
 
 
+# ─── dops_blocking_misses: blocking subset of quality gate ───────────────────
+
+
+def test_dops_blocking_misses_returns_empty_for_substantive_draft_with_missing_date():
+    # The user has approved a DOPS with full narrative but the extractor
+    # never picked up the date. Kaizen defaults the date to today, so the
+    # save can still produce a useful draft — Date must not block.
+    fields = normalise_dops_fields({
+        "stage_of_training": "Higher/ST4-ST6",
+        "clinical_setting": "Emergency Department",
+        "procedure_name": "DC cardioversion",
+        "indication": "Unstable atrial fibrillation with RVR and hypotension.",
+        "trainee_performance": (
+            "I led the synchronised cardioversion under ketamine sedation, "
+            "delivered three escalating shocks, escalated to ITU."
+        ),
+        "reflection": (
+            "Reinforced the value of early ITU escalation when rhythm fails "
+            "to convert."
+        ),
+    })
+    # Gate still flags the missing date as a quality issue.
+    assert "Date occurred on" in dops_quality_gate(fields)
+    # But blocking subset is empty — there's clinical substance to save.
+    assert dops_blocking_misses(fields) == []
+
+
+def test_dops_blocking_misses_returns_empty_when_only_stage_or_reflection_wording_is_off():
+    # Missing stage is a recoverable header gap; rough reflection wording is
+    # quality not safety. Neither should hard-block an explicit Save.
+    fields = normalise_dops_fields({
+        "date_of_encounter": "2026-05-19",
+        "procedure_name": "DC cardioversion",
+        "indication": "Unstable AF with RVR and hypotension.",
+        "trainee_performance": (
+            "I led the synchronised cardioversion under ketamine sedation."
+        ),
+        "reflection": "ok done",
+    })
+    misses = dops_quality_gate(fields)
+    assert "Stage of training" in misses
+    assert "Reflection (needs clearer wording)" in misses
+    assert dops_blocking_misses(fields, gate_misses=misses) == []
+
+
+def test_dops_blocking_misses_blocks_when_procedure_is_missing():
+    # A DOPS with no procedure name is not a DOPS at all.
+    fields = normalise_dops_fields({
+        "date_of_encounter": "2026-05-19",
+        "stage_of_training": "Higher/ST4-ST6",
+        "indication": "Unstable AF with RVR.",
+        "trainee_performance": "I supported the team during the cardioversion.",
+    })
+    blocking = dops_blocking_misses(fields)
+    assert "Procedural skill" in blocking
+
+
+def test_dops_blocking_misses_blocks_when_label_only_narrative_and_no_semantic_fields():
+    # case_observed is a label-only stub AND both semantic blocks are blank.
+    # Saving would put an empty narrative slot in front of an assessor.
+    fields = normalise_dops_fields({
+        "date_of_encounter": "2026-05-19",
+        "stage_of_training": "Higher/ST4-ST6",
+        "procedure_name": "DC cardioversion",
+        "case_observed": "Procedure observed: DC cardioversion",
+    })
+    blocking = dops_blocking_misses(fields)
+    assert "Case observed narrative" in blocking
+    assert "Indication" in blocking
+    assert "Trainee performance" in blocking
+
+
+def test_dops_blocking_misses_does_not_block_when_one_semantic_block_present():
+    # Indication is missing but trainee_performance is substantial, so the
+    # rebuilt narrative still has assessor-readable content. Warn, don't block.
+    fields = normalise_dops_fields({
+        "date_of_encounter": "2026-05-19",
+        "stage_of_training": "Higher/ST4-ST6",
+        "procedure_name": "DC cardioversion",
+        "trainee_performance": (
+            "I led the synchronised cardioversion under ketamine sedation, "
+            "delivered three shocks, escalated to ITU after refractory rhythm."
+        ),
+    })
+    misses = dops_quality_gate(fields)
+    assert "Indication" in misses
+    assert dops_blocking_misses(fields, gate_misses=misses) == []
+
+
 # ─── file_to_kaizen flag for the bot to detect quality-gate blocks ───────────
 
 
@@ -389,6 +479,49 @@ async def test_file_to_kaizen_dops_blocks_save_when_case_observed_blank():
     assert result["status"] == "partial"
     assert result["error"]
     assert "Case observed narrative" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_file_to_kaizen_dops_proceeds_when_only_date_is_missing():
+    """Missing date + otherwise substantive narrative must not gate. Kaizen
+    defaults the date to today; refusing to file would override the user's
+    explicit Save as draft for a recoverable gap."""
+    fields = {
+        # No date_of_encounter — bot already warned the user before save.
+        "stage_of_training": "Higher/ST4-ST6",
+        "clinical_setting": "Emergency Department",
+        "procedure_name": "DC cardioversion",
+        "indication": "Unstable AF with RVR and hypotension.",
+        "trainee_performance": (
+            "I led the synchronised cardioversion under ketamine sedation, "
+            "delivered three escalating shocks, escalated to ITU."
+        ),
+        "reflection": "Reinforced the value of early ITU escalation.",
+    }
+
+    with patch("kaizen_form_filer.KAIZEN_USE_CDP", False), \
+         patch("kaizen_form_filer.async_playwright") as ap_mock, \
+         patch("kaizen_form_filer._login", new=AsyncMock(return_value=True)), \
+         patch("kaizen_form_filer._fill_field_legacy", new=AsyncMock(return_value=True)), \
+         patch("kaizen_form_filer._save_draft_legacy", new=AsyncMock(return_value=True)) as save_mock, \
+         patch("kaizen_form_filer._verify_entry_saved", new=AsyncMock(return_value=True)), \
+         patch("kaizen_form_filer._fill_curriculum_links", new=AsyncMock(return_value=([], []))), \
+         patch("kaizen_form_filer.asyncio.sleep", new=AsyncMock()):
+        page = AsyncMock()
+        page.url = "https://kaizenep.com/events/new-section/dops-uuid"
+        page.goto = AsyncMock()
+        browser = AsyncMock()
+        browser.new_page = AsyncMock(return_value=page)
+        pw = AsyncMock()
+        pw.chromium.launch = AsyncMock(return_value=browser)
+        ap_mock.return_value.start = AsyncMock(return_value=pw)
+
+        result = await file_to_kaizen("DOPS", fields, "user", "pass")
+        # Save was actually attempted — no hard quality-gate block.
+        save_mock.assert_awaited()
+
+    assert not result.get("quality_gate_failed")
+    assert result["status"] in ("success", "partial")
 
 
 @pytest.mark.asyncio

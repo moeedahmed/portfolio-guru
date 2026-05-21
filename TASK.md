@@ -55,6 +55,13 @@ Build the next draft-quality improvement from dogfood feedback:
 - Added a focused DOPS bake-off (`backend/eval_dops_bakeoff.py`) that scores provider extractions on procedure / indication / trainee performance / reflection / KC links / grammar; the deterministic scorer is unit-tested offline.
 - Changed the normal "File another case" path to clear prior case/draft/recommendation state, while keeping explicit same-case and amend/update paths context-aware.
 - Cleaned normal form recommendation UX so default-2025 suggestions hide curriculum suffixes and use complete short one-line rationales instead of chopped descriptions with ellipses.
+- Replaced the stacked "Reading image…\nStill reading…" OCR ack with a single edited bubble: the initial "📷 Reading image…" is now replaced (not appended to) by "📷 Still reading…" after the 8 s patience threshold, then replaced again by the success/error message.
+- Extracted the image OCR slow-progress logic into a module-level `_run_image_progress(ack, *, still_text, delay_seconds, ocr_done)` helper coordinated by an `asyncio.Event`, so the reassurance edit is suppressed when OCR finishes inside the delay window and cannot race with the success edit.
+- Added focused image-progress regression coverage (`TestImageOCRProgress` in `test_flow_walker.py`) covering: ocr_done set before delay (no edit), ocr_done unset past delay (single replacement edit, no `\n`, no "Reading image" prefix), clean cancellation, swallowed edit failures, and an end-to-end fast-OCR check that no "Still reading…" message reaches the user.
+- Documented the user-facing message standard in `WORKFLOWS.md` (vocabulary by stage, slow-progress contract, error shape, safety-critical template boundary) and flagged minor wording drifts to normalise opportunistically.
+- Split the DOPS pre-save gate into blocking (genuinely unsafe / near-empty draft) and warning (recoverable gaps) tiers. The bot now sends the gate text as a separate Telegram message so the reviewed draft preview stays visible, and explicit Save as draft now proceeds past warning-level gaps (missing date, missing stage, single missing semantic block, rough reflection wording) instead of being silently blocked.
+- `file_to_kaizen` now refuses only on blocking misses, so the layered defence stays in place for near-empty drafts but no longer overrides the user's explicit Save for recoverable gaps.
+- Added `dops_blocking_misses` in `dops_filing.py` shared by the bot and the filer so both layers apply the same blocking definition; updated `WORKFLOWS.md` user-facing message standard with the new pre-save gate section.
 
 ## Verification
 
@@ -70,6 +77,8 @@ Build the next draft-quality improvement from dogfood feedback:
 - 20 May 2026: strengthened DOPS gate + Gemini 3.5 Flash route + DOPS bake-off scorer landed; focused suites (test_dops_filing_quality, test_model_config, test_eval_dops_bakeoff, test_flow_walker) passed: 98 passed; full backend offline suite passed: 187 passed, 22 skipped, 13 deselected.
 - 21 May 2026: context-boundary and recommendation-copy fixes verified; focused conversation/flow/snapshot suite passed: 80 passed; full backend offline suite passed: 198 passed, 22 skipped, 13 deselected; live bot restarted via launchd and confirmed running.
 - 21 May 2026 closeout review: py_compile passed for bot.py, dops_filing.py, kaizen_form_filer.py; focused flow/conversation/snapshot/DOPS suite passed: 108 passed. No live Kaizen/browser actions, commit, deploy, or restart were performed.
+- 21 May 2026: image-progress UX fix verified; new `TestImageOCRProgress` suite (5 tests) passed; flow_walker + conversation + snapshot suite passed: 85 passed; full backend offline suite passed: 203 passed, 22 skipped, 13 deselected. WORKFLOWS.md gained a `User-Facing Message Standard` section. No live Kaizen/browser actions, commit, deploy, or bot restart were performed.
+- 21 May 2026: DOPS pre-save gate split into blocking vs warning tiers; new tests (5 unit tests for `dops_blocking_misses`, 1 file_to_kaizen test for missing-date-only proceed, 1 bot flow test for missing-date warning + proceed, plus a tightened existing thin-DOPS test) all pass; full focused DOPS quality + flow walker suite passed: 105 passed; full backend offline suite passed: 210 passed, 22 skipped, 13 deselected. WORKFLOWS.md gained a `Pre-save gate (Save as draft)` section. No live Kaizen/browser actions, commit, deploy, or bot restart were performed.
 
 ## Next
 

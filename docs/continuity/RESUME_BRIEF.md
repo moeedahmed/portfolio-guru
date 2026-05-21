@@ -1,13 +1,13 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-05-21T16:07:09+00:00
-Status: stale_or_needs_review
+Generated: 2026-05-21T17:03:33+00:00
+Status: ready
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
 - Branch: feature/conversational-router
-- Last commit: 3620fe6 2026-05-21 Use natural prose for DOPS case observed
-- Uncommitted changes: yes
+- Last commit: 0a1abee 2026-05-21 fix: tighten portfolio filing context boundaries
+- Uncommitted changes: no
 
 ## Immediate read before restarting
 1. Product hub Status + Brief in Notion
@@ -15,10 +15,8 @@ Status: stale_or_needs_review
 3. `TASK.md` for active sprint state, if present
 4. This resume brief for drift warnings and repo state
 
-## Warnings
-- Repo has uncommitted changes — capture/commit or summarise before switching context
-
 ## Recent commits
+- 0a1abee 2026-05-21 fix: tighten portfolio filing context boundaries
 - 3620fe6 2026-05-21 Use natural prose for DOPS case observed
 - 843be6c 2026-05-21 Fix DOPS preview-to-filing narrative mismatch
 - 693f343 2026-05-20 Switch Portfolio Guru extractor to Gemini Flash
@@ -26,18 +24,6 @@ Status: stale_or_needs_review
 - 1972984 2026-05-20 Fix Portfolio Guru completion message and bot username
 - 7217fea 2026-05-20 Prevent duplicate form recommendation messages
 - 4425cdf 2026-05-20 Simplify image reading status copy
-- 124a907 2026-05-20 Fix Portfolio Guru new-case boundary after cancel
-
-## Uncommitted change summary
-- M backend/bot.py
--  M backend/dops_filing.py
--  M backend/filing_coverage.json
--  M backend/kaizen_form_filer.py
--  M backend/tests/test_dops_filing_quality.py
--  M backend/tests/test_e2e_offline.py
--  M backend/tests/test_flow_walker.py
--  M backend/tests/test_snapshots.py
--  M docs/continuity/RESUME_BRIEF.md
 
 ## Repo context snapshot
 ### AGENTS.md — present, 4 days old
@@ -96,6 +82,6 @@ Key headings:
 - ## Hard Constraints (never violate)
 
 ## Recommended restart path
-Refresh the product hub/Brief and repo context before a new build sprint.
+Continuity context looks sufficient; proceed with normal product-docs workflow.
 
 If this product has been idle for weeks, do not start implementation from memory. Refresh the product hub Status/Brief first, then create or update `TASK.md` for the next sprint.

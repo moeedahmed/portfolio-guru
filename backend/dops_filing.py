@@ -288,12 +288,12 @@ def _is_incoherent_reflection(text: str) -> bool:
 
 
 def dops_quality_gate(fields: dict) -> list[str]:
-    """Return required Kaizen DOM fields that would be empty or thin on save.
+    """Return every required Kaizen DOM field that would be empty or thin on save.
 
-    Run AFTER `normalise_dops_fields`. An empty result means the DOPS draft
-    is safe to save. A non-empty result means the filer must refuse to claim
-    success — saving anyway would create a near-blank or incoherent Kaizen
-    draft.
+    Run AFTER `normalise_dops_fields`. A non-empty result is the full list
+    of quality issues — useful for warning the user before they tap Save.
+    `dops_blocking_misses` then decides which of those issues are severe
+    enough to refuse the save outright.
 
     Checks beyond bare presence:
       - `case_observed` is "thin" (label-only stub like
@@ -328,6 +328,37 @@ def dops_quality_gate(fields: dict) -> list[str]:
         missing.append("Reflection (needs clearer wording)")
 
     return missing
+
+
+def dops_blocking_misses(
+    fields: dict,
+    gate_misses: list[str] | None = None,
+) -> list[str]:
+    """Return the subset of `dops_quality_gate` misses that must block save.
+
+    The user has explicitly approved the draft. Only refuse the save when
+    the resulting Kaizen draft would be genuinely unsafe to put in front of
+    an assessor:
+
+      - No procedure name at all — it isn't a DOPS without one.
+      - The narrative slot has no clinical substance at all: case_observed
+        is missing/thin AND both indication and trainee_performance are
+        also empty.
+
+    Everything else (missing date, missing stage, single missing semantic
+    block, roughly worded reflection) is a warning, not a blocker — Kaizen
+    accepts the partial draft and the user can polish it there.
+    """
+    misses = list(gate_misses) if gate_misses is not None else dops_quality_gate(fields)
+    blocking: list[str] = []
+    if "Procedural skill" in misses:
+        blocking.append("Procedural skill")
+
+    narrative_labels = ("Case observed narrative", "Indication", "Trainee performance")
+    if all(label in misses for label in narrative_labels):
+        for label in narrative_labels:
+            blocking.append(label)
+    return blocking
 
 
 # ─── KC breadth supplementer ─────────────────────────────────────────────────

@@ -134,6 +134,40 @@ async def _typing_until(chat, stop_event: asyncio.Event, interval: float = 4.0) 
         pass
 
 
+_IMAGE_PROGRESS_DELAY_SECONDS = 8.0
+_IMAGE_STILL_READING_TEXT = "📷 Still reading…"
+
+
+async def _run_image_progress(
+    ack,
+    *,
+    still_text: str = _IMAGE_STILL_READING_TEXT,
+    delay_seconds: float = _IMAGE_PROGRESS_DELAY_SECONDS,
+    ocr_done: asyncio.Event,
+) -> None:
+    """Replace the OCR ack with one calm "Still reading…" line if OCR is slow.
+
+    The reassurance edit replaces the original "Reading image…" copy instead
+    of appending to it, so the user never sees a stacked two-line bubble.
+    Skipped entirely when OCR finishes inside ``delay_seconds`` or when the
+    caller cancels the task.
+    """
+    try:
+        try:
+            await asyncio.wait_for(ocr_done.wait(), timeout=delay_seconds)
+            return
+        except asyncio.TimeoutError:
+            pass
+        if ocr_done.is_set():
+            return
+        try:
+            await ack.edit_text(still_text)
+        except Exception:
+            logger.debug("Image progress update failed", exc_info=True)
+    except asyncio.CancelledError:
+        pass
+
+
 async def _flow_msg(update, context, text, reply_markup=None, parse_mode=None, flow_key="setup"):
     """Send a fresh flow message and make it the new anchor.
 
@@ -1920,15 +1954,24 @@ async def _ask_for_more_detail_before_draft(message, context: ContextTypes.DEFAU
 
 
 
+_GATE_TO_FRIENDLY_LABEL = {
+    "Date occurred on": "Date",
+    "Stage of training": "Stage of Training",
+    "Procedural skill": "Procedure / procedural skill",
+    # Thin case_observed is functionally a missing indication block.
+    "Case observed narrative": "Indication",
+    "Indication": "Indication",
+    "Trainee performance": "Trainee Performance",
+    "Reflection (needs clearer wording)": "Reflection (needs clearer wording)",
+}
+
+
 def _pre_file_missing_fields(form_type: str, fields: dict) -> list[str]:
-    """Required-field guard before touching Kaizen.
+    """Return every quality gap the user should see before saving.
 
-    Template review may allow a user to continue with thin data; this final
-    gate prevents a mostly blank Kaizen draft, especially for voice-led DOPS.
-
-    Delegates the semantic content checks (thin narrative, missing indication
-    / trainee-performance sections, incoherent reflection) to
-    `dops_quality_gate` so the bot and `file_to_kaizen` apply the same rules.
+    Includes both blocking and warning-level misses. The Save handler then
+    asks `_pre_file_blocking_fields` whether any of these are severe enough
+    to refuse the save outright.
     """
     base_form = _normalise_form_type(form_type)
     if base_form != "DOPS":
@@ -1948,24 +1991,33 @@ def _pre_file_missing_fields(form_type: str, fields: dict) -> list[str]:
 
     from dops_filing import normalise_dops_fields, dops_quality_gate
     gate_misses = dops_quality_gate(normalise_dops_fields(fields))
-    # Translate DOM-level gate labels into the friendlier form-schema labels
-    # the UI already uses. "Case observed narrative" maps to "Indication"
-    # because a thin narrative is functionally a missing indication block.
-    gate_to_friendly = {
-        "Date occurred on": "Date",
-        "Stage of training": "Stage of Training",
-        "Procedural skill": "Procedure / procedural skill",
-        "Case observed narrative": "Indication",
-        "Indication": "Indication",
-        "Trainee performance": "Trainee Performance",
-        "Reflection (needs clearer wording)": "Reflection (needs clearer wording)",
-    }
     for m in gate_misses:
-        friendly = gate_to_friendly.get(m, m)
+        friendly = _GATE_TO_FRIENDLY_LABEL.get(m, m)
         if friendly not in missing:
             missing.append(friendly)
 
     return missing
+
+
+def _pre_file_blocking_fields(form_type: str, fields: dict) -> list[str]:
+    """Return friendly labels for misses severe enough to refuse the save.
+
+    Only DOPS gates today. A draft is genuinely unsafe when the procedure
+    is absent or the narrative has no clinical substance at all — see
+    `dops_blocking_misses` for the precise rule.
+    """
+    base_form = _normalise_form_type(form_type)
+    if base_form != "DOPS":
+        return []
+
+    from dops_filing import dops_blocking_misses, normalise_dops_fields
+    blocking_gate = dops_blocking_misses(normalise_dops_fields(fields))
+    blocking: list[str] = []
+    for m in blocking_gate:
+        friendly = _GATE_TO_FRIENDLY_LABEL.get(m, m)
+        if friendly not in blocking:
+            blocking.append(friendly)
+    return blocking
 
 
 def _format_pre_file_missing_message(form_type: str, missing: list[str]) -> str:
@@ -1977,6 +2029,20 @@ def _format_pre_file_missing_message(form_type: str, missing: list[str]) -> str:
         f"🟡 *{form_name} needs a bit more detail before I file it.*\n\n"
         "I’m not going to create a mostly blank Kaizen draft. Please send the missing detail for:\n"
         f"{questions}{extra}"
+    )
+
+
+def _format_pre_file_warning_message(form_type: str, missing: list[str]) -> str:
+    """Heads-up before the save proceeds. The user has approved the draft;
+    this just flags gaps they (or Kaizen) will need to handle after."""
+    form_name = _form_display_name(form_type)
+    shown = missing[:3]
+    bullets = "\n".join(f"• {item}" for item in shown)
+    extra = f"\n\n{len(missing) - 3} more to add in Kaizen too." if len(missing) > 3 else ""
+    return (
+        f"🟡 *Saving {form_name} despite some gaps.* "
+        "Add these in Kaizen after the save:\n"
+        f"{bullets}{extra}"
     )
 
 def _format_template_review(form_type: str, draft) -> str:
@@ -4807,17 +4873,10 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         ack = await _send_pending_bundle_status(update.message, context, ack_text) if bundling else await update.message.reply_text(ack_text)
         typing_stop = asyncio.Event()
         typing_task = asyncio.create_task(_typing_until(update.effective_chat, typing_stop))
-
-        async def _image_progress():
-            try:
-                await asyncio.sleep(8)
-                await ack.edit_text(f"{ack_text}\nStill reading…")
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                logger.debug("Image progress update failed", exc_info=True)
-
-        progress_task = asyncio.create_task(_image_progress())
+        ocr_done = asyncio.Event()
+        progress_task = asyncio.create_task(
+            _run_image_progress(ack, ocr_done=ocr_done)
+        )
         tmp_path = None
         try:
             photo = update.message.photo[-1]
@@ -4826,6 +4885,8 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 tmp_path = tmp.name
                 await photo_file.download_to_drive(tmp_path)
                 case_text = await extract_from_image(tmp_path)
+            ocr_done.set()
+            progress_task.cancel()
             if case_text.strip() == "NOT_CLINICAL":
                 await ack.edit_text("This image doesn't look like a clinical case. Send a text description or a photo of clinical notes/findings.")
                 return ConversationHandler.END
@@ -4844,6 +4905,8 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 await ack.edit_text("📷 Image read. Finding matching forms…")
             _track_latest_message(context, ack)
         except Exception as e:
+            ocr_done.set()
+            progress_task.cancel()
             context.user_data.clear()
             await ack.edit_text("⚠️ Couldn't read image. Try a clearer photo or describe the case in text.")
             return ConversationHandler.END
@@ -5190,22 +5253,28 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     form_emoji = FORM_EMOJIS.get(form_type, "📋")
 
     missing_before_file = _pre_file_missing_fields(form_type, fields)
-    if missing_before_file:
-        message = _format_pre_file_missing_message(form_type, missing_before_file)
-        if is_callback:
-            await _safe_edit_text(
-                source_message,
-                message,
-                reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
-                parse_mode="Markdown",
-            )
-        else:
-            await source_message.reply_text(
-                message,
-                reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
-                parse_mode="Markdown",
-            )
+    blocking_before_file = _pre_file_blocking_fields(form_type, fields)
+    # Always deliver the gate text as a fresh message so the reviewed draft
+    # preview stays visible — the user just approved it and shouldn't lose
+    # the context they reviewed.
+    if blocking_before_file:
+        message = _format_pre_file_missing_message(form_type, blocking_before_file)
+        await source_message.reply_text(
+            message,
+            reply_markup=_build_approval_keyboard(
+                improved_once=context.user_data.get("quick_improve_used", False)
+            ),
+            parse_mode="Markdown",
+        )
         return AWAIT_APPROVAL
+    if missing_before_file:
+        # User explicitly approved a draft with non-blocking gaps. Warn,
+        # then proceed to file — they remain in control.
+        warning = _format_pre_file_warning_message(form_type, missing_before_file)
+        try:
+            await source_message.reply_text(warning, parse_mode="Markdown")
+        except Exception:
+            logger.warning("Pre-file warning message failed to send", exc_info=True)
 
     # Save local JSON backup
     import json as _json

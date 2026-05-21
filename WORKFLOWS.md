@@ -1,4 +1,5 @@
 # Portfolio Guru — Agent Workflow Reference
+
 > Last updated: 2026-03-07
 > Optimised for agent consumption — no diagrams, pure structured text.
 > Human-readable Mermaid diagrams live in Notion (Portfolio Guru page).
@@ -8,15 +9,15 @@
 
 ## Conversation States
 
-| State constant | Meaning |
-|---|---|
-| `IDLE` | No active conversation. Waiting for any input. |
-| `AWAIT_FORM_CHOICE` | Form type buttons shown. Waiting for user to select a form. |
-| `AWAIT_APPROVAL` | Draft preview shown. Waiting for File / Edit / Cancel. |
-| `AWAIT_EDIT_FIELD` | Edit mode. Waiting for user to select which field to change. |
-| `AWAIT_EDIT_VALUE` | Edit mode. Waiting for user to provide the new field value. |
-| `AWAIT_USERNAME` | Setup flow. Waiting for Kaizen username. |
-| `AWAIT_PASSWORD` | Setup flow. Waiting for Kaizen password. |
+| State constant      | Meaning                                                      |
+| ------------------- | ------------------------------------------------------------ |
+| `IDLE`              | No active conversation. Waiting for any input.               |
+| `AWAIT_FORM_CHOICE` | Form type buttons shown. Waiting for user to select a form.  |
+| `AWAIT_APPROVAL`    | Draft preview shown. Waiting for File / Edit / Cancel.       |
+| `AWAIT_EDIT_FIELD`  | Edit mode. Waiting for user to select which field to change. |
+| `AWAIT_EDIT_VALUE`  | Edit mode. Waiting for user to provide the new field value.  |
+| `AWAIT_USERNAME`    | Setup flow. Waiting for Kaizen username.                     |
+| `AWAIT_PASSWORD`    | Setup flow. Waiting for Kaizen password.                     |
 
 **Invariant:** Every path to `ConversationHandler.END` must call `context.user_data.clear()` first.
 
@@ -342,6 +343,102 @@ BWS secrets (at startup only):
 
 ---
 
+## User-Facing Message Standard
+
+Applies to every bot message in `backend/bot.py`. Safety-critical templates
+(welcome, captured ack, recommendation, privacy nudge, AI unavailable, thin
+case, draft reply hint) live in `backend/message_policy.py` and must not
+drift from there.
+
+### Shape
+
+- One bot bubble per long async action. The first ack is edited in place as
+  the action progresses — never followed by a separate "still working" bubble.
+- One leading emoji per message, present-tense verb, en/em dashes for inline
+  asides (`—`), ellipsis (`…`) for in-flight actions.
+- Telegram's typing indicator (`_typing_until`) is the ambient progress
+  signal for long work. Text reassurance is opt-in, sparing, and replaces
+  the ack — it never adds a second line.
+
+### Vocabulary by stage
+
+| Stage                             | Photo                                                                       | Voice                                                        | Video                                                             | Document                                         | Kaizen save                                                                                                                                                                         |
+| --------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ack                               | `📷 Reading image…` / `📷 Reading images…`                                  | `🎙️ Transcribing voice note…`                                | `🎬 Extracting audio from video…`                                 | `📄 Reading *{file_name}*…`                      | `📤 Saving {form_name} as a Kaizen draft…`                                                                                                                                          |
+| Slow-progress (replaces ack)      | `📷 Still reading…` (after 8 s)                                             | —                                                            | —                                                                 | —                                                | `📤 Still saving {form_name} — Kaizen is loading the form…` then `📤 Filling fields in {form_name} — almost there…` then `📤 Verifying the save on Kaizen — this is the last step…` |
+| Success (new case)                | `📷 Image read. Finding matching forms…`                                    | `🎙️ Voice note read. Finding matching forms…`                | n/a                                                               | `📄 *{file_name}* read. Finding matching forms…` | `✅ Saved as a Kaizen draft.`                                                                                                                                                       |
+| Success (refining existing draft) | `📷 Got it — updating draft…`                                               | `🎙️ Got it — updating draft…`                                | `🎬 Got it — updating draft…`                                     | `📄 Got it — updating draft…`                    | n/a                                                                                                                                                                                 |
+| Error                             | `⚠️ Couldn't read image. Try a clearer photo or describe the case in text.` | `⚠️ Couldn't transcribe voice note. Try again or send text.` | `⚠️ Couldn't extract audio from video. Try a voice note or text.` | `⚠️ Couldn't read that file. Try text instead.`  | `❌ Filing failed. Try again or start fresh.`                                                                                                                                       |
+
+### Slow-progress contract
+
+For OCR, transcription, or filing that may take longer than the user's
+patience window, follow the `_run_image_progress` pattern in `backend/bot.py`:
+
+1. Send the initial ack once.
+2. Schedule one replacement edit after a delay (`asyncio.Event` + `wait_for`).
+3. Set the event before the success/error edit so the reassurance is
+   suppressed when work finishes in time.
+4. Cancel the task on the way out and swallow the resulting `CancelledError`.
+
+Never concatenate `"\n"`-joined status lines onto the ack — that reads as
+the bot repeating itself.
+
+### Errors
+
+- One ⚠️ line per error. State the cause in present tense (`Couldn't read
+image`), then a one-clause recovery (`Try a clearer photo or describe the
+case in text.`). No stack traces, no apologies, no "please".
+- Recovery clause is mode-aware: new-case flow says "describe the case in
+  text", existing-draft flow says "Type your feedback instead", template
+  review says "Try again or send text".
+
+### Pre-save gate (Save as draft)
+
+When the user taps **Save as draft** the bot checks the draft against the
+DOPS quality gate before calling Kaizen. The gate has two tiers:
+
+- **Blocking (genuinely unsafe / near-empty draft).** The procedure name is
+  absent, or the narrative slot has no clinical substance at all (thin
+  `case_observed` AND both `indication` and `trainee_performance` empty).
+  The bot sends a fresh `🟡 *{form_name} needs a bit more detail before I
+file it.*` message with the missing fields and the Save / Quick improve /
+  Cancel keyboard. The reviewed draft preview stays visible.
+- **Warning (recoverable gap, save proceeds).** Missing date, missing
+  stage, one missing semantic block, or rough reflection wording. The bot
+  sends a fresh `🟡 *Saving {form_name} despite some gaps.* Add these in
+Kaizen after the save:` message and then calls the filer normally. The
+  reviewed draft preview stays visible; the user remains in control of
+  their explicit Save.
+
+Both tiers always arrive as **new messages**, never by editing the
+reviewed draft preview — the user just approved that preview and should
+not lose the context they were looking at.
+
+### Safety-critical templates
+
+These stay fixed in `backend/message_policy.py` (`MessageClass.FIXED`):
+welcome (connected/disconnected), "what is this?", file-case prompt,
+captured ack, thin-case detail request, AI unavailable, photo privacy
+nudge, and the draft reply hint. LLM-assisted prose is allowed only on
+explicitly low-risk explanation/recovery paths (e.g. `answer_question`).
+
+### Known minor inconsistencies (deferred)
+
+The codebase has a handful of small wording drifts that are noted but not
+worth a churn-PR on their own:
+
+- `🎙️ Transcribing…` vs `🎙️ Transcribing voice note…` — same intent.
+- `Try a clearer photo or text.` vs `Try a clearer photo or describe the
+case in text.` — same intent, different verbosity.
+- `Got it — updating template…` vs `Got it — updating draft…` — separate
+  flow contexts, both correct as-is.
+
+If you touch one of these surfaces for unrelated reasons, normalise to the
+preferred copy in the table above while you're there.
+
+---
+
 ## FORM_UUIDS (in extractor.py)
 
 ```python
@@ -362,4 +459,5 @@ FORM_UUIDS = {
 ---
 
 ## Pending scope
+
 See Notion → Portfolio Guru → Current State → v2.1 scope section.

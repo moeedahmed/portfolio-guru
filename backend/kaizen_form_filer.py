@@ -1416,22 +1416,27 @@ async def fill_kaizen_form(
             return {"status": "failed", "filled": [], "skipped": [], "errors": [f"No field map for: {form_type}"], "screenshot": None}
 
         if form_type == "DOPS":
-            from dops_filing import normalise_dops_fields, dops_quality_gate
+            from dops_filing import (
+                dops_blocking_misses,
+                dops_quality_gate,
+                normalise_dops_fields,
+            )
             fields = normalise_dops_fields(fields)
-            missing_required = dops_quality_gate(fields)
-            if missing_required:
+            quality_misses = dops_quality_gate(fields)
+            blocking = dops_blocking_misses(fields, gate_misses=quality_misses)
+            if blocking:
                 return {
                     "status": "partial",
                     "filled": [],
                     "skipped": list(fields.keys()),
                     "errors": [
                         "DOPS draft is missing required Kaizen fields: "
-                        + ", ".join(missing_required)
+                        + ", ".join(blocking)
                         + ". Not saving — add the detail and try again."
                     ],
                     "screenshot": None,
                     "quality_gate_failed": True,
-                    "missing_for_quality": missing_required,
+                    "missing_for_quality": blocking,
                 }
 
         if (
@@ -2299,26 +2304,33 @@ async def file_to_kaizen(
     if form_type == "DOPS":
         # Adapt extractor-schema keys (indication, trainee_performance, etc.)
         # into the Kaizen DOM keys defined in FORM_FIELD_MAP["DOPS"], then
-        # refuse to file when required DOM slots are still blank. Stops the
-        # bot from announcing "saved successfully" for a near-empty draft.
+        # refuse to file when the resulting draft would be genuinely unsafe
+        # (no procedure, or no clinical substance in the narrative). Lesser
+        # gaps — missing date, missing stage, a single empty semantic block —
+        # are recoverable in Kaizen; the bot has already warned the user.
         # `quality_gate_failed` gives the bot a structural signal so it can
         # route the user back to draft approval rather than reporting
         # "filing failed".
-        from dops_filing import normalise_dops_fields, dops_quality_gate
+        from dops_filing import (
+            dops_blocking_misses,
+            dops_quality_gate,
+            normalise_dops_fields,
+        )
         fields = normalise_dops_fields(fields)
-        missing_required = dops_quality_gate(fields)
-        if missing_required:
+        quality_misses = dops_quality_gate(fields)
+        blocking = dops_blocking_misses(fields, gate_misses=quality_misses)
+        if blocking:
             return {
                 "status": "partial",
                 "filled": [],
                 "skipped": list(fields.keys()),
                 "error": (
                     "DOPS draft is missing required Kaizen fields: "
-                    + ", ".join(missing_required)
+                    + ", ".join(blocking)
                     + ". Not saving — add the detail and try again."
                 ),
                 "quality_gate_failed": True,
-                "missing_for_quality": missing_required,
+                "missing_for_quality": blocking,
             }
     browser = None
     cdp_pw = None
