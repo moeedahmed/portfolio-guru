@@ -5345,15 +5345,20 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         progress_task.cancel()
         kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS.get(form_type, '')}" if FORM_UUIDS.get(form_type) else "https://kaizenep.com/activities"
         timeout_msg = (
-            f"⏱ Filing took too long. The draft might be in your activities list already — "
-            f"[open Kaizen]({kaizen_url}) to check before retrying."
+            f"⏱ Filing took too long — Kaizen may have timed out the session."
         )
+        retry_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_filing")],
+            [InlineKeyboardButton("🔍 Check in Kaizen", url=kaizen_url)],
+            [InlineKeyboardButton("🆕 Start fresh", callback_data="ACTION|reset")],
+        ])
         try:
-            await ack.edit_text(timeout_msg, parse_mode="Markdown")
+            await ack.edit_text(timeout_msg, reply_markup=retry_keyboard, parse_mode="Markdown")
         except Exception:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=timeout_msg,
+                reply_markup=retry_keyboard,
                 parse_mode="Markdown",
             )
         # Keep draft so user can retry without re-typing the case
