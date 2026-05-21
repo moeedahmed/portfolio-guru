@@ -111,41 +111,41 @@ async def route_filing(
             "method": "deterministic" | "browser-use",
         }
     """
-    from filing_coverage import should_use_browser_use, record_run
+    from filing_coverage import record_run
 
     platform_lower = platform.lower()
     platform_config = PLATFORM_REGISTRY.get(platform_lower)
 
-    # Coverage-based escalation: check if browser-use should override deterministic
-    has_curriculum = bool(curriculum_links)
-    use_browser = should_use_browser_use(form_type, has_curriculum)
+    # Check if this form type has a deterministic DOM mapping
+    try:
+        from kaizen_form_filer import FORM_FIELD_MAP
+        has_dom_mapping = form_type in FORM_FIELD_MAP
+    except ImportError:
+        has_dom_mapping = False
+
+    # Strategy:
+    # - Forms with DOM mappings → always try Playwright. Never escalate to browser-use.
+    #   If Playwright returns partial, the DOM map gap is logged and returned — fix the map.
+    # - Forms without DOM mappings → use browser-use (CDP-connected, no credentials in prompts).
+    # - Unknown platforms → browser-use path.
 
     if platform_config and platform_config.get("deterministic") and form_type in platform_config.get("supported_forms", []):
-        if use_browser:
-            # Coverage says Playwright isn't reliable enough yet — escalate
-            logger.info(f"Coverage check: escalating {form_type} to browser-use (low confidence in Playwright)")
+        if not has_dom_mapping:
+            # No DOM mapping — browser-use needed
+            logger.info(f"No DOM mapping for {form_type} — using browser-use")
         else:
-            # Playwright is reliable — use deterministic path
+            # Has a DOM mapping — always try Playwright, never escalate
             logger.info(f"Using deterministic filer for {platform}/{form_type}")
             result = await _route_deterministic(platform_lower, form_type, fields, credentials, curriculum_links, submit=submit)
 
-            # Auto-escalation: if Playwright returned partial with important fields skipped
-            # OR if no fields were filled at all (no DOM mapping for this form type)
-            skipped = set(result.get("skipped", []))
-            filled = result.get("filled", [])
-            important_skipped = skipped & {"curriculum_links", "key_capabilities"}
-            no_fields_filled = result["status"] == "partial" and len(filled) == 0
-            if result["status"] == "partial" and (important_skipped or no_fields_filled):
-                logger.info(f"Playwright partial for {form_type}, escalating to browser-use (skipped: {important_skipped})")
-                # Record the partial Playwright run
-                record_run(form_type, "deterministic", result.get("filled", []), result.get("skipped", []))
-                # Fall through to browser-use below
-            else:
-                # Record and return
-                record_run(form_type, "deterministic", result.get("filled", []), result.get("skipped", []))
-                return result
+            # Record and return regardless of status
+            # If partial, the DOM map needs fixing — return it as-is
+            record_run(form_type, "deterministic", result.get("filled", []), result.get("skipped", []))
+            if result["status"] == "partial":
+                logger.warning(f"Playwright partial for {form_type} (has DOM map) — skipped: {result.get('skipped', [])}")
+            return result
 
-    # Browser-use path
+    # Browser-use path (forms without DOM mappings + unknown platforms)
     logger.info(f"Using browser-use filer for {platform}/{form_type}")
     resolved_url = platform_url or (platform_config or {}).get("login_url")
     if not resolved_url:

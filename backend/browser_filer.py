@@ -144,10 +144,13 @@ def _build_task_prompt(
     form_url: Optional[str],
     form_name: str,
     fields: Dict[str, Any],
-    credentials: Dict[str, str],
     curriculum_links: Optional[List[str]] = None,
 ) -> str:
-    """Build the browser-use agent task prompt."""
+    """Build the browser-use agent task prompt.
+
+    Credentials are NOT embedded — the agent uses an existing browser profile
+    (CDP-connected persistent Chrome) with saved login session.
+    """
 
     # Build field instructions
     field_instructions = []
@@ -168,9 +171,9 @@ def _build_task_prompt(
 
     # Navigation instruction
     if form_url:
-        nav_instruction = f"3. Navigate directly to this URL: {form_url}"
+        nav_instruction = f"2. Navigate directly to this URL: {form_url}"
     else:
-        nav_instruction = f'3. Find and open the form called "{form_name}". Look in menus, dashboards, or form lists.'
+        nav_instruction = f'2. Find and open the form called "{form_name}". Look in menus, dashboards, or form lists.'
 
     # Curriculum instruction
     curriculum_text = ""
@@ -184,18 +187,18 @@ It may be labelled "Curriculum Links", "2021 EM Curriculum", or similar.
 Expand each relevant section and tick the checkboxes for: {slo_list}
 If you cannot find the curriculum section, skip this step and note it."""
 
-    return f"""You are filling in a medical e-portfolio form for a trainee doctor. Be precise and methodical.
+    return f"""You are filling in a medical e-portfolio form for a trainee doctor using a browser
+that already has an active login session. Be precise and methodical.
 
 STEPS:
 1. Go to {platform_url}
-2. Log in using these credentials — username: {credentials["username"]}  password: {credentials["password"]}
-   - Wait for the page to fully load after login (SPAs may take 10-20 seconds)
-   - If you see an organisation/institution selector, choose the relevant one
-   - If you see a "shared device" popup, dismiss it
+   - You should already be logged in (session is preserved via CDP)
+   - If you see a login page, stop and report "SESSION_EXPIRED"
+   - If you see a "shared device" or similar popup, dismiss it
 {nav_instruction}
-4. Wait for the form to fully load (may take 10-20 seconds on SPA sites)
-5. Fill in each field as specified below
-6. After filling ALL fields, save as DRAFT
+3. Wait for the form to fully load (may take 10-20 seconds on SPA sites)
+4. Fill in each field as specified below
+5. After filling ALL fields, save as DRAFT
 
 FIELDS TO FILL:
 {fields_text}
@@ -216,7 +219,7 @@ CRITICAL SAFETY RULES:
 - NEVER click Submit, Send, Send to Supervisor, Send to Assessor, or any similar button
 - ONLY click Save/Save Draft/Save as Draft
 - If you're unsure whether a button submits or saves, DO NOT click it
-- If login fails, stop immediately and report the error
+- If session appears expired (login page shown), stop immediately and report "SESSION_EXPIRED"
 - If the form doesn't load, stop and report what you see instead"""
 
 
@@ -303,29 +306,22 @@ async def file_with_browser_use(
         except Exception:
             pass
 
-    # Build the task prompt (credentials interpolated directly — sensitive_data
-    # domain matching is unreliable across RCEM→Kaizen redirects)
+    # Build the task prompt — credentials intentionally NOT embedded.
+    # The CDP-connected persistent Chrome profile already has a saved
+    # Kaizen login session, so the agent just navigates and fills.
     task = _build_task_prompt(
         platform_url=platform_url,
         form_url=form_url,
         form_name=form_name,
         fields=fields,
-        credentials=credentials,
         curriculum_links=curriculum_links,
     )
 
-    # Sensitive data still provided for any browser-use internal masking
-    sensitive_data = {
-        base_domain: {
-            credentials["username"]: credentials["username"],
-            credentials["password"]: credentials["password"],
-        }
-    }
-
-    # Set up browser profile
+    # Set up browser profile using CDP (persistent Chrome with saved login session)
     browser_profile = BrowserProfile(
         headless=True,
         allowed_domains=allowed_domains,
+        cdp_url="http://localhost:18800",
     )
 
     # Create LLM based on model choice
@@ -355,14 +351,15 @@ async def file_with_browser_use(
             llm=llm,
             fallback_llm=fallback_llm,
             browser_profile=browser_profile,
-            sensitive_data=sensitive_data,
             use_vision=True,
             step_timeout=180,
             max_steps=40,
             max_failures=3,
             register_new_step_callback=step_callback,
-            save_conversation_path=conversation_path,
-            generate_gif=str(log_dir / f"{timestamp}.gif"),
+            # save_conversation_path deliberately omitted — CDP profile means
+            # no credentials in the prompt, but conversation logs still contain
+            # clinical field data and LLM-traversable page content.
+            # Omit GIF recording for the same reason.
         )
 
         result = await asyncio.wait_for(

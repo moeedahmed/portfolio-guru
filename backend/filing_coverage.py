@@ -114,8 +114,11 @@ def should_use_browser_use(
 
     Returns True (skip Playwright) only if:
     - the form has NO DOM mapping in FORM_FIELD_MAP
-    - the form has user pushbacks (user flagged missed fields)
     - the form has enough run history AND fill rates are below threshold
+
+    Note: user_pushbacks no longer skip Playwright. The router auto-escalates
+    to browser-use if Playwright returns partial with important fields missing,
+    so a pushback triggers escalation AFTER Playwright has had its chance.
     """
     # Check if form has a deterministic DOM mapping
     try:
@@ -133,10 +136,6 @@ def should_use_browser_use(
     if not entry:
         # Never filed but has a verified mapping — let Playwright try
         return False
-
-    pushbacks = entry.get("user_pushbacks", [])
-    if pushbacks:
-        return True
 
     # Only check fill rates after enough runs to judge
     playwright_runs = entry.get("playwright_runs", 0)

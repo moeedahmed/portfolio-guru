@@ -73,9 +73,7 @@
       "end_date": 0.657,
       "case_observed": 0.657
     },
-    "user_pushbacks": [
-      "other"
-    ],
+    "user_pushbacks": [],
     "last_updated": "2026-05-21"
   }
 }
