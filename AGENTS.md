@@ -20,7 +20,7 @@ Portfolio Guru automates e-portfolio filing for UK EM trainees. A doctor sends a
 - Telegram bot: `python-telegram-bot` v21+ in polling mode.
 - LLM extraction: Gemini fast model from `backend/model_config.py`, with DeepSeek/OpenAI fallback for eligible tiers.
 - Vision/voice: Gemini Vision/audio paths, with configured fallback models where implemented.
-- Browser automation: deterministic Playwright plus browser-use fallback where supported.
+- Browser automation: deterministic Playwright via browser-harness CDP for DOM-mapped forms (46 verified Kaizen form types). browser-use (LLM agent) is an emergency bridge only — replaced by browser-harness domain skills for any new platform.
 - Storage: Fernet-encrypted SQLite credentials/profile/state stores; PicklePersistence for Telegram conversation state.
 - Target platform: Kaizen ePortfolio (`eportfolio.rcem.ac.uk` → `kaizenep.com`).
 
@@ -31,6 +31,31 @@ Portfolio Guru automates e-portfolio filing for UK EM trainees. A doctor sends a
 - Use launchd on macOS; do not use systemd/systemctl.
 - Treat live Kaizen filing as approval-sensitive; manual/live tests can create draft artefacts that may need cleanup.
 - If docs disagree with git, tests, launchd status, or logs, runtime evidence wins and docs must be corrected before major work continues.
+
+## Filing Routing Discipline
+
+Single source of truth: `backend/filer_router.py` defines which filing method is used for each form type.
+
+**DOM-mapped forms** → deterministic Playwright via browser-harness CDP (`localhost:18800`). Always. No escalation to browser-use. If Playwright returns partial, the DOM map gap is logged and returned for fixing. Never credentials in LLM prompts.
+
+**Unknown form types** (no DOM mapping on a supported platform) → browser-use via CDP (`localhost:18800`). The persistent Chrome session handles auth; credentials never enter the LLM prompt. If the session is lost, report SESSION_EXPIRED — do not attempt login.
+
+**Unknown platforms** (Horus, SOAR, etc.) → browser-harness + domain skills first. browser-use is an emergency bridge only, replaced by written domain skills. The pattern is: user connects their own Chrome → browser-harness navigates via CDP → learns the layout → persists helpers for next time. No credentials ever touch the system.
+
+**What browser-use is NOT:** browser-use is NOT a substitute for DOM mapping or domain skills. It is a last-resort LLM agent for pages that CDP/Playwright cannot handle (rare). The `browser_use` Python package must never bypass the CDP auth profile with embedded credentials.
+
+## Known Failure Modes
+
+These are common mistakes in this codebase:
+
+- **Disabled features still have code paths:** `/bulk`, `/unsigned`, `/chase` return "coming soon" with an early `return`. Never treat the code below that return as live or production-relevant.
+- **Kaizen date format is `d/m/yyyy`:** Not US `m/d/yyyy`. Extracted dates from clinical text need conversion before filing. This is the most common Kaizen filing error.
+- **Two separate filer implementations:** `filer.py` (browser-use / CBD) and `browser_filer.py` (deterministic Playwright). They share logic in places but have different failure modes. Tests for one don't cover the other.
+- **Fernet-encrypted stores are read-once per process:** The decrypt-and-hold pattern means stale credentials persist in memory until restart. Don't add credential refresh logic — it's deliberate for stability.
+- **LLM extraction is non-deterministic:** The same input can produce different form recommendations on different calls. Test extraction with multiple runs, not one-off passes.
+- **Gemini fallback ordering:** `model_config.py` defines which models are tried in what order. Adding a new model there means updating all callers — not just the config array.
+- **Playwright selectors break on Kaizen UI changes:** Kaizen is a third-party platform that updates without notice. Deterministic selectors (XPath, CSS) are brittle. When tests fail after a Kaizen deploy, check selectors first.
+- **launchd logs are rotated:/tmp/ logs are lost on reboot.** Long-term debugging needs the `~/Library/Logs/` files.
 
 ## Supported Forms
 

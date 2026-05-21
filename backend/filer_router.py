@@ -1,7 +1,13 @@
 """
 Filer router — single entry point for all form filing.
-Picks the right approach: deterministic Playwright (fast, free) or browser-use (universal, AI-driven).
-Uses filing coverage data to auto-escalate when Playwright reliability is low.
+
+Routing strategy (canonical — see AGENTS.md § Filing Routing Discipline):
+- DOM-mapped forms → deterministic Playwright via browser-harness CDP only.
+  Never escalate to browser-use. If Playwright returns partial, fix the DOM map.
+- Unknown form types (no DOM mapping) → browser-use via CDP (localhost:18800).
+  Credentials never enter LLM prompts — the persistent Chrome session handles auth.
+- Unknown platforms → browser-harness + domain skills is the default.
+  browser-use is an emergency bridge, replaced by written domain skills.
 
 Usage:
     result = await route_filing(
