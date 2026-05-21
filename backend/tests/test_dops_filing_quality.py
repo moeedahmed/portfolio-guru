@@ -68,6 +68,9 @@ def test_normalise_dops_builds_case_observed_from_schema_keys():
     assert "Unstable AF" in case_observed
     assert "ketamine sedation" in case_observed
     assert "Haemodynamic instability" in case_observed
+    assert "Procedure observed:" not in case_observed
+    assert "Indication:" not in case_observed
+    assert "Trainee performance:" not in case_observed
     # Reflection is a separate DOM field — must NOT be folded into case_observed.
     assert "ITU escalation" not in case_observed
 
@@ -102,6 +105,8 @@ def test_normalise_dops_rebuilds_case_observed_from_reviewed_schema_fields():
     assert stale_case_observed not in out["case_observed"]
     assert "Unstable atrial fibrillation" in out["case_observed"]
     assert "prepared the resuscitation team" in out["case_observed"]
+    assert "Indication:" not in out["case_observed"]
+    assert "Trainee performance:" not in out["case_observed"]
 
 
 def test_normalise_dops_preserves_case_observed_without_schema_narrative():

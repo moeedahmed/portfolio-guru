@@ -95,8 +95,9 @@ def _build_case_observed_narrative(fields: dict) -> str:
     """Combine indication / clinical_reasoning / trainee_performance into one
     DOPS narrative block.
 
-    Labelled sections survive the round-trip into Kaizen so the assessor still
-    sees the original structure even though the form only has one text slot.
+    Keep this as assessor-facing prose, not engineering labels. The reviewed
+    draft can stay structured; Kaizen's single narrative box should read like
+    a normal assessment entry.
     """
     parts: list[str] = []
     indication = _str(fields.get("indication"))
@@ -108,13 +109,17 @@ def _build_case_observed_narrative(fields: dict) -> str:
     if procedure or clinical_setting:
         head = ", ".join(p for p in (procedure, clinical_setting) if p)
         if head:
-            parts.append(f"Procedure observed: {head}")
+            if indication:
+                parts.append(f"This DOPS concerned {head}, performed for {indication}.")
+            else:
+                parts.append(f"This DOPS concerned {head}.")
     if indication:
-        parts.append(f"Indication: {indication}")
+        if not (procedure or clinical_setting):
+            parts.append(f"The indication was {indication}.")
     if clinical_reasoning:
-        parts.append(f"Clinical reasoning: {clinical_reasoning}")
+        parts.append(clinical_reasoning)
     if trainee_performance:
-        parts.append(f"Trainee performance: {trainee_performance}")
+        parts.append(trainee_performance)
     return "\n\n".join(parts)
 
 
@@ -129,9 +134,8 @@ DOPS_REQUIRED_LABELS = (
 )
 
 
-# Section headers `_build_case_observed_narrative` writes into case_observed.
-# Stripping them gives a rough measure of how much real prose the draft
-# contains versus label scaffolding.
+# Older drafts used section labels in case_observed. Keep the prefixes for
+# backwards-compatible quality checks, but new filings should be natural prose.
 _NARRATIVE_LABEL_PREFIXES = (
     "Procedure observed:",
     "Indication:",
@@ -165,10 +169,10 @@ def _section_body(case_observed: str, header: str) -> str:
 
 
 def _is_thin_case_observed(case_observed: str) -> bool:
-    """True if the DOM narrative slot, with section labels stripped, has
-    fewer than 30 characters of real prose — i.e. a label-only stub like
-    'Procedure observed: DC cardioversion'."""
-    return len(_strip_narrative_labels(case_observed)) < 30
+    """True if the DOM narrative slot has too little real prose to be useful."""
+    cleaned = _strip_narrative_labels(case_observed)
+    words = [w for w in cleaned.split() if any(c.isalpha() for c in w)]
+    return len(cleaned) < 50 or len(words) < 8
 
 
 _INCOHERENT_REFLECTION_MIN_CHARS = 20
