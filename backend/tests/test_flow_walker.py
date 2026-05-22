@@ -2659,51 +2659,180 @@ class TestVoiceProfileTwoPathFlow:
         ] in _last_button_rows(sim)
 
     @pytest.mark.asyncio
-    async def test_kaizen_preview_reject_returns_directly_to_sample_size(self):
-        from bot import AWAIT_VOICE_EXAMPLES, voice_collect_example
+    async def test_build_voice_profile_activates_immediately_without_approval_gate(self):
+        """The approval gate is gone: a successful profile build must save the
+        profile straight away and not stash anything as pending."""
+        from bot import _build_voice_profile
 
         sim = BotSimulator()
-        update = sim._make_callback_update('VOICE|preview_reject')
+        update = sim._make_callback_update('VOICE|done')
         context = sim._make_context()
-        context.user_data['pending_voice_profile'] = '{"voice_summary": "x"}'
-        context.user_data['voice_examples'] = ['sample one', 'sample two', 'sample three']
-        context.user_data['voice_profile_retry_source'] = 'kaizen'
+        context.user_data['voice_examples'] = ['one', 'two', 'three']
 
-        result = await voice_collect_example(update, context)
+        with patch(
+            'voice_profile.generate_voice_profile',
+            new_callable=AsyncMock,
+            return_value='{"voice_summary": "x"}',
+        ), patch(
+            'bot._generate_voice_preview',
+            new_callable=AsyncMock,
+            return_value='Sample draft text.',
+        ), patch('bot.store_voice_profile') as store:
+            result = await _build_voice_profile(update, context)
 
-        assert result == AWAIT_VOICE_EXAMPLES
-        text = sim.get_last_text() or ''
+        store.assert_called_once()
+        args, _ = store.call_args
+        assert args[0] == sim.user_id
+        assert args[1] == '{"voice_summary": "x"}'
+        assert args[2] == 3
+        assert result == ConversationHandler.END
+        assert context.user_data.get('pending_voice_profile') is None
+        assert context.user_data.get('voice_examples') is None
+
         buttons = sim.get_last_buttons()
-        assert 'Pick a sample size' in text
-        assert ('📋 Recent 10 entries', 'VOICE|kaizen_sample|recent_10') in buttons
-        assert ('📅 Last 6 months', 'VOICE|kaizen_sample|last_6m') in buttons
-        assert ('📅 Last 12 months', 'VOICE|kaizen_sample|last_12m') in buttons
-        assert [
-            ('🔙 Back', 'VOICE|path_kaizen'),
-            ('❌ Cancel', 'VOICE|cancel'),
-        ] in _last_button_rows(sim)
-        assert ('🔄 Try Again', 'ACTION|voice') not in buttons
-        assert context.user_data.get('voice_kaizen_path_started') is True
+        button_data = {data for _, data in buttons}
+        assert 'VOICE|preview_accept' not in button_data
+        assert 'VOICE|preview_reject' not in button_data
+        text = sim.get_last_text() or ''
+        assert 'does this sound like you' not in text.lower()
+        assert 'looks like me' not in text.lower()
+        assert 'not quite' not in text.lower()
 
     @pytest.mark.asyncio
-    async def test_manual_preview_reject_reopens_manual_examples_without_full_restart(self):
-        from bot import AWAIT_VOICE_EXAMPLES, voice_collect_example
+    async def test_build_voice_profile_preview_frames_sample_as_demo_from_combined_samples(self):
+        """Preview copy must explain the sample is a demo and the profile was
+        built from combined writing patterns, not that one example/case."""
+        from bot import _build_voice_profile
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('VOICE|done')
+        context = sim._make_context()
+        context.user_data['voice_examples'] = ['one', 'two', 'three', 'four']
+
+        with patch(
+            'voice_profile.generate_voice_profile',
+            new_callable=AsyncMock,
+            return_value='{"voice_summary": "x"}',
+        ), patch(
+            'bot._generate_voice_preview',
+            new_callable=AsyncMock,
+            return_value='Reflective sample draft text.',
+        ), patch('bot.store_voice_profile'):
+            await _build_voice_profile(update, context)
+
+        text = (sim.get_last_text() or '').lower()
+        # Demo framing — the rendered sample is not the profile itself
+        assert 'demo' in text or 'example' in text or 'sample' in text
+        # Combined samples / writing-patterns framing
+        assert (
+            'combined' in text
+            or 'across' in text
+            or 'patterns' in text
+            or 'all your' in text
+        ), f"preview should explain combined-samples framing: {text!r}"
+        # Activation confirmation up front
+        assert 'activated' in text or 'active' in text
+
+    @pytest.mark.asyncio
+    async def test_build_voice_profile_offers_post_activation_recovery_buttons(self):
+        """After activation the user must have clear next moves: drafting and
+        a way back into voice setup (improve / rebuild)."""
+        from bot import _build_voice_profile
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('VOICE|done')
+        context = sim._make_context()
+        context.user_data['voice_examples'] = ['one', 'two', 'three']
+
+        with patch(
+            'voice_profile.generate_voice_profile',
+            new_callable=AsyncMock,
+            return_value='{"voice_summary": "x"}',
+        ), patch(
+            'bot._generate_voice_preview',
+            new_callable=AsyncMock,
+            return_value='Sample draft text.',
+        ), patch('bot.store_voice_profile'):
+            await _build_voice_profile(update, context)
+
+        buttons = sim.get_last_buttons()
+        button_data = {data for _, data in buttons}
+        # Start drafting → reuse the existing "file a case" action
+        assert 'ACTION|file' in button_data
+        # Improve / rebuild → reuse the two-path voice setup entry point
+        assert 'ACTION|voice' in button_data
+
+    @pytest.mark.asyncio
+    async def test_stale_preview_accept_without_pending_shows_clean_recovery(self):
+        """A user tapping the old 'Activate' button after this change should
+        not crash and should land on a useful next-step screen."""
+        from bot import voice_collect_example
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('VOICE|preview_accept')
+        context = sim._make_context()
+        # New flow never stashes pending_voice_profile.
+
+        with patch('bot.store_voice_profile') as store:
+            result = await voice_collect_example(update, context)
+
+        store.assert_not_called()
+        assert result == ConversationHandler.END
+        text = (sim.get_last_text() or '').lower()
+        assert 'voice profile' in text
+        # No raw error/crash language
+        assert 'expired' not in text or 'already' in text
+        buttons = sim.get_last_buttons()
+        button_data = {data for _, data in buttons}
+        # Recovery must offer a way forward without dead ends
+        assert 'ACTION|voice' in button_data or 'ACTION|file' in button_data
+
+    @pytest.mark.asyncio
+    async def test_stale_preview_accept_with_pending_still_activates_for_backwards_compat(self):
+        """If an old in-flight preview still has pending_voice_profile in
+        user_data, tapping Activate must still save the profile cleanly."""
+        from bot import voice_collect_example
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('VOICE|preview_accept')
+        context = sim._make_context()
+        context.user_data['pending_voice_profile'] = '{"voice_summary": "x"}'
+        context.user_data['voice_examples'] = ['one', 'two', 'three']
+
+        with patch('bot.store_voice_profile') as store:
+            result = await voice_collect_example(update, context)
+
+        store.assert_called_once()
+        assert result == ConversationHandler.END
+        assert context.user_data.get('pending_voice_profile') is None
+
+    @pytest.mark.asyncio
+    async def test_stale_preview_reject_shows_clean_recovery_not_retry(self):
+        """The 'Not quite — try again' button is gone. Old taps must show a
+        clean recovery message instead of dropping into the old retry path."""
+        from bot import voice_collect_example
 
         sim = BotSimulator()
         update = sim._make_callback_update('VOICE|preview_reject')
         context = sim._make_context()
-        context.user_data['pending_voice_profile'] = '{"voice_summary": "x"}'
-        context.user_data['voice_examples'] = ['sample one', 'sample two', 'sample three']
+        # Simulate a stale tap — no pending profile, no examples buffered.
 
         result = await voice_collect_example(update, context)
 
-        assert result == AWAIT_VOICE_EXAMPLES
-        assert ('🔄 Try Again', 'VOICE|path_manual') in sim.get_last_buttons()
-        assert ('🔄 Try Again', 'ACTION|voice') not in sim.get_last_buttons()
+        assert result == ConversationHandler.END
+        text = sim.get_last_text() or ''
+        buttons = sim.get_last_buttons()
+        button_data = {data for _, data in buttons}
+        # Old retry path must not reappear
+        assert ('🔄 Try Again', 'VOICE|path_manual') not in buttons
+        # Must offer a path back into voice setup without crashing
+        assert 'ACTION|voice' in button_data
+        # Must not echo the old "Does this sound like you?" framing
+        assert 'does this sound like you' not in text.lower()
 
     @pytest.mark.asyncio
     async def test_voice_preview_uses_plain_text_without_markdown_or_fence(self):
-        from bot import AWAIT_VOICE_EXAMPLES, _build_voice_profile
+        from bot import _build_voice_profile
 
         sim = BotSimulator()
         update = sim._make_callback_update('VOICE|done')
@@ -2718,10 +2847,10 @@ class TestVoiceProfileTwoPathFlow:
             'bot._generate_voice_preview',
             new_callable=AsyncMock,
             return_value='**Reflection**\nSample preview text.\n---',
-        ):
+        ), patch('bot.store_voice_profile'):
             result = await _build_voice_profile(update, context)
 
-        assert result == AWAIT_VOICE_EXAMPLES
+        assert result == ConversationHandler.END
         text = sim.get_last_text() or ''
         assert 'Reflection' in text
         assert '**Reflection**' not in text

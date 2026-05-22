@@ -22,6 +22,8 @@ cannot create, edit, delete, submit, or send assessor actions.
    Kaizen for voice learning. It uses browser-harness/CDP in read-only mode and
    is fully mocked in normal tests, so tests never hit live Kaizen.
 5. Stale sample-pick buttons can never bypass the Kaizen path gate.
+6. A generated voice profile activates immediately; the sample draft is a
+   reassurance/demo, not an approval gate.
 
 ## Done
 
@@ -47,6 +49,10 @@ cannot create, edit, delete, submit, or send assessor actions.
   read-only guard copy, sample-size pick, path enforcement on stale callbacks,
   mocked sampler success, read-only browser script checks,
   callback acknowledgement, and `VOICE|back_to_choice`.
+- Voice-profile generation now stores the profile immediately after analysis,
+  removes the "Does this sound like you?" activation gate, and shows the sample
+  as a demo built from combined writing patterns. Stale old preview buttons
+  recover safely without re-entering fragile pending state.
 
 ## Verification
 

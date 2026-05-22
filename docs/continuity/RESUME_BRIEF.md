@@ -1,12 +1,12 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-05-22T21:07:21+00:00
+Generated: 2026-05-22T23:11:27+00:00
 Status: ready
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
 - Branch: fix/portfolio-guru-kaizen-recovery
-- Last commit: 6e1b255 2026-05-22 fix: clarify unlimited settings usage
+- Last commit: 705519e 2026-05-22 fix: clean voice preview fallback copy
 - Uncommitted changes: no
 
 ## Immediate read before restarting
@@ -20,14 +20,14 @@ Status: ready
 - No missing practical sections
 
 ## Recent commits
-- 6e1b255 2026-05-22 fix: clarify unlimited settings usage
-- 5ae0a73 2026-05-22 fix: add setup recovery buttons
-- 0af4418 2026-05-22 fix: harden Kaizen login reliability checks
-- 9e70f54 2026-05-22 fix: use managed Kaizen CDP for login checks
-- caf7451 2026-05-22 fix: shorten telegram bot profile copy
-- 8525da2 2026-05-22 fix: update telegram bot profile copy
-- a863252 2026-05-22 fix: improve portfolio welcome copy
-- 6c82f4f 2026-05-22 fix: harden portfolio kaizen filing
+- 705519e 2026-05-22 fix: clean voice preview fallback copy
+- 2159921 2026-05-22 fix: compact back cancel button rows
+- 3fa194a 2026-05-22 fix: streamline voice profile retry flow
+- 20e236e 2026-05-22 test: add Telethon workflow harness
+- c5d8503 2026-05-22 fix: self-heal Kaizen voice sampling session
+- 37f8f87 2026-05-22 fix: offer Kaizen reconnect in voice profile flow
+- 1a47ebc 2026-05-22 Simplify voice profile Kaizen learning flow
+- e5e9021 2026-05-22 feat: add Kaizen voice profile setup flow
 
 ## Repo context snapshot
 ### AGENTS.md — present, 1 days old
@@ -62,14 +62,18 @@ Key headings:
 
 ### TASK.md — present, 0 days old
 Key headings:
-- # Active Task — Kaizen Filing Reliability Cleanup
+- # Active Task — Voice Profile Two-Path Setup
+- ## Objective
+- ## Current Slice
+- ## Done
+- ## Verification
+- ## Guardrails
+- ## Carried Context — Kaizen Filing Reliability Cleanup
+- # Carried — Kaizen Filing Reliability Cleanup
 - ## Objective
 - ## Current Slice
 - ## Guardrails
 - ## Done
-- ## Verification
-- ## Next
-- ## Carried Context — Portfolio Readiness / ARCP Health
 
 ### WORKFLOWS.md — present, 1 days old
 Key headings:

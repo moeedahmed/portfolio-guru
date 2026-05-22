@@ -2830,58 +2830,44 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
             return await _voice_run_kaizen_sample(update, context, data)
 
         if data == "VOICE|preview_accept":
+            # New flow activates the profile immediately inside
+            # _build_voice_profile, so this branch only runs for stale buttons.
+            # Backwards-compat: if an old in-flight pending profile is still in
+            # user_data, save it cleanly instead of dropping the user's work.
             profile_json = context.user_data.get("pending_voice_profile")
-            if not profile_json:
-                await _flow_edit(
-                    update, context,
-                    "⚠️ That preview has expired. Please rebuild your voice profile.",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("🔄 Rebuild Profile", callback_data="ACTION|voice")],
-                    ]),
-                    flow_key="voice",
-                )
-                context.user_data.pop("voice_examples", None)
-                _flow_done(context, "voice")
-                return ConversationHandler.END
-
-            store_voice_profile(update.effective_user.id, profile_json, len(examples))
+            if profile_json:
+                store_voice_profile(update.effective_user.id, profile_json, len(examples))
             context.user_data.pop("pending_voice_profile", None)
             context.user_data.pop("voice_examples", None)
+            context.user_data.pop("voice_profile_retry_source", None)
+            context.user_data.pop("voice_kaizen_path_started", None)
             await _flow_edit(
                 update, context,
-                "✅ Voice profile activated. All future drafts will match your writing voice.\n\n"
-                "Send a case any time to try it.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔄 Rebuild profile", callback_data="ACTION|voice")],
-                ]),
+                "✅ Your voice profile is already active. Send a case to try it, "
+                "or update the profile if you want to tune the voice.",
+                reply_markup=_voice_post_activation_keyboard(),
                 flow_key="voice",
             )
             _flow_done(context, "voice")
             return ConversationHandler.END
 
         if data == "VOICE|preview_reject":
+            # The "Not quite — try again" gate is gone. Old taps land here and
+            # should recover cleanly: the profile is already active (saved on
+            # build), and the user can update or start drafting.
             context.user_data.pop("pending_voice_profile", None)
             context.user_data.pop("voice_examples", None)
-            retry_source = context.user_data.pop("voice_profile_retry_source", None)
-            if retry_source == "kaizen":
-                context.user_data["voice_kaizen_path_started"] = True
-                await _flow_edit(
-                    update, context,
-                    VOICE_KAIZEN_SAMPLE_COPY,
-                    parse_mode="Markdown",
-                    reply_markup=_voice_kaizen_sample_keyboard(),
-                    flow_key="voice",
-                )
-                return AWAIT_VOICE_EXAMPLES
+            context.user_data.pop("voice_profile_retry_source", None)
+            context.user_data.pop("voice_kaizen_path_started", None)
             await _flow_edit(
                 update, context,
-                "No problem — let's try again with different examples.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔄 Try Again", callback_data="VOICE|path_manual")],
-                ]),
+                "Your voice profile is already saved. Want to tune it with more "
+                "examples or rebuild from different samples?",
+                reply_markup=_voice_post_activation_keyboard(),
                 flow_key="voice",
             )
-            return AWAIT_VOICE_EXAMPLES
+            _flow_done(context, "voice")
+            return ConversationHandler.END
 
         if data == "VOICE|remove":
             clear_voice_profile(update.effective_user.id)
@@ -3123,8 +3109,20 @@ def _clean_voice_preview_text(text: str) -> str:
     return cleaned.strip()
 
 
+def _voice_post_activation_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📋 Start drafting", callback_data="ACTION|file")],
+        [InlineKeyboardButton("🔄 Update voice profile", callback_data="ACTION|voice")],
+    ])
+
+
 async def _build_voice_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Build the voice profile from collected examples."""
+    """Build, save, and activate the voice profile from collected examples.
+
+    The profile is stored immediately — there is no separate user-approval gate.
+    A single sample draft is rendered as a demo so the user can see the voice in
+    action; the profile itself is built from patterns across all examples.
+    """
     examples = context.user_data.get("voice_examples", [])
 
     # Triggered by a button (VOICE|done / /done after 3 examples) → edit anchor.
@@ -3140,23 +3138,30 @@ async def _build_voice_profile(update: Update, context: ContextTypes.DEFAULT_TYP
         profile_json = await asyncio.wait_for(
             generate_voice_profile(examples), timeout=30
         )
-        context.user_data["pending_voice_profile"] = profile_json
+        store_voice_profile(update.effective_user.id, profile_json, len(examples))
+        # Pending state is obsolete — never set it on the happy path, and clear
+        # any leftover from older flows so stale callbacks can't bring it back.
+        context.user_data.pop("pending_voice_profile", None)
+        context.user_data.pop("voice_examples", None)
+        context.user_data.pop("voice_profile_retry_source", None)
+        context.user_data.pop("voice_kaizen_path_started", None)
+
         sample_draft = _clean_voice_preview_text(await _generate_voice_preview(profile_json))
+        example_count = len(examples)
 
         # No user input between "Analysing…" and the preview — always edit.
         await _flow_edit(
             update, context,
-            f"🔍 Here's a sample draft using your voice profile:\n\n"
-            f"{sample_draft}\n"
-            f"\n"
-            f"Does this sound like you?",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Looks like me — Activate", callback_data="VOICE|preview_accept")],
-                [InlineKeyboardButton("❌ Not quite — try again", callback_data="VOICE|preview_reject")],
-            ]),
+            f"✅ Voice profile activated. Future drafts will match your writing voice.\n\n"
+            f"I learned your voice from patterns across all {example_count} examples combined — "
+            f"not from any single case.\n\n"
+            f"🔍 Here's a sample draft as a demo of what it sounds like:\n\n"
+            f"{sample_draft}",
+            reply_markup=_voice_post_activation_keyboard(),
             flow_key="voice",
         )
-        return AWAIT_VOICE_EXAMPLES
+        _flow_done(context, "voice")
+        return ConversationHandler.END
     except asyncio.TimeoutError:
         logger.warning("Voice profile generation timed out (30s)")
         context.user_data.pop("pending_voice_profile", None)
