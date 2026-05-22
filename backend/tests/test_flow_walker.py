@@ -2145,6 +2145,18 @@ class TestTrainingStageGroups:
 
         assert 'Training stage: Unknown' in text
 
+    def test_unlimited_settings_labels_cases_as_filed_not_usage(self):
+        from bot import _settings_view_components
+
+        with patch('bot.get_curriculum', return_value='2025'), \
+             patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_voice_profile', return_value=None):
+            text, _ = _settings_view_components(123, tier='pro_plus', used=10)
+
+        assert 'Plan: Unlimited' in text
+        assert 'Cases filed: 10 this month' in text
+        assert 'Usage: 10 cases this month' not in text
+
     @pytest.mark.asyncio
     async def test_training_level_options_use_kaizen_stage_groups(self):
         from bot import handle_action_button

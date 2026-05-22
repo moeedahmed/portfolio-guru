@@ -1183,7 +1183,7 @@ def _settings_view_components(
         if used is not None:
             limit = TIER_LIMITS.get(tier, 5)
             if limit == -1:
-                plan_lines.append(f"📋 Usage: {used} cases this month")
+                plan_lines.append(f"📋 Cases filed: {used} this month")
             else:
                 plan_lines.append(f"📋 Usage: {used}/{limit} cases this month")
     plan_block = ("\n".join(plan_lines) + "\n\n") if plan_lines else ""
