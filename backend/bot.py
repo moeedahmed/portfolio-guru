@@ -3113,6 +3113,16 @@ Write a short portfolio entry (2-3 paragraphs) in this doctor's voice. Include a
     return await _generate(prompt)
 
 
+def _clean_voice_preview_text(text: str) -> str:
+    """Strip model-added Markdown from preview text before showing in chat."""
+    cleaned = (text or "").strip()
+    cleaned = re.sub(r"\*\*(.*?)\*\*", r"\1", cleaned)
+    cleaned = re.sub(r"__(.*?)__", r"\1", cleaned)
+    cleaned = re.sub(r"(?m)^\s{0,3}#{1,6}\s*", "", cleaned)
+    cleaned = re.sub(r"(?m)^\s*[-*_]{3,}\s*$", "", cleaned)
+    return cleaned.strip()
+
+
 async def _build_voice_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Build the voice profile from collected examples."""
     examples = context.user_data.get("voice_examples", [])
@@ -3131,16 +3141,14 @@ async def _build_voice_profile(update: Update, context: ContextTypes.DEFAULT_TYP
             generate_voice_profile(examples), timeout=30
         )
         context.user_data["pending_voice_profile"] = profile_json
-        sample_draft = await _generate_voice_preview(profile_json)
+        sample_draft = _clean_voice_preview_text(await _generate_voice_preview(profile_json))
 
         # No user input between "Analysing…" and the preview — always edit.
         await _flow_edit(
             update, context,
             f"🔍 Here's a sample draft using your voice profile:\n\n"
-            f"Preview draft\n"
-            f"────────────\n"
             f"{sample_draft}\n"
-            f"────────────\n\n"
+            f"\n"
             f"Does this sound like you?",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("✅ Looks like me — Activate", callback_data="VOICE|preview_accept")],
@@ -7029,6 +7037,17 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         logger.info("Stale callback query — ignoring gracefully")
         # Can't answer the query (it's expired), but we can send a message
         if update and hasattr(update, 'effective_message') and update.effective_message:
+            callback_data = getattr(getattr(update, "callback_query", None), "data", "") or ""
+            if callback_data.startswith("VOICE|"):
+                await _send_latest_message(
+                    update.effective_message,
+                    context,
+                    "That older voice-profile button is no longer active. Your setup is still saved — open Voice Profile and I'll rebuild it with you.",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("✍️ Open Voice Profile", callback_data="ACTION|voice")],
+                    ]),
+                )
+                return
             await _resume_paused_flow(
                 update,
                 context,

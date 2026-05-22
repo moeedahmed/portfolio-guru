@@ -2702,7 +2702,7 @@ class TestVoiceProfileTwoPathFlow:
         assert ('🔄 Try Again', 'ACTION|voice') not in sim.get_last_buttons()
 
     @pytest.mark.asyncio
-    async def test_voice_preview_uses_line_separator_not_three_dash_fence(self):
+    async def test_voice_preview_uses_plain_text_without_markdown_or_fence(self):
         from bot import AWAIT_VOICE_EXAMPLES, _build_voice_profile
 
         sim = BotSimulator()
@@ -2717,14 +2717,16 @@ class TestVoiceProfileTwoPathFlow:
         ), patch(
             'bot._generate_voice_preview',
             new_callable=AsyncMock,
-            return_value='Sample preview text.',
+            return_value='**Reflection**\nSample preview text.\n---',
         ):
             result = await _build_voice_profile(update, context)
 
         assert result == AWAIT_VOICE_EXAMPLES
         text = sim.get_last_text() or ''
-        assert 'Preview draft' in text
-        assert '────────────' in text
+        assert 'Reflection' in text
+        assert '**Reflection**' not in text
+        assert 'Preview draft' not in text
+        assert '────────────' not in text
         assert '---' not in text
 
     @pytest.mark.asyncio
