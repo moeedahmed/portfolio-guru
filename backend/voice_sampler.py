@@ -6,8 +6,9 @@ after the user chooses the Kaizen learning path and a sample window.
 
 Contract:
 - Pure read-only: never submits, deletes, edits, or creates Kaizen content.
-- Uses the authenticated managed Chrome/CDP session only; it does not type
-  credentials or try to log in.
+- Uses the authenticated managed Chrome/CDP session first. If that session has
+  expired, it may restore the session with the user's saved encrypted
+  credentials before retrying the read-only scrape.
 - Normal tests mock the browser-harness runner and never touch live Kaizen.
 - Returns a typed result so callers can branch on availability without parsing
   free text.
@@ -226,18 +227,66 @@ def _run_browser_harness(limit: int) -> dict:
     return _extract_payload(result.stdout)
 
 
+def _restore_kaizen_session(telegram_user_id: int) -> dict:
+    """Restore a logged-out managed browser session using saved credentials.
+
+    This only authenticates the browser profile. It does not create, edit,
+    submit, sign, delete, or share any Kaizen content.
+    """
+    try:
+        from engine.providers.kaizen import KaizenInfrastructureError, KaizenProvider
+        from store import get_credentials
+    except Exception:
+        return {"ok": False, "reason": "reconnect_unavailable"}
+
+    try:
+        credentials = get_credentials(telegram_user_id)
+    except Exception:
+        return {"ok": False, "reason": "credentials_unavailable"}
+    if not credentials:
+        return {"ok": False, "reason": "credentials_missing"}
+
+    username, password = credentials
+    provider = KaizenProvider(username=username, password=password)
+    try:
+        connected = provider.connect()
+    except KaizenInfrastructureError:
+        return {"ok": False, "reason": "reconnect_infrastructure_error"}
+    except Exception:
+        return {"ok": False, "reason": "reconnect_failed"}
+
+    if not connected:
+        return {"ok": False, "reason": "credentials_rejected"}
+    return {"ok": True}
+
+
 async def sample_kaizen_entries(
     telegram_user_id: int,
     window: SampleWindow,
 ) -> SamplerResult:
     """Read existing Kaizen entries from the managed browser session."""
-    del telegram_user_id  # The managed Chrome session already scopes the user.
     try:
         payload = await asyncio.to_thread(_run_browser_harness, _window_limit(window))
     except subprocess.TimeoutExpired:
         payload = {"status": "not_available", "reason": "timeout", "samples": []}
     except Exception:
         payload = {"status": "not_available", "reason": "unexpected_error", "samples": []}
+
+    if payload.get("status") == "not_available" and payload.get("reason") == "login_required":
+        reconnect = await asyncio.to_thread(_restore_kaizen_session, telegram_user_id)
+        if reconnect.get("ok"):
+            try:
+                payload = await asyncio.to_thread(_run_browser_harness, _window_limit(window))
+            except subprocess.TimeoutExpired:
+                payload = {"status": "not_available", "reason": "timeout_after_reconnect", "samples": []}
+            except Exception:
+                payload = {"status": "not_available", "reason": "unexpected_error_after_reconnect", "samples": []}
+        else:
+            payload = {
+                "status": "not_available",
+                "reason": reconnect.get("reason") or "login_required",
+                "samples": [],
+            }
 
     status = payload.get("status")
     if status == "ok" and payload.get("samples"):
@@ -254,7 +303,7 @@ async def sample_kaizen_entries(
         "I couldn't read Kaizen entries from the managed browser session just now. "
         "You can still add 3-5 examples manually while we reconnect Kaizen learning."
     )
-    if reason == "login_required":
+    if reason in {"login_required", "credentials_missing", "credentials_unavailable", "credentials_rejected"}:
         message = (
             "Kaizen needs reconnecting before I can learn from previous entries. "
             "Reconnect Kaizen, then try this again — or add examples manually for now."

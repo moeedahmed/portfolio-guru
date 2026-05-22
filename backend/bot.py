@@ -3047,7 +3047,12 @@ async def _voice_run_kaizen_sample(
         )
 
     rows = []
-    if getattr(result, "reason", None) == "login_required":
+    if getattr(result, "reason", None) in {
+        "login_required",
+        "credentials_missing",
+        "credentials_unavailable",
+        "credentials_rejected",
+    }:
         rows.append([InlineKeyboardButton("🔗 Reconnect Kaizen", callback_data="ACTION|setup")])
     rows.extend([
         [InlineKeyboardButton("✍️ Add examples manually", callback_data="VOICE|path_manual")],

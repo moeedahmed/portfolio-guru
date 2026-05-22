@@ -2655,6 +2655,45 @@ class TestVoiceProfileTwoPathFlow:
         assert result.status == SamplerStatus.OK
         assert result.samples == ['Reflective example text']
 
+    @pytest.mark.asyncio
+    async def test_voice_sampler_auto_reconnects_when_session_expired(self):
+        from voice_sampler import SampleWindow, SamplerStatus, sample_kaizen_entries
+
+        with patch(
+            'voice_sampler._run_browser_harness',
+            side_effect=[
+                {'status': 'not_available', 'reason': 'login_required', 'samples': []},
+                {'status': 'ok', 'samples': ['Recovered reflective example']},
+            ],
+        ) as runner, patch(
+            'voice_sampler._restore_kaizen_session',
+            return_value={'ok': True},
+        ) as restore:
+            result = await sample_kaizen_entries(123, SampleWindow.RECENT_10)
+
+        assert runner.call_count == 2
+        restore.assert_called_once_with(123)
+        assert result.status == SamplerStatus.OK
+        assert result.samples == ['Recovered reflective example']
+
+    @pytest.mark.asyncio
+    async def test_voice_sampler_only_shows_reconnect_after_auto_reconnect_fails(self):
+        from voice_sampler import SampleWindow, SamplerStatus, sample_kaizen_entries
+
+        with patch(
+            'voice_sampler._run_browser_harness',
+            return_value={'status': 'not_available', 'reason': 'login_required', 'samples': []},
+        ) as runner, patch(
+            'voice_sampler._restore_kaizen_session',
+            return_value={'ok': False, 'reason': 'credentials_rejected'},
+        ):
+            result = await sample_kaizen_entries(123, SampleWindow.RECENT_10)
+
+        runner.assert_called_once()
+        assert result.status == SamplerStatus.NOT_AVAILABLE
+        assert result.reason == 'credentials_rejected'
+        assert 'Reconnect Kaizen' in result.message
+
     def test_voice_sampler_browser_script_is_read_only(self):
         from voice_sampler import _browser_script
 
