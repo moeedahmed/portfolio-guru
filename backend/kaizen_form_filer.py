@@ -795,6 +795,151 @@ FORM_FIELD_MAP = {
     },
 }
 
+FORM_TYPE_ALIASES = {
+    # Portfolio Guru exposes the formal ESLE WPBA as ESLE_ASSESS. Kaizen's
+    # historical DOM map name is ESLE_PART1_2.
+    "ESLE_ASSESS": "ESLE_PART1_2",
+    # Bare ESLE is kept as a compatibility alias for older drafts/callbacks.
+    "ESLE": "ESLE_PART1_2",
+}
+
+
+def canonical_form_type(form_type: str) -> str:
+    return FORM_TYPE_ALIASES.get((form_type or "").strip().upper(), form_type)
+
+
+# Schema-required fields that do not have a one-to-one Kaizen DOM control.
+# "merge:*" entries are folded into a mapped field before filing. "safe_skip"
+# entries remain skipped/partial because no verified deterministic DOM target is
+# known; this is deliberate and prevents silently writing evidence to the wrong
+# Kaizen field.
+SCHEMA_REQUIRED_FIELD_HANDLING = {
+    "CBD": {
+        "clinical_setting": "merge:clinical_reasoning",
+        "patient_presentation": "merge:clinical_reasoning",
+        "trainee_role": "merge:clinical_reasoning",
+        "level_of_supervision": "merge:clinical_reasoning",
+    },
+    "DOPS": {
+        "clinical_setting": "merge:placement",
+        "indication": "merge:case_observed",
+        "trainee_performance": "merge:case_observed",
+    },
+    "LAT": {
+        "clinical_setting": "merge:trainee_post",
+        "stage_of_training": "safe_skip:no_verified_dom_field",
+        "reflection": "merge:clinical_reasoning",
+    },
+    "MINI_CEX": {
+        "clinical_reasoning": "merge:patient_presentation",
+    },
+    "MSF": {
+        "stage_of_training": "safe_skip:self_evaluation_form_has_no_verified_stage_dom",
+    },
+    "QIAT": {
+        "reflection": "safe_skip:no_verified_dom_field",
+    },
+    "SDL": {
+        "learning_activity_type": "merge:resource_details",
+    },
+    "TEACH_OBS": {
+        "stage_of_training": "safe_skip:no_verified_dom_field",
+    },
+    "AUDIT": {
+        "reflection": "safe_skip:no_verified_dom_field",
+    },
+    "RESEARCH": {
+        "reflection": "safe_skip:no_verified_dom_field",
+    },
+}
+
+
+def required_field_handling(form_type: str, field_key: str) -> str | None:
+    form_type = canonical_form_type(form_type)
+    handling_key = form_type[:-5] if form_type.endswith("_2021") else form_type
+    return (
+        SCHEMA_REQUIRED_FIELD_HANDLING.get(form_type, {}).get(field_key)
+        or SCHEMA_REQUIRED_FIELD_HANDLING.get(handling_key, {}).get(field_key)
+    )
+
+
+def _append_section(existing: Any, label: str, value: Any) -> str:
+    existing_text = str(existing).strip() if existing is not None else ""
+    value_text = str(value).strip() if value is not None else ""
+    if not value_text:
+        return existing_text
+    section = f"{label}: {value_text}"
+    if not existing_text:
+        return section
+    if value_text in existing_text:
+        return existing_text
+    return f"{existing_text}\n\n{section}"
+
+
+def normalise_fields_for_deterministic_filing(form_type: str, fields: dict) -> dict:
+    """Adapt extractor schema fields to the deterministic Kaizen field map.
+
+    This only performs mappings with a verified target in FORM_FIELD_MAP. Fields
+    listed as safe_skip in SCHEMA_REQUIRED_FIELD_HANDLING are left untouched so
+    the filer reports them as skipped/partial instead of silently misfiling.
+    """
+    form_type = canonical_form_type(form_type)
+    handling_key = form_type[:-5] if form_type.endswith("_2021") else form_type
+    out = dict(fields or {})
+
+    if handling_key == "DOPS":
+        from dops_filing import normalise_dops_fields
+        return normalise_dops_fields(out)
+
+    if handling_key == "CBD":
+        for key, label in (
+            ("clinical_setting", "Clinical setting"),
+            ("patient_presentation", "Patient presentation"),
+            ("trainee_role", "Trainee role"),
+            ("level_of_supervision", "Level of supervision"),
+        ):
+            if out.get(key):
+                out["clinical_reasoning"] = _append_section(out.get("clinical_reasoning"), label, out[key])
+                out.pop(key, None)
+
+    elif handling_key == "MINI_CEX" and out.get("clinical_reasoning"):
+        out["patient_presentation"] = _append_section(
+            out.get("patient_presentation"), "Clinical assessment", out["clinical_reasoning"]
+        )
+        out.pop("clinical_reasoning", None)
+
+    elif handling_key == "LAT":
+        if out.get("clinical_setting") and not out.get("trainee_post"):
+            out["trainee_post"] = out["clinical_setting"]
+            out.pop("clinical_setting", None)
+        if out.get("reflection"):
+            out["clinical_reasoning"] = _append_section(out.get("clinical_reasoning"), "Reflection", out["reflection"])
+            out.pop("reflection", None)
+
+    elif handling_key == "SDL" and out.get("learning_activity_type"):
+        value = out["learning_activity_type"]
+        if isinstance(value, (list, tuple, set)):
+            value = ", ".join(str(item) for item in value if str(item).strip())
+        out["resource_details"] = _append_section(out.get("resource_details"), "Learning activity type", value)
+        out.pop("learning_activity_type", None)
+
+    return out
+
+
+def drop_consumed_unmapped_schema_fields(form_type: str, fields: dict) -> dict:
+    """Remove schema-only source fields once their mapped target is populated."""
+    form_type = canonical_form_type(form_type)
+    handling_key = form_type[:-5] if form_type.endswith("_2021") else form_type
+    field_map = FORM_FIELD_MAP.get(form_type, {})
+    out = dict(fields or {})
+    for key, handling in SCHEMA_REQUIRED_FIELD_HANDLING.get(handling_key, {}).items():
+        if key in field_map or not handling.startswith("merge:"):
+            continue
+        target = handling.split(":", 1)[1]
+        if out.get(target):
+            out.pop(key, None)
+    return out
+
 # ─── Form type UUIDs (for creating new forms) ────────────────────────────────
 
 FORM_UUIDS = {
@@ -860,7 +1005,51 @@ FORM_UUIDS = {
     "CCT":                "9425aea9-1fb9-4230-b2a3-ec1712599caa",
     "FILE_UPLOAD":        "108ae04a-d865-4a4a-ba97-9c537563e960",
     "OOP":                "2b023326-a34f-463e-a921-bf215599b0ac",
+    # ─── 2021 curriculum variants ─────────────────────────────────────────────
+    "CBD_2021":           "310b903a-8c97-44e0-8ec3-4bf692b33441",
+    "DOPS_2021":          "27a300c6-245a-4fed-943e-fe2976686d0d",
+    "ACAT_2021":          "2a8a02fe-c085-4cd7-a78e-b024a359011a",
+    "ACAF_2021":          "37978f7b-1770-40ed-8bf1-53a96ae13c25",
+    "STAT_2021":          "262e7e37-9f74-414f-bc88-fb6ff5ce2239",
+    "MINI_CEX_2021":      "26978104-5583-46c4-9799-07555a18b3d4",
+    "JCF_2021":           "efb238d0-66f7-487d-b18a-cfda78c8e733",
+    "ESLE_2021":          "e4417335-969c-4a4e-a04f-cc272afc1ab8",
+    "TEACH_2021":         "98c35142-6b8d-4958-86c5-4dfd06f22143",
+    "PROC_LOG_2021":      "25527933-81e6-484f-b4dd-7ea23c2e3919",
+    "SDL_2021":           "5f679c9f-ed61-4dc9-afc9-2c1f98ba3983",
+    "US_CASE_2021":       "eede404a-cfab-442f-8c4c-0a1160cc45f1",
+    "COMPLAINT_2021":     "6c8cd525-dae4-479c-8836-864691a74832",
+    "SERIOUS_INC_2021":   "e2df1663-1b94-403a-91fa-37f568161ed5",
+    "EDU_ACT_2021":       "7a40ed0e-0280-4e16-b3dc-468022d84575",
+    "FORMAL_COURSE_2021": "1889dfd7-4267-4b77-a062-357740c2ed4d",
+    "TEACH_OBS_2021":     "e43a8b88-2bea-4bdb-a5aa-02e0cd388698",
+    "TEACH_CONFID_2021":  "563d2c82-46b5-41d7-b601-58a45b347a3a",
 }
+
+_FORM_FIELD_MAP_VARIANT_BASES = {
+    "CBD_2021": "CBD",
+    "DOPS_2021": "DOPS",
+    "ACAT_2021": "ACAT",
+    "ACAF_2021": "ACAF",
+    "STAT_2021": "STAT",
+    "MINI_CEX_2021": "MINI_CEX",
+    "JCF_2021": "JCF",
+    "ESLE_2021": "ESLE_PART1_2",
+    "TEACH_2021": "TEACH",
+    "PROC_LOG_2021": "PROC_LOG",
+    "SDL_2021": "SDL",
+    "US_CASE_2021": "US_CASE",
+    "COMPLAINT_2021": "COMPLAINT",
+    "SERIOUS_INC_2021": "SERIOUS_INC",
+    "EDU_ACT_2021": "EDU_ACT",
+    "FORMAL_COURSE_2021": "FORMAL_COURSE",
+    "TEACH_OBS_2021": "TEACH_OBS",
+    "TEACH_CONFID_2021": "TEACH_CONFID",
+}
+
+for _variant, _base in _FORM_FIELD_MAP_VARIANT_BASES.items():
+    if _base in FORM_FIELD_MAP:
+        FORM_FIELD_MAP.setdefault(_variant, FORM_FIELD_MAP[_base])
 
 
 # ─── JS snippets (passed as separate strings, NEVER f-string interpolated) ───
@@ -1384,6 +1573,8 @@ async def fill_kaizen_form(
     skipped = []
     errors = []
     pw = None
+    form_type = canonical_form_type(form_type)
+    fields = normalise_fields_for_deterministic_filing(form_type, fields)
 
     try:
         # Connect to managed Chrome
@@ -1438,6 +1629,7 @@ async def fill_kaizen_form(
                     "quality_gate_failed": True,
                     "missing_for_quality": blocking,
                 }
+        fields = drop_consumed_unmapped_schema_fields(form_type, fields)
 
         if (
             form_type == "PROC_LOG"
@@ -1682,6 +1874,14 @@ FORM_DISPLAY_NAMES = {
     "MGMT_REPORT":        "Management: Writing a Report",
     "MGMT_COMPLAINT":     "Management: Complaint",
 }
+
+for _alias, _target in FORM_TYPE_ALIASES.items():
+    if _target in FORM_UUIDS:
+        FORM_UUIDS.setdefault(_alias, FORM_UUIDS[_target])
+    if _target in FORM_FIELD_MAP:
+        FORM_FIELD_MAP.setdefault(_alias, FORM_FIELD_MAP[_target])
+    if _target in FORM_DISPLAY_NAMES:
+        FORM_DISPLAY_NAMES.setdefault(_alias, FORM_DISPLAY_NAMES[_target])
 
 
 # ─── CDP connection (legacy — used by file_to_kaizen / delete_all_drafts) ────
@@ -2287,6 +2487,7 @@ async def file_to_kaizen(
     Used by filer_router.py and bot.py. Wraps the old filer logic
     for backward compatibility.
     """
+    form_type = canonical_form_type(form_type)
     uuid = FORM_UUIDS.get(form_type)
     if not uuid:
         return {"status": "failed", "filled": [], "skipped": [], "error": f"Unknown form type: {form_type}"}
@@ -2298,6 +2499,7 @@ async def file_to_kaizen(
 
     filled = []
     skipped = []
+    fields = normalise_fields_for_deterministic_filing(form_type, fields)
     if form_type == "PROC_LOG" and fields.get("date_of_activity") and not fields.get("date_occurred_on"):
         fields = dict(fields)
         fields["date_occurred_on"] = fields["date_of_activity"]
@@ -2332,6 +2534,7 @@ async def file_to_kaizen(
                 "quality_gate_failed": True,
                 "missing_for_quality": blocking,
             }
+    fields = drop_consumed_unmapped_schema_fields(form_type, fields)
     browser = None
     cdp_pw = None
     use_cdp = KAIZEN_USE_CDP

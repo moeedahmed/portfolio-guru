@@ -57,18 +57,23 @@ def test_gemini_three_five_flash_model_honours_env(monkeypatch):
 
 def test_extractor_gemini_3_5_flash_override_reads_model_at_runtime(monkeypatch):
     # `gemini-3.5-flash` selects a Gemini Flash provider while leaving the
-    # production default untouched, so the eval can compare models without
-    # swapping the default extractor.
+    # production default untouched. It still keeps fallbacks because the
+    # preview/free-tier Gemini route can exhaust mid-flow.
     monkeypatch.setenv("PORTFOLIO_GURU_EXTRACTOR_PROVIDER", "gemini-3.5-flash")
     monkeypatch.setenv("GEMINI_3_5_FLASH_MODEL", "gemini-3-5-flash-runtime")
+    monkeypatch.setenv("GEMINI_STABLE_MODEL", "gemini-stable-runtime")
 
     from extractor import _select_providers
 
-    provider = _select_providers()[0]
+    providers = _select_providers()
+    provider = providers[0]
     assert provider["name"] == "gemini-3-5-flash"
     assert provider["type"] == "gemini"
     assert provider["env_key"] == "GOOGLE_API_KEY"
     assert provider["model"]() == "gemini-3-5-flash-runtime"
+    assert providers[1]["name"] == "gemini-stable"
+    assert providers[1]["model"]() == "gemini-stable-runtime"
+    assert providers[2]["name"] == "deepseek-v4"
 
 
 def test_extractor_default_unaffected_by_3_5_flash_being_available(monkeypatch):

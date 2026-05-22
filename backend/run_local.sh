@@ -70,10 +70,10 @@ export STRIPE_WEBHOOK_SECRET
 export STRIPE_PRO_PRICE_ID="price_1TKY11FtxKHU39UdHFXn1yur"
 export STRIPE_PRO_PLUS_PRICE_ID="price_1TKY12FtxKHU39UdTQZY8rOq"
 
-# Optional: persistent browser for faster filing (login once, reuse session)
-# Requires Chrome running with: google-chrome --remote-debugging-port=18800 --user-data-dir=/tmp/kaizen-profile
-# export KAIZEN_USE_CDP=1
-# export KAIZEN_CDP_URL=http://localhost:18800
+# Persistent browser for Kaizen filing (login once, reuse session)
+export KAIZEN_USE_CDP="${KAIZEN_USE_CDP:-1}"
+export KAIZEN_CDP_URL="${KAIZEN_CDP_URL:-http://localhost:18800}"
+"$SCRIPT_DIR/ensure_chrome.sh" --verbose
 
 echo "Secrets loaded. Starting bot + webhook server..."
 

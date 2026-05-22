@@ -10,7 +10,7 @@ from typing import List
 logger = logging.getLogger(__name__)
 from models import CBDData, FormTypeRecommendation, FormDraft
 from form_schemas import FORM_SCHEMAS
-from model_config import gemini_premium_model, gemini_three_five_flash_model
+from model_config import gemini_premium_model, gemini_stable_model, gemini_three_five_flash_model
 
 # RCEM Higher EM Curriculum (2025 Update) — Exact Kaizen checkbox labels
 # Source: Live Kaizen CBD form screenshot (verified 2026-03-08)
@@ -115,6 +115,13 @@ GEMINI_3_5_FLASH_PROVIDERS = [
         "model": gemini_three_five_flash_model,
         "env_key": "GOOGLE_API_KEY",
     },
+    {
+        "name": "gemini-stable",
+        "type": "gemini",
+        "model": gemini_stable_model,
+        "env_key": "GOOGLE_API_KEY",
+    },
+    *PROVIDERS,
 ]
 
 
@@ -170,14 +177,16 @@ async def _generate(prompt, retries: int = 1, tier: str = ""):
                         api_key=api_key,
                         base_url=provider.get("base_url"),
                     )
+                    request_kwargs = {
+                        "model": model_name,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.2,
+                    }
+                    if "json" in prompt.lower():
+                        request_kwargs["response_format"] = {"type": "json_object"}
                     response = await loop.run_in_executor(
                         None,
-                        lambda c=oai_client, m=model_name: c.chat.completions.create(
-                            model=m,
-                            messages=[{"role": "user", "content": prompt}],
-                            response_format={"type": "json_object"},
-                            temperature=0.2,
-                        )
+                        lambda c=oai_client, kwargs=request_kwargs: c.chat.completions.create(**kwargs)
                     )
                     elapsed = _time.monotonic() - t0
                     logger.info(f"{provider['name']} ({model_name}) responded in {elapsed:.1f}s")
@@ -280,6 +289,33 @@ FORM_UUIDS = {
     "FILE_UPLOAD_2021":   "2db062c4-471e-4216-92f2-d51af84f2246",
     "OOP":                "2b023326-a34f-463e-a921-bf215599b0ac",
 }
+
+FORM_TYPE_ALIASES = {
+    # User-facing "ESLE" should create the formal ESLE WPBA. The separate
+    # reflection-on-ESLE Kaizen form is not exposed as a selectable draft flow.
+    "ESLE": "ESLE_ASSESS",
+}
+
+FORM_SCHEMA_ALIASES = {
+    # The 2021 curriculum form is keyed as ESLE_2021 in Kaizen, but it uses the
+    # same assessed-ESLE draft schema as the current ESLE_ASSESS flow.
+    "ESLE_2021": "ESLE_ASSESS",
+}
+
+
+def canonical_form_type(form_type: str) -> str:
+    """Return the Portfolio Guru canonical form code for user-facing aliases."""
+    return FORM_TYPE_ALIASES.get((form_type or "").strip().upper(), form_type)
+
+
+def schema_form_type(form_type: str) -> str:
+    """Return the schema key used to draft/review a Portfolio Guru form code."""
+    canonical = canonical_form_type(form_type)
+    if canonical in FORM_SCHEMA_ALIASES:
+        return FORM_SCHEMA_ALIASES[canonical]
+    if canonical.endswith("_2021") and canonical not in FORM_SCHEMAS:
+        return canonical[:-5]
+    return canonical
 
 # AI-tell patterns to strip from ALL narrative text (humanizer)
 # Applied before the user sees any draft — not post-approval
@@ -673,7 +709,7 @@ def extract_explicit_form_type(text: str, *, require_intent: bool = True) -> str
         "TEACH":        ["teach form", "teaching delivered", "teaching session form"],
         "SDL":          ["self-directed learning", "self directed learning"],
         "US_CASE":      ["ultrasound case", "us case", "pocus case"],
-        "ESLE":         ["significant learning event"],
+        "ESLE_ASSESS":  ["significant learning event"],
         "COMPLAINT":    ["complaint reflection", "complaint form"],
         "SERIOUS_INC":  ["serious incident", "si reflection", "never event"],
         "EDU_ACT":      ["educational activity", "teaching attended"],
@@ -705,6 +741,7 @@ def extract_explicit_form_type(text: str, *, require_intent: bool = True) -> str
     secondary_codes = {
         "CBD":         ["cbd"],
         "DOPS":        ["dops"],
+        "MINI_CEX":    ["mini cex", "mini-cex", "mini_cex", "minicex"],
         "ACAT":        ["acat"],
         "ACAF":        ["acaf"],
         "STAT":        ["stat"],
@@ -712,7 +749,7 @@ def extract_explicit_form_type(text: str, *, require_intent: bool = True) -> str
         "QIAT":        ["qiat"],
         "JCF":         ["jcf"],
         "SDL":         ["sdl"],
-        "ESLE":        ["esle"],
+        "ESLE_ASSESS": ["esle"],
         "EDU_ACT":     ["edu act"],
     }
     for form_type, codes in secondary_codes.items():
@@ -1372,7 +1409,7 @@ MGMT_* (Management Portfolio forms — Rota, Complaint, Critical Incident, Risk,
 
     recommendations = []
     for item in data[:3]:  # Max 3
-        form_type = item.get("form_type", "CBD")
+        form_type = canonical_form_type(item.get("form_type", "CBD"))
         recommendations.append(FormTypeRecommendation(
             form_type=form_type,
             rationale=item.get("rationale", ""),
@@ -1768,8 +1805,10 @@ async def extract_form_data(
     prompt block forbidding fabrication and have their narrative fields
     sanitised by enforce_image_source_grounding before returning.
     """
-    # _2021 variants share the same schema as the base form — strip suffix for lookup
-    schema_key = form_type[:-5] if form_type.endswith("_2021") and form_type not in FORM_SCHEMAS else form_type
+    form_type = canonical_form_type(form_type)
+    # _2021 variants share draft schemas with their current-curriculum base
+    # forms, except where the user-facing code needs an explicit schema alias.
+    schema_key = schema_form_type(form_type)
     if schema_key not in FORM_SCHEMAS:
         raise ValueError(f"Unknown form type: {form_type}")
 
@@ -1806,9 +1845,10 @@ async def extract_form_data(
         field_keys = field_keys + ["key_capabilities"]
     json_template = "{\n" + ",\n".join([f'  "{k}": "<extracted value>"' for k in field_keys]) + "\n}"
 
-    # Check if this is a reflection-style form
+    # Check if this is a reflection-style form (use schema_key so _2021 variants
+    # inherit the same prompt treatment as their 2025 counterparts)
     reflection_forms = {"SDL", "US_CASE", "ESLE", "COMPLAINT", "SERIOUS_INC", "EDU_ACT", "FORMAL_COURSE", "REFLECT_LOG"}
-    is_reflection = form_type in reflection_forms
+    is_reflection = schema_key in reflection_forms
 
     reflection_instruction = """
 This is a self-reflection form. The trainee is reflecting on their own experience.
@@ -1832,7 +1872,7 @@ Field scoping rules:
 - learned (What have you learned): Distil to 1-2 genuine learning points. Do not repeat the clinical narrative. Do not repeat focussing_on content. What insight did this case give you?
 
 Anti-repetition rule: if you find yourself writing the words "ECG", "atrial flutter", "fixation bias" (or any other case-specific term) in more than two fields — stop and redistribute. Each key concept appears in ONE field only.
-""" if form_type == "REFLECT_LOG" else ""
+""" if schema_key == "REFLECT_LOG" else ""
 
     today = date.today()
     yesterday = today - timedelta(days=1)
@@ -1973,11 +2013,12 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
     if has_kc_tick:
         normalised["key_capabilities"] = _normalise_list_field(data.get("key_capabilities"))
 
-    if form_type == "DOPS" and has_kc_tick:
+    if schema_key == "DOPS" and has_kc_tick:
         # The LLM tends to pick SLO6 KC1 ("knowledge to identify when …") and
         # stop there. For unstable AF / cardioversion / sedation cases, that
         # leaves the resuscitation evidence unrepresented. Supplement with the
-        # SLO3/SLO6 KCs the case text genuinely supports.
+        # SLO3/SLO6 KCs the case text genuinely supports. Use schema_key so the
+        # DOPS_2021 variant gets the same augmentation as the 2025 form.
         from dops_filing import suggest_dops_kc_breadth, derive_dops_curriculum_links
         augmented = suggest_dops_kc_breadth(case_description, normalised.get("key_capabilities", []))
         if augmented != normalised.get("key_capabilities", []):

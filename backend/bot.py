@@ -516,6 +516,28 @@ def _load_draft(context):
     return _deserialise_draft(context.user_data.get("draft_data"))
 
 
+def _restore_retryable_draft(context) -> bool:
+    """If the active draft is gone but the last filing was partial/failed, restore
+    the saved `last_amend_*` snapshot into `draft_data` so a retry approval can
+    file it again. Returns True when a draft is restored."""
+    status = context.user_data.get("last_filing_status")
+    if status not in {"partial", "failed"}:
+        return False
+    if context.user_data.get("draft_data"):
+        return False
+    amend_draft = context.user_data.get("last_amend_draft")
+    if not amend_draft:
+        return False
+    context.user_data["draft_data"] = amend_draft
+    amend_case = context.user_data.get("last_amend_case_text")
+    if amend_case and not context.user_data.get("case_text"):
+        context.user_data["case_text"] = amend_case
+    amend_form = context.user_data.get("last_amend_chosen_form")
+    if amend_form and not context.user_data.get("chosen_form"):
+        context.user_data["chosen_form"] = amend_form
+    return True
+
+
 def _store_pending_draft(context, draft) -> None:
     """Store the analysed draft used during template review."""
     context.user_data["pending_draft_data"] = _serialise_draft(draft)
@@ -598,7 +620,19 @@ _BUNDLE_DONE_RE = re.compile(
 )
 
 _TEXT_FILING_APPROVAL_RE = re.compile(
-    r"^\s*(file|save|submit)\s+(this|it|the draft)(?:\s+(?:as\s+)?(?:draft|to kaizen|in kaizen))?\s*[.!?]*\s*$",
+    r"^\s*(?:"
+    # file/save/submit [+ this|it|the draft] [+ as draft|to kaizen|in kaizen] [+ again]
+    r"(?:file|save|submit)"
+    r"(?:\s+(?:this|it|the\s+draft))?"
+    r"(?:\s+(?:as\s+)?(?:draft|to\s+kaizen|in\s+kaizen))?"
+    r"(?:\s+(?:again|once\s+more))"
+    r"|(?:file|save|submit)\s+(?:this|it|the\s+draft)"
+    r"(?:\s+(?:as\s+)?(?:draft|to\s+kaizen|in\s+kaizen))?"
+    # try/retry [+ it|this|filing|the draft] [+ again]
+    r"|(?:try|retry)\s+(?:it|this|filing|the\s+draft)(?:\s+again)?"
+    r"|try\s+again"
+    r"|retry"
+    r")\s*[.!?]*\s*$",
     re.IGNORECASE,
 )
 
@@ -736,6 +770,45 @@ _BTN_BACK_TO_MISSING = InlineKeyboardButton("⬅️ Back to missing details", ca
 # the user needs an obvious way out. ACTION|cancel clears flow state and
 # returns the user to a clean "ready to file" message.
 _KB_CANCEL = InlineKeyboardMarkup([[_BTN_CANCEL]])
+
+# Retry + cancel keyboard for transient template-review failures (rate limits,
+# upstream LLM outage). Pairs with ACTION|retry_template — the bot re-runs
+# `_analyse_selected_form` using context.user_data["chosen_form"].
+_KB_RETRY_TEMPLATE = InlineKeyboardMarkup([
+    [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_template")],
+    [_BTN_CANCEL],
+])
+
+# Substrings that indicate the LLM call hit a transient upstream issue (rate
+# limiting, quota, service overload) rather than a code bug. Matching is
+# case-insensitive on str(exception). Keep tight — false positives would hide
+# real failures from the user as "try again" rather than surfacing them.
+_TRANSIENT_LLM_ERROR_MARKERS = (
+    "429",
+    "resource_exhausted",
+    "rate limit",
+    "rate-limit",
+    "ratelimit",
+    "quota",
+    "overloaded",
+    "503",
+    "502",
+    "500",
+    "service unavailable",
+    "unavailable",
+    "temporarily",
+)
+
+
+def _is_transient_llm_error(exc: BaseException) -> bool:
+    """Return True when `exc` looks like a transient upstream LLM failure.
+
+    Used to decide whether to show the user a retry-friendly message vs the
+    generic "could not review" wall. See `_KB_RETRY_TEMPLATE` for the keyboard
+    paired with this branch.
+    """
+    message = str(exc).lower()
+    return any(marker in message for marker in _TRANSIENT_LLM_ERROR_MARKERS)
 
 
 def _setup_needs_finishing(user_id: int) -> bool:
@@ -1291,18 +1364,37 @@ def _track_funnel_event(context, event: str, **metadata) -> None:
     logger.info("Portfolio Guru funnel event=%s metadata=%s", event, safe)
 
 
+_2021_CURRICULUM_FORM_ALIASES = {
+    # User-facing assessed ESLE is named ESLE_ASSESS in Portfolio Guru, but the
+    # Kaizen 2021 curriculum form is keyed as ESLE_2021.
+    "ESLE_ASSESS": "ESLE_2021",
+}
+
+
+def _form_type_for_curriculum(form_type: str, curriculum: str = "2025") -> str:
+    from extractor import FORM_UUIDS
+
+    if curriculum != "2021" or form_type.endswith("_2021"):
+        return form_type
+    if form_type in _2021_CURRICULUM_FORM_ALIASES:
+        return _2021_CURRICULUM_FORM_ALIASES[form_type]
+    variant = f"{form_type}_2021"
+    return variant if variant in FORM_UUIDS else form_type
+
+
 def _filtered_recommendations_for_curriculum(recommendations, curriculum="2025"):
     from extractor import FORM_UUIDS
 
     filtered = []
-    has_2021_variant = {k[:-5] for k in FORM_UUIDS if k.endswith("_2021")}
     for rec in recommendations:
         ft = rec.form_type
-        if curriculum == "2021" and ft in has_2021_variant:
+        ft_for_curriculum = _form_type_for_curriculum(ft, curriculum)
+        if curriculum == "2021" and ft_for_curriculum != ft:
             from models import FormTypeRecommendation
-            ft_2021 = ft + "_2021"
             filtered.append(FormTypeRecommendation(
-                form_type=ft_2021, rationale=rec.rationale, uuid=FORM_UUIDS.get(ft_2021)
+                form_type=ft_for_curriculum,
+                rationale=rec.rationale,
+                uuid=FORM_UUIDS.get(ft_for_curriculum),
             ))
         elif curriculum == "2025" and ft.endswith("_2021"):
             continue
@@ -1347,18 +1439,10 @@ def _filter_forms_by_curriculum(form_types, curriculum):
     - 2025: exclude _2021 suffixed forms
     - 2021: swap base forms that have _2021 variants with those variants
     """
-    from extractor import FORM_UUIDS
-    has_2021_variant = {k[:-5] for k in FORM_UUIDS if k.endswith("_2021")}
-
     if curriculum == "2021":
         result = []
         for ft in form_types:
-            if ft.endswith("_2021"):
-                result.append(ft)
-            elif ft in has_2021_variant:
-                result.append(ft + "_2021")
-            else:
-                result.append(ft)
+            result.append(_form_type_for_curriculum(ft, curriculum))
         return result
     else:
         # 2025 (default) — base forms only
@@ -1382,15 +1466,13 @@ def _get_allowed_forms(user_id):
 def _build_category_picker_keyboard(user_id):
     """Build the level-1 category picker keyboard, hiding empty categories."""
     allowed = set(_get_allowed_forms(user_id))
+    curriculum = get_curriculum(user_id)
     rows = []
     row = []
     for cat_name, cat_forms in FORM_CATEGORIES.items():
         # Check if any form in this category is available to this user
-        # Need to check both base and _2021 variants
-        has_forms = any(ft in allowed for ft in cat_forms)
-        if not has_forms:
-            # Also check _2021 variants
-            has_forms = any(ft + "_2021" in allowed for ft in cat_forms)
+        # Need to check both base and curriculum-specific variants.
+        has_forms = any(ft in allowed or _form_type_for_curriculum(ft, curriculum) in allowed for ft in cat_forms)
         if not has_forms:
             continue
         slug = _CAT_SLUGS[cat_name]
@@ -1411,15 +1493,18 @@ def _build_category_forms_keyboard(user_id, cat_slug):
     cat_name = _SLUG_TO_CAT[cat_slug]
     cat_forms = FORM_CATEGORIES[cat_name]
     allowed = set(_get_allowed_forms(user_id))
+    curriculum = get_curriculum(user_id)
     buttons = []
     for ft in cat_forms:
-        # Check if this form (or its _2021 variant) is in the allowed set
+        # Check if this form (or its curriculum-specific variant) is in the allowed set
         if ft in allowed:
             actual_ft = ft
-        elif ft + "_2021" in allowed:
-            actual_ft = ft + "_2021"
         else:
-            continue
+            curriculum_ft = _form_type_for_curriculum(ft, curriculum)
+            if curriculum_ft in allowed:
+                actual_ft = curriculum_ft
+            else:
+                continue
         base_ft = actual_ft.replace("_2021", "") if actual_ft.endswith("_2021") else actual_ft
         emoji = FORM_EMOJIS.get(base_ft, "📄")
         label = FORM_BUTTON_LABELS.get(actual_ft) or FORM_BUTTON_LABELS.get(base_ft) or _form_display_name(base_ft)[:24]
@@ -1543,7 +1628,7 @@ def _build_post_filing_keyboard(
             InlineKeyboardButton("👍 It worked", callback_data=f"FEEDBACK|good|{form_type}|{status}"),
             InlineKeyboardButton("👎 Didn't work", callback_data=f"FEEDBACK|bad|{form_type}|{status}"),
         ])
-    rows.append([InlineKeyboardButton("⋯ More options", callback_data=f"ACTION|post_file_more|{form_type}|{status}")])
+    rows.append([InlineKeyboardButton("🧰 More options", callback_data=f"ACTION|post_file_more|{form_type}|{status}")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -3718,11 +3803,16 @@ def _looks_like_clinical_case(case_text: str) -> bool:
 
 
 async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: int, case_text: str, form_type: str):
-    """Create an explicit-only draft snapshot for the selected form."""
+    """Create an explicit-only draft snapshot for the selected form.
+
+    `form_type` is the *user-selected* code (e.g. ``MINI_CEX`` or ``MINI_CEX_2021``).
+    The base form (``MINI_CEX``) picks which extractor + schema to use, but the
+    full code must be passed into ``extract_form_data`` so the resulting draft
+    carries the correct Kaizen UUID for the chosen curriculum variant.
+    """
     # Set tier for provider chain gating
     os.environ["CURRENT_USER_TIER"] = context.user_data.get("user_tier", "free")
     vp = get_voice_profile(user_id) or ""
-    # Normalise _2021 suffix — extractor uses base form type for schema lookup
     base_form_type = form_type[:-5] if form_type.endswith("_2021") else form_type
     if base_form_type == "CBD":
         draft = await asyncio.wait_for(
@@ -3739,7 +3829,7 @@ async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: in
         draft = await asyncio.wait_for(
             extract_form_data(
                 case_text,
-                base_form_type,
+                form_type,
                 voice_profile_json=vp,
                 leave_missing_blank=True,
                 preserve_original_content=True,
@@ -4008,6 +4098,41 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "ACTION|retry_filing":
         return await handle_approval_approve(update, context)
+
+    elif data == "ACTION|retry_template":
+        await query.answer("Retrying…")
+        chosen_form = context.user_data.get("chosen_form")
+        case_text = context.user_data.get("case_text", "")
+        user_id = update.effective_user.id
+        if not chosen_form or not case_text:
+            await query.edit_message_text(
+                "That earlier request expired. Send the case again and I’ll draft it.",
+                reply_markup=_build_next_step_keyboard(user_id),
+            )
+            return ConversationHandler.END
+        await query.edit_message_text(f"🧩 Reviewing {_form_display_name(chosen_form)} template…")
+        try:
+            draft = await _analyse_selected_form(context, user_id, case_text, chosen_form)
+        except asyncio.TimeoutError:
+            logger.error("Template review retry timed out for %s", chosen_form)
+            await query.edit_message_text(
+                "⏳ Template review timed out again. Try once more in a moment.",
+                reply_markup=_KB_RETRY_TEMPLATE,
+            )
+            return AWAIT_FORM_CHOICE
+        except Exception as exc:
+            logger.error("Template review retry failed for %s: %s", chosen_form, exc, exc_info=True)
+            if _is_transient_llm_error(exc):
+                await query.edit_message_text(
+                    "⏳ Still rate-limited or briefly unavailable. Wait a moment and try again.",
+                    reply_markup=_KB_RETRY_TEMPLATE,
+                )
+                return AWAIT_FORM_CHOICE
+            await query.edit_message_text("⚠️ Could not review that template.", reply_markup=_KB_CANCEL)
+            return ConversationHandler.END
+        if not _draft_has_useful_content(draft, chosen_form):
+            return await _ask_for_more_detail_before_draft(query.message, context)
+        return await _show_draft_review(query.message, context, draft, chosen_form)
 
     elif data == "CASE|new":
         await query.answer()
@@ -4653,6 +4778,8 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if _is_text_filing_approval(raw_text):
             if _load_draft(context):
                 return await handle_approval_approve(update, context)
+            if _restore_retryable_draft(context):
+                return await handle_approval_approve(update, context)
             if context.user_data.get("last_filing_status") == "success":
                 form_name = context.user_data.get("last_filing_form_name", "that draft")
                 await update.message.reply_text(
@@ -5182,10 +5309,19 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         draft = await _analyse_selected_form(context, update.effective_user.id, case_text, form_type)
     except asyncio.TimeoutError:
         logger.error("Template review timed out after 45s for %s", form_type)
-        await query.edit_message_text("⏳ Template review timed out.", reply_markup=_KB_CANCEL)
-        return ConversationHandler.END
+        await query.edit_message_text(
+            "⏳ Template review timed out. The model took too long — try again in a moment.",
+            reply_markup=_KB_RETRY_TEMPLATE,
+        )
+        return AWAIT_FORM_CHOICE
     except Exception as e:
         logger.error("Template review failed in form_choice: %s", e, exc_info=True)
+        if _is_transient_llm_error(e):
+            await query.edit_message_text(
+                "⏳ The drafting model is rate-limited or briefly unavailable. Try again in a moment.",
+                reply_markup=_KB_RETRY_TEMPLATE,
+            )
+            return AWAIT_FORM_CHOICE
         await query.edit_message_text("⚠️ Could not review that template.", reply_markup=_KB_CANCEL)
         return ConversationHandler.END
 
@@ -5236,8 +5372,11 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         fields = draft.fields
         curriculum_links = draft.fields.get("curriculum_links", [])
     else:
-        # CBDData
-        form_type = "CBD"
+        # CBDData hard-codes form_type="CBD". When the user picked the 2021
+        # variant via the category picker, chosen_form preserves that — route
+        # the filing there so the right Kaizen UUID is used.
+        chosen_form = context.user_data.get("chosen_form") or "CBD"
+        form_type = chosen_form if chosen_form in ("CBD", "CBD_2021") else "CBD"
         fields = {
             "date_of_encounter": draft.date_of_encounter,
             "end_date": draft.date_of_encounter,
@@ -6022,8 +6161,9 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
 
     raw_text = update.message.text.strip()
     case_text = context.user_data.get("case_text", "")
-    if _is_text_filing_approval(raw_text) and _load_draft(context):
-        return await handle_approval_approve(update, context)
+    if _is_text_filing_approval(raw_text):
+        if _load_draft(context) or _restore_retryable_draft(context):
+            return await handle_approval_approve(update, context)
 
     try:
         intent = await classify_intent(raw_text, case_context=case_text)
@@ -6510,7 +6650,7 @@ def build_application() -> Application:
             AWAIT_FORM_CHOICE: [
                 CallbackQueryHandler(handle_form_choice, pattern=r"^FORM\|"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
-                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|retry_recommend$"),
+                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:retry_recommend|retry_template)$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
             ],
             AWAIT_FORM_SEARCH: [
@@ -6562,7 +6702,7 @@ def build_application() -> Application:
             CommandHandler("cancel", setup_cancel),
             CallbackQueryHandler(
                 handle_callback,
-                pattern=r"^(?:INFO\|.*|CANCEL\|.*|ACTION\|(?:file|reset|cancel|continue_thin|retry_filing|retry_recommend))$",
+                pattern=r"^(?:INFO\|.*|CANCEL\|.*|ACTION\|(?:file|reset|cancel|continue_thin|retry_filing|retry_recommend|retry_template))$",
             ),
         ],
         per_message=False,

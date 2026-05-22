@@ -34,7 +34,7 @@ PLATFORM_REGISTRY = {
             # 2025 Update forms
             "CBD", "DOPS", "LAT", "ACAT", "ACAF", "STAT", "MSF",
             "MINI_CEX", "JCF", "QIAT", "TEACH", "PROC_LOG", "SDL",
-            "US_CASE", "ESLE", "ESLE_ASSESS", "COMPLAINT", "SERIOUS_INC",
+            "US_CASE", "ESLE", "ESLE_ASSESS", "ESLE_PART1_2", "COMPLAINT", "SERIOUS_INC",
             "EDU_ACT", "FORMAL_COURSE", "REFLECT_LOG", "TEACH_OBS",
             # 2021 versions
             "CBD_2021", "DOPS_2021", "ACAT_2021", "ACAF_2021", "STAT_2021",
@@ -121,6 +121,13 @@ async def route_filing(
 
     platform_lower = platform.lower()
     platform_config = PLATFORM_REGISTRY.get(platform_lower)
+    requested_form_type = form_type
+    if platform_lower == "kaizen":
+        try:
+            from kaizen_form_filer import canonical_form_type as canonical_kaizen_form_type
+            form_type = canonical_kaizen_form_type(form_type)
+        except ImportError:
+            pass
 
     # Check if this form type has a deterministic DOM mapping
     try:
@@ -135,7 +142,10 @@ async def route_filing(
     # - Forms without DOM mappings → use browser-use (CDP-connected, no credentials in prompts).
     # - Unknown platforms → browser-use path.
 
-    if platform_config and platform_config.get("deterministic") and form_type in platform_config.get("supported_forms", []):
+    supported_forms = set(platform_config.get("supported_forms", [])) if platform_config else set()
+    if platform_config and platform_config.get("deterministic") and (
+        form_type in supported_forms or requested_form_type in supported_forms
+    ):
         if not has_dom_mapping:
             # No DOM mapping — browser-use needed
             logger.info(f"No DOM mapping for {form_type} — using browser-use")

@@ -27,6 +27,16 @@ class TestFormTypeExtraction:
         result = extract_explicit_form_type("file a DOPS please")
         assert result == "DOPS"
 
+    def test_same_case_mini_cex_code_detected(self):
+        from extractor import extract_explicit_form_type
+        result = extract_explicit_form_type("use the same case for MINI_CEX", require_intent=False)
+        assert result == "MINI_CEX"
+
+    def test_esle_alias_detects_assessed_esle(self):
+        from extractor import extract_explicit_form_type
+        result = extract_explicit_form_type("use the same case for ESLE", require_intent=False)
+        assert result == "ESLE_ASSESS"
+
     def test_explicit_procedure_log_caption_detected(self):
         from extractor import extract_explicit_form_type
         result = extract_explicit_form_type(

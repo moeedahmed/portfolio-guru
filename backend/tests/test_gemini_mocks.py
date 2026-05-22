@@ -78,3 +78,23 @@ async def test_extraction_malformed_response():
         )
 
     assert len(recommendations) == 0
+
+
+@pytest.mark.asyncio
+async def test_plain_text_generation_does_not_force_json_response_format():
+    import json
+    from extractor import compose_filing_recovery_copy
+
+    with respx.mock(assert_all_called=True) as router:
+        route = router.post(_deepseek_route()).mock(
+            return_value=httpx.Response(
+                200,
+                json=_deepseek_payload("Kaizen could not be reached, so retry once the browser session is back."),
+            )
+        )
+
+        result = await compose_filing_recovery_copy("failed", "All connection attempts failed")
+
+    payload = json.loads(route.calls[0].request.content.decode())
+    assert "response_format" not in payload
+    assert result == "Kaizen could not be reached, so retry once the browser session is back."

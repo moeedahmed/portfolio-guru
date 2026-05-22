@@ -18,6 +18,7 @@ import re
 import sys
 import uuid
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -34,7 +35,10 @@ MANIFEST_PATH = Path(os.environ.get("KAIZEN_TEST_MANIFEST", f"/tmp/kaizen-live-t
 def _saved_event_id(result):
     saved_url = result.get("saved_url") or ""
     match = re.search(r"/events/fillin/([^/?#]+)", saved_url) or re.search(r"/events/view-section/([^/?#]+)", saved_url)
-    return match.group(1) if match else None
+    if match:
+        return match.group(1)
+    doc_id = parse_qs(urlparse(saved_url).query).get("doc", [None])[0]
+    return doc_id
 
 
 def _record_created_test_draft(form_type, result):

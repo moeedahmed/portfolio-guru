@@ -164,6 +164,72 @@ class TestFlowWalker:
         assert 'APPROVE|draft' not in {data for _, data in sim.get_last_buttons()}
 
     @pytest.mark.asyncio
+    async def test_form_choice_transient_template_failure_keeps_retry_button(self):
+        from bot import AWAIT_FORM_CHOICE, handle_form_choice
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('FORM|MINI_CEX')
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+
+        with patch('bot._analyse_selected_form', new=AsyncMock(side_effect=RuntimeError('429 resource_exhausted'))):
+            result = await handle_form_choice(update, context)
+
+        assert result == AWAIT_FORM_CHOICE
+        assert 'rate-limited' in sim.get_last_text()
+        assert ('🔄 Try again', 'ACTION|retry_template') in sim.get_last_buttons()
+        assert context.user_data['chosen_form'] == 'MINI_CEX'
+
+    @pytest.mark.asyncio
+    async def test_form_choice_non_transient_template_failure_reports_could_not_review(self):
+        from bot import handle_form_choice
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('FORM|MINI_CEX')
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+
+        with patch('bot._analyse_selected_form', new=AsyncMock(side_effect=ValueError('Unknown form type: BROKEN'))):
+            result = await handle_form_choice(update, context)
+
+        assert result == ConversationHandler.END
+        assert 'Could not review that template' in sim.get_last_text()
+        assert ('❌ Cancel', 'ACTION|cancel') in sim.get_last_buttons()
+
+    @pytest.mark.asyncio
+    async def test_retry_template_reuses_selected_form_and_case_text(self):
+        from bot import AWAIT_APPROVAL, handle_callback
+        from models import FormDraft
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('ACTION|retry_template')
+        context = sim._make_context()
+        context.user_data.update({
+            'case_text': SAMPLE_CASES['valid'],
+            'chosen_form': 'MINI_CEX',
+        })
+        draft = FormDraft(
+            form_type='MINI_CEX',
+            uuid='uuid-mini',
+            fields={
+                'date_of_encounter': '2026-05-21',
+                'clinical_setting': 'Emergency Department',
+                'patient_presentation': 'Chest pain assessment.',
+                'stage_of_training': 'Higher/ST4-ST6',
+                'clinical_reasoning': 'I assessed and escalated the patient.',
+                'reflection': 'I reflected on early escalation.',
+            },
+        )
+
+        with patch('bot._analyse_selected_form', new=AsyncMock(return_value=draft)) as analyse:
+            result = await handle_callback(update, context)
+
+        assert result == AWAIT_APPROVAL
+        analyse.assert_awaited_once()
+        assert analyse.await_args.args[3] == 'MINI_CEX'
+        assert 'Mini-Clinical Evaluation Exercise draft ready' in sim.get_last_text()
+
+    @pytest.mark.asyncio
     async def test_best_fit_button_uses_top_recommendation(self, thin_draft, recommended_forms):
         from bot import AWAIT_APPROVAL, handle_form_choice
 
@@ -646,7 +712,7 @@ class TestFlowWalker:
         assert ('👍 It worked', 'FEEDBACK|good|CBD|success') in buttons
         assert ('✏️ Amend this draft', 'AMEND|amend') in buttons
         assert ("👎 Didn't work", 'FEEDBACK|bad|CBD|success') in buttons
-        assert ('⋯ More options', 'ACTION|post_file_more|CBD|success') in buttons
+        assert ('🧰 More options', 'ACTION|post_file_more|CBD|success') in buttons
 
     @pytest.mark.asyncio
     async def test_text_file_this_files_active_draft_when_state_reentered(self, thin_draft):
@@ -675,6 +741,81 @@ class TestFlowWalker:
 
         assert result == ConversationHandler.END
         assert 'case-based discussion saved' in sim.get_last_text().lower()
+        assert context.user_data['last_filing_status'] == 'success'
+
+    @pytest.mark.asyncio
+    async def test_text_file_this_again_retries_active_draft_after_ready_message(self, thin_draft):
+        """User sent 'file this again' after the bot returned to ready state but the
+        draft (e.g. from a timed-out or errored filing attempt) is still loaded.
+        Must approve the active draft rather than treating the text as a new case."""
+        from bot import handle_case_input
+
+        sim = BotSimulator()
+        update = sim._make_text_update('file this again')
+        context = sim._make_context()
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin_draft.form_type,
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+        context.user_data['last_filing_status'] = 'failed'
+        context.user_data['last_filing_form_name'] = 'Case-Based Discussion'
+
+        route_filing_mock = AsyncMock(return_value={
+            'status': 'success',
+            'filled': ['date_of_encounter'],
+            'skipped': [],
+            'method': 'deterministic',
+        })
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.route_filing', new=route_filing_mock), \
+             patch('bot.recommend_form_types', new=AsyncMock(return_value=[])):
+            result = await handle_case_input(update, context)
+
+        route_filing_mock.assert_awaited()
+        assert result == ConversationHandler.END
+        assert context.user_data['last_filing_status'] == 'success'
+
+    @pytest.mark.asyncio
+    async def test_text_retry_restores_last_amend_draft_after_partial_failure(self, thin_draft):
+        """After a partial filing the active draft is cleared but last_amend_draft
+        is preserved. A natural retry phrase ('try again') in ready state must
+        restore that draft and run handle_approval_approve, not regenerate."""
+        from bot import handle_case_input
+
+        sim = BotSimulator()
+        update = sim._make_text_update('try again')
+        context = sim._make_context()
+        # Mirror the state set by handle_approval_approve after a partial save.
+        context.user_data['last_amend_draft'] = {
+            '_type': 'FORM',
+            'form_type': thin_draft.form_type,
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+        context.user_data['last_amend_case_text'] = 'Original case text.'
+        context.user_data['last_amend_chosen_form'] = thin_draft.form_type
+        context.user_data['last_filing_status'] = 'partial'
+        context.user_data['last_filing_form_name'] = 'Case-Based Discussion'
+
+        route_filing_mock = AsyncMock(return_value={
+            'status': 'success',
+            'filled': ['date_of_encounter'],
+            'skipped': [],
+            'method': 'deterministic',
+        })
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.route_filing', new=route_filing_mock), \
+             patch('bot.recommend_form_types', new=AsyncMock(return_value=[])):
+            result = await handle_case_input(update, context)
+
+        route_filing_mock.assert_awaited()
+        assert result == ConversationHandler.END
         assert context.user_data['last_filing_status'] == 'success'
 
     @pytest.mark.asyncio
@@ -866,6 +1007,7 @@ class TestFlowWalker:
         }
 
         with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.compose_filing_recovery_copy', new=AsyncMock(return_value="")), \
              patch('bot.route_filing', new_callable=AsyncMock, return_value={
                  'status': 'partial',
                  'filled': ['date_of_encounter'],
@@ -881,7 +1023,7 @@ class TestFlowWalker:
         buttons = sim.get_last_buttons()
         assert ('👍 It worked', 'FEEDBACK|good|CBD|partial') not in buttons
         assert ("👎 Didn't work", 'FEEDBACK|bad|CBD|partial') not in buttons
-        assert ('⋯ More options', 'ACTION|post_file_more|CBD|partial') in buttons
+        assert ('🧰 More options', 'ACTION|post_file_more|CBD|partial') in buttons
 
     @pytest.mark.asyncio
     async def test_manual_review_dops_partial_does_not_show_success_buttons(self):
@@ -988,6 +1130,56 @@ class TestFlowWalker:
         assert ('📋 File another case', 'ACTION|file') in buttons
         assert ('💬 Something missing?', 'FILING|feedback|CBD') in buttons
         assert ('⚙️ Settings', 'ACTION|settings') in buttons
+        assert ('🏠 Main menu', 'ACTION|back_to_menu') in buttons
+
+    def test_post_filing_more_options_button_has_emoji_for_all_statuses(self):
+        from bot import _build_post_filing_keyboard
+
+        for status in ("success", "partial", "failed"):
+            keyboard = _build_post_filing_keyboard("CBD", status)
+            buttons = [
+                (button.text, button.callback_data)
+                for row in keyboard.inline_keyboard
+                for button in row
+            ]
+            assert ("🧰 More options", f"ACTION|post_file_more|CBD|{status}") in buttons
+
+    @pytest.mark.asyncio
+    async def test_post_filing_more_secondary_workflows_are_connected(self, thin_draft):
+        from bot import handle_action_button, handle_filing_feedback
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin_draft.form_type,
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.get_user_tier', new_callable=AsyncMock, return_value='free'), \
+             patch('bot.get_cases_this_month', new_callable=AsyncMock, return_value=0):
+            await handle_action_button(sim._make_callback_update('ACTION|post_file_more|CBD|failed'), context)
+            callbacks = {callback for _, callback in sim.get_last_buttons()}
+            assert {
+                'ACTION|retry_filing',
+                'ACTION|file',
+                'FILING|feedback|CBD',
+                'ACTION|settings',
+                'ACTION|back_to_menu',
+            } <= callbacks
+
+            await handle_filing_feedback(sim._make_callback_update('FILING|feedback|CBD'), context)
+            pushback_callbacks = {callback for _, callback in sim.get_last_buttons()}
+            assert 'PUSHBACK|CBD|date_of_encounter' in pushback_callbacks
+            assert 'PUSHBACK|CBD|other' in pushback_callbacks
+
+            await handle_action_button(sim._make_callback_update('ACTION|settings'), context)
+            assert 'settings' in sim.get_last_text().lower()
+
+            await handle_action_button(sim._make_callback_update('ACTION|back_to_menu'), context)
+            assert 'Portfolio Guru' in sim.get_last_text()
 
     @pytest.mark.asyncio
     async def test_failed_filing_uses_llm_recovery_copy(self, thin_draft):
@@ -1672,6 +1864,51 @@ class TestFlowWalker:
         assert 'use the same case' not in (context.user_data.get('case_text') or '').lower()
         # Form is pre-selected to DOPS.
         assert context.user_data.get('chosen_form') == 'DOPS'
+
+    @pytest.mark.asyncio
+    async def test_same_case_manual_mini_cex_selection_reaches_template_review(self):
+        from bot import AWAIT_APPROVAL, handle_case_input, handle_form_choice
+        from models import FormDraft
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['last_filed_case_text'] = (
+            '58F with pleuritic chest pain in ED. I assessed for PE, reviewed ECG, '
+            'discussed imaging and reflected on safety-netting.'
+        )
+        context.user_data['last_filed_form_type'] = 'CBD'
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 5, 'free'))), \
+             patch('bot.recommend_form_types', new=AsyncMock()) as recommend:
+            result = await handle_case_input(sim._make_text_update('use the same case for MINI_CEX'), context)
+
+        assert result != ConversationHandler.END
+        recommend.assert_not_awaited()
+        assert context.user_data['chosen_form'] == 'MINI_CEX'
+        assert 'pleuritic chest pain' in context.user_data['case_text']
+        assert ('✅ Draft Mini-Clinical Evaluation Exercise', 'FORM|MINI_CEX') in sim.get_last_buttons()
+
+        draft = FormDraft(
+            form_type='MINI_CEX',
+            uuid='uuid-mini',
+            fields={
+                'date_of_encounter': '2026-05-21',
+                'clinical_setting': 'Emergency Department',
+                'patient_presentation': 'Pleuritic chest pain assessment.',
+                'stage_of_training': 'Higher/ST4-ST6',
+                'clinical_reasoning': 'I assessed for PE and discussed imaging.',
+                'reflection': 'I reflected on safety-netting.',
+            },
+        )
+        with patch('bot._analyse_selected_form', new=AsyncMock(return_value=draft)) as analyse:
+            result = await handle_form_choice(sim._make_callback_update('FORM|MINI_CEX'), context)
+
+        assert result == AWAIT_APPROVAL
+        analyse.assert_awaited_once()
+        assert analyse.await_args.args[2] == context.user_data['case_text']
+        assert analyse.await_args.args[3] == 'MINI_CEX'
+        assert 'Mini-Clinical Evaluation Exercise draft ready' in sim.get_last_text()
 
     @pytest.mark.asyncio
     async def test_thin_input_blocked_before_extraction(self):
