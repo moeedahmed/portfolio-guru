@@ -18,6 +18,16 @@ SAMPLE_CASES = {
 }
 
 
+def _last_button_rows(sim: BotSimulator):
+    for _, _, markup in reversed(sim.messages_sent):
+        if markup and hasattr(markup, "inline_keyboard"):
+            return [
+                [(button.text, button.callback_data) for button in row if button.callback_data]
+                for row in markup.inline_keyboard
+            ]
+    return []
+
+
 @pytest.fixture
 def recommended_forms():
     from extractor import FORM_UUIDS
@@ -2564,6 +2574,10 @@ class TestVoiceProfileTwoPathFlow:
         assert ('📋 Recent 10 entries', 'VOICE|kaizen_sample|recent_10') in buttons
         assert ('📅 Last 6 months', 'VOICE|kaizen_sample|last_6m') in buttons
         assert ('📅 Last 12 months', 'VOICE|kaizen_sample|last_12m') in buttons
+        assert [
+            ('🔙 Back', 'VOICE|path_kaizen'),
+            ('❌ Cancel', 'VOICE|cancel'),
+        ] in _last_button_rows(sim)
         assert context.user_data.get('voice_kaizen_path_started') is True
 
     @pytest.mark.asyncio
@@ -2639,6 +2653,10 @@ class TestVoiceProfileTwoPathFlow:
         buttons = sim.get_last_buttons()
         assert ('🔗 Reconnect Kaizen', 'ACTION|setup') in buttons
         assert ('✍️ Add examples manually', 'VOICE|path_manual') in buttons
+        assert [
+            ('🔙 Back', 'VOICE|back_to_choice'),
+            ('❌ Cancel', 'VOICE|cancel'),
+        ] in _last_button_rows(sim)
 
     @pytest.mark.asyncio
     async def test_kaizen_preview_reject_returns_directly_to_sample_size(self):
@@ -2660,6 +2678,10 @@ class TestVoiceProfileTwoPathFlow:
         assert ('📋 Recent 10 entries', 'VOICE|kaizen_sample|recent_10') in buttons
         assert ('📅 Last 6 months', 'VOICE|kaizen_sample|last_6m') in buttons
         assert ('📅 Last 12 months', 'VOICE|kaizen_sample|last_12m') in buttons
+        assert [
+            ('🔙 Back', 'VOICE|path_kaizen'),
+            ('❌ Cancel', 'VOICE|cancel'),
+        ] in _last_button_rows(sim)
         assert ('🔄 Try Again', 'ACTION|voice') not in buttons
         assert context.user_data.get('voice_kaizen_path_started') is True
 

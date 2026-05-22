@@ -766,6 +766,20 @@ _BTN_VOICE = InlineKeyboardButton("✍️ Voice Profile", callback_data="ACTION|
 _BTN_CONTINUE_THIN = InlineKeyboardButton("✅ Show me the draft", callback_data="ACTION|continue_thin")
 _BTN_BACK_TO_MISSING = InlineKeyboardButton("⬅️ Back to missing details", callback_data="ACTION|back_to_missing")
 
+
+def _nav_row(
+    back_text: str,
+    back_callback: str,
+    cancel_text: str = "❌ Cancel",
+    cancel_callback: str = "ACTION|cancel",
+) -> list[InlineKeyboardButton]:
+    """Compact Back + Cancel row for navigation-heavy mobile screens."""
+    return [
+        InlineKeyboardButton(back_text, callback_data=back_callback),
+        InlineKeyboardButton(cancel_text, callback_data=cancel_callback),
+    ]
+
+
 # Single-button "❌ Cancel" keyboard used in error / recovery surfaces where
 # the user needs an obvious way out. ACTION|cancel clears flow state and
 # returns the user to a clean "ready to file" message.
@@ -1574,8 +1588,9 @@ def _build_approval_keyboard(improved_once: bool = False, can_back_to_missing: b
             InlineKeyboardButton("✨ Quick improve", callback_data="IMPROVE|reflection"),
         ])
     if can_back_to_missing:
-        rows.append([_BTN_BACK_TO_MISSING])
-    rows.append([InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|draft")])
+        rows.append(_nav_row("⬅️ Back to missing details", "ACTION|back_to_missing", "❌ Cancel", "CANCEL|draft"))
+    else:
+        rows.append([InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|draft")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -2705,8 +2720,7 @@ def _voice_kaizen_sample_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📋 Recent 10 entries", callback_data="VOICE|kaizen_sample|recent_10")],
         [InlineKeyboardButton("📅 Last 6 months", callback_data="VOICE|kaizen_sample|last_6m")],
         [InlineKeyboardButton("📅 Last 12 months", callback_data="VOICE|kaizen_sample|last_12m")],
-        [InlineKeyboardButton("🔙 Back", callback_data="VOICE|path_kaizen")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
+        _nav_row("🔙 Back", "VOICE|path_kaizen", "❌ Cancel", "VOICE|cancel"),
     ])
 
 
@@ -3067,8 +3081,7 @@ async def _voice_run_kaizen_sample(
         rows.append([InlineKeyboardButton("🔗 Reconnect Kaizen", callback_data="ACTION|setup")])
     rows.extend([
         [InlineKeyboardButton("✍️ Add examples manually", callback_data="VOICE|path_manual")],
-        [InlineKeyboardButton("🔙 Back", callback_data="VOICE|back_to_choice")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
+        _nav_row("🔙 Back", "VOICE|back_to_choice", "❌ Cancel", "VOICE|cancel"),
     ])
 
     await _flow_edit(
