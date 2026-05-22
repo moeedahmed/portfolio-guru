@@ -3,6 +3,7 @@
 All browser code is written to temp files to avoid nested quoting issues.
 """
 import json, os, shutil, subprocess, tempfile
+from urllib.parse import urlparse
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
@@ -33,18 +34,22 @@ class KaizenProvider:
             env = os.environ.copy()
             env["KAIZEN_USER"] = self.username
             env["KAIZEN_PASS"] = self.password
-            # Auto-detect Chrome CDP WebSocket URL
+            # Auto-detect Chrome CDP WebSocket URL from the managed Kaizen
+            # Chrome port. The bot starts Chrome on 18800, not Chrome's common
+            # 9222 default.
             if "BU_CDP_WS" not in env:
                 try:
                     import urllib.request as _ur
-                    resp = _ur.urlopen("http://localhost:9222/json/version", timeout=3)
+                    cdp_url = env.get("KAIZEN_CDP_URL", "http://localhost:18800")
+                    parsed = urlparse(cdp_url)
+                    version_url = f"{parsed.scheme or 'http'}://{parsed.netloc or 'localhost:18800'}/json/version"
+                    resp = _ur.urlopen(version_url, timeout=3)
                     data = json.loads(resp.read())
                     ws = data.get("webSocketDebuggerUrl", "")
                     if ws:
                         env["BU_CDP_WS"] = ws
                 except Exception:
                     pass
-            env.setdefault("BU_CDP_WS", "ws://localhost:9222/devtools/browser/page")
             cmd = [BROWSER_HARNESS, "-c"]
             cmd.append("exec(open('" + tmp_path.replace("'", "'\\''") + "').read())")
             result = subprocess.run(

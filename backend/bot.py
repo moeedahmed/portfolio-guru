@@ -2456,17 +2456,13 @@ async def setup_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def _test_kaizen_login(username: str, password: str) -> bool | str:
     """Test Kaizen credentials via the engine and detect portfolio type.
     Returns role string ("hst", "accs", "assessor") or False on failure."""
-    try:
-        from engine.providers.kaizen import KaizenProvider
-        provider = KaizenProvider(username, password)
-        if not provider.connect():
-            return False
-        role = provider.portfolio_type
-        provider.disconnect()
-        return role if role != "unknown" else "unknown"
-    except Exception as e:
-        logger.warning(f"Engine credential test failed: {e}")
+    from engine.providers.kaizen import KaizenProvider
+    provider = KaizenProvider(username, password)
+    if not provider.connect():
         return False
+    role = provider.portfolio_type
+    provider.disconnect()
+    return role if role != "unknown" else "unknown"
 
 
 async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
