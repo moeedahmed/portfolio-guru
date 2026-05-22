@@ -6913,15 +6913,8 @@ def main():
         ])
         # Set bot description (shown on profile page before starting)
         try:
-            await app.bot.set_my_description(
-                "Portfolio Guru files your medical WPBA entries in seconds.\n\n"
-                "Describe a case by text, voice, photo, or document — the bot picks the right form, "
-                "drafts the entry, and files it when you approve.\n\n"
-                "45 RCEM forms supported. Files directly to Kaizen ePortfolio."
-            )
-            await app.bot.set_my_short_description(
-                "File WPBA entries to Kaizen in seconds. Text, voice, photo, or document → draft → approve → filed."
-            )
+            await app.bot.set_my_description(render_message("bot_profile_description"))
+            await app.bot.set_my_short_description(render_message("bot_profile_short_description"))
         except Exception:
             pass  # Non-critical — BotFather settings may not update on every restart
     application.post_init = post_init

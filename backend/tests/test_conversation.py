@@ -69,6 +69,16 @@ class TestMessagePolicy:
         assert summary[MessageClass.TEMPLATED.value] >= 1
         assert MessageClass.LLM_ASSISTED.value in summary
 
+    def test_bot_profile_description_matches_trust_positioning(self):
+        from message_policy import render_message
+
+        profile = render_message("bot_profile_description")
+        assert "rough case notes" in profile
+        assert "fills only what your input supports" in profile
+        assert "Draft-only until you approve" in profile
+        assert "encrypted" in profile
+        assert "files your medical WPBA entries in seconds" not in profile
+
     def test_form_recommendation_template_is_mobile_first_and_privacy_safe(self):
         from bot import _build_form_recommendation_text
         from extractor import FORM_UUIDS

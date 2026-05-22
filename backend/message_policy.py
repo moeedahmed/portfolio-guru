@@ -54,6 +54,24 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         ),
         safety_critical=True,
     ),
+    "bot_profile_description": MessageTemplate(
+        key="bot_profile_description",
+        message_class=MessageClass.FIXED,
+        text=(
+            "Portfolio Guru turns rough case notes into RCEM WPBA drafts.\n\n"
+            "Send text, voice, a photo, or a document. It matches the right form, fills only "
+            "what your input supports, and shows everything before anything is saved.\n\n"
+            "45 RCEM forms supported. Draft-only until you approve. Your Kaizen login is "
+            "encrypted, used only to save drafts, and never shared."
+        ),
+        safety_critical=True,
+    ),
+    "bot_profile_short_description": MessageTemplate(
+        key="bot_profile_short_description",
+        message_class=MessageClass.FIXED,
+        text="RCEM WPBA drafts from text, voice, photo, or document — draft-only until you approve.",
+        safety_critical=True,
+    ),
     "what_is_this": MessageTemplate(
         key="what_is_this",
         message_class=MessageClass.FIXED,
