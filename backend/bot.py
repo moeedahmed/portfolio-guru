@@ -2655,7 +2655,8 @@ async def setup_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 VOICE_CHOICE_FRESH_COPY = (
     "⭐ *Voice Profile Setup*\n\n"
     "Drafts can sound like you instead of a generic bot. Pick how you'd like to teach me your voice:\n\n"
-    "🤖 *Learn from my Kaizen entries* — I'll sample your previous portfolio entries (read-only) and learn your style.\n\n"
+    "🤖 *Learn from my Kaizen entries* — I'll read your previous portfolio entries only, read-only, "
+    "to learn your tone and structure. I won't create, edit, submit, sign, or share anything.\n\n"
     "✍️ *Add examples manually* — paste, photo, or voice-note 3-5 of your own portfolio entries."
 )
 
@@ -2674,20 +2675,10 @@ VOICE_MANUAL_INTRO_COPY = (
     "I'll learn your tone, structure, reflection depth and phrases. Send the first example now."
 )
 
-VOICE_KAIZEN_CONSENT_COPY = (
-    "🤖 *Learn from my Kaizen entries — read-only*\n\n"
-    "Before I sample anything, here's exactly what will and won't happen:\n\n"
-    "✅ I'll read your existing entries to learn your writing style.\n"
-    "✅ Everything stays as a draft — nothing is submitted on your behalf.\n"
-    "❌ I won't edit, delete, sign, or share any of your entries.\n"
-    "❌ I won't create new entries from this step.\n"
-    "❌ I won't change your Kaizen settings or supervisor list.\n\n"
-    "If that's OK, pick a sample size next. You can cancel any time."
-)
-
 VOICE_KAIZEN_SAMPLE_COPY = (
     "📚 *Pick a sample size*\n\n"
-    "Bigger samples give a steadier voice match. All options are read-only.\n\n"
+    "Bigger samples give a steadier voice match. This stays read-only: I'll only read existing portfolio entries — "
+    "no creating, editing, submitting, signing, or sharing.\n\n"
     "Choose how far back I should look:"
 )
 
@@ -2705,14 +2696,6 @@ def _voice_rebuild_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🤖 Learn from Kaizen entries", callback_data="VOICE|path_kaizen")],
         [InlineKeyboardButton("✍️ Add examples manually", callback_data="VOICE|path_manual")],
         [InlineKeyboardButton("🗑️ Remove Profile", callback_data="VOICE|remove")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
-    ])
-
-
-def _voice_kaizen_consent_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ I consent — pick sample", callback_data="VOICE|kaizen_consent")],
-        [InlineKeyboardButton("🔙 Back", callback_data="VOICE|back_to_choice")],
         [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
     ])
 
@@ -2739,7 +2722,7 @@ async def _voice_show_choice_screen(update: Update, context: ContextTypes.DEFAUL
     existing = get_voice_profile(user_id)
     context.user_data.pop("voice_examples", None)
     context.user_data.pop("pending_voice_profile", None)
-    context.user_data.pop("voice_kaizen_consented", None)
+    context.user_data.pop("voice_kaizen_path_started", None)
 
     show = _flow_edit if update.callback_query is not None else _flow_msg
     copy = VOICE_CHOICE_REBUILD_COPY if existing else VOICE_CHOICE_FRESH_COPY
@@ -2786,7 +2769,7 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
         if data == "VOICE|cancel":
             context.user_data.pop("voice_examples", None)
             context.user_data.pop("pending_voice_profile", None)
-            context.user_data.pop("voice_kaizen_consented", None)
+            context.user_data.pop("voice_kaizen_path_started", None)
             await _flow_edit(
                 update, context,
                 _cancelled_next_step_text(update.effective_user.id, "Voice profile setup cancelled"),
@@ -2797,12 +2780,12 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
             return ConversationHandler.END
 
         if data == "VOICE|back_to_choice":
-            context.user_data.pop("voice_kaizen_consented", None)
+            context.user_data.pop("voice_kaizen_path_started", None)
             return await _voice_show_choice_screen(update, context)
 
         if data == "VOICE|path_manual":
             context.user_data["voice_examples"] = []
-            context.user_data.pop("voice_kaizen_consented", None)
+            context.user_data.pop("voice_kaizen_path_started", None)
             # No "Back" here: a stale Back tap from this screen would wipe
             # voice_examples on the way back to the choice screen, silently
             # losing any examples typed in between. Users switch paths via
@@ -2819,18 +2802,7 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
             return AWAIT_VOICE_EXAMPLES
 
         if data == "VOICE|path_kaizen":
-            context.user_data.pop("voice_kaizen_consented", None)
-            await _flow_edit(
-                update, context,
-                VOICE_KAIZEN_CONSENT_COPY,
-                parse_mode="Markdown",
-                reply_markup=_voice_kaizen_consent_keyboard(),
-                flow_key="voice",
-            )
-            return AWAIT_VOICE_EXAMPLES
-
-        if data == "VOICE|kaizen_consent":
-            context.user_data["voice_kaizen_consented"] = True
+            context.user_data["voice_kaizen_path_started"] = True
             await _flow_edit(
                 update, context,
                 VOICE_KAIZEN_SAMPLE_COPY,
@@ -3020,8 +2992,8 @@ async def _voice_run_kaizen_sample(
 ) -> int:
     """Invoke the read-only Kaizen sampler for the chosen window.
 
-    Honours the consent gate so a stale button can never bypass the user's
-    explicit OK. Calls into ``voice_sampler.sample_kaizen_entries`` which is
+    Honours the path gate so a stale button can never bypass the user's
+    Kaizen-learning choice. Calls into ``voice_sampler.sample_kaizen_entries`` which is
     isolated from any live Kaizen action.
     """
     from voice_sampler import (
@@ -3031,10 +3003,10 @@ async def _voice_run_kaizen_sample(
         sample_kaizen_entries,
     )
 
-    if not context.user_data.get("voice_kaizen_consented"):
+    if not context.user_data.get("voice_kaizen_path_started"):
         await _flow_edit(
             update, context,
-            "⚠️ I need your consent before sampling. Pick a path again:",
+            "⚠️ That sample option is no longer active. Pick a voice source again:",
             reply_markup=_voice_choice_keyboard(),
             flow_key="voice",
         )
@@ -3061,7 +3033,7 @@ async def _voice_run_kaizen_sample(
 
     if result.status == SamplerStatus.OK and result.has_samples:
         context.user_data["voice_examples"] = list(result.samples)
-        context.user_data.pop("voice_kaizen_consented", None)
+        context.user_data.pop("voice_kaizen_path_started", None)
         return await _build_voice_profile(update, context)
 
     if result.status == SamplerStatus.NO_SAMPLES:

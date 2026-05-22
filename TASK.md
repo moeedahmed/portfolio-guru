@@ -3,11 +3,11 @@
 ## Objective
 
 Replace the old "send 3-5 examples" voice-profile entry with a production-shaped
-two-path setup: **Learn from Kaizen entries** (read-only, consent-gated) and
+two-path setup: **Learn from Kaizen entries** (read-only, action-gated) and
 **Add examples manually** (existing 3-5 examples flow). The Kaizen path uses the
 managed authenticated Chrome session through a read-only sampler: it can open
-existing entries after user consent, but cannot create, edit, delete, submit, or
-send assessor actions.
+existing entries after the user chooses the Kaizen path and sample window, but
+cannot create, edit, delete, submit, or send assessor actions.
 
 ## Current Slice
 
@@ -15,13 +15,13 @@ send assessor actions.
    entries / Add examples manually / Cancel. Same screen for fresh + rebuild,
    with Remove added when a profile already exists.
 2. Manual path preserves the existing 3-5 examples flow verbatim.
-3. Kaizen path shows an explicit read-only consent screen (✅/❌ guarantees)
-   before exposing the sample-size picker (Recent 10, Last 6 months, Last 12
-   months).
+3. Kaizen path opens the sample-size picker directly (Recent 10, Last 6 months,
+   Last 12 months), with the read-only guarantees stated in the first screen and
+   repeated lightly in the picker.
 4. `backend/voice_sampler.py` is the only service boundary that can reach
    Kaizen for voice learning. It uses browser-harness/CDP in read-only mode and
    is fully mocked in normal tests, so tests never hit live Kaizen.
-5. Stale sample-pick buttons can never bypass the consent gate.
+5. Stale sample-pick buttons can never bypass the Kaizen path gate.
 
 ## Done
 
@@ -33,19 +33,19 @@ send assessor actions.
 - `backend/bot.py`:
   - `voice_start` + `ACTION|voice` both call `_voice_show_choice_screen` so
     Settings → Set up voice profile and `/voice` are identical entry points.
-  - New `VOICE|path_manual`, `VOICE|path_kaizen`, `VOICE|kaizen_consent`,
+  - New `VOICE|path_manual`, `VOICE|path_kaizen`,
     `VOICE|kaizen_sample|<window>`, `VOICE|back_to_choice` handlers in
     `voice_collect_example`.
-  - Consent gate enforced in `_voice_run_kaizen_sample` — without
-    `context.user_data["voice_kaizen_consented"]`, the sampler is never
+  - Kaizen path gate enforced in `_voice_run_kaizen_sample` — without
+    `context.user_data["voice_kaizen_path_started"]`, the sampler is never
     awaited.
   - `voice_conv` adds `ACTION|voice` as an entry_point so the conv state is
     entered when users tap from Settings. Top-level `handle_action_button`
     pattern now excludes `voice$` so `voice_conv` claims it.
 - `backend/tests/test_flow_walker.py` gains `TestVoiceProfileTwoPathFlow`
   covering: fresh + rebuild choice screens, manual path copy preserved,
-  Kaizen consent copy + read-only guard, sample-size pick, consent enforcement
-  on stale callbacks, mocked sampler success, read-only browser script checks,
+  read-only guard copy, sample-size pick, path enforcement on stale callbacks,
+  mocked sampler success, read-only browser script checks,
   callback acknowledgement, and `VOICE|back_to_choice`.
 
 ## Verification

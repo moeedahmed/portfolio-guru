@@ -1,8 +1,8 @@
 """Voice profile Kaizen sampler — read-only service boundary.
 
 This module is the only place that reaches out to Kaizen to pull existing
-portfolio entries for voice-profile learning. The Telegram flow asks for
-explicit user consent before calling here.
+portfolio entries for voice-profile learning. The Telegram flow only calls it
+after the user chooses the Kaizen learning path and a sample window.
 
 Contract:
 - Pure read-only: never submits, deletes, edits, or creates Kaizen content.
