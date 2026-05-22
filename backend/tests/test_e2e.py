@@ -1,4 +1,3 @@
-import os
 import re
 
 import pytest
@@ -6,30 +5,37 @@ import pytest_asyncio
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
+from tests.telegram_live_harness import (
+    TelegramStep,
+    assert_transcript_is_sensible,
+    has_telethon_env,
+    run_telegram_workflow,
+    telethon_env,
+)
+
 
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.skipif(
-        not os.environ.get("TELETHON_API_ID"),
+        not has_telethon_env(),
         reason="Telethon credentials not configured",
     ),
 ]
 
 
-BOT_USERNAME = os.environ.get("TELEGRAM_BOT_USERNAME", "portfolio_guru_bot")
+BOT_USERNAME = telethon_env()["bot_username"]
 
 
 @pytest_asyncio.fixture
 async def telethon_client():
-    session = os.environ.get("TELETHON_SESSION")
-    api_hash = os.environ.get("TELETHON_API_HASH")
-    if not session or not api_hash:
+    env = telethon_env()
+    if not env["session"] or not env["api_id"] or not env["api_hash"]:
         pytest.skip("Telethon session or API hash not configured")
 
     client = TelegramClient(
-        StringSession(session),
-        int(os.environ["TELETHON_API_ID"]),
-        api_hash,
+        StringSession(env["session"]),
+        int(env["api_id"]),
+        env["api_hash"],
     )
     await client.connect()
     try:
@@ -88,3 +94,30 @@ async def test_e2e_setup_flow_starts(telethon_client):
         reply = await conv.get_response()
 
     assert "Kaizen username" in reply.raw_text
+
+
+@pytest.mark.asyncio
+async def test_e2e_realistic_case_workflow_is_sensible(telethon_client):
+    transcript = await run_telegram_workflow(
+        telethon_client,
+        BOT_USERNAME,
+        [
+            TelegramStep(
+                name="reset",
+                message="/cancel",
+                expect_text_any=("cancel", "ready", "connect", "file"),
+                timeout_seconds=60,
+            ),
+            TelegramStep(
+                name="clinical-case",
+                message=(
+                    "Adult ED case: 42M with pleuritic chest pain, normal ECG, "
+                    "negative troponin, discharged with safety-netting after senior discussion."
+                ),
+                expect_text_any=("draft", "form", "case", "CBD", "DOPS", "Mini-CEX"),
+                expect_button_any=("CBD", "Use best fit", "See all forms"),
+                timeout_seconds=120,
+            ),
+        ],
+    )
+    assert_transcript_is_sensible(transcript)

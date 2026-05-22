@@ -9,19 +9,19 @@ Requires: TELETHON_SESSION, TELEGRAM_API_ID, TELEGRAM_API_HASH env vars.
 from __future__ import annotations
 
 import asyncio
-import os
 
 import pytest
+
+from tests.telegram_live_harness import button_texts, has_telethon_env, telethon_env
 
 pytestmark = [
     pytest.mark.live,
     pytest.mark.skipif(
-        not os.environ.get("TELETHON_SESSION"),
-        reason="TELETHON_SESSION not set — skipping live Telegram tests",
+        not has_telethon_env(),
+        reason="Telethon credentials not set — skipping live Telegram tests",
     ),
 ]
 
-BOT_USERNAME = "@portfolio_guru_bot"
 RESPONSE_WAIT = 10  # seconds to wait for bot response
 
 
@@ -38,9 +38,10 @@ async def client():
     from telethon import TelegramClient
     from telethon.sessions import StringSession
 
-    session_str = os.environ.get("TELETHON_SESSION", "")
-    api_id = int(os.environ.get("TELEGRAM_API_ID", "0"))
-    api_hash = os.environ.get("TELEGRAM_API_HASH", "")
+    env = telethon_env()
+    session_str = env["session"]
+    api_id = int(env["api_id"])
+    api_hash = env["api_hash"]
 
     tc = TelegramClient(StringSession(session_str), api_id, api_hash)
     await tc.start()
@@ -50,11 +51,10 @@ async def client():
 
 async def _send_and_wait(client, text: str, wait: int = RESPONSE_WAIT):
     """Send a message to the bot and wait for a response."""
-    from telethon.tl.custom.message import Message
 
-    await client.send_message(BOT_USERNAME, text)
+    await client.send_message(telethon_env()["bot_username"], text)
     await asyncio.sleep(wait)
-    messages = await client.get_messages(BOT_USERNAME, limit=3)
+    messages = await client.get_messages(telethon_env()["bot_username"], limit=3)
     # Return the most recent bot message (not our own)
     for msg in messages:
         if msg.sender_id != (await client.get_me()).id:
@@ -76,7 +76,7 @@ async def test_live_case_text(client):
     await asyncio.sleep(RESPONSE_WAIT)
     msg = await _send_and_wait(client, "35F with ankle injury, examined and X-rayed, no fracture, discharged with advice")
     assert msg is not None
-    assert msg.buttons is not None or msg.reply_markup is not None
+    assert button_texts(msg) or msg.reply_markup is not None
 
 
 @pytest.mark.asyncio
