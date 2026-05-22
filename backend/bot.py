@@ -2848,16 +2848,26 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
         if data == "VOICE|preview_reject":
             context.user_data.pop("pending_voice_profile", None)
             context.user_data.pop("voice_examples", None)
+            retry_source = context.user_data.pop("voice_profile_retry_source", None)
+            if retry_source == "kaizen":
+                context.user_data["voice_kaizen_path_started"] = True
+                await _flow_edit(
+                    update, context,
+                    VOICE_KAIZEN_SAMPLE_COPY,
+                    parse_mode="Markdown",
+                    reply_markup=_voice_kaizen_sample_keyboard(),
+                    flow_key="voice",
+                )
+                return AWAIT_VOICE_EXAMPLES
             await _flow_edit(
                 update, context,
                 "No problem — let's try again with different examples.",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|voice")],
+                    [InlineKeyboardButton("🔄 Try Again", callback_data="VOICE|path_manual")],
                 ]),
                 flow_key="voice",
             )
-            _flow_done(context, "voice")
-            return ConversationHandler.END
+            return AWAIT_VOICE_EXAMPLES
 
         if data == "VOICE|remove":
             clear_voice_profile(update.effective_user.id)
@@ -3033,6 +3043,7 @@ async def _voice_run_kaizen_sample(
 
     if result.status == SamplerStatus.OK and result.has_samples:
         context.user_data["voice_examples"] = list(result.samples)
+        context.user_data["voice_profile_retry_source"] = "kaizen"
         context.user_data.pop("voice_kaizen_path_started", None)
         return await _build_voice_profile(update, context)
 
@@ -3113,7 +3124,10 @@ async def _build_voice_profile(update: Update, context: ContextTypes.DEFAULT_TYP
         await _flow_edit(
             update, context,
             f"🔍 Here's a sample draft using your voice profile:\n\n"
-            f"---\n{sample_draft}\n---\n\n"
+            f"Preview draft\n"
+            f"────────────\n"
+            f"{sample_draft}\n"
+            f"────────────\n\n"
             f"Does this sound like you?",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("✅ Looks like me — Activate", callback_data="VOICE|preview_accept")],

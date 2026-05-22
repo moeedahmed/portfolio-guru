@@ -2641,6 +2641,71 @@ class TestVoiceProfileTwoPathFlow:
         assert ('✍️ Add examples manually', 'VOICE|path_manual') in buttons
 
     @pytest.mark.asyncio
+    async def test_kaizen_preview_reject_returns_directly_to_sample_size(self):
+        from bot import AWAIT_VOICE_EXAMPLES, voice_collect_example
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('VOICE|preview_reject')
+        context = sim._make_context()
+        context.user_data['pending_voice_profile'] = '{"voice_summary": "x"}'
+        context.user_data['voice_examples'] = ['sample one', 'sample two', 'sample three']
+        context.user_data['voice_profile_retry_source'] = 'kaizen'
+
+        result = await voice_collect_example(update, context)
+
+        assert result == AWAIT_VOICE_EXAMPLES
+        text = sim.get_last_text() or ''
+        buttons = sim.get_last_buttons()
+        assert 'Pick a sample size' in text
+        assert ('📋 Recent 10 entries', 'VOICE|kaizen_sample|recent_10') in buttons
+        assert ('📅 Last 6 months', 'VOICE|kaizen_sample|last_6m') in buttons
+        assert ('📅 Last 12 months', 'VOICE|kaizen_sample|last_12m') in buttons
+        assert ('🔄 Try Again', 'ACTION|voice') not in buttons
+        assert context.user_data.get('voice_kaizen_path_started') is True
+
+    @pytest.mark.asyncio
+    async def test_manual_preview_reject_reopens_manual_examples_without_full_restart(self):
+        from bot import AWAIT_VOICE_EXAMPLES, voice_collect_example
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('VOICE|preview_reject')
+        context = sim._make_context()
+        context.user_data['pending_voice_profile'] = '{"voice_summary": "x"}'
+        context.user_data['voice_examples'] = ['sample one', 'sample two', 'sample three']
+
+        result = await voice_collect_example(update, context)
+
+        assert result == AWAIT_VOICE_EXAMPLES
+        assert ('🔄 Try Again', 'VOICE|path_manual') in sim.get_last_buttons()
+        assert ('🔄 Try Again', 'ACTION|voice') not in sim.get_last_buttons()
+
+    @pytest.mark.asyncio
+    async def test_voice_preview_uses_line_separator_not_three_dash_fence(self):
+        from bot import AWAIT_VOICE_EXAMPLES, _build_voice_profile
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('VOICE|done')
+        context = sim._make_context()
+        context.user_data['voice_examples'] = ['one', 'two', 'three']
+
+        with patch(
+            'voice_profile.generate_voice_profile',
+            new_callable=AsyncMock,
+            return_value='{"voice_summary": "x"}',
+        ), patch(
+            'bot._generate_voice_preview',
+            new_callable=AsyncMock,
+            return_value='Sample preview text.',
+        ):
+            result = await _build_voice_profile(update, context)
+
+        assert result == AWAIT_VOICE_EXAMPLES
+        text = sim.get_last_text() or ''
+        assert 'Preview draft' in text
+        assert '────────────' in text
+        assert '---' not in text
+
+    @pytest.mark.asyncio
     async def test_voice_sampler_uses_mocked_read_only_runner(self):
         """Normal tests must not touch live Kaizen; the runner is mockable."""
         from voice_sampler import SampleWindow, SamplerStatus, sample_kaizen_entries
