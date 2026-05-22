@@ -73,9 +73,10 @@ class TestMessagePolicy:
         from message_policy import render_message
 
         profile = render_message("bot_profile_description")
+        assert len(profile) <= 280
         assert "rough case notes" in profile
-        assert "fills only what your input supports" in profile
-        assert "Draft-only until you approve" in profile
+        assert "fills only supported details" in profile
+        assert "Draft-only until approval" in profile
         assert "encrypted" in profile
         assert "files your medical WPBA entries in seconds" not in profile
 

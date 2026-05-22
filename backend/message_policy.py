@@ -59,10 +59,9 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         message_class=MessageClass.FIXED,
         text=(
             "Portfolio Guru turns rough case notes into RCEM WPBA drafts.\n\n"
-            "Send text, voice, a photo, or a document. It matches the right form, fills only "
-            "what your input supports, and shows everything before anything is saved.\n\n"
-            "45 RCEM forms supported. Draft-only until you approve. Your Kaizen login is "
-            "encrypted, used only to save drafts, and never shared."
+            "Send text, voice, photo, or documents. It picks the right form, fills only "
+            "supported details, and shows the draft before saving.\n\n"
+            "45 RCEM forms. Draft-only until approval. Kaizen login encrypted, never shared."
         ),
         safety_critical=True,
     ),
