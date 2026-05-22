@@ -11,6 +11,48 @@ from ...portfoliotypes.base import detect_portfolio_type, load_selectors
 
 DOMAIN_SKILL_DIR = Path(__file__).parent / "domain_skill"
 BROWSER_HARNESS = shutil.which("browser-harness") or os.path.expanduser("~/.local/bin/browser-harness")
+# Bot starts Chrome on 18800; do NOT default to Chrome's stock 9222 — a stray
+# Chrome on 9222 would silently shadow the managed profile.
+DEFAULT_KAIZEN_CDP_URL = "http://localhost:18800"
+
+
+class KaizenInfrastructureError(RuntimeError):
+    """Browser-harness, CDP, or subprocess failure — *not* a credentials problem.
+
+    Callers should treat this as 'we couldn't even ask Kaizen', distinct from
+    a credentials rejection (which is signalled by ``connect()`` returning
+    ``False``). Misclassifying infra failure as bad credentials trains users
+    to retype passwords that are actually fine — keep the split.
+    """
+
+
+def _resolve_cdp_ws(env: Optional[Dict[str, str]] = None, *, timeout: float = 3.0) -> Optional[str]:
+    """Return the browser-harness CDP WebSocket URL for the managed Kaizen Chrome.
+
+    Resolution order:
+      1. ``BU_CDP_WS`` already set in the env → use it verbatim.
+      2. ``KAIZEN_CDP_URL`` (default ``http://localhost:18800``) → fetch
+         ``/json/version`` and return ``webSocketDebuggerUrl``.
+      3. On any failure → ``None`` (caller decides whether to proceed without
+         setting ``BU_CDP_WS``).
+    """
+    env = env if env is not None else os.environ
+    existing = env.get("BU_CDP_WS")
+    if existing:
+        return existing
+    cdp_url = env.get("KAIZEN_CDP_URL", DEFAULT_KAIZEN_CDP_URL)
+    parsed = urlparse(cdp_url)
+    netloc = parsed.netloc or "localhost:18800"
+    scheme = parsed.scheme or "http"
+    version_url = f"{scheme}://{netloc}/json/version"
+    try:
+        import urllib.request as _ur
+        resp = _ur.urlopen(version_url, timeout=timeout)
+        data = json.loads(resp.read())
+    except Exception:
+        return None
+    ws = data.get("webSocketDebuggerUrl", "")
+    return ws or None
 
 
 class KaizenProvider:
@@ -34,29 +76,19 @@ class KaizenProvider:
             env = os.environ.copy()
             env["KAIZEN_USER"] = self.username
             env["KAIZEN_PASS"] = self.password
-            # Auto-detect Chrome CDP WebSocket URL from the managed Kaizen
-            # Chrome port. The bot starts Chrome on 18800, not Chrome's common
-            # 9222 default.
-            if "BU_CDP_WS" not in env:
-                try:
-                    import urllib.request as _ur
-                    cdp_url = env.get("KAIZEN_CDP_URL", "http://localhost:18800")
-                    parsed = urlparse(cdp_url)
-                    version_url = f"{parsed.scheme or 'http'}://{parsed.netloc or 'localhost:18800'}/json/version"
-                    resp = _ur.urlopen(version_url, timeout=3)
-                    data = json.loads(resp.read())
-                    ws = data.get("webSocketDebuggerUrl", "")
-                    if ws:
-                        env["BU_CDP_WS"] = ws
-                except Exception:
-                    pass
+            ws = _resolve_cdp_ws(env)
+            if ws:
+                env["BU_CDP_WS"] = ws
             cmd = [BROWSER_HARNESS, "-c"]
             cmd.append("exec(open('" + tmp_path.replace("'", "'\\''") + "').read())")
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=timeout, env=env
-            )
+            try:
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=timeout, env=env
+                )
+            except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+                raise KaizenInfrastructureError(f"browser-harness invocation failed: {exc}") from exc
             if result.returncode != 0:
-                raise RuntimeError(result.stderr[:500])
+                raise KaizenInfrastructureError(result.stderr[:500] or "browser-harness exited non-zero")
             return result.stdout.strip()
         finally:
             try:
@@ -79,13 +111,17 @@ print(url)
 """
         try:
             output = self._run_file(code, timeout=30)
-            if "dashboard" in output:
-                self._connected = True
-                self.portfolio_type = self.detect_role()
-                return True
-            return False
+        except KaizenInfrastructureError:
+            # Browser-harness/CDP/subprocess failure. Do NOT classify as bad
+            # credentials — let callers tell the user "couldn't reach Kaizen".
+            raise
         except Exception as e:
-            raise RuntimeError(f"Login failed: {e}")
+            raise KaizenInfrastructureError(f"unexpected provider failure: {e}") from e
+        if "dashboard" in output:
+            self._connected = True
+            self.portfolio_type = self.detect_role()
+            return True
+        return False
 
     def disconnect(self):
         """Log out and close browser."""

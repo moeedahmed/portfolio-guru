@@ -20,6 +20,8 @@ CI.
    deprecated so it cannot silently fire with credentials in the LLM prompt.
 5. Pin alias routing (ESLE / Mini-CEX 2021) with focused offline tests so
    future regressions are caught.
+6. Pin Kaizen login reliability so browser/CDP/session failures cannot be
+   misclassified as bad credentials.
 
 ## Guardrails
 
@@ -55,6 +57,14 @@ CI.
 - `backend/tests/test_filing_reliability.py` adds 11 focused offline tests
   covering reuse-on-retry, no-reuse-on-normal, DOM isolation, alias routing,
   legacy deprecation, and tracked-artefact protection.
+- `backend/engine/providers/kaizen/__init__.py` now raises a distinct
+  `KaizenInfrastructureError` for browser-harness, CDP, subprocess, and
+  timeout failures. A loaded-but-not-dashboard result remains the only
+  credential rejection path.
+- `backend/tests/test_kaizen_login_reliability.py` adds focused offline
+  regression coverage for managed CDP resolution, provider failure taxonomy,
+  and the setup flow's user-facing split between "couldn't reach Kaizen" and
+  "Login failed".
 
 ## Verification
 
@@ -63,12 +73,16 @@ CI.
 - `git status` after the run shows no mutations to `backend/filing_coverage.json`,
   `backend/dom_learning_log.json`, or `backend/kaizen_form_filer.py`.
 - New tests in `tests/test_filing_reliability.py` all pass.
+- Login reliability gate: `pytest tests/test_kaizen_login_reliability.py tests/test_flow_walker.py::TestOnboardingFrictionPatch tests/test_filing_reliability.py -v`
+  passes (33 passed).
+- Default offline gate now passes with the login reliability tests included
+  (271 passed, 22 skipped, 13 deselected).
 
 ## Next
 
-- Codex review of the diff (orchestrator owns the handoff).
-- Once reviewed and merged, restart the launchd bot via the standard deploy
-  path. No live Kaizen verification is required as part of this slice.
+- Commit this reliability slice.
+- Restart the launchd bot via the standard deploy path only after approval.
+  No live Kaizen verification is required as part of this slice.
 
 ## Carried Context — Portfolio Readiness / ARCP Health
 

@@ -2518,6 +2518,10 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         _flow_done(context, "setup")
         return ConversationHandler.END
     except Exception as exc:
+        # Browser-harness / CDP / subprocess failures land here (raised as
+        # KaizenInfrastructureError by the provider). They are *not* bad
+        # credentials — keep this branch distinct from the "Login failed"
+        # path below or users will retype passwords that are actually fine.
         progress_task.cancel()
         logger.warning("Credential test errored: %s", exc, exc_info=True)
         await _flow_edit(

@@ -1,13 +1,13 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-05-22T18:51:16+00:00
-Status: stale_or_needs_review
+Generated: 2026-05-22T20:29:57+00:00
+Status: ready
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
 - Branch: fix/portfolio-guru-kaizen-recovery
-- Last commit: 49224c2 2026-05-22 fix: avoid reusing old Kaizen drafts by default
-- Uncommitted changes: yes
+- Last commit: 9e70f54 2026-05-22 fix: use managed Kaizen CDP for login checks
+- Uncommitted changes: no
 
 ## Immediate read before restarting
 1. Product hub Status + Brief in Notion
@@ -15,27 +15,19 @@ Status: stale_or_needs_review
 3. `TASK.md` for active sprint state, if present
 4. This resume brief for drift warnings and repo state
 
-## Warnings
-- Repo has uncommitted changes — capture/commit or summarise before switching context
-
 ## Practical AGENTS.md check
 - Useful for coding-agent/ACP work: yes
 - No missing practical sections
 
 ## Recent commits
+- 9e70f54 2026-05-22 fix: use managed Kaizen CDP for login checks
+- caf7451 2026-05-22 fix: shorten telegram bot profile copy
+- 8525da2 2026-05-22 fix: update telegram bot profile copy
+- a863252 2026-05-22 fix: improve portfolio welcome copy
+- 6c82f4f 2026-05-22 fix: harden portfolio kaizen filing
 - 49224c2 2026-05-22 fix: avoid reusing old Kaizen drafts by default
 - e9c5741 2026-05-22 fix: recover kaizen filing and form wiring
 - 6dd3645 2026-05-21 fix: add retry UI on timeout + enable draft reuse on retry
-- e4a736f 2026-05-21 docs: codify filing routing discipline
-- 14eb6d0 2026-05-21 fix: kill Kaizen → browser-use escalation for DOM-mapped forms
-- 60eecaa 2026-05-21 docs: define portfolio readiness spec
-- 0e607e1 2026-05-21 chore: standardise bot message copy
-- 9f29356 2026-05-21 fix: preserve draft control during portfolio filing
-
-## Uncommitted change summary
-- M backend/bot.py
--  M backend/filing_coverage.json
--  M backend/tests/test_flow_walker.py
 
 ## Repo context snapshot
 ### AGENTS.md — present, 0 days old
@@ -70,16 +62,16 @@ Key headings:
 
 ### TASK.md — present, 0 days old
 Key headings:
-- # Active Task - Portfolio Readiness / ARCP Health Spec
+- # Active Task — Kaizen Filing Reliability Cleanup
 - ## Objective
 - ## Current Slice
 - ## Guardrails
 - ## Done
 - ## Verification
 - ## Next
-- ## Carried Context - Conversational Router Dogfood
+- ## Carried Context — Portfolio Readiness / ARCP Health
 
-### WORKFLOWS.md — present, 0 days old
+### WORKFLOWS.md — present, 1 days old
 Key headings:
 - # Portfolio Guru — Agent Workflow Reference
 - ## Conversation States
@@ -95,6 +87,6 @@ Key headings:
 - ## Data Flow
 
 ## Recommended restart path
-Refresh the product hub/Brief and repo context before a new build sprint.
+Continuity context looks sufficient; proceed with normal product-docs workflow.
 
 If this product has been idle for weeks, do not start implementation from memory. Refresh the product hub Status/Brief first, then create or update `TASK.md` for the next sprint.
