@@ -779,6 +779,11 @@ _KB_RETRY_TEMPLATE = InlineKeyboardMarkup([
     [_BTN_CANCEL],
 ])
 
+_KB_RETRY_SETUP = InlineKeyboardMarkup([
+    [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|setup")],
+    [_BTN_CANCEL],
+])
+
 # Substrings that indicate the LLM call hit a transient upstream issue (rate
 # limiting, quota, service overload) rather than a code bug. Matching is
 # case-insensitive on str(exception). Keep tight — false positives would hide
@@ -2511,7 +2516,8 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await _flow_edit(
             update, context,
             "⏱ Kaizen took too long to respond. This is usually a brief outage on their side.\n\n"
-            "Try the setup again — or send the case anyway, you can connect later.",
+            "Tap Try again, or send the case anyway and connect later.",
+            reply_markup=_KB_RETRY_SETUP,
             flow_key="setup",
         )
         context.user_data.pop("setup_username", None)
@@ -2527,7 +2533,8 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await _flow_edit(
             update, context,
             "⚠️ Couldn't reach Kaizen to verify the login. Try again in a moment.\n\n"
-            "📧 What's your Kaizen username (email)?",
+            "Tap Try again, or type your Kaizen email below.",
+            reply_markup=_KB_RETRY_SETUP,
             flow_key="setup",
         )
         context.user_data.pop("setup_username", None)
@@ -2539,7 +2546,8 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await _flow_edit(
             update, context,
             "❌ Login failed — please check your username and password.\n\n"
-            "📧 What's your Kaizen username (email)?",
+            "Tap Try again, or type your Kaizen email below.",
+            reply_markup=_KB_RETRY_SETUP,
             flow_key="setup",
         )
         context.user_data.pop("setup_username", None)
