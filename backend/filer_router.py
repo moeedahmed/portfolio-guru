@@ -94,6 +94,7 @@ async def route_filing(
     platform_url: Optional[str] = None,
     form_url: Optional[str] = None,
     submit: bool = False,
+    reuse_draft: bool = False,
 ) -> Dict[str, Any]:
     """
     Route a filing request to the appropriate filer.
@@ -152,7 +153,7 @@ async def route_filing(
         else:
             # Has a DOM mapping — always try Playwright, never escalate
             logger.info(f"Using deterministic filer for {platform}/{form_type}")
-            result = await _route_deterministic(platform_lower, form_type, fields, credentials, curriculum_links, submit=submit)
+            result = await _route_deterministic(platform_lower, form_type, fields, credentials, curriculum_links, submit=submit, reuse_draft=reuse_draft)
 
             # Record and return regardless of status
             # If partial, the DOM map needs fixing — return it as-is
@@ -214,6 +215,7 @@ async def _route_deterministic(
     credentials: Dict[str, str],
     curriculum_links: Optional[List[str]],
     submit: bool = False,
+    reuse_draft: bool = False,
 ) -> Dict[str, Any]:
     """Route to the deterministic Playwright filer."""
     if platform == "kaizen":
@@ -225,7 +227,7 @@ async def _route_deterministic(
             password=credentials["password"],
             curriculum_links=curriculum_links,
             submit=submit,
-            reuse_draft=True,
+            reuse_draft=reuse_draft,
         )
         result["method"] = "deterministic"
         return result

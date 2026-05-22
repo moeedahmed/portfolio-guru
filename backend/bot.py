@@ -4097,6 +4097,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return AWAIT_CASE_INPUT
 
     elif data == "ACTION|retry_filing":
+        context.user_data["retry_filing_requested"] = True
         return await handle_approval_approve(update, context)
 
     elif data == "ACTION|retry_template":
@@ -5467,6 +5468,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             pass
 
     progress_task = asyncio.create_task(_filing_progress())
+    reuse_existing_draft = bool(context.user_data.pop("retry_filing_requested", False))
     try:
         result = await asyncio.wait_for(
             route_filing(
@@ -5476,6 +5478,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 credentials={"username": username, "password": password},
                 curriculum_links=curriculum_links,
                 form_name=form_name,
+                reuse_draft=reuse_existing_draft,
             ),
             timeout=300,  # 5 min — browser-use path may take longer
         )
