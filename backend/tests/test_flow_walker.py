@@ -2613,6 +2613,34 @@ class TestVoiceProfileTwoPathFlow:
         assert ('✍️ Add examples manually', 'VOICE|path_manual') in buttons
 
     @pytest.mark.asyncio
+    async def test_kaizen_login_required_offers_inline_reconnect(self):
+        from bot import AWAIT_VOICE_EXAMPLES, voice_collect_example
+        from voice_sampler import SampleWindow, SamplerResult, SamplerStatus
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('VOICE|kaizen_sample|recent_10')
+        context = sim._make_context()
+        context.user_data['voice_kaizen_path_started'] = True
+
+        fake_result = SamplerResult(
+            status=SamplerStatus.NOT_AVAILABLE,
+            window=SampleWindow.RECENT_10,
+            message='Kaizen needs reconnecting before I can learn from previous entries.',
+            reason='login_required',
+        )
+        with patch(
+            'voice_sampler.sample_kaizen_entries',
+            new_callable=AsyncMock,
+            return_value=fake_result,
+        ):
+            result = await voice_collect_example(update, context)
+
+        assert result == AWAIT_VOICE_EXAMPLES
+        buttons = sim.get_last_buttons()
+        assert ('🔗 Reconnect Kaizen', 'ACTION|setup') in buttons
+        assert ('✍️ Add examples manually', 'VOICE|path_manual') in buttons
+
+    @pytest.mark.asyncio
     async def test_voice_sampler_uses_mocked_read_only_runner(self):
         """Normal tests must not touch live Kaizen; the runner is mockable."""
         from voice_sampler import SampleWindow, SamplerStatus, sample_kaizen_entries

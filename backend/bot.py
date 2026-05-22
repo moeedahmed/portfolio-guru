@@ -3046,14 +3046,19 @@ async def _voice_run_kaizen_sample(
             "Kaizen learning isn't switched on yet. Try adding examples manually instead."
         )
 
+    rows = []
+    if getattr(result, "reason", None) == "login_required":
+        rows.append([InlineKeyboardButton("🔗 Reconnect Kaizen", callback_data="ACTION|setup")])
+    rows.extend([
+        [InlineKeyboardButton("✍️ Add examples manually", callback_data="VOICE|path_manual")],
+        [InlineKeyboardButton("🔙 Back", callback_data="VOICE|back_to_choice")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
+    ])
+
     await _flow_edit(
         update, context,
         body,
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("✍️ Add examples manually", callback_data="VOICE|path_manual")],
-            [InlineKeyboardButton("🔙 Back", callback_data="VOICE|back_to_choice")],
-            [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
-        ]),
+        reply_markup=InlineKeyboardMarkup(rows),
         flow_key="voice",
     )
     return AWAIT_VOICE_EXAMPLES

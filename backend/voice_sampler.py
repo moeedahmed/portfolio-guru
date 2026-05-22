@@ -63,6 +63,7 @@ class SamplerResult:
     window: SampleWindow
     samples: List[str] = field(default_factory=list)
     message: Optional[str] = None
+    reason: Optional[str] = None
 
     @property
     def has_samples(self) -> bool:
@@ -258,4 +259,9 @@ async def sample_kaizen_entries(
             "Kaizen needs reconnecting before I can learn from previous entries. "
             "Reconnect Kaizen, then try this again — or add examples manually for now."
         )
-    return SamplerResult(status=SamplerStatus.NOT_AVAILABLE, window=window, message=message)
+    return SamplerResult(
+        status=SamplerStatus.NOT_AVAILABLE,
+        window=window,
+        message=message,
+        reason=reason,
+    )
