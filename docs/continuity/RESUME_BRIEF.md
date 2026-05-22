@@ -1,12 +1,12 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-05-22T20:29:57+00:00
+Generated: 2026-05-22T21:07:21+00:00
 Status: ready
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
 - Branch: fix/portfolio-guru-kaizen-recovery
-- Last commit: 9e70f54 2026-05-22 fix: use managed Kaizen CDP for login checks
+- Last commit: 6e1b255 2026-05-22 fix: clarify unlimited settings usage
 - Uncommitted changes: no
 
 ## Immediate read before restarting
@@ -20,17 +20,17 @@ Status: ready
 - No missing practical sections
 
 ## Recent commits
+- 6e1b255 2026-05-22 fix: clarify unlimited settings usage
+- 5ae0a73 2026-05-22 fix: add setup recovery buttons
+- 0af4418 2026-05-22 fix: harden Kaizen login reliability checks
 - 9e70f54 2026-05-22 fix: use managed Kaizen CDP for login checks
 - caf7451 2026-05-22 fix: shorten telegram bot profile copy
 - 8525da2 2026-05-22 fix: update telegram bot profile copy
 - a863252 2026-05-22 fix: improve portfolio welcome copy
 - 6c82f4f 2026-05-22 fix: harden portfolio kaizen filing
-- 49224c2 2026-05-22 fix: avoid reusing old Kaizen drafts by default
-- e9c5741 2026-05-22 fix: recover kaizen filing and form wiring
-- 6dd3645 2026-05-21 fix: add retry UI on timeout + enable draft reuse on retry
 
 ## Repo context snapshot
-### AGENTS.md — present, 0 days old
+### AGENTS.md — present, 1 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md
 - ## Project
@@ -45,7 +45,7 @@ Key headings:
 - ## Key Design Decisions
 - ## Continuity Protocol
 
-### CLAUDE.md — present, 0 days old
+### CLAUDE.md — present, 1 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md
 - ## Project

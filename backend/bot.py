@@ -2652,45 +2652,124 @@ async def setup_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 # === VOICE PROFILE FLOW ===
 
-async def voice_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start voice profile collection — /voice command."""
+VOICE_CHOICE_FRESH_COPY = (
+    "⭐ *Voice Profile Setup*\n\n"
+    "Drafts can sound like you instead of a generic bot. Pick how you'd like to teach me your voice:\n\n"
+    "🤖 *Learn from my Kaizen entries* — I'll sample your previous portfolio entries (read-only) and learn your style.\n\n"
+    "✍️ *Add examples manually* — paste, photo, or voice-note 3-5 of your own portfolio entries."
+)
+
+VOICE_CHOICE_REBUILD_COPY = (
+    "✍️ You already have a voice profile active. Your drafts are styled to match your writing.\n\n"
+    "Want to rebuild it? Pick a source:"
+)
+
+VOICE_MANUAL_INTRO_COPY = (
+    "✍️ *Add examples manually*\n\n"
+    "Send 3-5 examples of real portfolio writing. Best examples are reflections or WPBA text you would actually submit.\n\n"
+    "You can send:\n"
+    "• pasted text — best quality\n"
+    "• screenshots/photos — I'll extract the text\n"
+    "• voice notes — useful, but pasted examples are cleaner\n\n"
+    "I'll learn your tone, structure, reflection depth and phrases. Send the first example now."
+)
+
+VOICE_KAIZEN_CONSENT_COPY = (
+    "🤖 *Learn from my Kaizen entries — read-only*\n\n"
+    "Before I sample anything, here's exactly what will and won't happen:\n\n"
+    "✅ I'll read your existing entries to learn your writing style.\n"
+    "✅ Everything stays as a draft — nothing is submitted on your behalf.\n"
+    "❌ I won't edit, delete, sign, or share any of your entries.\n"
+    "❌ I won't create new entries from this step.\n"
+    "❌ I won't change your Kaizen settings or supervisor list.\n\n"
+    "If that's OK, pick a sample size next. You can cancel any time."
+)
+
+VOICE_KAIZEN_SAMPLE_COPY = (
+    "📚 *Pick a sample size*\n\n"
+    "Bigger samples give a steadier voice match. All options are read-only.\n\n"
+    "Choose how far back I should look:"
+)
+
+
+def _voice_choice_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🤖 Learn from Kaizen entries", callback_data="VOICE|path_kaizen")],
+        [InlineKeyboardButton("✍️ Add examples manually", callback_data="VOICE|path_manual")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
+    ])
+
+
+def _voice_rebuild_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🤖 Learn from Kaizen entries", callback_data="VOICE|path_kaizen")],
+        [InlineKeyboardButton("✍️ Add examples manually", callback_data="VOICE|path_manual")],
+        [InlineKeyboardButton("🗑️ Remove Profile", callback_data="VOICE|remove")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
+    ])
+
+
+def _voice_kaizen_consent_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ I consent — pick sample", callback_data="VOICE|kaizen_consent")],
+        [InlineKeyboardButton("🔙 Back", callback_data="VOICE|back_to_choice")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
+    ])
+
+
+def _voice_kaizen_sample_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📋 Recent 10 entries", callback_data="VOICE|kaizen_sample|recent_10")],
+        [InlineKeyboardButton("📅 Last 6 months", callback_data="VOICE|kaizen_sample|last_6m")],
+        [InlineKeyboardButton("📅 Last 12 months", callback_data="VOICE|kaizen_sample|last_12m")],
+        [InlineKeyboardButton("🔙 Back", callback_data="VOICE|path_kaizen")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
+    ])
+
+
+async def _voice_show_choice_screen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Show the two-path voice setup choice screen.
+
+    Used by ``/voice``, ``ACTION|voice``, and ``VOICE|back_to_choice``. Button
+    entries edit the current voice anchor in place so back-and-forth navigation
+    does not append duplicate messages; the typed ``/voice`` command sends a
+    fresh message because there is nothing to edit.
+    """
     user_id = update.effective_user.id
     existing = get_voice_profile(user_id)
-    _flow_done(context, "voice")  # fresh start — drop any stale anchor
+    context.user_data.pop("voice_examples", None)
+    context.user_data.pop("pending_voice_profile", None)
+    context.user_data.pop("voice_kaizen_consented", None)
 
-    if existing:
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔄 Rebuild Profile", callback_data="VOICE|rebuild"),
-             InlineKeyboardButton("🗑️ Remove Profile", callback_data="VOICE|remove")],
-            [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
-        ])
-        await _flow_msg(
-            update, context,
-            "✍️ You already have a voice profile active. Your drafts are styled to match your writing.\n\n"
-            "What would you like to do?",
-            reply_markup=keyboard,
-            flow_key="voice",
-        )
-        return AWAIT_VOICE_EXAMPLES
+    show = _flow_edit if update.callback_query is not None else _flow_msg
+    copy = VOICE_CHOICE_REBUILD_COPY if existing else VOICE_CHOICE_FRESH_COPY
+    keyboard = _voice_rebuild_keyboard() if existing else _voice_choice_keyboard()
 
-    await _flow_msg(
+    await show(
         update, context,
-        "⭐ *Voice Profile Setup*\n\n"
-        "This is the personalisation step that makes Portfolio Guru sound like you, not a generic bot.\n\n"
-        "Send 3-5 examples of real portfolio writing. Best examples are reflections or WPBA text you would actually submit.\n\n"
-        "You can send:\n"
-        "• pasted text — best quality\n"
-        "• screenshots/photos — I’ll extract the text\n"
-        "• voice notes — useful, but pasted examples are cleaner\n\n"
-        "I’ll learn your tone, structure, reflection depth and phrases. Send the first example now.",
+        copy,
         parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
-        ]),
+        reply_markup=keyboard,
         flow_key="voice",
     )
-    context.user_data["voice_examples"] = []
     return AWAIT_VOICE_EXAMPLES
+
+
+async def voice_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Start voice profile collection — /voice command or ACTION|voice."""
+    query = update.callback_query
+    if query is not None:
+        # Clear Telegram's spinner before any async work, otherwise the
+        # tapped button stays in a loading state until the query times out.
+        await query.answer()
+        # Adopt the tapped message as the new voice anchor so the choice
+        # screen edits in place instead of appending a duplicate message.
+        msg = query.message
+        if msg is not None:
+            context.user_data["_flow_anchor_voice"] = (msg.chat_id, msg.message_id)
+    else:
+        _flow_done(context, "voice")  # /voice command — drop any stale anchor
+    return await _voice_show_choice_screen(update, context)
 
 
 async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -2707,6 +2786,7 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
         if data == "VOICE|cancel":
             context.user_data.pop("voice_examples", None)
             context.user_data.pop("pending_voice_profile", None)
+            context.user_data.pop("voice_kaizen_consented", None)
             await _flow_edit(
                 update, context,
                 _cancelled_next_step_text(update.effective_user.id, "Voice profile setup cancelled"),
@@ -2715,6 +2795,53 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
             )
             _flow_done(context, "voice")
             return ConversationHandler.END
+
+        if data == "VOICE|back_to_choice":
+            context.user_data.pop("voice_kaizen_consented", None)
+            return await _voice_show_choice_screen(update, context)
+
+        if data == "VOICE|path_manual":
+            context.user_data["voice_examples"] = []
+            context.user_data.pop("voice_kaizen_consented", None)
+            # No "Back" here: a stale Back tap from this screen would wipe
+            # voice_examples on the way back to the choice screen, silently
+            # losing any examples typed in between. Users switch paths via
+            # Cancel + /voice instead.
+            await _flow_edit(
+                update, context,
+                VOICE_MANUAL_INTRO_COPY,
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
+                ]),
+                flow_key="voice",
+            )
+            return AWAIT_VOICE_EXAMPLES
+
+        if data == "VOICE|path_kaizen":
+            context.user_data.pop("voice_kaizen_consented", None)
+            await _flow_edit(
+                update, context,
+                VOICE_KAIZEN_CONSENT_COPY,
+                parse_mode="Markdown",
+                reply_markup=_voice_kaizen_consent_keyboard(),
+                flow_key="voice",
+            )
+            return AWAIT_VOICE_EXAMPLES
+
+        if data == "VOICE|kaizen_consent":
+            context.user_data["voice_kaizen_consented"] = True
+            await _flow_edit(
+                update, context,
+                VOICE_KAIZEN_SAMPLE_COPY,
+                parse_mode="Markdown",
+                reply_markup=_voice_kaizen_sample_keyboard(),
+                flow_key="voice",
+            )
+            return AWAIT_VOICE_EXAMPLES
+
+        if data.startswith("VOICE|kaizen_sample|"):
+            return await _voice_run_kaizen_sample(update, context, data)
 
         if data == "VOICE|preview_accept":
             profile_json = context.user_data.get("pending_voice_profile")
@@ -2773,18 +2900,10 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
             return ConversationHandler.END
 
         if data == "VOICE|rebuild":
-            context.user_data["voice_examples"] = []
-            context.user_data.pop("pending_voice_profile", None)
-            await _flow_edit(
-                update, context,
-                "🔄 Starting fresh. Send 3-5 examples of real portfolio writing. Pasted text is best; screenshots and voice notes also work.\n\n"
-                "Send your first example now.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
-                ]),
-                flow_key="voice",
-            )
-            return AWAIT_VOICE_EXAMPLES
+            # No current button emits VOICE|rebuild, but historical chat
+            # messages may still carry one. Redirect gracefully to the
+            # two-path choice screen instead of crashing.
+            return await _voice_show_choice_screen(update, context)
 
         if data == "VOICE|done":
             return await _build_voice_profile(update, context)
@@ -2891,6 +3010,80 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
             flow_key="voice",
         )
 
+    return AWAIT_VOICE_EXAMPLES
+
+
+async def _voice_run_kaizen_sample(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    callback_data: str,
+) -> int:
+    """Invoke the read-only Kaizen sampler for the chosen window.
+
+    Honours the consent gate so a stale button can never bypass the user's
+    explicit OK. Calls into ``voice_sampler.sample_kaizen_entries`` which is
+    isolated from any live Kaizen action.
+    """
+    from voice_sampler import (
+        SamplerStatus,
+        WINDOW_LABELS,
+        parse_window,
+        sample_kaizen_entries,
+    )
+
+    if not context.user_data.get("voice_kaizen_consented"):
+        await _flow_edit(
+            update, context,
+            "⚠️ I need your consent before sampling. Pick a path again:",
+            reply_markup=_voice_choice_keyboard(),
+            flow_key="voice",
+        )
+        return AWAIT_VOICE_EXAMPLES
+
+    token = callback_data.split("|", 2)[-1]
+    window = parse_window(token)
+    if window is None:
+        await _flow_edit(
+            update, context,
+            "⚠️ That sample option is no longer valid. Pick again:",
+            reply_markup=_voice_kaizen_sample_keyboard(),
+            flow_key="voice",
+        )
+        return AWAIT_VOICE_EXAMPLES
+
+    await _flow_edit(
+        update, context,
+        f"🔍 Reading {WINDOW_LABELS[window]} — read-only, no changes…",
+        flow_key="voice",
+    )
+
+    result = await sample_kaizen_entries(update.effective_user.id, window)
+
+    if result.status == SamplerStatus.OK and result.has_samples:
+        context.user_data["voice_examples"] = list(result.samples)
+        context.user_data.pop("voice_kaizen_consented", None)
+        return await _build_voice_profile(update, context)
+
+    if result.status == SamplerStatus.NO_SAMPLES:
+        body = (
+            f"📭 I couldn't find any entries in the {WINDOW_LABELS[window]} window. "
+            "Try a wider window or add examples manually."
+        )
+    else:
+        body = result.message or (
+            "Kaizen learning isn't switched on yet. Try adding examples manually instead."
+        )
+
+    await _flow_edit(
+        update, context,
+        body,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✍️ Add examples manually", callback_data="VOICE|path_manual")],
+            [InlineKeyboardButton("🔙 Back", callback_data="VOICE|back_to_choice")],
+            [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
+        ]),
+        flow_key="voice",
+    )
     return AWAIT_VOICE_EXAMPLES
 
 
@@ -3035,31 +3228,6 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 reply_markup=_build_next_step_keyboard(user_id),
             )
         return ConversationHandler.END
-
-    elif action == "voice":
-        # Trigger voice profile flow — simulate /voice command
-        existing = get_voice_profile(user_id)
-        if existing:
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Rebuild Profile", callback_data="VOICE|rebuild"),
-                 InlineKeyboardButton("🗑️ Remove Profile", callback_data="VOICE|remove")],
-                [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
-            ])
-            await query.message.reply_text(
-                "✍️ You already have a voice profile. What would you like to do next?",
-                reply_markup=keyboard
-            )
-        else:
-            await query.message.reply_text(
-                "⭐ *Voice Profile Setup*\n\n"
-                "Send 3-5 examples of real portfolio writing. Pasted text is best; screenshots and voice notes also work.\n\n"
-                "I’ll learn your tone, structure, reflection depth and phrases. Send your first example now.",
-                parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
-                ])
-            )
-            context.user_data["voice_examples"] = []
 
     elif action == "file":
         if not has_credentials(user_id):
@@ -6805,7 +6973,7 @@ def build_application() -> Application:
     application.add_handler(
         CallbackQueryHandler(
             handle_action_button,
-            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|setup$).+",
+            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|setup$|voice$).+",
         )
     )
     application.add_handler(CallbackQueryHandler(handle_feedback, pattern=r"^FEEDBACK\|"))
@@ -6813,7 +6981,12 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(handle_pushback, pattern=r"^PUSHBACK\|"))
 
     voice_conv = ConversationHandler(
-        entry_points=[CommandHandler("voice", voice_start)],
+        entry_points=[
+            CommandHandler("voice", voice_start),
+            # Settings → "Set up voice profile" tap also enters the conv so the
+            # follow-up VOICE|* clicks land in AWAIT_VOICE_EXAMPLES.
+            CallbackQueryHandler(voice_start, pattern=r"^ACTION\|voice$"),
+        ],
         states={
             AWAIT_VOICE_EXAMPLES: [
                 CallbackQueryHandler(voice_collect_example, pattern=r"^VOICE\|"),

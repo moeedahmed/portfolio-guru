@@ -2451,3 +2451,215 @@ class TestMessageStandardCopy:
             'Found bare "🎙️ Transcribing…" ack — voice acks should read '
             '"🎙️ Transcribing voice note…" per WORKFLOWS.md.'
         )
+
+
+class TestVoiceProfileTwoPathFlow:
+    """Settings → Set up voice profile must offer two clear paths:
+    Learn from Kaizen entries (read-only, consent-gated) or Add examples
+    manually (the existing 3-5 examples flow).
+    """
+
+    @pytest.mark.asyncio
+    async def test_voice_command_shows_two_path_choice_for_fresh_user(self):
+        from bot import AWAIT_VOICE_EXAMPLES, voice_start
+
+        sim = BotSimulator()
+        update = sim._make_text_update('/voice')
+        context = sim._make_context()
+
+        with patch('bot.get_voice_profile', return_value=None):
+            result = await voice_start(update, context)
+
+        assert result == AWAIT_VOICE_EXAMPLES
+        buttons = sim.get_last_buttons()
+        assert ('🤖 Learn from Kaizen entries', 'VOICE|path_kaizen') in buttons
+        assert ('✍️ Add examples manually', 'VOICE|path_manual') in buttons
+        assert ('❌ Cancel', 'VOICE|cancel') in buttons
+        text = sim.get_last_text() or ''
+        assert 'Voice Profile Setup' in text
+        # Fresh choice copy must NOT drop the user straight into the 3-5
+        # examples brief — that path is now opt-in via VOICE|path_manual.
+        assert 'Send 3-5 examples' not in text
+
+    @pytest.mark.asyncio
+    async def test_action_voice_routes_to_choice_screen(self):
+        from bot import AWAIT_VOICE_EXAMPLES, voice_start
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('ACTION|voice')
+        context = sim._make_context()
+
+        with patch('bot.get_voice_profile', return_value=None):
+            result = await voice_start(update, context)
+
+        assert result == AWAIT_VOICE_EXAMPLES
+        update.callback_query.answer.assert_awaited_once()
+        assert sim.messages_sent[-1][0] == 'bot_edit'
+        buttons = sim.get_last_buttons()
+        assert ('🤖 Learn from Kaizen entries', 'VOICE|path_kaizen') in buttons
+        assert ('✍️ Add examples manually', 'VOICE|path_manual') in buttons
+
+    @pytest.mark.asyncio
+    async def test_voice_command_for_existing_profile_offers_paths_and_remove(self):
+        from bot import AWAIT_VOICE_EXAMPLES, voice_start
+
+        sim = BotSimulator()
+        update = sim._make_text_update('/voice')
+        context = sim._make_context()
+
+        with patch('bot.get_voice_profile', return_value='{"voice_summary": "x"}'):
+            result = await voice_start(update, context)
+
+        assert result == AWAIT_VOICE_EXAMPLES
+        buttons = sim.get_last_buttons()
+        assert ('🤖 Learn from Kaizen entries', 'VOICE|path_kaizen') in buttons
+        assert ('✍️ Add examples manually', 'VOICE|path_manual') in buttons
+        assert ('🗑️ Remove Profile', 'VOICE|remove') in buttons
+        assert ('❌ Cancel', 'VOICE|cancel') in buttons
+
+    @pytest.mark.asyncio
+    async def test_manual_path_preserves_existing_3_to_5_examples_flow(self):
+        from bot import AWAIT_VOICE_EXAMPLES, voice_collect_example
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('VOICE|path_manual')
+        context = sim._make_context()
+
+        result = await voice_collect_example(update, context)
+
+        assert result == AWAIT_VOICE_EXAMPLES
+        assert context.user_data.get('voice_examples') == []
+        text = sim.get_last_text() or ''
+        assert 'Add examples manually' in text
+        assert 'Send 3-5 examples' in text
+        assert ('🔙 Back', 'VOICE|back_to_choice') not in sim.get_last_buttons()
+        # The Kaizen consent gate must NOT be implicitly set from the manual
+        # path — those are independent contracts.
+        assert context.user_data.get('voice_kaizen_consented') is None
+
+    @pytest.mark.asyncio
+    async def test_kaizen_path_shows_read_only_consent_screen(self):
+        from bot import AWAIT_VOICE_EXAMPLES, voice_collect_example
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('VOICE|path_kaizen')
+        context = sim._make_context()
+
+        result = await voice_collect_example(update, context)
+
+        assert result == AWAIT_VOICE_EXAMPLES
+        text = sim.get_last_text() or ''
+        # The consent copy must state both read-only guarantee AND what is
+        # explicitly not happening, so users can opt in with eyes open.
+        assert 'read-only' in text.lower()
+        assert "won't edit" in text.lower() or "won't submit" in text.lower() or "won't create" in text.lower()
+        assert 'nothing is submitted' in text.lower() or "won't submit" in text.lower() or "stays as a draft" in text.lower()
+
+        buttons = sim.get_last_buttons()
+        assert ('✅ I consent — pick sample', 'VOICE|kaizen_consent') in buttons
+        # Consent must not be pre-set just by viewing the screen.
+        assert context.user_data.get('voice_kaizen_consented') is None
+
+    @pytest.mark.asyncio
+    async def test_kaizen_consent_opens_sample_size_choice(self):
+        from bot import AWAIT_VOICE_EXAMPLES, voice_collect_example
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('VOICE|kaizen_consent')
+        context = sim._make_context()
+
+        result = await voice_collect_example(update, context)
+
+        assert result == AWAIT_VOICE_EXAMPLES
+        assert context.user_data.get('voice_kaizen_consented') is True
+        buttons = sim.get_last_buttons()
+        assert ('📋 Recent 10 entries', 'VOICE|kaizen_sample|recent_10') in buttons
+        assert ('📅 Last 6 months', 'VOICE|kaizen_sample|last_6m') in buttons
+        assert ('📅 Last 12 months', 'VOICE|kaizen_sample|last_12m') in buttons
+
+    @pytest.mark.asyncio
+    async def test_kaizen_sample_requires_consent_first(self):
+        """Stale sample-pick buttons must not bypass the consent gate."""
+        from bot import AWAIT_VOICE_EXAMPLES, voice_collect_example
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('VOICE|kaizen_sample|recent_10')
+        context = sim._make_context()
+        # No consent set — simulate a stale callback.
+
+        with patch('voice_sampler.sample_kaizen_entries',
+                   new_callable=AsyncMock) as sampler:
+            result = await voice_collect_example(update, context)
+            sampler.assert_not_called()
+
+        assert result == AWAIT_VOICE_EXAMPLES
+        text = (sim.get_last_text() or '').lower()
+        assert 'consent' in text
+
+    @pytest.mark.asyncio
+    async def test_kaizen_sample_invokes_sampler_without_live_browser(self):
+        """The flow must call the sampler boundary, not touch Kaizen directly."""
+        from bot import AWAIT_VOICE_EXAMPLES, voice_collect_example
+        from voice_sampler import SampleWindow, SamplerResult, SamplerStatus
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('VOICE|kaizen_sample|recent_10')
+        context = sim._make_context()
+        context.user_data['voice_kaizen_consented'] = True
+
+        fake_result = SamplerResult(
+            status=SamplerStatus.NOT_AVAILABLE,
+            window=SampleWindow.RECENT_10,
+            message='Kaizen learning isn\'t switched on yet.',
+        )
+        with patch('voice_sampler.sample_kaizen_entries',
+                   new_callable=AsyncMock, return_value=fake_result) as sampler:
+            result = await voice_collect_example(update, context)
+            sampler.assert_awaited_once()
+
+        assert result == AWAIT_VOICE_EXAMPLES
+        text = sim.get_last_text() or ''
+        assert "isn't switched on yet" in text or 'manually' in text
+        buttons = sim.get_last_buttons()
+        assert ('✍️ Add examples manually', 'VOICE|path_manual') in buttons
+
+    @pytest.mark.asyncio
+    async def test_voice_sampler_uses_mocked_read_only_runner(self):
+        """Normal tests must not touch live Kaizen; the runner is mockable."""
+        from voice_sampler import SampleWindow, SamplerStatus, sample_kaizen_entries
+
+        with patch(
+            'voice_sampler._run_browser_harness',
+            return_value={'status': 'ok', 'samples': ['Reflective example text']},
+        ) as runner:
+            result = await sample_kaizen_entries(123, SampleWindow.RECENT_10)
+
+        runner.assert_called_once()
+        assert result.status == SamplerStatus.OK
+        assert result.samples == ['Reflective example text']
+
+    def test_voice_sampler_browser_script_is_read_only(self):
+        from voice_sampler import _browser_script
+
+        script = _browser_script(10).lower()
+        forbidden = ['submit(', '.click(', 'delete', 'save as draft', 'send to assessor', 'set_react_value', 'fill_input']
+        offenders = [needle for needle in forbidden if needle in script]
+        assert not offenders, "voice sampler script must stay read-only: " + ", ".join(offenders)
+
+    @pytest.mark.asyncio
+    async def test_back_to_choice_drops_consent_state(self):
+        from bot import AWAIT_VOICE_EXAMPLES, voice_collect_example
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('VOICE|back_to_choice')
+        context = sim._make_context()
+        context.user_data['voice_kaizen_consented'] = True
+
+        with patch('bot.get_voice_profile', return_value=None):
+            result = await voice_collect_example(update, context)
+
+        assert result == AWAIT_VOICE_EXAMPLES
+        assert context.user_data.get('voice_kaizen_consented') is None
+        buttons = sim.get_last_buttons()
+        assert ('🤖 Learn from Kaizen entries', 'VOICE|path_kaizen') in buttons
+        assert ('✍️ Add examples manually', 'VOICE|path_manual') in buttons
