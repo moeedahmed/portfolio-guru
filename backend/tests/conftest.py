@@ -12,6 +12,28 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "live: live Telegram tests (requires personal account session)")
     config.addinivalue_line("markers", "kaizen: live Kaizen integration tests (requires credentials, manual only)")
 
+
+@pytest.fixture(autouse=True)
+def _isolate_filing_artefacts(tmp_path, monkeypatch):
+    """Redirect tracked filing artefacts to per-test tmp paths.
+
+    filing_coverage.json and dom_learning_log.json are tracked in git, and the
+    deterministic Playwright source kaizen_form_filer.py is the only DOM map.
+    Tests that exercise filer_router.route_filing call record_run, which would
+    otherwise mutate the tracked coverage file. Auto-learning is feature-gated
+    in dom_learner, but we still null the paths here so a future caller that
+    sets PORTFOLIO_GURU_DOM_AUTOLEARN=1 in CI cannot rewrite tracked source.
+    """
+    coverage_path = tmp_path / "filing_coverage.json"
+    learning_log_path = tmp_path / "dom_learning_log.json"
+    filer_copy = tmp_path / "kaizen_form_filer.py"
+
+    monkeypatch.setenv("PORTFOLIO_GURU_FILING_COVERAGE_PATH", str(coverage_path))
+    monkeypatch.setenv("PORTFOLIO_GURU_DOM_LEARNING_LOG_PATH", str(learning_log_path))
+    monkeypatch.setenv("PORTFOLIO_GURU_KAIZEN_FILER_PATH", str(filer_copy))
+    monkeypatch.delenv("PORTFOLIO_GURU_DOM_AUTOLEARN", raising=False)
+    yield
+
 @pytest.fixture
 def mock_update():
     """Fake Telegram update — simulates a user sending a message."""

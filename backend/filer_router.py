@@ -95,6 +95,8 @@ async def route_filing(
     form_url: Optional[str] = None,
     submit: bool = False,
     reuse_draft: bool = False,
+    attachment_path: Optional[str] = None,
+    attachment_drive_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Route a filing request to the appropriate filer.
@@ -108,6 +110,12 @@ async def route_filing(
         form_name: Human-readable form name (for browser-use)
         platform_url: Override login URL (for unknown platforms)
         form_url: Direct URL to form (for browser-use with known form URLs)
+        attachment_path: Local file path to upload (deterministic Kaizen path only).
+        attachment_drive_url: Drive URL the filer downloads then uploads
+            (deterministic Kaizen path only). Both attachment params are
+            forwarded to file_to_kaizen; supplying them on the browser-use
+            path returns an unsupported error rather than silently dropping
+            the attachment.
 
     Returns:
         {
@@ -153,7 +161,17 @@ async def route_filing(
         else:
             # Has a DOM mapping — always try Playwright, never escalate
             logger.info(f"Using deterministic filer for {platform}/{form_type}")
-            result = await _route_deterministic(platform_lower, form_type, fields, credentials, curriculum_links, submit=submit, reuse_draft=reuse_draft)
+            result = await _route_deterministic(
+                platform_lower,
+                form_type,
+                fields,
+                credentials,
+                curriculum_links,
+                submit=submit,
+                reuse_draft=reuse_draft,
+                attachment_path=attachment_path,
+                attachment_drive_url=attachment_drive_url,
+            )
 
             # Record and return regardless of status
             # If partial, the DOM map needs fixing — return it as-is
@@ -162,7 +180,39 @@ async def route_filing(
                 logger.warning(f"Playwright partial for {form_type} (has DOM map) — skipped: {result.get('skipped', [])}")
             return result
 
-    # Browser-use path (forms without DOM mappings + unknown platforms)
+    # Browser-use path (forms without DOM mappings + unknown platforms).
+    # Hard guard: a form with a DOM mapping must never reach this branch. The
+    # deterministic block above always returns when has_dom_mapping is True,
+    # so this is defence-in-depth against a future refactor accidentally
+    # falling through.
+    if has_dom_mapping:
+        logger.error(
+            "Refusing to escalate %s/%s to browser-use: form has a DOM mapping",
+            platform,
+            form_type,
+        )
+        return {
+            "status": "failed",
+            "filled": [],
+            "skipped": list(fields.keys()),
+            "error": (
+                f"Internal routing error: {form_type} has a DOM mapping but was "
+                "routed to browser-use. Refused to escalate."
+            ),
+            "method": "deterministic",
+        }
+    if attachment_path or attachment_drive_url:
+        return {
+            "status": "failed",
+            "filled": [],
+            "skipped": list(fields.keys()),
+            "error": (
+                f"Attachments are not supported on the browser-use path "
+                f"(form_type={form_type!r}). Build a DOM mapping for this form "
+                "or remove attachment_path/attachment_drive_url."
+            ),
+            "method": "browser-use",
+        }
     logger.info(f"Using browser-use filer for {platform}/{form_type}")
     resolved_url = platform_url or (platform_config or {}).get("login_url")
     if not resolved_url:
@@ -216,6 +266,8 @@ async def _route_deterministic(
     curriculum_links: Optional[List[str]],
     submit: bool = False,
     reuse_draft: bool = False,
+    attachment_path: Optional[str] = None,
+    attachment_drive_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Route to the deterministic Playwright filer."""
     if platform == "kaizen":
@@ -228,6 +280,8 @@ async def _route_deterministic(
             curriculum_links=curriculum_links,
             submit=submit,
             reuse_draft=reuse_draft,
+            attachment_path=attachment_path,
+            attachment_drive_url=attachment_drive_url,
         )
         result["method"] = "deterministic"
         return result

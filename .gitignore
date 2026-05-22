@@ -54,6 +54,5 @@ user-data-dir/
 
 # One-off local helper scripts
 backend/dump_ticket.py
-backend/fill_one.py
 backend/tick_kcs_only.py
 backend/ensure_chrome.sh

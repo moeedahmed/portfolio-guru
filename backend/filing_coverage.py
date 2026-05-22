@@ -2,17 +2,37 @@
 Filing coverage tracker — tracks how many times each form has been filed
 and field fill rates. Used by filer_router.py to decide between Playwright
 and browser-use.
+
+Coverage is runtime state, not source code. The live bot writes to
+~/.openclaw/data/portfolio-guru/filing_coverage.json (alongside the SQLite
+store, drafts, and bot persistence) so normal runs never dirty tracked
+files. Tests set PORTFOLIO_GURU_FILING_COVERAGE_PATH via conftest to
+redirect writes to a per-test tmp file.
 """
 
 import json
 import logging
+import os
 from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-COVERAGE_PATH = Path(__file__).parent / "filing_coverage.json"
+_RUNTIME_DATA_DIR = Path.home() / ".openclaw" / "data" / "portfolio-guru"
+_DEFAULT_COVERAGE_PATH = _RUNTIME_DATA_DIR / "filing_coverage.json"
+
+
+def _resolve_coverage_path() -> Path:
+    """Read PORTFOLIO_GURU_FILING_COVERAGE_PATH per call so tests can override."""
+    override = os.environ.get("PORTFOLIO_GURU_FILING_COVERAGE_PATH")
+    if override:
+        return Path(override)
+    return _DEFAULT_COVERAGE_PATH
+
+
+# Back-compat: any caller reading COVERAGE_PATH directly gets the live default.
+COVERAGE_PATH = _DEFAULT_COVERAGE_PATH
 
 # Fields considered "important" — low fill rates here trigger browser-use
 IMPORTANT_FIELDS = {
@@ -27,10 +47,11 @@ CURRICULUM_FILL_THRESHOLD = 0.8
 
 def load_coverage() -> Dict[str, Any]:
     """Read filing_coverage.json. Returns empty dict if missing."""
-    if not COVERAGE_PATH.exists():
+    path = _resolve_coverage_path()
+    if not path.exists():
         return {}
     try:
-        return json.loads(COVERAGE_PATH.read_text())
+        return json.loads(path.read_text())
     except (json.JSONDecodeError, OSError) as e:
         logger.warning(f"Could not load coverage data: {e}")
         return {}
@@ -38,8 +59,10 @@ def load_coverage() -> Dict[str, Any]:
 
 def _save_coverage(data: Dict[str, Any]) -> None:
     """Write coverage data back to disk."""
+    path = _resolve_coverage_path()
     try:
-        COVERAGE_PATH.write_text(json.dumps(data, indent=2))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2))
     except OSError as e:
         logger.error(f"Could not save coverage data: {e}")
 

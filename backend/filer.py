@@ -1,3 +1,22 @@
+"""
+Legacy browser-use CBD filer — DEPRECATED.
+
+This module pre-dates filer_router.py. It embeds credentials directly in the
+LLM prompt, which violates the filing routing discipline described in
+AGENTS.md (browser-use must use a CDP-connected Chrome profile with the saved
+session, never inject credentials into LLM prompts).
+
+The live Telegram bot routes all filings through bot.handle_approval_approve
+→ filer_router.route_filing. The only remaining caller of file_cbd_to_kaizen
+is the legacy FastAPI /api/file route in main.py, which is not started by the
+launchd service (start-bot.sh → run_local.sh → python bot.py).
+
+Calls to file_cbd_to_kaizen now raise NotImplementedError unless the explicit
+opt-in env var PORTFOLIO_GURU_ALLOW_LEGACY_FILER=1 is set. Operators who need
+the legacy path for a one-off must set the env var, accept the credential-in-
+prompt risk, and not commit that change.
+"""
+
 import asyncio
 import os
 import base64
@@ -19,11 +38,21 @@ async def file_cbd_to_kaizen(
     password: str,
 ) -> tuple[str, List[ActionStep], Optional[str], Optional[str]]:
     """
-    File a CBD entry to Kaizen using browser-use.
+    DEPRECATED. File a CBD entry to Kaizen using browser-use.
+
+    Use filer_router.route_filing instead. This entrypoint embeds credentials
+    in the LLM prompt and is retained only for the legacy /api/file FastAPI
+    route. Set PORTFOLIO_GURU_ALLOW_LEGACY_FILER=1 to unlock it.
 
     Returns: (status, action_log, screenshot_base64, assessor_warning)
     status: "success" | "partial" | "failed"
     """
+    if os.environ.get("PORTFOLIO_GURU_ALLOW_LEGACY_FILER") != "1":
+        raise NotImplementedError(
+            "filer.file_cbd_to_kaizen is deprecated. Route filings through "
+            "filer_router.route_filing. Set PORTFOLIO_GURU_ALLOW_LEGACY_FILER=1 "
+            "to opt in to the legacy credentials-in-prompt path."
+        )
     from browser_use import Agent
     from browser_use.browser import BrowserProfile, BrowserSession
     from browser_use.llm.google.chat import ChatGoogle

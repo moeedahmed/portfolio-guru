@@ -5,10 +5,23 @@ and patches FORM_FIELD_MAP in kaizen_filer.py automatically.
 After each browser-use filing, compares discovered UUIDs against the
 existing Playwright mapping. New fields are added to FORM_FIELD_MAP
 so future Playwright runs can fill them deterministically.
+
+Auto-patching of tracked source is OFF by default. Set
+PORTFOLIO_GURU_DOM_AUTOLEARN=1 to enable it for explicit ops runs.
+Without the flag, learn_from_browser_use_run is a no-op so neither
+ordinary runtime filings nor tests can mutate tracked source files.
+
+The learning log is runtime state; when autolearn is opted in, it writes
+to ~/.openclaw/data/portfolio-guru/dom_learning_log.json by default.
+Override via PORTFOLIO_GURU_DOM_LEARNING_LOG_PATH (tests redirect to tmp).
+KAIZEN_FILER_PATH still resolves to the tracked kaizen_form_filer.py
+source — patching that file is the whole point of autolearn, so the
+opt-in flag, not the path, is the safety boundary.
 """
 
 import json
 import logging
+import os
 import re
 from datetime import date
 from pathlib import Path
@@ -16,24 +29,49 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
+_RUNTIME_DATA_DIR = Path.home() / ".openclaw" / "data" / "portfolio-guru"
+
+
+def _autolearn_enabled() -> bool:
+    """Auto-patching of tracked source must be explicitly opted in."""
+    return os.environ.get("PORTFOLIO_GURU_DOM_AUTOLEARN") == "1"
+
+
+def _resolve_kaizen_filer_path() -> Path:
+    override = os.environ.get("PORTFOLIO_GURU_KAIZEN_FILER_PATH")
+    if override:
+        return Path(override)
+    return Path(__file__).parent / "kaizen_form_filer.py"
+
+
+def _resolve_learning_log_path() -> Path:
+    override = os.environ.get("PORTFOLIO_GURU_DOM_LEARNING_LOG_PATH")
+    if override:
+        return Path(override)
+    return _RUNTIME_DATA_DIR / "dom_learning_log.json"
+
+
 KAIZEN_FILER_PATH = Path(__file__).parent / "kaizen_form_filer.py"
-DOM_LEARNING_LOG_PATH = Path(__file__).parent / "dom_learning_log.json"
+DOM_LEARNING_LOG_PATH = _RUNTIME_DATA_DIR / "dom_learning_log.json"
 
 
 def _load_learning_log() -> list:
     """Load existing learning log entries."""
-    if not DOM_LEARNING_LOG_PATH.exists():
+    path = _resolve_learning_log_path()
+    if not path.exists():
         return []
     try:
-        return json.loads(DOM_LEARNING_LOG_PATH.read_text())
+        return json.loads(path.read_text())
     except (json.JSONDecodeError, OSError):
         return []
 
 
 def _save_learning_log(entries: list) -> None:
     """Persist learning log."""
+    path = _resolve_learning_log_path()
     try:
-        DOM_LEARNING_LOG_PATH.write_text(json.dumps(entries, indent=2))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(entries, indent=2))
     except OSError as e:
         logger.error(f"Could not save DOM learning log: {e}")
 
@@ -59,8 +97,9 @@ def _patch_form_field_map(form_type: str, new_fields: Dict[str, str]) -> bool:
     if not new_fields:
         return False
 
+    path = _resolve_kaizen_filer_path()
     try:
-        source = KAIZEN_FILER_PATH.read_text()
+        source = path.read_text()
     except OSError as e:
         logger.error(f"Could not read kaizen_filer.py: {e}")
         return False
@@ -88,7 +127,7 @@ def _patch_form_field_map(form_type: str, new_fields: Dict[str, str]) -> bool:
     patched_source = source[:match.start()] + patched_block + source[match.end():]
 
     try:
-        KAIZEN_FILER_PATH.write_text(patched_source)
+        path.write_text(patched_source)
         logger.info(f"Patched FORM_FIELD_MAP.{form_type} with {len(new_fields)} new fields")
         return True
     except OSError as e:
@@ -104,14 +143,29 @@ async def learn_from_browser_use_run(
     Extract any new field UUIDs from a browser-use run result and patch
     kaizen_filer.py's FORM_FIELD_MAP.
 
+    Off by default — set PORTFOLIO_GURU_DOM_AUTOLEARN=1 to opt in. The
+    canonical pattern is to discover UUIDs via deliberate scraping/ops
+    tooling and review the diff before committing; silent runtime patching
+    of tracked source on every browser-use call is too risky for a private
+    beta whose live bot runs unattended.
+
     Args:
         form_type: Form short code (e.g. "QIAT")
         browser_use_result: Result dict from browser_filer.py, expected to
             contain "discovered_uuids": {"field_name": "uuid"}
 
     Returns:
-        Dict of newly learned field→UUID mappings (empty if nothing new).
+        Dict of newly learned field→UUID mappings (empty if nothing new or
+        if auto-learn is disabled).
     """
+    if not _autolearn_enabled():
+        logger.debug(
+            "DOM auto-learn disabled (PORTFOLIO_GURU_DOM_AUTOLEARN!=1) — "
+            "skipping patch for %s",
+            form_type,
+        )
+        return {}
+
     discovered = browser_use_result.get("discovered_uuids", {})
     if not discovered:
         logger.debug(f"No discovered_uuids in browser-use result for {form_type}")

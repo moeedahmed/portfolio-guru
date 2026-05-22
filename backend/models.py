@@ -63,7 +63,9 @@ class KaizenFillRequest(BaseModel):
     form_type: str
     fields: dict
     draft_uuid: Optional[str] = None
-    save_as_draft: bool = True
+    # Draft-only is the product invariant for non-bot entrypoints. Pydantic
+    # rejects any payload that tries to flip this to False.
+    save_as_draft: Literal[True] = True
 
 
 class KaizenFillResponse(BaseModel):

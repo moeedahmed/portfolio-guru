@@ -1127,6 +1127,27 @@ def _format_proof_report(
     return "\n".join(lines)
 
 
+def _format_failed_filing_summary(
+    error: str | None,
+    skipped: list,
+) -> str:
+    """Compact trust-layer summary for failed filing attempts."""
+    lines = [
+        "*What happened*",
+        "Saved in Kaizen: not confirmed",
+        "Final submission: not sent",
+        "Supervisor request: not sent",
+    ]
+    if skipped:
+        skipped_text = ", ".join(str(f).replace("_", " ") for f in skipped[:4])
+        if len(skipped) > 4:
+            skipped_text += f", +{len(skipped) - 4} more"
+        lines.append(f"Needs manual check: {skipped_text}")
+    if error:
+        lines.append(f"Blocker: {error}")
+    return "\n".join(lines)
+
+
 
 def _settings_view_components(
     user_id: int,
@@ -1621,6 +1642,9 @@ def _build_post_filing_keyboard(
     rows = [primary_row]
     if same_case_available:
         rows.append([InlineKeyboardButton("📋 File another case", callback_data="ACTION|file")])
+    elif status == "failed" or uncertain:
+        rows.append([InlineKeyboardButton("📋 File another case", callback_data="ACTION|file")])
+        rows.append([_BTN_CANCEL])
     elif status == "partial" and FORM_UUIDS.get(form_type):
         rows.append([InlineKeyboardButton("📋 File another case", callback_data="ACTION|file")])
     if status == "success":
@@ -2972,6 +2996,11 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         user_id,
         _case_review_state_snapshot(context),
     )
+
+    if action == "retry_filing":
+        context.user_data["retry_filing_requested"] = True
+        return await handle_approval_approve(update, context)
+
     await query.answer()
 
     if action == "setup":
@@ -5698,13 +5727,15 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         if platform == "kaizen" and FORM_UUIDS.get(form_type):
             kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS[form_type]}"
             recovery_block = recovery or "Try again, or open the form in Kaizen and fill it manually."
-            msg = f"❌ *Filing didn't complete — {FLOW_STATE_LABELS['blocked']}.*\n\n{recovery_block}\n\n[Open {form_name} manually in Kaizen]({kaizen_url}){proof_report}"
+            failed_summary = _format_failed_filing_summary(error, skipped)
+            msg = f"❌ *Filing didn't complete.*\n\n{recovery_block}\n\n[Open {form_name} manually in Kaizen]({kaizen_url})\n\n{failed_summary}"
             if not recovery and error:
                 msg += f"\n\n_Details: {error}_"
             status_line = "❌ Filing stopped."
         else:
             recovery_block = recovery or "Try again, or fill the form manually in your portfolio."
-            msg = f"❌ *Filing didn't complete — {FLOW_STATE_LABELS['blocked']}.*\n\n{recovery_block}{proof_report}"
+            failed_summary = _format_failed_filing_summary(error, skipped)
+            msg = f"❌ *Filing didn't complete.*\n\n{recovery_block}\n\n{failed_summary}"
             if not recovery and error:
                 msg += f"\n\n_Details: {error}_"
             status_line = "❌ Filing stopped."
@@ -5739,6 +5770,8 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             )
         except Exception:
             pass
+    if status == "failed" or uncertain_save:
+        return AWAIT_APPROVAL
     return ConversationHandler.END
 
 
@@ -6679,6 +6712,7 @@ def build_application() -> Application:
                 CallbackQueryHandler(handle_review_draft, pattern=r"^REVIEW\|draft$"),
                 CallbackQueryHandler(handle_approval_edit, pattern=r"^EDIT\|"),
                 CallbackQueryHandler(handle_amend_draft, pattern=r"^AMEND\|"),
+                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|retry_filing$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
                 MessageHandler(filters.VOICE, handle_approval_media_feedback),
@@ -6763,7 +6797,7 @@ def build_application() -> Application:
     application.add_handler(
         CallbackQueryHandler(
             handle_action_button,
-            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|retry_filing$|setup$).+",
+            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|setup$).+",
         )
     )
     application.add_handler(CallbackQueryHandler(handle_feedback, pattern=r"^FEEDBACK\|"))

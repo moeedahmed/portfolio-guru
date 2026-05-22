@@ -994,7 +994,7 @@ class TestFlowWalker:
 
     @pytest.mark.asyncio
     async def test_uncertain_save_keeps_draft_and_offers_compact_recovery(self, thin_draft):
-        from bot import handle_approval_approve
+        from bot import AWAIT_APPROVAL, handle_approval_approve
 
         sim = BotSimulator()
         update = sim._make_callback_update('APPROVE|draft')
@@ -1017,12 +1017,14 @@ class TestFlowWalker:
              }):
             result = await handle_approval_approve(update, context)
 
-        assert result == ConversationHandler.END
+        assert result == AWAIT_APPROVAL
         assert context.user_data.get('draft_data')
         assert 'may not have saved' in sim.get_last_text().lower()
         buttons = sim.get_last_buttons()
         assert ('👍 It worked', 'FEEDBACK|good|CBD|partial') not in buttons
         assert ("👎 Didn't work", 'FEEDBACK|bad|CBD|partial') not in buttons
+        assert ('📋 File another case', 'ACTION|file') in buttons
+        assert ('❌ Cancel', 'ACTION|cancel') in buttons
         assert ('🧰 More options', 'ACTION|post_file_more|CBD|partial') in buttons
 
     @pytest.mark.asyncio
@@ -1183,7 +1185,7 @@ class TestFlowWalker:
 
     @pytest.mark.asyncio
     async def test_failed_filing_uses_llm_recovery_copy(self, thin_draft):
-        from bot import handle_approval_approve
+        from bot import AWAIT_APPROVAL, handle_approval_approve
 
         sim = BotSimulator()
         update = sim._make_callback_update('APPROVE|draft')
@@ -1203,15 +1205,20 @@ class TestFlowWalker:
                  'error': 'Login failed',
              }), \
              patch('bot.compose_filing_recovery_copy', new=AsyncMock(return_value=recovery_line)):
-            await handle_approval_approve(update, context)
+            result = await handle_approval_approve(update, context)
 
         text = sim.get_last_text()
+        assert result == AWAIT_APPROVAL
         assert recovery_line in text
         assert "Filing didn't complete" in text
+        assert "Saved in Kaizen: not confirmed" in text
+        buttons = sim.get_last_buttons()
+        assert ('📋 File another case', 'ACTION|file') in buttons
+        assert ('❌ Cancel', 'ACTION|cancel') in buttons
 
     @pytest.mark.asyncio
     async def test_failed_filing_falls_back_to_static_when_llm_empty(self, thin_draft):
-        from bot import handle_approval_approve
+        from bot import AWAIT_APPROVAL, handle_approval_approve
 
         sim = BotSimulator()
         update = sim._make_callback_update('APPROVE|draft')
@@ -1229,11 +1236,81 @@ class TestFlowWalker:
                  'error': 'Something went wrong',
              }), \
              patch('bot.compose_filing_recovery_copy', new=AsyncMock(return_value="")):
-            await handle_approval_approve(update, context)
+            result = await handle_approval_approve(update, context)
 
         text = sim.get_last_text()
+        assert result == AWAIT_APPROVAL
         assert 'Try again' in text or 'manually' in text
         assert 'Something went wrong' in text
+
+    @pytest.mark.asyncio
+    async def test_failed_filing_try_again_reuses_active_draft(self, thin_draft):
+        from bot import AWAIT_APPROVAL, handle_approval_approve, handle_callback
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin_draft.form_type,
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+
+        route_filing = AsyncMock(side_effect=[
+            {
+                'status': 'failed',
+                'filled': [],
+                'skipped': [],
+                'method': 'deterministic',
+                'error': 'Save button not found or click failed',
+            },
+            {
+                'status': 'success',
+                'filled': ['date_of_encounter'],
+                'skipped': [],
+                'method': 'deterministic',
+            },
+        ])
+
+        with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.route_filing', new=route_filing), \
+             patch('bot.compose_filing_recovery_copy', new=AsyncMock(return_value='')):
+            first = await handle_approval_approve(sim._make_callback_update('APPROVE|draft'), context)
+            second = await handle_callback(sim._make_callback_update('ACTION|retry_filing'), context)
+
+        assert first == AWAIT_APPROVAL
+        assert route_filing.await_count == 2
+        assert route_filing.await_args_list[0].kwargs['reuse_draft'] is False
+        assert route_filing.await_args_list[1].kwargs['reuse_draft'] is True
+        assert second == ConversationHandler.END
+
+    @pytest.mark.asyncio
+    async def test_global_try_again_button_can_retry_after_conversation_end(self, thin_draft):
+        from bot import handle_action_button
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin_draft.form_type,
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+
+        route_filing = AsyncMock(return_value={
+            'status': 'success',
+            'filled': ['date_of_encounter'],
+            'skipped': [],
+            'method': 'deterministic',
+        })
+
+        with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.route_filing', new=route_filing):
+            result = await handle_action_button(sim._make_callback_update('ACTION|retry_filing'), context)
+
+        route_filing.assert_awaited_once()
+        assert route_filing.await_args.kwargs['reuse_draft'] is True
+        assert result == ConversationHandler.END
 
     @pytest.mark.asyncio
     async def test_natural_language_edit_applies_to_draft_and_keeps_approval(self, thin_draft):

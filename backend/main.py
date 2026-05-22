@@ -1,3 +1,14 @@
+"""
+Legacy FastAPI app for Portfolio Guru.
+
+The live bot runs in polling mode via launchd → start-bot.sh → run_local.sh
+→ python bot.py. This module is retained for the Docker/supervisord deploy
+path (backend/Dockerfile, backend/supervisord.conf) but the /api/file route
+calls the deprecated filer.file_cbd_to_kaizen and will raise unless the
+PORTFOLIO_GURU_ALLOW_LEGACY_FILER opt-in is set. Prefer filer_router for any
+new programmatic entrypoint — see AGENTS.md § Filing Routing Discipline.
+"""
+
 import os
 import base64
 from contextlib import asynccontextmanager
@@ -100,24 +111,38 @@ async def file_entry(request: FileRequest):
 
 @app.post("/api/kaizen/file", response_model=KaizenFillResponse)
 async def kaizen_file(request: KaizenFillRequest):
-    from kaizen_form_filer import fill_kaizen_form
+    """Programmatic Kaizen filing entrypoint — draft-only, routed via filer_router.
+
+    All filing flows through filer_router.route_filing (single source of truth
+    for routing — see AGENTS.md § Filing Routing Discipline). submit=False is
+    hard-coded; the KaizenFillRequest model already forbids save_as_draft=False
+    at the API boundary. draft_uuid on the request body is ignored — drafts are
+    a bot-side concept; programmatic callers create new drafts.
+    """
+    from filer_router import route_filing
 
     username = os.environ.get("KAIZEN_USERNAME")
     password = os.environ.get("KAIZEN_PASSWORD")
     if not username or not password:
         raise HTTPException(status_code=500, detail="Kaizen credentials not configured")
 
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    screenshot_path = f"/tmp/portfolio-guru-screenshots/kaizen-{request.form_type.lower()}-{ts}.png"
-    os.makedirs(os.path.dirname(screenshot_path), exist_ok=True)
-
-    result = await fill_kaizen_form(
+    result = await route_filing(
+        platform="kaizen",
         form_type=request.form_type,
         fields=request.fields,
-        username=username,
-        password=password,
-        draft_uuid=request.draft_uuid,
-        save_as_draft=request.save_as_draft,
-        screenshot_path=screenshot_path,
+        credentials={"username": username, "password": password},
+        submit=False,
     )
-    return KaizenFillResponse(**result)
+
+    errors: list[str] = []
+    if result.get("error"):
+        errors.append(result["error"])
+    errors.extend(result.get("errors", []))
+
+    return KaizenFillResponse(
+        status=result.get("status", "failed"),
+        filled=result.get("filled", []),
+        skipped=result.get("skipped", []),
+        errors=errors,
+        screenshot_path=result.get("screenshot") or result.get("screenshot_path"),
+    )
