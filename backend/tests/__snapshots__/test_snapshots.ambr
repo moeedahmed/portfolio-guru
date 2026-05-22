@@ -85,11 +85,13 @@
       ),
     ]),
     'text': '''
-      🩺 Portfolio Guru — WPBA drafts from rough notes.
+      🩺 Portfolio Guru — RCEM portfolio drafts from rough notes.
       
-      Send a case by text, voice, photo, or document. I’ll suggest the best forms, then draft only after you choose one.
+      Send a case by text, voice, photo, or document. I’ll match it to the right form (CBD, DOPS, Mini-CEX, ACAT, reflections, teaching, procedurals, and more) and draft only after you choose.
       
-      Your Kaizen login is encrypted and never shared.
+      I won’t invent clinical detail. Missing fields stay blank, and nothing is filed until you approve it.
+      
+      Your Kaizen login is encrypted and used only to save drafts — never shared.
       
       Tap 🔗 Connect to start.
     ''',

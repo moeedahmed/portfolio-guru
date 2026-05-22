@@ -33,10 +33,13 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         key="welcome_disconnected",
         message_class=MessageClass.FIXED,
         text=(
-            "🩺 Portfolio Guru — WPBA drafts from rough notes.\n\n"
-            "Send a case by text, voice, photo, or document. I’ll suggest the best forms, "
-            "then draft only after you choose one.\n\n"
-            "Your Kaizen login is encrypted and never shared.\n\n"
+            "🩺 Portfolio Guru — RCEM portfolio drafts from rough notes.\n\n"
+            "Send a case by text, voice, photo, or document. I’ll match it to the right form "
+            "(CBD, DOPS, Mini-CEX, ACAT, reflections, teaching, procedurals, and more) "
+            "and draft only after you choose.\n\n"
+            "I won’t invent clinical detail. Missing fields stay blank, and nothing is filed "
+            "until you approve it.\n\n"
+            "Your Kaizen login is encrypted and used only to save drafts — never shared.\n\n"
             "Tap 🔗 Connect to start."
         ),
         safety_critical=True,
@@ -46,7 +49,8 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         message_class=MessageClass.FIXED,
         text=(
             "🩺 Portfolio Guru is ready.\n\n"
-            "Send what happened — text, voice, photo, or document. Rough notes are enough."
+            "Send what happened — text, voice, photo, or document. Rough notes are enough; "
+            "I’ll only use what you send and won’t invent clinical detail."
         ),
         safety_critical=True,
     ),
@@ -56,6 +60,7 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         text=(
             "🩺 Portfolio Guru turns clinical notes into RCEM portfolio drafts.\n\n"
             "Flow: send case → pick form → review draft → save to Kaizen.\n\n"
+            "I won’t invent clinical detail — missing fields stay blank for you to complete.\n\n"
             "Nothing is filed until you approve it. Supervisor submission is always manual."
         ),
         safety_critical=True,
