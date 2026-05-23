@@ -28,6 +28,35 @@ def test_normalise_summary_extracts_uuid_and_state():
     assert summary.uuid == "12345678-1234-1234-1234-123456789abc"
     assert summary.section_view is True
     assert summary.state == "Pending"
+    # No fill_action key in the row → field stays None for backward compat.
+    assert summary.fill_action is None
+
+
+def test_normalise_summary_records_fill_action_true():
+    row = {
+        "title": "DOPS - (ST3-ST6 - 2025 update)",
+        "href": "https://kaizenep.com/events/view-section/ec49d6ab-d18e-4fe8-b53d-2a1ec89c41b7",
+        "state": None,
+        "fill_action": True,
+    }
+
+    summary = assessor_mapper._normalise_summary(row)
+
+    assert summary.fill_action is True
+    assert summary.state is None
+
+
+def test_normalise_summary_records_fill_action_false():
+    row = {
+        "title": "DOPS - (ST3-ST6 - 2025 update)",
+        "href": "https://kaizenep.com/events/view-section/50ee434b-completed-1234-1234-12345624f0ce",
+        "state": None,
+        "fill_action": False,
+    }
+
+    summary = assessor_mapper._normalise_summary(row)
+
+    assert summary.fill_action is False
 
 
 def test_redact_ticket_title_removes_owner_suffix():

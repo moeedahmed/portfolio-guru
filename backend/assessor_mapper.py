@@ -56,6 +56,11 @@ class AssessorTicketSummary:
     uuid: str | None = None
     state: str | None = None
     section_view: bool | None = None
+    # True  → queue row exposes a "Fill in" anchor/button (unfilled assessor section).
+    # False → queue row has no Fill in (filled, submitted, or completed).
+    # None  → extractor did not surface a signal (e.g. older fixtures); callers should
+    #         not treat this as a positive "filled" claim.
+    fill_action: bool | None = None
 
 
 @dataclass
@@ -115,12 +120,19 @@ def _event_uuid_from_href(href: str | None) -> tuple[str | None, bool | None]:
 
 def _normalise_summary(row: dict[str, Any]) -> AssessorTicketSummary:
     uuid, section_view = _event_uuid_from_href(row.get("href"))
+    raw_fill_action = row.get("fill_action")
+    fill_action: bool | None
+    if raw_fill_action is None:
+        fill_action = None
+    else:
+        fill_action = bool(raw_fill_action)
     return AssessorTicketSummary(
         title=row.get("title"),
         href=row.get("href"),
         uuid=uuid,
         state=row.get("state"),
         section_view=section_view,
+        fill_action=fill_action,
     )
 
 
@@ -186,18 +198,29 @@ async def _ensure_logged_in(page: Page, username: str = "", password: str = "") 
 
 
 async def extract_assessment_rows(page: Page, limit: int = 20) -> list[AssessorTicketSummary]:
-    """Extract visible assessment timeline rows without changing state."""
+    """Extract visible assessment timeline rows without changing state.
+
+    Read-only DOM inspection. The ``fill_action`` boolean records whether the
+    row exposes a Fill in anchor/button — we never click it. Ahmed Mahdi's
+    assessor queue does not render ``.event-section-progress-state`` so the
+    textual ``state`` is null on every row; ``fill_action`` is the reliable
+    unfilled signal there.
+    """
     rows = await page.evaluate(
         """(limit) => {
           const text = el => (el && el.textContent ? el.textContent.trim().replace(/\\s+/g, ' ') : null);
+          const FILL_RE = /^\\s*fill\\s*in\\s*$/i;
           return Array.from(document.querySelectorAll('.row.event-inner')).slice(0, limit).map(r => {
             const a = r.querySelector('a[router-link], a[href*="/events/"]');
             const titleEl = r.querySelector('h2.entry-title, .entry-title');
             const stateEl = r.querySelector('.event-section-progress-state');
+            const fillAnchor = r.querySelector('a[href*="/events/fillin/"]');
+            const fillByText = !fillAnchor && Array.from(r.querySelectorAll('a, button')).some(el => FILL_RE.test(el.textContent || ''));
             return {
               title: text(titleEl || a),
               href: a ? a.href : null,
-              state: text(stateEl)
+              state: text(stateEl),
+              fill_action: Boolean(fillAnchor) || fillByText
             };
           }).filter(r => r.title || r.href);
         }""",

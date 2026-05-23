@@ -759,3 +759,113 @@ FORM_SCHEMAS = {
         ]
     },
 }
+
+
+# ─── Clinical Supervisor (assessor-side) schemas ───────────────────────────
+# These describe the fields the assessor (supervisor) fills in. They are
+# distinct from FORM_SCHEMAS, which describes the trainee-entered fields on the
+# same physical Kaizen form. Source: discovery against Ahmed Mahdi's queue and
+# completed-ticket samples — see docs/clinical-supervisor-architecture.md.
+
+# RCEM Entrustment Scale (5 levels) — used by CBD, DOPS, Mini-CEX assessors.
+ENTRUSTMENT_SCALE_OPTIONS = [
+    "Level 1 - I had to do",
+    "Level 2 - I had to talk them through",
+    "Level 3 - I had to prompt",
+    "Level 4 - I needed to be there but did not need to prompt",
+    "Level 5 - I did not need to be there",
+]
+
+# 5-point performance scale used for ESLE NTS ratings and QIAT SLO 11.
+NTS_RATING_OPTIONS = [
+    "1 - Below expected level",
+    "2 - Borderline",
+    "3 - Meets expected level",
+    "4 - Above expected level",
+    "5 - Well above expected level",
+]
+
+
+# Shared assessor section for CBD / DOPS / Mini-CEX.
+# Field labels match the Kaizen UI text captured live on 2026-05-23 in Ahmed
+# Mahdi's completed DOPS ticket (docs/assessor-mapping/raw-output.json index 8,
+# probe.json `DOPS_filled`). CBD and Mini-CEX share the same assessor shape per
+# docs/clinical-supervisor-architecture.md; that assertion is unverified by the
+# current probe (no completed CBD or Mini-CEX assessor section captured) so any
+# label drift on those two should be reconciled before live filing.
+_CBD_DOPS_MINICEX_ASSESSOR_FIELDS = [
+    {"key": "assessor_registration_number", "label": "Assessor Registration Number", "type": "text",     "required": True},
+    {"key": "assessor_job_title",           "label": "Job title",                    "type": "text",     "required": True},
+    {"key": "assessor_other_specify",       "label": "If other, please specify",     "type": "text",     "required": False,
+     "conditional_required_when": {"assessor_job_title": "Other"}},
+    {"key": "entrustment_scale",            "label": "Entrustment Scale",            "type": "dropdown", "required": True,
+     "options": ENTRUSTMENT_SCALE_OPTIONS},
+    {"key": "feedback",                     "label": "Feedback",                     "type": "text",     "required": True},
+    {"key": "recommendation",               "label": "Recommendation for further learning or development", "type": "text", "required": True},
+]
+
+
+ASSESSOR_FORM_SCHEMAS = {
+
+    "CBD": {
+        "name": "Case-Based Discussion — Assessor Section",
+        "fields": list(_CBD_DOPS_MINICEX_ASSESSOR_FIELDS),
+    },
+
+    "DOPS": {
+        "name": "Direct Observation of Procedural Skills — Assessor Section",
+        "fields": list(_CBD_DOPS_MINICEX_ASSESSOR_FIELDS),
+    },
+
+    "MINI_CEX": {
+        "name": "Mini-Clinical Evaluation Exercise — Assessor Section",
+        "fields": list(_CBD_DOPS_MINICEX_ASSESSOR_FIELDS),
+    },
+
+    "QIAT": {
+        "name": "Quality Improvement Assessment Tool — Assessor Section",
+        "fields": [
+            {"key": "feedback_on_performance", "label": "Feedback on clinician performance", "type": "text", "required": True},
+            {"key": "learning_points",         "label": "Learning points",                   "type": "text", "required": True},
+            {"key": "recommendation",          "label": "Recommendation",                    "type": "text", "required": True},
+            {"key": "slo11_performance_level", "label": "SLO 11 performance level",          "type": "dropdown", "required": True,
+             "options": NTS_RATING_OPTIONS},
+            {"key": "assessor_name",                "label": "Assessor name",                "type": "text", "required": True},
+            {"key": "assessor_registration_number", "label": "Assessor Registration Number", "type": "text", "required": True},
+            {"key": "assessor_email",               "label": "Assessor email",               "type": "text", "required": True},
+            {"key": "assessor_job_title",           "label": "Job title",                    "type": "text", "required": True},
+            {"key": "assessor_responsibility",      "label": "Assessor responsibility",      "type": "text", "required": False},
+            {"key": "assessment_date",              "label": "Date of assessment",           "type": "date", "required": True},
+        ],
+    },
+
+    "ESLE": {
+        "name": "Extended Supervised Learning Event — Assessor Section",
+        "fields": [
+            {"key": "event_sequence",       "label": "Records event sequence",      "type": "text", "required": True},
+            {"key": "clinical_cases",       "label": "Clinical cases covered",      "type": "text", "required": True},
+            {"key": "key_learning_points",  "label": "Key learning points",         "type": "text", "required": True},
+            # Non-technical skills ratings (per ANTS/RCEM ESLE framework)
+            {"key": "nts_maintenance_of_standards", "label": "Maintenance of standards", "type": "dropdown", "required": True, "options": NTS_RATING_OPTIONS},
+            {"key": "nts_observations",             "label": "Observations",             "type": "dropdown", "required": True, "options": NTS_RATING_OPTIONS},
+            {"key": "nts_workload_management",      "label": "Workload management",      "type": "dropdown", "required": True, "options": NTS_RATING_OPTIONS},
+            {"key": "nts_supervision",              "label": "Supervision",              "type": "dropdown", "required": True, "options": NTS_RATING_OPTIONS},
+            {"key": "nts_feedback",                 "label": "Feedback to team",         "type": "dropdown", "required": True, "options": NTS_RATING_OPTIONS},
+            {"key": "nts_team_building",            "label": "Team building",            "type": "dropdown", "required": True, "options": NTS_RATING_OPTIONS},
+            {"key": "nts_communication_quality",    "label": "Communication quality",    "type": "dropdown", "required": True, "options": NTS_RATING_OPTIONS},
+            {"key": "nts_authority",                "label": "Authority",                "type": "dropdown", "required": True, "options": NTS_RATING_OPTIONS},
+            {"key": "nts_assertiveness",            "label": "Assertiveness",            "type": "dropdown", "required": True, "options": NTS_RATING_OPTIONS},
+            {"key": "nts_option_generation",        "label": "Option generation",        "type": "dropdown", "required": True, "options": NTS_RATING_OPTIONS},
+            {"key": "nts_risk_assessment",          "label": "Risk assessment",          "type": "dropdown", "required": True, "options": NTS_RATING_OPTIONS},
+            {"key": "nts_decision_making",          "label": "Decision making",          "type": "dropdown", "required": True, "options": NTS_RATING_OPTIONS},
+            # Summary + learning objectives
+            {"key": "nts_summary",          "label": "Summary of NTS evaluation",   "type": "text", "required": True},
+            {"key": "learning_objectives",  "label": "Learning Objectives",         "type": "text", "required": True},
+            # Assessor identity block
+            {"key": "assessor_name",                "label": "Assessor name",                "type": "text", "required": True},
+            {"key": "assessor_registration_number", "label": "Assessor Registration Number", "type": "text", "required": True},
+            {"key": "assessor_job_title",           "label": "Job title",                    "type": "text", "required": True},
+            {"key": "assessment_date",              "label": "Date of assessment",           "type": "date", "required": True},
+        ],
+    },
+}

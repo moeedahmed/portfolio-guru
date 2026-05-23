@@ -42,6 +42,9 @@ us_case_*.json
 # Local private ticket workspace; sanitise before committing deliberately
 /tickets/
 
+# Assessor mapping artefacts — screenshots and raw JSON contain trainee PHI
+/docs/assessor-mapping/
+
 # Browser/session artefacts
 .playwright/
 playwright-report/
