@@ -2921,6 +2921,24 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
             )
             _flow_done(context, "voice")
             return ConversationHandler.END
+
+        # Long text = likely a clinical case, not a voice example.
+        # Exit voice setup and route to filing instead.
+        if len(text) > 300:
+            context.user_data.pop("voice_examples", None)
+            context.user_data.pop("pending_voice_profile", None)
+            context.user_data.pop("voice_kaizen_path_started", None)
+            _flow_done(context, "voice")
+            await _flow_msg(
+                update, context,
+                "You were in Voice Profile setup — I've exited so you can file your case. "
+                "Send it and I'll help you draft it.\n\n"
+                "You can come back to Voice Profile from /settings any time.",
+                reply_markup=_build_next_step_keyboard(update.effective_user.id),
+                flow_key="voice",
+            )
+            return ConversationHandler.END
+
         examples.append(text)
         via_typed_text = True
 

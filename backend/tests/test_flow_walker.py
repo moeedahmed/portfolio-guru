@@ -2948,6 +2948,25 @@ class TestVoiceProfileTwoPathFlow:
         assert not offenders, "voice sampler script must stay read-only: " + ", ".join(offenders)
 
     @pytest.mark.asyncio
+    async def test_long_text_in_voice_profile_exits_to_filing(self):
+        """Sending a case-length text while in voice setup should exit the flow."""
+        from bot import AWAIT_VOICE_EXAMPLES, voice_collect_example, ConversationHandler
+
+        sim = BotSimulator()
+        # Simulate user already in voice profile setup
+        update = sim._make_text_update("A 45-year-old man presents with chest pain radiating to the left arm for 2 hours. He is diaphoretic and hypotensive. ECG shows ST elevation in anterior leads. I diagnosed anterior STEMI and activated the cath lab team. Thrombolysis was contraindicated due to recent surgery. Bloods showed elevated troponin. He was started on dual antiplatelets and referred to cardiology for urgent angiography. The patient had a history of hypertension and type 2 diabetes.")
+        context = sim._make_context()
+        context.user_data["voice_examples"] = ["I like concise summaries"]
+
+        result = await voice_collect_example(update, context)
+
+        assert result == ConversationHandler.END
+        # Voice state should be cleaned up
+        assert context.user_data.get("voice_examples") is None
+        text = sim.get_last_text() or ""
+        assert "exited" in text.lower()
+
+    @pytest.mark.asyncio
     async def test_back_to_choice_drops_kaizen_path_state(self):
         from bot import AWAIT_VOICE_EXAMPLES, voice_collect_example
 
