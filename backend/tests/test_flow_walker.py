@@ -2550,7 +2550,6 @@ class TestVoiceProfileTwoPathFlow:
         assert 'Send 3-5 examples' in text
         assert [
             ('🔙 Back', 'VOICE|back_to_choice'),
-            ('❌ Cancel', 'VOICE|cancel'),
         ] in _last_button_rows(sim)
         # The Kaizen path gate must NOT be set from the manual path — those
         # are independent contracts.
@@ -2605,8 +2604,7 @@ class TestVoiceProfileTwoPathFlow:
         assert ('📅 Last 6 months', 'VOICE|kaizen_sample|last_6m') in buttons
         assert ('📅 Last 12 months', 'VOICE|kaizen_sample|last_12m') in buttons
         assert [
-            ('🔙 Back', 'VOICE|path_kaizen'),
-            ('❌ Cancel', 'VOICE|cancel'),
+            ('🔙 Back', 'VOICE|back_to_choice'),
         ] in _last_button_rows(sim)
         assert context.user_data.get('voice_kaizen_path_started') is True
 
@@ -2685,7 +2683,6 @@ class TestVoiceProfileTwoPathFlow:
         assert ('✍️ Add examples manually', 'VOICE|path_manual') in buttons
         assert [
             ('🔙 Back', 'VOICE|back_to_choice'),
-            ('❌ Cancel', 'VOICE|cancel'),
         ] in _last_button_rows(sim)
 
     @pytest.mark.asyncio

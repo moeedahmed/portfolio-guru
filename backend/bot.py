@@ -1030,6 +1030,7 @@ TRAINING_LEVEL_FORMS = {
 TRAINING_LEVEL_FORMS["ACCS"] = TRAINING_LEVEL_FORMS["ST3"]
 TRAINING_LEVEL_FORMS["INTERMEDIATE"] = TRAINING_LEVEL_FORMS["ST3"]
 TRAINING_LEVEL_FORMS["HIGHER"] = TRAINING_LEVEL_FORMS["ST6"]
+TRAINING_LEVEL_FORMS["ASSESSOR"] = TRAINING_LEVEL_FORMS["SAS"]
 
 # Kaizen stage groups. Legacy ST3/ST4/ST5/ST6 values are still accepted for old profiles.
 TRAINING_LEVEL_LABELS = {
@@ -1037,6 +1038,7 @@ TRAINING_LEVEL_LABELS = {
     "INTERMEDIATE": "Intermediate (ST3)",
     "HIGHER": "Higher (ST4–6)",
     "SAS": "SAS / Fellow",
+    "ASSESSOR": "SAS / Fellow / Consultant",
     "ST3": "Intermediate (ST3)",
     "ST4": "Higher (ST4–6)",
     "ST5": "Higher (ST4–6)",
@@ -2604,7 +2606,7 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 [InlineKeyboardButton("ACCS (ST1–2)", callback_data="SETLEVEL|ACCS")],
                 [InlineKeyboardButton("Intermediate (ST3)", callback_data="SETLEVEL|INTERMEDIATE")],
                 [InlineKeyboardButton("Higher (ST4+)", callback_data="SETLEVEL|HIGHER")],
-                [InlineKeyboardButton("Assessor / Non-Trainee", callback_data="SETLEVEL|ASSESSOR")],
+                [InlineKeyboardButton("SAS / Fellow / Consultant", callback_data="SETLEVEL|ASSESSOR")],
             ])
         )
         return AWAIT_TRAINING_LEVEL
@@ -2720,7 +2722,7 @@ def _voice_kaizen_sample_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📋 Recent 10 entries", callback_data="VOICE|kaizen_sample|recent_10")],
         [InlineKeyboardButton("📅 Last 6 months", callback_data="VOICE|kaizen_sample|last_6m")],
         [InlineKeyboardButton("📅 Last 12 months", callback_data="VOICE|kaizen_sample|last_12m")],
-        _nav_row("🔙 Back", "VOICE|path_kaizen", "❌ Cancel", "VOICE|cancel"),
+        [InlineKeyboardButton("🔙 Back", callback_data="VOICE|back_to_choice")],
     ])
 
 
@@ -2829,7 +2831,7 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
                 VOICE_MANUAL_INTRO_COPY,
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup([
-                    _nav_row("🔙 Back", "VOICE|back_to_choice", "❌ Cancel", "VOICE|cancel"),
+                    [InlineKeyboardButton("🔙 Back", callback_data="VOICE|back_to_choice")],
                 ]),
                 flow_key="voice",
             )
@@ -3007,7 +3009,7 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
             update, context,
             f"Got it — example {len(examples)} captured. Send {remaining} more so I can build a reliable voice profile.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
+                [InlineKeyboardButton("🔙 Back", callback_data="VOICE|back_to_choice")],
             ]),
             flow_key="voice",
         )
@@ -3087,7 +3089,7 @@ async def _voice_run_kaizen_sample(
         rows.append([InlineKeyboardButton("🔗 Reconnect Kaizen", callback_data="ACTION|setup")])
     rows.extend([
         [InlineKeyboardButton("✍️ Add examples manually", callback_data="VOICE|path_manual")],
-        _nav_row("🔙 Back", "VOICE|back_to_choice", "❌ Cancel", "VOICE|cancel"),
+        [InlineKeyboardButton("🔙 Back", callback_data="VOICE|back_to_choice")],
     ])
 
     await _flow_edit(
@@ -3434,7 +3436,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             [InlineKeyboardButton("Intermediate (ST3)", callback_data="SETLEVEL|INTERMEDIATE")],
             [InlineKeyboardButton("Higher (ST4–6)", callback_data="SETLEVEL|HIGHER")],
             [InlineKeyboardButton("SAS / Fellow", callback_data="SETLEVEL|SAS")],
-            [InlineKeyboardButton("Assessor / Non-Trainee", callback_data="SETLEVEL|ASSESSOR")],
+            [InlineKeyboardButton("SAS / Fellow / Consultant", callback_data="SETLEVEL|ASSESSOR")],
             [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
         ])
         await query.message.edit_text(
