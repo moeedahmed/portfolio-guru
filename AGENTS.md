@@ -136,3 +136,48 @@ Kaizen integration tests require `KAIZEN_LIVE_TESTS=1` even when credentials are
 ## Compatibility
 
 `CLAUDE.md` is a symlink to this file for Claude Code compatibility. Do not maintain duplicate long-form agent context files.
+
+## Product Direction
+
+### Portfolio Types
+There are exactly **three portfolio types** for users who file their own tickets:
+1. **ACCS (ST1–2)** — ACCS training level
+2. **Intermediate (ST3)** — ST3 training level
+3. **Higher (ST4–6)** — Higher specialty training
+
+SAS / Fellow doctors are assigned one of these three based on their competency level (Kaizen assigns them ACCS/Intermediate/Higher by level, not by job title).
+
+**There is no Consultant portfolio type.** Consultants do not file their own e-portfolio tickets in Kaizen — they become Clinical Supervisors.
+
+### Clinical Supervisor Mode (Next Major Feature)
+Once the filing aspect is complete, the next build is a **Clinical Supervisor mode** — a completely separate product role within Portfolio Guru.
+
+**Clinical Supervisor workflow:**
+1. Supervisor receives a Telegram notification when a new ticket is assigned to them for assessment
+2. Notification includes a button to open the ticket
+3. Ticket content rendered in Telegram for the supervisor to read
+4. Supervisor dictates/voices their assessment feedback as a Telegram conversation
+5. Bot converts the conversation into the "part two" assessment fields of the form
+6. Saved as a Kaizen draft
+7. Rest of the filing engine re-used
+
+**Notification layer (universal, benefits everyone):**
+- MSF invitations, cross-trainee assessments, any "form sent to you" scenario
+- Not Clinical Supervisor-only — benefits trainees receiving MSFs too
+- Inbound notification → open → read → respond → file as draft
+
+**Architecture note:** The Clinical Supervisor mode is a separate interaction pattern (inbound notif + read + assess) but shares ~80% of the filing engine. It needs its own trigger, UX, and form-context rendering. Treat as a separate feature track, not a portfolio type setting.
+
+### Auto-Detect Role Mapping
+```python
+role_map = {"hst": "HIGHER", "accs": "ACCS", "accs_intermediate": "INTERMEDIATE", "assessor": "HIGHER"}
+```
+`assessor` maps to `HIGHER` — the Clinical Supervisor account has no personal portfolio. For now, supervisor functionality is a separate feature track (see above).
+
+**Note:** The three portfolio types (ACCS, Intermediate, Higher) are the only valid options. SAS/Fellow doctors pick by their actual level. Consultants become Clinical Supervisors and don't file personal tickets.
+
+### Credentials Reference
+- `drmoeedahmed@gmail.com` — Higher Trainee (ST5). Full HST form set including 2025 updates, progression, CCT.
+- `mharisq79@gmail.com` — ACCS/Intermediate. ACCS-specific forms (EPA, ASAT, HALO, IAC).
+- `ahmed.mahdi@stgeorges.nhs.uk` — Clinical Supervisor. No personal portfolio ("You cannot create any events!"). Only supervisors trainees.
+- `drsanazehra@gmail.com` — SAS (Non-Trainee Higher). Same form set as Higher trainee minus progression/CCT forms.

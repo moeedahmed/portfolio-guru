@@ -1020,14 +1020,12 @@ TRAINING_LEVEL_FORMS = {
 TRAINING_LEVEL_FORMS["ACCS"] = TRAINING_LEVEL_FORMS["ST3"]
 TRAINING_LEVEL_FORMS["INTERMEDIATE"] = TRAINING_LEVEL_FORMS["ST3"]
 TRAINING_LEVEL_FORMS["HIGHER"] = TRAINING_LEVEL_FORMS["ST6"]
-TRAINING_LEVEL_FORMS["CONSULTANT"] = TRAINING_LEVEL_FORMS["ST6"]
 
 # Kaizen stage groups. Legacy ST3/ST4/ST5/ST6 values are still accepted for old profiles.
 TRAINING_LEVEL_LABELS = {
     "ACCS": "ACCS (ST1–2)",
     "INTERMEDIATE": "Intermediate (ST3)",
     "HIGHER": "Higher (ST4–6)",
-    "CONSULTANT": "Consultant (post-CCT)",
     "ST3": "Intermediate (ST3)",
     "ST4": "Higher (ST4–6)",
     "ST5": "Higher (ST4–6)",
@@ -2565,8 +2563,8 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # Auto-detect training level from engine
     detected_role = login_ok if isinstance(login_ok, str) else ""
-    role_map = {"hst": "HIGHER", "accs": "ACCS", "accs_intermediate": "INTERMEDIATE", "assessor": "CONSULTANT"}
-    label_map = {"hst": "Higher Specialist Trainee", "accs": "ACCS Trainee", "accs_intermediate": "ACCS + Intermediate Trainee", "assessor": "Consultant (post-CCT)"}
+    role_map = {"hst": "HIGHER", "accs": "ACCS", "accs_intermediate": "INTERMEDIATE", "assessor": "HIGHER"}
+    label_map = {"hst": "Higher Specialist Trainee", "accs": "ACCS Trainee", "accs_intermediate": "ACCS + Intermediate Trainee", "assessor": "Clinical Supervisor"}
     
     auto_level = role_map.get(detected_role)
     if auto_level:
@@ -2595,7 +2593,6 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 [InlineKeyboardButton("ACCS (ST1–2)", callback_data="SETLEVEL|ACCS")],
                 [InlineKeyboardButton("Intermediate (ST3)", callback_data="SETLEVEL|INTERMEDIATE")],
                 [InlineKeyboardButton("Higher (ST4–6)", callback_data="SETLEVEL|HIGHER")],
-                [InlineKeyboardButton("Consultant (post-CCT)", callback_data="SETLEVEL|CONSULTANT")],
             ])
         )
         return AWAIT_TRAINING_LEVEL
@@ -3424,7 +3421,6 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             [InlineKeyboardButton("ACCS (ST1–2)", callback_data="SETLEVEL|ACCS")],
             [InlineKeyboardButton("Intermediate (ST3)", callback_data="SETLEVEL|INTERMEDIATE")],
             [InlineKeyboardButton("Higher (ST4–6)", callback_data="SETLEVEL|HIGHER")],
-            [InlineKeyboardButton("Consultant (post-CCT)", callback_data="SETLEVEL|CONSULTANT")],
             [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
         ])
         await query.message.edit_text(

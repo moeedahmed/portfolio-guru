@@ -45,7 +45,7 @@ class TestTrainingLevelForms:
     def test_all_grades_defined(self):
         """All expected grades must exist."""
         from bot import TRAINING_LEVEL_FORMS
-        for grade in ["ST3", "ST4", "ST5", "ST6", "ACCS", "INTERMEDIATE", "HIGHER", "CONSULTANT"]:
+        for grade in ["ST3", "ST4", "ST5", "ST6", "ACCS", "INTERMEDIATE", "HIGHER"]:
             assert grade in TRAINING_LEVEL_FORMS, f"Grade {grade} missing"
 
 class TestCurriculumFilter:
