@@ -12,8 +12,8 @@ cannot create, edit, delete, submit, or send assessor actions.
 ## Current Slice
 
 1. Two-path choice screen at `/voice` and `ACTION|voice` — Learn from Kaizen
-   entries / Add examples manually / Cancel. Same screen for fresh + rebuild,
-   with Remove added when a profile already exists.
+   entries / Add examples manually / Back to settings. Same screen for fresh +
+   rebuild, with Remove added when a profile already exists.
 2. Manual path preserves the existing 3-5 examples flow verbatim.
 3. Kaizen path opens the sample-size picker directly (Recent 10, Last 6 months,
    Last 12 months), with the read-only guarantees stated in the first screen and

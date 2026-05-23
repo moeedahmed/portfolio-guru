@@ -2702,7 +2702,7 @@ def _voice_choice_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🤖 Learn from Kaizen entries", callback_data="VOICE|path_kaizen")],
         [InlineKeyboardButton("✍️ Add examples manually", callback_data="VOICE|path_manual")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
+        [InlineKeyboardButton("🔙 Back to settings", callback_data="VOICE|back_to_settings")],
     ])
 
 
@@ -2711,7 +2711,7 @@ def _voice_rebuild_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🤖 Learn from Kaizen entries", callback_data="VOICE|path_kaizen")],
         [InlineKeyboardButton("✍️ Add examples manually", callback_data="VOICE|path_manual")],
         [InlineKeyboardButton("🗑️ Remove Profile", callback_data="VOICE|remove")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
+        [InlineKeyboardButton("🔙 Back to settings", callback_data="VOICE|back_to_settings")],
     ])
 
 
@@ -2750,6 +2750,27 @@ async def _voice_show_choice_screen(update: Update, context: ContextTypes.DEFAUL
         flow_key="voice",
     )
     return AWAIT_VOICE_EXAMPLES
+
+
+async def _voice_show_settings_screen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user_id = update.effective_user.id
+    context.user_data.pop("voice_examples", None)
+    context.user_data.pop("pending_voice_profile", None)
+    context.user_data.pop("voice_kaizen_path_started", None)
+
+    try:
+        used = await get_cases_this_month(user_id)
+    except Exception:
+        used = 0
+    text, keyboard = _settings_view_components(
+        user_id,
+        tier=await get_user_tier(user_id),
+        used=used,
+        connected=has_credentials(user_id),
+    )
+    await _flow_edit(update, context, text, reply_markup=keyboard, flow_key="voice")
+    _flow_done(context, "voice")
+    return ConversationHandler.END
 
 
 async def voice_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -2797,19 +2818,18 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
             context.user_data.pop("voice_kaizen_path_started", None)
             return await _voice_show_choice_screen(update, context)
 
+        if data == "VOICE|back_to_settings":
+            return await _voice_show_settings_screen(update, context)
+
         if data == "VOICE|path_manual":
             context.user_data["voice_examples"] = []
             context.user_data.pop("voice_kaizen_path_started", None)
-            # No "Back" here: a stale Back tap from this screen would wipe
-            # voice_examples on the way back to the choice screen, silently
-            # losing any examples typed in between. Users switch paths via
-            # Cancel + /voice instead.
             await _flow_edit(
                 update, context,
                 VOICE_MANUAL_INTRO_COPY,
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("❌ Cancel", callback_data="VOICE|cancel")],
+                    _nav_row("🔙 Back", "VOICE|back_to_choice", "❌ Cancel", "VOICE|cancel"),
                 ]),
                 flow_key="voice",
             )

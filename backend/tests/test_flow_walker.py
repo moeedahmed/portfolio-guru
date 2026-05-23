@@ -2484,7 +2484,8 @@ class TestVoiceProfileTwoPathFlow:
         buttons = sim.get_last_buttons()
         assert ('🤖 Learn from Kaizen entries', 'VOICE|path_kaizen') in buttons
         assert ('✍️ Add examples manually', 'VOICE|path_manual') in buttons
-        assert ('❌ Cancel', 'VOICE|cancel') in buttons
+        assert ('🔙 Back to settings', 'VOICE|back_to_settings') in buttons
+        assert ('❌ Cancel', 'VOICE|cancel') not in buttons
         text = sim.get_last_text() or ''
         assert 'Voice Profile Setup' in text
         assert 'read-only' in text.lower()
@@ -2511,6 +2512,7 @@ class TestVoiceProfileTwoPathFlow:
         buttons = sim.get_last_buttons()
         assert ('🤖 Learn from Kaizen entries', 'VOICE|path_kaizen') in buttons
         assert ('✍️ Add examples manually', 'VOICE|path_manual') in buttons
+        assert ('🔙 Back to settings', 'VOICE|back_to_settings') in buttons
 
     @pytest.mark.asyncio
     async def test_voice_command_for_existing_profile_offers_paths_and_remove(self):
@@ -2528,7 +2530,8 @@ class TestVoiceProfileTwoPathFlow:
         assert ('🤖 Learn from Kaizen entries', 'VOICE|path_kaizen') in buttons
         assert ('✍️ Add examples manually', 'VOICE|path_manual') in buttons
         assert ('🗑️ Remove Profile', 'VOICE|remove') in buttons
-        assert ('❌ Cancel', 'VOICE|cancel') in buttons
+        assert ('🔙 Back to settings', 'VOICE|back_to_settings') in buttons
+        assert ('❌ Cancel', 'VOICE|cancel') not in buttons
 
     @pytest.mark.asyncio
     async def test_manual_path_preserves_existing_3_to_5_examples_flow(self):
@@ -2545,10 +2548,37 @@ class TestVoiceProfileTwoPathFlow:
         text = sim.get_last_text() or ''
         assert 'Add examples manually' in text
         assert 'Send 3-5 examples' in text
-        assert ('🔙 Back', 'VOICE|back_to_choice') not in sim.get_last_buttons()
+        assert [
+            ('🔙 Back', 'VOICE|back_to_choice'),
+            ('❌ Cancel', 'VOICE|cancel'),
+        ] in _last_button_rows(sim)
         # The Kaizen path gate must NOT be set from the manual path — those
         # are independent contracts.
         assert context.user_data.get('voice_kaizen_path_started') is None
+
+    @pytest.mark.asyncio
+    async def test_voice_choice_back_returns_to_settings(self):
+        from bot import ConversationHandler, voice_collect_example
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('VOICE|back_to_settings')
+        context = sim._make_context()
+        context.user_data['voice_examples'] = ['draft example']
+        context.user_data['voice_kaizen_path_started'] = True
+
+        with patch('bot.get_user_tier', new_callable=AsyncMock, return_value='free'), \
+             patch('bot.get_cases_this_month', new_callable=AsyncMock, return_value=1), \
+             patch('bot.has_credentials', return_value=True), \
+             patch('bot.get_curriculum', return_value='2025'), \
+             patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_voice_profile', return_value=None):
+            result = await voice_collect_example(update, context)
+
+        assert result == ConversationHandler.END
+        assert context.user_data.get('voice_examples') is None
+        assert context.user_data.get('voice_kaizen_path_started') is None
+        assert 'Your settings' in (sim.get_last_text() or '')
+        assert ('🔙 Back', 'ACTION|back_to_menu') in sim.get_last_buttons()
 
     @pytest.mark.asyncio
     async def test_kaizen_path_opens_sample_size_choice_with_read_only_copy(self):
@@ -2937,3 +2967,4 @@ class TestVoiceProfileTwoPathFlow:
         buttons = sim.get_last_buttons()
         assert ('🤖 Learn from Kaizen entries', 'VOICE|path_kaizen') in buttons
         assert ('✍️ Add examples manually', 'VOICE|path_manual') in buttons
+        assert ('🔙 Back to settings', 'VOICE|back_to_settings') in buttons
