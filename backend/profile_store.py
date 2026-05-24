@@ -236,3 +236,16 @@ def get_kaizen_role(telegram_user_id: int) -> Optional[str]:
     with Session(engine) as session:
         profile = _select_profile(session, telegram_user_id)
         return profile.kaizen_role if profile else None
+
+
+def list_users_by_kaizen_role(role: str) -> list[int]:
+    """Return Telegram user IDs whose cached Kaizen role matches ``role``.
+
+    Used by the supervisor scheduler to find assessor accounts without
+    iterating every profile row. Users whose ``kaizen_role`` is ``NULL``
+    are excluded.
+    """
+    with Session(engine) as session:
+        stmt = select(UserProfile).where(UserProfile.kaizen_role == role)
+        rows = session.scalars(stmt).all()
+        return [row.telegram_user_id for row in rows]

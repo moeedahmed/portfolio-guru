@@ -7037,6 +7037,14 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(handle_filing_feedback, pattern=r"^FILING\|feedback\|"))
     application.add_handler(CallbackQueryHandler(handle_pushback, pattern=r"^PUSHBACK\|"))
 
+    # Clinical Supervisor read-only callbacks (Open / Skip / Later on assessor
+    # notifications). Inert until a user is cached as kaizen_role=="assessor"
+    # by supervisor_workflow.set_role_if_better.
+    from supervisor_bot import CALLBACK_PATTERN as SUPERVISOR_CALLBACK_PATTERN, handle_supervisor_callback
+    application.add_handler(
+        CallbackQueryHandler(handle_supervisor_callback, pattern=SUPERVISOR_CALLBACK_PATTERN)
+    )
+
     voice_conv = ConversationHandler(
         entry_points=[
             CommandHandler("voice", voice_start),
@@ -7147,6 +7155,29 @@ def main():
 
     # Weekly nudge — every 7 days. first=86400 means don't fire on startup.
     application.job_queue.run_repeating(weekly_push, interval=604800, first=86400)
+
+    # Clinical Supervisor poll — read-only, inert unless there is at least
+    # one user with cached kaizen_role=="assessor" AND credentials AND a
+    # reachable CDP session. Trainee-only deployments stay silent.
+    from supervisor_bot import connect_cdp_page, send_supervisor_notification
+    from supervisor_scheduler import (
+        SUPERVISOR_POLL_FIRST_RUN_SECONDS,
+        SUPERVISOR_POLL_INTERVAL_SECONDS,
+        supervisor_poll_tick,
+    )
+
+    async def _supervisor_tick(context: ContextTypes.DEFAULT_TYPE) -> None:
+        await supervisor_poll_tick(
+            bot=context.bot,
+            connect_cdp=connect_cdp_page,
+            notify=send_supervisor_notification,
+        )
+
+    application.job_queue.run_repeating(
+        _supervisor_tick,
+        interval=SUPERVISOR_POLL_INTERVAL_SECONDS,
+        first=SUPERVISOR_POLL_FIRST_RUN_SECONDS,
+    )
 
     # Register commands so they appear in Telegram's "/" menu
     async def post_init(app):

@@ -152,7 +152,7 @@ Allowed during mapping:
   - extract read-only fields, tags, state, visible buttons
   - output PHI-free ticket shapes for mapping
 
-Backend integration landed in this slice:
+Backend integration landed earlier in the branch:
   - Account role cached per Telegram user (profile_store.kaizen_role)
     via supervisor_workflow.set_role_if_better — refuses to demote a
     known-good "assessor"/"trainee" cache to "unknown" on a flaky probe.
@@ -161,14 +161,31 @@ Backend integration landed in this slice:
   - supervisor_workflow.run_supervisor_poll is a callable, fully tested
     orchestrator: refreshes role, gates on role=="assessor", polls the
     queue via supervisor_poller, returns PHI-free
-    SupervisorNotificationPayload objects. Not yet scheduled.
+    SupervisorNotificationPayload objects.
   - supervisor_workflow.render_supervisor_notification_text /
-    render_supervisor_ticket_detail_text are pure formatters ready for
-    the bot to drop into a future /supervisor command.
+    render_supervisor_ticket_detail_text are pure formatters reused by
+    the live workflow.
+
+Live read-only supervisor workflow landed in this slice:
+  - supervisor_scheduler.supervisor_poll_tick — JobQueue tick every 5
+    minutes (first fire +5 min). Inert unless at least one user has
+    kaizen_role=="assessor" AND credentials AND a reachable CDP session
+    at localhost:18800. Per-user state file under
+    ~/.openclaw/data/portfolio-guru/supervisor/. Trainee-only deploys
+    stay silent.
+  - supervisor_bot.send_supervisor_notification — turns a PHI-free
+    payload into a Telegram message with Open / Skip / Later buttons
+    and stashes the payload in supervisor_notification_cache.
+  - supervisor_bot.handle_supervisor_callback — Open delegates to
+    assessor_reader.open_ticket_readonly (read-only); Skip / Later are
+    pure UI acknowledgements and never navigate to Kaizen.
+  - profile_store.list_users_by_kaizen_role — scheduler-facing query
+    helper used to short-circuit when no assessor users exist.
+  - Source scans assert the new modules never click Fill in / Save /
+    Submit / Sign / Approve / Delete / Send (test_supervisor_scheduler,
+    test_supervisor_bot, plus the existing supervisor_workflow scan).
 
 Not built yet:
-  - periodic scheduler that drives run_supervisor_poll on a 5-min tick
-  - Telegram /supervisor command + Open/Skip callbacks
   - assessor feedback capture (voice/text → assessor fields)
   - draft save on assessor side
   - any submit/sign action (out of scope by safety contract)

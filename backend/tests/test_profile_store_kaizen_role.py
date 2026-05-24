@@ -59,3 +59,30 @@ def test_store_kaizen_role_does_not_clobber_training_level(profile_store_module)
 
     assert profile_store_module.get_training_level(404) == "HIGHER"
     assert profile_store_module.get_kaizen_role(404) == "assessor"
+
+
+# ── list_users_by_kaizen_role ───────────────────────────────────────────────
+
+
+def test_list_users_by_kaizen_role_returns_empty_when_none_match(profile_store_module):
+    profile_store_module.store_kaizen_role(501, "trainee")
+    profile_store_module.store_kaizen_role(502, "trainee")
+
+    assert profile_store_module.list_users_by_kaizen_role("assessor") == []
+
+
+def test_list_users_by_kaizen_role_returns_only_matching_role(profile_store_module):
+    profile_store_module.store_kaizen_role(601, "assessor")
+    profile_store_module.store_kaizen_role(602, "trainee")
+    profile_store_module.store_kaizen_role(603, "assessor")
+    profile_store_module.store_kaizen_role(604, "unknown")
+
+    assert sorted(profile_store_module.list_users_by_kaizen_role("assessor")) == [601, 603]
+
+
+def test_list_users_by_kaizen_role_excludes_users_with_no_kaizen_role(profile_store_module):
+    # User has a training level but no kaizen_role probe ever ran.
+    profile_store_module.store_training_level(701, "HIGHER")
+
+    assert profile_store_module.list_users_by_kaizen_role("assessor") == []
+    assert profile_store_module.list_users_by_kaizen_role("trainee") == []
