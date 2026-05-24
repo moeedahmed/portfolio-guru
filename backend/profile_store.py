@@ -68,6 +68,7 @@ def _migrate_add_column(column_name: str, column_type: str) -> None:
 # intentional and safe.
 def _autoapply_userprofile_migrations() -> None:
     try:
+        init_profile_db()
         _migrate_add_column("curriculum", "TEXT")
         _migrate_add_column("kaizen_role", "TEXT")
     except Exception:

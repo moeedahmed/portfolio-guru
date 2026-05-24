@@ -831,7 +831,11 @@ def _is_transient_llm_error(exc: BaseException) -> bool:
 
 
 def _setup_needs_finishing(user_id: int) -> bool:
-    return not has_credentials(user_id)
+    try:
+        return not has_credentials(user_id)
+    except Exception:
+        logger.warning("Credential setup check failed; treating setup as unfinished", exc_info=True)
+        return True
 
 
 def _build_next_step_keyboard(user_id: int) -> InlineKeyboardMarkup | None:
