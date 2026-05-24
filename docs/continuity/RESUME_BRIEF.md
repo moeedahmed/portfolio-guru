@@ -1,13 +1,13 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-05-23T22:09:11+00:00
-Status: stale_or_needs_review
+Generated: 2026-05-23T23:06:49+00:00
+Status: ready
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
-- Branch: main
-- Last commit: a47ee1b 2026-05-23 fix: case-length text in voice profile exits to filing
-- Uncommitted changes: yes
+- Branch: feature/clinical-supervisor-backend
+- Last commit: 907aaf8 2026-05-24 feat: add clinical supervisor backend detection
+- Uncommitted changes: no
 
 ## Immediate read before restarting
 1. Product hub Status + Brief in Notion
@@ -15,14 +15,12 @@ Status: stale_or_needs_review
 3. `TASK.md` for active sprint state, if present
 4. This resume brief for drift warnings and repo state
 
-## Warnings
-- Repo has uncommitted changes — capture/commit or summarise before switching context
-
 ## Practical AGENTS.md check
 - Useful for coding-agent/ACP work: yes
 - No missing practical sections
 
 ## Recent commits
+- 907aaf8 2026-05-24 feat: add clinical supervisor backend detection
 - a47ee1b 2026-05-23 fix: case-length text in voice profile exits to filing
 - 8ab636f 2026-05-23 fix: remove Consultant portfolio type, keep three types
 - 7b02789 2026-05-23 fix: Consultant form set should include WPBA (CBD/DOPS/Mini-CEX)
@@ -30,20 +28,6 @@ Status: stale_or_needs_review
 - 7aaa27e 2026-05-23 fix: rename training levels, fix voice back nav, remove cancel buttons
 - 80c0e61 2026-05-23 fix: replace voice setup cancel with back navigation
 - c863a0d 2026-05-23 fix: auto-activate voice profiles
-- 705519e 2026-05-22 fix: clean voice preview fallback copy
-
-## Uncommitted change summary
-- M .gitignore
--  M backend/form_schemas.py
-- ?? backend/assessor_reader.py
-- ?? backend/state_tracker.py
-- ?? backend/supervisor_poller.py
-- ?? backend/tests/test_assessor_form_schemas.py
-- ?? backend/tests/test_assessor_reader.py
-- ?? backend/tests/test_state_tracker.py
-- ?? backend/tests/test_supervisor_poller.py
-- ?? docs/clinical-supervisor-architecture.md
-- ?? docs/clinical-supervisor-sprint.md
 
 ## Repo context snapshot
 ### AGENTS.md — present, 0 days old
@@ -107,6 +91,6 @@ Key headings:
 - ## Data Flow
 
 ## Recommended restart path
-Refresh the product hub/Brief and repo context before a new build sprint.
+Continuity context looks sufficient; proceed with normal product-docs workflow.
 
 If this product has been idle for weeks, do not start implementation from memory. Refresh the product hub Status/Brief first, then create or update `TASK.md` for the next sprint.

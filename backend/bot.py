@@ -2563,6 +2563,17 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # Auto-detect training level from engine
     detected_role = login_ok if isinstance(login_ok, str) else ""
+    # Cache the canonical Kaizen account role separately from training_level
+    # (an assessor has no personal portfolio; training_level falls back to
+    # HIGHER for UX continuity but the supervisor workflow keys off this).
+    # Demotion-safe: a transient "unknown" probe never overwrites an
+    # already-cached assessor / trainee.
+    try:
+        from supervisor_workflow import set_role_if_better
+        set_role_if_better(user_id, detected_role)
+    except Exception:
+        # Cache failure must never block the login success path.
+        logger.warning("Kaizen role cache update failed", exc_info=True)
     role_map = {"hst": "HIGHER", "accs": "ACCS", "accs_intermediate": "INTERMEDIATE", "assessor": "HIGHER"}
     label_map = {"hst": "Higher Specialist Trainee", "accs": "ACCS Trainee", "accs_intermediate": "ACCS + Intermediate Trainee", "assessor": "Clinical Supervisor"}
     

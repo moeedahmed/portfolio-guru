@@ -139,19 +139,39 @@ Current implementation status:
 ```
 Read-only mapping scaffold exists:
   backend/assessor_mapper.py
+  backend/assessor_reader.py
+  backend/state_tracker.py
+  backend/supervisor_poller.py
+  backend/role_detector.py
+  backend/supervisor_workflow.py    # orchestration seam
 
 Allowed during mapping:
   - navigate to Assessments timeline
-  - list visible assessment rows
+  - list visible assessment rows (now also records `fill_action`)
   - open ticket detail pages
   - extract read-only fields, tags, state, visible buttons
   - output PHI-free ticket shapes for mapping
 
+Backend integration landed in this slice:
+  - Account role cached per Telegram user (profile_store.kaizen_role)
+    via supervisor_workflow.set_role_if_better — refuses to demote a
+    known-good "assessor"/"trainee" cache to "unknown" on a flaky probe.
+  - setup_password persists the canonical role after a successful login
+    (one new line; trainee setup behaviour unchanged).
+  - supervisor_workflow.run_supervisor_poll is a callable, fully tested
+    orchestrator: refreshes role, gates on role=="assessor", polls the
+    queue via supervisor_poller, returns PHI-free
+    SupervisorNotificationPayload objects. Not yet scheduled.
+  - supervisor_workflow.render_supervisor_notification_text /
+    render_supervisor_ticket_detail_text are pure formatters ready for
+    the bot to drop into a future /supervisor command.
+
 Not built yet:
-  - notification polling
-  - assessor feedback/sign-off field mapping
-  - submit/sign action
-  - Telegram assessor review UI
+  - periodic scheduler that drives run_supervisor_poll on a 5-min tick
+  - Telegram /supervisor command + Open/Skip callbacks
+  - assessor feedback capture (voice/text → assessor fields)
+  - draft save on assessor side
+  - any submit/sign action (out of scope by safety contract)
 ```
 
 First mapped read-only ticket shape:

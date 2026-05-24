@@ -23,6 +23,12 @@ class UserProfile(SQLModel, table=True):
     curriculum: Optional[str] = Field(default=None)  # "2025" or "2021"; None treated as "2025"
     voice_profile: Optional[str] = Field(default=None)  # JSON style profile from user examples
     voice_examples_count: int = Field(default=0)  # how many examples were used to build profile
+    # Detected Kaizen account role — "assessor" (pure Clinical Supervisor),
+    # "trainee" (own portfolio), or "unknown" (detection failed / no probe yet).
+    # Separate from training_level because an assessor has no personal portfolio
+    # and the current bot maps that to HIGHER as a default. Read-only here;
+    # mutated only through the demotion-safe `store_kaizen_role` helper.
+    kaizen_role: Optional[str] = Field(default=None)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -31,8 +37,9 @@ def init_profile_db():
     db_path = DATABASE_URL.replace("sqlite:///", "")
     pathlib.Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     SQLModel.metadata.create_all(engine)
-    # Migrate: add curriculum column if missing (create_all won't alter existing tables)
+    # Migrate: add columns that create_all won't alter on existing tables.
     _migrate_add_column("curriculum", "TEXT")
+    _migrate_add_column("kaizen_role", "TEXT")
 
 
 def _migrate_add_column(column_name: str, column_type: str) -> None:
@@ -49,6 +56,25 @@ def _migrate_add_column(column_name: str, column_type: str) -> None:
         conn.close()
     except Exception:
         pass  # table may not exist yet — create_all will handle it
+
+
+# Auto-apply additive UserProfile migrations on import.
+# Newer columns added to the SQLModel above show up in every default SELECT,
+# so a legacy on-disk DB missing the column raises OperationalError at the
+# first read — including from code paths (e.g. `get_voice_profile`) that
+# don't logically depend on the new column. The migration is idempotent and
+# additive (no data loss); running it once per process load is cheap.
+# init_profile_db() also calls these for the startup path; the duplicate is
+# intentional and safe.
+def _autoapply_userprofile_migrations() -> None:
+    try:
+        _migrate_add_column("curriculum", "TEXT")
+        _migrate_add_column("kaizen_role", "TEXT")
+    except Exception:
+        pass
+
+
+_autoapply_userprofile_migrations()
 
 
 def store_training_level(telegram_user_id: int, training_level: str) -> None:
@@ -175,3 +201,38 @@ def get_curriculum(telegram_user_id: int) -> str:
             select(UserProfile).where(UserProfile.telegram_user_id == telegram_user_id)
         ).first()
         return profile.curriculum if profile and profile.curriculum else "2025"
+
+
+def _select_profile(session, telegram_user_id: int) -> Optional[UserProfile]:
+    """Return the UserProfile row for ``telegram_user_id`` or ``None``."""
+    stmt = select(UserProfile).where(UserProfile.telegram_user_id == telegram_user_id)
+    rows = session.scalars(stmt)
+    return rows.first()
+
+
+def store_kaizen_role(telegram_user_id: int, role: Optional[str]) -> None:
+    """Persist the user's Kaizen account role (`assessor` / `trainee` / `unknown`).
+
+    Stored verbatim — the demotion-safe semantics live in
+    ``supervisor_workflow.set_role_if_better``. Callers that want
+    "don't downgrade a known-good role" must go through that helper.
+    """
+    with Session(engine) as session:
+        existing = _select_profile(session, telegram_user_id)
+        if existing:
+            existing.kaizen_role = role
+            existing.updated_at = datetime.utcnow()
+            session.add(existing)
+        else:
+            session.add(UserProfile(
+                telegram_user_id=telegram_user_id,
+                kaizen_role=role,
+            ))
+        session.commit()
+
+
+def get_kaizen_role(telegram_user_id: int) -> Optional[str]:
+    """Return the cached Kaizen role for a user or ``None`` if never set."""
+    with Session(engine) as session:
+        profile = _select_profile(session, telegram_user_id)
+        return profile.kaizen_role if profile else None
