@@ -7042,11 +7042,29 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(handle_pushback, pattern=r"^PUSHBACK\|"))
 
     # Clinical Supervisor read-only callbacks (Open / Skip / Later on assessor
-    # notifications). Inert until a user is cached as kaizen_role=="assessor"
-    # by supervisor_workflow.set_role_if_better.
-    from supervisor_bot import CALLBACK_PATTERN as SUPERVISOR_CALLBACK_PATTERN, handle_supervisor_callback
+    # notifications, plus Review / Re-record / Cancel for the post-Open local
+    # draft). Inert until a user is cached as kaizen_role=="assessor" by
+    # supervisor_workflow.set_role_if_better.
+    from supervisor_bot import (
+        CALLBACK_PATTERN as SUPERVISOR_CALLBACK_PATTERN,
+        handle_assessor_intent_capture,
+        handle_supervisor_callback,
+    )
     application.add_handler(
         CallbackQueryHandler(handle_supervisor_callback, pattern=SUPERVISOR_CALLBACK_PATTERN)
+    )
+    # Assessor intent capture runs in a higher-priority group so the
+    # supervisor's text/voice note is consumed by the assessor draft
+    # pipeline when a session is active. Inert (returns without raising)
+    # for any user without an active session, so trainee flows in the
+    # default group keep working untouched. Commands are excluded so
+    # global `/cancel`, `/start`, etc. always reach the trainee handlers.
+    application.add_handler(
+        MessageHandler(
+            (filters.TEXT & ~filters.COMMAND) | filters.VOICE | filters.AUDIO,
+            handle_assessor_intent_capture,
+        ),
+        group=-1,
     )
 
     voice_conv = ConversationHandler(

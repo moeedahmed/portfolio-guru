@@ -185,10 +185,39 @@ Live read-only supervisor workflow landed in this slice:
     Submit / Sign / Approve / Delete / Send (test_supervisor_scheduler,
     test_supervisor_bot, plus the existing supervisor_workflow scan).
 
+Local assessor draft capture landed next:
+  - backend/assessor_drafter.py — pure draft service. Given a free-text
+    supervisor intent and an assessor schema, builds a structured
+    AssessorDraft with values (intent → feedback, entrustment inferred
+    from numeric/behavioural hints), missing_required fields, risk
+    notes (brief feedback, missing recommendation phrasing, missing
+    entrustment, missing assessor identity), and render_preview for a
+    Markdown Telegram preview.
+  - backend/assessor_session_store.py — per-supervisor file cache that
+    records the active ticket UUID, form type, ticket URL, the trainee
+    section, and any in-progress intent/draft. Lives in the same
+    supervisor data dir as the notification cache. Missing or corrupt
+    files behave like "no session" rather than raising.
+  - supervisor_bot.handle_supervisor_callback now also routes
+    SUP|review (re-render preview), SUP|recapture (clear draft, prompt
+    again), and SUP|cancel-draft (end session). None of these touch
+    Kaizen.
+  - supervisor_bot.handle_assessor_intent_capture — high-priority
+    MessageHandler (group=-1) wired in bot.build_application. Inert
+    when no active session for the user; otherwise transcribes voice
+    via whisper.transcribe_voice, drafts via assessor_drafter, and
+    replies with the preview + review keyboard. Raises
+    ApplicationHandlerStop on success so the trainee flow in group 0
+    does not double-process the message. Commands (/cancel, /start,
+    etc.) are excluded from the filter so trainee fallbacks still
+    reach the default group untouched.
+
 Not built yet:
-  - assessor feedback capture (voice/text → assessor fields)
-  - draft save on assessor side
-  - any submit/sign action (out of scope by safety contract)
+  - LLM-assisted field extraction (current drafter is deterministic;
+    feedback gets the raw intent, other assessor fields stay blank).
+  - Any Save / Submit / Sign control — the Review keyboard intentionally
+    excludes them. Final filing remains out of scope until a separate
+    one-ticket approval gate exists.
 ```
 
 First mapped read-only ticket shape:
