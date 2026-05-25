@@ -155,6 +155,12 @@ Status:
 - It does not click write controls and has tests guarding the read-only boundary.
 - Full assessor feedback/sign-off field mapping is now mapped for CBD only; other ticket types remain unmapped.
 - Live read-only mapping can use an existing authenticated browser session; supplied credentials are only needed if login is required, and the mapper must stop at 2FA/captcha.
+- Guarded write-back planning slice added in `backend/assessor_writeback.py`.
+- The write-back adapter maps reviewed local CBD assessor draft values to the mapped Kaizen assessor completion labels, but produces browser-step descriptors only. It does not execute Playwright calls.
+- Actions are explicitly separated as `fill_fields`, `save_draft`, `submit`, `sign`, `approve`, and `cancel`.
+- Every Kaizen-touching action requires ticket UUID, form type, explicit action, and reviewed draft hash. Mismatches, unsupported form types, missing required fields, and final actions produce blocked plans.
+- `supervisor_bot` exposes only a review-safe button: `Prepare Kaizen action plan (no write)`. The callback renders the guarded plan and never connects to CDP or opens Kaizen.
+- Live Kaizen write-back execution remains unavailable until a foreground-approved one-ticket/action live runner is built and tested separately.
 
 ### Phase 2.8 - Public UX upgrade
 

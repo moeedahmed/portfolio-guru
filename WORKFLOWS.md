@@ -130,8 +130,9 @@ Ticket appears in assessor portfolio
 → Bot drafts assessor feedback/sign-off text
 → Bot shows missing assessor fields or risk notes if present
 → Bot shows draft response
-→ User approves one named action
-→ Bot submits/signs that one assessor action
+→ User requests a reviewed Kaizen action plan
+→ Bot shows the mapped fields and blocked/safety status
+→ Future slice only: foreground-approved runner performs one named action
 ```
 
 Current implementation status:
@@ -212,12 +213,27 @@ Local assessor draft capture landed next:
     etc.) are excluded from the filter so trainee fallbacks still
     reach the default group untouched.
 
+Guarded write-back planning landed next:
+  - backend/assessor_writeback.py — non-executing adapter that maps a
+    reviewed local assessor draft to the Kaizen assessor completion
+    surface for CBD only.
+  - The adapter distinguishes fill_fields, save_draft, submit, sign,
+    approve, and cancel. It requires ticket UUID, form type, explicit
+    action, and reviewed draft hash for every Kaizen-touching action.
+  - Mismatched ticket identity, mismatched draft hash, unsupported form
+    type, missing required fields, and final actions produce blocked
+    plans. Browser steps are descriptors only; live execution is
+    unavailable.
+  - supervisor_bot adds a review-only button: "Prepare Kaizen action
+    plan (no write)". That callback renders the guarded plan from the
+    current local draft and never connects to CDP or opens Kaizen.
+
 Not built yet:
   - LLM-assisted field extraction (current drafter is deterministic;
     feedback gets the raw intent, other assessor fields stay blank).
-  - Any Save / Submit / Sign control — the Review keyboard intentionally
-    excludes them. Final filing remains out of scope until a separate
-    one-ticket approval gate exists.
+  - Any live Fill in / Save draft / Submit / Sign / Approve control.
+    Final filing remains out of scope until a separate one-ticket
+    foreground approval gate and live runner exist.
 ```
 
 First mapped read-only ticket shape:

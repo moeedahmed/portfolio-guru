@@ -313,6 +313,12 @@ async def test_callback_review_renders_existing_draft(cache_dir):
         or update.callback_query.message.reply_text.await_args.args[0]
     assert "Assessor draft — CBD" in preview
     assert "Good case, level 4 supervision." in preview
+    keyboard = update.callback_query.message.reply_text.await_args.kwargs.get("reply_markup")
+    buttons = [btn for row in keyboard.inline_keyboard for btn in row]
+    labels = {btn.text for btn in buttons}
+    callbacks = {btn.callback_data for btn in buttons}
+    assert "🧾 Prepare Kaizen action plan (no write)" in labels
+    assert f"SUP|prepare-writeback|u-rev" in callbacks
     # Cache and session preserved so the user can keep iterating.
     assert session_store.get(cache_dir, telegram_user_id=1) is not None
 
@@ -365,6 +371,50 @@ async def test_callback_cancel_draft_ends_session(cache_dir):
     edited = update.callback_query.edit_message_text.await_args.kwargs.get("text") \
         or update.callback_query.edit_message_text.await_args.args[0]
     assert "discarded" in edited.lower() or "cancelled" in edited.lower()
+
+
+async def test_callback_prepare_writeback_renders_non_executing_plan(cache_dir):
+    _start_session(cache_dir, ticket_uuid="u-plan")
+    draft = AssessorDraft(
+        form_type="CBD",
+        ticket_uuid="u-plan",
+        values={
+            "assessor_registration_number": "GMC1234567",
+            "assessor_job_title": "Consultant",
+            "entrustment_scale": "Level 4 - I needed to be there but did not need to prompt",
+            "feedback": "Clear reasoning and safe escalation.",
+            "recommendation": "Continue documenting escalation triggers.",
+        },
+        source_intent="Reviewed text",
+    )
+    session_store.update_draft(cache_dir, telegram_user_id=1, draft=draft)
+    update = _callback_update("SUP|prepare-writeback|u-plan", telegram_user_id=1)
+    context = MagicMock()
+
+    with patch("supervisor_bot.connect_cdp_page", new=AsyncMock()) as connect_mock:
+        await supervisor_bot.handle_supervisor_callback(update, context)
+
+    connect_mock.assert_not_awaited()
+    update.callback_query.message.reply_text.assert_awaited_once()
+    text = update.callback_query.message.reply_text.await_args.kwargs.get("text") \
+        or update.callback_query.message.reply_text.await_args.args[0]
+    assert "Reviewed Kaizen action plan" in text
+    assert "save draft" in text.lower()
+    assert "Live Kaizen execution is unavailable" in text
+    assert "Clear reasoning" not in text
+
+
+async def test_callback_prepare_writeback_requires_existing_reviewed_draft(cache_dir):
+    _start_session(cache_dir, ticket_uuid="u-plan-missing")
+    update = _callback_update("SUP|prepare-writeback|u-plan-missing", telegram_user_id=1)
+    context = MagicMock()
+
+    with patch("supervisor_bot.connect_cdp_page", new=AsyncMock()) as connect_mock:
+        await supervisor_bot.handle_supervisor_callback(update, context)
+
+    connect_mock.assert_not_awaited()
+    update.callback_query.edit_message_text.assert_awaited_once()
+    update.callback_query.message.reply_text.assert_not_awaited()
 
 
 # ── handle_assessor_intent_capture ──────────────────────────────────────────

@@ -42,6 +42,7 @@ from telegram.ext import ApplicationHandlerStop, ContextTypes
 
 import assessor_drafter
 import assessor_session_store as session_store
+import assessor_writeback
 import supervisor_notification_cache as cache_mod
 import supervisor_workflow
 from assessor_mapper import AssessorTicketSummary
@@ -60,7 +61,7 @@ NOTIFICATION_CACHE_DIR = Path(
 
 CALLBACK_NAMESPACE = "SUP"
 CALLBACK_PATTERN = (
-    r"^SUP\|(?:open|skip|later|review|recapture|cancel-draft)\|[0-9a-fA-F\-]+$"
+    r"^SUP\|(?:open|skip|later|review|recapture|cancel-draft|prepare-writeback)\|[0-9a-fA-F\-]+$"
 )
 
 _SKIP_TEXT = "✅ Skipped — I won't notify you about this ticket again."
@@ -91,6 +92,9 @@ _DRAFT_CANCELLED_TEXT = (
 )
 _DRAFT_MISSING_TEXT = (
     "That earlier draft has expired. Tap *Open* on a fresh notification to start again."
+)
+_WRITEBACK_MISSING_TEXT = (
+    "That reviewed draft has expired. Re-open the ticket and re-check the local draft first."
 )
 _RECAPTURE_TEXT = (
     "🔄 Cleared the previous draft.\n\n" + _INTENT_PROMPT
@@ -132,6 +136,12 @@ def _intent_prompt_keyboard(ticket_uuid: str) -> InlineKeyboardMarkup:
 def _draft_review_keyboard(ticket_uuid: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
+            [
+                InlineKeyboardButton(
+                    "🧾 Prepare Kaizen action plan (no write)",
+                    callback_data=f"{CALLBACK_NAMESPACE}|prepare-writeback|{ticket_uuid}",
+                ),
+            ],
             [
                 InlineKeyboardButton(
                     "📝 Re-show draft",
@@ -320,6 +330,26 @@ async def _handle_cancel_draft(update: Update, ticket_uuid: str) -> None:
     )
 
 
+async def _handle_prepare_writeback(update: Update, ticket_uuid: str) -> None:
+    user_id = update.effective_user.id
+    session = session_store.get(NOTIFICATION_CACHE_DIR, telegram_user_id=user_id)
+    if session is None or session.ticket_uuid != ticket_uuid or not session.draft:
+        await update.callback_query.edit_message_text(text=_WRITEBACK_MISSING_TEXT)
+        return
+    draft = assessor_drafter.AssessorDraft(**session.draft)
+    request = assessor_writeback.build_write_request(
+        action=assessor_writeback.AssessorWriteAction.SAVE_DRAFT,
+        ticket_uuid=session.ticket_uuid,
+        form_type=session.form_type,
+        reviewed_draft_hash=assessor_writeback.draft_review_hash(draft),
+    )
+    plan = assessor_writeback.build_write_plan(draft, request)
+    await update.callback_query.message.reply_text(
+        text=assessor_writeback.render_write_plan(plan),
+        parse_mode="Markdown",
+    )
+
+
 async def handle_supervisor_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Dispatch SUP|open / SUP|skip / SUP|later / SUP|review / SUP|recapture /
     SUP|cancel-draft button taps."""
@@ -341,6 +371,8 @@ async def handle_supervisor_callback(update: Update, context: ContextTypes.DEFAU
         await _handle_recapture(update, ticket_uuid)
     elif action == "cancel-draft":
         await _handle_cancel_draft(update, ticket_uuid)
+    elif action == "prepare-writeback":
+        await _handle_prepare_writeback(update, ticket_uuid)
     # Unknown actions are silently ignored — the callback regex should
     # already filter them out, but defence in depth is cheap here.
 
