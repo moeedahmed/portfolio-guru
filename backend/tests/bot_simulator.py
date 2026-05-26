@@ -114,12 +114,17 @@ class BotSimulator:
         self.messages_sent.append(("markup", None, markup))
         return self._mock_message()
 
+    async def _capture_delete(self, *args, **kwargs):
+        self.messages_sent.append(("delete", None, None))
+        return True
+
     def _mock_message(self):
         message = MagicMock()
         message.message_id = self.message_id_counter
         message.chat_id = self.user_id
         message.chat = self._make_chat()
         message.edit_text = AsyncMock(side_effect=self._capture_edit)
+        message.delete = AsyncMock(side_effect=self._capture_delete)
         self.message_id_counter += 1
         return message
 

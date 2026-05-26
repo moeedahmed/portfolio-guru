@@ -1632,40 +1632,57 @@ def _build_post_filing_keyboard(
     *,
     uncertain: bool = False,
     same_case_available: bool = False,
+    saved_url: str | None = None,
 ) -> InlineKeyboardMarkup:
-    """Compact keyboard shown after a filing attempt."""
-    if status == "partial" and FORM_UUIDS.get(form_type):
-        primary_row = [InlineKeyboardButton(
-            "🔗 Open in Kaizen",
-            url=f"https://kaizenep.com/events/new-section/{FORM_UUIDS[form_type]}",
-        )]
-    elif uncertain and FORM_UUIDS.get(form_type):
-        primary_row = [InlineKeyboardButton(
-            "🔗 Open in Kaizen",
-            url=f"https://kaizenep.com/events/new-section/{FORM_UUIDS[form_type]}",
-        )]
-    elif status == "failed":
-        primary_row = [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")]
-    else:
-        if same_case_available:
-            primary_row = [InlineKeyboardButton("🔁 Same case, another WPBA", callback_data="ACTION|same_case_another")]
-        else:
-            primary_row = [InlineKeyboardButton("📋 File another case", callback_data="ACTION|file")]
+    """Flat keyboard shown after a filing attempt — no More-options split.
 
-    rows = [primary_row]
-    if same_case_available:
-        rows.append([InlineKeyboardButton("📋 File another case", callback_data="ACTION|file")])
-    elif status == "failed" or uncertain:
+    Every useful follow-up sits on this one keyboard so the user never has to
+    drill into a secondary set and back out. Settings and a Main-menu reset
+    are intentionally absent: nothing about a just-saved draft makes a
+    settings change immediately relevant, and the welcome-style "Portfolio
+    Guru is ready" message reads like a context wipe right after the user
+    filed a case.
+
+    saved_url: when the deterministic filer captured the post-save Kaizen URL
+    (e.g. /events/fillin/<doc-id>?autosave=...), link directly to that draft.
+    Without it, the fallback links to /activities — the user has to find the
+    saved draft there, but at least the bot doesn't open a NEW blank form
+    while claiming to open the filed draft.
+    """
+    rows: list[list[InlineKeyboardButton]] = []
+
+    if status == "failed":
+        rows.append([InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")])
         rows.append([InlineKeyboardButton("📋 File another case", callback_data="ACTION|file")])
         rows.append([_BTN_CANCEL])
-    elif status == "partial" and FORM_UUIDS.get(form_type):
+        return InlineKeyboardMarkup(rows)
+
+    if status == "partial" or uncertain:
+        if saved_url:
+            rows.append([InlineKeyboardButton("🔗 Open saved draft", url=saved_url)])
+        elif FORM_UUIDS.get(form_type):
+            rows.append([InlineKeyboardButton("🔗 Open Kaizen", url="https://kaizenep.com/activities")])
+        if uncertain:
+            rows.append([InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")])
         rows.append([InlineKeyboardButton("📋 File another case", callback_data="ACTION|file")])
-    if status == "success":
-        rows.append([
-            InlineKeyboardButton("👍 It worked", callback_data=f"FEEDBACK|good|{form_type}|{status}"),
-            InlineKeyboardButton("👎 Didn't work", callback_data=f"FEEDBACK|bad|{form_type}|{status}"),
-        ])
-    rows.append([InlineKeyboardButton("🧰 More options", callback_data=f"ACTION|post_file_more|{form_type}|{status}")])
+        if uncertain:
+            rows.append([_BTN_CANCEL])
+        else:
+            rows.append([InlineKeyboardButton("🚩 Flag a missed field", callback_data=f"FILING|feedback|{form_type}")])
+        return InlineKeyboardMarkup(rows)
+
+    if saved_url:
+        rows.append([InlineKeyboardButton("🔗 Open saved draft", url=saved_url)])
+    elif FORM_UUIDS.get(form_type):
+        rows.append([InlineKeyboardButton("🔗 Open Kaizen", url="https://kaizenep.com/activities")])
+    if same_case_available:
+        rows.append([InlineKeyboardButton("🔁 Same case, another WPBA", callback_data="ACTION|same_case_another")])
+    rows.append([InlineKeyboardButton("📋 File another case", callback_data="ACTION|file")])
+    rows.append([
+        InlineKeyboardButton("👍 It worked", callback_data=f"FEEDBACK|good|{form_type}|{status}"),
+        InlineKeyboardButton("👎 Didn't work", callback_data=f"FEEDBACK|bad|{form_type}|{status}"),
+    ])
+    rows.append([InlineKeyboardButton("🚩 Flag a missed field", callback_data=f"FILING|feedback|{form_type}")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -1815,14 +1832,20 @@ def _draft_coach_note(draft) -> str:
 
 
 def _draft_header(title: str, reason: str | None, draft) -> list[str]:
-    lines = [f"🟢 *{FLOW_STATE_LABELS['drafted']} — {title} ready*"]
+    """Status header → optional 'why this form' block → optional coach note →
+    divider → 'Draft preview' label. The divider and label keep the draft body
+    visually separate from the recommendation so the user can't mistake the
+    helper text for portfolio content."""
+    lines: list[str] = [
+        f"🟢 *{FLOW_STATE_LABELS['drafted']} — {title} ready*",
+        "",
+    ]
     if reason:
-        lines.append(f"*Why this form:* {reason}")
+        lines.extend([f"ℹ️ *Why this form:* {reason}", ""])
     coach = _draft_coach_note(draft)
     if coach:
         lines.extend([coach, ""])
-    else:
-        lines.append("")
+    lines.extend([_DRAFT_DIVIDER, "📋 *Draft preview*", ""])
     return lines
 
 
@@ -1862,6 +1885,13 @@ _MISSING_MARKER = "_— needs your detail_"
 # Appended to draft previews shown with the approval keyboard so the user
 # knows they can reply to refine, instead of relying on a removed Edit button.
 _REPLY_HINT_SUFFIX = render_message("draft_reply_hint")
+
+# Visual divider used inside the draft preview and saved/filed confirmation
+# messages to keep helper text from looking like portfolio content. Uses U+2501
+# so it survives Telegram Markdown without escaping. Dogfooding showed the
+# "Needs review" warning sticking to the curriculum block — the divider plus
+# the explicit "Draft preview" / "Review" labels makes the boundary obvious.
+_DRAFT_DIVIDER = "━━━━━━━━━━━━━━"
 
 _NARRATIVE_PREVIEW_KEYS = {
     "actions_taken",
@@ -2018,7 +2048,11 @@ def _draft_missing_review_note(draft, form_type: str) -> str:
     if not missing_required and not missing_optional:
         return ""
 
-    lines = ["", "⚠️ *Needs review before this is complete*"]
+    # Leading blank + divider make sure the "Needs review" warning never
+    # looks attached to the last draft field (the curriculum block in
+    # particular), so the user doesn't read it as portfolio content and
+    # accidentally copy it into Kaizen.
+    lines = ["", _DRAFT_DIVIDER, "", "⚠️ *Needs review before this is complete*"]
     if missing_required:
         labels = ", ".join(field["label"] for field in missing_required[:6])
         extra = f" (+{len(missing_required) - 6} more)" if len(missing_required) > 6 else ""
@@ -3324,17 +3358,12 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         parts = action.split("|")
         form_type = parts[1] if len(parts) > 1 else "unknown"
         status = parts[2] if len(parts) > 2 else "unknown"
-        rows = [
-            [InlineKeyboardButton("📋 File another case", callback_data="ACTION|file")],
-            [InlineKeyboardButton("💬 Something missing?", callback_data=f"FILING|feedback|{form_type}")],
-            [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")],
-        ]
-        if context.user_data.get("last_filed_case_text") and status == "success":
-            rows.insert(0, [InlineKeyboardButton("🔁 Same case, another WPBA", callback_data="ACTION|same_case_another")])
-        if status in {"failed", "partial"} and _load_draft(context):
-            rows.insert(0, [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")])
-        rows.append([InlineKeyboardButton("🏠 Main menu", callback_data="ACTION|back_to_menu")])
-        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(rows))
+        await query.edit_message_reply_markup(reply_markup=_build_post_filing_keyboard(
+            form_type,
+            status,
+            uncertain=status == "partial",
+            same_case_available=bool(context.user_data.get("last_filed_case_text") and status == "success"),
+        ))
 
     elif action == "help":
         await query.message.edit_text(
@@ -5828,11 +5857,19 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         context.user_data["last_amend_case_text"] = amend_case_text
         context.user_data["last_amend_chosen_form"] = amend_chosen_form_type
 
+    # Only treat the post-save URL as a real draft link when the save itself
+    # was credible. Partial-with-error means the save may not have landed, so
+    # any URL we captured could point at a half-formed draft — link to the
+    # activities list instead so the user can verify.
+    raw_saved_url = result.get("saved_url")
+    saved_url = raw_saved_url if (status in ("success", "partial") and not uncertain_save and raw_saved_url) else None
+
     end_keyboard = _build_post_filing_keyboard(
         form_type,
         status,
         uncertain=uncertain_save,
         same_case_available=bool(filed_case_text and status == "success" and not uncertain_save),
+        saved_url=saved_url,
     )
 
     # Track usage for successful filings
@@ -5894,11 +5931,16 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         summary = f"\n📅 {date_val}" if date_val else ""
         if slo_str:
             summary += f"  ·  📚 {slo_str}"
-        # Clean success message — no verbose proof report
+        # Clean success message — no verbose proof report. Lead with a step
+        # header so the confirmation reads as a new phase, distinct from the
+        # draft preview the user just approved.
         filled_count = len(filled)
         fields_summary = f"\n{filled_count} field{'s' if filled_count != 1 else ''} completed." if filled_count > 0 else ""
         msg = (
-            f"✅ *{form_name} saved.*{summary}{fields_summary}{usage_line}{observation_line}"
+            f"✅ *Case filed*\n"
+            f"_{form_name} saved as a Kaizen draft._{summary}{fields_summary}"
+            f"\n\n{_DRAFT_DIVIDER}"
+            f"{usage_line}{observation_line}"
         )
         status_line = "✅ Filing finished."
     elif status == "partial":
@@ -5925,9 +5967,17 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         else:
             skipped_display = ", ".join(skipped_names)
         if error:
-            # Partial with error — save may not have worked
-            kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS.get(form_type, '')}" if FORM_UUIDS.get(form_type) else ""
-            link_text = f"\n\n[Open {form_name} manually in Kaizen]({kaizen_url})" if kaizen_url else ""
+            # Partial with error — save may not have worked. Don't link to
+            # /events/new-section (that opens a BLANK form and the user could
+            # easily mistake it for the draft we just talked about). Prefer
+            # the captured saved-draft URL when we have one; otherwise point
+            # at the activities list so the user verifies before retrying.
+            if raw_saved_url:
+                link_text = f"\n\n[Find this draft in Kaizen]({raw_saved_url})"
+            elif platform == "kaizen":
+                link_text = "\n\n[Check your Kaizen drafts](https://kaizenep.com/activities)"
+            else:
+                link_text = ""
             recovery = ""
             try:
                 recovery = await compose_filing_recovery_copy("partial", error)
@@ -5936,8 +5986,10 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             recovery_block = recovery or f"Check your portfolio — the draft may not have saved.\n\nDetails: {error}"
             fields_filled_str = f"{len(filled)} field{'s' if len(filled) != 1 else ''} filled"
             msg = (
-                f"⚠️ *{form_name} — filing had issues.*\n\n"
+                f"⚠️ *Filing had issues — check Kaizen*\n"
+                f"_{form_name}_\n\n"
                 f"{fields_filled_str}.\n\n"
+                f"{_DRAFT_DIVIDER}\n\n"
                 f"{recovery_block}{link_text}{usage_line}{proof_report}"
             )
             status_line = "⚠️ Filing needs attention."
@@ -5947,11 +5999,32 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 f"{len(skipped)} field{'s' if len(skipped) != 1 else ''} "
                 f"need{'s' if len(skipped) == 1 else ''} your review"
             )
+            # The action line tracks what the keyboard button actually does:
+            # if we have the saved-draft URL, "Open saved draft" lands on the
+            # exact draft; otherwise the fallback opens the activities list
+            # and the user finds the draft from there.
+            if raw_saved_url:
+                action_line = (
+                    "Open the saved draft to fill the missing detail, "
+                    "then assign an assessor."
+                )
+            else:
+                action_line = (
+                    "Open Kaizen and find your saved draft to fill the missing "
+                    "detail, then assign an assessor."
+                )
+            # Lead with a distinct "Draft saved in Kaizen" step header so the
+            # confirmation doesn't visually merge with the approved draft
+            # above it, and keep the review guidance in its own block so it
+            # reads as guidance, not as draft content.
             msg = (
-                f"⚠️ *{form_name} saved as a draft, but needs manual review.*\n\n"
+                f"📥 *Draft saved in Kaizen*\n"
+                f"_{form_name}_\n\n"
+                f"{_DRAFT_DIVIDER}\n\n"
+                f"⚠️ *Needs your review*\n"
                 f"{fields_filled_str} from your case. "
                 f"{review_clause}: {skipped_display}.\n\n"
-                f"This is not complete yet. Open Kaizen to fill the missing detail, then assign an assessor.{usage_line}"
+                f"{action_line}{usage_line}"
             )
             status_line = "⚠️ Filing needs manual review."
     else:
@@ -5965,14 +6038,30 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS[form_type]}"
             recovery_block = recovery or "Try again, or open the form in Kaizen and fill it manually."
             failed_summary = _format_failed_filing_summary(error, skipped)
-            msg = f"❌ *Filing didn't complete.*\n\n{recovery_block}\n\n[Open {form_name} manually in Kaizen]({kaizen_url})\n\n{failed_summary}"
+            # "manually" wording is honest here — filing failed, so the link
+            # is opening a fresh blank form on purpose, not pretending to
+            # jump to a saved draft.
+            msg = (
+                f"❌ *Filing didn't complete*\n"
+                f"_{form_name}_\n\n"
+                f"{recovery_block}\n\n"
+                f"[Open blank {form_name} in Kaizen to fill manually]({kaizen_url})\n\n"
+                f"{_DRAFT_DIVIDER}\n\n"
+                f"{failed_summary}"
+            )
             if not recovery and error:
                 msg += f"\n\n_Details: {error}_"
             status_line = "❌ Filing stopped."
         else:
             recovery_block = recovery or "Try again, or fill the form manually in your portfolio."
             failed_summary = _format_failed_filing_summary(error, skipped)
-            msg = f"❌ *Filing didn't complete.*\n\n{recovery_block}\n\n{failed_summary}"
+            msg = (
+                f"❌ *Filing didn't complete*\n"
+                f"_{form_name}_\n\n"
+                f"{recovery_block}\n\n"
+                f"{_DRAFT_DIVIDER}\n\n"
+                f"{failed_summary}"
+            )
             if not recovery and error:
                 msg += f"\n\n_Details: {error}_"
             status_line = "❌ Filing stopped."
@@ -6134,6 +6223,31 @@ async def handle_review_draft(update: Update, context: ContextTypes.DEFAULT_TYPE
     return AWAIT_APPROVAL
 
 
+async def _restore_active_draft_buttons(query, context) -> None:
+    """Re-attach the approval keyboard to the original draft message after a
+    failed Quick Improve, so the user can retry or save without losing it."""
+    try:
+        await query.edit_message_reply_markup(reply_markup=_active_draft_keyboard(context))
+    except Exception:
+        logger.debug("Failed to restore active draft keyboard after quick improve error", exc_info=True)
+
+
+async def _dismiss_quick_improve_ack(ack) -> None:
+    """Remove the tiny 'Tightening…' status line once the in-place edit lands.
+
+    Falls back to a quiet confirmation edit if delete is unavailable (older
+    messages, restricted permissions) so the chat never keeps a stale status."""
+    try:
+        await ack.delete()
+        return
+    except Exception:
+        logger.debug("Could not delete quick-improve status message", exc_info=True)
+    try:
+        await ack.edit_text("✨ Done")
+    except Exception:
+        logger.debug("Could not edit quick-improve status message to Done", exc_info=True)
+
+
 async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Improve the reflection only, keeping the rest of the draft stable."""
     query = update.callback_query
@@ -6210,16 +6324,27 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
         _store_draft(context, updated)
         context.user_data["quick_improve_used"] = True
     except asyncio.TimeoutError:
-        await ack.edit_text("⏳ Quick improve timed out. Your original draft is still ready.", reply_markup=_active_draft_keyboard(context))
+        await _restore_active_draft_buttons(query, context)
+        await ack.edit_text("⏳ Quick improve timed out. Your original draft is still ready.")
         return AWAIT_APPROVAL
     except Exception as exc:
         logger.error("Quick improve failed for %s: %s", form_type, exc, exc_info=True)
-        await ack.edit_text("⚠️ Quick improve failed. Your original draft is still ready.", reply_markup=_active_draft_keyboard(context))
+        await _restore_active_draft_buttons(query, context)
+        await ack.edit_text("⚠️ Quick improve failed. Your original draft is still ready.")
         return AWAIT_APPROVAL
 
+    # Edit the ORIGINAL draft message in place so the chat keeps a single
+    # living draft instead of stacking a second full preview underneath. The
+    # tiny status line is dismissed once the in-place edit lands.
     preview = _format_draft_preview(updated, _chosen_form_reason(context, form_type))
-    header = "✨ *Reflection polished.* Here's the updated draft:\n\n"
-    await _safe_edit_text(ack, header + preview + _REPLY_HINT_SUFFIX, reply_markup=_active_draft_keyboard(context), parse_mode="Markdown")
+    header = "✨ *Revised draft* — polished from the first version.\n\n"
+    await _safe_edit_text(
+        query.message,
+        header + preview + _REPLY_HINT_SUFFIX,
+        reply_markup=_active_draft_keyboard(context),
+        parse_mode="Markdown",
+    )
+    await _dismiss_quick_improve_ack(ack)
     return AWAIT_APPROVAL
 
 

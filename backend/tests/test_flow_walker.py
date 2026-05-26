@@ -155,6 +155,98 @@ class TestFlowWalker:
         assert 'I have left those fields blank rather than inventing them' in text
 
     @pytest.mark.asyncio
+    async def test_draft_preview_separates_curriculum_from_needs_review(self, thin_draft):
+        """The 'Needs review' warning must not be visually glued to the
+        curriculum block. A divider line between the last draft field and the
+        warning, plus a 'Draft preview' sub-header, makes the draft body and
+        helper text read as distinct sections — so a user copying the draft
+        into Kaizen can't accidentally include the warning."""
+        from bot import _DRAFT_DIVIDER, handle_form_choice
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        update = sim._make_callback_update('FORM|CBD')
+
+        with patch(
+            'bot._analyse_selected_form',
+            new_callable=AsyncMock,
+            return_value=thin_draft,
+        ):
+            await handle_form_choice(update, context)
+
+        text = sim.get_last_text()
+
+        # The divider character must appear at least twice: once between the
+        # status/recommendation block and the draft body, once between the
+        # draft body and the 'Needs review' warning.
+        assert text.count(_DRAFT_DIVIDER) >= 2, (
+            f"Expected at least two dividers in preview text, got: {text!r}"
+        )
+
+        # The 'Draft preview' label sits between the status header and the
+        # first field, so the draft body reads as its own section.
+        assert '📋 *Draft preview*' in text
+        preview_pos = text.index('📋 *Draft preview*')
+        first_field_pos = text.index('📅')
+        assert preview_pos < first_field_pos, (
+            "'Draft preview' label must precede the first draft field"
+        )
+
+        # Critical: a divider must appear between the curriculum block and the
+        # 'Needs review' warning. If they touch, the warning looks like part
+        # of the portfolio entry — that's the bug the user reported.
+        curriculum_pos = text.index('📚 *Curriculum:*')
+        needs_review_pos = text.index('Needs review before this is complete')
+        between = text[curriculum_pos:needs_review_pos]
+        assert _DRAFT_DIVIDER in between, (
+            "Divider must sit between the curriculum block and the "
+            "'Needs review' warning"
+        )
+
+    @pytest.mark.asyncio
+    async def test_draft_preview_isolates_why_this_form_recommendation(self, thin_draft):
+        """The 'Why this form' recommendation explains the choice — keep it,
+        but render it as its own block above the divider so it never reads
+        like another field in the draft body."""
+        from bot import _DRAFT_DIVIDER, handle_form_choice
+        from extractor import FORM_UUIDS
+        from models import FormTypeRecommendation
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        # Stash a recommendation reason so _chosen_form_reason returns it and
+        # the preview renders the 'Why this form' block.
+        context.user_data['form_recommendations'] = [
+            FormTypeRecommendation(
+                form_type='CBD',
+                rationale='The case is a reflective discussion of one patient.',
+                uuid=FORM_UUIDS['CBD'],
+            ),
+        ]
+        update = sim._make_callback_update('FORM|CBD')
+
+        with patch(
+            'bot._analyse_selected_form',
+            new_callable=AsyncMock,
+            return_value=thin_draft,
+        ):
+            await handle_form_choice(update, context)
+
+        text = sim.get_last_text()
+
+        # Recommendation block is present, distinct from field labels, and
+        # appears BEFORE the divider that opens the draft body.
+        assert 'ℹ️ *Why this form:*' in text
+        why_pos = text.index('ℹ️ *Why this form:*')
+        first_divider_pos = text.index(_DRAFT_DIVIDER)
+        assert why_pos < first_divider_pos, (
+            "'Why this form' must sit ABOVE the divider that opens the "
+            "draft body, not inside the body"
+        )
+
+    @pytest.mark.asyncio
     async def test_form_choice_asks_for_detail_when_extraction_is_too_thin(self):
         from bot import AWAIT_CASE_INPUT, handle_form_choice
         from models import FormDraft
@@ -362,6 +454,118 @@ class TestFlowWalker:
         assert updated_fields['reflection'] == improved.fields['reflection']
         assert updated_fields['clinical_reasoning'] == thin_draft.fields['clinical_reasoning']
         assert any(data == 'APPROVE|draft' for _, data in sim.get_last_buttons())
+
+    @pytest.mark.asyncio
+    async def test_quick_improve_edits_original_draft_in_place(self, thin_draft):
+        """The revised draft must replace the original draft message (edit in
+        place) and never spawn a second full draft message. The chat should
+        show one living draft with a Revised draft label."""
+        from bot import AWAIT_APPROVAL, handle_quick_improve
+        from models import FormDraft
+
+        improved = FormDraft(
+            form_type='CBD',
+            uuid='uuid-cbd',
+            fields={
+                **thin_draft.fields,
+                'reflection': 'I will escalate dynamic ECG changes earlier and document the decision-making more clearly.',
+            },
+        )
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('IMPROVE|reflection')
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': 'CBD',
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+        original_message_id = update.callback_query.message.message_id
+
+        with patch('bot.get_voice_profile', return_value=''), \
+             patch('bot.extract_form_data', new_callable=AsyncMock, return_value=improved):
+            result = await handle_quick_improve(update, context)
+
+        assert result == AWAIT_APPROVAL
+
+        # The original draft message must have been edited in place once, with
+        # the revised content + Revised draft label and the approval keyboard.
+        # Use the simulator's edit log to confirm.
+        edits = [m for m in sim.messages_sent if m[0] == 'edit' and m[1] is not None]
+        revised_edits = [m for m in edits if 'Revised draft' in m[1]]
+        assert len(revised_edits) == 1, (
+            f"Expected exactly one in-place edit with the Revised draft label, got: {edits}"
+        )
+        revised_text = revised_edits[0][1]
+        assert improved.fields['reflection'] in revised_text
+        revised_markup = revised_edits[0][2]
+        assert revised_markup is not None and hasattr(revised_markup, 'inline_keyboard')
+        button_data = [b.callback_data for row in revised_markup.inline_keyboard for b in row]
+        assert 'APPROVE|draft' in button_data
+        # One-revision default: improve button must NOT come back on the
+        # revised draft.
+        assert 'IMPROVE|reflection' not in button_data
+
+        # The in-place edit must target the SAME message the user tapped
+        # (the original draft), not a freshly sent ack message.
+        update.callback_query.message.edit_text.assert_awaited_once()
+
+        # No second full draft message should have been sent. The only
+        # outbound "reply" should be the tiny status ack.
+        replies = [m for m in sim.messages_sent if m[0] == 'reply']
+        assert len(replies) == 1
+        assert 'Tightening' in replies[0][1]
+        # That status ack must have been dismissed (deleted), so the chat
+        # ends up with a single living draft instead of a status + draft.
+        assert any(m[0] == 'delete' for m in sim.messages_sent)
+
+    @pytest.mark.asyncio
+    async def test_quick_improve_failure_restores_original_buttons(self, thin_draft):
+        """When the LLM call fails, the original draft message must keep its
+        approval keyboard so the user can retry/save — no orphaned draft and
+        no second full preview message."""
+        from bot import AWAIT_APPROVAL, handle_quick_improve
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('IMPROVE|reflection')
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': 'CBD',
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+
+        async def _raise(*args, **kwargs):
+            raise RuntimeError('boom')
+
+        with patch('bot.get_voice_profile', return_value=''), \
+             patch('bot.extract_form_data', new_callable=AsyncMock, side_effect=_raise):
+            result = await handle_quick_improve(update, context)
+
+        assert result == AWAIT_APPROVAL
+        # quick_improve_used must remain unset so the user can retry.
+        assert not context.user_data.get('quick_improve_used')
+
+        # No revised-draft edit should have happened on the original message.
+        revised_edits = [
+            m for m in sim.messages_sent
+            if m[0] == 'edit' and m[1] is not None and 'Revised draft' in m[1]
+        ]
+        assert revised_edits == []
+
+        # The keyboard must be restored on the ORIGINAL draft message via a
+        # markup-only edit (text untouched). The improve button must still be
+        # present so the user can retry.
+        markup_events = [m for m in sim.messages_sent if m[0] == 'markup' and m[2] is not None]
+        assert markup_events, 'Original draft buttons were not restored after failure'
+        last_markup = markup_events[-1][2]
+        button_data = [b.callback_data for row in last_markup.inline_keyboard for b in row]
+        assert 'APPROVE|draft' in button_data
+        assert 'IMPROVE|reflection' in button_data
 
     @pytest.mark.asyncio
     async def test_all_forms_screen_has_navigation(self):
@@ -722,7 +926,8 @@ class TestFlowWalker:
         assert ('👍 It worked', 'FEEDBACK|good|CBD|success') in buttons
         assert ('✏️ Amend this draft', 'AMEND|amend') in buttons
         assert ("👎 Didn't work", 'FEEDBACK|bad|CBD|success') in buttons
-        assert ('🧰 More options', 'ACTION|post_file_more|CBD|success') in buttons
+        assert ('🧰 More options', 'ACTION|post_file_more|CBD|success') not in buttons
+        assert not any(label in {'💬 Something missing?', '⚙️ Settings', '🏠 Main menu'} for label, _ in buttons)
 
     @pytest.mark.asyncio
     async def test_text_file_this_files_active_draft_when_state_reentered(self, thin_draft):
@@ -1029,13 +1234,36 @@ class TestFlowWalker:
 
         assert result == AWAIT_APPROVAL
         assert context.user_data.get('draft_data')
-        assert 'may not have saved' in sim.get_last_text().lower()
+        text = sim.get_last_text()
+        assert 'may not have saved' in text.lower()
+        # New step-header treatment so the uncertain-save report doesn't read
+        # as another draft block, plus a divider separating the recovery copy
+        # from the saved-status line.
+        assert '⚠️ *Filing had issues — check Kaizen*' in text
+        # The link in the message body must not falsely promise to open the
+        # draft we just tried to save — when uncertain, we point at the
+        # Kaizen drafts list so the user verifies first.
+        assert 'Check your Kaizen drafts' in text
+        assert '[Open ' not in text  # no "Open {form_name} manually in Kaizen" link
         buttons = sim.get_last_buttons()
         assert ('👍 It worked', 'FEEDBACK|good|CBD|partial') not in buttons
         assert ("👎 Didn't work", 'FEEDBACK|bad|CBD|partial') not in buttons
         assert ('📋 File another case', 'ACTION|file') in buttons
         assert ('❌ Cancel', 'ACTION|cancel') in buttons
-        assert ('🧰 More options', 'ACTION|post_file_more|CBD|partial') in buttons
+        assert ('🧰 More options', 'ACTION|post_file_more|CBD|partial') not in buttons
+        assert not any(label in {'💬 Something missing?', '⚙️ Settings', '🏠 Main menu'} for label, _ in buttons)
+        # Button URLs must never lead to /events/new-section/ on uncertain
+        # save — that opens a BLANK form and the user reported it looked
+        # like the saved draft.
+        markup = sim.messages_sent[-1][2]
+        url_buttons = [
+            button.url
+            for row in markup.inline_keyboard
+            for button in row
+            if getattr(button, 'url', None)
+        ]
+        assert not any('events/new-section/' in url for url in url_buttons)
+        assert any(url == 'https://kaizenep.com/activities' for url in url_buttons)
 
     @pytest.mark.asyncio
     async def test_manual_review_dops_partial_does_not_show_success_buttons(self):
@@ -1097,12 +1325,19 @@ class TestFlowWalker:
 
         assert result == ConversationHandler.END
         text = sim.get_last_text()
-        assert 'saved as a draft, but needs manual review' in text
+        # The saved-draft confirmation must lead with a clear step header so
+        # users can tell the case has been filed; the review guidance must
+        # then read as its own block, not as draft content.
+        assert '📥 *Draft saved in Kaizen*' in text
+        assert '⚠️ *Needs your review*' in text
         assert '8 fields filled' in text
         assert 'needs your review: Placement' in text
-        assert 'This is not complete yet' in text
         assert '10 cases this month (Unlimited)' in text
-        assert '✅ *Direct Observation of Procedural Skills saved.*' not in text
+        # The old single-line wording must NOT come back — that's the merged
+        # look the user reported.
+        assert 'saved as a draft, but needs manual review' not in text
+        assert 'This is not complete yet' not in text
+        assert '✅ *Case filed*' not in text
 
         buttons = sim.get_last_buttons()
         callbacks = {callback for _, callback in buttons}
@@ -1110,7 +1345,7 @@ class TestFlowWalker:
         assert 'FEEDBACK|bad|DOPS|partial' not in callbacks
         assert 'AMEND|amend' not in callbacks
         assert 'ACTION|file' in callbacks
-        assert 'ACTION|post_file_more|DOPS|partial' in callbacks
+        assert 'ACTION|post_file_more|DOPS|partial' not in callbacks
 
         markup = sim.messages_sent[-1][2]
         url_buttons = [
@@ -1119,10 +1354,14 @@ class TestFlowWalker:
             for button in row
             if getattr(button, 'url', None)
         ]
-        assert any('kaizenep.com/events/new-section/' in url for url in url_buttons)
+        # Without a saved_url from the filer, the Open Kaizen button MUST
+        # land on the activities list — never the new-section URL (which
+        # would open a blank form instead of the saved draft).
+        assert any(url == 'https://kaizenep.com/activities' for url in url_buttons)
+        assert not any('events/new-section/' in url for url in url_buttons)
 
     @pytest.mark.asyncio
-    async def test_post_filing_more_expands_secondary_actions(self, thin_draft):
+    async def test_stale_post_filing_more_rebuilds_compact_actions(self, thin_draft):
         from bot import handle_action_button
 
         sim = BotSimulator()
@@ -1140,11 +1379,14 @@ class TestFlowWalker:
         buttons = sim.get_last_buttons()
         assert ('🔄 Try again', 'ACTION|retry_filing') in buttons
         assert ('📋 File another case', 'ACTION|file') in buttons
-        assert ('💬 Something missing?', 'FILING|feedback|CBD') in buttons
-        assert ('⚙️ Settings', 'ACTION|settings') in buttons
-        assert ('🏠 Main menu', 'ACTION|back_to_menu') in buttons
+        assert ('❌ Cancel', 'ACTION|cancel') in buttons
+        assert ('💬 Something missing?', 'FILING|feedback|CBD') not in buttons
+        assert ('🚩 Flag a missed field', 'FILING|feedback|CBD') not in buttons
+        assert ('⚙️ Settings', 'ACTION|settings') not in buttons
+        assert ('🏠 Main menu', 'ACTION|back_to_menu') not in buttons
+        assert ('🧰 More options', 'ACTION|post_file_more|CBD|partial') not in buttons
 
-    def test_post_filing_more_options_button_has_emoji_for_all_statuses(self):
+    def test_post_filing_keyboard_does_not_show_more_options_for_any_status(self):
         from bot import _build_post_filing_keyboard
 
         for status in ("success", "partial", "failed"):
@@ -1154,10 +1396,13 @@ class TestFlowWalker:
                 for row in keyboard.inline_keyboard
                 for button in row
             ]
-            assert ("🧰 More options", f"ACTION|post_file_more|CBD|{status}") in buttons
+            assert ("🧰 More options", f"ACTION|post_file_more|CBD|{status}") not in buttons
+            assert not any(label in {'💬 Something missing?', '⚙️ Settings', '🏠 Main menu'} for label, _ in buttons)
+            if status in {"success", "partial"}:
+                assert ("🚩 Flag a missed field", "FILING|feedback|CBD") in buttons
 
     @pytest.mark.asyncio
-    async def test_post_filing_more_secondary_workflows_are_connected(self, thin_draft):
+    async def test_stale_post_filing_more_does_not_restore_clutter(self, thin_draft):
         from bot import handle_action_button, handle_filing_feedback
 
         sim = BotSimulator()
@@ -1174,24 +1419,15 @@ class TestFlowWalker:
              patch('bot.get_cases_this_month', new_callable=AsyncMock, return_value=0):
             await handle_action_button(sim._make_callback_update('ACTION|post_file_more|CBD|failed'), context)
             callbacks = {callback for _, callback in sim.get_last_buttons()}
-            assert {
-                'ACTION|retry_filing',
-                'ACTION|file',
-                'FILING|feedback|CBD',
-                'ACTION|settings',
-                'ACTION|back_to_menu',
-            } <= callbacks
+            assert {'ACTION|retry_filing', 'ACTION|file', 'ACTION|cancel'} <= callbacks
+            assert 'FILING|feedback|CBD' not in callbacks
+            assert 'ACTION|settings' not in callbacks
+            assert 'ACTION|back_to_menu' not in callbacks
 
             await handle_filing_feedback(sim._make_callback_update('FILING|feedback|CBD'), context)
             pushback_callbacks = {callback for _, callback in sim.get_last_buttons()}
             assert 'PUSHBACK|CBD|date_of_encounter' in pushback_callbacks
             assert 'PUSHBACK|CBD|other' in pushback_callbacks
-
-            await handle_action_button(sim._make_callback_update('ACTION|settings'), context)
-            assert 'settings' in sim.get_last_text().lower()
-
-            await handle_action_button(sim._make_callback_update('ACTION|back_to_menu'), context)
-            assert 'Portfolio Guru' in sim.get_last_text()
 
     @pytest.mark.asyncio
     async def test_failed_filing_uses_llm_recovery_copy(self, thin_draft):
@@ -2116,6 +2352,344 @@ class TestRecentPortfolioFixes:
 
         assert ('🔁 Same case, another WPBA', 'ACTION|same_case_another') in buttons
         assert ('📋 File another case', 'ACTION|file') in buttons
+
+    def test_post_filing_keyboard_links_to_saved_draft_url_when_present(self):
+        """When the filer captures the post-save Kaizen URL, the Open button
+        must link directly to that draft — not to the new-section URL (which
+        would open a blank form and is the bug the user reported)."""
+        from bot import _build_post_filing_keyboard
+
+        saved_url = 'https://kaizenep.com/events/fillin/draft-doc-id?autosave=auto-1'
+        for status in ('success', 'partial'):
+            keyboard = _build_post_filing_keyboard(
+                'CBD', status, saved_url=saved_url,
+            )
+            labelled_urls = [
+                (button.text, button.url)
+                for row in keyboard.inline_keyboard
+                for button in row
+                if getattr(button, 'url', None)
+            ]
+
+            assert ('🔗 Open saved draft', saved_url) in labelled_urls
+            # No 'Open in Kaizen' label that falsely promises to open the draft.
+            assert not any(text == '🔗 Open in Kaizen' for text, _ in labelled_urls)
+            # The new-section URL (blank form) must not appear when we have a
+            # real saved-draft URL.
+            assert not any('events/new-section/' in url for _, url in labelled_urls)
+
+    def test_post_filing_keyboard_falls_back_to_activities_without_saved_url(self):
+        """Without a saved-draft URL, the button must NOT open a new blank
+        form. It opens the Kaizen activities list (where the saved draft can
+        be found) and the label is plain 'Open Kaizen' — no false promise."""
+        from bot import _build_post_filing_keyboard
+
+        keyboard = _build_post_filing_keyboard('CBD', 'partial', saved_url=None)
+        labelled_urls = [
+            (button.text, button.url)
+            for row in keyboard.inline_keyboard
+            for button in row
+            if getattr(button, 'url', None)
+        ]
+
+        assert ('🔗 Open Kaizen', 'https://kaizenep.com/activities') in labelled_urls
+        # No label claiming the button opens the saved draft, since it
+        # actually opens the activities list.
+        assert not any(text == '🔗 Open saved draft' for text, _ in labelled_urls)
+        # Critically: never link to the new-section URL on a saved draft —
+        # that would open a blank form, which is the user-reported bug.
+        assert not any('events/new-section/' in url for _, url in labelled_urls)
+
+        success_keyboard = _build_post_filing_keyboard('CBD', 'success', saved_url=None)
+        success_urls = [
+            (button.text, button.url)
+            for row in success_keyboard.inline_keyboard
+            for button in row
+            if getattr(button, 'url', None)
+        ]
+        assert ('🔗 Open Kaizen', 'https://kaizenep.com/activities') in success_urls
+        assert not any('events/new-section/' in url for _, url in success_urls)
+
+    def test_post_filing_keyboard_uncertain_uses_saved_url_or_activities_fallback(self):
+        """The uncertain-save path (partial + error) currently can't trust the
+        captured URL, so it must use the honest activities-list fallback."""
+        from bot import _build_post_filing_keyboard
+
+        keyboard = _build_post_filing_keyboard('CBD', 'partial', uncertain=True)
+        url_buttons = [
+            button.url
+            for row in keyboard.inline_keyboard
+            for button in row
+            if getattr(button, 'url', None)
+        ]
+
+        assert 'https://kaizenep.com/activities' in url_buttons
+        assert not any('events/new-section/' in url for url in url_buttons)
+
+    @pytest.mark.asyncio
+    async def test_saved_confirmation_partial_uses_clear_step_header(self, thin_draft):
+        """The partial-no-error confirmation must lead with a 'Draft saved in
+        Kaizen' step header and visually separate the field-review guidance
+        from the saved-status line so users can tell what phase they're in."""
+        from bot import handle_approval_approve
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('APPROVE|draft')
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin_draft.form_type,
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+
+        with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.record_case_filed', new=AsyncMock()), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 1, -1, 'pro_plus'))), \
+             patch('bot.route_filing', new_callable=AsyncMock, return_value={
+                 'status': 'partial',
+                 'filled': ['date_of_encounter', 'clinical_setting', 'reflection'],
+                 'skipped': ['clinical_reasoning'],
+                 'method': 'deterministic',
+                 'saved_url': 'https://kaizenep.com/events/fillin/draft-doc-id?autosave=auto-1',
+             }):
+            await handle_approval_approve(update, context)
+
+        text = sim.get_last_text()
+
+        # Top step header is clear and distinct from the draft above.
+        first_line = text.split('\n', 1)[0]
+        assert '📥' in first_line and 'Draft saved in Kaizen' in first_line, (
+            f"First line should be the step header. Got: {first_line!r}"
+        )
+
+        # Field-review guidance lives in its own block, after the saved-status
+        # block, and is itself led by a clear "Needs your review" sub-header.
+        assert '⚠️ *Needs your review*' in text
+        header_pos = text.index('Draft saved in Kaizen')
+        review_pos = text.index('Needs your review')
+        assert review_pos > header_pos, (
+            "Field-review guidance must come AFTER the saved-status header"
+        )
+
+        # When saved_url is available, the action line points to "the saved
+        # draft" — matching what the keyboard button actually does.
+        assert 'Open the saved draft' in text
+
+        # Keyboard must link to the actual saved draft URL.
+        url_buttons = [
+            button.url
+            for row in sim.messages_sent[-1][2].inline_keyboard
+            for button in row
+            if getattr(button, 'url', None)
+        ]
+        assert 'https://kaizenep.com/events/fillin/draft-doc-id?autosave=auto-1' in url_buttons
+
+    @pytest.mark.asyncio
+    async def test_saved_confirmation_partial_falls_back_when_no_saved_url(self, thin_draft):
+        """Without a saved_url, the action wording and the button must both
+        be the honest fallback: 'Open Kaizen and find your saved draft' (text)
+        and the activities list (URL)."""
+        from bot import handle_approval_approve
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('APPROVE|draft')
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin_draft.form_type,
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+
+        with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.record_case_filed', new=AsyncMock()), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 1, -1, 'pro_plus'))), \
+             patch('bot.route_filing', new_callable=AsyncMock, return_value={
+                 'status': 'partial',
+                 'filled': ['date_of_encounter', 'clinical_setting'],
+                 'skipped': ['reflection'],
+                 'method': 'browser-use',
+                 # No saved_url — browser-use path doesn't return it.
+             }):
+            await handle_approval_approve(update, context)
+
+        text = sim.get_last_text()
+        assert '📥 *Draft saved in Kaizen*' in text
+        # Honest fallback wording — does not promise to open the draft.
+        assert 'Open Kaizen and find your saved draft' in text
+        assert 'Open the saved draft' not in text
+
+        url_buttons = [
+            button.url
+            for row in sim.messages_sent[-1][2].inline_keyboard
+            for button in row
+            if getattr(button, 'url', None)
+        ]
+        assert 'https://kaizenep.com/activities' in url_buttons
+        assert not any('events/new-section/' in url for url in url_buttons)
+
+    @pytest.mark.asyncio
+    async def test_saved_confirmation_success_uses_case_filed_header(self):
+        """Successful save also reads as a new step: 'Case filed' on top, then
+        the form-name subhead, then summary lines — distinct from the draft."""
+        from bot import handle_approval_approve
+        from models import FormDraft
+
+        thin = FormDraft(
+            form_type='CBD',
+            uuid='uuid-cbd',
+            fields={
+                'date_of_encounter': '2026-03-17',
+                'clinical_setting': 'ED',
+                'patient_presentation': 'Chest pain',
+                'clinical_reasoning': 'Managed as ACS, escalated appropriately.',
+                'reflection': 'Need faster ECG review.',
+                'curriculum_links': ['SLO1'],
+                'key_capabilities': ['SLO1 KC1: Assess and stabilise the patient'],
+            },
+        )
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('APPROVE|draft')
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin.form_type,
+            'fields': thin.fields,
+            'uuid': thin.uuid,
+        }
+
+        with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.record_case_filed', new=AsyncMock()), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 1, -1, 'pro_plus'))), \
+             patch('bot.get_case_history', new=AsyncMock(return_value=[])), \
+             patch('bot.route_filing', new_callable=AsyncMock, return_value={
+                 'status': 'success',
+                 'filled': ['date_of_encounter', 'clinical_setting', 'reflection'],
+                 'skipped': [],
+                 'method': 'deterministic',
+             }):
+            await handle_approval_approve(update, context)
+
+        text = sim.get_last_text()
+        first_line = text.split('\n', 1)[0]
+        assert '✅ *Case filed*' in first_line, (
+            f"First line should be the 'Case filed' header. Got: {first_line!r}"
+        )
+        # The subhead mentions the form was saved as a Kaizen draft so the
+        # user knows nothing was submitted/signed.
+        assert 'saved as a Kaizen draft' in text
+
+    def test_post_filing_keyboard_flag_missed_field_button_label_is_actionable(self):
+        """The old "💬 Something missing?" label was vague — it sounded like a
+        question, but the handler records pushback telemetry. The new label
+        names the action so the user knows what tapping it does."""
+        from bot import _build_post_filing_keyboard
+
+        for status in ('success', 'partial'):
+            keyboard = _build_post_filing_keyboard('CBD', status, same_case_available=True)
+            buttons = [
+                (b.text, b.callback_data)
+                for row in keyboard.inline_keyboard
+                for b in row
+            ]
+            assert ('🚩 Flag a missed field', 'FILING|feedback|CBD') in buttons, (
+                f"status={status!r} keyboard should expose the renamed pushback "
+                f"button with an action-shaped label. Got: {buttons!r}"
+            )
+            assert not any(label == '💬 Something missing?' for label, _ in buttons)
+
+    def test_post_filing_keyboard_omits_flag_button_when_filing_failed(self):
+        """A hard failure means nothing saved — there's no draft, so a
+        "missed field" pushback isn't meaningful. The flag button stays off."""
+        from bot import _build_post_filing_keyboard
+
+        keyboard = _build_post_filing_keyboard('CBD', 'failed')
+        callbacks = {b.callback_data for row in keyboard.inline_keyboard for b in row}
+        assert 'FILING|feedback|CBD' not in callbacks
+
+    def test_post_filing_keyboard_has_no_duplicate_file_another_case(self):
+        """'File another case' must appear at most once in any post-filed
+        keyboard — the user reported it was showing up in both primary and
+        the old More-options drawer."""
+        from bot import _build_post_filing_keyboard
+
+        for status, kwargs in (
+            ('success', {'same_case_available': True}),
+            ('success', {'same_case_available': False}),
+            ('partial', {}),
+            ('partial', {'uncertain': True}),
+            ('failed', {}),
+        ):
+            keyboard = _build_post_filing_keyboard('CBD', status, **kwargs)
+            file_again_count = sum(
+                1
+                for row in keyboard.inline_keyboard
+                for b in row
+                if (b.callback_data or '') == 'ACTION|file'
+            )
+            assert file_again_count <= 1, (
+                f"status={status!r} kwargs={kwargs!r} should not duplicate "
+                f"'File another case'. Got count={file_again_count}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_same_case_another_reuses_original_case_text_not_draft(
+        self, recommended_forms
+    ):
+        """Acceptance #5: the Same-case-another button must reuse the user's
+        ORIGINAL submitted case text — never the saved draft text or a
+        bot-generated draft — and route back to the assessment-type
+        recommendation step so the user doesn't re-send the case."""
+        from bot import AWAIT_FORM_CHOICE, handle_action_button
+
+        original_case_text = (
+            "45M with epigastric pain radiating to back, raised lipase, "
+            "started IV fluids and analgesia, admitted under surgery."
+        )
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        # Post-filed state: original case + the form just filed sit on
+        # last_filed_*; the user_data also carries the bot-generated draft
+        # text so we can confirm we're NOT reusing that.
+        context.user_data['last_filed_case_text'] = original_case_text
+        context.user_data['last_filed_form_type'] = 'CBD'
+        context.user_data['last_draft_preview'] = (
+            'Bot-generated draft body — must NOT be reused as case text.'
+        )
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_curriculum', return_value='2025'), \
+             patch(
+                 'bot.recommend_form_types',
+                 new_callable=AsyncMock,
+                 return_value=recommended_forms,
+             ) as recommend_mock:
+            result = await handle_action_button(
+                sim._make_callback_update('ACTION|same_case_another'), context
+            )
+
+        # Routes back to the recommendation/assessment-type selection step.
+        assert result == AWAIT_FORM_CHOICE
+        # The recommender saw the ORIGINAL case text, not the bot draft.
+        recommend_mock.assert_awaited()
+        called_with = recommend_mock.await_args.args[0]
+        assert called_with == original_case_text, (
+            f"Expected recommender to receive the original case text, "
+            f"got: {called_with!r}"
+        )
+        # The previously filed form type is excluded so the user is offered a
+        # different WPBA type.
+        assert context.user_data.get('excluded_form_type') == 'CBD'
+        # case_text was restored from last_filed_case_text — not the draft body.
+        assert context.user_data.get('case_text') == original_case_text
+
 
 class TestOnboardingFrictionPatch:
     @pytest.mark.asyncio
