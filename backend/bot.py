@@ -390,10 +390,11 @@ async def _edit_last_bot_msg(context, chat_id, text, reply_markup=None, parse_mo
 
 def _track_latest_message(context, msg):
     """Remember a bot message that later flow steps should edit in place."""
+    chat_id = getattr(msg, "chat_id", None) or getattr(getattr(msg, "chat", None), "id", None)
     context.user_data["last_bot_msg_id"] = msg.message_id
-    context.user_data["last_bot_chat_id"] = msg.chat_id
+    context.user_data["last_bot_chat_id"] = chat_id
     context.user_data["status_msg_id"] = msg.message_id
-    context.user_data["status_msg_chat"] = msg.chat_id
+    context.user_data["status_msg_chat"] = chat_id
 
 
 def _track_pending_bundle_message(context, msg):

@@ -298,3 +298,48 @@ class TestExplicitFormRouting:
         edited = context.bot.edit_message_text.await_args.kwargs
         assert edited["message_id"] == 123
         assert "Procedural Log" in edited["text"]
+
+    @pytest.mark.asyncio
+    async def test_status_tracking_uses_chat_object_when_chat_id_missing(self, monkeypatch):
+        import bot
+
+        message = MagicMock()
+        message.chat_id = 456
+        message.chat.id = 456
+        message.reply_text = AsyncMock()
+
+        ack = MagicMock()
+        ack.message_id = 123
+        ack.chat_id = None
+        ack.chat.id = 456
+
+        context = MagicMock()
+        context.user_data = {}
+        context.bot.edit_message_text = AsyncMock()
+
+        bot._track_latest_message(context, ack)
+
+        async def fail_recommend(*args, **kwargs):
+            raise AssertionError("recommend_form_types should not run for explicit procedure log requests")
+
+        async def fail_analyse(*args, **kwargs):
+            raise AssertionError("_analyse_selected_form should wait until the user taps Draft")
+
+        monkeypatch.setattr(bot, "recommend_form_types", fail_recommend)
+        monkeypatch.setattr(bot, "_analyse_selected_form", fail_analyse)
+
+        state = await bot._process_case_text(
+            message,
+            context,
+            99999,
+            "Add this case as procedural log for adult procedural sedation\n\nSedation notes.",
+            "voice",
+        )
+
+        assert state == bot.AWAIT_FORM_CHOICE
+        message.reply_text.assert_not_awaited()
+        context.bot.edit_message_text.assert_awaited_once()
+        edited = context.bot.edit_message_text.await_args.kwargs
+        assert edited["chat_id"] == 456
+        assert edited["message_id"] == 123
+        assert "Procedural Log" in edited["text"]
