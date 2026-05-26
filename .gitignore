@@ -26,6 +26,7 @@ __pycache__/
 *.scratch
 
 # Local generated/debug artefacts
+.artifacts/
 *_inspection_results.json
 p0_inspection_results.json
 *_conflict_resolution_*.json

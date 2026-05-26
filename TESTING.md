@@ -28,6 +28,8 @@ Portfolio Guru uses five testing layers, and every change must preserve all of t
 
 Telethon is the lean product-bot lane: use it when we need to prove Portfolio Guru works from a real user's perspective without the overhead of a separate desktop VM. OpenClaw QA Lab / Mantis remains the heavier lane for visual proof, bot-to-bot channel checks, and PR evidence. The shared Telethon harness captures a transcript and can write it to `TELEGRAM_E2E_ARTIFACT_DIR` for review.
 
+The autonomous pre-launch wrapper is `scripts/telegram_bot_qa.sh`; the discipline and escalation rules live in `docs/telegram-bot-autonomous-testing.md`.
+
 ## Layer 7 — API Mocks And Snapshots
 
 `backend/tests/test_gemini_mocks.py` exercises Gemini edge cases against the SDK HTTP layer with `respx`. `backend/tests/test_snapshots.py` uses `syrupy` to lock key outgoing bot messages so formatting regressions fail fast.
