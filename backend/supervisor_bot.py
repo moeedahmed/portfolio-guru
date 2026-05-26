@@ -276,7 +276,7 @@ async def connect_cdp_page():
     """
     pw = await async_playwright().start()
     try:
-        browser = await pw.chromium.connect_over_cdp(CDP_URL)
+        browser = await pw.chromium.connect_over_cdp(CDP_URL, no_defaults=True)
     except Exception:
         await pw.stop()
         raise

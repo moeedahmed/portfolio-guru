@@ -77,7 +77,7 @@ async def scrape_unsigned_tickets(
 
         # Try CDP first
         try:
-            browser = await pw.chromium.connect_over_cdp(CDP_URL)
+            browser = await pw.chromium.connect_over_cdp(CDP_URL, no_defaults=True)
             for ctx in browser.contexts:
                 for page in ctx.pages:
                     if "kaizenep.com" in page.url:

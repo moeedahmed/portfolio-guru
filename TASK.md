@@ -87,6 +87,20 @@ python -m pytest tests/ -q \
   --ignore=tests/test_e2e_live.py
 ```
 
+## Live Smoke — 2026-05-26
+
+- Fixed the Chrome 148 / Playwright CDP attach failure by using
+  `connect_over_cdp(..., no_defaults=True)` across the live Kaizen CDP entry
+  points and requiring Playwright 1.60+.
+- Verified the persistent Chrome session can attach via CDP, log in, and read
+  the live Kaizen Assessments queue.
+- Live save-draft could not be completed because every visible assessment row
+  in the checked accounts was already filled; no unfilled CBD ticket exposed a
+  `Fill in` control.
+- Safety smoke against an existing filled CBD returned a clean failure before
+  any field write: `Fill in` control not found, zero fields filled, still on the
+  original ticket URL.
+
 ## Guardrails
 
 - Save-draft is the _only_ live assessor action this slice enables. Submit,

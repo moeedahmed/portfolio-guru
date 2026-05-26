@@ -325,7 +325,7 @@ async def extract_assessor_completion_shape(page: Page, detail: AssessorTicketDe
 async def _open_mapping_page(pw):
     browser_to_close = None
     try:
-        browser = await pw.chromium.connect_over_cdp(CDP_URL)
+        browser = await pw.chromium.connect_over_cdp(CDP_URL, no_defaults=True)
         context = browser.contexts[0] if browser.contexts else await browser.new_context()
         page = context.pages[0] if context.pages else await context.new_page()
     except Exception:

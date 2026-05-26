@@ -13,7 +13,7 @@ CDP_URL = "http://localhost:18800"
 
 async def discover_all_forms():
     pw = await async_playwright().start()
-    browser = await pw.chromium.connect_over_cdp(CDP_URL)
+    browser = await pw.chromium.connect_over_cdp(CDP_URL, no_defaults=True)
 
     page = None
     for ctx in browser.contexts:

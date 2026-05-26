@@ -39,7 +39,7 @@ async def main() -> int:
 
     manifest = _load_manifest(Path(sys.argv[1]))
     async with async_playwright() as pw:
-        browser = await pw.chromium.connect_over_cdp("http://localhost:18800")
+        browser = await pw.chromium.connect_over_cdp("http://localhost:18800", no_defaults=True)
         context = browser.contexts[0]
         deleted: list[str] = []
         for record in manifest:

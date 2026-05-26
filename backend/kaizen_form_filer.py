@@ -1111,7 +1111,7 @@ async def _connect_cdp() -> tuple:
     """Connect to managed Chrome via CDP, or fall back to headless Chromium."""
     pw = await async_playwright().start()
     try:
-        browser = await pw.chromium.connect_over_cdp(CDP_URL)
+        browser = await pw.chromium.connect_over_cdp(CDP_URL, no_defaults=True)
         # Reuse existing Kaizen page if available
         for context in browser.contexts:
             for page in context.pages:
@@ -1894,7 +1894,7 @@ async def connect_cdp_browser() -> tuple:
     """
     try:
         pw = await async_playwright().start()
-        browser = await pw.chromium.connect_over_cdp(CDP_URL)
+        browser = await pw.chromium.connect_over_cdp(CDP_URL, no_defaults=True)
 
         # Look for an existing Kaizen page
         for context in browser.contexts:
