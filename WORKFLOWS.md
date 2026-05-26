@@ -5,6 +5,10 @@
 > Human-readable Mermaid diagrams live in Notion (Portfolio Guru page).
 > Update this file whenever a flow changes.
 
+For the private-beta launch boundary, supervisor scope, rollback path,
+and monitoring cadence, see `docs/PRIVATE_BETA_LAUNCH.md`. The dogfood
+smoke checklist lives in `scripts/dogfood_smoke.sh`.
+
 ---
 
 ## Conversation States

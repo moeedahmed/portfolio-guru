@@ -1,137 +1,117 @@
-# Active Task — Clinical Supervisor Guarded Save-Draft Write-Back
+# Active Task — Private Beta Launch Cut
 
 ## Objective
 
-Extend the Clinical Supervisor write-back from planning-only into a one-action
-live runner. A supervisor can open a ticket, dictate or type feedback, review
-the local assessor draft, request a reviewed Kaizen action plan, and — behind a
-separate explicit Telegram confirmation — let the bot save the assessor section
-as a Kaizen _draft_. The bot still does not submit, sign, approve, send, delete,
-or reject anything in Kaizen.
+Cut a private-beta-ready slice of Portfolio Guru for 3–5 trusted UK EM
+trainees. No public launch, no marketing, no new supervisor surface
+features. The work here is launch discipline: a written runbook, a
+dogfood smoke checklist, and the carried-over supervisor guardrails the
+last few slices established. The next operator should be able to push,
+deploy, and dogfood without re-discovering the release path.
 
 ## Current Slice
 
-1. `backend/assessor_writeback.py` keeps the planning surface but now adds a
-   guarded live runner. `execute_write_plan` opens the named ticket via the
-   CDP-attached Playwright page, clicks `Fill in`, fills the mapped CBD
-   assessor fields, and clicks `Save as draft` — and nothing else. Browser
-   step kinds outside `{open_completion_surface, fill_field, save_draft}`
-   are rejected.
-2. `execute_write_plan` enforces the safety envelope before it touches the
-   browser: action must be `SAVE_DRAFT`; `plan.blocked_reasons` must be
-   empty; the draft hash must still match; the ticket URL must contain the
-   plan's ticket UUID; at least one field write must be planned. Any mismatch
-   raises `AssessorWriteBackUnavailable` before any navigation.
-3. Recoverable runner failures (Fill in / field input / Save button missing,
-   navigation error, no Kaizen confirmation marker) return an
-   `AssessorWriteResult(status="failed", error=…)` instead of raising. The
-   Telegram surface renders that error as a user-facing message and never
-   claims partial success.
-4. `backend/supervisor_bot.py` adds the explicit confirmation step. Reviewing
-   the plan now exposes `📤 Save draft in Kaizen` (only when the plan is
-   executable); tapping it shows a fresh confirmation message that names the
-   action and safety boundary, with `✅ Yes, save as draft` and `❌ Cancel`.
-   The live runner runs only after the confirmation tap. Ordinary
-   Open / Skip / Later / Review / Recapture / Cancel / Prepare paths never
-   reach the runner.
-5. Tests cover write-back mapping, action separation, ticket/draft binding,
-   missing-required blocking, final-action blocking, the new live happy
-   path, every recoverable failure mode, hash drift, ticket-URL mismatch,
-   the explicit-confirmation gate, blocked-plan rejection, CDP failure,
-   the no-write source-scan boundary on `assessor_writeback`, and the
-   ordinary-callback isolation in `supervisor_bot`.
+1. `docs/PRIVATE_BETA_LAUNCH.md` is the launch runbook. It defines the
+   beta boundary (3–5 trusted EM trainees, no promotion), the supported
+   trainee flows (text/voice/photo → recommendation → draft → edit /
+   cancel / recover → Kaizen save draft), the controlled supervisor
+   scope (read-only notifications and local draft prep always safe; CBD
+   save-draft only behind explicit confirmation against a disposable
+   unfilled CBD ticket), the hard no-go blockers, the rollback /
+   disable path for launchd and the GitHub Mac-Mini runner, the
+   monitoring cadence at 30 min / 2 h / 24 h, and the verbatim
+   message to send beta users.
+2. `scripts/dogfood_smoke.sh` is a manual checklist. It does not touch
+   Telegram, Kaizen, the LLM, or the filer. It walks the operator
+   through 12 checks (service health, logs, /start, text / voice /
+   photo case → draft, edit, cancel / reset, stale-button recovery,
+   trainee save-as-draft, supervisor save-draft confirmation boundary,
+   and a final no-submit Kaizen audit) and records pass / fail / skip
+   plus a free-text note to a timestamped artefact under
+   `docs/continuity/dogfood/`. `--no-record` prints the checklist
+   without prompting, for review.
+3. `WORKFLOWS.md` gets a single pointer up top to the launch runbook so
+   the agent context surfaces the launch source-of-truth without
+   wholesale reformatting.
 
 ## Done
 
-- CBD assessor save-draft runner clicks only `Fill in` and `Save as draft`
-  (verified by source-scan).
-- Live execution is gated by:
-  - Action must be `SAVE_DRAFT`; everything else raises
-    `AssessorWriteBackUnavailable`.
-  - Plan must be unblocked, draft-hash-bound, and have at least one field
-    write.
-  - Browser step kinds must be on the live allow-list.
-  - Ticket URL must contain the planned ticket UUID.
-- `render_write_plan` surfaces a distinct safety boundary for executable vs
-  blocked plans. Executable plans advertise the explicit-confirmation gate;
-  blocked plans say nothing was opened/filled/saved/submitted in Kaizen.
-- Telegram surface adds two new callbacks:
-  - `SUP|request-save-draft|<uuid>` — shows the explicit confirmation copy
-    and the Yes / Cancel keyboard. No CDP attach, no runner call.
-  - `SUP|confirm-save-draft|<uuid>` — re-validates the plan, attaches CDP,
-    calls the runner, and reports success or a user-facing failure reason.
-    Session ends on success so future text/voice falls back to the trainee
-    flow; session is preserved on failure so the supervisor can retry.
-- Focused tests pass:
-  `python -m pytest tests/test_assessor_writeback.py tests/test_supervisor_bot.py tests/test_assessor_drafter.py tests/test_assessor_session_store.py tests/test_assessor_reader.py tests/test_assessor_mapper.py tests/test_assessor_form_schemas.py tests/test_supervisor_workflow.py -q`
-  → 177 passed.
-- Full offline suite passes:
-  `python -m pytest tests/ -q --ignore=tests/test_e2e.py --ignore=tests/test_e2e_live.py`
-  → 525 passed, 22 skipped, 13 deselected.
+- Launch runbook written and committed to the branch.
+- Dogfood smoke script committed, `chmod +x`, `bash -n` clean, and
+  `--no-record` dry-run prints the full checklist.
+- `TASK.md` updated to reflect the active Private Beta Launch Cut sprint
+  with carried supervisor guardrails.
+- `WORKFLOWS.md` gets a single launch pointer; no broad reformatting.
 
 ## Verification
 
 ```bash
-cd /Users/moeedahmed/projects/portfolio-guru/backend
-source venv/bin/activate
-python -m pytest tests/test_assessor_writeback.py \
-  tests/test_supervisor_bot.py \
-  tests/test_assessor_drafter.py \
-  tests/test_assessor_session_store.py \
-  tests/test_assessor_reader.py \
-  tests/test_assessor_mapper.py \
-  tests/test_assessor_form_schemas.py \
-  tests/test_supervisor_workflow.py -q
+bash -n scripts/dogfood_smoke.sh
+bash scripts/dogfood_smoke.sh --no-record   # prints checklist, no I/O
+cd backend && source venv/bin/activate
 python -m pytest tests/ -q \
   --ignore=tests/test_e2e.py \
   --ignore=tests/test_e2e_live.py
 ```
 
-## Live Smoke — 2026-05-26
+The pytest gate above is the same gate the launch runbook references as
+the cut-line; only run it on the laptop before push, not from this
+slice's documentation work.
 
-- Fixed the Chrome 148 / Playwright CDP attach failure by using
-  `connect_over_cdp(..., no_defaults=True)` across the live Kaizen CDP entry
-  points and requiring Playwright 1.60+.
-- Verified the persistent Chrome session can attach via CDP, log in, and read
-  the live Kaizen Assessments queue.
-- Live save-draft could not be completed because every visible assessment row
-  in the checked accounts was already filled; no unfilled CBD ticket exposed a
-  `Fill in` control.
-- Safety smoke against an existing filled CBD returned a clean failure before
-  any field write: `Fill in` control not found, zero fields filled, still on the
-  original ticket URL.
+No live Kaizen tests run in this slice. No deployment, no launchd
+restart, no push, no Telegram traffic. This branch is documentation and
+operator tooling only.
 
-## Guardrails
+## Guardrails (Carried Forward)
 
-- Save-draft is the _only_ live assessor action this slice enables. Submit,
-  sign, approve, send, reject, and delete remain blocked and tested.
-- The runner requires the matching draft hash, the matching ticket UUID in
-  the URL, an unblocked plan, and at least one mapped field write. Any
-  drift raises before any navigation.
-- The Telegram bot has no path to the live runner from Open / Skip / Later /
-  Review / Recapture / Cancel / Prepare-writeback / Request-save-draft.
-  Only `confirm-save-draft` reaches the runner, and it does so only after
-  the supervisor taps `Yes, save as draft`.
-- Save-draft remains CBD-only until another assessor completion surface is
-  mapped and tested.
-- No live Kaizen tests are run in this slice. No deployment, no launchd
-  restart, no push.
+These were established by the prior supervisor slices and must not
+regress as part of the launch cut:
 
-## Carried Context — Guarded Write-Back Planning
+- `backend/assessor_writeback.execute_write_plan` runs against the live
+  CDP page only when the plan is an unblocked CBD save_draft, the draft
+  hash still matches, the ticket URL contains the planned ticket UUID,
+  and every browser step kind is on the live allow-list
+  (`{open_completion_surface, fill_field, save_draft}`). Any other
+  condition raises `AssessorWriteBackUnavailable` before navigation.
+- The runner clicks `Fill in` once, fills the mapped CBD assessor
+  fields by label, and clicks `Save as draft` — and nothing else.
+  Source-scan tests refuse Submit / Sign / Approve / Send / Reject /
+  Delete locator targets in `assessor_writeback`.
+- `backend/supervisor_bot.py` exposes the live runner only via
+  `SUP|confirm-save-draft`, after a separate `SUP|request-save-draft`
+  confirmation step that names the action and safety boundary. Open /
+  Skip / Later / Review / Recapture / Cancel / Prepare-writeback /
+  Request-save-draft never invoke the live runner.
+- Save-draft remains CBD-only. DOPS, Mini-CEX, ESLE, QIAT, LAT, STAT,
+  MSF, JCF, ACAF, ACAT assessor completion surfaces stay blocked until
+  each is mapped, bound, and tested.
+- Trainee filing is draft-only (`filer.py`, `browser_filer.py`,
+  `filer_router.py`). No submit / sign / approve / send / reject /
+  delete on any surface, for any user, in any flow.
 
-The previous slice added the planning surface in `assessor_writeback`,
-`AssessorWriteAction` separation, and the supervisor's
-`Prepare Kaizen action plan (no write)` button. That contract is preserved:
-non-save-draft actions still produce planning-only results, `cancel` stays
-local, and final actions block.
+## Orchestrator Hand-Off
 
-## Carried Context — Local Assessor Draft Capture
+This branch is `launch/private-beta-cut`. Local `main` is currently
+**ahead of `origin/main` by 3 commits**, none of them pushed or
+deployed yet:
 
-`assessor_drafter`, `assessor_session_store`, and the high-priority
-supervisor intent handler remain the baseline. Voice/text capture, review,
-recapture, cancel, skip, later, and open callbacks must stay preserved.
+- `8e28832 fix: restore Kaizen CDP attach for Chrome 148`
+- `cd2aae0 feat: add guarded CBD save-draft live runner`
+- `269446b feat: add guarded assessor writeback planning`
 
-## Carried Context — Kaizen Filing Reliability Cleanup
+Plus the launch-cut docs/script added on this branch.
 
-Deterministic trainee filing, browser-use fallback rules, and launchd deploy
-state are part of the baseline. Do not reopen unless a regression appears.
+The orchestrator owns:
+
+- Pushing (or PR-merging) `launch/private-beta-cut` plus the three
+  prior commits to `origin/main`.
+- Letting the self-hosted Mac-Mini runner deploy, then verifying via
+  `launchctl print` and `/tmp/portfolio-guru-bot.log`.
+- Running the dogfood smoke (`scripts/dogfood_smoke.sh`) against the
+  live bot before sending the beta-user message.
+- Sending the beta-user message in `docs/PRIVATE_BETA_LAUNCH.md`.
+- Deciding whether to hide or keep coming-soon responses for `/bulk`,
+  `/unsigned`, `/chase` during the beta window.
+
+Until the orchestrator pushes and deploys, nothing this branch added is
+live on the Mac Mini bot.
