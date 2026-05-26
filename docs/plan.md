@@ -19,6 +19,7 @@ Reason: a separate bot would duplicate auth, persistence, Kaizen credentials, bi
 Accept ordinary messages, not just command/button flows.
 
 Examples:
+
 - "Had a difficult airway case, can this go in Kaizen?"
 - "What forms would this support?"
 - "File this as CBD and reflection."
@@ -68,6 +69,7 @@ Hard rules:
 ### Phase 0 - Checkpoint and branch
 
 Done:
+
 - DeepSeek model-pathway work committed.
 - Main pushed to GitHub.
 - New branch created for this work.
@@ -100,11 +102,13 @@ Run router in the background for ordinary text messages and log the intended rou
 Purpose: prove the router understands real messages before handing it control.
 
 Verification:
+
 - existing tests pass
 - shadow logs show correct intent on at least 20 representative prompts
 - no user-facing workflow changes
 
 Status:
+
 - Implemented for ordinary text in `handle_case_input` and `handle_mid_conversation_text`.
 - Current implementation is log-only. It does not change routing, replies, buttons, filing, billing, or credentials.
 - Tests prove existing decisions are preserved even when the shadow router returns a conflicting intent.
@@ -112,6 +116,7 @@ Status:
 ### Phase 2.5 - Source-grounding before more conversational routing
 
 Status:
+
 - Added after a real photo-derived draft fabricated a CPR/ALS/ROSC CBD from screenshots that only supported rib fractures, regional anaesthesia, imaging findings and follow-up.
 - Image extraction now uses a facts-only prompt and explicitly forbids extrapolating visible findings into management narrative.
 - Photo/image-derived recommendations and drafts now receive source-grounding guards.
@@ -121,6 +126,7 @@ Status:
 ### Phase 2.6 - Message and workflow hardening
 
 Status:
+
 - Added before Phase 3 to avoid brittle fixed copy and unsafe free-form bot wording.
 - Deterministic workflow states remain the source of truth.
 - Safety-critical messages stay fixed: filing, billing, credentials, confirmations, privacy warnings, and blockers.
@@ -131,12 +137,14 @@ Status:
 ### Phase 2.7 - Assessor workflow mapping
 
 Product direction:
+
 - One engine, two entry points.
 - `file_evidence`: user sends their own case → bot drafts evidence → user approves → bot saves a Kaizen draft.
 - `assess_ticket`: ticket arrives for review → bot shows ticket content → assessor gives intent → bot drafts feedback/sign-off text → assessor approves → bot submits the assessor action.
 - No persistent user-facing modes unless task routing proves confusing.
 
 Safety contract:
+
 - Assessor mapping starts read-only.
 - Browser harness may navigate, list assessment tickets, open tickets, and extract field/button metadata.
 - Browser harness must not sign, submit, save, delete, approve, reject, send feedback, or create drafts during mapping.
@@ -144,6 +152,7 @@ Safety contract:
 - Colleague/consultant credentials are treated as high-risk: no noisy test artefacts, no spam drafts, and no destructive actions.
 
 Status:
+
 - Read-only assessor mapper scaffold added in `backend/assessor_mapper.py`.
 - It can list visible assessment timeline rows and optionally extract ticket detail fields/tags/buttons for mapping.
 - It can output a PHI-free ticket shape (`--shape-only`) so mapping can record field labels/control labels without storing patient narrative.
@@ -156,15 +165,17 @@ Status:
 - Full assessor feedback/sign-off field mapping is now mapped for CBD only; other ticket types remain unmapped.
 - Live read-only mapping can use an existing authenticated browser session; supplied credentials are only needed if login is required, and the mapper must stop at 2FA/captcha.
 - Guarded write-back planning slice added in `backend/assessor_writeback.py`.
-- The write-back adapter maps reviewed local CBD assessor draft values to the mapped Kaizen assessor completion labels, but produces browser-step descriptors only. It does not execute Playwright calls.
+- The write-back adapter maps reviewed local CBD assessor draft values to the mapped Kaizen assessor completion labels.
 - Actions are explicitly separated as `fill_fields`, `save_draft`, `submit`, `sign`, `approve`, and `cancel`.
 - Every Kaizen-touching action requires ticket UUID, form type, explicit action, and reviewed draft hash. Mismatches, unsupported form types, missing required fields, and final actions produce blocked plans.
-- `supervisor_bot` exposes only a review-safe button: `Prepare Kaizen action plan (no write)`. The callback renders the guarded plan and never connects to CDP or opens Kaizen.
-- Live Kaizen write-back execution remains unavailable until a foreground-approved one-ticket/action live runner is built and tested separately.
+- `supervisor_bot` exposes a review-safe button: `Prepare Kaizen action plan (no write)`. The callback renders the guarded plan and never connects to CDP or opens Kaizen.
+- Guarded save-draft live runner added next: `assessor_writeback.execute_write_plan` runs against the existing CDP-attached Playwright page only for CBD `save_draft`, only when the plan is unblocked, hash-bound, ticket-URL-bound, and limited to the {open_completion_surface, fill_field, save_draft} step kinds. It clicks `Fill in` once, fills the mapped CBD assessor fields, and clicks `Save as draft` — nothing else. Submit, sign, approve, send, reject, and delete remain blocked and tested. Source-scan on `assessor_writeback` refuses click/locator targets for the forbidden controls.
+- The Telegram surface adds an explicit confirmation step: tapping `Prepare Kaizen action plan` shows the plan and, when executable, a `📤 Save draft in Kaizen` button. That posts a separate confirmation message naming the action and safety boundary with `✅ Yes, save as draft` / `❌ Cancel`. Only the explicit confirm tap reaches the runner. CDP-down, stale draft, blocked plan, missing ticket URL, and runner failure each produce distinct user-facing messages. Session ends on success and is preserved on failure so the supervisor can retry.
 
 ### Phase 2.8 - Public UX upgrade
 
 Status:
+
 - Added after real usage feedback that Medic Portfolio feels smoother than the public Portfolio Guru bot.
 - Product diagnosis: Portfolio Guru was exposing the state machine too early: choose form, review missing fields, then draft. That is safe, but it feels brittle compared with an assistant that accepts context and chooses the next sensible action.
 - Current slice keeps the deterministic safety contract but makes the recommendation step more assistant-like.
@@ -177,6 +188,7 @@ Status:
 ### Phase 2.9 - Portfolio Readiness / ARCP Health spec
 
 Status:
+
 - Approved product direction: build Portfolio Readiness as a generic Portfolio Guru feature, not as a Moeed-only tracker or Medic-internal automation.
 - Canonical spec lives in `docs/ARCP_HEALTH_DESIGN.md`.
 - MVP is manual/user-entered first: no Kaizen login, scraping, import, browser automation, supervisor request, or automated submission.
@@ -195,6 +207,7 @@ Activate router for:
 Keep case creation and filing on existing paths until the router proves stable.
 
 Verification:
+
 - ordinary "what can you do?" and "why am I blocked?" messages receive useful replies
 - no disruption to existing button workflows
 
@@ -205,6 +218,7 @@ Route natural case descriptions into the existing case extraction flow.
 The output should be the same structured draft/recommendation flow users already know, but the input can be natural text.
 
 Verification:
+
 - existing case flows still pass
 - natural case prompts create drafts without requiring command/button setup first
 - unclear cases ask one clarifying question instead of failing silently
@@ -214,11 +228,13 @@ Verification:
 Allow natural filing instructions only when a draft already exists and the action is clear.
 
 Examples:
+
 - "file this as a CBD"
 - "send this to Kaizen"
 - "also make a reflection log"
 
 Verification:
+
 - filing still requires explicit confirmation
 - wrong/ambiguous form requests ask a clarification
 - no duplicate Kaizen drafts

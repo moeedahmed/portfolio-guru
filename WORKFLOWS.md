@@ -132,7 +132,16 @@ Ticket appears in assessor portfolio
 → Bot shows draft response
 → User requests a reviewed Kaizen action plan
 → Bot shows the mapped fields and blocked/safety status
-→ Future slice only: foreground-approved runner performs one named action
+→ If the plan is executable (unblocked CBD save_draft), bot offers
+  📤 Save draft in Kaizen
+→ User taps Save draft in Kaizen
+→ Bot posts a fresh confirmation message naming the action and the
+  safety boundary, with [✅ Yes, save as draft | ❌ Cancel]
+→ User taps Yes, save as draft
+→ Bot re-validates plan, attaches CDP, navigates to the ticket,
+  clicks Fill in, fills the mapped fields, and clicks Save as draft.
+  Submit, sign, approve, send, reject, and delete remain out of scope.
+→ Bot reports save success or a user-facing failure reason
 ```
 
 Current implementation status:
@@ -214,26 +223,59 @@ Local assessor draft capture landed next:
     reach the default group untouched.
 
 Guarded write-back planning landed next:
-  - backend/assessor_writeback.py — non-executing adapter that maps a
-    reviewed local assessor draft to the Kaizen assessor completion
-    surface for CBD only.
+  - backend/assessor_writeback.py — adapter that maps a reviewed local
+    assessor draft to the Kaizen assessor completion surface for CBD only.
   - The adapter distinguishes fill_fields, save_draft, submit, sign,
     approve, and cancel. It requires ticket UUID, form type, explicit
     action, and reviewed draft hash for every Kaizen-touching action.
   - Mismatched ticket identity, mismatched draft hash, unsupported form
     type, missing required fields, and final actions produce blocked
-    plans. Browser steps are descriptors only; live execution is
-    unavailable.
+    plans. Plan rendering is still descriptor-only.
   - supervisor_bot adds a review-only button: "Prepare Kaizen action
     plan (no write)". That callback renders the guarded plan from the
     current local draft and never connects to CDP or opens Kaizen.
 
+Guarded save-draft live runner landed in this slice:
+  - assessor_writeback.execute_write_plan now runs against a real CDP-
+    attached Playwright page when — and only when — the plan is an
+    unblocked CBD save_draft, the draft hash still matches, the ticket
+    URL contains the planned ticket UUID, and every browser step kind
+    is on the live allow-list ({open_completion_surface, fill_field,
+    save_draft}). Any other condition raises
+    AssessorWriteBackUnavailable before navigation. Recoverable runner
+    failures (Fill in / field input / Save button missing, navigation
+    error, missing Kaizen confirmation marker) return an
+    AssessorWriteResult(status="failed", error=…) instead of raising.
+  - The runner clicks "Fill in" once, fills the mapped CBD assessor
+    fields by label, and clicks "Save as draft" — and nothing else.
+    Source-scan refuses click/locator targets for Submit / Sign /
+    Approve / Send / Reject / Delete in assessor_writeback.
+  - supervisor_bot exposes the explicit confirmation step. After the
+    reviewed plan is shown, an executable plan surfaces
+    "📤 Save draft in Kaizen" (SUP|request-save-draft). Tapping it
+    posts a separate confirmation message that names the action and
+    safety boundary and offers "✅ Yes, save as draft" / "❌ Cancel".
+    Only SUP|confirm-save-draft re-validates the plan, attaches CDP,
+    calls execute_write_plan, and reports success or a user-facing
+    failure reason. Session ends on success so future text/voice falls
+    back to the trainee flow; session is preserved on failure so the
+    supervisor can retry without re-recording. CDP-down, stale draft,
+    blocked plan, missing ticket URL, runner failure, and unexpected
+    exceptions all have distinct user-facing messages.
+  - Ordinary Open / Skip / Later / Review / Recapture / Cancel /
+    Prepare-writeback / Request-save-draft callbacks never invoke the
+    live runner. A dedicated test sweeps every callback to assert that
+    execute_write_plan is not awaited.
+
 Not built yet:
   - LLM-assisted field extraction (current drafter is deterministic;
     feedback gets the raw intent, other assessor fields stay blank).
-  - Any live Fill in / Save draft / Submit / Sign / Approve control.
-    Final filing remains out of scope until a separate one-ticket
-    foreground approval gate and live runner exist.
+  - Submit / Sign / Approve / Send / Delete / Reject live actions —
+    these remain blocked and tested. The save-draft runner is the
+    only live assessor write in this product.
+  - Save-draft for other assessor completion surfaces (DOPS, Mini-CEX,
+    QIAT, ESLE). The runner refuses non-CBD plans until each
+    completion surface is explicitly mapped, bound, and tested.
 ```
 
 First mapped read-only ticket shape:

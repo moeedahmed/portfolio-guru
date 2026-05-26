@@ -373,11 +373,10 @@ async def test_callback_cancel_draft_ends_session(cache_dir):
     assert "discarded" in edited.lower() or "cancelled" in edited.lower()
 
 
-async def test_callback_prepare_writeback_renders_non_executing_plan(cache_dir):
-    _start_session(cache_dir, ticket_uuid="u-plan")
-    draft = AssessorDraft(
+def _complete_cbd_assessor_draft(ticket_uuid: str) -> AssessorDraft:
+    return AssessorDraft(
         form_type="CBD",
-        ticket_uuid="u-plan",
+        ticket_uuid=ticket_uuid,
         values={
             "assessor_registration_number": "GMC1234567",
             "assessor_job_title": "Consultant",
@@ -387,7 +386,13 @@ async def test_callback_prepare_writeback_renders_non_executing_plan(cache_dir):
         },
         source_intent="Reviewed text",
     )
-    session_store.update_draft(cache_dir, telegram_user_id=1, draft=draft)
+
+
+async def test_callback_prepare_writeback_renders_plan_with_save_button_when_executable(cache_dir):
+    _start_session(cache_dir, ticket_uuid="u-plan")
+    session_store.update_draft(
+        cache_dir, telegram_user_id=1, draft=_complete_cbd_assessor_draft("u-plan")
+    )
     update = _callback_update("SUP|prepare-writeback|u-plan", telegram_user_id=1)
     context = MagicMock()
 
@@ -396,12 +401,53 @@ async def test_callback_prepare_writeback_renders_non_executing_plan(cache_dir):
 
     connect_mock.assert_not_awaited()
     update.callback_query.message.reply_text.assert_awaited_once()
-    text = update.callback_query.message.reply_text.await_args.kwargs.get("text") \
-        or update.callback_query.message.reply_text.await_args.args[0]
+    kwargs = update.callback_query.message.reply_text.await_args.kwargs
+    text = kwargs.get("text") or update.callback_query.message.reply_text.await_args.args[0]
     assert "Reviewed Kaizen action plan" in text
     assert "save draft" in text.lower()
-    assert "Live Kaizen execution is unavailable" in text
+    # Executable plan must surface the explicit-confirmation safety boundary
+    # and keep raw draft values out of the rendering.
+    assert "explicit confirmation" in text.lower()
+    assert "never submit" in text.lower()
     assert "Clear reasoning" not in text
+    # The keyboard exposes the Save draft request callback alongside Cancel.
+    keyboard = kwargs.get("reply_markup")
+    callbacks = {btn.callback_data for row in keyboard.inline_keyboard for btn in row}
+    assert "SUP|request-save-draft|u-plan" in callbacks
+    assert "SUP|cancel-draft|u-plan" in callbacks
+
+
+async def test_callback_prepare_writeback_hides_save_button_when_plan_is_blocked(cache_dir):
+    _start_session(cache_dir, ticket_uuid="u-blocked")
+    # DOPS is mapped only for read-only mode — write-back is unavailable, so
+    # the plan must be blocked and the Save button must not appear.
+    blocked_draft = AssessorDraft(
+        form_type="DOPS",
+        ticket_uuid="u-blocked",
+        values={"feedback": "Solid case."},
+        source_intent="Solid case.",
+    )
+    # Re-shape the session for the DOPS form so the plan reads consistently.
+    session_store.start(
+        cache_dir,
+        telegram_user_id=1,
+        ticket_uuid="u-blocked",
+        form_type="DOPS",
+        ticket_url="https://kaizenep.com/events/view-section/u-blocked",
+    )
+    session_store.update_draft(cache_dir, telegram_user_id=1, draft=blocked_draft)
+    update = _callback_update("SUP|prepare-writeback|u-blocked", telegram_user_id=1)
+    context = MagicMock()
+
+    with patch("supervisor_bot.connect_cdp_page", new=AsyncMock()) as connect_mock:
+        await supervisor_bot.handle_supervisor_callback(update, context)
+
+    connect_mock.assert_not_awaited()
+    kwargs = update.callback_query.message.reply_text.await_args.kwargs
+    keyboard = kwargs.get("reply_markup")
+    callbacks = {btn.callback_data for row in keyboard.inline_keyboard for btn in row}
+    assert "SUP|request-save-draft|u-blocked" not in callbacks
+    assert "SUP|cancel-draft|u-blocked" in callbacks
 
 
 async def test_callback_prepare_writeback_requires_existing_reviewed_draft(cache_dir):
@@ -415,6 +461,219 @@ async def test_callback_prepare_writeback_requires_existing_reviewed_draft(cache
     connect_mock.assert_not_awaited()
     update.callback_query.edit_message_text.assert_awaited_once()
     update.callback_query.message.reply_text.assert_not_awaited()
+
+
+# ── request-save-draft / confirm-save-draft callbacks ───────────────────────
+
+
+async def test_callback_request_save_draft_requires_explicit_confirmation(cache_dir):
+    _start_session(cache_dir, ticket_uuid="u-req")
+    session_store.update_draft(
+        cache_dir, telegram_user_id=1, draft=_complete_cbd_assessor_draft("u-req")
+    )
+    update = _callback_update("SUP|request-save-draft|u-req", telegram_user_id=1)
+    context = MagicMock()
+
+    with patch("supervisor_bot.connect_cdp_page", new=AsyncMock()) as connect_mock, \
+         patch(
+             "supervisor_bot.assessor_writeback.execute_write_plan",
+             new=AsyncMock(),
+         ) as execute_mock:
+        await supervisor_bot.handle_supervisor_callback(update, context)
+
+    # No CDP attach and no live runner invocation before the user confirms.
+    connect_mock.assert_not_awaited()
+    execute_mock.assert_not_awaited()
+
+    update.callback_query.message.reply_text.assert_awaited_once()
+    kwargs = update.callback_query.message.reply_text.await_args.kwargs
+    text = kwargs.get("text") or update.callback_query.message.reply_text.await_args.args[0]
+    # Confirmation copy must name the action and the safety boundary the bot keeps.
+    assert "save as draft" in text.lower()
+    assert "submit" in text.lower()
+    keyboard = kwargs.get("reply_markup")
+    callbacks = {btn.callback_data for row in keyboard.inline_keyboard for btn in row}
+    assert callbacks == {"SUP|confirm-save-draft|u-req", "SUP|cancel-draft|u-req"}
+
+
+async def test_callback_request_save_draft_blocks_when_plan_is_not_executable(cache_dir):
+    _start_session(cache_dir, ticket_uuid="u-stale", user_id=1)
+    # Draft is missing required assessor fields, so the plan is blocked.
+    blocked_draft = AssessorDraft(
+        form_type="CBD",
+        ticket_uuid="u-stale",
+        values={"feedback": "Only feedback, missing the rest."},
+        source_intent="Only feedback",
+    )
+    session_store.update_draft(cache_dir, telegram_user_id=1, draft=blocked_draft)
+    update = _callback_update("SUP|request-save-draft|u-stale", telegram_user_id=1)
+    context = MagicMock()
+
+    with patch("supervisor_bot.connect_cdp_page", new=AsyncMock()) as connect_mock, \
+         patch(
+             "supervisor_bot.assessor_writeback.execute_write_plan",
+             new=AsyncMock(),
+         ) as execute_mock:
+        await supervisor_bot.handle_supervisor_callback(update, context)
+
+    connect_mock.assert_not_awaited()
+    execute_mock.assert_not_awaited()
+    kwargs = update.callback_query.message.reply_text.await_args.kwargs
+    text = kwargs.get("text") or update.callback_query.message.reply_text.await_args.args[0]
+    assert "can't save" in text.lower() or "cannot save" in text.lower()
+
+
+async def test_callback_confirm_save_draft_runs_runner_and_reports_success(cache_dir):
+    _start_session(cache_dir, ticket_uuid="u-go", user_id=1)
+    session_store.update_draft(
+        cache_dir, telegram_user_id=1, draft=_complete_cbd_assessor_draft("u-go")
+    )
+    update = _callback_update("SUP|confirm-save-draft|u-go", telegram_user_id=1)
+    context = MagicMock()
+
+    fake_page = AsyncMock()
+    fake_result = supervisor_bot.assessor_writeback.AssessorWriteResult(
+        status="success",
+        action=supervisor_bot.assessor_writeback.AssessorWriteAction.SAVE_DRAFT,
+        filled_fields=["feedback", "recommendation"],
+    )
+
+    with patch(
+        "supervisor_bot.connect_cdp_page",
+        new=AsyncMock(return_value=fake_page),
+    ) as connect_mock, patch(
+        "supervisor_bot.assessor_writeback.execute_write_plan",
+        new=AsyncMock(return_value=fake_result),
+    ) as execute_mock:
+        await supervisor_bot.handle_supervisor_callback(update, context)
+
+    connect_mock.assert_awaited_once()
+    execute_mock.assert_awaited_once()
+    call_kwargs = execute_mock.await_args.kwargs
+    assert call_kwargs["page"] is fake_page
+    assert call_kwargs["ticket_url"].endswith("u-go")
+    update.callback_query.message.reply_text.assert_awaited_once()
+    success_text = update.callback_query.message.reply_text.await_args.kwargs.get("text") \
+        or update.callback_query.message.reply_text.await_args.args[0]
+    assert "saved" in success_text.lower()
+    # Session is wound down after a successful save so the next free text or
+    # voice note falls back to the trainee flow.
+    assert session_store.get(cache_dir, telegram_user_id=1) is None
+
+
+async def test_callback_confirm_save_draft_reports_runner_failure(cache_dir):
+    _start_session(cache_dir, ticket_uuid="u-fail", user_id=1)
+    session_store.update_draft(
+        cache_dir, telegram_user_id=1, draft=_complete_cbd_assessor_draft("u-fail")
+    )
+    update = _callback_update("SUP|confirm-save-draft|u-fail", telegram_user_id=1)
+    context = MagicMock()
+
+    fake_result = supervisor_bot.assessor_writeback.AssessorWriteResult(
+        status="failed",
+        action=supervisor_bot.assessor_writeback.AssessorWriteAction.SAVE_DRAFT,
+        error="'Save as draft' button not found on the assessor completion surface.",
+    )
+
+    with patch(
+        "supervisor_bot.connect_cdp_page",
+        new=AsyncMock(return_value=AsyncMock()),
+    ), patch(
+        "supervisor_bot.assessor_writeback.execute_write_plan",
+        new=AsyncMock(return_value=fake_result),
+    ):
+        await supervisor_bot.handle_supervisor_callback(update, context)
+
+    failure_text = update.callback_query.message.reply_text.await_args.kwargs.get("text") \
+        or update.callback_query.message.reply_text.await_args.args[0]
+    assert "couldn't save" in failure_text.lower()
+    assert "save as draft" in failure_text.lower()
+    # Session preserved so the supervisor can retry without re-recording.
+    assert session_store.get(cache_dir, telegram_user_id=1) is not None
+
+
+async def test_callback_confirm_save_draft_handles_cdp_failure(cache_dir):
+    _start_session(cache_dir, ticket_uuid="u-cdp-fail", user_id=1)
+    session_store.update_draft(
+        cache_dir, telegram_user_id=1, draft=_complete_cbd_assessor_draft("u-cdp-fail")
+    )
+    update = _callback_update("SUP|confirm-save-draft|u-cdp-fail", telegram_user_id=1)
+    context = MagicMock()
+
+    with patch(
+        "supervisor_bot.connect_cdp_page",
+        new=AsyncMock(side_effect=RuntimeError("CDP refused")),
+    ), patch(
+        "supervisor_bot.assessor_writeback.execute_write_plan",
+        new=AsyncMock(),
+    ) as execute_mock:
+        await supervisor_bot.handle_supervisor_callback(update, context)
+
+    execute_mock.assert_not_awaited()
+    cdp_text = update.callback_query.message.reply_text.await_args.kwargs.get("text") \
+        or update.callback_query.message.reply_text.await_args.args[0]
+    assert "couldn't reach kaizen" in cdp_text.lower()
+    # Session preserved so the supervisor can retry once CDP is reachable.
+    assert session_store.get(cache_dir, telegram_user_id=1) is not None
+
+
+async def test_callback_confirm_save_draft_blocks_stale_draft(cache_dir):
+    _start_session(cache_dir, ticket_uuid="u-stale-2", user_id=1)
+    # Missing required fields → blocked plan on confirm.
+    session_store.update_draft(
+        cache_dir,
+        telegram_user_id=1,
+        draft=AssessorDraft(
+            form_type="CBD",
+            ticket_uuid="u-stale-2",
+            values={"feedback": "Just one field."},
+            source_intent="Just one field.",
+        ),
+    )
+    update = _callback_update("SUP|confirm-save-draft|u-stale-2", telegram_user_id=1)
+    context = MagicMock()
+
+    with patch("supervisor_bot.connect_cdp_page", new=AsyncMock()) as connect_mock, \
+         patch(
+             "supervisor_bot.assessor_writeback.execute_write_plan",
+             new=AsyncMock(),
+         ) as execute_mock:
+        await supervisor_bot.handle_supervisor_callback(update, context)
+
+    connect_mock.assert_not_awaited()
+    execute_mock.assert_not_awaited()
+    edited = update.callback_query.edit_message_text.await_args.kwargs.get("text") \
+        or update.callback_query.edit_message_text.await_args.args[0]
+    assert "can't save" in edited.lower() or "cannot save" in edited.lower()
+
+
+async def test_ordinary_callbacks_never_trigger_a_live_save_draft(cache_dir):
+    """Open / Skip / Later / Review / Recapture / Cancel must never call the runner."""
+    cache_mod.remember(cache_dir, telegram_user_id=1, payload=_payload("u-noop"))
+    _start_session(cache_dir, ticket_uuid="u-noop2", user_id=2)
+    session_store.update_draft(
+        cache_dir, telegram_user_id=2, draft=_complete_cbd_assessor_draft("u-noop2")
+    )
+
+    for callback_data, user_id in [
+        ("SUP|skip|u-noop", 1),
+        ("SUP|later|u-noop", 1),
+        ("SUP|review|u-noop2", 2),
+        ("SUP|recapture|u-noop2", 2),
+        ("SUP|cancel-draft|u-noop2", 2),
+        ("SUP|prepare-writeback|u-noop2", 2),
+        ("SUP|request-save-draft|u-noop2", 2),
+    ]:
+        update = _callback_update(callback_data, telegram_user_id=user_id)
+        context = MagicMock()
+        with patch(
+            "supervisor_bot.assessor_writeback.execute_write_plan",
+            new=AsyncMock(),
+        ) as execute_mock:
+            await supervisor_bot.handle_supervisor_callback(update, context)
+        assert not execute_mock.await_args_list, (
+            f"{callback_data} unexpectedly invoked the live runner"
+        )
 
 
 # ── handle_assessor_intent_capture ──────────────────────────────────────────

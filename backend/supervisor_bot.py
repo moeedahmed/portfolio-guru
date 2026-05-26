@@ -1,29 +1,32 @@
-"""Telegram surface for the Clinical Supervisor read-only workflow.
+"""Telegram surface for the Clinical Supervisor workflow.
 
-This module is the boundary between the python-telegram-bot world and
-the supervisor stack:
+This module is the boundary between the python-telegram-bot world and the
+supervisor stack:
 
 * :func:`send_supervisor_notification` — turns a PHI-free
-  :class:`supervisor_workflow.SupervisorNotificationPayload` into a
-  Telegram message with Open / Skip / Later buttons and stashes the
-  payload in :mod:`supervisor_notification_cache` so the callbacks can
-  recover the ``ticket_url`` later.
+  :class:`supervisor_workflow.SupervisorNotificationPayload` into a Telegram
+  message with Open / Skip / Later buttons and stashes the payload in
+  :mod:`supervisor_notification_cache` so the callbacks can recover the
+  ``ticket_url`` later.
 * :func:`handle_supervisor_callback` — fires when a supervisor taps a
-  button. ``open`` is the only action that touches Kaizen, and it does
-  so read-only via :func:`assessor_reader.open_ticket_readonly`.
-  ``skip`` and ``later`` are pure UI acknowledgements; they never
-  navigate to Kaizen. ``review``, ``recapture``, and ``cancel-draft``
-  manage the local assessor draft only.
-* :func:`connect_cdp_page` — minimal helper that attaches to the
-  persistent Chrome session at ``localhost:18800``. It never falls back
-  to a fresh headless launch — the scheduler relies on the connection
-  failing fast when CDP isn't available.
+  button. ``open`` reads a ticket detail page (read-only) via
+  :func:`assessor_reader.open_ticket_readonly`. ``skip`` and ``later`` are
+  pure UI acknowledgements that never navigate to Kaizen. ``review``,
+  ``recapture``, and ``cancel-draft`` manage the local assessor draft only.
+  ``prepare-writeback`` renders the reviewed write-back plan without
+  navigating to Kaizen. ``request-save-draft`` shows the explicit
+  confirmation prompt — still no navigation. Only ``confirm-save-draft``
+  invokes the guarded CBD save-draft runner in
+  :mod:`assessor_writeback`, which clicks Fill in and Save as draft only.
+* :func:`connect_cdp_page` — minimal helper that attaches to the persistent
+  Chrome session at ``localhost:18800``. It never falls back to a fresh
+  headless launch — the scheduler and the save-draft runner rely on the
+  connection failing fast when CDP isn't available.
 * :func:`handle_assessor_intent_capture` — message handler for text and
-  voice notes that runs *after* the supervisor has tapped Open. It
-  feeds the utterance into :mod:`assessor_drafter` and replies with a
-  local-only draft preview. No Kaizen write action is ever invoked from
-  this path — the safety contract keeps Fill in / Save / Submit / Sign
-  out of scope for the entire module.
+  voice notes that runs *after* the supervisor has tapped Open. It feeds
+  the utterance into :mod:`assessor_drafter` and replies with a local-only
+  draft preview. No Kaizen write action is ever invoked from this path —
+  the only path to a live write is the explicit confirm-save-draft tap.
 
 The module is kept free of Telegram-bot import-time work so it can be
 loaded from tests without the full ``backend/bot.py`` graph.
@@ -61,7 +64,10 @@ NOTIFICATION_CACHE_DIR = Path(
 
 CALLBACK_NAMESPACE = "SUP"
 CALLBACK_PATTERN = (
-    r"^SUP\|(?:open|skip|later|review|recapture|cancel-draft|prepare-writeback)\|[0-9a-fA-F\-]+$"
+    r"^SUP\|"
+    r"(?:open|skip|later|review|recapture|cancel-draft|prepare-writeback"
+    r"|request-save-draft|confirm-save-draft)"
+    r"\|[0-9a-fA-F\-]+$"
 )
 
 _SKIP_TEXT = "✅ Skipped — I won't notify you about this ticket again."
@@ -102,6 +108,35 @@ _RECAPTURE_TEXT = (
 _FORM_TYPE_UNKNOWN_TEXT = (
     "⚠️ I couldn't identify the assessor form type for this ticket — "
     "draft generation is disabled. Tap *Cancel* and try a different ticket."
+)
+_SAVE_DRAFT_REQUEST_TEXT = (
+    "📤 *Save the assessor draft on Kaizen?*\n\n"
+    "I'll open the named ticket, fill the reviewed assessor fields, and tap "
+    "*Save as draft* — and nothing else. I will *not* submit, sign, approve, "
+    "send, or delete. You can review and submit the draft yourself on Kaizen.\n\n"
+    "Tap *Yes, save as draft* to proceed or *Cancel* to keep the draft local only."
+)
+_SAVE_DRAFT_BLOCKED_TEXT = (
+    "⚠️ I can't save this draft live: {reason}.\n"
+    "Re-record or recheck the draft and try again."
+)
+_SAVE_DRAFT_RUNNING_TEXT = "⏳ Saving the assessor draft on Kaizen…"
+_SAVE_DRAFT_OK_TEXT = (
+    "✅ *Saved as a draft in Kaizen.*\n"
+    "{count} assessor field(s) filled. Open the ticket on Kaizen to submit it "
+    "yourself when you're ready."
+)
+_SAVE_DRAFT_FAILED_TEXT = (
+    "❌ *Couldn't save the assessor draft on Kaizen.*\n"
+    "{reason}\n\n"
+    "Open the ticket on Kaizen directly if you need to act now."
+)
+_SAVE_DRAFT_CDP_DOWN_TEXT = (
+    "⚠️ Couldn't reach Kaizen to save the draft. Try again in a moment."
+)
+_SAVE_DRAFT_TICKET_URL_MISSING_TEXT = (
+    "⚠️ I don't have the ticket URL for this draft any more. Re-open the "
+    "ticket from a fresh notification before saving."
 )
 
 
@@ -153,6 +188,54 @@ def _draft_review_keyboard(ticket_uuid: str) -> InlineKeyboardMarkup:
                     "🔄 Re-record",
                     callback_data=f"{CALLBACK_NAMESPACE}|recapture|{ticket_uuid}",
                 ),
+                InlineKeyboardButton(
+                    "❌ Cancel",
+                    callback_data=f"{CALLBACK_NAMESPACE}|cancel-draft|{ticket_uuid}",
+                ),
+            ],
+        ]
+    )
+
+
+def _writeback_plan_keyboard(ticket_uuid: str, *, can_save: bool) -> InlineKeyboardMarkup:
+    """Keyboard shown under a rendered write-back plan.
+
+    When ``can_save`` is True the supervisor has the option to request a live
+    save-draft (still gated by a separate confirmation step). When False the
+    keyboard only exposes Cancel so blocked plans cannot reach the live runner.
+    """
+    rows: list[list[InlineKeyboardButton]] = []
+    if can_save:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    "📤 Save draft in Kaizen",
+                    callback_data=f"{CALLBACK_NAMESPACE}|request-save-draft|{ticket_uuid}",
+                ),
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                "❌ Cancel",
+                callback_data=f"{CALLBACK_NAMESPACE}|cancel-draft|{ticket_uuid}",
+            ),
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+def _confirm_save_keyboard(ticket_uuid: str) -> InlineKeyboardMarkup:
+    """Final-confirmation keyboard before the live save-draft runner fires."""
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "✅ Yes, save as draft",
+                    callback_data=f"{CALLBACK_NAMESPACE}|confirm-save-draft|{ticket_uuid}",
+                ),
+            ],
+            [
                 InlineKeyboardButton(
                     "❌ Cancel",
                     callback_data=f"{CALLBACK_NAMESPACE}|cancel-draft|{ticket_uuid}",
@@ -330,12 +413,17 @@ async def _handle_cancel_draft(update: Update, ticket_uuid: str) -> None:
     )
 
 
-async def _handle_prepare_writeback(update: Update, ticket_uuid: str) -> None:
-    user_id = update.effective_user.id
-    session = session_store.get(NOTIFICATION_CACHE_DIR, telegram_user_id=user_id)
-    if session is None or session.ticket_uuid != ticket_uuid or not session.draft:
-        await update.callback_query.edit_message_text(text=_WRITEBACK_MISSING_TEXT)
-        return
+def _plan_from_session(session) -> tuple[
+    assessor_drafter.AssessorDraft, assessor_writeback.AssessorWritePlan
+] | None:
+    """Rebuild the reviewed save-draft plan from the current session draft.
+
+    Returns ``None`` when the session has no draft. The plan is rebuilt from
+    scratch on every callback so a draft change between request and confirm
+    is caught by the hash binding instead of acting on stale state.
+    """
+    if not session or not session.draft:
+        return None
     draft = assessor_drafter.AssessorDraft(**session.draft)
     request = assessor_writeback.build_write_request(
         action=assessor_writeback.AssessorWriteAction.SAVE_DRAFT,
@@ -344,8 +432,130 @@ async def _handle_prepare_writeback(update: Update, ticket_uuid: str) -> None:
         reviewed_draft_hash=assessor_writeback.draft_review_hash(draft),
     )
     plan = assessor_writeback.build_write_plan(draft, request)
+    return draft, plan
+
+
+async def _handle_prepare_writeback(update: Update, ticket_uuid: str) -> None:
+    user_id = update.effective_user.id
+    session = session_store.get(NOTIFICATION_CACHE_DIR, telegram_user_id=user_id)
+    if session is None or session.ticket_uuid != ticket_uuid or not session.draft:
+        await update.callback_query.edit_message_text(text=_WRITEBACK_MISSING_TEXT)
+        return
+    bundle = _plan_from_session(session)
+    if bundle is None:
+        await update.callback_query.edit_message_text(text=_WRITEBACK_MISSING_TEXT)
+        return
+    _, plan = bundle
+    can_save = bool(plan.is_executable and session.ticket_url)
     await update.callback_query.message.reply_text(
         text=assessor_writeback.render_write_plan(plan),
+        parse_mode="Markdown",
+        reply_markup=_writeback_plan_keyboard(ticket_uuid, can_save=can_save),
+    )
+
+
+async def _handle_request_save_draft(update: Update, ticket_uuid: str) -> None:
+    """Show the explicit save-draft confirmation. Never touches Kaizen."""
+    user_id = update.effective_user.id
+    session = session_store.get(NOTIFICATION_CACHE_DIR, telegram_user_id=user_id)
+    if session is None or session.ticket_uuid != ticket_uuid or not session.draft:
+        await update.callback_query.edit_message_text(text=_WRITEBACK_MISSING_TEXT)
+        return
+    bundle = _plan_from_session(session)
+    if bundle is None:
+        await update.callback_query.edit_message_text(text=_WRITEBACK_MISSING_TEXT)
+        return
+    _, plan = bundle
+    if not plan.is_executable:
+        reason = "; ".join(plan.blocked_reasons) if plan.blocked_reasons else (
+            "this action is not live-enabled"
+        )
+        await update.callback_query.message.reply_text(
+            text=_SAVE_DRAFT_BLOCKED_TEXT.format(reason=reason),
+        )
+        return
+    if not session.ticket_url:
+        await update.callback_query.message.reply_text(
+            text=_SAVE_DRAFT_TICKET_URL_MISSING_TEXT,
+        )
+        return
+    await update.callback_query.message.reply_text(
+        text=_SAVE_DRAFT_REQUEST_TEXT,
+        parse_mode="Markdown",
+        reply_markup=_confirm_save_keyboard(ticket_uuid),
+    )
+
+
+async def _handle_confirm_save_draft(update: Update, ticket_uuid: str) -> None:
+    """Run the guarded live save-draft after the supervisor confirms."""
+    user_id = update.effective_user.id
+    session = session_store.get(NOTIFICATION_CACHE_DIR, telegram_user_id=user_id)
+    if session is None or session.ticket_uuid != ticket_uuid or not session.draft:
+        await update.callback_query.edit_message_text(text=_WRITEBACK_MISSING_TEXT)
+        return
+    bundle = _plan_from_session(session)
+    if bundle is None:
+        await update.callback_query.edit_message_text(text=_WRITEBACK_MISSING_TEXT)
+        return
+    draft, plan = bundle
+    if not plan.is_executable:
+        reason = "; ".join(plan.blocked_reasons) if plan.blocked_reasons else (
+            "this action is not live-enabled"
+        )
+        await update.callback_query.edit_message_text(
+            text=_SAVE_DRAFT_BLOCKED_TEXT.format(reason=reason),
+        )
+        return
+    if not session.ticket_url:
+        await update.callback_query.edit_message_text(text=_SAVE_DRAFT_TICKET_URL_MISSING_TEXT)
+        return
+
+    try:
+        await update.callback_query.edit_message_text(text=_SAVE_DRAFT_RUNNING_TEXT)
+    except Exception as exc:
+        logger.warning("Save-draft progress edit failed: %s", exc)
+
+    try:
+        page = await connect_cdp_page()
+    except Exception as exc:
+        logger.warning("Save-draft: CDP unavailable (%s)", exc)
+        await update.callback_query.message.reply_text(text=_SAVE_DRAFT_CDP_DOWN_TEXT)
+        return
+
+    try:
+        result = await assessor_writeback.execute_write_plan(
+            plan,
+            draft,
+            page=page,
+            ticket_url=session.ticket_url,
+        )
+    except assessor_writeback.AssessorWriteBackUnavailable as exc:
+        logger.warning("Save-draft refused by runner: %s", exc)
+        await update.callback_query.message.reply_text(
+            text=_SAVE_DRAFT_FAILED_TEXT.format(reason=str(exc)),
+            parse_mode="Markdown",
+        )
+        return
+    except Exception as exc:
+        logger.warning("Save-draft runner crashed: %s", exc)
+        await update.callback_query.message.reply_text(
+            text=_SAVE_DRAFT_FAILED_TEXT.format(reason=f"unexpected error: {exc}"),
+            parse_mode="Markdown",
+        )
+        return
+
+    if result.status == "success":
+        await update.callback_query.message.reply_text(
+            text=_SAVE_DRAFT_OK_TEXT.format(count=len(result.filled_fields)),
+            parse_mode="Markdown",
+        )
+        session_store.end(NOTIFICATION_CACHE_DIR, telegram_user_id=user_id)
+        return
+
+    await update.callback_query.message.reply_text(
+        text=_SAVE_DRAFT_FAILED_TEXT.format(
+            reason=result.error or "Kaizen did not confirm the save."
+        ),
         parse_mode="Markdown",
     )
 
@@ -373,6 +583,10 @@ async def handle_supervisor_callback(update: Update, context: ContextTypes.DEFAU
         await _handle_cancel_draft(update, ticket_uuid)
     elif action == "prepare-writeback":
         await _handle_prepare_writeback(update, ticket_uuid)
+    elif action == "request-save-draft":
+        await _handle_request_save_draft(update, ticket_uuid)
+    elif action == "confirm-save-draft":
+        await _handle_confirm_save_draft(update, ticket_uuid)
     # Unknown actions are silently ignored — the callback regex should
     # already filter them out, but defence in depth is cheap here.
 
