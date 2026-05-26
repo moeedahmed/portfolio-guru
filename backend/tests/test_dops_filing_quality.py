@@ -26,7 +26,12 @@ from dops_filing import (  # noqa: E402
     normalise_dops_fields,
     suggest_dops_kc_breadth,
 )
-from kaizen_form_filer import FORM_FIELD_MAP, _fill_field_legacy, file_to_kaizen  # noqa: E402
+from kaizen_form_filer import (  # noqa: E402
+    FORM_FIELD_MAP,
+    _fill_field_legacy,
+    apply_common_header_defaults,
+    file_to_kaizen,
+)
 
 
 UNSTABLE_AF_CASE = (
@@ -454,6 +459,19 @@ def test_field_map_has_required_dops_dom_slots():
         assert key in dops_map, f"DOPS field map missing {key}"
 
 
+def test_common_header_defaults_fill_static_kaizen_wrapper_fields():
+    fields, meta = apply_common_header_defaults("CBD", {
+        "clinical_setting": "Emergency Department",
+        "patient_presentation": "Chest pain",
+        "clinical_reasoning": "Managed as ACS with escalation.",
+    })
+
+    assert fields["date_of_encounter"]
+    assert fields["end_date"] == fields["date_of_encounter"]
+    assert "date_of_encounter" in meta["defaulted_fields"]
+    assert "Chest pain" in fields["event_description"]
+
+
 @pytest.mark.asyncio
 async def test_file_to_kaizen_dops_blocks_save_when_case_observed_blank():
     fields_with_blank_narrative = {
@@ -502,7 +520,7 @@ async def test_file_to_kaizen_dops_proceeds_when_only_date_is_missing():
     with patch("kaizen_form_filer.KAIZEN_USE_CDP", False), \
          patch("kaizen_form_filer.async_playwright") as ap_mock, \
          patch("kaizen_form_filer._login", new=AsyncMock(return_value=True)), \
-         patch("kaizen_form_filer._fill_field_legacy", new=AsyncMock(return_value=True)), \
+         patch("kaizen_form_filer._fill_field_legacy", new=AsyncMock(return_value=True)) as fill_mock, \
          patch("kaizen_form_filer._save_draft_legacy", new=AsyncMock(return_value=True)) as save_mock, \
          patch("kaizen_form_filer._verify_entry_saved", new=AsyncMock(return_value=True)), \
          patch("kaizen_form_filer._fill_curriculum_links", new=AsyncMock(return_value=([], []))), \
@@ -522,6 +540,13 @@ async def test_file_to_kaizen_dops_proceeds_when_only_date_is_missing():
 
     assert not result.get("quality_gate_failed")
     assert result["status"] in ("success", "partial")
+    assert "date_of_encounter" in result["defaulted_fields"]
+    assert "end_date" in result["filled"]
+    assert "event_description" in result["filled"]
+    filled_dom_ids = [call.args[1] for call in fill_mock.await_args_list]
+    assert "startDate" in filled_dom_ids
+    assert "endDate" in filled_dom_ids
+    assert "event-description" in filled_dom_ids
 
 
 @pytest.mark.asyncio

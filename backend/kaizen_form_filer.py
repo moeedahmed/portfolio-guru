@@ -230,6 +230,12 @@ COMMON_HEADER_FIELDS = {
     },
 }
 
+COMMON_HEADER_FIELD_MAP = {
+    "date_of_encounter": "startDate",
+    "end_date": "endDate",
+    "event_description": "event-description",
+}
+
 
 # ─── Tag-based curriculum tagging (for forms WITHOUT an in-form curriculum tree) ─
 # Some Kaizen forms (e.g. Critical Incident, MGMT_*, CLIN_GOV, MGMT_REPORT) do
@@ -926,6 +932,104 @@ def normalise_fields_for_deterministic_filing(form_type: str, fields: dict) -> d
     return out
 
 
+def _first_present_value(fields: dict, keys: tuple[str, ...]) -> str:
+    for key in keys:
+        value = fields.get(key)
+        if value is None or value == "" or value == []:
+            continue
+        return str(value).strip()
+    return ""
+
+
+def _short_event_description(form_type: str, fields: dict) -> str:
+    """Build the Kaizen timeline description from available case facts."""
+    candidates = (
+        "event_description",
+        "case_title",
+        "reflection_title",
+        "session_title",
+        "title_of_session",
+        "paper_title",
+        "title_of_education",
+        "procedure_name",
+        "procedural_skill",
+        "patient_presentation",
+        "clinical_setting",
+        "clinical_reasoning",
+        "case_observed",
+        "leadership_context",
+        "situation",
+        "clinical_scenario",
+        "description",
+        "reflection",
+    )
+    parts = []
+    for key in candidates:
+        value = fields.get(key)
+        if value is None or value == "" or value == []:
+            continue
+        text = str(value).strip()
+        if key in {"clinical_setting", "procedure_name", "procedural_skill"} and parts:
+            continue
+        if text and text not in parts:
+            parts.append(text)
+        if len(" - ".join(parts)) >= 90:
+            break
+    summary = _strip_emojis(" - ".join(parts))
+    summary = re.sub(r"[*_`#>\[\]]", "", summary)
+    summary = re.sub(r"\s+", " ", summary).strip()
+    if len(summary) > 140:
+        summary = summary[:137].rstrip(" ,;:-") + "..."
+    return summary
+
+
+def apply_common_header_defaults(form_type: str, fields: dict, field_map: dict | None = None) -> tuple[dict, dict]:
+    """Ensure Kaizen's static wrapper fields are filled whenever possible."""
+    out = dict(fields or {})
+    field_map = field_map or FORM_FIELD_MAP.get(canonical_form_type(form_type), {})
+    defaulted = []
+
+    start_keys = tuple(key for key, dom_id in field_map.items() if dom_id == "startDate") + ("date_of_encounter",)
+    end_keys = tuple(key for key, dom_id in field_map.items() if dom_id == "endDate") + ("end_date",)
+    date_source_keys = (
+        "date_of_encounter",
+        "date_of_event",
+        "date_of_activity",
+        "date_of_education",
+        "date_of_teaching",
+        "date_of_teaching_activity",
+        "date_of_case",
+        "date_of_complaint",
+        "date_of_incident",
+        "date_of_completion",
+        "end_date",
+    )
+
+    source_date = _first_present_value(out, date_source_keys)
+    if not source_date:
+        source_date = date.today().isoformat()
+        defaulted.append("date_of_encounter")
+
+    if not _first_present_value(out, start_keys):
+        out["date_of_encounter"] = source_date
+    if not _first_present_value(out, end_keys):
+        out["end_date"] = source_date
+        if "end_date" not in defaulted:
+            defaulted.append("end_date")
+
+    if not out.get("event_description"):
+        description = _short_event_description(form_type, out)
+        if description:
+            out["event_description"] = description
+
+    meta = {
+        "defaulted_fields": defaulted,
+        "activity_date": source_date,
+        "event_description": out.get("event_description") or "",
+    }
+    return out, meta
+
+
 def drop_consumed_unmapped_schema_fields(form_type: str, fields: dict) -> dict:
     """Remove schema-only source fields once their mapped target is populated."""
     form_type = canonical_form_type(form_type)
@@ -1602,9 +1706,10 @@ async def fill_kaizen_form(
         await asyncio.sleep(4)  # Wait for Angular rendering
 
         # Get field map for this form type
-        field_map = FORM_FIELD_MAP.get(form_type, {})
-        if not field_map:
+        base_field_map = FORM_FIELD_MAP.get(form_type, {})
+        if not base_field_map:
             return {"status": "failed", "filled": [], "skipped": [], "errors": [f"No field map for: {form_type}"], "screenshot": None}
+        field_map = {**COMMON_HEADER_FIELD_MAP, **base_field_map}
 
         if form_type == "DOPS":
             from dops_filing import (
@@ -1629,6 +1734,7 @@ async def fill_kaizen_form(
                     "quality_gate_failed": True,
                     "missing_for_quality": blocking,
                 }
+        fields, header_meta = apply_common_header_defaults(form_type, fields, field_map)
         fields = drop_consumed_unmapped_schema_fields(form_type, fields)
 
         if (
@@ -1803,6 +1909,7 @@ async def fill_kaizen_form(
             "errors": errors,
             "final_url": page.url,
             "screenshot": screenshot_path,
+            **header_meta,
         }
 
     except Exception as e:
@@ -2492,10 +2599,11 @@ async def file_to_kaizen(
     if not uuid:
         return {"status": "failed", "filled": [], "skipped": [], "error": f"Unknown form type: {form_type}"}
 
-    field_map = FORM_FIELD_MAP.get(form_type, {})
-    if not field_map:
+    base_field_map = FORM_FIELD_MAP.get(form_type, {})
+    if not base_field_map:
         all_field_keys = list(fields.keys())
         return {"status": "partial", "filled": [], "skipped": all_field_keys, "error": f"No field mapping for {form_type} — needs browser-use"}
+    field_map = {**COMMON_HEADER_FIELD_MAP, **base_field_map}
 
     filled = []
     skipped = []
@@ -2534,6 +2642,7 @@ async def file_to_kaizen(
                 "quality_gate_failed": True,
                 "missing_for_quality": blocking,
             }
+    fields, header_meta = apply_common_header_defaults(form_type, fields, field_map)
     fields = drop_consumed_unmapped_schema_fields(form_type, fields)
     browser = None
     cdp_pw = None
@@ -2667,6 +2776,7 @@ async def file_to_kaizen(
             "skipped": skipped,
             "error": save_error,
             "saved_url": saved_url,
+            **header_meta,
         }
 
     except Exception as e:

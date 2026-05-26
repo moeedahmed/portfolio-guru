@@ -2584,6 +2584,53 @@ class TestRecentPortfolioFixes:
         # user knows nothing was submitted/signed.
         assert 'saved as a Kaizen draft' in text
 
+    @pytest.mark.asyncio
+    async def test_saved_confirmation_tells_user_when_today_was_used_for_missing_date(self):
+        from bot import handle_approval_approve
+        from models import FormDraft
+
+        thin = FormDraft(
+            form_type='CBD',
+            uuid='uuid-cbd',
+            fields={
+                'date_of_encounter': '',
+                'clinical_setting': 'ED',
+                'patient_presentation': 'Chest pain',
+                'clinical_reasoning': 'Managed as ACS.',
+                'reflection': 'Need faster ECG review.',
+                'curriculum_links': ['SLO1'],
+                'key_capabilities': ['SLO1 KC1: Assess and stabilise the patient'],
+            },
+        )
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('APPROVE|draft')
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin.form_type,
+            'fields': thin.fields,
+            'uuid': thin.uuid,
+        }
+
+        with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.record_case_filed', new=AsyncMock()), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 1, -1, 'pro_plus'))), \
+             patch('bot.get_case_history', new=AsyncMock(return_value=[])), \
+             patch('bot.route_filing', new_callable=AsyncMock, return_value={
+                 'status': 'success',
+                 'filled': ['date_of_encounter', 'end_date', 'event_description', 'clinical_reasoning', 'reflection'],
+                 'skipped': [],
+                 'method': 'deterministic',
+                 'activity_date': '2026-05-26',
+                 'defaulted_fields': ['date_of_encounter', 'end_date'],
+             }):
+            await handle_approval_approve(update, context)
+
+        text = sim.get_last_text()
+        assert "I used today's date (2026-05-26) because no case date was given." in text
+
     def test_post_filing_keyboard_flag_missed_field_button_label_is_actionable(self):
         """The old "💬 Something missing?" label was vague — it sounded like a
         question, but the handler records pushback telemetry. The new label

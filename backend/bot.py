@@ -5827,6 +5827,14 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     filled = result.get("filled", [])
     skipped = result.get("skipped", [])
     error = result.get("error")
+    defaulted_fields = set(result.get("defaulted_fields") or [])
+    date_default_note = ""
+    if "date_of_encounter" in defaulted_fields:
+        default_date = result.get("activity_date") or fields.get("date_of_encounter") or fields.get("date_of_event")
+        date_default_note = (
+            f"\n📅 I used today's date"
+            f"{f' ({default_date})' if default_date else ''} because no case date was given."
+        )
     required_labels = {field["label"] for field in _template_requirements(form_type)[0]}
     required_keys = {field["key"] for field in _template_requirements(form_type)[0]}
     skipped_required = [s for s in skipped if s in required_keys or s in required_labels]
@@ -5926,7 +5934,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             logger.warning("Post-file observation failed", exc_info=True)
 
     if status == "success":
-        date_val = fields.get("date_of_encounter", fields.get("date_of_event", ""))
+        date_val = result.get("activity_date") or fields.get("date_of_encounter", fields.get("date_of_event", ""))
         slo_str = ", ".join(curriculum_links) if curriculum_links else ""
         summary = f"\n📅 {date_val}" if date_val else ""
         if slo_str:
@@ -5939,6 +5947,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         msg = (
             f"✅ *Case filed*\n"
             f"_{form_name} saved as a Kaizen draft._{summary}{fields_summary}"
+            f"{date_default_note}"
             f"\n\n{_DRAFT_DIVIDER}"
             f"{usage_line}{observation_line}"
         )
@@ -6024,7 +6033,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 f"⚠️ *Needs your review*\n"
                 f"{fields_filled_str} from your case. "
                 f"{review_clause}: {skipped_display}.\n\n"
-                f"{action_line}{usage_line}"
+                f"{action_line}{date_default_note}{usage_line}"
             )
             status_line = "⚠️ Filing needs manual review."
     else:
