@@ -42,6 +42,7 @@ class BotSimulator:
         message = MagicMock(spec=Message)
         message.text = text
         message.voice = None
+        message.audio = None
         message.photo = []
         message.document = None
         message.caption = None

@@ -407,6 +407,24 @@ def _track_pending_bundle_message(context, msg):
     context.user_data["pending_bundle_chat_id"] = msg.chat_id
 
 
+def _voice_media_from_message(message):
+    """Return a voice-like Telegram attachment, including forwarded audio."""
+    return getattr(message, "voice", None) or getattr(message, "audio", None)
+
+
+def _voice_media_suffix(media) -> str:
+    file_name = getattr(media, "file_name", None) or ""
+    suffix = os.path.splitext(file_name)[1]
+    if suffix:
+        return suffix
+    mime_type = (getattr(media, "mime_type", None) or "").lower()
+    if "mpeg" in mime_type or "mp3" in mime_type:
+        return ".mp3"
+    if "mp4" in mime_type or "m4a" in mime_type:
+        return ".m4a"
+    return ".ogg"
+
+
 async def _send_latest_message(message, context, text, reply_markup=None, parse_mode=None):
     """Edit the active bot message when possible, otherwise send and track one."""
     chat_id = getattr(message, "chat_id", None) or getattr(getattr(message, "chat", None), "id", None)
@@ -4632,12 +4650,13 @@ async def handle_template_review_media(update: Update, context: ContextTypes.DEF
     msg = update.message
     extracted_text = None
 
-    if msg.voice:
+    voice_media = _voice_media_from_message(msg)
+    if voice_media:
         ack = await msg.reply_text("🎙️ Transcribing voice note…")
         tmp_path = None
         try:
-            voice_file = await msg.voice.get_file()
-            with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+            voice_file = await voice_media.get_file()
+            with tempfile.NamedTemporaryFile(suffix=_voice_media_suffix(voice_media), delete=False) as tmp:
                 tmp_path = tmp.name
                 await voice_file.download_to_drive(tmp_path)
                 extracted_text = await transcribe_voice(tmp_path)
@@ -4733,13 +4752,14 @@ async def handle_approval_media_feedback(update: Update, context: ContextTypes.D
     extracted_text = None
     input_source = "media"
 
-    if msg.voice:
+    voice_media = _voice_media_from_message(msg)
+    if voice_media:
         input_source = "voice"
         ack = await msg.reply_text("🎙️ Transcribing voice note…")
         tmp_path = None
         try:
-            voice_file = await msg.voice.get_file()
-            with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+            voice_file = await voice_media.get_file()
+            with tempfile.NamedTemporaryFile(suffix=_voice_media_suffix(voice_media), delete=False) as tmp:
                 tmp_path = tmp.name
                 await voice_file.download_to_drive(tmp_path)
                 extracted_text = await transcribe_voice(tmp_path)
@@ -5267,12 +5287,13 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
             case_text = raw_text
 
-    elif update.message.voice:
+    elif _voice_media_from_message(update.message):
+        voice_media = _voice_media_from_message(update.message)
         ack = await update.message.reply_text("🎙️ Transcribing voice note…")
         tmp_path = None
         try:
-            voice_file = await update.message.voice.get_file()
-            with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+            voice_file = await voice_media.get_file()
+            with tempfile.NamedTemporaryFile(suffix=_voice_media_suffix(voice_media), delete=False) as tmp:
                 tmp_path = tmp.name
                 await voice_file.download_to_drive(tmp_path)
                 case_text = await transcribe_voice(tmp_path)
@@ -5409,7 +5430,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if update.message.photo:
         input_source = "photo"
-    elif update.message.voice:
+    elif _voice_media_from_message(update.message):
         input_source = "voice"
     elif update.message.document:
         input_source = "document"
@@ -6478,7 +6499,7 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     # Resolve feedback from any input modality (including forwarded messages)
     msg = update.message
-    voice = msg.voice or (msg.audio if msg.audio else None)
+    voice = _voice_media_from_message(msg)
     photo = msg.photo
 
     if voice:
@@ -6486,7 +6507,7 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         tmp_path = None
         try:
             voice_file = await voice.get_file()
-            with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+            with tempfile.NamedTemporaryFile(suffix=_voice_media_suffix(voice), delete=False) as tmp:
                 tmp_path = tmp.name
                 await voice_file.download_to_drive(tmp_path)
                 feedback = await transcribe_voice(tmp_path)
@@ -7044,6 +7065,7 @@ def build_application() -> Application:
             CallbackQueryHandler(handle_amend_draft, pattern=r"^AMEND\|"),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_case_input),
             MessageHandler(filters.VOICE, handle_case_input),
+            MessageHandler(filters.AUDIO, handle_case_input),
             MessageHandler(filters.PHOTO, handle_case_input),
             MessageHandler(filters.Document.ALL, handle_case_input),
         ],
@@ -7051,6 +7073,7 @@ def build_application() -> Application:
             AWAIT_CASE_INPUT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_case_input),
                 MessageHandler(filters.VOICE, handle_case_input),
+                MessageHandler(filters.AUDIO, handle_case_input),
                 MessageHandler(filters.PHOTO, handle_case_input),
                 MessageHandler(filters.Document.ALL, handle_case_input),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|continue_thin$"),
@@ -7069,6 +7092,7 @@ def build_application() -> Application:
             AWAIT_TEMPLATE_REVIEW: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_template_review_text),
                 MessageHandler(filters.VOICE, handle_template_review_media),
+                MessageHandler(filters.AUDIO, handle_template_review_media),
                 MessageHandler(filters.PHOTO, handle_template_review_media),
                 MessageHandler(filters.VIDEO, handle_template_review_media),
                 MessageHandler(filters.Document.ALL, handle_template_review_media),
@@ -7088,6 +7112,7 @@ def build_application() -> Application:
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
                 MessageHandler(filters.VOICE, handle_approval_media_feedback),
+                MessageHandler(filters.AUDIO, handle_approval_media_feedback),
                 MessageHandler(filters.PHOTO, handle_approval_media_feedback),
                 MessageHandler(filters.VIDEO, handle_approval_media_feedback),
                 MessageHandler(filters.Document.ALL, handle_approval_media_feedback),
