@@ -1694,13 +1694,13 @@ def _build_post_filing_keyboard(
             rows.append([InlineKeyboardButton("🔗 Open saved draft", url=saved_url)])
         elif FORM_UUIDS.get(form_type):
             rows.append([InlineKeyboardButton("🔗 Open Kaizen", url="https://kaizenep.com/activities")])
+        if same_case_available and not uncertain:
+            rows.append([InlineKeyboardButton("🔁 Same case, another WPBA", callback_data="ACTION|same_case_another")])
         if uncertain:
             rows.append([InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")])
         rows.append([InlineKeyboardButton("📋 File another case", callback_data="ACTION|file")])
         if uncertain:
             rows.append([_BTN_CANCEL])
-        else:
-            rows.append([InlineKeyboardButton("🚩 Flag a missed field", callback_data=f"FILING|feedback|{form_type}")])
         return InlineKeyboardMarkup(rows)
 
     if saved_url:
@@ -1714,7 +1714,6 @@ def _build_post_filing_keyboard(
         InlineKeyboardButton("👍 It worked", callback_data=f"FEEDBACK|good|{form_type}|{status}"),
         InlineKeyboardButton("👎 Didn't work", callback_data=f"FEEDBACK|bad|{form_type}|{status}"),
     ])
-    rows.append([InlineKeyboardButton("🚩 Flag a missed field", callback_data=f"FILING|feedback|{form_type}")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -3387,7 +3386,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             form_type,
             status,
             uncertain=status == "partial",
-            same_case_available=bool(context.user_data.get("last_filed_case_text") and status == "success"),
+            same_case_available=bool(context.user_data.get("last_filed_case_text") and status in ("success", "partial")),
         ))
 
     elif action == "help":
@@ -5914,7 +5913,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         form_type,
         status,
         uncertain=uncertain_save,
-        same_case_available=bool(filed_case_text and status == "success" and not uncertain_save),
+        same_case_available=bool(filed_case_text and status in ("success", "partial") and not uncertain_save),
         saved_url=saved_url,
     )
 

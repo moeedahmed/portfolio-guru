@@ -1372,8 +1372,6 @@ class TestFlowWalker:
             ]
             assert ("🧰 More options", f"ACTION|post_file_more|CBD|{status}") not in buttons
             assert not any(label in {'💬 Something missing?', '⚙️ Settings', '🏠 Main menu'} for label, _ in buttons)
-            if status in {"success", "partial"}:
-                assert ("🚩 Flag a missed field", "FILING|feedback|CBD") in buttons
 
     @pytest.mark.asyncio
     async def test_stale_post_filing_more_does_not_restore_clutter(self, thin_draft):
@@ -2327,6 +2325,28 @@ class TestRecentPortfolioFixes:
         assert ('🔁 Same case, another WPBA', 'ACTION|same_case_another') in buttons
         assert ('📋 File another case', 'ACTION|file') in buttons
 
+    def test_post_filing_keyboard_offers_same_case_for_clean_partial(self):
+        """Clean partial (no error) should also surface the 'Same case,
+        another WPBA' button when same_case_available is true, so the user
+        can get a different form type from the same case text."""
+        from bot import _build_post_filing_keyboard
+
+        keyboard = _build_post_filing_keyboard('CBD', 'partial', same_case_available=True)
+        buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
+
+        assert ('🔁 Same case, another WPBA', 'ACTION|same_case_another') in buttons
+
+    def test_post_filing_keyboard_no_same_case_for_uncertain_partial(self):
+        """Uncertain partial (partial + error) must NOT offer Same case
+        — the save may not have landed, so we don't encourage re-filing."""
+        from bot import _build_post_filing_keyboard
+
+        keyboard = _build_post_filing_keyboard('CBD', 'partial', uncertain=True, same_case_available=True)
+        buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
+
+        assert ('🔁 Same case, another WPBA', 'ACTION|same_case_another') not in buttons
+        assert ('🔄 Try again', 'ACTION|retry_filing') in buttons
+
     def test_post_filing_keyboard_links_to_saved_draft_url_when_present(self):
         """When the filer captures the post-save Kaizen URL, the Open button
         must link directly to that draft — not to the new-section URL (which
@@ -2506,7 +2526,96 @@ class TestRecentPortfolioFixes:
         assert not any('events/new-section/' in url for url in url_buttons)
 
     @pytest.mark.asyncio
-    async def test_saved_confirmation_success_uses_case_filed_header(self):
+    async def test_approval_partial_includes_same_case_another(self, thin_draft):
+        """When handle_approval_approve processes a clean partial (no error),
+        the post-filing keyboard must include 'Same case, another WPBA' so the
+        user can get a different WPBA from the same case."""
+        from bot import handle_approval_approve
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('APPROVE|draft')
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin_draft.form_type,
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+
+        with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.record_case_filed', new=AsyncMock()), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 1, -1, 'pro_plus'))), \
+             patch('bot.route_filing', new_callable=AsyncMock, return_value={
+                 'status': 'partial',
+                 'filled': ['date_of_encounter', 'clinical_setting', 'reflection'],
+                 'skipped': ['clinical_reasoning'],
+                 'method': 'deterministic',
+                 # No error — clean partial, save landed
+             }):
+            await handle_approval_approve(update, context)
+
+        buttons = [
+            (row[0].text, row[0].callback_data)
+            for row in sim.messages_sent[-1][2].inline_keyboard
+            if row
+        ]
+        assert ('🔁 Same case, another WPBA', 'ACTION|same_case_another') in buttons, (
+            f"Clean partial should surface 'Same case' button. Got: {buttons!r}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_approval_success_includes_same_case_another(self):
+        """When handle_approval_approve processes a success, the post-filing
+        keyboard must also include 'Same case, another WPBA'."""
+        from bot import handle_approval_approve
+        from models import FormDraft
+
+        thin = FormDraft(
+            form_type='CBD',
+            uuid='uuid-cbd',
+            fields={
+                'date_of_encounter': '2026-03-17',
+                'clinical_setting': 'ED',
+                'patient_presentation': 'Chest pain',
+                'clinical_reasoning': 'Managed as ACS, escalated appropriately.',
+                'reflection': 'Need faster ECG review.',
+                'curriculum_links': ['SLO1'],
+                'key_capabilities': ['SLO1 KC1: Assess and stabilise the patient'],
+            },
+        )
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('APPROVE|draft')
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin.form_type,
+            'fields': thin.fields,
+            'uuid': thin.uuid,
+        }
+
+        with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.record_case_filed', new=AsyncMock()), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 1, -1, 'pro_plus'))), \
+             patch('bot.get_case_history', new=AsyncMock(return_value=[])), \
+             patch('bot.route_filing', new_callable=AsyncMock, return_value={
+                 'status': 'success',
+                 'filled': ['date_of_encounter', 'clinical_setting', 'reflection'],
+                 'skipped': [],
+                 'method': 'deterministic',
+             }):
+            await handle_approval_approve(update, context)
+
+        buttons = [
+            (row[0].text, (row[0].callback_data or ''))
+            for row in sim.messages_sent[-1][2].inline_keyboard
+            if row
+        ]
+        assert ('🔁 Same case, another WPBA', 'ACTION|same_case_another') in buttons, (
+            f"Success should surface 'Same case' button. Got: {buttons!r}"
+        )
         """Successful save also reads as a new step: 'Case filed' on top, then
         the form-name subhead, then summary lines — distinct from the draft."""
         from bot import handle_approval_approve
@@ -2605,24 +2714,24 @@ class TestRecentPortfolioFixes:
         text = sim.get_last_text()
         assert "I used today's date (2026-05-26) because no case date was given." in text
 
-    def test_post_filing_keyboard_flag_missed_field_button_label_is_actionable(self):
-        """The old "💬 Something missing?" label was vague — it sounded like a
-        question, but the handler records pushback telemetry. The new label
-        names the action so the user knows what tapping it does."""
+    def test_post_filing_keyboard_flag_missed_field_button_removed_from_primary(self):
+        """The '🚩 Flag a missed field' button is removed from the primary
+        success and clean partial post-filing keyboards — filing pushback
+        telemetry can still be recorded via other channels but doesn't
+        clutter the immediate post-filing confirmation."""
         from bot import _build_post_filing_keyboard
 
         for status in ('success', 'partial'):
-            keyboard = _build_post_filing_keyboard('CBD', status, same_case_available=True)
+            keyboard = _build_post_filing_keyboard('CBD', status)
             buttons = [
                 (b.text, b.callback_data)
                 for row in keyboard.inline_keyboard
                 for b in row
             ]
-            assert ('🚩 Flag a missed field', 'FILING|feedback|CBD') in buttons, (
-                f"status={status!r} keyboard should expose the renamed pushback "
-                f"button with an action-shaped label. Got: {buttons!r}"
+            assert ('🚩 Flag a missed field', 'FILING|feedback|CBD') not in buttons, (
+                f"status={status!r} keyboard should NOT expose the flag button "
+                f"on the primary post-filing keyboard. Got: {buttons!r}"
             )
-            assert not any(label == '💬 Something missing?' for label, _ in buttons)
 
     def test_post_filing_keyboard_omits_flag_button_when_filing_failed(self):
         """A hard failure means nothing saved — there's no draft, so a

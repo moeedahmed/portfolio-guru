@@ -20,6 +20,19 @@
 > full offline gate green at 555 passed, 22 skipped, 13 deselected, 3 snapshots
 > passed. No live restart recorded in this file yet.
 
+> **2026-05-27 addendum — saved-draft quality/button correction.**
+> Moeed's Kaizen saved-draft screenshot showed the lean follow-up action was
+> still wrong: `Flag a missed field` was surfaced as a primary button, while
+> `Same case, another WPBA` was missing from clean partial saves. The current
+> uncommitted slice removes the missed-field feedback button from primary
+> post-file keyboards, shows `Same case, another WPBA` after successful and
+> clean-partial saves when the original case text is available, and hardens
+> Reflective Practice Log polish to fill safely supported title/date/why/
+> different-outcome/focus fields for sepsis and surgical-referral reflections.
+> Verification: focused Reflective Log + flow-walker tests green at 144 passed,
+> 3 warnings; full offline gate green at 570 passed, 22 skipped,
+> 13 deselected, 3 snapshots passed. No live restart recorded in this file yet.
+
 ## Objective
 
 Cut a private-beta-ready slice of Portfolio Guru for 3–5 trusted UK EM
@@ -131,21 +144,20 @@ Acceptance criteria → resolution:
    a filing attempt. Settings remains reachable from `/settings`, the
    welcome keyboard, and `/start` — just not from the post-file follow-up,
    which used to drop the user into a "Portfolio Guru is ready" reset.
-4. _Clarify or remove "Something missing?"._ Retained — the handler
-   genuinely records pushback telemetry (`filing_coverage.record_pushback`),
-   so it's not dead UI. Relabelled to `🚩 Flag a missed field` so the
-   button names the action, not a question. Visible on success and clean
-   partial only; suppressed on hard failure (no draft to flag against)
-   and on uncertain-save (user should verify first).
-5. _Reuse same case for a different WPBA._ Already wired in
+4. _Clarify or remove "Something missing?"._ Superseded on 2026-05-27:
+   the missed-field feedback path is no longer a primary post-file action.
+   The handler remains for stale buttons or a future feedback surface, but
+   the lean saved-draft flow now prioritises opening the draft, filing the
+   same case as another WPBA, or filing a new case.
+5. _Reuse same case for a different WPBA._ Wired in
    `handle_action_button("same_case_another")` — it reads
    `last_filed_case_text` (the original user-submitted case text,
    set in `handle_approval_approve` before any draft mutation), excludes
    the previously filed form type, and routes through `_process_case_text`
-   back to the assessment-type recommendation step. The new test
-   `test_same_case_another_reuses_original_case_text_not_draft` locks in
-   that the recommender receives the original case text — never the
-   bot-generated draft body or `last_draft_preview`.
+   back to the assessment-type recommendation step. As of 2026-05-27 it is
+   offered after clean partial saves as well as success. Tests lock in that
+   the recommender receives the original case text — never the bot-generated
+   draft body or `last_draft_preview`.
 
 Files touched:
 

@@ -1473,29 +1473,92 @@ def _fields_are_repetitive(first: str, second: str) -> bool:
 
 
 def _polish_reflect_log_fields(fields: dict, case_description: str) -> dict:
-    """Keep Reflective Practice Log action fields distinct without inventing case facts."""
-    replay = str(fields.get("replay_differently") or "").strip()
-    focus = str(fields.get("focussing_on") or "").strip()
-    if not replay or not focus or not _fields_are_repetitive(replay, focus):
-        return fields
+    """Keep Reflective Practice Log action fields distinct without inventing case facts.
 
+    Derives title, why, different_outcome, and focussing_on from supported
+    sepsis/surgical-referral case facts when the LLM output is repetitive
+    or missing. Never introduces facts absent from the case description."""
     polished = dict(fields)
-    combined = f"{case_description} {replay} {focus}".lower()
-    if any(term in combined for term in ("handover", "refer", "referral", "surgical")):
-        polished["focussing_on"] = (
-            "I am practising a concise SBAR-style referral that states the working diagnosis, "
-            "current concerns, treatment already started, and the decision I need from the receiving team."
-        )
-    elif "sepsis" in combined:
-        polished["focussing_on"] = (
-            "I am building a habit of treating sepsis early while explicitly naming the likely source, "
-            "the treatment already started, and the next review point."
-        )
-    else:
+    combined = (f"{case_description} " + " ".join(str(fields.get(k, "")) for k in fields)).lower()
+
+    is_sepsis = any(term in combined for term in ("sepsis", "septic", "sirs", "sepsis6", "sepsis 6"))
+    is_surgical_ref = any(term in combined for term in ("handover", "refer", "referral", "surgical"))
+
+    if not is_sepsis and not is_surgical_ref:
+        replay = str(polished.get("replay_differently") or "").strip()
+        focus = str(polished.get("focussing_on") or "").strip()
+        if not replay or not focus or not _fields_are_repetitive(replay, focus):
+            return fields
         polished["focussing_on"] = (
             "I am turning this into a specific next-shift habit: state the concern early, "
             "name the uncertainty, and agree the next escalation or review point."
         )
+        return polished
+
+    replay = str(polished.get("replay_differently") or "").strip()
+
+    # --- Date derivation ---
+    event_date = str(polished.get("date_of_event") or "").strip()
+    encounter_date = str(polished.get("date_of_encounter") or "").strip()
+    if not event_date and encounter_date:
+        polished["date_of_event"] = encounter_date
+
+    # --- Title derivation ---
+    title = str(polished.get("reflection_title") or "").strip()
+    if not title:
+        if is_sepsis:
+            polished["reflection_title"] = "Recognition and initial management of sepsis"
+        else:
+            polished["reflection_title"] = "Structured referral and communication"
+
+    # --- Why derivation ---
+    why = str(polished.get("why") or "").strip()
+    if not why or _fields_are_repetitive(why, replay):
+        if is_sepsis:
+            polished["why"] = (
+                "Sepsis recognition requires mental commitment to source identification "
+                "and time-critical treatment, not just treatment initiation."
+            )
+        else:
+            polished["why"] = (
+                "Unstructured referrals can mask urgency and delay the receiving "
+                "team's response or lead to repeated calls."
+            )
+
+    # --- different_outcome derivation ---
+    diff_outcome = str(polished.get("different_outcome") or "").strip()
+    if not diff_outcome or _fields_are_repetitive(diff_outcome, replay):
+        if is_sepsis:
+            polished["different_outcome"] = (
+                "Clearer source identification and earlier antibiotics could "
+                "reduce the time to definitive treatment."
+            )
+        else:
+            polished["different_outcome"] = (
+                "A structured referral that states the working diagnosis, concerns, "
+                "and the specific decision needed could result in a faster, more "
+                "targeted response from the receiving team."
+            )
+
+    # --- focussing_on derivation ---
+    focus = str(polished.get("focussing_on") or "").strip()
+    if not focus or _fields_are_repetitive(focus, replay):
+        if is_surgical_ref:
+            polished["focussing_on"] = (
+                "I am practising a concise SBAR-style referral that states the working diagnosis, "
+                "current concerns, treatment already started, and the decision I need from the receiving team."
+            )
+        elif is_sepsis:
+            polished["focussing_on"] = (
+                "I am building a habit of treating sepsis early while explicitly naming the likely source, "
+                "the treatment already started, and the next review point."
+            )
+        else:
+            polished["focussing_on"] = (
+                "I am turning this into a specific next-shift habit: state the concern early, "
+                "name the uncertainty, and agree the next escalation or review point."
+            )
+
     return polished
 
 

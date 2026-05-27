@@ -1,13 +1,13 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-05-26T19:39:14+00:00
-Status: ready
+Generated: 2026-05-27T01:19:42+00:00
+Status: stale_or_needs_review
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
-- Branch: launch/private-beta-cut
-- Last commit: 2762ed9 2026-05-26 docs: add private beta launch cut
-- Uncommitted changes: no
+- Branch: chore/telegram-bot-qa-discipline
+- Last commit: 9f9b1ed 2026-05-27 fix: polish draft preview layout
+- Uncommitted changes: yes
 
 ## Immediate read before restarting
 1. Product hub Status + Brief in Notion
@@ -15,19 +15,25 @@ Status: ready
 3. `TASK.md` for active sprint state, if present
 4. This resume brief for drift warnings and repo state
 
+## Warnings
+- Repo has uncommitted changes — capture/commit or summarise before switching context
+
 ## Practical AGENTS.md check
 - Useful for coding-agent/ACP work: yes
 - No missing practical sections
 
 ## Recent commits
-- 2762ed9 2026-05-26 docs: add private beta launch cut
-- 8e28832 2026-05-26 fix: restore Kaizen CDP attach for Chrome 148
-- cd2aae0 2026-05-26 feat: add guarded CBD save-draft live runner
-- 269446b 2026-05-25 feat: add guarded assessor writeback planning
-- 9b79f05 2026-05-24 feat: add local assessor draft capture for supervisor mode
-- 72f159e 2026-05-24 fix: initialise profile store for CI recovery paths
-- d625282 2026-05-24 feat: enable read-only supervisor notifications
-- e49c10f 2026-05-24 feat: add clinical supervisor workflow scaffold
+- 9f9b1ed 2026-05-27 fix: polish draft preview layout
+- ffe6bce 2026-05-27 fix: reuse voice capture status message
+- 7b715ac 2026-05-27 fix: route forwarded media after start reset
+- 3526505 2026-05-27 test: harden telegram bot qa guardrails
+- dfa181a 2026-05-27 fix: treat audio documents as voice notes
+- 4e7708e 2026-05-27 fix: handle forwarded voice messages
+- 219c629 2026-05-26 fix: reuse voice status message for form choices
+- 60389a1 2026-05-26 fix: fill Kaizen wrapper fields
+
+## Uncommitted change summary
+- ?? memory/2026-05-27.md
 
 ## Repo context snapshot
 ### AGENTS.md — present, 3 days old
@@ -68,6 +74,8 @@ Key headings:
 - ## Done
 - ## Verification
 - ## Guardrails (Carried Forward)
+- ## UX Polish Slice — Post-Filed Buttons (2026-05-26)
+- # 539 passed, 22 skipped, 13 deselected, 3 snapshots passed
 - ## Orchestrator Hand-Off
 
 ### WORKFLOWS.md — present, 0 days old
@@ -86,6 +94,6 @@ Key headings:
 - ## Data Flow
 
 ## Recommended restart path
-Continuity context looks sufficient; proceed with normal product-docs workflow.
+Refresh the product hub/Brief and repo context before a new build sprint.
 
 If this product has been idle for weeks, do not start implementation from memory. Refresh the product hub Status/Brief first, then create or update `TASK.md` for the next sprint.
