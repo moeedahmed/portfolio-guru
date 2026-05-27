@@ -1449,6 +1449,56 @@ def _normalise_text_field(value, leave_missing_blank: bool, fallback: str = "Not
     return str(value).strip()
 
 
+def _normalise_for_similarity(value: str) -> str:
+    import re
+
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def _fields_are_repetitive(first: str, second: str) -> bool:
+    """Detect reflection fields that say the same thing with minor grammar changes."""
+    from difflib import SequenceMatcher
+
+    a = _normalise_for_similarity(first)
+    b = _normalise_for_similarity(second)
+    if not a or not b:
+        return False
+    if a in b or b in a:
+        return True
+    a_words = {word for word in a.split() if len(word) > 4}
+    b_words = {word for word in b.split() if len(word) > 4}
+    if len(a_words & b_words) >= 3 and SequenceMatcher(None, a, b).ratio() >= 0.55:
+        return True
+    return SequenceMatcher(None, a, b).ratio() >= 0.72
+
+
+def _polish_reflect_log_fields(fields: dict, case_description: str) -> dict:
+    """Keep Reflective Practice Log action fields distinct without inventing case facts."""
+    replay = str(fields.get("replay_differently") or "").strip()
+    focus = str(fields.get("focussing_on") or "").strip()
+    if not replay or not focus or not _fields_are_repetitive(replay, focus):
+        return fields
+
+    polished = dict(fields)
+    combined = f"{case_description} {replay} {focus}".lower()
+    if any(term in combined for term in ("handover", "refer", "referral", "surgical")):
+        polished["focussing_on"] = (
+            "I am practising a concise SBAR-style referral that states the working diagnosis, "
+            "current concerns, treatment already started, and the decision I need from the receiving team."
+        )
+    elif "sepsis" in combined:
+        polished["focussing_on"] = (
+            "I am building a habit of treating sepsis early while explicitly naming the likely source, "
+            "the treatment already started, and the next review point."
+        )
+    else:
+        polished["focussing_on"] = (
+            "I am turning this into a specific next-shift habit: state the concern early, "
+            "name the uncertainty, and agree the next escalation or review point."
+        )
+    return polished
+
+
 def _normalise_list_field(value) -> list:
     if value is None:
         return []
@@ -1868,8 +1918,12 @@ Field scoping rules:
 - replay_differently (What would you do differently): ONE specific concrete action. One sentence or two max. Do not explain WHY here — that is the next field.
 - why (Why): The reason behind the "differently" answer. Focus on the cognitive or systemic cause (e.g. fixation bias, workload). Do not repeat the clinical story.
 - different_outcome (Would the outcome be different): Direct yes/no answer + one sentence on the specific impact. Do not restate the diagnosis or the error — just the counterfactual outcome.
-- focussing_on (What are you focussing on): Forward-looking only — what practice change or learning goal you are now working on. Not what happened. Not what you learned. What you will DO differently going forward.
+- focussing_on (What are you focussing on): Forward-looking improvement plan only. It must be more specific than replay_differently and must not be the same sentence in different words. Include the method/framework/check you will use next time, but only if supported by the case.
 - learned (What have you learned): Distil to 1-2 genuine learning points. Do not repeat the clinical narrative. Do not repeat focussing_on content. What insight did this case give you?
+
+Example for handover/referral reflections:
+- replay_differently: "I would give a more structured handover when referring an unwell surgical patient."
+- focussing_on: "I am practising a concise SBAR-style referral that states the working diagnosis, sepsis treatments already started, current instability, and the decision I need from the surgical team."
 
 Anti-repetition rule: if you find yourself writing the words "ECG", "atrial flutter", "fixation bias" (or any other case-specific term) in more than two fields — stop and redistribute. Each key concept appears in ONE field only.
 """ if schema_key == "REFLECT_LOG" else ""
@@ -2030,6 +2084,8 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
 
     # Apply humanizer to ALL narrative fields before user sees the draft
     normalised = _humanize_all_fields(normalised)
+    if schema_key == "REFLECT_LOG":
+        normalised = _polish_reflect_log_fields(normalised, case_description)
 
     # For image-derived input, strip any unsupported resuscitation / advanced-
     # imaging narrative the LLM tried to inject. Rib-fracture screenshots

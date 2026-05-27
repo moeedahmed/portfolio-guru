@@ -8,6 +8,18 @@
 > green: 539 passed, 22 skipped, 3 snapshots passed. No deploy, no
 > launchd restart, no push — orchestrator delivers.
 
+> **2026-05-27 addendum — draft preview quality/layout polish.**
+> Moeed's voice-test draft showed two beta-readiness issues: the draft body was
+> visually sandwiched between a heavy "Why this form" block and a loud
+> "Needs review" warning, and Reflective Practice Log action fields could
+> repeat the same handover-improvement sentence. The current uncommitted slice
+> makes draft previews output-first (compact rationale → draft body → compact
+> missing-details/help), removes divider sandwiching from draft previews, and
+> adds a Reflective Practice Log guard that rewrites repetitive focussing-on
+> copy into a specific action plan when safely supported. Verification:
+> full offline gate green at 555 passed, 22 skipped, 13 deselected, 3 snapshots
+> passed. No live restart recorded in this file yet.
+
 ## Objective
 
 Cut a private-beta-ready slice of Portfolio Guru for 3–5 trusted UK EM

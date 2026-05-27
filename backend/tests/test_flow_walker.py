@@ -150,17 +150,14 @@ class TestFlowWalker:
         assert 'APPROVE|submit' not in button_data
         text = sim.get_last_text()
         assert 'Case-Based Discussion draft ready' in text
-        assert 'Needs review before this is complete' in text
+        assert 'Missing details' in text
         assert 'Stage of Training' in text
-        assert 'I have left those fields blank rather than inventing them' in text
+        assert 'Blank fields are left blank rather than invented' in text
 
     @pytest.mark.asyncio
-    async def test_draft_preview_separates_curriculum_from_needs_review(self, thin_draft):
-        """The 'Needs review' warning must not be visually glued to the
-        curriculum block. A divider line between the last draft field and the
-        warning, plus a 'Draft preview' sub-header, makes the draft body and
-        helper text read as distinct sections — so a user copying the draft
-        into Kaizen can't accidentally include the warning."""
+    async def test_draft_preview_keeps_missing_details_after_body_without_divider_sandwich(self, thin_draft):
+        """Missing details should sit after the portfolio body without making
+        the draft feel trapped between large instruction blocks."""
         from bot import _DRAFT_DIVIDER, handle_form_choice
 
         sim = BotSimulator()
@@ -177,39 +174,20 @@ class TestFlowWalker:
 
         text = sim.get_last_text()
 
-        # The divider character must appear at least twice: once between the
-        # status/recommendation block and the draft body, once between the
-        # draft body and the 'Needs review' warning.
-        assert text.count(_DRAFT_DIVIDER) >= 2, (
-            f"Expected at least two dividers in preview text, got: {text!r}"
-        )
-
-        # The 'Draft preview' label sits between the status header and the
-        # first field, so the draft body reads as its own section.
-        assert '📋 *Draft preview*' in text
-        preview_pos = text.index('📋 *Draft preview*')
         first_field_pos = text.index('📅')
-        assert preview_pos < first_field_pos, (
-            "'Draft preview' label must precede the first draft field"
-        )
+        assert '📋 *Draft preview*' not in text
+        assert text.count(_DRAFT_DIVIDER) == 0
 
-        # Critical: a divider must appear between the curriculum block and the
-        # 'Needs review' warning. If they touch, the warning looks like part
-        # of the portfolio entry — that's the bug the user reported.
         curriculum_pos = text.index('📚 *Curriculum:*')
-        needs_review_pos = text.index('Needs review before this is complete')
-        between = text[curriculum_pos:needs_review_pos]
-        assert _DRAFT_DIVIDER in between, (
-            "Divider must sit between the curriculum block and the "
-            "'Needs review' warning"
-        )
+        missing_pos = text.index('🧩 *Missing details*')
+        reply_hint_pos = text.index('💬 Reply to refine this draft')
+        assert first_field_pos < curriculum_pos < missing_pos < reply_hint_pos
 
     @pytest.mark.asyncio
-    async def test_draft_preview_isolates_why_this_form_recommendation(self, thin_draft):
-        """The 'Why this form' recommendation explains the choice — keep it,
-        but render it as its own block above the divider so it never reads
-        like another field in the draft body."""
-        from bot import _DRAFT_DIVIDER, handle_form_choice
+    async def test_draft_preview_keeps_why_this_form_compact(self, thin_draft):
+        """The form rationale should be visible but not a heavy instruction
+        block that competes with the draft itself."""
+        from bot import handle_form_choice
         from extractor import FORM_UUIDS
         from models import FormTypeRecommendation
 
@@ -236,15 +214,11 @@ class TestFlowWalker:
 
         text = sim.get_last_text()
 
-        # Recommendation block is present, distinct from field labels, and
-        # appears BEFORE the divider that opens the draft body.
-        assert 'ℹ️ *Why this form:*' in text
-        why_pos = text.index('ℹ️ *Why this form:*')
-        first_divider_pos = text.index(_DRAFT_DIVIDER)
-        assert why_pos < first_divider_pos, (
-            "'Why this form' must sit ABOVE the divider that opens the "
-            "draft body, not inside the body"
-        )
+        assert 'ℹ️ The case is a reflective discussion of one patient.' in text
+        why_pos = text.index('ℹ️ The case is a reflective discussion of one patient.')
+        first_field_pos = text.index('📅')
+        assert why_pos < first_field_pos
+        assert '*Why this form:*' not in text
 
     @pytest.mark.asyncio
     async def test_form_choice_asks_for_detail_when_extraction_is_too_thin(self):
@@ -368,7 +342,7 @@ class TestFlowWalker:
 
         assert result == AWAIT_APPROVAL
         assert 'draft ready' in sim.get_last_text().lower()
-        assert 'Helpful detail if you have it: Supervisor' in sim.get_last_text()
+        assert 'Helpful if you have it: Supervisor' in sim.get_last_text()
         assert any(data == 'APPROVE|draft' for _, data in sim.get_last_buttons())
 
     def test_draft_preview_splits_long_narrative_without_mutating_fields(self, thin_draft):

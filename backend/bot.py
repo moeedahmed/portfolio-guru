@@ -1864,20 +1864,13 @@ def _draft_coach_note(draft) -> str:
 
 
 def _draft_header(title: str, reason: str | None, draft) -> list[str]:
-    """Status header → optional 'why this form' block → optional coach note →
-    divider → 'Draft preview' label. The divider and label keep the draft body
-    visually separate from the recommendation so the user can't mistake the
-    helper text for portfolio content."""
+    """Compact status header before the draft body."""
     lines: list[str] = [
         f"🟢 *{FLOW_STATE_LABELS['drafted']} — {title} ready*",
         "",
     ]
     if reason:
-        lines.extend([f"ℹ️ *Why this form:* {reason}", ""])
-    coach = _draft_coach_note(draft)
-    if coach:
-        lines.extend([coach, ""])
-    lines.extend([_DRAFT_DIVIDER, "📋 *Draft preview*", ""])
+        lines.extend([f"ℹ️ {reason}", ""])
     return lines
 
 
@@ -1918,11 +1911,8 @@ _MISSING_MARKER = "_— needs your detail_"
 # knows they can reply to refine, instead of relying on a removed Edit button.
 _REPLY_HINT_SUFFIX = render_message("draft_reply_hint")
 
-# Visual divider used inside the draft preview and saved/filed confirmation
-# messages to keep helper text from looking like portfolio content. Uses U+2501
-# so it survives Telegram Markdown without escaping. Dogfooding showed the
-# "Needs review" warning sticking to the curriculum block — the divider plus
-# the explicit "Draft preview" / "Review" labels makes the boundary obvious.
+# Visual divider used in saved/filed confirmation messages. Draft previews avoid
+# it so the portfolio content is not sandwiched between instruction blocks.
 _DRAFT_DIVIDER = "━━━━━━━━━━━━━━"
 
 _NARRATIVE_PREVIEW_KEYS = {
@@ -2077,23 +2067,25 @@ def _draft_has_useful_content(draft, form_type: str) -> bool:
 
 def _draft_missing_review_note(draft, form_type: str) -> str:
     missing_required, missing_optional, _ = _missing_template_fields(draft, form_type)
-    if not missing_required and not missing_optional:
+    coach = _draft_coach_note(draft)
+    if not missing_required and not missing_optional and not coach:
         return ""
+    if not missing_required and not missing_optional:
+        return f"\n💡 {coach.removeprefix('Coach note: ').strip()}"
 
-    # Leading blank + divider make sure the "Needs review" warning never
-    # looks attached to the last draft field (the curriculum block in
-    # particular), so the user doesn't read it as portfolio content and
-    # accidentally copy it into Kaizen.
-    lines = ["", _DRAFT_DIVIDER, "", "⚠️ *Needs review before this is complete*"]
+    lines = ["", "🧩 *Missing details*"]
     if missing_required:
         labels = ", ".join(field["label"] for field in missing_required[:6])
         extra = f" (+{len(missing_required) - 6} more)" if len(missing_required) > 6 else ""
-        lines.append(f"Required detail still needed: {labels}{extra}.")
+        lines.append(f"Required: {labels}{extra}.")
     if missing_optional:
         labels = ", ".join(field["label"] for field in missing_optional[:3])
         extra = f" (+{len(missing_optional) - 3} more)" if len(missing_optional) > 3 else ""
-        lines.append(f"Helpful detail if you have it: {labels}{extra}.")
-    lines.append("I have left those fields blank rather than inventing them. Reply with extra detail to update the draft.")
+        lines.append(f"Helpful if you have it: {labels}{extra}.")
+    if coach:
+        lines.append(coach)
+    if missing_required or missing_optional:
+        lines.append("Blank fields are left blank rather than invented. Reply with extra detail to update the draft.")
     return "\n".join(lines)
 
 
@@ -2106,7 +2098,8 @@ async def _show_draft_review(
     edit: bool = True,
 ) -> int:
     _store_draft(context, draft)
-    has_missing = bool(_draft_missing_review_note(draft, form_type))
+    missing_required, missing_optional, _ = _missing_template_fields(draft, form_type)
+    has_missing = bool(missing_required or missing_optional)
     _track_funnel_event(context, "draft_shown", form_type=form_type, has_missing=has_missing)
     preview = _format_draft_preview(draft, _chosen_form_reason(context, form_type))
     text = preview + _REPLY_HINT_SUFFIX
