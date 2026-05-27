@@ -409,7 +409,20 @@ def _track_pending_bundle_message(context, msg):
 
 def _voice_media_from_message(message):
     """Return a voice-like Telegram attachment, including forwarded audio."""
-    return getattr(message, "voice", None) or getattr(message, "audio", None)
+    voice = getattr(message, "voice", None) or getattr(message, "audio", None)
+    if voice:
+        return voice
+
+    document = getattr(message, "document", None)
+    if not document:
+        return None
+
+    file_name = (getattr(document, "file_name", None) or "").lower()
+    mime_type = (getattr(document, "mime_type", None) or "").lower()
+    voice_extensions = (".oga", ".ogg", ".opus", ".mp3", ".m4a", ".mp4", ".wav")
+    if mime_type.startswith("audio/") or file_name.endswith(voice_extensions):
+        return document
+    return None
 
 
 def _voice_media_suffix(media) -> str:

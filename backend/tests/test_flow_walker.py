@@ -3015,6 +3015,39 @@ class TestMessageStandardCopy:
         assert 'send a text message' not in (sim.get_last_text() or '').lower()
 
     @pytest.mark.asyncio
+    async def test_forwarded_voice_document_enters_new_case_flow(self, recommended_forms):
+        from bot import AWAIT_FORM_CHOICE, handle_case_input
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        update = sim._make_text_update('')
+        document = MagicMock()
+        document.file_name = "forwarded-voice.oga"
+        document.mime_type = "audio/ogg"
+        file_obj = MagicMock()
+        file_obj.download_to_drive = AsyncMock()
+        document.get_file = AsyncMock(return_value=file_obj)
+        update.message.text = None
+        update.message.voice = None
+        update.message.audio = None
+        update.message.photo = []
+        update.message.document = document
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.transcribe_voice', new=AsyncMock(return_value=SAMPLE_CASES['valid'])) as transcribe_mock, \
+             patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_curriculum', return_value='2025'), \
+             patch('bot.recommend_form_types', new=AsyncMock(return_value=recommended_forms)):
+            result = await handle_case_input(update, context)
+
+        assert result == AWAIT_FORM_CHOICE
+        transcribe_mock.assert_awaited_once()
+        assert context.user_data['case_input_source'] == 'voice'
+        assert 'fit your case' in (sim.get_last_text() or '').lower()
+        assert 'file type' not in (sim.get_last_text() or '').lower()
+
+    @pytest.mark.asyncio
     async def test_template_review_image_error_uses_send_text_recovery(self):
         from bot import AWAIT_TEMPLATE_REVIEW, handle_template_review_media
 
