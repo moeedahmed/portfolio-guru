@@ -34,6 +34,38 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 logging.basicConfig(level=logging.INFO)
+
+# Token redaction for bot/API logging. Telegram Bot API URLs contain the
+# token immediately after "/bot", so a plain word-boundary regex misses them.
+_token_pattern = re.compile(
+    r"(?<=bot)\d{8,10}:[A-Za-z0-9_-]{30,}|"
+    r"(?<![A-Za-z0-9_])\d{8,10}:[A-Za-z0-9_-]{30,}(?![A-Za-z0-9_])"
+)
+def _redact_token_string(s: str) -> str:
+    s = _token_pattern.sub("<REDACTED_TELEGRAM_TOKEN>", s)
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if token and token in s:
+        s = s.replace(token, "<REDACTED_TELEGRAM_TOKEN>")
+    return s
+
+_orig_handle = logging.Logger.handle
+def _redacted_handle(self, record):
+    try:
+        if isinstance(record.msg, str):
+            record.msg = _redact_token_string(record.msg)
+        if record.args:
+            new_args = []
+            for arg in record.args:
+                if isinstance(arg, str):
+                    new_args.append(_redact_token_string(arg))
+                else:
+                    new_args.append(arg)
+            record.args = tuple(new_args)
+    except Exception:
+        pass
+    return _orig_handle(self, record)
+logging.Logger.handle = _redacted_handle
+
 logger = logging.getLogger(__name__)
 
 MAX_TELEGRAM_MSG = 4096
@@ -892,12 +924,27 @@ def _expired_prompt_text(user_id: int) -> str:
         return "⏳ That button has expired. Finish setup from the latest message and I'll pick it up from there."
     return "⏳ That button has expired. Start a new case from the latest message and I'll pick it up from there."
 
+
+def _restore_last_filed_case_context(context) -> bool:
+    """Restore the previous case for stale same-case/form-list callbacks."""
+    case_text = (context.user_data.get("last_filed_case_text") or "").strip()
+    if not case_text or context.user_data.get("case_text"):
+        return False
+    context.user_data["case_text"] = case_text
+    context.user_data["case_input_source"] = "same case"
+    filed_form = context.user_data.get("last_filed_form_type")
+    if filed_form and not context.user_data.get("excluded_form_type"):
+        context.user_data["excluded_form_type"] = filed_form
+    return True
+
+
 async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, reason: str) -> int:
     """Recover a paused case by sending a fresh latest message for the current step."""
     user_id = update.effective_user.id
     message = update.effective_message
     draft = _load_draft(context)
     pending_draft = _load_pending_draft(context)
+    _restore_last_filed_case_context(context)
     case_text = (context.user_data.get("case_text") or "").strip()
     chosen_form = context.user_data.get("chosen_form")
 
@@ -1658,6 +1705,10 @@ def _build_post_review_keyboard(improved_once: bool = False):
     return _build_approval_keyboard(improved_once=improved_once)
 
 
+_POST_FILING_SAME_CASE_LABEL = "🔁 Same case, new WPBA"
+_POST_FILING_NEW_CASE_LABEL = "📋 File another case"
+
+
 def _build_post_filing_keyboard(
     form_type: str,
     status: str,
@@ -1685,7 +1736,7 @@ def _build_post_filing_keyboard(
 
     if status == "failed":
         rows.append([InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")])
-        rows.append([InlineKeyboardButton("📋 File another case", callback_data="ACTION|file")])
+        rows.append([InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file")])
         rows.append([_BTN_CANCEL])
         return InlineKeyboardMarkup(rows)
 
@@ -1695,10 +1746,14 @@ def _build_post_filing_keyboard(
         elif FORM_UUIDS.get(form_type):
             rows.append([InlineKeyboardButton("🔗 Open Kaizen", url="https://kaizenep.com/activities")])
         if same_case_available and not uncertain:
-            rows.append([InlineKeyboardButton("🔁 Same case, another WPBA", callback_data="ACTION|same_case_another")])
+            rows.append([
+                InlineKeyboardButton(_POST_FILING_SAME_CASE_LABEL, callback_data="ACTION|same_case_another"),
+                InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file"),
+            ])
+        else:
+            rows.append([InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file")])
         if uncertain:
             rows.append([InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")])
-        rows.append([InlineKeyboardButton("📋 File another case", callback_data="ACTION|file")])
         if uncertain:
             rows.append([_BTN_CANCEL])
         return InlineKeyboardMarkup(rows)
@@ -1708,8 +1763,12 @@ def _build_post_filing_keyboard(
     elif FORM_UUIDS.get(form_type):
         rows.append([InlineKeyboardButton("🔗 Open Kaizen", url="https://kaizenep.com/activities")])
     if same_case_available:
-        rows.append([InlineKeyboardButton("🔁 Same case, another WPBA", callback_data="ACTION|same_case_another")])
-    rows.append([InlineKeyboardButton("📋 File another case", callback_data="ACTION|file")])
+        rows.append([
+            InlineKeyboardButton(_POST_FILING_SAME_CASE_LABEL, callback_data="ACTION|same_case_another"),
+            InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file"),
+        ])
+    else:
+        rows.append([InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -3365,20 +3424,29 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         return AWAIT_CASE_INPUT
 
     elif action == "same_case_another":
-        case_text = context.user_data.get("last_filed_case_text", "")
-        filed_form = context.user_data.get("last_filed_form_type", "")
+        case_text = (
+            context.user_data.get("last_filed_case_text")
+            or context.user_data.get("case_text")
+            or ""
+        ).strip()
+        filed_form = (
+            context.user_data.get("last_filed_form_type")
+            or context.user_data.get("excluded_form_type")
+            or ""
+        )
         if not case_text:
             await query.message.reply_text(
-                "That filed case is no longer available here. Send the case again and I’ll draft another WPBA.",
+                "That same-case shortcut has expired. Send the case again, or start a new case and I’ll draft the next WPBA.",
                 reply_markup=_build_next_step_keyboard(user_id),
             )
             return ConversationHandler.END
         context.user_data.clear()
         context.user_data["case_text"] = case_text
         context.user_data["excluded_form_type"] = filed_form
-        await query.message.reply_text(
-            "🔁 Reusing the same case. I’ll suggest a different WPBA type — not the one you already filed."
+        ack = await query.message.reply_text(
+            "🔁 Reusing the same case. Finding other WPBA options…"
         )
+        _track_latest_message(context, ack)
         return await _process_case_text(query.message, context, user_id, case_text, "same case")
 
     elif action.startswith("post_file_more|"):
@@ -5541,6 +5609,9 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.answer("Coming soon — choose another form.", show_alert=False)
         return AWAIT_FORM_CHOICE
 
+    if not context.user_data.get("case_text"):
+        _restore_last_filed_case_context(context)
+
     if data == "FORM|show_all":
         # Level 1 — category picker
         user_id = update.effective_user.id
@@ -5627,11 +5698,14 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await query.edit_message_reply_markup(reply_markup=None)
         except Exception:
             pass
-        return await _resume_paused_flow(
-            update,
+        context.user_data.clear()
+        await _send_latest_message(
+            query.message,
             context,
-            "That earlier button is no longer active.",
+            "That form list has expired. Start a new case and I’ll rebuild the form choices.",
+            reply_markup=_build_next_step_keyboard(update.effective_user.id),
         )
+        return ConversationHandler.END
 
     context.user_data["chosen_form"] = form_type
     context.user_data.pop("quick_improve_used", None)
@@ -5985,13 +6059,13 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         filled_count = len(filled)
         fields_summary = f"\n{filled_count} field{'s' if filled_count != 1 else ''} completed." if filled_count > 0 else ""
         msg = (
-            f"✅ *Case filed*\n"
+            f"✅ *Kaizen draft saved*\n"
             f"_{form_name} saved as a Kaizen draft._{summary}{fields_summary}"
             f"{date_default_note}"
             f"\n\n{_DRAFT_DIVIDER}"
             f"{usage_line}{observation_line}"
         )
-        status_line = "✅ Filing finished."
+        status_line = "✅ Draft saved."
     elif status == "partial":
         _FIELD_FRIENDLY = {
             "curriculum_links": "SLO links",
@@ -7349,6 +7423,18 @@ def main():
     """Entry point for local development - runs in polling mode."""
     import requests as _req
     import subprocess as _subprocess
+    import portalocker
+
+    # Process lock to prevent duplicate instances/polling conflicts
+    lock_file = os.path.join(os.path.dirname(__file__), "portfolio-guru-bot.lock")
+    global _lock_fp
+    _lock_fp = open(lock_file, "w")
+    try:
+        portalocker.lock(_lock_fp, portalocker.LOCK_EX | portalocker.LOCK_NB)
+        logger.info("Successfully acquired process lock. No duplicate instances.")
+    except portalocker.exceptions.LockException:
+        logger.error("FATAL: Another instance of Portfolio Guru bot is already running! (Failed to acquire file lock)")
+        sys.exit(1)
 
     init()
     init_profile_db()

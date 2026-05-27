@@ -174,13 +174,65 @@ def _click_expectation_step(step: TelegramStep) -> TelegramStep:
     )
 
 
+async def wait_for_matching_message(
+    client,
+    chat_id: str | int,
+    timeout_seconds: int,
+    expect_text_any: tuple[str, ...] = (),
+    expect_buttons: bool = False,
+    expect_button_any: tuple[str, ...] = (),
+    forbid_text_any: tuple[str, ...] = FORBIDDEN_RESPONSE_MARKERS,
+    min_id: int | None = None,
+) -> any:
+    """Poll recent chat history until a message matches text/buttons expectations."""
+    import asyncio
+    import time
+    start_time = time.time()
+
+    while time.time() - start_time < timeout_seconds:
+        try:
+            messages = await client.get_messages(chat_id, limit=5)
+            for msg in messages:
+                if msg.out:
+                    continue
+                if min_id is not None and getattr(msg, "id", 0) < min_id:
+                    continue
+                received = getattr(msg, "raw_text", "") or ""
+                buttons = button_texts(msg)
+
+                text_ok = not expect_text_any or _contains_any(received, expect_text_any)
+                buttons_ok = not expect_buttons or bool(buttons or msg.reply_markup)
+                button_text_ok = not expect_button_any or any(
+                    _button_matches(button, expect_button_any) for button in buttons
+                )
+                forbidden_text_ok = not forbid_text_any or not _contains_any(received, forbid_text_any)
+
+                if received.strip() and text_ok and buttons_ok and button_text_ok and forbidden_text_ok:
+                    return msg
+        except Exception:
+            pass
+        await asyncio.sleep(0.5)
+
+    raise TimeoutError(
+        f"Timed out waiting for message in chat {chat_id} "
+        f"matching text {expect_text_any} and buttons {expect_button_any} "
+        f"(buttons expected: {expect_buttons})"
+    )
+
+
 async def _wait_for_matching_response(conv, step: TelegramStep):
-    reply = await conv.get_response(timeout=step.timeout_seconds)
-    for _ in range(step.followup_limit):
-        if _matches_expectation(reply, step):
-            return reply
-        reply = await conv.get_response(timeout=step.timeout_seconds)
-    return reply
+    try:
+        return await wait_for_matching_message(
+            conv.client,
+            conv.input_chat,
+            step.timeout_seconds,
+            expect_text_any=step.expect_text_any,
+            expect_buttons=bool(step.expect_button_any),
+            expect_button_any=step.expect_button_any,
+            forbid_text_any=step.forbid_text_any,
+        )
+    except TimeoutError:
+        return await conv.get_response(timeout=1)
 
 
 async def run_telegram_workflow(client, bot_username: str, steps: Iterable[TelegramStep]) -> list[TelegramExchange]:
@@ -190,8 +242,17 @@ async def run_telegram_workflow(client, bot_username: str, steps: Iterable[Teleg
     transcript: list[TelegramExchange] = []
     async with client.conversation(bot_username, timeout=max(step.timeout_seconds for step in steps)) as conv:
         for step in steps:
-            await conv.send_message(step.message)
-            reply = await _wait_for_matching_response(conv, step)
+            sent = await conv.send_message(step.message)
+            reply = await wait_for_matching_message(
+                client,
+                bot_username,
+                step.timeout_seconds,
+                expect_text_any=step.expect_text_any,
+                expect_buttons=bool(step.expect_button_any),
+                expect_button_any=step.expect_button_any,
+                forbid_text_any=step.forbid_text_any,
+                min_id=getattr(sent, "id", None),
+            )
             exchange = TelegramExchange(
                 step=step.name,
                 action=f"send:{step.message}",
@@ -209,7 +270,16 @@ async def run_telegram_workflow(client, bot_username: str, steps: Iterable[Teleg
                 clicked_text = button.text
                 await button.click()
                 click_step = _click_expectation_step(step)
-                followup = await _wait_for_matching_response(conv, click_step)
+                followup = await wait_for_matching_message(
+                    client,
+                    bot_username,
+                    click_step.timeout_seconds,
+                    expect_text_any=click_step.expect_text_any,
+                    expect_buttons=bool(click_step.expect_button_any),
+                    expect_button_any=click_step.expect_button_any,
+                    forbid_text_any=click_step.forbid_text_any,
+                    min_id=getattr(reply, "id", None),
+                )
                 _assert_message_matches(followup, click_step, f"after clicking {clicked_text!r}")
                 transcript.append(
                     TelegramExchange(

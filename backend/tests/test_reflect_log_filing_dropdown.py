@@ -43,6 +43,41 @@ async def test_reflect_log_event_type_selects_ed_patient_label(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_legacy_reflect_log_event_type_uses_verified_select_filler(monkeypatch):
+    select = AsyncMock()
+    select.count = AsyncMock(return_value=1)
+    select.evaluate = AsyncMock(return_value="SELECT")
+
+    page = MagicMock()
+    page.locator = MagicMock(return_value=select)
+
+    calls = []
+
+    async def fake_fill_select(page_arg, dom_id_arg, value_arg):
+        calls.append((page_arg, dom_id_arg, value_arg))
+        return True
+
+    monkeypatch.setattr(kaizen_form_filer, "_fill_select", fake_fill_select)
+
+    ok = await _fill_field_legacy(
+        page,
+        FORM_FIELD_MAP["REFLECT_LOG"]["event_type"],
+        "ED patient",
+        "event_type",
+        "REFLECT_LOG",
+    )
+
+    assert ok is True
+    assert calls == [
+        (
+            page,
+            FORM_FIELD_MAP["REFLECT_LOG"]["event_type"],
+            "ED patient",
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_legacy_reflect_log_header_dates_use_verified_date_filler(monkeypatch):
     async def _noop_sleep(*args, **kwargs):
         return None

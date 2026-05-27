@@ -58,3 +58,44 @@ def test_profile_store_roundtrip_succeeds(monkeypatch):
     profile_store.store_training_level(456, "ST6")
 
     assert profile_store.get_training_level(456) == "ST6"
+
+
+def test_token_redaction_in_logging(monkeypatch):
+    import logging
+    # Ensure bot module is loaded so monkeypatch is applied
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ12345678")
+    monkeypatch.setenv("GOOGLE_API_KEY", "test-google-key")
+    monkeypatch.setenv("FERNET_SECRET_KEY", Fernet.generate_key().decode())
+
+    sys.modules.pop("bot", None)
+    import bot
+
+    # Create a custom log handler to capture logs
+    log_records = []
+    class CaptureHandler(logging.Handler):
+        def emit(self, record):
+            log_records.append(record.getMessage())
+
+    handler = CaptureHandler()
+    logger = logging.getLogger("test_redact")
+    logger.setLevel(logging.INFO)
+    logger.addHandler(handler)
+
+    # Log a message containing a raw token
+    token = "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ12345678"
+    logger.info(f"Connecting to https://api.telegram.org/bot{token}/getUpdates")
+
+    # Assert it was redacted
+    assert len(log_records) == 1
+    assert token not in log_records[0]
+    assert "<REDACTED_TELEGRAM_TOKEN>" in log_records[0]
+
+
+def test_token_redaction_without_env_token():
+    import bot
+
+    token = "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi"
+    redacted = bot._redact_token_string(f"https://api.telegram.org/bot{token}/getUpdates")
+
+    assert token not in redacted
+    assert "bot<REDACTED_TELEGRAM_TOKEN>/getUpdates" in redacted

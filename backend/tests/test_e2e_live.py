@@ -18,6 +18,7 @@ from tests.telegram_live_harness import (
     button_texts,
     has_telethon_env,
     telethon_env,
+    wait_for_matching_message,
 )
 
 pytestmark = [
@@ -56,20 +57,24 @@ async def _send_and_wait(
     wait: int = RESPONSE_WAIT,
     expect_text_any: tuple[str, ...] = (),
     expect_buttons: bool = False,
+    expect_button_any: tuple[str, ...] = (),
 ):
     """Send a message to the bot and wait for a response."""
-    async with client.conversation(telethon_env()["bot_username"], timeout=wait * 3) as conv:
-        await conv.send_message(text)
-        reply = await conv.get_response(timeout=wait * 3)
-        for _ in range(4):
-            text_ok = not expect_text_any or any(
-                token.lower() in (reply.raw_text or "").lower() for token in expect_text_any
+    bot_username = telethon_env()["bot_username"]
+    async with client.conversation(bot_username, timeout=wait * 3) as conv:
+        sent = await conv.send_message(text)
+        try:
+            return await wait_for_matching_message(
+                client,
+                bot_username,
+                wait * 3,
+                expect_text_any=expect_text_any,
+                expect_buttons=expect_buttons,
+                expect_button_any=expect_button_any,
+                min_id=getattr(sent, "id", None),
             )
-            buttons_ok = not expect_buttons or bool(button_texts(reply) or reply.reply_markup)
-            if text_ok and buttons_ok:
-                return reply
-            reply = await conv.get_response(timeout=wait * 3)
-        return reply
+        except TimeoutError:
+            return await conv.get_response(timeout=1)
 
 
 @pytest.mark.asyncio

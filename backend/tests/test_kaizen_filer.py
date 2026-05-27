@@ -1,14 +1,9 @@
 """
 Mock tests for kaizen_form_filer.py — full isolation via mocked Playwright.
 No browser, no network, no credentials needed.
-
-NOTE: These tests need rewriting to match the new kaizen_form_filer internals.
-The old kaizen_filer module was replaced but these mocks still target its
-private functions (_login, _save_draft, etc.) which no longer exist.
 """
 import pytest
 
-pytestmark = pytest.mark.skip(reason="Tests need rewriting for new kaizen_form_filer internals")
 from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 import asyncio
 
@@ -23,7 +18,6 @@ from kaizen_form_filer import (
     STAGE_SELECT_VALUES,
     _strip_emojis,
     _to_uk_date,
-    _fill_stage_of_training,
 )
 
 
@@ -40,12 +34,28 @@ def mock_page():
 
     def make_locator(selector):
         loc = AsyncMock()
+        if not isinstance(getattr(page, "_locators", None), dict):
+            page._locators = {}
+        page._locators[selector] = loc
         loc.count = AsyncMock(return_value=1)
-        loc.evaluate = AsyncMock(return_value="INPUT")
+
+        async def evaluate_mock(expr, *args):
+            if "el.value" in expr:
+                if getattr(loc, "_typed_val", None):
+                    return loc._typed_val
+                return "20/3/2026"
+            if "tagName" in expr:
+                return "INPUT"
+            return "INPUT"
+        loc.evaluate = evaluate_mock
+
+        async def type_mock(text, **kwargs):
+            loc._typed_val = text
+        loc.type = type_mock
+
         loc.fill = AsyncMock()
         loc.click = AsyncMock()
         loc.press = AsyncMock()
-        loc.type = AsyncMock()
         loc.select_option = AsyncMock()
         loc.inner_text = AsyncMock(return_value="Save as draft")
         loc.first = loc
@@ -121,7 +131,7 @@ async def test_login_failure_returns_failed(mock_playwright_ctx):
 async def test_login_success_proceeds_to_form(mock_playwright_ctx):
     mock_page = mock_playwright_ctx
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=True)):
             result = await file_to_kaizen("CBD", {"clinical_reasoning": "test"}, "user", "pass")
             assert result["status"] != "failed" or "Login" not in (result["error"] or "")
             mock_page.goto.assert_called()
@@ -144,7 +154,7 @@ async def test_form_page_redirect_returns_failed(mock_playwright_ctx):
 @pytest.mark.asyncio
 async def test_all_fields_filled_returns_success(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=True)):
             with patch("kaizen_form_filer._verify_entry_saved", AsyncMock(return_value=True)):
                 fields = {
                     "date_of_encounter": "2026-03-21",
@@ -161,10 +171,14 @@ async def test_all_fields_filled_returns_success(mock_playwright_ctx):
 @pytest.mark.asyncio
 async def test_missing_fields_returns_partial(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=True)):
+            # Under the new internals, fields not present in the input are NOT
+            # counted as skipped. To trigger a partial/skipped status, we must
+            # explicitly pass an empty/None value for a mapped field.
             fields = {
                 "date_of_encounter": "2026-03-21",
                 "stage_of_training": "Higher",
+                "clinical_reasoning": None,
             }
             result = await file_to_kaizen("CBD", fields, "user", "pass")
             assert len(result["skipped"]) > 0
@@ -175,7 +189,7 @@ async def test_save_fails_returns_failed_not_partial(mock_playwright_ctx):
     """Regression: save failure must return 'failed', not 'partial'.
     This was the original bug — false success when save failed."""
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft", AsyncMock(return_value=False)):
+        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=False)):
             fields = {
                 "date_of_encounter": "2026-03-21",
                 "stage_of_training": "Higher",
@@ -193,7 +207,7 @@ async def test_save_fails_returns_failed_not_partial(mock_playwright_ctx):
 @pytest.mark.asyncio
 async def test_empty_string_field_is_skipped(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=True)):
             fields = {
                 "date_of_encounter": "2026-03-21",
                 "stage_of_training": "Higher",
@@ -207,7 +221,7 @@ async def test_empty_string_field_is_skipped(mock_playwright_ctx):
 @pytest.mark.asyncio
 async def test_none_field_is_skipped(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=True)):
             fields = {
                 "date_of_encounter": "2026-03-21",
                 "stage_of_training": "Higher",
@@ -223,28 +237,46 @@ async def test_none_field_is_skipped(mock_playwright_ctx):
 @pytest.mark.asyncio
 async def test_stage_defaults_to_higher_for_st5(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=True)):
             fields = {"stage_of_training": "ST5", "clinical_reasoning": "test"}
             result = await file_to_kaizen("CBD", fields, "user", "pass")
             assert "stage_of_training" in result["filled"]
+            stage_locator = mock_playwright_ctx._locators[
+                f'[id="{FORM_FIELD_MAP["CBD"]["stage_of_training"]}"]'
+            ]
+            stage_locator.select_option.assert_any_call(
+                value=STAGE_SELECT_VALUES["Higher"]
+            )
 
 
 @pytest.mark.asyncio
 async def test_stage_maps_accs_for_st1(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=True)):
             fields = {"stage_of_training": "ST1", "clinical_reasoning": "test"}
             result = await file_to_kaizen("CBD", fields, "user", "pass")
             assert "stage_of_training" in result["filled"]
+            stage_locator = mock_playwright_ctx._locators[
+                f'[id="{FORM_FIELD_MAP["CBD"]["stage_of_training"]}"]'
+            ]
+            stage_locator.select_option.assert_any_call(
+                value=STAGE_SELECT_VALUES["ACCS"]
+            )
 
 
 @pytest.mark.asyncio
 async def test_stage_maps_intermediate_for_st3(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=True)):
             fields = {"stage_of_training": "ST3", "clinical_reasoning": "test"}
             result = await file_to_kaizen("CBD", fields, "user", "pass")
             assert "stage_of_training" in result["filled"]
+            stage_locator = mock_playwright_ctx._locators[
+                f'[id="{FORM_FIELD_MAP["CBD"]["stage_of_training"]}"]'
+            ]
+            stage_locator.select_option.assert_any_call(
+                value=STAGE_SELECT_VALUES["Intermediate"]
+            )
 
 
 # ─── Section F: Emoji stripping ─────────────────────────────────────────────────
@@ -261,7 +293,7 @@ def test_emoji_stripped_before_fill():
 @pytest.mark.asyncio
 async def test_emoji_stripped_in_fill_field(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=True)):
             fields = {
                 "date_of_encounter": "2026-03-21",
                 "stage_of_training": "Higher",
@@ -277,7 +309,7 @@ async def test_emoji_stripped_in_fill_field(mock_playwright_ctx):
 @pytest.mark.asyncio
 async def test_reflect_log_fills_all_gibbs_fields(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=True)):
             with patch("kaizen_form_filer._verify_entry_saved", AsyncMock(return_value=True)):
                 fields = {
                     "date_of_encounter": "2026-03-21",
@@ -333,6 +365,12 @@ def test_no_duplicate_uuids_within_form():
     (The REFLECT_LOG bug pattern — same UUID for reflection and circumstances.)"""
     for form_type, field_map in FORM_FIELD_MAP.items():
         non_date_ids = [v for k, v in field_map.items() if v not in ("startDate", "endDate")]
+        if form_type.startswith("DOPS"):
+            # procedure_name and procedural_skill are intentional aliases in DOPS mapping to the same dropdown
+            non_date_ids = [v for k, v in field_map.items() if k not in ("procedure_name",) and v not in ("startDate", "endDate")]
+        elif form_type.startswith("PROC_LOG"):
+            # higher_procedural_skill_other and procedure_other are intentional aliases in PROC_LOG mapping to the same text field
+            non_date_ids = [v for k, v in field_map.items() if k not in ("procedure_other",) and v not in ("startDate", "endDate")]
         assert len(non_date_ids) == len(set(non_date_ids)), (
             f"{form_type} has duplicate UUIDs: "
             f"{[v for v in non_date_ids if non_date_ids.count(v) > 1]}"
@@ -344,25 +382,24 @@ def test_no_duplicate_uuids_within_form():
 @pytest.mark.asyncio
 async def test_curriculum_links_trigger_tick_attempt(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft", AsyncMock(return_value=True)):
-            with patch("kaizen_form_filer._expand_curriculum_section", AsyncMock()) as mock_expand:
-                with patch("kaizen_form_filer._tick_curriculum", AsyncMock(return_value=2)) as mock_tick:
-                    fields = {"stage_of_training": "Higher", "clinical_reasoning": "test"}
-                    result = await file_to_kaizen(
-                        "CBD", fields, "user", "pass",
-                        curriculum_links=["SLO1", "SLO3"],
-                    )
-                    mock_expand.assert_called_once()
-                    mock_tick.assert_called_once()
-                    tick_args = mock_tick.call_args[0]
-                    assert ["SLO1", "SLO3"] == tick_args[1]
+        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=True)):
+            with patch("kaizen_form_filer._fill_curriculum_links", AsyncMock(return_value=([], []))) as mock_fill:
+                fields = {"stage_of_training": "Higher", "clinical_reasoning": "test"}
+                result = await file_to_kaizen(
+                    "CBD", fields, "user", "pass",
+                    curriculum_links=["SLO1", "SLO3"],
+                )
+                mock_fill.assert_called_once()
+                args = mock_fill.call_args[0]
+                assert args[1] == ["SLO1", "SLO3"]
+                assert args[2] == ["SLO1", "SLO3"]
 
 
 @pytest.mark.asyncio
 async def test_no_curriculum_links_skips_tick(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft", AsyncMock(return_value=True)):
-            with patch("kaizen_form_filer._tick_curriculum", AsyncMock()) as mock_tick:
+        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=True)):
+            with patch("kaizen_form_filer._fill_curriculum_links", AsyncMock(return_value=([], []))) as mock_fill:
                 fields = {"stage_of_training": "Higher", "clinical_reasoning": "test"}
                 result = await file_to_kaizen("CBD", fields, "user", "pass")
-                mock_tick.assert_not_called()
+                mock_fill.assert_not_called()

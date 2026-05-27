@@ -12,6 +12,7 @@ from tests.telegram_live_harness import (
     has_telethon_env,
     run_telegram_workflow,
     telethon_env,
+    wait_for_matching_message,
 )
 
 
@@ -58,17 +59,20 @@ async def test_e2e_start_shows_welcome(telethon_client):
 @pytest.mark.asyncio
 async def test_e2e_case_text_gets_recommendation(telethon_client):
     async with telethon_client.conversation(BOT_USERNAME, timeout=90) as conv:
-        await conv.send_message(
+        sent = await conv.send_message(
             "I ran a busy emergency department shift with several acute chest pain patients and want to reflect on my management."
         )
-        reply = await conv.get_response()
-        for _ in range(4):
-            if reply.buttons:
-                break
-            reply = await conv.get_response(timeout=90)
+        reply = await wait_for_matching_message(
+            telethon_client,
+            BOT_USERNAME,
+            90,
+            expect_buttons=True,
+            expect_button_any=("Use best fit", "See all forms"),
+            min_id=getattr(sent, "id", None),
+        )
 
     buttons = [button.text for row in (reply.buttons or []) for button in row]
-    assert any("CBD" in text or "Case-Based" in text for text in buttons)
+    assert any("Use best fit" in text or "See all forms" in text for text in buttons)
 
 
 @pytest.mark.asyncio

@@ -80,6 +80,49 @@
 > green at 580 passed, 22 skipped, 13 deselected, 3 snapshots passed. No live
 > Kaizen test, launchd restart, deploy, or push.
 
+> **2026-05-27 addendum — filing helper consistency audit.**
+> Moeed asked whether other live filing fields still bypassed verified helpers.
+> The current slice routes legacy-compatible select/dropdown fields through the
+> verified select helper and routes legacy stage-of-training selection through
+> the verified stage helper while preserving ST1/ST3/ST4-ST6 aliases. Audit
+> finding: live mapped date fields now use the verified date helper in both
+> deterministic and legacy-compatible paths. Remaining inline date code exists
+> only in a dormant Kaizen domain-skill provider path, not the live bot route.
+> Verification: focused filing tests green at 39 passed, 22 skipped; full
+> offline gate green at 581 passed, 22 skipped, 13 deselected, 3 snapshots
+> passed. No live Kaizen test, deploy, or push.
+
+> **2026-05-27 addendum — same-case stale-button recovery.**
+> Moeed's beta run showed old `Same case` / `See all forms` buttons could be
+> tapped after the visible chat had moved on, leaving either no response or the
+> blunt `filed case is no longer available here` copy. The current slice treats
+> visible stale buttons as recoverable UX: if the last filed case is still in
+> bot state, stale form-list callbacks restore it and keep the filed form
+> excluded; if the case has genuinely expired, form selection and same-case
+> shortcuts give a calm restart path. The transitional `Reusing the same case`
+> message is now tracked and edited into the `Forms that fit your case` list,
+> so it does not sit above the real next step. Post-save copy now says
+> `Kaizen draft saved`, and the post-filing keyboard puts `Same case, new WPBA`
+> beside `File another case` when both actions are available. Verification:
+> focused stale-callback/post-filing tests green at 23 passed; full offline
+> gate green at 585 passed, 22 skipped, 13 deselected, 3 snapshots passed. No
+> live Kaizen test, launchd restart, deploy, or push.
+
+> **2026-05-27 addendum — pre-beta QA hardening.**
+> Resolved the offline pre-beta blockers identified in the latest QA pass. (1) Re-enabled and updated all 22 mock tests in `test_kaizen_filer.py` to match current filing internals, restoring coverage for legacy filer paths. (2) Cleaned `kaizen_form_filer.py` by removing legacy dead code (`_fill_stage_of_training`, `_fill_select_legacy`) and adding a safety guard in `_fill_stage` to prevent the regex fallback from unconditionally overriding a successful key/label lookup. (3) Fixed the same-case fallback edge case in `bot.py` by ignoring `chosen_form` when no successful filing has occurred. (4) Resolved the live Telethon harness mismatch by introducing a robust, polling-based `wait_for_matching_message` shared helper that correctly watches for message edits and updates in real-time. (5) Added root-level token redaction to logging to guarantee raw bot tokens are never printed or saved to local log files, and verified this behavior with a dedicated unit test in `test_smoke.py`. (6) Incorporated a non-blocking process lock in `bot.py`'s `main()` to gracefully prevent multiple concurrent polling instances. Verification: full offline pytest gate is green with 612 passed, 0 failed, 13 deselected, and 43 warnings. No live external actions.
+
+> **2026-05-27 addendum — deterministic QA gate correction.**
+> The launch call is corrected: Portfolio Guru is ready for a controlled live
+> smoke, not private beta. The QA report now carries a deterministic workflow /
+> button map, explicit live-smoke limits, and the remaining beta gates:
+> controlled Telegram smoke, controlled Kaizen saved-draft verification, and a
+> reviewed commit of this product-readiness slice. Added offline coverage for
+> paused-flow recovery restoring the last filed case before rebuilding form
+> recommendations, so stale callbacks cannot strand a user between same-case
+> and form-selection flows. Verification: full offline gate green at
+> 612 passed, 13 deselected, 43 warnings; focused flow/filer/harness/smoke gate
+> green at 179 passed, 6 warnings. No live Telegram, Kaizen, deploy, push, or restart.
+
 ## Objective
 
 Cut a private-beta-ready slice of Portfolio Guru for 3–5 trusted UK EM

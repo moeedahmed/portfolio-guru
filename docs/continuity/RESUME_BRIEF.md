@@ -1,12 +1,12 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-05-27T01:19:42+00:00
+Generated: 2026-05-27T13:38:55+00:00
 Status: stale_or_needs_review
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
 - Branch: chore/telegram-bot-qa-discipline
-- Last commit: 9f9b1ed 2026-05-27 fix: polish draft preview layout
+- Last commit: e419d77 2026-05-27 fix: verify Kaizen header date filling
 - Uncommitted changes: yes
 
 ## Immediate read before restarting
@@ -23,20 +23,25 @@ Status: stale_or_needs_review
 - No missing practical sections
 
 ## Recent commits
+- e419d77 2026-05-27 fix: verify Kaizen header date filling
+- 4ed3b4c 2026-05-27 fix: fill RPL event circumstances dropdown
+- 7d930d5 2026-05-27 fix: polish RPL draft UX
+- ee946a0 2026-05-27 fix: harden reflective practice log drafting
+- 7a0e487 2026-05-27 fix: streamline post-save wpba reuse
 - 9f9b1ed 2026-05-27 fix: polish draft preview layout
 - ffe6bce 2026-05-27 fix: reuse voice capture status message
 - 7b715ac 2026-05-27 fix: route forwarded media after start reset
-- 3526505 2026-05-27 test: harden telegram bot qa guardrails
-- dfa181a 2026-05-27 fix: treat audio documents as voice notes
-- 4e7708e 2026-05-27 fix: handle forwarded voice messages
-- 219c629 2026-05-26 fix: reuse voice status message for form choices
-- 60389a1 2026-05-26 fix: fill Kaizen wrapper fields
 
 ## Uncommitted change summary
-- ?? memory/2026-05-27.md
+- M TASK.md
+-  M backend/bot.py
+-  M backend/kaizen_form_filer.py
+-  M backend/tests/test_flow_walker.py
+-  M backend/tests/test_reflect_log_filing_dropdown.py
+-  M docs/continuity/RESUME_BRIEF.md
 
 ## Repo context snapshot
-### AGENTS.md — present, 3 days old
+### AGENTS.md — present, 4 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md
 - ## Project
@@ -51,7 +56,7 @@ Key headings:
 - ## Key Design Decisions
 - ## Continuity Protocol
 
-### CLAUDE.md — present, 3 days old
+### CLAUDE.md — present, 4 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md
 - ## Project

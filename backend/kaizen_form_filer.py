@@ -1322,6 +1322,14 @@ async def _fill_stage(page: Page, dom_id: str, stage_label: str) -> bool:
         if key.lower() in stage_label.lower():
             stage_key = key
             break
+    if not is_qiat_stage and stage_key == stage_label:
+        stage_text = stage_label.lower()
+        if re.search(r"\bst[4-6]\b", stage_text):
+            stage_key = "Higher"
+        elif re.search(r"\bst3\b", stage_text):
+            stage_key = "Intermediate"
+        elif re.search(r"\b(st[12]|ct[12])\b", stage_text) or "accs" in stage_text:
+            stage_key = "ACCS"
 
     angular_value = values_map.get(stage_key)
     if not angular_value:
@@ -2032,7 +2040,7 @@ async def _fill_field_legacy(page: Page, dom_id: str, value: Any, field_key: str
 
     try:
         if field_key == "stage_of_training":
-            return await _fill_stage_of_training(page, dom_id, value)
+            return await _fill_stage(page, dom_id, str(value))
 
         el = page.locator(f'[id="{dom_id}"]')
         if not await el.count():
@@ -2049,7 +2057,7 @@ async def _fill_field_legacy(page: Page, dom_id: str, value: Any, field_key: str
         if tag == "SELECT":
             if form_type == "DOPS" and field_key == "placement":
                 value = await _normalise_dops_select_value(page, field_key, dom_id, value)
-            return await _fill_select_legacy(el, dom_id, value, field_key)
+            return await _fill_select(page, dom_id, str(value))
 
         # Textareas and text inputs
         if tag in ("TEXTAREA", "INPUT"):
@@ -2064,52 +2072,6 @@ async def _fill_field_legacy(page: Page, dom_id: str, value: Any, field_key: str
         logger.warning(f"Error filling #{dom_id} ({field_key}): {e}")
         return False
 
-
-async def _fill_stage_of_training(page: Page, dom_id: str, value: Any) -> bool:
-    """Fill the stage of training select using known Kaizen values."""
-    val_str = str(value).lower()
-    select_value = None
-
-    if "higher" in val_str or "st4" in val_str or "st5" in val_str or "st6" in val_str:
-        select_value = STAGE_SELECT_VALUES["Higher"]
-    elif "intermediate" in val_str or "st3" in val_str:
-        select_value = STAGE_SELECT_VALUES["Intermediate"]
-    elif "accs" in val_str or "st1" in val_str or "st2" in val_str or "ct1" in val_str or "ct2" in val_str:
-        select_value = STAGE_SELECT_VALUES["ACCS"]
-    elif "pem" in val_str:
-        select_value = STAGE_SELECT_VALUES["PEM"]
-    else:
-        select_value = STAGE_SELECT_VALUES["Higher"]
-        logger.info(f"Defaulting stage to Higher for value: '{value}'")
-
-    try:
-        el = page.locator(f'[id="{dom_id}"]')
-        if await el.count() > 0:
-            await el.select_option(value=select_value)
-            await asyncio.sleep(5)
-            logger.info(f"Selected stage of training: {select_value}")
-            return True
-    except Exception as e:
-        logger.warning(f"Stage selection failed: {e}")
-    return False
-
-
-async def _fill_select_legacy(el, dom_id: str, value: Any, field_key: str) -> bool:
-    """Fill a generic select dropdown with label or partial match."""
-    try:
-        await el.select_option(label=str(value))
-        return True
-    except Exception:
-        options = await el.evaluate("""el => {
-            return Array.from(el.options).map(o => ({value: o.value, text: o.text}))
-        }""")
-        val_lower = str(value).lower()
-        for opt in options:
-            if val_lower in opt["text"].lower():
-                await el.select_option(value=opt["value"])
-                return True
-        logger.warning(f"No matching option for #{dom_id}: '{value}' in {[o['text'] for o in options]}")
-        return False
 
 
 # ─── Legacy save/submit/verify ───────────────────────────────────────────────

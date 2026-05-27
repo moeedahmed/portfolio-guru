@@ -59,9 +59,22 @@ class _FakeButton:
 
 
 class _FakeMessage:
-    def __init__(self, text, buttons=()):
+    def __init__(self, text, buttons=(), *, message_id=1, out=False):
+        self.id = message_id
         self.raw_text = text
+        self.out = out
         self.buttons = [[_FakeButton(label) for label in row] for row in buttons]
+        self.reply_markup = bool(buttons)
+
+
+class _FakeClient:
+    def __init__(self, history_batches):
+        self.history_batches = list(history_batches)
+
+    async def get_messages(self, chat_id, limit=5):
+        if len(self.history_batches) > 1:
+            return self.history_batches.pop(0)
+        return self.history_batches[0]
 
 
 def test_matches_expectation_requires_expected_text_and_button():
@@ -95,3 +108,42 @@ def test_find_button_selects_expected_inline_button():
 
     assert button is not None
     assert button.text == "See all forms"
+
+
+@pytest.mark.asyncio
+async def test_wait_for_matching_message_observes_edited_recent_message():
+    stale = _FakeMessage("Old recommendation", (("Use best fit",),), message_id=10)
+    edited = _FakeMessage("Forms that fit your case", (("See all forms",),), message_id=11)
+    client = _FakeClient([
+        [stale],
+        [edited],
+    ])
+
+    match = await harness.wait_for_matching_message(
+        client,
+        "portfolio_guru_bot",
+        timeout_seconds=2,
+        expect_text_any=("Forms that fit",),
+        expect_button_any=("See all forms",),
+        min_id=11,
+    )
+
+    assert match is edited
+
+
+@pytest.mark.asyncio
+async def test_wait_for_matching_message_ignores_stale_pre_click_match():
+    stale = _FakeMessage("Draft preview", (("Save as draft",),), message_id=20)
+    fresh = _FakeMessage("Kaizen draft saved", (("File another case",),), message_id=21)
+    client = _FakeClient([[stale, fresh]])
+
+    match = await harness.wait_for_matching_message(
+        client,
+        "portfolio_guru_bot",
+        timeout_seconds=2,
+        expect_text_any=("draft",),
+        expect_button_any=("File another",),
+        min_id=21,
+    )
+
+    assert match is fresh

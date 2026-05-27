@@ -1314,7 +1314,7 @@ class TestFlowWalker:
         # look the user reported.
         assert 'saved as a draft, but needs manual review' not in text
         assert 'This is not complete yet' not in text
-        assert '✅ *Case filed*' not in text
+        assert '✅ *Kaizen draft saved*' not in text
 
         buttons = sim.get_last_buttons()
         callbacks = {callback for _, callback in buttons}
@@ -2325,8 +2325,15 @@ class TestRecentPortfolioFixes:
         keyboard = _build_post_filing_keyboard('CBD', 'success', same_case_available=True)
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
 
-        assert ('🔁 Same case, another WPBA', 'ACTION|same_case_another') in buttons
+        assert ('🔁 Same case, new WPBA', 'ACTION|same_case_another') in buttons
         assert ('📋 File another case', 'ACTION|file') in buttons
+        assert [
+            ('🔁 Same case, new WPBA', 'ACTION|same_case_another'),
+            ('📋 File another case', 'ACTION|file'),
+        ] in [
+            [(b.text, b.callback_data) for b in row]
+            for row in keyboard.inline_keyboard
+        ]
 
     def test_post_filing_keyboard_offers_same_case_for_clean_partial(self):
         """Clean partial (no error) should also surface the 'Same case,
@@ -2337,7 +2344,7 @@ class TestRecentPortfolioFixes:
         keyboard = _build_post_filing_keyboard('CBD', 'partial', same_case_available=True)
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
 
-        assert ('🔁 Same case, another WPBA', 'ACTION|same_case_another') in buttons
+        assert ('🔁 Same case, new WPBA', 'ACTION|same_case_another') in buttons
 
     def test_post_filing_keyboard_no_same_case_for_uncertain_partial(self):
         """Uncertain partial (partial + error) must NOT offer Same case
@@ -2347,7 +2354,7 @@ class TestRecentPortfolioFixes:
         keyboard = _build_post_filing_keyboard('CBD', 'partial', uncertain=True, same_case_available=True)
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
 
-        assert ('🔁 Same case, another WPBA', 'ACTION|same_case_another') not in buttons
+        assert ('🔁 Same case, new WPBA', 'ACTION|same_case_another') not in buttons
         assert ('🔄 Try again', 'ACTION|retry_filing') in buttons
 
     def test_post_filing_keyboard_links_to_saved_draft_url_when_present(self):
@@ -2531,7 +2538,7 @@ class TestRecentPortfolioFixes:
     @pytest.mark.asyncio
     async def test_approval_partial_includes_same_case_another(self, thin_draft):
         """When handle_approval_approve processes a clean partial (no error),
-        the post-filing keyboard must include 'Same case, another WPBA' so the
+        the post-filing keyboard must include 'Same case, new WPBA' so the
         user can get a different WPBA from the same case."""
         from bot import handle_approval_approve
 
@@ -2563,14 +2570,14 @@ class TestRecentPortfolioFixes:
             for row in sim.messages_sent[-1][2].inline_keyboard
             if row
         ]
-        assert ('🔁 Same case, another WPBA', 'ACTION|same_case_another') in buttons, (
+        assert ('🔁 Same case, new WPBA', 'ACTION|same_case_another') in buttons, (
             f"Clean partial should surface 'Same case' button. Got: {buttons!r}"
         )
 
     @pytest.mark.asyncio
     async def test_approval_success_includes_same_case_another(self):
         """When handle_approval_approve processes a success, the post-filing
-        keyboard must also include 'Same case, another WPBA'."""
+        keyboard must also include 'Same case, new WPBA'."""
         from bot import handle_approval_approve
         from models import FormDraft
 
@@ -2616,10 +2623,10 @@ class TestRecentPortfolioFixes:
             for row in sim.messages_sent[-1][2].inline_keyboard
             if row
         ]
-        assert ('🔁 Same case, another WPBA', 'ACTION|same_case_another') in buttons, (
+        assert ('🔁 Same case, new WPBA', 'ACTION|same_case_another') in buttons, (
             f"Success should surface 'Same case' button. Got: {buttons!r}"
         )
-        """Successful save also reads as a new step: 'Case filed' on top, then
+        """Successful save also reads as a new step: 'Kaizen draft saved' on top, then
         the form-name subhead, then summary lines — distinct from the draft."""
         from bot import handle_approval_approve
         from models import FormDraft
@@ -2663,8 +2670,8 @@ class TestRecentPortfolioFixes:
 
         text = sim.get_last_text()
         first_line = text.split('\n', 1)[0]
-        assert '✅ *Case filed*' in first_line, (
-            f"First line should be the 'Case filed' header. Got: {first_line!r}"
+        assert '✅ *Kaizen draft saved*' in first_line, (
+            f"First line should be the 'Kaizen draft saved' header. Got: {first_line!r}"
         )
         # The subhead mentions the form was saved as a Kaizen draft so the
         # user knows nothing was submitted/signed.
@@ -2861,6 +2868,113 @@ class TestRecentPortfolioFixes:
         assert context.user_data.get('excluded_form_type') == 'CBD'
         # case_text was restored from last_filed_case_text — not the draft body.
         assert context.user_data.get('case_text') == original_case_text
+
+    @pytest.mark.asyncio
+    async def test_same_case_transition_message_is_replaced_by_form_list(
+        self, recommended_forms
+    ):
+        from bot import AWAIT_FORM_CHOICE, handle_action_button
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['last_filed_case_text'] = SAMPLE_CASES['valid']
+        context.user_data['last_filed_form_type'] = 'REFLECT_LOG'
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_curriculum', return_value='2025'), \
+             patch('bot.recommend_form_types', new_callable=AsyncMock, return_value=recommended_forms):
+            result = await handle_action_button(
+                sim._make_callback_update('ACTION|same_case_another'), context
+            )
+
+        assert result == AWAIT_FORM_CHOICE
+        assert sim.messages_sent[-1][0] == 'bot_edit'
+        assert 'Forms that fit your case' in sim.messages_sent[-1][1]
+        assert 'Reusing the same case' not in sim.messages_sent[-1][1]
+
+    @pytest.mark.asyncio
+    async def test_same_case_stale_button_explains_expiry_without_dead_end(self):
+        from bot import handle_action_button
+
+        sim = BotSimulator()
+        context = sim._make_context()
+
+        with patch('bot._setup_needs_finishing', return_value=False):
+            result = await handle_action_button(
+                sim._make_callback_update('ACTION|same_case_another'), context
+            )
+
+        assert result == ConversationHandler.END
+        text = sim.get_last_text()
+        assert 'same-case shortcut has expired' in text
+        assert 'Send the case again' in text
+        assert 'no longer available here' not in text
+
+    @pytest.mark.asyncio
+    async def test_stale_see_all_forms_restores_last_filed_case_context(self):
+        from bot import AWAIT_FORM_CHOICE, handle_form_choice
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['last_filed_case_text'] = SAMPLE_CASES['valid']
+        context.user_data['last_filed_form_type'] = 'REFLECT_LOG'
+
+        with patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_curriculum', return_value='2025'):
+            result = await handle_form_choice(
+                sim._make_callback_update('FORM|show_all'), context
+            )
+
+        assert result == AWAIT_FORM_CHOICE
+        assert context.user_data['case_text'] == SAMPLE_CASES['valid']
+        assert context.user_data['excluded_form_type'] == 'REFLECT_LOG'
+        assert 'Pick a category' in sim.get_last_text()
+
+    @pytest.mark.asyncio
+    async def test_stale_form_selection_without_case_gives_restart_path(self):
+        from bot import handle_form_choice
+
+        sim = BotSimulator()
+        context = sim._make_context()
+
+        with patch('bot._setup_needs_finishing', return_value=False):
+            result = await handle_form_choice(
+                sim._make_callback_update('FORM|CBD'), context
+            )
+
+        assert result == ConversationHandler.END
+        text = sim.get_last_text()
+        assert 'form list has expired' in text
+        assert 'Start a new case' in text
+
+    @pytest.mark.asyncio
+    async def test_paused_flow_restores_last_filed_case_before_recommending(
+        self, recommended_forms
+    ):
+        from bot import AWAIT_FORM_CHOICE, _resume_paused_flow
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['last_filed_case_text'] = SAMPLE_CASES['valid']
+        context.user_data['last_filed_form_type'] = 'REFLECT_LOG'
+
+        with patch('bot._setup_needs_finishing', return_value=False), \
+             patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_curriculum', return_value='2025'), \
+             patch('bot.recommend_form_types', new=AsyncMock(return_value=recommended_forms)):
+            result = await _resume_paused_flow(
+                sim._make_callback_update('FORM|CBD'),
+                context,
+                'That earlier button is no longer active.',
+            )
+
+        assert result == AWAIT_FORM_CHOICE
+        assert context.user_data['case_text'] == SAMPLE_CASES['valid']
+        assert context.user_data['case_input_source'] == 'same case'
+        assert context.user_data['excluded_form_type'] == 'REFLECT_LOG'
+        assert 'Your case is still in progress' in sim.messages_sent[-2][1]
+        assert 'Pick one' in sim.messages_sent[-1][1]
 
 
 class TestOnboardingFrictionPatch:
