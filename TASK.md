@@ -33,6 +33,18 @@
 > 3 warnings; full offline gate green at 570 passed, 22 skipped,
 > 13 deselected, 3 snapshots passed. No live restart recorded in this file yet.
 
+> **2026-05-27 addendum — RPL field-specific quality regression.**
+> Moeed's RUQ pain / sepsis-features voice note exposed that Reflective Practice
+> Log filing still captured the clinical narrative but left safe reflective
+> fields blank or repetitive in Kaizen. The current slice adds a regression for
+> that exact beta case, adds an ED event-type schema option for RPL, and hardens
+> RPL polishing for dual sepsis + surgical-referral reflections so title,
+> event type, why, outcome/feelings, learning, and action-plan fields are
+> filled where source-supported without inventing clinical facts. Verification:
+> focused RPL quality test green at 15 passed; full offline gate green at
+> 571 passed, 22 skipped, 13 deselected, 3 snapshots passed. No live restart
+> recorded in this file yet.
+
 ## Objective
 
 Cut a private-beta-ready slice of Portfolio Guru for 3–5 trusted UK EM

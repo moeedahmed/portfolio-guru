@@ -1,6 +1,26 @@
 """Reflective Practice Log draft-quality guardrails."""
 
 from extractor import _polish_reflect_log_fields
+from form_schemas import FORM_SCHEMAS
+
+
+# Voice transcript Moeed sent during the May 2026 beta regression:
+# RUQ pain + fever + sepsis features + surgical escalation + handover reflection.
+# The bot produced a draft where title, date_of_event, type-of-event, why, and
+# different_outcome were all blank and focussing_on copied replay_differently
+# verbatim. The polish layer must fix every one of those fields without
+# inventing clinical content.
+MOEED_RUQ_SEPSIS_CASE = (
+    "okay so I saw 42 years old woman in ED with right upper quadrant abdominal pain "
+    "vomiting and fever. she was tachycardic at 118 temperature 38.4 blood pressure "
+    "104 over 68 with tenderness and guarding in the right upper quadrant. I considered "
+    "acute cholecystitis with possible sepsis. I inserted a cannula sent bloods including "
+    "LFTs and cultures started IV fluids analgesia and antibiotics and requested an "
+    "urgent ultrasound. I escalated to surgical registrar and discussed with my ED senior "
+    "because of the sepsis features. so the reflections were that this was a good case "
+    "for prioritizing sepsis treatment while keeping the surgical diagnosis in mind. I "
+    "want to improve my handover structure when referring unwell surgical patients"
+)
 
 
 def test_sepsis_derives_title_when_blank():
@@ -152,3 +172,95 @@ def test_non_sepsis_non_surgical_still_fixes_repetitive_focus():
     polished = _polish_reflect_log_fields(fields, "chest pain case")
     assert polished["focussing_on"] != fields["focussing_on"]
     assert "next-shift habit" in polished["focussing_on"]
+
+
+def test_moeed_ruq_sepsis_beta_regression():
+    """End-to-end regression for the May 2026 beta broken draft.
+
+    The LLM produced: blank title, blank date_of_event, blank event_type,
+    blank why, blank different_outcome, and focussing_on that was a verbatim
+    copy of replay_differently. All seven must be fixed without inventing
+    clinical facts not present in the source transcript.
+    """
+    # Exact broken LLM output fields as reported from the beta
+    broken_fields = {
+        "date_of_encounter": "27/5/2026",
+        "reflection_title": "",
+        "date_of_event": "",
+        "event_type": "",
+        "reflection": (
+            "I saw a 42-year-old woman in ED with right upper quadrant abdominal pain, "
+            "vomiting and fever. She was tachycardic at 118, temperature 38.4, BP 104/68 "
+            "with RUQ tenderness and guarding. I considered acute cholecystitis with possible "
+            "sepsis, inserted a cannula, sent bloods including LFTs and cultures, started IV "
+            "fluids, analgesia and antibiotics, and requested an urgent ultrasound. I escalated "
+            "to the surgical registrar and discussed with my ED senior because of the sepsis features."
+        ),
+        "replay_differently": (
+            "I would improve my handover structure when referring unwell surgical patients."
+        ),
+        "why": "",
+        "different_outcome": "",
+        "focussing_on": (
+            "I would improve my handover structure when referring unwell surgical patients."
+        ),
+        "learned": (
+            "I learned the importance of prioritising sepsis treatment while maintaining "
+            "awareness of the underlying surgical diagnosis."
+        ),
+    }
+
+    polished = _polish_reflect_log_fields(broken_fields, MOEED_RUQ_SEPSIS_CASE)
+
+    # Title derived and references sepsis or surgical referral
+    assert polished["reflection_title"], "reflection_title must not be blank"
+    title_lower = polished["reflection_title"].lower()
+    assert any(w in title_lower for w in ("sepsis", "referral", "surgical")), (
+        f"title should reference sepsis or surgical referral, got: {polished['reflection_title']!r}"
+    )
+
+    # date_of_event copied from date_of_encounter
+    assert polished["date_of_event"] == "27/5/2026", (
+        f"date_of_event should be copied from date_of_encounter, got: {polished['date_of_event']!r}"
+    )
+
+    # event_type set for ED context
+    assert polished["event_type"], "event_type must not be blank for an ED encounter"
+    assert polished["event_type"] in FORM_SCHEMAS["REFLECT_LOG"]["fields"][3]["options"], (
+        f"event_type must be a valid schema option, got: {polished['event_type']!r}"
+    )
+
+    # why is filled and anchors the sepsis-vs-surgical-referral tension
+    assert polished["why"], "why must not be blank"
+    why_lower = polished["why"].lower()
+    assert any(w in why_lower for w in ("sepsis", "source", "referral", "surgical")), (
+        f"why should explain sepsis/surgical referral tension, got: {polished['why']!r}"
+    )
+
+    # different_outcome filled, references shared understanding / urgency, does not claim
+    # a different clinical outcome as established fact
+    assert polished["different_outcome"], "different_outcome must not be blank"
+    diff_lower = polished["different_outcome"].lower()
+    assert any(w in diff_lower for w in ("shared", "urgency", "referral", "structured", "explicit", "clearer")), (
+        f"different_outcome should reference structured referral or shared mental model, "
+        f"got: {polished['different_outcome']!r}"
+    )
+    # Must qualify the outcome claim, not assert a different patient course as fact
+    assert "clinical course" in diff_lower or "would" in diff_lower or "could" in diff_lower, (
+        f"different_outcome must hedge rather than assert a different patient outcome, "
+        f"got: {polished['different_outcome']!r}"
+    )
+
+    # focussing_on must NOT be a copy of replay_differently and must name a concrete action
+    assert polished["focussing_on"] != broken_fields["replay_differently"], (
+        "focussing_on must not be identical to replay_differently"
+    )
+    focus_lower = polished["focussing_on"].lower()
+    assert any(w in focus_lower for w in ("sbar", "structured", "referral")), (
+        f"focussing_on should specify SBAR or structured referral, got: {polished['focussing_on']!r}"
+    )
+
+    # learned is already substantive — must be preserved unchanged
+    assert polished["learned"] == broken_fields["learned"], (
+        "learned was already good and must not be overwritten"
+    )

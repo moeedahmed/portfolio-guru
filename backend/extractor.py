@@ -1472,28 +1472,43 @@ def _fields_are_repetitive(first: str, second: str) -> bool:
     return SequenceMatcher(None, a, b).ratio() >= 0.72
 
 
+_REFLECT_LOG_ED_TERMS = (
+    " ed ", "ed,", "ed.", "(ed)", " in ed",
+    "emergency department", "ed patient", "a&e", "a & e", "accident and emergency",
+)
+
+
 def _polish_reflect_log_fields(fields: dict, case_description: str) -> dict:
     """Keep Reflective Practice Log action fields distinct without inventing case facts.
 
-    Derives title, why, different_outcome, and focussing_on from supported
-    sepsis/surgical-referral case facts when the LLM output is repetitive
-    or missing. Never introduces facts absent from the case description."""
+    Derives title, why, different_outcome, focussing_on, and event_type from
+    supported sepsis/surgical-referral case facts when the LLM output is
+    repetitive or missing. Never introduces clinical facts absent from the
+    case description."""
     polished = dict(fields)
     combined = (f"{case_description} " + " ".join(str(fields.get(k, "")) for k in fields)).lower()
 
     is_sepsis = any(term in combined for term in ("sepsis", "septic", "sirs", "sepsis6", "sepsis 6"))
     is_surgical_ref = any(term in combined for term in ("handover", "refer", "referral", "surgical"))
+    is_dual = is_sepsis and is_surgical_ref
+    has_ed_context = any(term in (" " + combined + " ") for term in _REFLECT_LOG_ED_TERMS)
 
     if not is_sepsis and not is_surgical_ref:
         replay = str(polished.get("replay_differently") or "").strip()
         focus = str(polished.get("focussing_on") or "").strip()
-        if not replay or not focus or not _fields_are_repetitive(replay, focus):
-            return fields
-        polished["focussing_on"] = (
-            "I am turning this into a specific next-shift habit: state the concern early, "
-            "name the uncertainty, and agree the next escalation or review point."
+        repetitive_focus = (
+            replay and focus and _fields_are_repetitive(replay, focus)
         )
-        return polished
+        # event_type still derived for plain ED encounters even when no
+        # sepsis/surgical signal is present.
+        polished = _polish_reflect_log_event_type(polished, has_ed_context)
+        if repetitive_focus:
+            polished["focussing_on"] = (
+                "I am turning this into a specific next-shift habit: state the concern early, "
+                "name the uncertainty, and agree the next escalation or review point."
+            )
+            return polished
+        return polished if polished != fields else fields
 
     replay = str(polished.get("replay_differently") or "").strip()
 
@@ -1506,7 +1521,11 @@ def _polish_reflect_log_fields(fields: dict, case_description: str) -> dict:
     # --- Title derivation ---
     title = str(polished.get("reflection_title") or "").strip()
     if not title:
-        if is_sepsis:
+        if is_dual:
+            polished["reflection_title"] = (
+                "Balancing sepsis recognition with a structured surgical referral"
+            )
+        elif is_sepsis:
             polished["reflection_title"] = "Recognition and initial management of sepsis"
         else:
             polished["reflection_title"] = "Structured referral and communication"
@@ -1514,7 +1533,14 @@ def _polish_reflect_log_fields(fields: dict, case_description: str) -> dict:
     # --- Why derivation ---
     why = str(polished.get("why") or "").strip()
     if not why or _fields_are_repetitive(why, replay):
-        if is_sepsis:
+        if is_dual:
+            polished["why"] = (
+                "Time-critical sepsis treatment has to run in parallel with a clear, "
+                "structured surgical referral so the receiving team grasps the urgency "
+                "and the source-control question without losing time to repeat calls or "
+                "missed context."
+            )
+        elif is_sepsis:
             polished["why"] = (
                 "Sepsis recognition requires mental commitment to source identification "
                 "and time-critical treatment, not just treatment initiation."
@@ -1528,7 +1554,15 @@ def _polish_reflect_log_fields(fields: dict, case_description: str) -> dict:
     # --- different_outcome derivation ---
     diff_outcome = str(polished.get("different_outcome") or "").strip()
     if not diff_outcome or _fields_are_repetitive(diff_outcome, replay):
-        if is_sepsis:
+        if is_dual:
+            polished["different_outcome"] = (
+                "A structured referral that names the physiology, the sepsis treatment "
+                "already started, the working diagnosis and the specific decision needed "
+                "would give the surgical team a shared mental model, making the urgency "
+                "explicit and the next decision quicker and safer, even where the patient's "
+                "clinical course stays the same."
+            )
+        elif is_sepsis:
             polished["different_outcome"] = (
                 "Clearer source identification and earlier antibiotics could "
                 "reduce the time to definitive treatment."
@@ -1543,7 +1577,15 @@ def _polish_reflect_log_fields(fields: dict, case_description: str) -> dict:
     # --- focussing_on derivation ---
     focus = str(polished.get("focussing_on") or "").strip()
     if not focus or _fields_are_repetitive(focus, replay):
-        if is_surgical_ref:
+        if is_dual:
+            polished["focussing_on"] = (
+                "I am practising a short SBAR-style surgical referral that states the "
+                "physiology and key vitals, the sepsis treatment already started (fluids, "
+                "antibiotics, analgesia), the working diagnosis and investigations requested, "
+                "and the specific decision I need from the surgical team, naming the urgency "
+                "explicitly."
+            )
+        elif is_surgical_ref:
             polished["focussing_on"] = (
                 "I am practising a concise SBAR-style referral that states the working diagnosis, "
                 "current concerns, treatment already started, and the decision I need from the receiving team."
@@ -1559,6 +1601,21 @@ def _polish_reflect_log_fields(fields: dict, case_description: str) -> dict:
                 "name the uncertainty, and agree the next escalation or review point."
             )
 
+    polished = _polish_reflect_log_event_type(polished, has_ed_context)
+
+    return polished
+
+
+def _polish_reflect_log_event_type(polished: dict, has_ed_context: bool) -> dict:
+    """Default the Kaizen "Type of event/circumstances" select to an ED option
+    when the reflection clearly describes an ED clinical encounter. Leaves any
+    non-empty user-supplied value alone."""
+    if not has_ed_context:
+        return polished
+    existing = str(polished.get("event_type") or "").strip()
+    if existing:
+        return polished
+    polished["event_type"] = "ED patient"
     return polished
 
 

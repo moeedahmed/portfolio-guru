@@ -441,6 +441,8 @@ FORM_SCHEMAS = {
             {"key": "date_of_encounter",  "label": "Date",                            "type": "date",     "required": True},
             {"key": "reflection_title",   "label": "Title of Reflection",             "type": "text",     "required": False},
             {"key": "date_of_event",      "label": "Date of Event",                   "type": "date",     "required": False},
+            {"key": "event_type",         "label": "Type of event/circumstances",     "type": "dropdown", "required": False,
+             "options": ["ED patient"]},
             {"key": "reflection",         "label": "Description / What happened",     "type": "text",     "required": True},
             {"key": "replay_differently", "label": "What would you do differently",   "type": "text",     "required": False},
             {"key": "why",                "label": "Why",                              "type": "text",     "required": False},
