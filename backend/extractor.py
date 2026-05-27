@@ -1455,6 +1455,21 @@ def _normalise_for_similarity(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
 
 
+def _is_absolute_no_outcome(text: str) -> bool:
+    """Detect the too-absolute 'No, the clinical outcome would remain the same'
+    pattern that should be replaced with softer communication-quality framing
+    when the case supports it."""
+    lower = text.lower().strip()
+    return (
+        lower.startswith("no,")
+        or lower.startswith("no.")
+        or "clinical outcome would remain" in lower
+        or "outcome would not be different" in lower
+        or "outcome would remain the same" in lower
+        or "outcome would be the same" in lower
+    )
+
+
 def _fields_are_repetitive(first: str, second: str) -> bool:
     """Detect reflection fields that say the same thing with minor grammar changes."""
     from difflib import SequenceMatcher
@@ -1491,7 +1506,20 @@ def _polish_reflect_log_fields(fields: dict, case_description: str) -> dict:
     is_sepsis = any(term in combined for term in ("sepsis", "septic", "sirs", "sepsis6", "sepsis 6"))
     is_surgical_ref = any(term in combined for term in ("handover", "refer", "referral", "surgical"))
     is_dual = is_sepsis and is_surgical_ref
+    is_stemi = any(term in combined for term in ("stemi", "st elevation", "st-elevation", "acs", "nstemi", "pci", "angiogram"))
+    has_communication_context = any(term in combined for term in ("communicat", "patient understand", "anxiety", "explain", "famil", "relative"))
     has_ed_context = any(term in (" " + combined + " ") for term in _REFLECT_LOG_ED_TERMS)
+
+    # Replace absolute "No, the clinical outcome would remain the same" with softer
+    # communication-quality framing when the case is STEMI/ACS or has clear
+    # communication context. Applies before all other derivation so it takes effect
+    # regardless of which sepsis/surgical path the rest of the function follows.
+    _early_diff = str(polished.get("different_outcome") or "").strip()
+    if _early_diff and _is_absolute_no_outcome(_early_diff) and (is_stemi or has_communication_context):
+        polished["different_outcome"] = (
+            "The clinical escalation was appropriate, but clearer communication "
+            "may have improved patient understanding and reduced anxiety."
+        )
 
     if not is_sepsis and not is_surgical_ref:
         replay = str(polished.get("replay_differently") or "").strip()
@@ -2037,7 +2065,7 @@ Field scoping rules:
 - reflection (Description / What happened): Clinical narrative only — what occurred, what you observed, what you did. No learning points, no "I would", no "I now know". Pure account of events.
 - replay_differently (What would you do differently): ONE specific concrete action. One sentence or two max. Do not explain WHY here — that is the next field.
 - why (Why): The reason behind the "differently" answer. Focus on the cognitive or systemic cause (e.g. fixation bias, workload). Do not repeat the clinical story.
-- different_outcome (Would the outcome be different): Direct yes/no answer + one sentence on the specific impact. Do not restate the diagnosis or the error — just the counterfactual outcome.
+- different_outcome (Would the outcome be different): If the clinical management was appropriate but communication or process could be improved, do NOT write "No, the clinical outcome would remain the same" — instead frame it as a quality-of-care improvement (e.g. "The clinical escalation was appropriate, but clearer communication may have improved patient understanding and reduced anxiety."). If there was a genuine clinical change that would alter the patient's course, describe that counterfactual outcome. Do not restate the diagnosis — just the specific impact.
 - focussing_on (What are you focussing on): Forward-looking improvement plan only. It must be more specific than replay_differently and must not be the same sentence in different words. Include the method/framework/check you will use next time, but only if supported by the case.
 - learned (What have you learned): Distil to 1-2 genuine learning points. Do not repeat the clinical narrative. Do not repeat focussing_on content. What insight did this case give you?
 

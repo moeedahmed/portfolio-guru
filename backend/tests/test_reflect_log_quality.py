@@ -264,3 +264,48 @@ def test_moeed_ruq_sepsis_beta_regression():
     assert polished["learned"] == broken_fields["learned"], (
         "learned was already good and must not be overwritten"
     )
+
+
+def test_stemi_communication_avoids_absolute_no_phrasing():
+    """When a STEMI case has an LLM-generated absolute 'No, the clinical
+    outcome would remain the same', the polish layer must replace it with
+    softer communication-quality framing that doesn't dismiss the value of
+    the reflection."""
+    fields = {
+        "replay_differently": "I would have explained the STEMI diagnosis more clearly to the patient and family.",
+        "different_outcome": "No, the clinical outcome would remain the same as the STEMI was identified and treated appropriately with primary PCI.",
+        "focussing_on": "",
+    }
+    polished = _polish_reflect_log_fields(
+        fields,
+        "STEMI identified in ED, patient anxious about the diagnosis and prognosis, taken for primary PCI",
+    )
+    diff_lower = polished["different_outcome"].lower()
+    assert "no, the clinical outcome would remain the same" not in diff_lower, (
+        f"Absolute 'No clinical outcome change' phrasing must be replaced for "
+        f"communication-quality cases. Got: {polished['different_outcome']!r}"
+    )
+    assert any(w in diff_lower for w in ("communication", "understanding", "anxiety", "clearer", "may have", "appropriate")), (
+        f"different_outcome should use softer communication-quality framing. "
+        f"Got: {polished['different_outcome']!r}"
+    )
+
+
+def test_communication_case_without_stemi_also_avoids_absolute_no():
+    """The absolute-no guard applies to any case where communication is the
+    focus, not only STEMI — e.g. a handover case where the patient outcome
+    was fine but communication could have been clearer."""
+    fields = {
+        "replay_differently": "I would have communicated the diagnosis more clearly.",
+        "different_outcome": "No. The clinical outcome would be the same as the patient was treated correctly.",
+        "focussing_on": "",
+    }
+    polished = _polish_reflect_log_fields(
+        fields,
+        "Patient anxious after diagnosis; I explained the plan but communication could have been clearer",
+    )
+    diff_lower = polished["different_outcome"].lower()
+    assert "no." not in diff_lower or "clinical outcome would be the same" not in diff_lower, (
+        f"Absolute-no phrasing must be softened when communication context is present. "
+        f"Got: {polished['different_outcome']!r}"
+    )

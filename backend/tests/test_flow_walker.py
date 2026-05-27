@@ -185,9 +185,9 @@ class TestFlowWalker:
 
     @pytest.mark.asyncio
     async def test_draft_preview_keeps_why_this_form_compact(self, thin_draft):
-        """The form rationale should be visible but not a heavy instruction
-        block that competes with the draft itself."""
-        from bot import handle_form_choice
+        """The form rationale must appear after the draft body (below a divider),
+        not above the draft fields, so users see portfolio content first."""
+        from bot import _DRAFT_DIVIDER, handle_form_choice
         from extractor import FORM_UUIDS
         from models import FormTypeRecommendation
 
@@ -195,7 +195,7 @@ class TestFlowWalker:
         context = sim._make_context()
         context.user_data['case_text'] = SAMPLE_CASES['valid']
         # Stash a recommendation reason so _chosen_form_reason returns it and
-        # the preview renders the 'Why this form' block.
+        # the preview renders the rationale footer.
         context.user_data['form_recommendations'] = [
             FormTypeRecommendation(
                 form_type='CBD',
@@ -215,9 +215,12 @@ class TestFlowWalker:
         text = sim.get_last_text()
 
         assert 'ℹ️ The case is a reflective discussion of one patient.' in text
-        why_pos = text.index('ℹ️ The case is a reflective discussion of one patient.')
         first_field_pos = text.index('📅')
-        assert why_pos < first_field_pos
+        curriculum_pos = text.index('📚 *Curriculum:*')
+        divider_pos = text.index(_DRAFT_DIVIDER)
+        why_pos = text.index('ℹ️ The case is a reflective discussion of one patient.')
+        # Draft fields come first, then curriculum, then divider, then rationale
+        assert first_field_pos < curriculum_pos < divider_pos < why_pos
         assert '*Why this form:*' not in text
 
     @pytest.mark.asyncio
@@ -897,9 +900,9 @@ class TestFlowWalker:
         buttons = sim.get_last_buttons()
         # First button may be File another case or the amend button row
         assert ('📋 File another case', 'ACTION|file') in buttons
-        assert ('👍 It worked', 'FEEDBACK|good|CBD|success') in buttons
+        assert ('👍 It worked', 'FEEDBACK|good|CBD|success') not in buttons
         assert ('✏️ Amend this draft', 'AMEND|amend') in buttons
-        assert ("👎 Didn't work", 'FEEDBACK|bad|CBD|success') in buttons
+        assert ("👎 Didn't work", 'FEEDBACK|bad|CBD|success') not in buttons
         assert ('🧰 More options', 'ACTION|post_file_more|CBD|success') not in buttons
         assert not any(label in {'💬 Something missing?', '⚙️ Settings', '🏠 Main menu'} for label, _ in buttons)
 
@@ -2766,6 +2769,45 @@ class TestRecentPortfolioFixes:
                 f"status={status!r} kwargs={kwargs!r} should not duplicate "
                 f"'File another case'. Got count={file_again_count}"
             )
+
+    def test_post_filing_keyboard_no_feedback_buttons_on_success(self):
+        """Feedback buttons ('It worked' / 'Didn't work') must not appear on
+        the primary post-filing keyboard. Open/amend/same-case/new-case
+        actions remain. Stale FEEDBACK| callbacks on older messages are still
+        handled by handle_feedback's self-strip logic, so removing them from
+        the keyboard doesn't break existing messages."""
+        from bot import _build_post_filing_keyboard
+
+        for kwargs in (
+            {'same_case_available': True, 'saved_url': 'https://kaizenep.com/events/fillin/123'},
+            {'same_case_available': False, 'saved_url': None},
+        ):
+            keyboard = _build_post_filing_keyboard('CBD', 'success', **kwargs)
+            callbacks = {
+                b.callback_data
+                for row in keyboard.inline_keyboard
+                for b in row
+                if b.callback_data
+            }
+            assert not any(cb.startswith('FEEDBACK|') for cb in callbacks), (
+                f"Success keyboard must not contain FEEDBACK buttons. Got: {callbacks!r}"
+            )
+            # Core follow-up actions remain
+            assert 'ACTION|file' in callbacks, "File another case must remain"
+
+    def test_post_filing_keyboard_partial_never_had_feedback_buttons(self):
+        """Partial-save keyboard never included feedback buttons — verify
+        unchanged after the success-path cleanup."""
+        from bot import _build_post_filing_keyboard
+
+        keyboard = _build_post_filing_keyboard('CBD', 'partial')
+        callbacks = {
+            b.callback_data
+            for row in keyboard.inline_keyboard
+            for b in row
+            if b.callback_data
+        }
+        assert not any(cb.startswith('FEEDBACK|') for cb in callbacks)
 
     @pytest.mark.asyncio
     async def test_same_case_another_reuses_original_case_text_not_draft(

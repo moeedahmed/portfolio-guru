@@ -33,6 +33,20 @@
 > 3 warnings; full offline gate green at 570 passed, 22 skipped,
 > 13 deselected, 3 snapshots passed. No live restart recorded in this file yet.
 
+> **2026-05-27 addendum — RPL dogfood UX/content polish.**
+> Three changes from Moeed's latest dogfood screenshots: (1) Draft previews
+> now show the actual portfolio draft first; the ℹ️ form-choice rationale moves
+> to a footer after the draft body, separated by a `━━━━━━━━━━━━━━` divider,
+> so users see Kaizen content before bot instruction. (2) RPL `different_outcome`
+> field now guards against the absolute "No, the clinical outcome would remain the
+> same" pattern for STEMI/ACS and communication-quality cases, replacing it with
+> the softer framing "The clinical escalation was appropriate, but clearer
+> communication may have improved patient understanding and reduced anxiety." (3)
+> Post-filing success keyboard removes `👍 It worked` / `👎 Didn't work` from the
+> primary keyboard; stale-callback handler retained for old messages.
+> Verification: full offline gate green at 575 passed, 22 skipped,
+> 13 deselected, 3 snapshots passed. No live restart recorded in this file yet.
+
 > **2026-05-27 addendum — RPL field-specific quality regression.**
 > Moeed's RUQ pain / sepsis-features voice note exposed that Reflective Practice
 > Log filing still captured the clinical narrative but left safe reflective

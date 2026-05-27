@@ -1710,10 +1710,6 @@ def _build_post_filing_keyboard(
     if same_case_available:
         rows.append([InlineKeyboardButton("🔁 Same case, another WPBA", callback_data="ACTION|same_case_another")])
     rows.append([InlineKeyboardButton("📋 File another case", callback_data="ACTION|file")])
-    rows.append([
-        InlineKeyboardButton("👍 It worked", callback_data=f"FEEDBACK|good|{form_type}|{status}"),
-        InlineKeyboardButton("👎 Didn't work", callback_data=f"FEEDBACK|bad|{form_type}|{status}"),
-    ])
     return InlineKeyboardMarkup(rows)
 
 
@@ -1862,24 +1858,31 @@ def _draft_coach_note(draft) -> str:
     return ""
 
 
-def _draft_header(title: str, reason: str | None, draft) -> list[str]:
+def _draft_header(title: str) -> list[str]:
     """Compact status header before the draft body."""
-    lines: list[str] = [
+    return [
         f"🟢 *{FLOW_STATE_LABELS['drafted']} — {title} ready*",
         "",
     ]
-    if reason:
-        lines.extend([f"ℹ️ {reason}", ""])
-    return lines
+
+
+def _draft_rationale_footer(reason: str | None) -> str:
+    """Divider + form-choice rationale appended after the draft body.
+
+    Keeping portfolio content first ensures users see what will be filed
+    in Kaizen before they see bot guidance/rationale."""
+    if not reason:
+        return ""
+    return f"\n{_DRAFT_DIVIDER}\nℹ️ {reason}\n"
 
 
 def _format_draft_preview(draft, reason: str | None = None) -> str:
     """Format draft data as a preview message. Dispatches based on type."""
     if isinstance(draft, FormDraft):
-        preview = _format_generic_draft(draft, reason=reason)
-        return preview + _draft_missing_review_note(draft, draft.form_type)
-    preview = _format_cbd_draft(draft, reason=reason)
-    return preview + _draft_missing_review_note(draft, "CBD")
+        preview = _format_generic_draft(draft)
+        return preview + _draft_rationale_footer(reason) + _draft_missing_review_note(draft, draft.form_type)
+    preview = _format_cbd_draft(draft)
+    return preview + _draft_rationale_footer(reason) + _draft_missing_review_note(draft, "CBD")
 
 
 def _draft_fields_for_review(draft) -> dict:
@@ -1910,8 +1913,8 @@ _MISSING_MARKER = "_— needs your detail_"
 # knows they can reply to refine, instead of relying on a removed Edit button.
 _REPLY_HINT_SUFFIX = render_message("draft_reply_hint")
 
-# Visual divider used in saved/filed confirmation messages. Draft previews avoid
-# it so the portfolio content is not sandwiched between instruction blocks.
+# Visual divider separating portfolio content from bot guidance/rationale in
+# draft previews (after draft body) and saved/filed confirmation messages.
 _DRAFT_DIVIDER = "━━━━━━━━━━━━━━"
 
 _NARRATIVE_PREVIEW_KEYS = {
@@ -2332,7 +2335,7 @@ def _format_curriculum_hierarchy(curriculum_links, key_capabilities) -> str:
     return "\n".join(lines)
 
 
-def _format_cbd_draft(cbd_data, reason: str | None = None) -> str:
+def _format_cbd_draft(cbd_data) -> str:
     """Format CBD data as a preview message. Empty required fields are
     rendered with an explicit "needs your detail" marker so the user never
     sees a falsely-complete-looking draft."""
@@ -2354,7 +2357,7 @@ def _format_cbd_draft(cbd_data, reason: str | None = None) -> str:
     if not curriculum.strip():
         curriculum = _MISSING_MARKER
 
-    lines = _draft_header("CBD draft", reason, cbd_data)
+    lines = _draft_header("CBD draft")
     lines.extend([
         f"📅 *Date:* {date_display}",
         f"🏥 *Setting:* {display('clinical_setting', cbd_data.clinical_setting)}",
@@ -2369,13 +2372,13 @@ def _format_cbd_draft(cbd_data, reason: str | None = None) -> str:
     return "\n".join(lines)
 
 
-def _format_generic_draft(draft: FormDraft, reason: str | None = None) -> str:
+def _format_generic_draft(draft: FormDraft) -> str:
     """Format a generic FormDraft as a preview message."""
     schema = FORM_SCHEMAS.get(draft.form_type, {})
     form_name = schema.get("name", draft.form_type)
     emoji = FORM_EMOJIS.get(draft.form_type, "📋")
 
-    lines = _draft_header(f"{form_name} draft", reason, draft)
+    lines = _draft_header(f"{form_name} draft")
     lines[0] = f"{emoji} *{form_name} draft ready*"
 
     fields = schema.get("fields", [])
