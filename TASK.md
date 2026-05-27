@@ -1,5 +1,14 @@
 # Active Task — Private Beta Launch Cut
 
+> **2026-05-27 addendum — Kaizen description summary guard.**
+> Moeed's beta screenshot showed Kaizen's top `Description (optional)` field
+> being filled with a clipped sentence ending mid-word (`recognis...`). The
+> current slice routes the shared event-description builder through a one-line
+> complete-summary guard: no ellipsis endings, no mid-word truncation, and
+> supplied clipped descriptions are sanitised before filing. Verification:
+> focused header/form-name tests green at 52 passed, 1 warning; full offline
+> pytest gate green at 621 passed, 13 deselected, 43 warnings.
+
 > **2026-05-27 addendum — user-visible form-name audit.**
 > Moeed flagged that acronyms such as DOPS are acceptable, but internal form
 > keys such as `PROC_LOG` must not appear in doctor-facing Telegram messages.

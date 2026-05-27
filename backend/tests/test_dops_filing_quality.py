@@ -472,6 +472,48 @@ def test_common_header_defaults_fill_static_kaizen_wrapper_fields():
     assert "Chest pain" in fields["event_description"]
 
 
+def test_common_header_description_is_complete_one_line_summary():
+    fields, meta = apply_common_header_defaults("CBD", {
+        "date_of_encounter": "2026-05-27",
+        "patient_presentation": "A 70-year-old patient in ED resus with acute shortness of breath and hypotension",
+        "clinical_reasoning": (
+            "I assessed a 70-year-old patient in ED resus with acute shortness of breath and hypotension. "
+            "I led the initial ABCDE assessment, recognised shock, started treatment and escalated."
+        ),
+    })
+
+    description = fields["event_description"]
+    assert description == meta["event_description"]
+    assert "\n" not in description
+    assert not description.endswith(("...", "…"))
+    assert "recognis." not in description
+    assert description.endswith(".") or description.endswith("hypotension")
+    assert len(description) <= 110
+
+
+def test_common_header_sanitises_supplied_clipped_description():
+    fields, _ = apply_common_header_defaults("CBD", {
+        "date_of_encounter": "2026-05-27",
+        "event_description": (
+            "I assessed a 70-year-old patient in ED resus with acute shortness of breath and hypotension. "
+            "I led the initial ABCDE assessment, recognis..."
+        ),
+    })
+
+    assert fields["event_description"] == (
+        "I assessed a 70-year-old patient in ED resus with acute shortness of breath and hypotension."
+    )
+
+
+def test_common_header_sanitises_short_clipped_description_without_prior_sentence():
+    fields, _ = apply_common_header_defaults("CBD", {
+        "date_of_encounter": "2026-05-27",
+        "event_description": "I led the initial ABCDE assessment, recognis...",
+    })
+
+    assert fields["event_description"] == "I led the initial ABCDE assessment."
+
+
 @pytest.mark.asyncio
 async def test_file_to_kaizen_dops_blocks_save_when_case_observed_blank():
     fields_with_blank_narrative = {

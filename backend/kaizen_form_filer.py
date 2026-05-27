@@ -941,6 +941,40 @@ def _first_present_value(fields: dict, keys: tuple[str, ...]) -> str:
     return ""
 
 
+def _trim_to_word_boundary(text: str, max_chars: int) -> str:
+    """Return a complete-looking one-line summary without ellipsis."""
+    if len(text) <= max_chars:
+        return text
+    trimmed = text[:max_chars].rstrip()
+    boundary = max(trimmed.rfind(" "), trimmed.rfind(","), trimmed.rfind(";"), trimmed.rfind(":"))
+    if boundary >= max(40, int(max_chars * 0.55)):
+        trimmed = trimmed[:boundary]
+    trimmed = trimmed.rstrip(" ,;:-.")
+    return f"{trimmed}." if trimmed else ""
+
+
+def _one_line_event_summary(text: str, max_chars: int = 110) -> str:
+    """Format Kaizen's timeline Description as a short complete summary."""
+    summary = _strip_emojis(str(text or ""))
+    summary = re.sub(r"[*_`#>\[\]]", "", summary)
+    summary = re.sub(r"\s+", " ", summary).strip()
+    if not summary:
+        return ""
+
+    was_clipped = bool(re.search(r"(?:\.\.\.|…)+$", summary))
+    summary = re.sub(r"(?:\.\.\.|…)+$", "", summary).strip(" ,;:-")
+    if was_clipped and not re.search(r"[.!?]$", summary):
+        last_space = summary.rfind(" ")
+        if last_space > 20:
+            summary = summary[:last_space].rstrip(" ,;:-.")
+        if summary:
+            summary = f"{summary}."
+    first_sentence = re.split(r"(?<=[.!?])\s+", summary, maxsplit=1)[0].strip()
+    if first_sentence and len(first_sentence) <= max_chars:
+        return first_sentence
+    return _trim_to_word_boundary(first_sentence or summary, max_chars)
+
+
 def _short_event_description(form_type: str, fields: dict) -> str:
     """Build the Kaizen timeline description from available case facts."""
     candidates = (
@@ -975,12 +1009,7 @@ def _short_event_description(form_type: str, fields: dict) -> str:
             parts.append(text)
         if len(" - ".join(parts)) >= 90:
             break
-    summary = _strip_emojis(" - ".join(parts))
-    summary = re.sub(r"[*_`#>\[\]]", "", summary)
-    summary = re.sub(r"\s+", " ", summary).strip()
-    if len(summary) > 140:
-        summary = summary[:137].rstrip(" ,;:-") + "..."
-    return summary
+    return _one_line_event_summary(" - ".join(parts))
 
 
 def apply_common_header_defaults(form_type: str, fields: dict, field_map: dict | None = None) -> tuple[dict, dict]:
@@ -1017,7 +1046,9 @@ def apply_common_header_defaults(form_type: str, fields: dict, field_map: dict |
         if "end_date" not in defaulted:
             defaulted.append("end_date")
 
-    if not out.get("event_description"):
+    if out.get("event_description"):
+        out["event_description"] = _one_line_event_summary(out["event_description"])
+    else:
         description = _short_event_description(form_type, out)
         if description:
             out["event_description"] = description
