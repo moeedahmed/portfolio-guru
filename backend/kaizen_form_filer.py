@@ -2365,12 +2365,52 @@ def _download_drive_file(url: str) -> Optional[str]:
 
 
 async def _attach_file(page: Page, file_path: str) -> bool:
-    """Attach a file using the form's file input element."""
+    """Attach a file using Kaizen's Upload button/file chooser flow."""
     try:
         if not os.path.isfile(file_path):
             logger.warning(f"Attachment file not found: {file_path}")
             return False
 
+        upload_selectors = [
+            'button[aria-label="Upload files for Attach files"]',
+            'button.btn-info:has-text("Upload")',
+            'button:has-text("Upload")',
+        ]
+
+        for selector in upload_selectors:
+            upload_button = page.locator(selector).first
+            try:
+                if not await upload_button.is_visible(timeout=2000):
+                    continue
+
+                async with page.expect_file_chooser(timeout=5000) as chooser_info:
+                    await upload_button.click()
+                chooser = await chooser_info.value
+                await chooser.set_files(file_path)
+                await asyncio.sleep(2)
+
+                filename = os.path.basename(file_path)
+                verification_targets = [
+                    page.get_by_text(filename, exact=False),
+                    page.get_by_text(KAIZEN_FILE_UPLOAD["uploaded_status_text"], exact=False),
+                    page.get_by_text("Remove", exact=False),
+                    page.get_by_text("Replace", exact=False),
+                ]
+                for target in verification_targets:
+                    try:
+                        if await target.first.is_visible(timeout=5000):
+                            logger.info(f"Attached file via upload button: {file_path}")
+                            return True
+                    except Exception:
+                        continue
+
+                logger.info(f"Attached file via upload button without visible confirmation: {file_path}")
+                return True
+            except Exception as e:
+                logger.debug(f"Upload button selector failed ({selector}): {e}")
+                continue
+
+        # Legacy/static fallback for pages where the input is already present.
         file_input = page.locator('input[type="file"]')
         count = await file_input.count()
         if count > 0:

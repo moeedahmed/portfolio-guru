@@ -16,6 +16,7 @@ from kaizen_form_filer import (
     FORM_FIELD_MAP,
     FORM_UUIDS,
     STAGE_SELECT_VALUES,
+    _attach_file,
     _strip_emojis,
     _to_uk_date,
 )
@@ -101,6 +102,54 @@ def mock_playwright_ctx(mock_page):
 
 
 # ─── Section A: Entry point validation ─────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_attach_file_uses_kaizen_upload_button_file_chooser(tmp_path, monkeypatch):
+    attachment = tmp_path / "portfolio-guru-test.docx"
+    attachment.write_text("synthetic attachment", encoding="utf-8")
+
+    async def _noop_sleep(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr("kaizen_form_filer.asyncio.sleep", _noop_sleep)
+
+    upload_button = MagicMock()
+    upload_button.is_visible = AsyncMock(return_value=True)
+    upload_button.click = AsyncMock()
+
+    upload_locator = MagicMock()
+    upload_locator.first = upload_button
+
+    chooser = MagicMock()
+    chooser.set_files = AsyncMock()
+
+    class ChooserInfo:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        @property
+        def value(self):
+            async def _value():
+                return chooser
+
+            return _value()
+
+    confirmation = MagicMock()
+    confirmation.is_visible = AsyncMock(return_value=True)
+    confirmation.first = confirmation
+
+    page = MagicMock()
+    page.locator.return_value = upload_locator
+    page.expect_file_chooser.return_value = ChooserInfo()
+    page.get_by_text.return_value = confirmation
+
+    assert await _attach_file(page, str(attachment)) is True
+    upload_button.click.assert_awaited_once()
+    chooser.set_files.assert_awaited_once_with(str(attachment))
+
 
 @pytest.mark.asyncio
 async def test_unknown_form_type_returns_failed():
