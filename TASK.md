@@ -1,5 +1,13 @@
 # Active Task — Private Beta Launch Cut
 
+> **2026-05-26 addendum — UX polish batch (post-filed buttons).**
+> This branch (`chore/telegram-bot-qa-discipline`) carries an uncommitted
+> UX polish slice that responds to Moeed's latest beta-feedback evidence on
+> the post-filed keyboard. See `## UX Polish Slice — Post-Filed Buttons`
+> below. Offline pytest gate (`tests/` minus the e2e/live ignores) is
+> green: 539 passed, 22 skipped, 3 snapshots passed. No deploy, no
+> launchd restart, no push — orchestrator delivers.
+
 ## Objective
 
 Cut a private-beta-ready slice of Portfolio Guru for 3–5 trusted UK EM
@@ -88,6 +96,75 @@ regress as part of the launch cut:
 - Trainee filing is draft-only (`filer.py`, `browser_filer.py`,
   `filer_router.py`). No submit / sign / approve / send / reject /
   delete on any surface, for any user, in any flow.
+
+## UX Polish Slice — Post-Filed Buttons (2026-05-26)
+
+Uncommitted on `chore/telegram-bot-qa-discipline`. Responds to Moeed's
+latest beta-feedback evidence on the keyboard the user sees after a
+filing attempt.
+
+Acceptance criteria → resolution:
+
+1. _Return-to-primary after More options, or remove the split entirely._
+   `_build_post_filing_keyboard` is now flat — there is no More-options
+   drawer. Every useful follow-up sits on one keyboard. Stale
+   `ACTION|post_file_more|...` callbacks from older chat history fall
+   through to `handle_action_button`, which re-renders the same flat
+   keyboard (no Settings, no Main-menu, no "Something missing?").
+2. _Remove duplicated `📋 File another case`._ Asserted by
+   `test_post_filing_keyboard_has_no_duplicate_file_another_case`: the
+   button appears at most once across every (status, kwargs) combo.
+3. _Drop Settings and the generic Main-menu reset from post-filed
+   surfaces._ `⚙️ Settings` and `🏠 Main menu` no longer appear after
+   a filing attempt. Settings remains reachable from `/settings`, the
+   welcome keyboard, and `/start` — just not from the post-file follow-up,
+   which used to drop the user into a "Portfolio Guru is ready" reset.
+4. _Clarify or remove "Something missing?"._ Retained — the handler
+   genuinely records pushback telemetry (`filing_coverage.record_pushback`),
+   so it's not dead UI. Relabelled to `🚩 Flag a missed field` so the
+   button names the action, not a question. Visible on success and clean
+   partial only; suppressed on hard failure (no draft to flag against)
+   and on uncertain-save (user should verify first).
+5. _Reuse same case for a different WPBA._ Already wired in
+   `handle_action_button("same_case_another")` — it reads
+   `last_filed_case_text` (the original user-submitted case text,
+   set in `handle_approval_approve` before any draft mutation), excludes
+   the previously filed form type, and routes through `_process_case_text`
+   back to the assessment-type recommendation step. The new test
+   `test_same_case_another_reuses_original_case_text_not_draft` locks in
+   that the recommender receives the original case text — never the
+   bot-generated draft body or `last_draft_preview`.
+
+Files touched:
+
+- `backend/bot.py` — `_build_post_filing_keyboard` rewritten flat; the
+  `post_file_more` callback retained as a stale-button fallback that just
+  re-renders the flat keyboard.
+- `backend/tests/test_flow_walker.py` — new tests for the renamed
+  pushback label, the no-duplicate invariant, the failure-path button
+  absence, and the same-case-another reuse contract. Pre-existing
+  assertions for the More-options drawer / Settings / Main-menu / old
+  "Something missing?" label are now `not in` checks.
+- `WORKFLOWS.md` — post-filing-outcome table and button-vocabulary table
+  updated to match the flat keyboard, including the
+  `🚩 Flag a missed field`, `🔗 Open saved draft`, and `🔗 Open Kaizen`
+  entries. The "no More-options, no Settings, no Main-menu reset" rule
+  is now documented under the outcome table.
+- `TASK.md` — this slice.
+
+Verification run:
+
+```bash
+cd backend && source venv/bin/activate
+python -m pytest tests/ -q \
+  --ignore=tests/test_e2e.py \
+  --ignore=tests/test_e2e_live.py
+# 539 passed, 22 skipped, 13 deselected, 3 snapshots passed
+```
+
+No live Kaizen tests, no deploy, no launchd restart, no push. Out of
+scope for this slice: Kaizen/supervisor safety changes beyond honest
+button labelling (carried-forward guardrails above stay intact).
 
 ## Orchestrator Hand-Off
 

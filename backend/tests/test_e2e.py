@@ -7,6 +7,7 @@ from telethon.sessions import StringSession
 
 from tests.telegram_live_harness import (
     TelegramStep,
+    assert_live_telegram_guardrails,
     assert_transcript_is_sensible,
     has_telethon_env,
     run_telegram_workflow,
@@ -28,6 +29,7 @@ BOT_USERNAME = telethon_env()["bot_username"]
 
 @pytest_asyncio.fixture
 async def telethon_client():
+    assert_live_telegram_guardrails()
     env = telethon_env()
     if not env["session"] or not env["api_id"] or not env["api_hash"]:
         pytest.skip("Telethon session or API hash not configured")
@@ -60,6 +62,10 @@ async def test_e2e_case_text_gets_recommendation(telethon_client):
             "I ran a busy emergency department shift with several acute chest pain patients and want to reflect on my management."
         )
         reply = await conv.get_response()
+        for _ in range(4):
+            if reply.buttons:
+                break
+            reply = await conv.get_response(timeout=90)
 
     buttons = [button.text for row in (reply.buttons or []) for button in row]
     assert any("CBD" in text or "Case-Based" in text for text in buttons)
@@ -116,6 +122,9 @@ async def test_e2e_realistic_case_workflow_is_sensible(telethon_client):
                 ),
                 expect_text_any=("draft", "form", "case", "CBD", "DOPS", "Mini-CEX"),
                 expect_button_any=("CBD", "Use best fit", "See all forms"),
+                click_button_any=("Use best fit", "CBD", "Case-Based"),
+                expect_after_click_text_any=("draft", "case", "CBD", "reflection", "portfolio"),
+                expect_after_click_button_any=("Regenerate", "Save", "Edit", "Copy", "Back"),
                 timeout_seconds=120,
             ),
         ],

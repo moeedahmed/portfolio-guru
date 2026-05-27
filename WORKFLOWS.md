@@ -668,13 +668,21 @@ not lose the context they were looking at.
 The progress message edits one last time with the final outcome — the
 reviewed draft preview always stays visible above. Outcome shapes:
 
-| Status                 | Headline                                                      | Body                                                                                                  | Keyboard                                                                 |
-| ---------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `success`              | `✅ *{form_name} saved.*` + SLO/date summary                  | Field count, usage line, optional one-line `💡 {observation}`                                         | `📋 File another` / `🔁 Same case, another WPBA` / `✏️ Amend this draft` |
-| `partial` (with error) | `⚠️ *{form_name} — filing had issues.*`                       | `{n} fields filled.` + LLM-composed recovery clause + `[Open … in Kaizen]({url})` + proof report      | `🔄 Try again` / `🆕 Start fresh`                                        |
-| `partial` (no error)   | `⚠️ *{form_name} saved as a draft, but needs manual review.*` | Filled + skipped count + `Open Kaizen to fill the missing detail, then assign an assessor.`           | Post-file follow-up keyboard                                             |
-| `failed`               | `❌ *Filing didn't complete — Failed / blocked.*`             | LLM recovery clause + `[Open {form_name} manually in Kaizen]({url})` + proof report                   | `🔄 Try again` / `🆕 Start fresh`                                        |
-| Timeout                | `⏱ Filing took too long.`                                     | `The draft might be in your activities list already — [open Kaizen]({url}) to check before retrying.` | Stays on `AWAIT_APPROVAL` so the user can retry                          |
+| Status                 | Headline                                                                                  | Body                                                                                                                                                                             | Keyboard (flat — no More-options drawer)                                                                                                                                               |
+| ---------------------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `success`              | `✅ *Case filed*` + `{form_name} saved as a Kaizen draft.` subhead                        | SLO/date summary, field count, usage line, optional one-line `💡 {observation}`                                                                                                  | `🔁 Same case, another WPBA` (when applicable) / `📋 File another case` / `👍 It worked` · `👎 Didn't work` / `🚩 Flag a missed field` (+ `✏️ Amend this draft` appended to first row) |
+| `partial` (with error) | `⚠️ *Filing had issues — check Kaizen*` + `{form_name}` subhead                           | `{n} fields filled.` + LLM-composed recovery clause + `[Find this draft in Kaizen]({saved_url})` or `[Check your Kaizen drafts](https://kaizenep.com/activities)` + proof report | `🔗 Open saved draft` (or `🔗 Open Kaizen` fallback) / `🔄 Try again` / `📋 File another case` / `❌ Cancel`                                                                           |
+| `partial` (no error)   | `📥 *Draft saved in Kaizen*` + `{form_name}` subhead, then `⚠️ *Needs your review*` block | Filled + skipped count + `Open the saved draft to fill the missing detail` (or `Open Kaizen and find your saved draft`)                                                          | `🔗 Open saved draft` (or `🔗 Open Kaizen` fallback) / `📋 File another case` / `🚩 Flag a missed field`                                                                               |
+| `failed`               | `❌ *Filing didn't complete*` + `{form_name}` subhead                                     | LLM recovery clause + `[Open blank {form_name} in Kaizen to fill manually]({url})` + proof report                                                                                | `🔄 Try again` / `📋 File another case` / `❌ Cancel`                                                                                                                                  |
+| Timeout                | `⏱ Filing took too long.`                                                                 | `The draft might be in your activities list already — [open Kaizen]({url}) to check before retrying.`                                                                            | Stays on `AWAIT_APPROVAL` so the user can retry                                                                                                                                        |
+
+Settings and a Main-menu reset are deliberately absent from every post-filed
+keyboard. Nothing about a just-saved draft makes a settings change immediately
+relevant, and the welcome-style "Portfolio Guru is ready" message reads like a
+context wipe right after a successful save. Stale `ACTION|post_file_more|...`
+callbacks from older chat history fall through to `handle_action_button`,
+which re-renders the same flat keyboard — never the Settings / Main-menu /
+"Something missing?" drawer that briefly existed during dogfood.
 
 The proof report at the bottom of partial/failed states is generated by
 `_format_proof_report` and lists status, source, fields completed, skipped
@@ -708,19 +716,22 @@ all enforce this.
 Used across keyboards in `bot.py`. Keep these exact — the emoji and label
 together carry meaning and downstream copy refers to them by name.
 
-| Button label                      | Callback                         | Where                                    |
-| --------------------------------- | -------------------------------- | ---------------------------------------- |
-| `🔗 Connect Kaizen`               | `ACTION\|setup`                  | Welcome, missing-credentials surfaces    |
-| `❌ Cancel`                       | `ACTION\|cancel` (and others)    | Universal cancel                         |
-| `📤 Save as draft`                | `APPROVE\|draft`                 | Approval keyboard                        |
-| `✨ Quick improve`                | `IMPROVE\|reflection`            | Approval keyboard (single-use per draft) |
-| `✏️ Edit` / `✏️ Amend this draft` | `APPROVE\|edit` / `AMEND\|amend` | Approval / post-file keyboards           |
-| `📋 File another case`            | `ACTION\|file`                   | Post-file keyboard                       |
-| `🔁 Same case, another WPBA`      | `ACTION\|same_case_another`      | Post-success keyboard                    |
-| `📝 Review draft` (Unlimited)     | `REVIEW\|draft`                  | Approval keyboard (gated tier)           |
-| `🔄 Try again`                    | `ACTION\|retry_filing`           | Filing error / partial keyboards         |
-| `🆕 Start fresh`                  | `ACTION\|reset`                  | Filing error keyboards                   |
-| `🔙 Back`                         | `ACTION\|back_to_menu`           | Sub-views (settings, health, help, info) |
+| Button label                      | Callback                              | Where                                                                                                                                                                                                           |
+| --------------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `🔗 Connect Kaizen`               | `ACTION\|setup`                       | Welcome, missing-credentials surfaces                                                                                                                                                                           |
+| `❌ Cancel`                       | `ACTION\|cancel` (and others)         | Universal cancel                                                                                                                                                                                                |
+| `📤 Save as draft`                | `APPROVE\|draft`                      | Approval keyboard                                                                                                                                                                                               |
+| `✨ Quick improve`                | `IMPROVE\|reflection`                 | Approval keyboard (single-use per draft)                                                                                                                                                                        |
+| `✏️ Edit` / `✏️ Amend this draft` | `APPROVE\|edit` / `AMEND\|amend`      | Approval / post-file keyboards                                                                                                                                                                                  |
+| `📋 File another case`            | `ACTION\|file`                        | Post-file keyboard                                                                                                                                                                                              |
+| `🔁 Same case, another WPBA`      | `ACTION\|same_case_another`           | Post-success keyboard. Reuses the original case text from `last_filed_case_text` (NOT the saved draft body or any bot-generated text) and excludes the previously filed form type from the new recommendations. |
+| `🔗 Open saved draft`             | `url=saved_url`                       | Post-file partial/uncertain — only when the deterministic filer captured the post-save Kaizen URL (`/events/fillin/<doc-id>?autosave=...`).                                                                     |
+| `🔗 Open Kaizen`                  | `url=https://kaizenep.com/activities` | Post-file partial/uncertain fallback when no captured URL — links to the Kaizen activities list, NEVER `/events/new-section/...` (that opens a blank form and reads like a fresh entry).                        |
+| `🚩 Flag a missed field`          | `FILING\|feedback\|{form_type}`       | Post-file success and partial-no-error. Records pushback telemetry via `filing_coverage.record_pushback`. Renamed from the earlier vague "💬 Something missing?" label so the action is explicit.               |
+| `📝 Review draft` (Unlimited)     | `REVIEW\|draft`                       | Approval keyboard (gated tier)                                                                                                                                                                                  |
+| `🔄 Try again`                    | `ACTION\|retry_filing`                | Filing error / partial keyboards                                                                                                                                                                                |
+| `🆕 Start fresh`                  | `ACTION\|reset`                       | Filing error keyboards                                                                                                                                                                                          |
+| `🔙 Back`                         | `ACTION\|back_to_menu`                | Sub-views (settings, health, help, info)                                                                                                                                                                        |
 
 ### Safety-critical templates
 

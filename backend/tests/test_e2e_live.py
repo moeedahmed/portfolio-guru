@@ -11,8 +11,14 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+import pytest_asyncio
 
-from tests.telegram_live_harness import button_texts, has_telethon_env, telethon_env
+from tests.telegram_live_harness import (
+    assert_live_telegram_guardrails,
+    button_texts,
+    has_telethon_env,
+    telethon_env,
+)
 
 pytestmark = [
     pytest.mark.live,
@@ -25,19 +31,13 @@ pytestmark = [
 RESPONSE_WAIT = 10  # seconds to wait for bot response
 
 
-@pytest.fixture(scope="module")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
-
-
-@pytest.fixture(scope="module")
+@pytest_asyncio.fixture
 async def client():
     """Create and start a Telethon client from session string."""
     from telethon import TelegramClient
     from telethon.sessions import StringSession
 
+    assert_live_telegram_guardrails()
     env = telethon_env()
     session_str = env["session"]
     api_id = int(env["api_id"])
@@ -49,23 +49,33 @@ async def client():
     await tc.disconnect()
 
 
-async def _send_and_wait(client, text: str, wait: int = RESPONSE_WAIT):
+async def _send_and_wait(
+    client,
+    text: str,
+    *,
+    wait: int = RESPONSE_WAIT,
+    expect_text_any: tuple[str, ...] = (),
+    expect_buttons: bool = False,
+):
     """Send a message to the bot and wait for a response."""
-
-    await client.send_message(telethon_env()["bot_username"], text)
-    await asyncio.sleep(wait)
-    messages = await client.get_messages(telethon_env()["bot_username"], limit=3)
-    # Return the most recent bot message (not our own)
-    for msg in messages:
-        if msg.sender_id != (await client.get_me()).id:
-            return msg
-    return messages[0] if messages else None
+    async with client.conversation(telethon_env()["bot_username"], timeout=wait * 3) as conv:
+        await conv.send_message(text)
+        reply = await conv.get_response(timeout=wait * 3)
+        for _ in range(4):
+            text_ok = not expect_text_any or any(
+                token.lower() in (reply.raw_text or "").lower() for token in expect_text_any
+            )
+            buttons_ok = not expect_buttons or bool(button_texts(reply) or reply.reply_markup)
+            if text_ok and buttons_ok:
+                return reply
+            reply = await conv.get_response(timeout=wait * 3)
+        return reply
 
 
 @pytest.mark.asyncio
 async def test_live_start(client):
     """Send /start → verify response contains 'Portfolio Guru'."""
-    msg = await _send_and_wait(client, "/start")
+    msg = await _send_and_wait(client, "/start", expect_text_any=("Portfolio Guru",))
     assert msg is not None
     assert "Portfolio Guru" in msg.text
 
@@ -74,7 +84,11 @@ async def test_live_start(client):
 async def test_live_case_text(client):
     """Send a clinical case → verify buttons appear in response."""
     await asyncio.sleep(RESPONSE_WAIT)
-    msg = await _send_and_wait(client, "35F with ankle injury, examined and X-rayed, no fracture, discharged with advice")
+    msg = await _send_and_wait(
+        client,
+        "35F with ankle injury, examined and X-rayed, no fracture, discharged with advice",
+        expect_buttons=True,
+    )
     assert msg is not None
     assert button_texts(msg) or msg.reply_markup is not None
 
@@ -92,7 +106,7 @@ async def test_live_gibberish(client):
 async def test_live_help(client):
     """Send /help → verify help text."""
     await asyncio.sleep(RESPONSE_WAIT)
-    msg = await _send_and_wait(client, "/help")
+    msg = await _send_and_wait(client, "/help", expect_text_any=("help", "portfolio", "file"))
     assert msg is not None
     assert "help" in msg.text.lower() or "portfolio" in msg.text.lower() or "file" in msg.text.lower()
 
@@ -101,6 +115,6 @@ async def test_live_help(client):
 async def test_live_cancel(client):
     """Send /cancel → verify clean reset."""
     await asyncio.sleep(RESPONSE_WAIT)
-    msg = await _send_and_wait(client, "/cancel")
+    msg = await _send_and_wait(client, "/cancel", expect_text_any=("cancel", "❌"))
     assert msg is not None
     assert "cancel" in msg.text.lower() or "❌" in msg.text
