@@ -5483,8 +5483,18 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return await _ask_for_more_detail_before_draft(ack, context)
         return await _show_draft_review(ack, context, draft, chosen_form)
 
+    active_msg_id = context.user_data.get("last_bot_msg_id")
+    active_chat_id = context.user_data.get("last_bot_chat_id")
+    active_status_id = context.user_data.get("status_msg_id")
+    active_status_chat = context.user_data.get("status_msg_chat")
     _clear_case_review_state(context, keep_case=False)
-    if not context.user_data.get("last_bot_msg_id"):
+    if active_msg_id and active_chat_id:
+        context.user_data["last_bot_msg_id"] = active_msg_id
+        context.user_data["last_bot_chat_id"] = active_chat_id
+        context.user_data["status_msg_id"] = active_status_id or active_msg_id
+        context.user_data["status_msg_chat"] = active_status_chat or active_chat_id
+        await _send_latest_message(update.message, context, CAPTURED_ACK, parse_mode="Markdown")
+    elif not context.user_data.get("last_bot_msg_id"):
         ack = await update.message.reply_text(CAPTURED_ACK, parse_mode="Markdown")
         _track_latest_message(context, ack)
     return await _process_case_text(update.message, context, user_id, case_text, input_source)

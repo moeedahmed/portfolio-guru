@@ -3015,6 +3015,38 @@ class TestMessageStandardCopy:
         assert 'send a text message' not in (sim.get_last_text() or '').lower()
 
     @pytest.mark.asyncio
+    async def test_voice_capture_reuses_voice_status_message(self, recommended_forms):
+        from bot import AWAIT_FORM_CHOICE, CAPTURED_ACK, handle_case_input
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        update = sim._make_text_update('')
+        voice = MagicMock()
+        file_obj = MagicMock()
+        file_obj.download_to_drive = AsyncMock()
+        voice.get_file = AsyncMock(return_value=file_obj)
+        update.message.text = None
+        update.message.voice = voice
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.transcribe_voice', new=AsyncMock(return_value=SAMPLE_CASES['valid'])), \
+             patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_curriculum', return_value='2025'), \
+             patch('bot.recommend_form_types', new=AsyncMock(return_value=recommended_forms)):
+            result = await handle_case_input(update, context)
+
+        assert result == AWAIT_FORM_CHOICE
+        captured_replies = [
+            text for kind, text, _ in sim.messages_sent
+            if kind == 'reply' and text == CAPTURED_ACK
+        ]
+        assert captured_replies == []
+        bot_edits = [text for kind, text, _ in sim.messages_sent if kind == 'bot_edit' and text]
+        assert CAPTURED_ACK in bot_edits
+        assert 'fit your case' in (sim.get_last_text() or '').lower()
+
+    @pytest.mark.asyncio
     async def test_forwarded_voice_document_enters_new_case_flow(self, recommended_forms):
         from bot import AWAIT_FORM_CHOICE, handle_case_input
 
