@@ -1,5 +1,6 @@
 import pytest
 import sys, os
+from unittest.mock import AsyncMock, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 class TestFormTypeExtraction:
@@ -76,6 +77,31 @@ class TestFormTypeExtraction:
         from extractor import extract_explicit_form_type
         result = extract_explicit_form_type("make me a STAT for my teaching session")
         assert result == "STAT", f"Expected STAT, got: {result}"
+
+    @pytest.mark.asyncio
+    async def test_recent_activity_uses_public_assessment_names(self):
+        from extractor import summarise_recent_activity
+
+        captured = {}
+
+        async def fake_generate(prompt, retries=1, tier=""):
+            captured["prompt"] = prompt
+            return "You've filed a CBD, but consider adding a DOPS or PROC_LOG next."
+
+        history = [
+            {"form_type": "CBD", "filed_at": "2026-05-01", "status": "filed"},
+            {"form_type": "DOPS", "filed_at": "2026-05-03", "status": "filed"},
+            {"form_type": "PROC_LOG", "filed_at": "2026-05-04", "status": "filed"},
+        ]
+
+        with patch("extractor._generate", new=AsyncMock(side_effect=fake_generate)):
+            text = await summarise_recent_activity(history, "CBD")
+
+        assert "PROC_LOG" not in captured["prompt"]
+        assert "PROC_LOG" not in text
+        assert "Procedural Log" in text
+        assert "Direct Observation of Procedural Skills" in text
+        assert "Case-Based Discussion" in text
 
 class TestFormSchemas:
     """Verify form schemas are complete and well-formed."""

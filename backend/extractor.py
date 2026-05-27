@@ -2514,7 +2514,13 @@ async def summarise_recent_activity(case_history: list, just_filed_form_type: st
     from collections import Counter
     from datetime import datetime, timedelta, timezone
 
-    counts = dict(Counter(c.get("form_type", "unknown") for c in case_history))
+    def public_form_name(form_type: str) -> str:
+        key = str(form_type or "").strip()
+        base_key = key[:-5] if key.endswith("_2021") else key
+        schema = FORM_SCHEMAS.get(base_key) or FORM_SCHEMAS.get(key) or {}
+        return schema.get("name") or key.replace("_", " ").title()
+
+    counts = dict(Counter(public_form_name(c.get("form_type", "unknown")) for c in case_history))
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=42)
     recent_types: set[str] = set()
@@ -2535,22 +2541,27 @@ async def summarise_recent_activity(case_history: list, just_filed_form_type: st
         if parsed and parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         if parsed and parsed > cutoff:
-            recent_types.add(c.get("form_type", "unknown"))
+            recent_types.add(public_form_name(c.get("form_type", "unknown")))
 
-    prompt = f"""A doctor just filed a {just_filed_form_type} for their UK Emergency Medicine ARCP portfolio.
+    just_filed_name = public_form_name(just_filed_form_type)
+
+    prompt = f"""A doctor just filed a {just_filed_name} for their UK Emergency Medicine ARCP portfolio.
 
 Their last 3 months of activity:
 - Total cases: {len(case_history)}
-- Counts by form type: {counts}
-- Form types seen in the last 6 weeks: {sorted(recent_types) or 'none other than what was just filed'}
+- Counts by assessment type: {counts}
+- Assessment types seen in the last 6 weeks: {sorted(recent_types) or 'none other than what was just filed'}
 
-Write ONE friendly, concrete sentence under 25 words. Either acknowledge their progress on the form type they just filed, or point out a specific gap they should consider next. No sycophancy, no exclamation marks, no repeating the raw count number. Just the sentence, no quotes."""
+Write ONE friendly, concrete sentence under 25 words. Use full assessment names, not internal form codes. Either acknowledge their progress on the assessment type they just filed, or point out a specific gap they should consider next. No sycophancy, no exclamation marks, no repeating the raw count number. Just the sentence, no quotes."""
 
     try:
         text = (await _generate(prompt)).strip().strip('"').strip("'").strip()
     except Exception as e:
         logger.warning("summarise_recent_activity failed: %s", e)
         return ""
+
+    for code in sorted(FORM_SCHEMAS, key=len, reverse=True):
+        text = re.sub(rf"\b{re.escape(code)}\b", public_form_name(code), text)
 
     if not text or len(text) > 220:
         return ""

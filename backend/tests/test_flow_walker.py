@@ -221,6 +221,7 @@ class TestFlowWalker:
         why_pos = text.index('ℹ️ The case is a reflective discussion of one patient.')
         # Draft fields come first, then curriculum, then divider, then rationale
         assert first_field_pos < curriculum_pos < divider_pos < why_pos
+        assert f"\n\n{_DRAFT_DIVIDER}\n\nℹ️" in text
         assert '*Why this form:*' not in text
 
     @pytest.mark.asyncio

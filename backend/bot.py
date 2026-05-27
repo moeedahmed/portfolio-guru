@@ -1982,7 +1982,7 @@ def _draft_rationale_footer(reason: str | None) -> str:
     in Kaizen before they see bot guidance/rationale."""
     if not reason:
         return ""
-    return f"\n{_DRAFT_DIVIDER}\nℹ️ {reason}\n"
+    return f"\n\n{_DRAFT_DIVIDER}\n\nℹ️ {reason}\n"
 
 
 def _format_draft_preview(draft, reason: str | None = None) -> str:

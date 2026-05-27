@@ -1,5 +1,15 @@
 # Active Task — Private Beta Launch Cut
 
+> **2026-05-27 addendum — public WPBA names and draft-divider spacing.**
+> Moeed's beta screenshots showed two presentation issues: the post-filing
+> portfolio nudge leaked internal form codes (`CBD`, `DOPS`, `PROC_LOG`)
+> instead of public WPBA names, and the draft-preview divider was too tight
+> against surrounding text. The current slice feeds public assessment names
+> into the recent-activity LLM prompt, post-sanitises any leaked internal codes
+> back to display names, and adds blank space above and below the draft-only
+> divider. Verification: focused extraction + flow-walker gate green at
+> 2 passed, 1 warning.
+
 > **2026-05-27 addendum — saved-draft confirmation divider removed.**
 > Moeed's live screenshot showed the post-save confirmation still carried the
 > heavy draft-preview divider before usage/portfolio guidance. That divider now
