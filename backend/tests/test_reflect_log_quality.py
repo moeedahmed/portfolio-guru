@@ -174,6 +174,38 @@ def test_non_sepsis_non_surgical_still_fixes_repetitive_focus():
     assert "next-shift habit" in polished["focussing_on"]
 
 
+def test_stemi_reflective_log_defaults_event_type_to_ed_patient():
+    fields = {
+        "event_type": "",
+        "reflection": (
+            "I managed a 58-year-old male presenting with central pressure chest pain. "
+            "His ECG showed ST elevation in V2-V5, we activated the cath lab, and I "
+            "explained the STEMI pathway and transfer plan under time pressure."
+        ),
+        "replay_differently": "I would explain the STEMI pathway more concisely.",
+        "focussing_on": "I am practising concise emergency coronary intervention explanations.",
+    }
+
+    polished = _polish_reflect_log_fields(fields, fields["reflection"])
+
+    assert polished["event_type"] == "ED patient"
+    assert polished["event_type"] in FORM_SCHEMAS["REFLECT_LOG"]["fields"][3]["options"]
+
+
+def test_reflect_log_event_type_schema_matches_kaizen_dropdown_options():
+    options = FORM_SCHEMAS["REFLECT_LOG"]["fields"][3]["options"]
+
+    assert options == [
+        "ED patient",
+        "CDU patient",
+        "Clinic patient",
+        "Anaesthetic list",
+        "ITU",
+        "Ward patient",
+        "Pre-hospital",
+    ]
+
+
 def test_moeed_ruq_sepsis_beta_regression():
     """End-to-end regression for the May 2026 beta broken draft.
 

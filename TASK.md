@@ -59,6 +59,16 @@
 > 571 passed, 22 skipped, 13 deselected, 3 snapshots passed. No live restart
 > recorded in this file yet.
 
+> **2026-05-27 addendum — RPL event-circumstances dropdown.**
+> Moeed's STEMI dogfood filing showed Kaizen's `Type of event/circumstances`
+> dropdown was left blank. The current slice expands the Reflective Practice
+> Log schema to the real Kaizen dropdown labels, treats source-supported acute
+> EM pathways such as STEMI/cath-lab activation as `ED patient`, and adds a
+> filing-layer regression that confirms the RPL event-type UUID is selected by
+> label. Verification: focused RPL/dropdown tests green at 21 passed; full
+> offline gate green at 579 passed, 22 skipped, 13 deselected, 3 snapshots
+> passed. No live Kaizen test, launchd restart, deploy, or push.
+
 ## Objective
 
 Cut a private-beta-ready slice of Portfolio Guru for 3–5 trusted UK EM

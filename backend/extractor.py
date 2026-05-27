@@ -1492,6 +1492,13 @@ _REFLECT_LOG_ED_TERMS = (
     "emergency department", "ed patient", "a&e", "a & e", "accident and emergency",
 )
 
+_REFLECT_LOG_ACUTE_ED_TERMS = (
+    "stemi", "st elevation", "st-elevation", "acs", "nstemi",
+    "catheterisation lab", "catheterization lab", "cath lab", "pci",
+    "resus", "resuscitation", "999", "ambulance", "blue light",
+    "sepsis 6", "sepsis6", "surgical registrar", "ed senior",
+)
+
 
 def _polish_reflect_log_fields(fields: dict, case_description: str) -> dict:
     """Keep Reflective Practice Log action fields distinct without inventing case facts.
@@ -1508,7 +1515,7 @@ def _polish_reflect_log_fields(fields: dict, case_description: str) -> dict:
     is_dual = is_sepsis and is_surgical_ref
     is_stemi = any(term in combined for term in ("stemi", "st elevation", "st-elevation", "acs", "nstemi", "pci", "angiogram"))
     has_communication_context = any(term in combined for term in ("communicat", "patient understand", "anxiety", "explain", "famil", "relative"))
-    has_ed_context = any(term in (" " + combined + " ") for term in _REFLECT_LOG_ED_TERMS)
+    has_ed_context = _has_reflect_log_ed_context(combined)
 
     # Replace absolute "No, the clinical outcome would remain the same" with softer
     # communication-quality framing when the case is STEMI/ACS or has clear
@@ -1645,6 +1652,21 @@ def _polish_reflect_log_event_type(polished: dict, has_ed_context: bool) -> dict
         return polished
     polished["event_type"] = "ED patient"
     return polished
+
+
+def _has_reflect_log_ed_context(text: str) -> bool:
+    """Return true when the source supports Kaizen's ED event circumstance.
+
+    Direct ED wording is preferred. A short whitelist of time-critical EM
+    pathways is also accepted because beta dogfood showed photo-derived STEMI
+    reflections can omit the literal word "ED" while still describing an ED
+    presentation and transfer pathway.
+    """
+    lower = (" " + str(text or "").lower() + " ")
+    return (
+        any(term in lower for term in _REFLECT_LOG_ED_TERMS)
+        or any(term in lower for term in _REFLECT_LOG_ACUTE_ED_TERMS)
+    )
 
 
 def _normalise_list_field(value) -> list:
