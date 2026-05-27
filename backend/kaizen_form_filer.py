@@ -1612,7 +1612,7 @@ async def _verify_fields(page: Page, fields: dict, field_map: dict, filled_keys:
     issues = []
 
     # Check date fields
-    for key in ("date", "date_occurred_on", "date_of_encounter", "date_of_education", "date_of_activity",
+    for key in ("date", "date_occurred_on", "date_of_encounter", "end_date", "date_of_education", "date_of_activity",
                 "date_of_teaching", "date_of_case", "date_of_complaint", "date_of_incident"):
         if key in fields and key in field_map:
             dom_id = field_map[key]
@@ -2043,15 +2043,7 @@ async def _fill_field_legacy(page: Page, dom_id: str, value: Any, field_key: str
 
         # Date fields
         if dom_id == "startDate" or dom_id == "endDate" or "date" in field_key.lower():
-            uk_date = _to_uk_date(str(value))
-            if uk_date:
-                await el.click()
-                await el.fill("")
-                await el.type(uk_date, delay=50)
-                await el.press("Tab")
-                await asyncio.sleep(0.3)
-                return True
-            return False
+            return await _fill_date(page, dom_id, str(value))
 
         # Select dropdowns
         if tag == "SELECT":

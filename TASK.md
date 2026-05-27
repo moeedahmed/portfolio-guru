@@ -69,6 +69,17 @@
 > offline gate green at 579 passed, 22 skipped, 13 deselected, 3 snapshots
 > passed. No live Kaizen test, launchd restart, deploy, or push.
 
+> **2026-05-27 addendum — Kaizen header date fill regression.**
+> Moeed's saved STEMI RPL screenshot showed Kaizen's required `Date occurred
+> on` and `End date` header fields were still blank. The current slice routes
+> the legacy filing path's date fields through the verified Angular-aware date
+> filler used by the deterministic path, so header dates are clicked, selected,
+> typed as `d/m/yyyy`, tabbed to trigger Kaizen watchers, and read back before
+> being counted as filled. It also verifies `end_date` in the post-fill check.
+> Verification: focused RPL/date tests green at 22 passed; full offline gate
+> green at 580 passed, 22 skipped, 13 deselected, 3 snapshots passed. No live
+> Kaizen test, launchd restart, deploy, or push.
+
 ## Objective
 
 Cut a private-beta-ready slice of Portfolio Guru for 3–5 trusted UK EM
