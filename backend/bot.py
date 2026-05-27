@@ -7096,9 +7096,17 @@ def build_application() -> Application:
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:retry_recommend|retry_template)$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
+                MessageHandler(filters.VOICE, handle_case_input),
+                MessageHandler(filters.AUDIO, handle_case_input),
+                MessageHandler(filters.PHOTO, handle_case_input),
+                MessageHandler(filters.Document.ALL, handle_case_input),
             ],
             AWAIT_FORM_SEARCH: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_form_search_text),
+                MessageHandler(filters.VOICE, handle_case_input),
+                MessageHandler(filters.AUDIO, handle_case_input),
+                MessageHandler(filters.PHOTO, handle_case_input),
+                MessageHandler(filters.Document.ALL, handle_case_input),
                 CallbackQueryHandler(handle_form_choice, pattern=r"^FORM\|"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
             ],
@@ -7176,12 +7184,11 @@ def build_application() -> Application:
             AWAIT_TRAINING_LEVEL: [CallbackQueryHandler(setup_training_level, pattern=r"^LEVEL\|")],
             AWAIT_CURRICULUM: [CallbackQueryHandler(setup_curriculum, pattern=r"^SETUP_CURRICULUM\|")],
         },
-        fallbacks=[CommandHandler("cancel", setup_cancel)],
+        fallbacks=[CommandHandler("start", start), CommandHandler("cancel", setup_cancel)],
         allow_reentry=True,
     )
 
     # Register handlers
-    application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(CommandHandler("delete", delete_data))
     application.add_handler(CommandHandler("help", help_command))
@@ -7255,13 +7262,14 @@ def build_application() -> Application:
                 MessageHandler(filters.VOICE, voice_collect_example),
             ],
         },
-        fallbacks=[CommandHandler("cancel", setup_cancel)],
+        fallbacks=[CommandHandler("start", start), CommandHandler("cancel", setup_cancel)],
         allow_reentry=True,
     )
 
     application.add_handler(setup_conv)
     application.add_handler(voice_conv)
     application.add_handler(case_conv)
+    application.add_handler(CommandHandler("start", start), group=1)
 
     # NOTE: CallbackQueryHandler already registered in case_conv fallbacks.
     # Do NOT add a second one here — causes duplicate message delivery.
