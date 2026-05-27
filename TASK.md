@@ -1,5 +1,15 @@
 # Active Task — Private Beta Launch Cut
 
+> **2026-05-27 addendum — draft footer rationale polish live.**
+> Moeed's management-ticket dogfood showed the draft footer still exposing a
+> heavy divider plus verbose LAT model rationale (`EPIC/flow coordinator`,
+> `EMLeaders framework assessed by a LAT`). This slice removes the divider from
+> draft rationale footers, sanitises form-choice rationale into a short
+> user-facing sentence, keeps the concise reply/save/cancel instruction, updates
+> render/snapshot tests, and restarts the launchd bot so the new copy is live.
+> Verification: focused draft footer tests green at 2 passed; snapshot/render
+> gate green at 9 passed, 133 deselected, 3 snapshots passed.
+
 > **2026-05-27 addendum — attachment live proof passed.**
 > The narrow beta attachment gate is complete. First controlled DOCX dogfood
 > run proved draft save but exposed the real blocker: Kaizen creates its file

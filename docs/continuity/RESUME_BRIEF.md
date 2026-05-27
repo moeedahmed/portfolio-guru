@@ -1,13 +1,13 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-05-27T13:38:55+00:00
-Status: stale_or_needs_review
+Generated: 2026-05-27T20:45:59+00:00
+Status: ready
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
 - Branch: chore/telegram-bot-qa-discipline
-- Last commit: e419d77 2026-05-27 fix: verify Kaizen header date filling
-- Uncommitted changes: yes
+- Last commit: 60ffe09 2026-05-27 docs: record attachment beta proof
+- Uncommitted changes: no
 
 ## Immediate read before restarting
 1. Product hub Status + Brief in Notion
@@ -15,30 +15,19 @@ Status: stale_or_needs_review
 3. `TASK.md` for active sprint state, if present
 4. This resume brief for drift warnings and repo state
 
-## Warnings
-- Repo has uncommitted changes — capture/commit or summarise before switching context
-
 ## Practical AGENTS.md check
 - Useful for coding-agent/ACP work: yes
 - No missing practical sections
 
 ## Recent commits
-- e419d77 2026-05-27 fix: verify Kaizen header date filling
-- 4ed3b4c 2026-05-27 fix: fill RPL event circumstances dropdown
-- 7d930d5 2026-05-27 fix: polish RPL draft UX
-- ee946a0 2026-05-27 fix: harden reflective practice log drafting
-- 7a0e487 2026-05-27 fix: streamline post-save wpba reuse
-- 9f9b1ed 2026-05-27 fix: polish draft preview layout
-- ffe6bce 2026-05-27 fix: reuse voice capture status message
-- 7b715ac 2026-05-27 fix: route forwarded media after start reset
-
-## Uncommitted change summary
-- M TASK.md
--  M backend/bot.py
--  M backend/kaizen_form_filer.py
--  M backend/tests/test_flow_walker.py
--  M backend/tests/test_reflect_log_filing_dropdown.py
--  M docs/continuity/RESUME_BRIEF.md
+- 60ffe09 2026-05-27 docs: record attachment beta proof
+- c4a1e90 2026-05-27 fix: use Kaizen upload chooser for attachments
+- efc3110 2026-05-27 docs(memory): update restart context memory log for attachment handoff
+- 21b50d5 2026-05-27 feat(bot): implement beta-ready attachment handoff for Telegram documents
+- 25babad 2026-05-27 fix: keep kaizen descriptions concise
+- 9a93c26 2026-05-27 fix: sanitise user-visible form names
+- f7d0907 2026-05-27 fix: use public WPBA names in portfolio nudges
+- a663408 2026-05-27 fix: remove post-save confirmation divider
 
 ## Repo context snapshot
 ### AGENTS.md — present, 4 days old
@@ -99,6 +88,6 @@ Key headings:
 - ## Data Flow
 
 ## Recommended restart path
-Refresh the product hub/Brief and repo context before a new build sprint.
+Continuity context looks sufficient; proceed with normal product-docs workflow.
 
 If this product has been idle for weeks, do not start implementation from memory. Refresh the product hub Status/Brief first, then create or update `TASK.md` for the next sprint.

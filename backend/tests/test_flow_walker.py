@@ -185,8 +185,8 @@ class TestFlowWalker:
 
     @pytest.mark.asyncio
     async def test_draft_preview_keeps_why_this_form_compact(self, thin_draft):
-        """The form rationale must appear after the draft body (below a divider),
-        not above the draft fields, so users see portfolio content first."""
+        """The form rationale must appear after the draft body as a user-facing
+        sentence, with no heavy divider sandwiching the draft."""
         from bot import _DRAFT_DIVIDER, handle_form_choice
         from extractor import FORM_UUIDS
         from models import FormTypeRecommendation
@@ -214,15 +214,76 @@ class TestFlowWalker:
 
         text = sim.get_last_text()
 
-        assert 'ℹ️ The case is a reflective discussion of one patient.' in text
+        expected_reason = (
+            "ℹ️ I've treated this as a Case-Based Discussion because "
+            "the case is a reflective discussion of one patient."
+        )
+        assert expected_reason in text
+        assert _DRAFT_DIVIDER not in text
         first_field_pos = text.index('📅')
         curriculum_pos = text.index('📚 *Curriculum:*')
-        divider_pos = text.index(_DRAFT_DIVIDER)
-        why_pos = text.index('ℹ️ The case is a reflective discussion of one patient.')
-        # Draft fields come first, then curriculum, then divider, then rationale
-        assert first_field_pos < curriculum_pos < divider_pos < why_pos
-        assert f"\n\n{_DRAFT_DIVIDER}\n\nℹ️" in text
+        why_pos = text.index(expected_reason)
+        # Draft fields come first, then curriculum, then rationale (no divider).
+        assert first_field_pos < curriculum_pos < why_pos
         assert '*Why this form:*' not in text
+
+    @pytest.mark.asyncio
+    async def test_draft_preview_sanitises_lat_management_rationale(self, thin_draft):
+        """LAT/management rationales must not leak model-justification phrasing
+        ('the trainee', '(EPIC equivalent)', '...framework assessed by a LAT')
+        into the user-facing footer."""
+        from bot import _DRAFT_DIVIDER, handle_form_choice
+        from extractor import FORM_UUIDS
+        from models import FormDraft, FormTypeRecommendation
+
+        lat_draft = FormDraft(
+            form_type='LAT',
+            uuid=FORM_UUIDS.get('LAT', 'uuid-lat'),
+            fields={
+                'date_of_encounter': '2026-03-17',
+                'clinical_setting': 'ED',
+                'reflection': 'Led a busy shift; juniors needed prioritisation help.',
+                'curriculum_links': ['SLO11'],
+                'key_capabilities': ['SLO11 KC1: Lead a team safely'],
+            },
+        )
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        context.user_data['form_recommendations'] = [
+            FormTypeRecommendation(
+                form_type='LAT',
+                rationale=(
+                    "The trainee actively performed a shift leadership and "
+                    "coordination role (EPIC/flow coordinator equivalent), "
+                    "directing juniors and escalating to site management, "
+                    "which fits the EMLeaders framework assessed by a LAT."
+                ),
+                uuid=FORM_UUIDS.get('LAT', 'uuid-lat'),
+            ),
+        ]
+        update = sim._make_callback_update('FORM|LAT')
+
+        with patch(
+            'bot._analyse_selected_form',
+            new_callable=AsyncMock,
+            return_value=lat_draft,
+        ):
+            await handle_form_choice(update, context)
+
+        text = sim.get_last_text()
+
+        assert _DRAFT_DIVIDER not in text
+        assert "I've treated this as a Leadership Assessment Tool because" in text
+        # None of the internal/model-flavoured phrasing should reach the user.
+        assert 'the trainee' not in text.lower()
+        assert 'EPIC' not in text
+        assert 'EMLeaders' not in text
+        assert 'assessed by a LAT' not in text
+        assert 'assessed by LAT' not in text
+        # The instruction is preserved but reads as one concise line.
+        assert '💬 Reply to refine this draft, or save/cancel before sending a new case.' in text
 
     @pytest.mark.asyncio
     async def test_form_choice_asks_for_detail_when_extraction_is_too_thin(self):

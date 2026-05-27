@@ -1977,23 +1977,65 @@ def _draft_header(title: str) -> list[str]:
     ]
 
 
-def _draft_rationale_footer(reason: str | None) -> str:
-    """Divider + form-choice rationale appended after the draft body.
+_RATIONALE_FRAMEWORK_TAIL_RE = re.compile(
+    r",?\s*(?:which |that )?fits[^.]*?(?:framework|tool|form|wpba)[^.,]*",
+    flags=re.IGNORECASE,
+)
+_RATIONALE_TRAINEE_VERB_RE = re.compile(
+    r"\bthe trainee (?:actively |successfully )?"
+    r"(?:performed|led|demonstrated|carried out|undertook|managed) (?:a |the )?",
+    flags=re.IGNORECASE,
+)
 
-    Keeping portfolio content first ensures users see what will be filed
-    in Kaizen before they see bot guidance/rationale."""
-    if not reason:
+
+def _sanitise_form_rationale(text: str) -> str:
+    """Strip model-justification phrasing from a form-choice rationale.
+
+    Targets the wording that reads as internal model reasoning rather than
+    user-facing prose: parenthetical clarifications, third-person trainee
+    framing, "fits framework X assessed by Y" tails, and "Best fit for"
+    self-justification."""
+    cleaned = sanitize_internal_form_codes(text or "")
+    cleaned = re.sub(r"\s*\([^)]*\)", "", cleaned)
+    cleaned = _RATIONALE_FRAMEWORK_TAIL_RE.sub("", cleaned)
+    cleaned = _RATIONALE_TRAINEE_VERB_RE.sub("", cleaned)
+    cleaned = re.sub(r"\bthe trainee\b", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^\s*best fit for\s+", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.;:")
+    return cleaned
+
+
+def _format_draft_rationale(reason: str | None, form_type: str) -> str:
+    """Render the chosen form's rationale as concise, user-facing copy."""
+    cleaned = _sanitise_form_rationale(reason or "")
+    short = _short_plain_text(cleaned, max_words=20).rstrip(".")
+    if not short:
         return ""
-    return f"\n\n{_DRAFT_DIVIDER}\n\nℹ️ {reason}\n"
+    name = public_form_name(form_type) or form_type
+    short = short[0].lower() + short[1:]
+    return f"I've treated this as a {name} because {short}."
+
+
+def _draft_rationale_footer(reason: str | None, form_type: str) -> str:
+    """Form-choice rationale appended after the draft body.
+
+    Portfolio content still leads the message; a blank line is enough
+    visual separation between the draft body and the rationale, so the
+    heavier ASCII divider is intentionally omitted here to keep the
+    preview mobile-friendly."""
+    rendered = _format_draft_rationale(reason, form_type)
+    if not rendered:
+        return ""
+    return f"\n\nℹ️ {rendered}\n"
 
 
 def _format_draft_preview(draft, reason: str | None = None) -> str:
     """Format draft data as a preview message. Dispatches based on type."""
     if isinstance(draft, FormDraft):
         preview = _format_generic_draft(draft)
-        return preview + _draft_rationale_footer(reason) + _draft_missing_review_note(draft, draft.form_type)
+        return preview + _draft_rationale_footer(reason, draft.form_type) + _draft_missing_review_note(draft, draft.form_type)
     preview = _format_cbd_draft(draft)
-    return preview + _draft_rationale_footer(reason) + _draft_missing_review_note(draft, "CBD")
+    return preview + _draft_rationale_footer(reason, "CBD") + _draft_missing_review_note(draft, "CBD")
 
 
 def _draft_fields_for_review(draft) -> dict:

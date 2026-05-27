@@ -133,7 +133,7 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
     "draft_reply_hint": MessageTemplate(
         key="draft_reply_hint",
         message_class=MessageClass.FIXED,
-        text="\n\n💬 Reply to refine this draft. Save or cancel before sending a new case.",
+        text="\n\n💬 Reply to refine this draft, or save/cancel before sending a new case.",
     ),
 }
 
