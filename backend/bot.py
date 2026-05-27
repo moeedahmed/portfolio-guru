@@ -2023,7 +2023,8 @@ _MISSING_MARKER = "_— needs your detail_"
 _REPLY_HINT_SUFFIX = render_message("draft_reply_hint")
 
 # Visual divider separating portfolio content from bot guidance/rationale in
-# draft previews (after draft body) and saved/filed confirmation messages.
+# draft previews (after draft body). Post-filing confirmations should stay
+# clean because they are outcome messages, not draft-plus-instruction messages.
 _DRAFT_DIVIDER = "━━━━━━━━━━━━━━"
 
 _NARRATIVE_PREVIEW_KEYS = {
@@ -6113,7 +6114,6 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             f"✅ Kaizen draft saved\n"
             f"{form_name} saved as a Kaizen draft.{summary}{fields_summary}"
             f"{date_default_note}"
-            f"\n\n{_DRAFT_DIVIDER}"
             f"{usage_line}{observation_line}"
         )
         status_line = "✅ Draft saved."
@@ -6194,7 +6194,6 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             msg = (
                 f"📥 Draft saved in Kaizen\n"
                 f"{form_name}\n\n"
-                f"{_DRAFT_DIVIDER}\n\n"
                 f"⚠️ Needs your review\n"
                 f"{fields_filled_str} from your case. "
                 f"{review_clause}: {skipped_display}.\n\n"

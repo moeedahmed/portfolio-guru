@@ -1,5 +1,13 @@
 # Active Task — Private Beta Launch Cut
 
+> **2026-05-27 addendum — saved-draft confirmation divider removed.**
+> Moeed's live screenshot showed the post-save confirmation still carried the
+> heavy draft-preview divider before usage/portfolio guidance. That divider now
+> stays only in draft previews where it separates the user's draft from bot
+> rationale/instructions; successful and clean-partial post-filing outcome
+> messages render without it. Verification: focused flow-walker gate green at
+> 4 passed, 134 deselected, 3 warnings.
+
 > **2026-05-27 addendum — controlled live smoke passed.**
 > Moeed approved the narrow live gate. The first Kaizen save proved the external
 > side effect but exposed a Telegram confirmation blocker: the saved-draft

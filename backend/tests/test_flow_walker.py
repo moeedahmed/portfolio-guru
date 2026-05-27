@@ -2605,7 +2605,7 @@ class TestRecentPortfolioFixes:
     async def test_approval_success_includes_same_case_another(self):
         """When handle_approval_approve processes a success, the post-filing
         keyboard must also include 'Same case, new WPBA'."""
-        from bot import handle_approval_approve
+        from bot import _DRAFT_DIVIDER, handle_approval_approve
         from models import FormDraft
 
         thin = FormDraft(
@@ -2703,6 +2703,7 @@ class TestRecentPortfolioFixes:
         # The subhead mentions the form was saved as a Kaizen draft so the
         # user knows nothing was submitted/signed.
         assert 'saved as a Kaizen draft' in text
+        assert _DRAFT_DIVIDER not in text
 
     @pytest.mark.asyncio
     async def test_saved_confirmation_tells_user_when_today_was_used_for_missing_date(self):
