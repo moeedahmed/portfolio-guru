@@ -1,5 +1,15 @@
 # Active Task — Private Beta Launch Cut
 
+> **2026-05-27 addendum — LAT click-non-actionable filing robustness.**
+> Investigated LAT Kaizen save failure. Fixed Playwright click timeout errors on
+> `startDate`, `endDate`, `event-description`, `trainee_post`, `leadership_context`,
+> and `clinical_reasoning` fields when elements are obscured/non-actionable. Patched
+> the deterministic filing helpers (`_fill_date`, `_fill_text`, and `_fill_field_legacy`)
+> in `kaizen_form_filer.py` to catch click exceptions, retry with `force=True`, and
+> fall back to direct focus / JS input events if required. Added focused coverage in `test_kaizen_filer.py`
+> ensuring non-actionable click exceptions are intercepted and successfully resolved via
+> forced click and focus fallback. Full live status depends on launchd restart after verification.
+
 > **2026-05-27 addendum — draft footer rationale polish live.**
 > Moeed's management-ticket dogfood showed the draft footer still exposing a
 > heavy divider plus verbose LAT model rationale (`EPIC/flow coordinator`,

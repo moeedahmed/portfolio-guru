@@ -1317,9 +1317,41 @@ async def _fill_date(page: Page, dom_id: str, raw_value: str) -> bool:
         logger.warning(f"Date field not found: {dom_id}")
         return False
 
-    await el.click()
-    await el.click(click_count=3)  # select all existing text
-    await el.type(uk_date, delay=50)  # type char by char
+    try:
+        # Try normal click first exactly as originally written to preserve signature for mock tests
+        await el.click()
+        await el.click(click_count=3)
+    except Exception as e:
+        logger.warning(f"Normal click on date field #{dom_id} failed or timed out: {e}. Trying force=True.")
+        try:
+            await el.click(force=True, timeout=2000)
+            await el.click(click_count=3, force=True, timeout=2000)
+        except Exception as force_e:
+            logger.warning(f"Forced click on date field #{dom_id} also failed: {force_e}. Attempting focus fallback.")
+            try:
+                await el.focus()
+            except Exception as focus_e:
+                logger.error(f"Focus fallback on date field #{dom_id} failed: {focus_e}")
+
+    try:
+        await el.type(uk_date, delay=50)  # type char by char
+    except Exception as e:
+        logger.warning(f"Date type failed for {dom_id}; using JS event fallback: {e}")
+        ok = await page.evaluate(
+            """({domId, value}) => {
+                const el = document.getElementById(domId);
+                if (!el) return false;
+                el.focus();
+                el.value = value;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                el.dispatchEvent(new Event('blur', { bubbles: true }));
+                return true;
+            }""",
+            {"domId": dom_id, "value": uk_date},
+        )
+        if not ok:
+            return False
     await page.keyboard.press("Tab")  # trigger Angular watcher
     await asyncio.sleep(1)
 
@@ -1397,8 +1429,38 @@ async def _fill_text(page: Page, dom_id: str, value: str) -> bool:
     ]:
         el = page.locator(selector).first
         if await el.count():
-            await el.click()
-            await el.fill(clean)
+            try:
+                # Try normal click first exactly as originally written to preserve signature for mock tests
+                await el.click()
+            except Exception as e:
+                logger.warning(f"Normal click on text field {selector} failed or timed out: {e}. Trying force=True.")
+                try:
+                    await el.click(force=True, timeout=2000)
+                except Exception as force_e:
+                    logger.warning(f"Forced click on text field {selector} also failed: {force_e}. Attempting focus fallback.")
+                    try:
+                        await el.focus()
+                    except Exception as focus_e:
+                        logger.error(f"Focus fallback on text field {selector} failed: {focus_e}")
+            try:
+                await el.fill(clean)
+            except Exception as e:
+                logger.warning(f"Text fill failed for {dom_id}; using JS event fallback: {e}")
+                ok = await page.evaluate(
+                    """({domId, value}) => {
+                        const el = document.getElementById(domId);
+                        if (!el) return false;
+                        el.focus();
+                        el.value = value;
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                        el.dispatchEvent(new Event('blur', { bubbles: true }));
+                        return true;
+                    }""",
+                    {"domId": dom_id, "value": clean},
+                )
+                if not ok:
+                    return False
             await asyncio.sleep(0.5)
             logger.info(f"Text filled: {dom_id} ({len(clean)} chars)")
             return True
@@ -2093,8 +2155,38 @@ async def _fill_field_legacy(page: Page, dom_id: str, value: Any, field_key: str
         # Textareas and text inputs
         if tag in ("TEXTAREA", "INPUT"):
             clean_value = _strip_emojis(str(value))
-            await el.click()
-            await el.fill(clean_value)
+            try:
+                # Try normal click first exactly as originally written to preserve signature for mock tests
+                await el.click()
+            except Exception as e:
+                logger.warning(f"Normal click on legacy field #{dom_id} ({field_key}) failed or timed out: {e}. Trying force=True.")
+                try:
+                    await el.click(force=True, timeout=2000)
+                except Exception as force_e:
+                    logger.warning(f"Forced click on legacy field #{dom_id} also failed: {force_e}. Attempting focus fallback.")
+                    try:
+                        await el.focus()
+                    except Exception as focus_e:
+                        logger.error(f"Focus fallback on legacy field #{dom_id} failed: {focus_e}")
+            try:
+                await el.fill(clean_value)
+            except Exception as e:
+                logger.warning(f"Legacy fill failed for #{dom_id} ({field_key}); using JS event fallback: {e}")
+                ok = await page.evaluate(
+                    """({domId, value}) => {
+                        const el = document.getElementById(domId);
+                        if (!el) return false;
+                        el.focus();
+                        el.value = value;
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                        el.dispatchEvent(new Event('blur', { bubbles: true }));
+                        return true;
+                    }""",
+                    {"domId": dom_id, "value": clean_value},
+                )
+                if not ok:
+                    return False
             return True
 
         return False

@@ -452,3 +452,75 @@ async def test_no_curriculum_links_skips_tick(mock_playwright_ctx):
                 fields = {"stage_of_training": "Higher", "clinical_reasoning": "test"}
                 result = await file_to_kaizen("CBD", fields, "user", "pass")
                 mock_fill.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_fill_date_click_non_actionable_fallback(mock_playwright_ctx):
+    mock_page = mock_playwright_ctx
+    from kaizen_form_filer import _fill_date
+
+    orig_locator = mock_page.locator
+    el = AsyncMock()
+    el.count = AsyncMock(return_value=1)
+    el.evaluate = AsyncMock(return_value="28/03/2026")
+
+    click_calls = []
+    async def mock_click(*args, **kwargs):
+        click_calls.append((args, kwargs))
+        raise Exception("Non-actionable click timeout")
+
+    el.click = mock_click
+    el.focus = AsyncMock()
+    el.type = AsyncMock()
+
+    def my_locator(selector):
+        if "startDate" in selector:
+            return el
+        return orig_locator(selector)
+
+    mock_page.locator = MagicMock(side_effect=my_locator)
+
+    result = await _fill_date(mock_page, "startDate", "28/03/2026")
+
+    # Normal click and triple click fail -> Try forced click and forced triple click -> Focus fallback
+    assert len(click_calls) >= 2
+    assert click_calls[0][1].get("timeout") is None
+    assert click_calls[1][1].get("force") is True
+    el.focus.assert_called()
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_fill_text_click_non_actionable_fallback(mock_playwright_ctx):
+    mock_page = mock_playwright_ctx
+    from kaizen_form_filer import _fill_text
+
+    orig_locator = mock_page.locator
+    el = AsyncMock()
+    el.count = AsyncMock(return_value=1)
+    el.first = el
+
+    click_calls = []
+    async def mock_click(*args, **kwargs):
+        click_calls.append((args, kwargs))
+        raise Exception("Non-actionable click timeout")
+
+    el.click = mock_click
+    el.focus = AsyncMock()
+    el.fill = AsyncMock()
+
+    def my_locator(selector):
+        if "some-field" in selector:
+            return el
+        return orig_locator(selector)
+
+    mock_page.locator = MagicMock(side_effect=my_locator)
+
+    result = await _fill_text(mock_page, "some-field", "some text value")
+
+    # Normal click fails -> Forced click fails -> Focus fallback
+    assert len(click_calls) == 2
+    assert click_calls[0][1].get("timeout") is None
+    assert click_calls[1][1].get("force") is True
+    el.focus.assert_called_once()
+    assert result is True
