@@ -1,5 +1,16 @@
 # Active Task — Private Beta Launch Cut
 
+> **2026-05-27 addendum — beta-ready attachment handoff.**
+> Implemented a safe, lightweight attachment handoff for Telegram documents used as
+> case source material. The original document is copied to a persistent temp/cache
+> directory, and its metadata is stored in `context.user_data`. When the user saves
+> the draft to Kaizen, the cached document is passed as `attachment_path` to the
+> deterministic filing router. Missing or unsupported attachments at filing time
+> are gracefully reported as skipped in the outcome summary without crashing.
+> Verification: 6 focused unit tests covering document caching, path handoff,
+> non-attachment paths, and graceful skip handling are green. Full offline
+> pytest gate passed.
+
 > **2026-05-27 addendum — Kaizen description summary guard.**
 > Moeed's beta screenshot showed Kaizen's top `Description (optional)` field
 > being filled with a clipped sentence ending mid-word (`recognis...`). The

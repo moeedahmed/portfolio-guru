@@ -664,6 +664,8 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
             "last_amend_chosen_form",
             "last_bot_msg_id",
             "last_bot_chat_id",
+            "attachment_path",
+            "attachment_name",
         ):
             context.user_data.pop(key, None)
 
@@ -5148,6 +5150,8 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     """Handle text, voice, photo, or document input for case description."""
     user_id = update.effective_user.id
     _start_conversational_router_shadow(update, "handle_case_input")
+    attachment_path_to_save = None
+    attachment_name_to_save = None
 
     # If the user just tapped "Custom range" in the /unsigned picker, the next
     # text reply is their date range — intercept it before treating as a case.
@@ -5533,6 +5537,18 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await ack.edit_text(f"📄 *{file_name}* read. Finding matching forms…", parse_mode="Markdown")
             _track_latest_message(context, ack)
             context.user_data["document_name"] = file_name
+
+            # Preserve a copy in a safe temp/cache location with original-ish suffix and store metadata
+            import shutil
+            cache_dir = os.path.join(tempfile.gettempdir(), "portfolio_guru_cache")
+            os.makedirs(cache_dir, exist_ok=True)
+            cache_suffix = os.path.splitext(file_name)[1] or ".tmp"
+            with tempfile.NamedTemporaryFile(dir=cache_dir, suffix=cache_suffix, delete=False) as cached_file:
+                cached_path = cached_file.name
+            shutil.copy2(tmp_path, cached_path)
+
+            attachment_path_to_save = cached_path
+            attachment_name_to_save = file_name
         except Exception as e:
             logger.error(f"Document processing failed: {e}", exc_info=True)
             context.user_data.clear()
@@ -5603,6 +5619,9 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     active_status_id = context.user_data.get("status_msg_id")
     active_status_chat = context.user_data.get("status_msg_chat")
     _clear_case_review_state(context, keep_case=False)
+    if attachment_path_to_save:
+        context.user_data["attachment_path"] = attachment_path_to_save
+        context.user_data["attachment_name"] = attachment_name_to_save
     if active_msg_id and active_chat_id:
         context.user_data["last_bot_msg_id"] = active_msg_id
         context.user_data["last_bot_chat_id"] = active_chat_id
@@ -5930,6 +5949,18 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
 
     progress_task = asyncio.create_task(_filing_progress())
     reuse_existing_draft = bool(context.user_data.pop("retry_filing_requested", False))
+    
+    # Retrieve attachment path and validate existence / support
+    attachment_path = context.user_data.get("attachment_path")
+    attachment_skipped_reason = None
+    if attachment_path:
+        if not os.path.exists(attachment_path):
+            attachment_skipped_reason = "attachment (file missing)"
+            attachment_path = None
+        elif not is_supported_document(context.user_data.get("attachment_name", "")):
+            attachment_skipped_reason = "attachment (unsupported type)"
+            attachment_path = None
+
     try:
         result = await asyncio.wait_for(
             route_filing(
@@ -5940,9 +5971,15 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 curriculum_links=curriculum_links,
                 form_name=form_name,
                 reuse_draft=reuse_existing_draft,
+                attachment_path=attachment_path,
             ),
             timeout=300,  # 5 min — browser-use path may take longer
         )
+        if attachment_skipped_reason:
+            if "skipped" not in result:
+                result["skipped"] = []
+            if attachment_skipped_reason not in result["skipped"]:
+                result["skipped"].append(attachment_skipped_reason)
     except asyncio.TimeoutError:
         typing_stop.set()
         progress_task.cancel()
@@ -6110,11 +6147,17 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         # draft preview the user just approved.
         filled_count = len(filled)
         fields_summary = f"\n{filled_count} field{'s' if filled_count != 1 else ''} completed." if filled_count > 0 else ""
+        attachment_skipped_msg = ""
+        for s in skipped:
+            if "attachment" in str(s).lower():
+                attachment_skipped_msg = f"\n\n⚠️ Attachment skipped: {str(s).replace('attachment (', '').replace(')', '')}."
+                break
         msg = (
             f"✅ Kaizen draft saved\n"
             f"{form_name} saved as a Kaizen draft.{summary}{fields_summary}"
             f"{date_default_note}"
             f"{usage_line}{observation_line}"
+            f"{attachment_skipped_msg}"
         )
         status_line = "✅ Draft saved."
     elif status == "partial":
@@ -6193,6 +6236,11 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             # confirmation doesn't visually merge with the approved draft
             # above it, and keep the review guidance in its own block so it
             # reads as guidance, not as draft content.
+            attachment_skipped_msg = ""
+            for s in skipped:
+                if "attachment" in str(s).lower():
+                    attachment_skipped_msg = f"\n\n⚠️ Attachment skipped: {str(s).replace('attachment (', '').replace(')', '')}."
+                    break
             msg = (
                 f"📥 Draft saved in Kaizen\n"
                 f"{form_name}\n\n"
@@ -6200,6 +6248,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 f"{fields_filled_str} from your case. "
                 f"{review_clause}: {skipped_display}.\n\n"
                 f"{action_line}{date_default_note}{usage_line}"
+                f"{attachment_skipped_msg}"
             )
             status_line = "⚠️ Filing needs manual review."
     else:
