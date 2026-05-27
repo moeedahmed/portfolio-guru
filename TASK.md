@@ -1,5 +1,14 @@
 # Active Task — Private Beta Launch Cut
 
+> **2026-05-27 addendum — user-visible form-name audit.**
+> Moeed flagged that acronyms such as DOPS are acceptable, but internal form
+> keys such as `PROC_LOG` must not appear in doctor-facing Telegram messages.
+> The current slice adds a shared display-name/sanitisation layer for form
+> names, routes recommendation rationale, question answers, recent-activity
+> nudges, and filing failure details through it, and adds regression tests for
+> internal-code leakage. Verification: full offline pytest gate green at
+> 618 passed, 24 deselected, 40 warnings.
+
 > **2026-05-27 addendum — public WPBA names and draft-divider spacing.**
 > Moeed's beta screenshots showed two presentation issues: the post-filing
 > portfolio nudge leaked internal form codes (`CBD`, `DOPS`, `PROC_LOG`)

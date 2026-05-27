@@ -19,6 +19,7 @@ from usage import record_case_filed, get_cases_this_month, check_can_file, get_u
 from filer_router import route_filing
 from kaizen_form_filer import FORM_UUIDS
 from form_schemas import FORM_SCHEMAS
+from form_display import public_form_name, sanitize_internal_form_codes
 from models import FormDraft, CBDData
 from whisper import transcribe_voice
 from vision import extract_from_image
@@ -1280,12 +1281,12 @@ def _format_failed_filing_summary(
         "Supervisor request: not sent",
     ]
     if skipped:
-        skipped_text = ", ".join(str(f).replace("_", " ") for f in skipped[:4])
+        skipped_text = ", ".join(sanitize_internal_form_codes(str(f).replace("_", " ")) for f in skipped[:4])
         if len(skipped) > 4:
             skipped_text += f", +{len(skipped) - 4} more"
         lines.append(f"Needs manual check: {skipped_text}")
     if error:
-        lines.append(f"Blocker: {error}")
+        lines.append(f"Blocker: {sanitize_internal_form_codes(error)}")
     return "\n".join(lines)
 
 
@@ -1487,8 +1488,7 @@ FIELD_EMOJIS = {
 
 def _form_display_name(form_type: str) -> str:
     """Human-readable form name from schema, falling back to code if not found."""
-    schema = FORM_SCHEMAS.get(form_type, {})
-    return schema.get("name", form_type)
+    return public_form_name(form_type)
 
 
 _DEFAULT_CURRICULUM_SUFFIX_RE = re.compile(
@@ -1887,7 +1887,7 @@ def _short_plain_text(text: str, max_words: int = 16) -> str:
 
 def _recommendation_line(rec, *, index: int, total: int, curriculum: str) -> str:
     name = _recommendation_form_display_name(rec.form_type, curriculum)
-    rationale = _short_plain_text(getattr(rec, "rationale", ""))
+    rationale = _short_plain_text(sanitize_internal_form_codes(getattr(rec, "rationale", "")))
     if index == 0 and total > 1:
         alternative_count = total - 1
         comparison = (
@@ -1901,7 +1901,7 @@ def _recommendation_line(rec, *, index: int, total: int, curriculum: str) -> str
             rationale = comparison
     if not rationale:
         rationale = "Fits the main portfolio evidence in this case."
-    return f"- {name}: {rationale}"
+    return sanitize_internal_form_codes(f"- {name}: {rationale}")
 
 
 def _privacy_nudge_for_source(input_source: str | None) -> str:
@@ -5126,7 +5126,7 @@ async def handle_edit_value_with_intent(update: Update, context: ContextTypes.DE
     if intent in ("question_general", "question_about_case"):
         try:
             case_text = context.user_data.get("case_text", "")
-            answer = await answer_question(raw_text, case_context=case_text)
+            answer = sanitize_internal_form_codes(await answer_question(raw_text, case_context=case_text))
             await msg.reply_text(
                 f"{answer}\n\nStill in edit mode — send your new value for *{field}* when ready.",
                 parse_mode="Markdown"
@@ -6157,7 +6157,9 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 recovery = await compose_filing_recovery_copy("partial", error)
             except Exception:
                 logger.warning("Recovery copy generation failed", exc_info=True)
-            recovery_block = recovery or f"Check your portfolio — the draft may not have saved.\n\nDetails: {error}"
+            recovery_block = sanitize_internal_form_codes(
+                recovery or f"Check your portfolio — the draft may not have saved.\n\nDetails: {error}"
+            )
             fields_filled_str = f"{len(filled)} field{'s' if len(filled) != 1 else ''} filled"
             msg = (
                 f"⚠️ Filing had issues — check Kaizen\n"
@@ -6209,7 +6211,9 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             logger.warning("Recovery copy generation failed", exc_info=True)
         if platform == "kaizen" and FORM_UUIDS.get(form_type):
             kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS[form_type]}"
-            recovery_block = recovery or "Try again, or open the form in Kaizen and fill it manually."
+            recovery_block = sanitize_internal_form_codes(
+                recovery or "Try again, or open the form in Kaizen and fill it manually."
+            )
             failed_summary = _format_failed_filing_summary(error, skipped)
             # "manually" wording is honest here — filing failed, so the link
             # is opening a fresh blank form on purpose, not pretending to
@@ -6223,10 +6227,12 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 f"{failed_summary}"
             )
             if not recovery and error:
-                msg += f"\n\nDetails: {error}"
+                msg += f"\n\nDetails: {sanitize_internal_form_codes(error)}"
             status_line = "❌ Filing stopped."
         else:
-            recovery_block = recovery or "Try again, or fill the form manually in your portfolio."
+            recovery_block = sanitize_internal_form_codes(
+                recovery or "Try again, or fill the form manually in your portfolio."
+            )
             failed_summary = _format_failed_filing_summary(error, skipped)
             msg = (
                 f"❌ Filing didn't complete\n"
@@ -6236,7 +6242,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 f"{failed_summary}"
             )
             if not recovery and error:
-                msg += f"\n\nDetails: {error}"
+                msg += f"\n\nDetails: {sanitize_internal_form_codes(error)}"
             status_line = "❌ Filing stopped."
 
     context.user_data["last_filing_status"] = status

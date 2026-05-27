@@ -10,6 +10,7 @@ from typing import List
 logger = logging.getLogger(__name__)
 from models import CBDData, FormTypeRecommendation, FormDraft
 from form_schemas import FORM_SCHEMAS
+from form_display import public_form_name, sanitize_internal_form_codes
 from model_config import gemini_premium_model, gemini_stable_model, gemini_three_five_flash_model
 
 # RCEM Higher EM Curriculum (2025 Update) — Exact Kaizen checkbox labels
@@ -892,7 +893,7 @@ Available forms: CBD, DOPS, Mini-CEX, ACAT, LAT, ACAF, STAT, MSF, QIAT, JCF, Tea
 
 Be concise. For each suggestion give the form name and a one-line reason why it fits this case."""
             text = await _generate(prompt)
-            return text.strip()
+            return sanitize_internal_form_codes(text.strip())
 
     # Check if user is asking about specific form types or capabilities
     text_lower = text.lower()
@@ -903,7 +904,7 @@ Be concise. For each suggestion give the form name and a one-line reason why it 
         # Direct answer about available forms
         form_list = [
             ("CBD", "Case-Based Discussion"),
-            ("DOPS", "Directly Observed Procedural Skills"),
+            ("DOPS", "Direct Observation of Procedural Skills"),
             ("Mini-CEX", "Mini Clinical Evaluation Exercise"),
             ("LAT", "Leadership Assessment Tool"),
             ("ACAT", "Acute Care Assessment Tool"),
@@ -912,33 +913,35 @@ Be concise. For each suggestion give the form name and a one-line reason why it 
             ("MSF", "Multi-Source Feedback"),
             ("QIAT", "Quality Improvement Assessment Tool"),
             ("JCF", "Journal Club Form"),
-            ("TEACH", "Teaching Delivered by Trainee"),
-            ("PROC_LOG", "Procedural Log"),
+            ("Teaching", "Teaching Delivered by Trainee"),
+            ("Procedural Log", "Procedural Log"),
             ("SDL", "Self-Directed Learning Reflection"),
-            ("US_CASE", "Ultrasound Case Reflection"),
+            ("Ultrasound Case", "Ultrasound Case Reflection"),
             ("ESLE", "Educational Supervisor's Learning Event"),
             ("COMPLAINT", "Reflection on Complaints"),
-            ("SERIOUS_INC", "Reflection on Serious Incident"),
-            ("EDU_ACT", "Educational Activity Attended"),
-            ("FORMAL_COURSE", "Attendance at Formal Course"),
+            ("Serious Incident", "Reflection on Serious Incident"),
+            ("Educational Activity", "Educational Activity Attended"),
+            ("Formal Course", "Attendance at Formal Course"),
         ]
 
         # Check if asking about a specific form
         for form_code, form_name in form_list:
             if form_code.lower().replace("_", " ") in text_lower or form_code.lower() in text_lower:
-                return f"✅ Yes, {form_code} ({form_name}) is fully supported with auto-filing to Kaizen."
+                return sanitize_internal_form_codes(
+                    f"✅ Yes, {form_code} ({form_name}) is fully supported with auto-filing to Kaizen."
+                )
 
         # General question about what's supported
         forms_text = "\n".join([f"• {code} — {name}" for code, name in form_list[:10]])
         forms_text += f"\n• ...and {len(form_list) - 10} more"
 
-        return f"""📋 I support all 19 RCEM WPBA forms with full auto-filing to Kaizen:
+        return sanitize_internal_form_codes(f"""📋 I support all 19 RCEM WPBA forms with full auto-filing to Kaizen:
 
 {forms_text}
 
 All forms are auto-filled with structured data and saved as drafts in Kaizen.
 
-Describe your case or activity and I'll recommend the right form."""
+Describe your case or activity and I'll recommend the right form.""")
 
     # General question — use AI but with grounded facts
     prompt = f"""You are Portfolio Guru, a Telegram bot that helps RCEM doctors file their clinical cases to the Kaizen e-portfolio.
@@ -956,7 +959,7 @@ Question: {text}
 Answer concisely. If the question is about a specific form type, confirm it's supported."""
 
     text = await _generate(prompt)
-    return text.strip()
+    return sanitize_internal_form_codes(text.strip())
 
 
 async def assess_case_sufficiency(case_description: str) -> dict:
@@ -2514,12 +2517,6 @@ async def summarise_recent_activity(case_history: list, just_filed_form_type: st
     from collections import Counter
     from datetime import datetime, timedelta, timezone
 
-    def public_form_name(form_type: str) -> str:
-        key = str(form_type or "").strip()
-        base_key = key[:-5] if key.endswith("_2021") else key
-        schema = FORM_SCHEMAS.get(base_key) or FORM_SCHEMAS.get(key) or {}
-        return schema.get("name") or key.replace("_", " ").title()
-
     counts = dict(Counter(public_form_name(c.get("form_type", "unknown")) for c in case_history))
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=42)
@@ -2560,8 +2557,7 @@ Write ONE friendly, concrete sentence under 25 words. Use full assessment names,
         logger.warning("summarise_recent_activity failed: %s", e)
         return ""
 
-    for code in sorted(FORM_SCHEMAS, key=len, reverse=True):
-        text = re.sub(rf"\b{re.escape(code)}\b", public_form_name(code), text)
+    text = sanitize_internal_form_codes(text)
 
     if not text or len(text) > 220:
         return ""
