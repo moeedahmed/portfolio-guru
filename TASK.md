@@ -1,5 +1,21 @@
 # Active Task — Private Beta Launch Cut
 
+> **2026-05-27 addendum — attachment live proof passed.**
+> The narrow beta attachment gate is complete. First controlled DOCX dogfood
+> run proved draft save but exposed the real blocker: Kaizen creates its file
+> input only after clicking the Upload button, so the old static input lookup
+> skipped attachments. The current slice changes the attachment helper to use
+> Kaizen's Upload button/file-chooser flow with a legacy input fallback, adds
+> focused coverage for the upload-chooser path, restarts the bot, and reruns
+> the same controlled proof. Retest result: Telegram document -> CBD
+> recommendation -> draft preview -> Kaizen draft save passed; attachment was
+> uploaded before save and was not reported as skipped. Verification: focused
+> attachment/filer tests green; full offline gate green at 628 passed,
+> 13 deselected, 43 warnings; commit pushed. Cleanup note: two synthetic CBD
+> test drafts were created during the proof; the attached retest draft shows
+> `Replace` / `Remove` controls, but the edit screen did not expose a precise
+> draft-delete control, so broad deletion was not attempted.
+
 > **2026-05-27 addendum — beta-ready attachment handoff.**
 > Implemented a safe, lightweight attachment handoff for Telegram documents used as
 > case source material. The original document is copied to a persistent temp/cache

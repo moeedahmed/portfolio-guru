@@ -8,13 +8,17 @@
 
 ## Executive Readiness State
 
-**CONTROLLED LIVE SMOKE PASSED. READY FOR A SMALL PRIVATE BETA ONLY AFTER FINAL COMMIT/PUSH/RESTART CHECK.**
+**READY FOR A SMALL PRIVATE BETA WITH KNOWN LIMITS.**
 
 The deterministic product gate is green and the approved live gate has now
-proven the core loop on a synthetic case: text case -> recommendation ->
+proven the core loop on synthetic cases: user input -> recommendation ->
 draft preview -> save as Kaizen draft -> real saved-draft URL detected ->
-Telegram confirmation with recovery/follow-up buttons. Future live testing
-must stay narrow, scripted, and stopped on the first unexplained failure.
+Telegram confirmation with recovery/follow-up buttons. The follow-up
+attachment gate also passed after fixing Kaizen's upload-button/file-chooser
+path: Telegram DOCX -> CBD recommendation -> draft preview -> Kaizen draft
+save with the attachment uploaded before save and no attachment-skipped
+warning. Future live testing must stay narrow, scripted, and stopped on the
+first unexplained failure.
 
 Resolved offline:
 - Filer tests are re-enabled and passing against current filing internals.
@@ -28,10 +32,9 @@ Resolved offline:
   profile stage instead of being left blank when the source case omits it.
 
 Still required before beta:
-- Commit/push/restart the current product-readiness slice so the beta cut is
-  reproducible from git, not only from the dirty local checkout.
-- One final post-restart read-back confirming the live bot is running that
-  commit and only one polling instance is active.
+- Clean up the two synthetic CBD drafts created during the attachment proof,
+  or leave them temporarily as evidence. The edit screen did not expose a
+  precise draft-delete control, so broad deletion was not attempted.
 - Keep the beta to 3-5 trusted users; do not market or widen until the first
   real-user cases are reviewed.
 
