@@ -1,5 +1,22 @@
 # Active Task — Private Beta Launch Cut
 
+> **2026-05-27 addendum — controlled live smoke passed.**
+> Moeed approved the narrow live gate. The first Kaizen save proved the external
+> side effect but exposed a Telegram confirmation blocker: the saved-draft
+> report failed when sent with Markdown parsing. The current slice makes
+> post-filing reports plain-text/fallback-safe, tightens token redaction for
+> non-string log arguments, and fills required Kaizen `stage_of_training` from
+> the user's saved training profile instead of leaving it for manual review.
+> Controlled live smoke after restart passed end-to-end: synthetic text case →
+> `Use best fit: CBD` → draft preview → `Save as draft` → real Kaizen draft
+> URL detected → Telegram confirmation displayed with `Open saved draft`,
+> `Amend this draft`, `Same case, new WPBA`, and `File another case`.
+> Live filing proof included stage set to Higher, header dates filled, SLO2 /
+> SLO3 / SLO7 / SLO11 expanded and KCs ticked, Supabase usage/case mirror
+> created, and no Telegram `Bad Request` on the final report. Remaining
+> operational risk: Gemini free-tier quota/high-demand fallbacks are noisy but
+> recovered through configured fallback providers in the live run.
+
 > **2026-05-26 addendum — UX polish batch (post-filed buttons).**
 > This branch (`chore/telegram-bot-qa-discipline`) carries an uncommitted
 > UX polish slice that responds to Moeed's latest beta-feedback evidence on

@@ -1,20 +1,20 @@
 # Pre-Beta QA Report — 2026-05-27
 
 **Branch:** `chore/telegram-bot-qa-discipline`  
-**Assessed by:** Claude Code (offline, no live external actions)  
-**Gate:** Full offline pytest + static analysis + diff review
+**Assessed by:** Claude Code + Codex + controlled live Telethon/Kaizen smoke
+**Gate:** Full offline pytest + static analysis + diff review + approved controlled live smoke
 
 ---
 
 ## Executive Readiness State
 
-**READY FOR A CONTROLLED LIVE SMOKE. NOT READY FOR PRIVATE BETA YET.**
+**CONTROLLED LIVE SMOKE PASSED. READY FOR A SMALL PRIVATE BETA ONLY AFTER FINAL COMMIT/PUSH/RESTART CHECK.**
 
-The offline product gate is green, but beta launch still needs a final
-controlled live smoke and real saved-draft review after the deterministic
-workflow map below has been checked. The previous broad live run was too
-noisy and did not prove the user loop; future live testing must be narrow,
-scripted, and stopped on the first unexplained failure.
+The deterministic product gate is green and the approved live gate has now
+proven the core loop on a synthetic case: text case -> recommendation ->
+draft preview -> save as Kaizen draft -> real saved-draft URL detected ->
+Telegram confirmation with recovery/follow-up buttons. Future live testing
+must stay narrow, scripted, and stopped on the first unexplained failure.
 
 Resolved offline:
 - Filer tests are re-enabled and passing against current filing internals.
@@ -22,15 +22,18 @@ Resolved offline:
 - Live Telethon harness has been updated to observe edited bot messages.
 - Root-level logging token redaction is implemented and verified.
 - Process lock guard prevents duplicate bot polling instances.
+- Post-filing reports are plain-text/fallback-safe so generated observation
+  copy cannot break Telegram Markdown parsing.
+- Required Kaizen stage-of-training fields are filled from the user's saved
+  profile stage instead of being left blank when the source case omits it.
 
 Still required before beta:
-- One controlled live Telegram smoke covering text case → recommendation →
-  draft preview → cancel/recover, with no random exploration.
-- One controlled Kaizen saved-draft verification against a disposable or
-  explicitly approved test case, reviewing the actual saved fields rather
-  than the bot's success message.
-- Commit/review of the current product-readiness slice so the beta cut is
-  reproducible.
+- Commit/push/restart the current product-readiness slice so the beta cut is
+  reproducible from git, not only from the dirty local checkout.
+- One final post-restart read-back confirming the live bot is running that
+  commit and only one polling instance is active.
+- Keep the beta to 3-5 trusted users; do not market or widen until the first
+  real-user cases are reviewed.
 
 ## Deterministic Workflow / Button Map
 
@@ -85,17 +88,53 @@ Live smoke quality note:
   check: missing details should stay obvious without blocking a safe draft preview.
 - Primary draft buttons were calm: `Save as draft`, `Quick improve`, `Cancel`.
 
-New launch blockers from live/log inspection:
+### Controlled Kaizen Saved-Draft Addendum
+
+After Moeed approved the next gate, a narrow synthetic live test was run against
+the allowlisted bot and real Kaizen save-draft path. Broad exploratory Telethon
+testing was not used.
+
+Initial result:
+
+- Kaizen save worked: deterministic filer clicked `Save as draft`, detected a
+  saved draft URL, and mirrored usage/case records.
+- Telegram loop did not close: the final saved-draft report failed with
+  Telegram `Bad Request` because the report was still sent with Markdown
+  parsing after generated observation content was appended.
+
+Fix applied:
+
+- Post-filing reports now send as plain text with inline buttons, not Markdown.
+- Fallback send failures are logged with exception detail.
+- Token redaction now covers non-string logging arguments.
+- Stage-of-training is filled from saved user profile metadata for forms that
+  require it.
+
+Final controlled live result:
+
+- Synthetic text case -> `Use best fit: CBD` -> draft preview -> `Save as draft`.
+- Kaizen proof: stage set to Higher, header dates filled, SLO2 / SLO3 / SLO7 /
+  SLO11 expanded and KCs ticked, saved-draft URL detected.
+- Telegram proof: final confirmation displayed successfully with `Open saved
+  draft`, `Amend this draft`, `Same case, new WPBA`, and `File another case`.
+- No Telegram `Bad Request` on the final report.
+- Operational note: Gemini free-tier quota/high-demand errors occurred, but the
+  configured fallback providers recovered and the user loop still completed.
+
+Resolved launch blockers from live/log inspection:
 
 1. **Live harness mismatch:** `tests/test_e2e.py` / `tests/test_e2e_live.py` must be updated to
    observe edited messages or poll recent bot history before the live Telegram lane can be used
-   as a launch gate.
+   as a launch gate. **Resolved for the controlled harness path** by polling recent bot history
+   and observing edited messages; broad legacy live tests remain non-launch-gate until refreshed.
 2. **Credential leakage in local logs:** `/tmp/portfolio-guru-bot.log` records Telegram Bot API
    URLs with the raw bot token embedded. Logs must redact bot tokens before beta, because launch
-   triage artefacts and copied log snippets can otherwise leak credentials.
+   triage artefacts and copied log snippets can otherwise leak credentials. **Resolved for new
+   logs** by root-level token redaction, including non-string logging arguments.
 3. **Recent duplicate polling conflicts:** `launchd.err.log` contains repeated Telegram 409
    conflicts indicating another bot polling instance. This needs cleanup before beta monitoring
-   can be trusted.
+   can be trusted. **Resolved for the current runtime** by disabling the duplicate launchd service
+   and restarting the canonical service under the process lock.
 
 ---
 
@@ -108,7 +147,7 @@ source venv/bin/activate
 python -m pytest tests/ -q \
   --ignore=tests/test_e2e.py \
   --ignore=tests/test_e2e_live.py
-# Result: 585 passed, 22 skipped, 13 deselected, 43 warnings in 17.61s
+# Latest result after controlled-live fixes: 613 passed, 13 deselected, 40 warnings, 3 snapshots passed
 
 # 2. Safety-critical modules only
 python -m pytest tests/test_form_type_wiring.py \

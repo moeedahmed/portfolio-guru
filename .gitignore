@@ -52,6 +52,7 @@ playwright-report/
 test-results/
 chrome-profile/
 user-data-dir/
+backend/*.lock
 
 # Local agent/editor settings
 .claude/

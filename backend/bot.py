@@ -59,7 +59,8 @@ def _redacted_handle(self, record):
                 if isinstance(arg, str):
                     new_args.append(_redact_token_string(arg))
                 else:
-                    new_args.append(arg)
+                    redacted = _redact_token_string(str(arg))
+                    new_args.append(redacted if redacted != str(arg) else arg)
             record.args = tuple(new_args)
     except Exception:
         pass
@@ -1120,6 +1121,55 @@ def _training_level_label(level: str | None) -> str:
     return TRAINING_LEVEL_LABELS.get(level or "", "Unknown")
 
 
+def _stage_value_from_training_level(level: str | None, form_type: str) -> str:
+    """Return the Kaizen stage value implied by the user's saved profile."""
+    if not level:
+        return ""
+    normalised = level.upper()
+    schema_fields = FORM_SCHEMAS.get(form_type, {}).get("fields", [])
+    stage_field = next((field for field in schema_fields if field.get("key") == "stage_of_training"), {})
+    options = set(stage_field.get("options") or [])
+
+    # Most WPBAs use grouped stage values; QIAT-style forms use individual
+    # years. Keep the value aligned with the actual schema for the chosen form.
+    if any(option.startswith("Higher/") for option in options):
+        if normalised in {"HIGHER", "ST4", "ST5", "ST6"}:
+            return "Higher/ST4-ST6"
+        if normalised in {"INTERMEDIATE", "ST3"}:
+            return "Intermediate/ST3"
+        if normalised == "ACCS" or normalised in {"ST1", "ST2", "CT1", "CT2"}:
+            return "ACCS ST1-ST2/CT1-CT2"
+        if normalised == "PEM":
+            return "PEM Sub-specialty"
+
+    if normalised in options:
+        return normalised
+    if normalised == "HIGHER":
+        return "ST4" if "ST4" in options else ""
+    if normalised == "INTERMEDIATE":
+        return "ST3" if "ST3" in options else ""
+    if normalised == "ACCS":
+        return "ST1/CT1" if "ST1/CT1" in options else ""
+    return ""
+
+
+def _apply_profile_training_stage(draft, user_id: int, form_type: str) -> None:
+    schema_fields = FORM_SCHEMAS.get(form_type, {}).get("fields", [])
+    if not any(field.get("key") == "stage_of_training" for field in schema_fields):
+        return
+    stage_value = _stage_value_from_training_level(get_training_level(user_id), form_type)
+    if not stage_value:
+        return
+    if isinstance(draft, FormDraft):
+        if not draft.fields.get("stage_of_training"):
+            draft.fields["stage_of_training"] = stage_value
+    elif hasattr(draft, "stage_of_training") and not getattr(draft, "stage_of_training", None):
+        try:
+            setattr(draft, "stage_of_training", stage_value)
+        except Exception:
+            pass
+
+
 def _default_allowed_forms_for_unknown_training() -> list[str]:
     seen = set()
     forms = []
@@ -1203,7 +1253,7 @@ def _format_proof_report(
 
     lines = [
         "",
-        "*Portfolio Guru proof report*",
+        "Portfolio Guru proof report",
         f"Status: {state}",
         f"WPBA type: {form_name}",
         f"Source: {source}",
@@ -1224,7 +1274,7 @@ def _format_failed_filing_summary(
 ) -> str:
     """Compact trust-layer summary for failed filing attempts."""
     lines = [
-        "*What happened*",
+        "What happened",
         "Saved in Kaizen: not confirmed",
         "Final submission: not sent",
         "Supervisor request: not sent",
@@ -4227,6 +4277,7 @@ async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: in
             ),
             timeout=45,
         )
+    _apply_profile_training_stage(draft, user_id, form_type)
     _store_pending_draft(context, draft)
     context.user_data["chosen_form"] = form_type
     context.user_data["awaiting_detail"] = True
@@ -6059,8 +6110,8 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         filled_count = len(filled)
         fields_summary = f"\n{filled_count} field{'s' if filled_count != 1 else ''} completed." if filled_count > 0 else ""
         msg = (
-            f"✅ *Kaizen draft saved*\n"
-            f"_{form_name} saved as a Kaizen draft._{summary}{fields_summary}"
+            f"✅ Kaizen draft saved\n"
+            f"{form_name} saved as a Kaizen draft.{summary}{fields_summary}"
             f"{date_default_note}"
             f"\n\n{_DRAFT_DIVIDER}"
             f"{usage_line}{observation_line}"
@@ -6096,7 +6147,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             # the captured saved-draft URL when we have one; otherwise point
             # at the activities list so the user verifies before retrying.
             if raw_saved_url:
-                link_text = f"\n\n[Find this draft in Kaizen]({raw_saved_url})"
+                link_text = f"\n\nFind this draft in Kaizen:\n{raw_saved_url}"
             elif platform == "kaizen":
                 link_text = "\n\n[Check your Kaizen drafts](https://kaizenep.com/activities)"
             else:
@@ -6109,8 +6160,8 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             recovery_block = recovery or f"Check your portfolio — the draft may not have saved.\n\nDetails: {error}"
             fields_filled_str = f"{len(filled)} field{'s' if len(filled) != 1 else ''} filled"
             msg = (
-                f"⚠️ *Filing had issues — check Kaizen*\n"
-                f"_{form_name}_\n\n"
+                f"⚠️ Filing had issues — check Kaizen\n"
+                f"{form_name}\n\n"
                 f"{fields_filled_str}.\n\n"
                 f"{_DRAFT_DIVIDER}\n\n"
                 f"{recovery_block}{link_text}{usage_line}{proof_report}"
@@ -6141,10 +6192,10 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             # above it, and keep the review guidance in its own block so it
             # reads as guidance, not as draft content.
             msg = (
-                f"📥 *Draft saved in Kaizen*\n"
-                f"_{form_name}_\n\n"
+                f"📥 Draft saved in Kaizen\n"
+                f"{form_name}\n\n"
                 f"{_DRAFT_DIVIDER}\n\n"
-                f"⚠️ *Needs your review*\n"
+                f"⚠️ Needs your review\n"
                 f"{fields_filled_str} from your case. "
                 f"{review_clause}: {skipped_display}.\n\n"
                 f"{action_line}{date_default_note}{usage_line}"
@@ -6165,28 +6216,28 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             # is opening a fresh blank form on purpose, not pretending to
             # jump to a saved draft.
             msg = (
-                f"❌ *Filing didn't complete*\n"
-                f"_{form_name}_\n\n"
+                f"❌ Filing didn't complete\n"
+                f"{form_name}\n\n"
                 f"{recovery_block}\n\n"
-                f"[Open blank {form_name} in Kaizen to fill manually]({kaizen_url})\n\n"
+                f"Open blank {form_name} in Kaizen to fill manually:\n{kaizen_url}\n\n"
                 f"{_DRAFT_DIVIDER}\n\n"
                 f"{failed_summary}"
             )
             if not recovery and error:
-                msg += f"\n\n_Details: {error}_"
+                msg += f"\n\nDetails: {error}"
             status_line = "❌ Filing stopped."
         else:
             recovery_block = recovery or "Try again, or fill the form manually in your portfolio."
             failed_summary = _format_failed_filing_summary(error, skipped)
             msg = (
-                f"❌ *Filing didn't complete*\n"
-                f"_{form_name}_\n\n"
+                f"❌ Filing didn't complete\n"
+                f"{form_name}\n\n"
                 f"{recovery_block}\n\n"
                 f"{_DRAFT_DIVIDER}\n\n"
                 f"{failed_summary}"
             )
             if not recovery and error:
-                msg += f"\n\n_Details: {error}_"
+                msg += f"\n\nDetails: {error}"
             status_line = "❌ Filing stopped."
 
     context.user_data["last_filing_status"] = status
@@ -6207,18 +6258,17 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     # Keep the reviewed draft visible. The temporary progress message becomes
     # the final report so completion stays to one message.
     try:
-        await ack.edit_text(msg, reply_markup=end_keyboard, parse_mode="Markdown")
+        await ack.edit_text(msg, reply_markup=end_keyboard)
     except Exception:
-        logger.warning("Could not edit filing report, falling back to fresh message")
+        logger.warning("Could not edit filing report, falling back to fresh message", exc_info=True)
         try:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=msg,
                 reply_markup=end_keyboard,
-                parse_mode="Markdown",
             )
         except Exception:
-            pass
+            logger.warning("Could not send fallback filing report", exc_info=True)
     if status == "failed" or uncertain_save:
         return AWAIT_APPROVAL
     return ConversationHandler.END

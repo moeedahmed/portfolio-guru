@@ -329,6 +329,33 @@ class TestFlowWalker:
         assert {'APPROVE|draft', 'CANCEL|draft'} <= {data for _, data in sim.get_last_buttons()}
 
     @pytest.mark.asyncio
+    async def test_template_review_fills_stage_from_saved_training_level(self):
+        from bot import _analyse_selected_form
+        from models import FormDraft
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        draft = FormDraft(
+            form_type='CBD',
+            uuid='uuid-cbd',
+            fields={
+                'date_of_encounter': '2026-05-27',
+                'clinical_setting': 'ED',
+                'patient_presentation': 'Sepsis',
+                'clinical_reasoning': 'Escalated septic shock promptly.',
+                'reflection': 'Earlier antibiotic prompt would improve flow.',
+            },
+        )
+
+        with patch('bot.get_voice_profile', return_value=''), \
+             patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.extract_cbd_data', new=AsyncMock(return_value=draft)):
+            result = await _analyse_selected_form(context, sim.user_id, SAMPLE_CASES['valid'], 'CBD')
+
+        assert result.fields['stage_of_training'] == 'Higher/ST4-ST6'
+        assert context.user_data['pending_draft_data']['fields']['stage_of_training'] == 'Higher/ST4-ST6'
+
+    @pytest.mark.asyncio
     async def test_optional_missing_fields_do_not_block_draft_preview(self, thin_draft):
         from bot import AWAIT_APPROVAL, handle_form_choice
 
@@ -1216,7 +1243,7 @@ class TestFlowWalker:
         # New step-header treatment so the uncertain-save report doesn't read
         # as another draft block, plus a divider separating the recovery copy
         # from the saved-status line.
-        assert '⚠️ *Filing had issues — check Kaizen*' in text
+        assert '⚠️ Filing had issues — check Kaizen' in text
         # The link in the message body must not falsely promise to open the
         # draft we just tried to save — when uncertain, we point at the
         # Kaizen drafts list so the user verifies first.
@@ -1305,8 +1332,8 @@ class TestFlowWalker:
         # The saved-draft confirmation must lead with a clear step header so
         # users can tell the case has been filed; the review guidance must
         # then read as its own block, not as draft content.
-        assert '📥 *Draft saved in Kaizen*' in text
-        assert '⚠️ *Needs your review*' in text
+        assert '📥 Draft saved in Kaizen' in text
+        assert '⚠️ Needs your review' in text
         assert '8 fields filled' in text
         assert 'needs your review: Placement' in text
         assert '10 cases this month (Unlimited)' in text
@@ -1314,7 +1341,7 @@ class TestFlowWalker:
         # look the user reported.
         assert 'saved as a draft, but needs manual review' not in text
         assert 'This is not complete yet' not in text
-        assert '✅ *Kaizen draft saved*' not in text
+        assert '✅ Kaizen draft saved' not in text
 
         buttons = sim.get_last_buttons()
         callbacks = {callback for _, callback in buttons}
@@ -2470,7 +2497,7 @@ class TestRecentPortfolioFixes:
 
         # Field-review guidance lives in its own block, after the saved-status
         # block, and is itself led by a clear "Needs your review" sub-header.
-        assert '⚠️ *Needs your review*' in text
+        assert '⚠️ Needs your review' in text
         header_pos = text.index('Draft saved in Kaizen')
         review_pos = text.index('Needs your review')
         assert review_pos > header_pos, (
@@ -2521,7 +2548,7 @@ class TestRecentPortfolioFixes:
             await handle_approval_approve(update, context)
 
         text = sim.get_last_text()
-        assert '📥 *Draft saved in Kaizen*' in text
+        assert '📥 Draft saved in Kaizen' in text
         # Honest fallback wording — does not promise to open the draft.
         assert 'Open Kaizen and find your saved draft' in text
         assert 'Open the saved draft' not in text
@@ -2670,7 +2697,7 @@ class TestRecentPortfolioFixes:
 
         text = sim.get_last_text()
         first_line = text.split('\n', 1)[0]
-        assert '✅ *Kaizen draft saved*' in first_line, (
+        assert '✅ Kaizen draft saved' in first_line, (
             f"First line should be the 'Kaizen draft saved' header. Got: {first_line!r}"
         )
         # The subhead mentions the form was saved as a Kaizen draft so the
