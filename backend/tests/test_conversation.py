@@ -53,6 +53,27 @@ class TestKeyboardBuilding:
         for row in form_rows:
             assert len(row) <= 2, f"Row has {len(row)} buttons — expected max 2"
 
+    def test_single_strong_recommendation_keeps_manual_escape_hatch(self):
+        from bot import _build_form_choice_keyboard
+        from models import FormTypeRecommendation
+        from extractor import FORM_UUIDS
+
+        keyboard = _build_form_choice_keyboard([
+            FormTypeRecommendation(
+                form_type="QIAT",
+                rationale="Run-chart quality improvement work.",
+                uuid=FORM_UUIDS.get("QIAT"),
+            )
+        ])
+
+        button_data = [
+            button.callback_data
+            for row in keyboard.inline_keyboard
+            for button in row
+        ]
+        assert "FORM|best" in button_data
+        assert "FORM|show_all" in button_data
+
 
 class TestMessagePolicy:
     def test_policy_has_no_raw_markdown_in_plain_templates(self):

@@ -1693,6 +1693,7 @@ def _build_template_review_keyboard():
 def _build_explicit_form_keyboard(form_type: str):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(f"✅ Draft {_form_display_name(form_type)}", callback_data=f"FORM|{form_type}")],
+        [InlineKeyboardButton("📋 See all forms", callback_data="FORM|show_all")],
         [_BTN_CANCEL],
     ])
 

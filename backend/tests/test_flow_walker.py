@@ -125,9 +125,33 @@ class TestFlowWalker:
 
         assert result == AWAIT_FORM_CHOICE
         assert context.user_data['chosen_form'] == 'PROC_LOG'
-        assert any(data == 'FORM|PROC_LOG' for _, data in sim.get_last_buttons())
+        button_data = {data for _, data in sim.get_last_buttons()}
+        assert 'FORM|PROC_LOG' in button_data
+        assert 'FORM|show_all' in button_data
         recommend.assert_not_awaited()
         analyse.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_explicit_qiat_from_evidence_can_still_choose_another_form(self):
+        from bot import AWAIT_FORM_CHOICE, handle_case_input
+
+        sim = BotSimulator()
+        update = sim._make_text_update(
+            "Quality improvement assessment from a run chart: ED time-to-antibiotics improved after a sepsis huddle."
+        )
+        context = sim._make_context()
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.recommend_form_types', new_callable=AsyncMock) as recommend, \
+             patch('bot.check_can_file', new_callable=AsyncMock, return_value=(True, 0, 5, 'free')):
+            result = await handle_case_input(update, context)
+
+        assert result == AWAIT_FORM_CHOICE
+        assert context.user_data['chosen_form'] == 'QIAT'
+        button_data = {data for _, data in sim.get_last_buttons()}
+        assert 'FORM|QIAT' in button_data
+        assert 'FORM|show_all' in button_data
+        recommend.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_form_choice_shows_partial_draft_first(self, thin_draft):
