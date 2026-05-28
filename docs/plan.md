@@ -8,9 +8,11 @@ The product should accept messy doctor-language, understand intent, ask one usef
 
 ## Product Decision
 
-Keep one bot. Do not create a separate conversational bot.
+Build Portfolio Guru vNext as a separate private conversational test bot first, not a replacement for the current public bot. The public Portfolio Guru bot stays stable on its existing deterministic engine. Once vNext beats the current bot in messy dogfooding, the orchestrator may later decide whether to point the public bot identity at the new engine.
 
-Reason: a separate bot would duplicate auth, persistence, Kaizen credentials, billing, usage limits, support surface, and user memory. The better architecture is one Portfolio Guru bot with a conversational layer in front of the existing workflow engine.
+This supersedes the earlier "keep one bot" decision recorded in this file. The reason for the change: dogfooding a conversational layer directly on the live public bot would couple the experiment to billing, Kaizen credentials, supervisor flows, and user memory at the moment we most need to iterate on intent classification, source grounding, and case-vs-chat separation. Running vNext on a dedicated private token isolates that risk. Duplication of auth/persistence/Kaizen wiring is accepted as a temporary cost in exchange for safe iteration.
+
+Approved on 2026-05-28 by Moeed. Migration of the public bot identity to the new engine remains gated on dogfood proof, not a calendar date.
 
 ## Architecture
 
@@ -223,6 +225,43 @@ Verification:
 - natural case prompts create drafts without requiring command/button setup first
 - unclear cases ask one clarifying question instead of failing silently
 
+### Phase 4.5 - vNext private test-bot dogfood (added 2026-05-28)
+
+Build the conversational case engine and dogfood it inside a separate
+private Telegram bot before changing public bot behaviour.
+
+Slice 1 (offline only) — implemented:
+
+- `backend/conversational_case_engine.py` adds a pure, typed case
+  workspace/state engine with states `idle`, `possible_case`,
+  `collecting`, `clarifying`, `draft_ready`, `saving`, `abandoned`,
+  plus `new_case` started as a transition. The engine produces
+  deterministic `NextAction` tuples and never touches Telegram, LLMs,
+  Kaizen, billing, credentials, or filesystem.
+- Source-grounding primitives ride on each fact: every `CaseFact`
+  carries `source_type` (text / voice / image / document /
+  user_confirmation / system) and the `source_turn_id` that produced
+  it. Image/document facts default to stricter/unconfirmed and are
+  excluded from draft eligibility until the user explicitly confirms
+  them.
+- Side conversation flows into `chat_turns`, not `facts`. Corrections
+  override prior values as user-confirmed facts. New-case events allocate
+  a fresh `case_id` so cases stay separated.
+- `backend/conversational_vnext_bot.py` is the future entrypoint and
+  is currently a no-op. It refuses to start unless `PG_VNEXT_BOT_TOKEN`
+  is set, and refuses if that token matches any known production token
+  env var. It does not import the public bot, register handlers, or
+  hook into launchd.
+
+Slice 2+ (future, gated on dogfood):
+
+- Wire the engine into a real polling loop on the private bot token.
+- Add intent classification + fact extraction adapters (LLM-backed or
+  rule-based) that produce `IngestEvent` values from real Telegram
+  messages.
+- Compare vNext drafts against the current bot on the same messy cases
+  before discussing any public bot identity migration.
+
 ### Phase 5 - Filing command activation
 
 Allow natural filing instructions only when a draft already exists and the action is clear.
@@ -241,11 +280,11 @@ Verification:
 
 ## Non-Goals
 
-- No separate bot.
 - No rewrite of Kaizen filing.
-- No removal of buttons.
+- No removal of buttons from the public bot.
 - No free-form agent with permission to file autonomously.
-- No migration away from current Telegram bot until the router proves value.
+- No migration of the public bot identity onto the vNext engine until dogfood beats the current bot.
+- No live wiring of the vNext private test bot into launchd, the Mac Mini GitHub runner, or the public bot's Telegram token.
 
 ## Success Criteria
 

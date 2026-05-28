@@ -1,5 +1,38 @@
 # Active Task — Private Beta Launch Cut
 
+> **2026-05-28 addendum — vNext conversational test-bot slice (offline).**
+> Approved direction from Moeed: build Portfolio Guru vNext as a separate
+> private conversational test bot first, not as a replacement of the
+> current public bot. This supersedes the older "keep one bot" line in
+> `docs/plan.md`. The current public bot stays stable; the orchestrator
+> may later decide whether to migrate the public identity onto the new
+> engine, gated on dogfood proof. This slice ships the offline foundation
+> only and changes no live runtime behaviour. Added:
+> `backend/conversational_case_engine.py` — pure typed state engine
+> (`idle`, `possible_case`, `collecting`, `clarifying`, `draft_ready`,
+> `saving`, `abandoned`, plus `new_case` as a transition) that produces
+> deterministic `NextAction` tuples and never touches Telegram, LLMs,
+> Kaizen, billing, credentials, or the filesystem. Every `CaseFact`
+> carries source type (text/voice/image/document/user_confirmation/system)
+> and `source_turn_id`; image/document facts stay stricter/unconfirmed
+> and are excluded from draft eligibility until the user confirms them;
+> side conversation flows into `chat_turns`, not `facts`. Also added a
+> disabled scaffold `backend/conversational_vnext_bot.py` that refuses to
+> start unless `PG_VNEXT_BOT_TOKEN` is set and refuses if that token
+> matches any production token env var — it does not import the public
+> bot, register Telegram handlers, or hook into launchd. Reconciled
+> `docs/plan.md`: dropped the "no separate bot" non-goal and added
+> Phase 4.5 covering the engine slice and the future polling/extraction
+> work that is gated on dogfood proof. Verification: focused
+> `tests/test_conversational_case_engine.py`,
+> `tests/test_conversational_vnext_bot.py`, and existing
+> `tests/test_conversational_router.py` green at 30 passed; full offline
+> backend pytest gate green at 656 passed, 13 deselected, 43 warnings,
+> 3 snapshots passed. No live Kaizen, Telegram, launchd, deploy, or push.
+> Next step: wire intent classification + fact extraction adapters that
+> can turn real Telegram messages into `IngestEvent` values, behind the
+> private token, before any public-bot migration discussion.
+
 > **2026-05-28 addendum — QIAT stage/KC beta guardrails.**
 > Moeed's image-derived QIAT dogfood showed a generic Higher/HST profile being
 > collapsed into exact `ST4` on QIAT's year-specific dropdown, and curriculum
@@ -191,7 +224,7 @@
 
 > **2026-05-27 addendum — Kaizen header date fill regression.**
 > Moeed's saved STEMI RPL screenshot showed Kaizen's required `Date occurred
-> on` and `End date` header fields were still blank. The current slice routes
+on` and `End date` header fields were still blank. The current slice routes
 > the legacy filing path's date fields through the verified Angular-aware date
 > filler used by the deterministic path, so header dates are clicked, selected,
 > typed as `d/m/yyyy`, tabbed to trigger Kaizen watchers, and read back before
