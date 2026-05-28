@@ -1,12 +1,12 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-05-27T21:37:33+00:00
+Generated: 2026-05-28T06:35:36+00:00
 Status: ready
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
 - Branch: chore/telegram-bot-qa-discipline
-- Last commit: cf2b9ba 2026-05-27 fix: simplify draft rationale footer
+- Last commit: 3b78fff 2026-05-27 fix: harden LAT Kaizen field filling
 - Uncommitted changes: no
 
 ## Immediate read before restarting
@@ -20,6 +20,7 @@ Status: ready
 - No missing practical sections
 
 ## Recent commits
+- 3b78fff 2026-05-27 fix: harden LAT Kaizen field filling
 - cf2b9ba 2026-05-27 fix: simplify draft rationale footer
 - 60ffe09 2026-05-27 docs: record attachment beta proof
 - c4a1e90 2026-05-27 fix: use Kaizen upload chooser for attachments
@@ -27,7 +28,6 @@ Status: ready
 - 21b50d5 2026-05-27 feat(bot): implement beta-ready attachment handoff for Telegram documents
 - 25babad 2026-05-27 fix: keep kaizen descriptions concise
 - 9a93c26 2026-05-27 fix: sanitise user-visible form names
-- f7d0907 2026-05-27 fix: use public WPBA names in portfolio nudges
 
 ## Repo context snapshot
 ### AGENTS.md — present, 4 days old

@@ -1,5 +1,14 @@
 # Active Task — Private Beta Launch Cut
 
+> **2026-05-28 addendum — failed-filing intent gate.**
+> Moeed's live LAT filing failure showed the active draft stayed open after an
+> unconfirmed Kaizen save, so the next case image/text was treated as more
+> detail for the same draft. The current slice adds an explicit checkpoint for
+> failed or uncertain filing states: new input now asks whether to retry filing
+> the current draft, keep editing it, start a separate case from the new input,
+> or cancel the current draft. Verification: focused failed-filing regression
+> tests green at 3 passed; full flow-walker gate green at 141 passed.
+
 > **2026-05-27 addendum — LAT click-non-actionable filing robustness.**
 > Investigated LAT Kaizen save failure. Fixed Playwright click timeout errors on
 > `startDate`, `endDate`, `event-description`, `trainee_post`, `leadership_context`,

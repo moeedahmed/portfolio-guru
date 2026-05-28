@@ -1595,6 +1595,84 @@ class TestFlowWalker:
         assert second == ConversationHandler.END
 
     @pytest.mark.asyncio
+    async def test_failed_filing_new_text_shows_intent_gate(self, thin_draft):
+        from bot import AWAIT_APPROVAL, handle_approval_approve, handle_mid_conversation_text
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data.update({
+            'draft_data': {
+                '_type': 'FORM',
+                'form_type': thin_draft.form_type,
+                'fields': thin_draft.fields,
+                'uuid': thin_draft.uuid,
+            },
+            'case_text': 'Original LAT flow-management case',
+            'chosen_form': thin_draft.form_type,
+        })
+
+        route_filing = AsyncMock(return_value={
+            'status': 'failed',
+            'filled': [],
+            'skipped': [],
+            'method': 'deterministic',
+            'error': 'Save button not found or click failed',
+        })
+
+        with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.route_filing', new=route_filing), \
+             patch('bot.compose_filing_recovery_copy', new=AsyncMock(return_value='')):
+            first = await handle_approval_approve(sim._make_callback_update('APPROVE|draft'), context)
+
+        assert first == AWAIT_APPROVAL
+
+        new_case_text = 'New case: paediatric asthma review with escalation to HDU.'
+        result = await handle_mid_conversation_text(sim._make_text_update(new_case_text), context)
+
+        assert result == AWAIT_APPROVAL
+        assert route_filing.await_count == 1
+        assert context.user_data['pending_new_case_text'] == new_case_text
+        text = (sim.get_last_text() or '').lower()
+        assert 'kept that draft open' in text
+        buttons = sim.get_last_buttons()
+        assert ('🔄 Retry filing this draft', 'ACTION|retry_filing') in buttons
+        assert ('✏️ Keep editing this draft', 'CASE|improve') in buttons
+        assert ('📋 Start new case', 'CASE|new') in buttons
+        assert ('❌ Cancel current draft', 'ACTION|cancel') in buttons
+
+    @pytest.mark.asyncio
+    async def test_failed_filing_start_new_choice_processes_pending_text(self, thin_draft):
+        from bot import AWAIT_APPROVAL, AWAIT_FORM_CHOICE, handle_callback, handle_mid_conversation_text
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data.update({
+            'draft_data': {
+                '_type': 'FORM',
+                'form_type': thin_draft.form_type,
+                'fields': thin_draft.fields,
+                'uuid': thin_draft.uuid,
+            },
+            'case_text': 'Original failed case',
+            'chosen_form': thin_draft.form_type,
+            'last_filing_status': 'failed',
+            'last_filing_form_name': 'Leadership Assessment Tool',
+        })
+
+        new_case_text = 'New case: paediatric asthma review with escalation to HDU.'
+        gate_result = await handle_mid_conversation_text(sim._make_text_update(new_case_text), context)
+
+        assert gate_result == AWAIT_APPROVAL
+
+        with patch('bot._process_case_text', new=AsyncMock(return_value=AWAIT_FORM_CHOICE)) as process_case:
+            result = await handle_callback(sim._make_callback_update('CASE|new'), context)
+
+        assert result == AWAIT_FORM_CHOICE
+        process_case.assert_awaited_once()
+        assert process_case.await_args.args[3] == new_case_text
+        assert context.user_data.get('draft_data') is None
+
+    @pytest.mark.asyncio
     async def test_global_try_again_button_can_retry_after_conversation_end(self, thin_draft):
         from bot import handle_action_button
 

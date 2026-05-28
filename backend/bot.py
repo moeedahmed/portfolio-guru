@@ -1740,6 +1740,45 @@ def _build_amend_new_case_choice_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def _has_retryable_failed_filing_draft(context) -> bool:
+    """True when a failed/uncertain filing left a draft active for retry."""
+    if context.user_data.get("last_filing_status") not in {"failed", "partial"}:
+        return False
+    return bool(_load_draft(context) or _restore_retryable_draft(context))
+
+
+def _build_failed_filing_input_gate_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Retry filing this draft", callback_data="ACTION|retry_filing")],
+        [InlineKeyboardButton("✏️ Keep editing this draft", callback_data="CASE|improve")],
+        [InlineKeyboardButton("📋 Start new case", callback_data="CASE|new")],
+        [InlineKeyboardButton("❌ Cancel current draft", callback_data="ACTION|cancel")],
+    ])
+
+
+async def _show_failed_filing_input_gate(
+    target,
+    context,
+    incoming_text: str,
+    *,
+    edit: bool = False,
+) -> int:
+    """Ask whether new input after a failed filing is retry/edit/new/cancel."""
+    context.user_data["pending_new_case_text"] = (incoming_text or "").strip()
+    form_name = context.user_data.get("last_filing_form_name") or _form_display_name(context.user_data.get("chosen_form", ""))
+    form_line = f" for the {form_name}" if form_name else ""
+    prompt_text = (
+        f"The Kaizen save did not complete{form_line}, so I have kept that draft open.\n\n"
+        "Do you want this new information to update the same draft, or should I start a separate case?"
+    )
+    markup = _build_failed_filing_input_gate_keyboard()
+    if edit:
+        await target.edit_text(prompt_text, reply_markup=markup)
+    else:
+        await target.reply_text(prompt_text, reply_markup=markup)
+    return AWAIT_APPROVAL
+
+
 def _looks_like_explicit_new_case_request(text: str) -> bool:
     lowered = (text or "").strip().lower()
     if not lowered:
@@ -5020,6 +5059,14 @@ async def handle_approval_media_feedback(update: Update, context: ContextTypes.D
         await msg.reply_text("Send text, voice, image, or a document with the extra detail.")
         return AWAIT_APPROVAL
 
+    if _has_retryable_failed_filing_draft(context):
+        return await _show_failed_filing_input_gate(
+            ack,
+            context,
+            extracted_text or "",
+            edit=True,
+        )
+
     return await _regenerate_active_draft_with_feedback(
         update,
         context,
@@ -6831,6 +6878,16 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
     if _is_text_filing_approval(raw_text):
         if _load_draft(context) or _restore_retryable_draft(context):
             return await handle_approval_approve(update, context)
+
+    if (
+        _has_retryable_failed_filing_draft(context)
+        and not _is_recent_filing_status_question(raw_text)
+    ):
+        return await _show_failed_filing_input_gate(
+            update.message,
+            context,
+            raw_text,
+        )
 
     try:
         intent = await classify_intent(raw_text, case_context=case_text)
