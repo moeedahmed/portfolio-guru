@@ -83,6 +83,22 @@ SLO12: Lead & Manage (2025 Update)
   KC6: demonstrate a positive impact on the culture of the Emergency Department through attitudes and behaviours that impact positively on colleagues, patients and their relatives (2025 Update)
 """
 
+KC_FULL_TEXT = {
+    "SLO11 KC1": (
+        "SLO11 KC1: be able to provide clinical leadership on effective "
+        "Quality Improvement work (2025 Update)"
+    ),
+    "SLO11 KC2": (
+        "SLO11 KC2: be able to support and develop a culture of departmental "
+        "safety, and good clinical governance (2025 Update)"
+    ),
+    "SLO12 KC2": (
+        "SLO12 KC2: be able to investigate a patient safety incident, "
+        "participate and contribute effectively to department clinical "
+        "governance activities and risk reduction processes (2025 Update)"
+    ),
+}
+
 _client = None
 
 # Extraction model policy:
@@ -1688,6 +1704,112 @@ def _normalise_dropdown_field(value, options: list, leave_missing_blank: bool):
     return "" if leave_missing_blank else (options[0] if options else "")
 
 
+def _kc_code_prefix(kc_string: str) -> str:
+    head = str(kc_string or "").split(":", 1)[0]
+    return "".join(head.lower().split())
+
+
+def _derive_curriculum_links_from_kcs(kcs: List[str]) -> list[str]:
+    links: list[str] = []
+    seen: set[str] = set()
+    for kc in kcs or []:
+        match = re.search(r"SLO\s*(\d+)", str(kc), flags=re.IGNORECASE)
+        if not match:
+            continue
+        code = f"SLO{int(match.group(1))}"
+        if code not in seen:
+            links.append(code)
+            seen.add(code)
+    return links
+
+
+def _source_supports_qi_curriculum(case_description: str, schema_key: str) -> bool:
+    text = (case_description or "").lower()
+    qi_terms = (
+        "qiat", "quality improvement", " qi ", "qi project", "run chart",
+        "run-chart", "audit", "pdsa", "quality and safety", "patient safety",
+        "clinical governance", "governance",
+    )
+    return schema_key == "QIAT" or any(term in f" {text} " for term in qi_terms)
+
+
+def _supplement_supported_key_capabilities(
+    fields: dict,
+    *,
+    case_description: str,
+    schema_key: str,
+    has_kc_tick: bool,
+) -> dict:
+    """Add narrow, source-tied KCs when a curriculum form under-tags a draft."""
+    if not has_kc_tick:
+        return fields
+
+    existing = _normalise_list_field(fields.get("key_capabilities"))
+    if len(existing) >= 3:
+        fields["curriculum_links"] = _derive_curriculum_links_from_kcs(existing)
+        return fields
+
+    supplemented = list(existing)
+    present_prefixes = {_kc_code_prefix(kc) for kc in existing}
+
+    if _source_supports_qi_curriculum(case_description, schema_key):
+        for code in ("SLO11 KC1", "SLO11 KC2", "SLO12 KC2"):
+            full_text = KC_FULL_TEXT[code]
+            prefix = _kc_code_prefix(full_text)
+            if prefix in present_prefixes:
+                continue
+            supplemented.append(full_text)
+            present_prefixes.add(prefix)
+
+    if supplemented != existing:
+        fields["key_capabilities"] = supplemented
+    if supplemented:
+        fields["curriculum_links"] = _derive_curriculum_links_from_kcs(supplemented)
+    return fields
+
+
+def _dropdown_uses_exact_training_years(options: list[str]) -> bool:
+    return any(re.fullmatch(r"(?:ST|CT)\d+(?:/CT\d+)?", str(option)) for option in options or [])
+
+
+def _exact_training_year_mentioned(source_text: str, value: str) -> bool:
+    match = re.search(r"(ST|CT)(\d+)", str(value or ""), flags=re.IGNORECASE)
+    if not match:
+        return False
+    prefix, year = match.group(1).upper(), match.group(2)
+    source = source_text or ""
+    exact_patterns = [
+        rf"\b{prefix}\s*{year}\b",
+        rf"\b{prefix}-{year}\b",
+    ]
+    if prefix == "ST":
+        exact_patterns.extend([
+            rf"\bstage\s*{year}\b",
+            rf"\bspecialty\s+trainee\s*{year}\b",
+        ])
+    return any(re.search(pattern, source, flags=re.IGNORECASE) for pattern in exact_patterns)
+
+
+def _guard_unsourced_exact_training_stage(fields: dict, schema: dict, source_text: str) -> dict:
+    stage_field = next(
+        (field for field in schema.get("fields", []) if field.get("key") == "stage_of_training"),
+        None,
+    )
+    if not stage_field:
+        return fields
+    options = stage_field.get("options") or []
+    if not _dropdown_uses_exact_training_years(options):
+        return fields
+    value = str(fields.get("stage_of_training") or "").strip()
+    if not value or not re.search(r"\b(?:ST|CT)\d+", value, flags=re.IGNORECASE):
+        return fields
+    if _exact_training_year_mentioned(source_text, value):
+        return fields
+    guarded = dict(fields)
+    guarded["stage_of_training"] = ""
+    return guarded
+
+
 _IMAGE_EXTRACTOR_GUARD = """
 ===== IMAGE-DERIVED INPUT GUARD (NON-NEGOTIABLE) =====
 The case description below was extracted from a photo/screenshot — it
@@ -2254,6 +2376,14 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
             derived = derive_dops_curriculum_links(augmented)
             merged = list(dict.fromkeys(list(existing_links) + derived))
             normalised["curriculum_links"] = merged
+
+    normalised = _guard_unsourced_exact_training_stage(normalised, schema, case_description)
+    normalised = _supplement_supported_key_capabilities(
+        normalised,
+        case_description=case_description,
+        schema_key=schema_key,
+        has_kc_tick=has_kc_tick,
+    )
 
     # Apply humanizer to ALL narrative fields before user sees the draft
     normalised = _humanize_all_fields(normalised)

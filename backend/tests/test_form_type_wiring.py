@@ -92,6 +92,18 @@ def test_2021_manual_category_picker_shows_esle_2021_callback():
     assert "FORM|ESLE_ASSESS" not in callbacks
 
 
+def test_generic_higher_profile_does_not_fill_qiat_exact_training_year():
+    from bot import _format_curriculum_hierarchy, _stage_value_from_training_level
+
+    assert _stage_value_from_training_level("HIGHER", "QIAT") == ""
+    assert _stage_value_from_training_level("ST5", "QIAT") == "ST5"
+    assert _stage_value_from_training_level("HIGHER", "DOPS") == "Higher/ST4-ST6"
+
+    labels = _format_curriculum_hierarchy(["SLO10", "SLO11"], [])
+    assert "SLO10 — Research" in labels
+    assert "SLO11 — Quality improvement & safety" in labels
+
+
 @pytest.mark.asyncio
 async def test_filer_router_uses_deterministic_esle_assessed_alias():
     from filer_router import route_filing
@@ -229,6 +241,42 @@ async def test_mini_cex_extracts_from_same_case_text_without_live_model_call():
     assert draft.uuid == FORM_UUIDS["MINI_CEX"]
     assert draft.fields["clinical_setting"] == "Emergency Department"
     assert draft.fields["reflection"]
+
+
+@pytest.mark.asyncio
+async def test_qiat_blanks_unsourced_training_year_and_supplements_qi_kcs():
+    from extractor import extract_form_data
+
+    payload = {
+        "date_of_encounter": "2026-05-21",
+        "stage_of_training": "ST4",
+        "placement": "Emergency Department",
+        "pdp_summary": "Quality improvement project reviewing ED run chart data.",
+        "qi_engagement": "I participated in audit and run-chart review.",
+        "qi_understanding": "I learned how measurement links to safer systems.",
+        "involved_in_project": "Yes",
+        "qi_journey_aspects": ["Measurement"],
+        "reflection": "HST-level quality improvement work using run charts.",
+        "next_pdp": "Continue measurement and governance learning.",
+        "curriculum_links": ["SLO11"],
+        "key_capabilities": [
+            "SLO11 KC1: be able to provide clinical leadership on effective Quality Improvement work (2025 Update)",
+            "SLO11 KC2: be able to support and develop a culture of departmental safety, and good clinical governance (2025 Update)",
+        ],
+    }
+
+    source = (
+        "HST trainee quality improvement project using audit data and a run chart "
+        "to improve departmental safety. No exact ST year was stated."
+    )
+
+    with patch("extractor._generate", new=AsyncMock(return_value=json.dumps(payload))):
+        draft = await extract_form_data(source, "QIAT", input_source="image")
+
+    assert draft.fields["stage_of_training"] == ""
+    assert len(draft.fields["key_capabilities"]) >= 3
+    assert any(kc.startswith("SLO12 KC2:") for kc in draft.fields["key_capabilities"])
+    assert draft.fields["curriculum_links"] == ["SLO11", "SLO12"]
 
 
 @pytest.mark.asyncio

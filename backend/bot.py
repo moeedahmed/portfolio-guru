@@ -1147,10 +1147,8 @@ def _stage_value_from_training_level(level: str | None, form_type: str) -> str:
 
     if normalised in options:
         return normalised
-    if normalised == "HIGHER":
-        return "ST4" if "ST4" in options else ""
     if normalised == "INTERMEDIATE":
-        return "ST3" if "ST3" in options else ""
+        return "ST3/CT3" if "ST3/CT3" in options else ""
     if normalised == "ACCS":
         return "ST1/CT1" if "ST1/CT1" in options else ""
     return ""
@@ -2485,7 +2483,8 @@ def _format_curriculum_hierarchy(curriculum_links, key_capabilities) -> str:
             "SLO8": "SLO8 — Lead the ED shift",
             "SLO9_TEACH": "SLO9 — Teaching & supervision",
             "SLO9_RESEARCH": "SLO9 — Research",
-            "SLO10": "SLO10 — Quality improvement",
+            "SLO10": "SLO10 — Research",
+            "SLO11": "SLO11 — Quality improvement & safety",
             "SLO12": "SLO12 — Lead & manage",
         }
         return labels.get(slo.upper(), slo.replace("_", " "))

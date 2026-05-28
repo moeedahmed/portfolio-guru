@@ -1,5 +1,16 @@
 # Active Task — Private Beta Launch Cut
 
+> **2026-05-28 addendum — QIAT stage/KC beta guardrails.**
+> Moeed's image-derived QIAT dogfood showed a generic Higher/HST profile being
+> collapsed into exact `ST4` on QIAT's year-specific dropdown, and curriculum
+> tags under-shooting the beta requirement for substantive filings. The current
+> slice stops generic Higher from filling exact-year schemas, blanks LLM-supplied
+> exact training years unless the source names that year, deterministically
+> supplements QI/QIAT/run-chart/audit drafts to at least three source-tied KCs
+> (`SLO11 KC1`, `SLO11 KC2`, `SLO12 KC2`), derives SLO links from selected KCs,
+> and corrects SLO10/SLO11 display labels. Verification: focused form wiring,
+> conversation/snapshot checks, and the full offline backend gate are green.
+
 > **2026-05-28 addendum — failed-filing intent gate.**
 > Moeed's live LAT filing failure showed the active draft stayed open after an
 > unconfirmed Kaizen save, so the next case image/text was treated as more
