@@ -335,12 +335,28 @@ Slice 5 (richer extraction + draft-readiness) — implemented 2026-05-29:
   activated, consultant supervised, learned to escalate early" → 8 facts →
   DRAFT_READY in one message; all tests green.
 
-Slice 6+ (future, gated on live dogfood):
+Slice 6 (form-type recommendation + local preview) — implemented 2026-05-29:
+
+- `backend/vnext_form_recommender.py` — pure deterministic rules from fact
+  keys/values. Returns `FormRecommendation(form_type, confidence, reason)` or
+  `InsufficientFacts(missing_prompt)`. No LLM, no network. Rule priority:
+  POCUS → US_CASE; trainee skill + supervisor → DOPS; trainee skill alone →
+  PROC_LOG; management-pathway procedure (cath lab / thrombolysis / surgical
+  review) defers to CBD rules; setting + diagnosis → CBD (high); setting +
+  complaint → CBD (medium); pure learning point → REFLECT_LOG; else →
+  InsufficientFacts with targeted prompt.
+- `backend/vnext_draft_preview.py` — source-tied local preview builder.
+  Shows facts section (verbatim), narrative outline (fact values only, no
+  fabrication), recommendation with reason. Always marked "not a Kaizen draft"
+  with dogfood footer.
+- `vnext_runner._build_reply` wired to call both at OFFER_DRAFT.
+- 51 new focused tests (26 recommender + 25 preview); focused private-vNext
+  gate green at 142 passed; full offline gate green at 810 passed.
+
+Slice 7+ (future, gated on live dogfood):
 
 - Dogfood the live private bot using `scripts/run_vnext_local.sh` and verify
-  DRAFT_READY is reached on realistic messy clinical cases.
-- Layer form-type recommendation and local preview generation (a simple
-  summary from captured facts, not a Kaizen draft).
+  DRAFT_READY + form recommendation on realistic messy clinical cases.
 - Compare vNext dogfood output against the current public bot on the same
   messy cases before any public bot identity migration discussion.
 

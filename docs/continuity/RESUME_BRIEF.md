@@ -7,25 +7,24 @@ Status: current
 
 - Repo: /Users/moeedahmed/projects/portfolio-guru
 - Branch: chore/telegram-bot-qa-discipline
-- Last commit: 0d04468 2026-05-28 feat: run private vNext Telegram bot
+- Last commit: c8fe80c 2026-05-29 feat: add vNext source-tied clinical extraction
 - Uncommitted changes: yes (this slice — not yet committed; see TASK.md addendum)
 
 ## Latest vNext slice (2026-05-29)
 
-Extended `vnext_text_extractor.py` with 6 new verbatim extractors (setting,
-presenting_complaint, diagnosis, procedure, supervision, learning_point).
-Added `_is_draft_ready()` to the engine (≥3 eligible facts + ≥1 clinical key →
-DRAFT_READY). The acceptance-criteria STEMI case now produces 8 facts and reaches
-DRAFT_READY in a single message. Full offline gate: 765 passed, 0 failed.
+Added deterministic form recommendation and local preview helpers for the
+private vNext bot. `vnext_form_recommender.py` recommends CBD/DOPS/PROC_LOG/
+US_CASE/REFLECT_LOG only from captured source-tied facts, or returns a targeted
+missing-detail prompt. `vnext_draft_preview.py` builds a local dogfood preview
+marked as not a Kaizen draft. `vnext_runner.py` now includes that preview on
+OFFER_DRAFT. Public bot and Kaizen filing remain untouched.
 
 ## Next step
 
-- Commit this slice (files: vnext_text_extractor.py, conversational_case_engine.py,
-  vnext_runner.py, test_vnext_text_extractor.py, test_conversational_case_engine.py,
-  test_telegram_vnext_adapter.py, test_conversational_vnext_bot.py, TASK.md,
-  docs/plan.md, docs/continuity/RESUME_BRIEF.md).
-- Dogfood the live private bot using `scripts/run_vnext_local.sh`.
-- Next feature: form-type recommendation and local preview from captured facts.
+- Verify and commit this slice.
+- Restart the live private bot after verification.
+- Dogfood the live private bot on realistic messy cases and compare against the
+  current public bot before any public identity migration discussion.
 
 ## Immediate read before restarting
 
@@ -45,6 +44,7 @@ DRAFT_READY in a single message. Full offline gate: 765 passed, 0 failed.
 
 ## Recent commits
 
+- c8fe80c 2026-05-29 feat: add vNext source-tied clinical extraction
 - 0d04468 2026-05-28 feat: run private vNext Telegram bot
 - 75a9fa5 2026-05-28 feat: add conservative vNext text fact extractor
 - b14c37d 2026-05-28 feat: add vNext Telegram→engine adapter
@@ -57,6 +57,10 @@ DRAFT_READY in a single message. Full offline gate: 765 passed, 0 failed.
 ## Uncommitted change summary
 
 - ?? .openclaw/
+- ?? backend/tests/test_vnext_draft_preview.py
+- ?? backend/tests/test_vnext_form_recommender.py
+- ?? backend/vnext_draft_preview.py
+- ?? backend/vnext_form_recommender.py
 - ?? HEARTBEAT.md
 - ?? IDENTITY.md
 - ?? SOUL.md

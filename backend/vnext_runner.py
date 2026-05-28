@@ -19,7 +19,7 @@ Safety
 ------
 This module never imports ``backend/bot.py``, never touches Kaizen,
 credentials, billing, launchd, or the public bot token. Workspaces are
-in-memory and scoped to a single process lifetime — suitable for dogfood
+in-memory and scoped to a single process lifetime - suitable for dogfood
 only, not for production state.
 """
 
@@ -50,6 +50,8 @@ from conversational_vnext_bot import (
     guard_token_separation,
     is_enabled,
 )
+from vnext_draft_preview import build_draft_preview
+from vnext_form_recommender import recommend
 
 log = logging.getLogger("portfolio_guru.vnext.runner")
 
@@ -67,9 +69,9 @@ _workspaces: dict[int, CaseWorkspace] = {}
 _INTRO = (
     "Private vNext test bot\n\n"
     "Send a clinical case description and I'll run it through the conversational "
-    "case engine. Kaizen filing is not wired in this slice — dogfood only.\n\n"
-    "/start — reset workspace\n"
-    "/reset — clear workspace"
+    "case engine. Kaizen filing is not wired in this slice - dogfood only.\n\n"
+    "/start - reset workspace\n"
+    "/reset - clear workspace"
 )
 
 
@@ -147,12 +149,9 @@ def _build_reply(snapshot: EngineSnapshot) -> str:
             )
         elif action.kind is ActionKind.OFFER_DRAFT:
             n = action.payload.get("eligible_facts", "?")
-            fact_lines = "\n".join(f"  {f.key}: {f.value}" for f in eligible)
-            parts.append(
-                f"Draft ready — {n} source-tied facts captured:\n"
-                f"{fact_lines}\n"
-                "Kaizen filing not wired — dogfood only."
-            )
+            rec = recommend(eligible)
+            preview = build_draft_preview(eligible, rec)
+            parts.append(f"Draft ready - {n} source-tied facts captured.\n\n{preview}")
         elif action.kind is ActionKind.DRAFT_NOT_READY:
             reason = action.payload.get("reason", "unknown")
             parts.append(
@@ -170,7 +169,7 @@ def _build_reply(snapshot: EngineSnapshot) -> str:
             parts.append("Case abandoned. Use /reset to start fresh.")
         elif action.kind is ActionKind.REQUEST_FACT_CONFIRMATION:
             parts.append(
-                f"Strict-source facts present (state: {state}) — "
+                f"Strict-source facts present (state: {state}) - "
                 "image/document facts need user confirmation before draft."
             )
         elif action.kind is ActionKind.REQUEST_CLARIFICATION:
@@ -203,7 +202,7 @@ def main() -> int:
 
     if not is_enabled():
         print(
-            f"[vNext runner] disabled — set {VNEXT_TOKEN_ENV} to a separate "
+            f"[vNext runner] disabled - set {VNEXT_TOKEN_ENV} to a separate "
             "private bot token to enable.",
             file=sys.stderr,
         )

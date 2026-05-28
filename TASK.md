@@ -1,5 +1,37 @@
 # Active Task — Private Beta Launch Cut
 
+> **2026-05-29 addendum — vNext form-type recommendation + local preview slice.**
+> Added two new pure helper modules behind the private vNext bot.
+> `backend/vnext_form_recommender.py` implements a deterministic rule-based
+> form recommender that takes `CaseFact` tuples and returns a `FormRecommendation`
+> (form_type, confidence, reason) or `InsufficientFacts` (with a specific
+> clarifying prompt). No LLM, no network, no Kaizen touch. Rules cover:
+> POCUS/FAST scan → US_CASE (high); named trainee skill procedure (RSI/chest drain/
+> LP/nerve block/CVC/cardioversion/procedural sedation) + supervisor → DOPS (medium);
+> same without supervisor → PROC_LOG (medium); management-pathway procedures (cath lab/
+> thrombolysis/surgical review) are not trainee skills — setting+diagnosis takes
+> priority → CBD; setting + diagnosis → CBD (high); setting + complaint only → CBD
+> (medium); pure learning_point without clinical context → REFLECT_LOG (medium);
+> insufficient signals → InsufficientFacts with a targeted prompt.
+> `backend/vnext_draft_preview.py` builds a local source-tied dogfood preview from
+> draft-eligible facts: facts section (verbatim key/value), narrative outline (values
+> only — no fabrication), form recommendation with reason, and a "not a Kaizen draft"
+> / dogfood marker. `vnext_runner._build_reply` now calls both at OFFER_DRAFT so
+> dogfood replies show a structured preview with recommendation rather than a raw
+> fact list. All existing safety invariants preserved: side questions do not pollute
+> facts, save requests produce DRAFT_NOT_READY, Kaizen filing remains not wired.
+> Acceptance-criteria case: "62M chest pain in ED, STEMI on ECG, cath lab activated,
+> consultant supervised, learned to escalate early" → DRAFT_READY in one turn →
+> preview shows CBD (high confidence) with reason "ED case with STEMI — clinical
+> management without standalone trainee procedure skill". Verification: focused
+> vNext gate (including test_vnext_form_recommender 26 new,
+> test_vnext_draft_preview 25 new, and existing private-vNext suites) green at
+> 142 passed; full offline backend gate
+> green at 810 passed, 13 deselected, 43 warnings, 3 snapshots passed. No live
+> Telegram, Kaizen, launchd, deploy, or public-bot change. Next step: dogfood the
+> private bot live on realistic messy cases; compare CBD/DOPS/PROC_LOG recommendations
+> against production bot output before any public-bot identity migration discussion.
+
 > **2026-05-29 addendum — vNext richer source-tied extraction + draft-readiness slice.**
 > Extended `backend/vnext_text_extractor.py` with six new verbatim-from-source
 > extractors: `setting` (ED/ICU/resus/HDU/CCU/…), `presenting_complaint` (chest pain,
