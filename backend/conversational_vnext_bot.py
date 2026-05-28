@@ -25,6 +25,10 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from typing import Any, Callable
+
+from conversational_case_engine import CaseWorkspace, EngineSnapshot, apply_event
+from telegram_vnext_adapter import event_from_telegram_message
 
 VNEXT_TOKEN_ENV = "PG_VNEXT_BOT_TOKEN"
 
@@ -64,6 +68,38 @@ def guard_token_separation(
                 "test bot must use a separate Telegram token."
             )
     return None
+
+
+VNextHandler = Callable[[CaseWorkspace, Any], EngineSnapshot]
+
+
+def build_handler(
+    env: "os._Environ[str] | dict[str, str] | None" = None,
+) -> VNextHandler | None:
+    """Return the conversational case handler if vNext is safely enabled.
+
+    The handler is a stateless ``(workspace, telegram_message) -> EngineSnapshot``
+    callable that runs the message through :func:`event_from_telegram_message`
+    and applies the resulting event to the case engine. It never imports
+    ``python-telegram-bot``, opens credentials, or performs I/O.
+
+    Returns ``None`` when vNext is disabled (no token), when the token
+    collides with any known production env var, or when the token is
+    blank — mirroring :func:`main`'s refusal contract so the private
+    bot can never silently degrade into the public bot's identity.
+    """
+
+    source = os.environ if env is None else env
+    if not is_enabled(source):
+        return None
+    if guard_token_separation(source) is not None:
+        return None
+
+    def _handle(workspace: CaseWorkspace, message: Any) -> EngineSnapshot:
+        event = event_from_telegram_message(message)
+        return apply_event(workspace, event)
+
+    return _handle
 
 
 def main(argv: list[str] | None = None) -> int:

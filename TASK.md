@@ -1,5 +1,38 @@
 # Active Task — Private Beta Launch Cut
 
+> **2026-05-28 addendum — vNext Telegram→engine adapter slice (offline).**
+> Built the next vNext private-bot slice on top of the engine scaffold from
+> commit `5d7425b`. Added `backend/telegram_vnext_adapter.py`, a pure
+> conversion layer that turns Telegram-shaped messages (text, voice/audio,
+> photo, document) into `conversational_case_engine.IngestEvent` values
+> without invoking vision/whisper/document extractors, network calls, or any
+> LLM. Text preserves the user's raw wording and routes through
+> `conversational_router` to choose between `POSSIBLE_CASE_DETAIL`,
+> `REQUEST_SAVE`, and `SIDE_QUESTION` — never inventing facts. Voice/audio
+> emits `SourceType.VOICE` with no extracted facts and is treated as a
+> chat-turn until transcription is wired in a later slice. Image and
+> supported documents (`.pdf`, `.pptx`, `.docx`, `.doc`, `.txt`, `.md`,
+> `.rtf`) emit stricter `SourceType.IMAGE`/`SourceType.DOCUMENT` with empty
+> facts, so the engine asks for user confirmation before drafting and never
+> exposes draft-eligible facts. Unsupported documents fall through as
+> `SIDE_QUESTION` so the engine stays calm. `backend/conversational_vnext_bot.py`
+> now exposes a `build_handler()` factory that returns a stateless
+> `(workspace, message) -> EngineSnapshot` callable when
+> `PG_VNEXT_BOT_TOKEN` is set and the production-token guard is clean, and
+> `None` otherwise — the module still does not import
+> `python-telegram-bot`, register handlers, hook into launchd, or perform
+> any I/O. Verification: focused vNext gate
+> (`tests/test_conversational_case_engine.py`,
+> `tests/test_conversational_vnext_bot.py`,
+> `tests/test_telegram_vnext_adapter.py`,
+> `tests/test_conversational_router.py`) green at 65 passed;
+> full offline backend gate green at 691 passed, 13 deselected,
+> 43 warnings, 3 snapshots passed. No live Telegram, Kaizen, launchd,
+> deploy, or push. Next step: wire a real polling loop on the private
+> `PG_VNEXT_BOT_TOKEN` and plug in LLM/rule-based fact extraction so the
+> engine can move past `POSSIBLE_CASE`, still behind the private-token
+> boundary, before any public-bot migration discussion.
+
 > **2026-05-28 addendum — vNext conversational test-bot slice (offline).**
 > Approved direction from Moeed: build Portfolio Guru vNext as a separate
 > private conversational test bot first, not as a replacement of the

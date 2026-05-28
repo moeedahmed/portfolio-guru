@@ -253,12 +253,38 @@ Slice 1 (offline only) — implemented:
   env var. It does not import the public bot, register handlers, or
   hook into launchd.
 
-Slice 2+ (future, gated on dogfood):
+Slice 2 (offline adapter layer) — implemented:
 
-- Wire the engine into a real polling loop on the private bot token.
-- Add intent classification + fact extraction adapters (LLM-backed or
-  rule-based) that produce `IngestEvent` values from real Telegram
-  messages.
+- `backend/telegram_vnext_adapter.py` adds a pure
+  `event_from_telegram_message` conversion layer that turns Telegram-
+  shaped messages into `IngestEvent` values for the engine without
+  invoking vision/whisper/document extractors, network calls, or any
+  LLM. Text routes through `conversational_router` into
+  `POSSIBLE_CASE_DETAIL`, `REQUEST_SAVE`, or `SIDE_QUESTION` while
+  preserving the user's raw wording with `extracted_facts == ()`.
+- Voice and audio emit `SourceType.VOICE` with no facts and are
+  treated as chat-only until transcription is wired in a later slice.
+  Image and supported documents (`.pdf`, `.pptx`, `.docx`, `.doc`,
+  `.txt`, `.md`, `.rtf`) emit stricter `SourceType.IMAGE` /
+  `SourceType.DOCUMENT` with empty facts, so the engine asks for user
+  confirmation before drafting and never exposes draft-eligible facts.
+  Unsupported documents fall through to `SIDE_QUESTION` so the engine
+  stays calm and the orchestrator can ask for a clearer file.
+- `backend/conversational_vnext_bot.py` now exposes a `build_handler()`
+  factory. It returns a stateless
+  `(workspace, telegram_message) -> EngineSnapshot` callable when
+  `PG_VNEXT_BOT_TOKEN` is set and the production-token guard is clean,
+  and `None` otherwise. The module still does not import
+  `python-telegram-bot`, register handlers, hook into launchd, or
+  perform any I/O.
+
+Slice 3+ (future, gated on dogfood):
+
+- Wire `build_handler` into a real polling loop on the private bot token.
+- Plug in LLM-backed or rule-based fact extraction so the engine can
+  move past `POSSIBLE_CASE` and produce real drafts. Stricter sources
+  (image/document) must remain unconfirmed until the user explicitly
+  confirms the extracted facts.
 - Compare vNext drafts against the current bot on the same messy cases
   before discussing any public bot identity migration.
 
