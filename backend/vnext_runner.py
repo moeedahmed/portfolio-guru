@@ -51,6 +51,11 @@ from conversational_vnext_bot import (
     is_enabled,
 )
 from vnext_draft_preview import build_draft_preview
+from vnext_dialogue_policy import (
+    collecting_reply,
+    is_completion_request,
+    not_ready_reply,
+)
 from vnext_form_recommender import recommend
 
 log = logging.getLogger("portfolio_guru.vnext.runner")
@@ -68,8 +73,9 @@ _workspaces: dict[int, CaseWorkspace] = {}
 
 _INTRO = (
     "Private vNext test bot\n\n"
-    "Send a clinical case description and I'll run it through the conversational "
-    "case engine. Kaizen filing is not wired in this slice - dogfood only.\n\n"
+    "Tell me the case in your own words. Add details over multiple messages. "
+    "When you're done, say 'done' and I'll recommend the form and show a "
+    "preview. Kaizen filing is not wired in this slice - dogfood only.\n\n"
     "/start - reset workspace\n"
     "/reset - clear workspace"
 )
@@ -119,13 +125,17 @@ async def handle_message(
     workspace = _get_workspace(chat_id)
     snapshot: EngineSnapshot = handler(workspace, update.message)
     _workspaces[chat_id] = snapshot.workspace
-    await update.message.reply_text(_build_reply(snapshot))
+    completion_requested = is_completion_request(_message_text(update.message))
+    await update.message.reply_text(
+        _build_reply(snapshot, completion_requested=completion_requested)
+    )
 
 
-def _build_reply(snapshot: EngineSnapshot) -> str:
+def _build_reply(
+    snapshot: EngineSnapshot, *, completion_requested: bool = False
+) -> str:
     """Translate engine NextAction tuples into short dogfood-safe reply text."""
     parts: list[str] = []
-    state = snapshot.workspace.state.value
     eligible = snapshot.workspace.draft_eligible_facts()
 
     for action in snapshot.actions:
@@ -135,51 +145,52 @@ def _build_reply(snapshot: EngineSnapshot) -> str:
                 "Use /reset to start a new case."
             )
         elif action.kind is ActionKind.REQUEST_CASE_CONFIRMATION:
-            fact_lines = "\n".join(f"  {f.key}: {f.value}" for f in snapshot.workspace.facts)
-            parts.append(
-                f"Case signal detected (state: {state}).\n"
-                f"Facts so far:\n{fact_lines or '  (none)'}\n"
-                "Keep adding detail or /reset."
-            )
+            parts.append(collecting_reply(snapshot.workspace))
         elif action.kind is ActionKind.ACK_CASE_DETAILS:
-            fact_lines = "\n".join(f"  {f.key}: {f.value}" for f in eligible)
-            parts.append(
-                f"Case updated (state: {state}).\n"
-                f"Captured facts:\n{fact_lines or '  (none)'}"
-            )
+            parts.append(collecting_reply(snapshot.workspace))
         elif action.kind is ActionKind.OFFER_DRAFT:
+            if not completion_requested:
+                parts.append(collecting_reply(snapshot.workspace))
+                continue
             n = action.payload.get("eligible_facts", "?")
             rec = recommend(eligible)
             preview = build_draft_preview(eligible, rec)
             parts.append(f"Draft ready - {n} source-tied facts captured.\n\n{preview}")
         elif action.kind is ActionKind.DRAFT_NOT_READY:
-            reason = action.payload.get("reason", "unknown")
-            parts.append(
-                f"Not ready to draft ({reason}, state: {state}). "
-                "Keep adding case details."
-            )
+            parts.append(not_ready_reply(snapshot.workspace))
         elif action.kind is ActionKind.ANSWER_CHAT:
             parts.append(
-                f"[Side conversation, state: {state}] "
-                "Send a clinical case description to test the engine."
+                "I can help with portfolio questions, but this private bot is mainly "
+                "testing case capture right now. Keep adding case details, or say "
+                "'done' when you want the form recommendation and preview."
             )
         elif action.kind is ActionKind.START_NEW_CASE:
-            parts.append(f"New case started (state: {state}).")
+            parts.append("New case started. Tell me what happened.")
         elif action.kind is ActionKind.ABANDON_CASE:
             parts.append("Case abandoned. Use /reset to start fresh.")
         elif action.kind is ActionKind.REQUEST_FACT_CONFIRMATION:
             parts.append(
-                f"Strict-source facts present (state: {state}) - "
+                "Strict-source facts present - "
                 "image/document facts need user confirmation before draft."
             )
         elif action.kind is ActionKind.REQUEST_CLARIFICATION:
             target = action.payload.get("target", "")
             suffix = f": {target}" if target else ""
-            parts.append(f"Clarification needed (state: {state}){suffix}.")
+            parts.append(f"Clarification needed{suffix}.")
         elif action.kind is ActionKind.NOOP:
             pass
 
-    return "\n".join(parts) if parts else f"[vNext] engine state: {state}"
+    return "\n".join(parts) if parts else "I'm listening. Send case detail, or say 'done' when ready."
+
+
+def _message_text(message: object) -> str:
+    text = getattr(message, "text", None)
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+    caption = getattr(message, "caption", None)
+    if isinstance(caption, str) and caption.strip():
+        return caption.strip()
+    return ""
 
 
 def run(token: str, handler: object) -> None:

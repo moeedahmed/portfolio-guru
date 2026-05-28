@@ -260,19 +260,20 @@ def test_build_reply_save_draft_explains_not_wired():
 def test_build_reply_request_case_confirmation_shows_state():
     snap = _snapshot_with_action(ActionKind.REQUEST_CASE_CONFIRMATION)
     text = vnext_runner._build_reply(snap)
-    assert "Case signal detected" in text
-    assert "possible_case" in text or "state" in text
+    assert "Got it" in text
+    assert "state" not in text
 
 
 def test_build_reply_ack_case_details_shows_state():
     snap = _snapshot_with_action(ActionKind.ACK_CASE_DETAILS)
     text = vnext_runner._build_reply(snap)
-    assert "Case updated" in text
+    assert "Got it" in text
+    assert "state" not in text
 
 
 def test_build_reply_offer_draft_shows_dogfood_note():
     snap = _snapshot_with_action(ActionKind.OFFER_DRAFT)
-    text = vnext_runner._build_reply(snap)
+    text = vnext_runner._build_reply(snap, completion_requested=True)
     assert "Draft ready" in text
     assert "dogfood" in text.lower()
 
@@ -286,13 +287,15 @@ def test_build_reply_draft_not_ready_shows_reason():
     )
     snap = EngineSnapshot(workspace=ws, actions=actions)
     text = vnext_runner._build_reply(snap)
-    assert "no_source_backed_facts" in text
+    assert "not enough" in text.lower()
+    assert "no_source_backed_facts" not in text
 
 
 def test_build_reply_answer_chat_prompts_case():
     snap = _snapshot_with_action(ActionKind.ANSWER_CHAT)
     text = vnext_runner._build_reply(snap)
-    assert "Side conversation" in text
+    assert "case" in text.lower()
+    assert "state" not in text
 
 
 def test_build_reply_abandon_case():
@@ -310,14 +313,84 @@ def test_build_reply_request_fact_confirmation_mentions_strict():
 def test_build_reply_noop_returns_state_fallback():
     snap = _snapshot_with_action(ActionKind.NOOP)
     text = vnext_runner._build_reply(snap)
-    assert "idle" in text or "state" in text
+    assert "I'm listening" in text
 
 
 def test_build_reply_empty_actions_returns_fallback():
     ws = new_workspace()
     snap = EngineSnapshot(workspace=ws, actions=())
     text = vnext_runner._build_reply(snap)
-    assert "idle" in text or "state" in text
+    assert "I'm listening" in text
+
+
+async def test_rich_case_collects_first_and_previews_only_when_done():
+    """Dogfood complaint: vNext should collect conversationally, not dump a preview immediately."""
+    with patch.dict(
+        "os.environ",
+        {VNEXT_TOKEN_ENV: "vnext-only", **{k: "" for k in PRODUCTION_TOKEN_ENVS}},
+        clear=False,
+    ):
+        import conversational_vnext_bot
+
+        handler = conversational_vnext_bot.build_handler(
+            {VNEXT_TOKEN_ENV: "vnext-only", **{k: "" for k in PRODUCTION_TOKEN_ENVS}}
+        )
+    assert handler is not None
+
+    case_update = _make_update(
+        chat_id=88,
+        message_text=(
+            "62M chest pain in ED, STEMI on ECG, cath lab activated, "
+            "consultant supervised, learned to escalate early"
+        ),
+    )
+    ctx = _make_context(handler=handler)
+
+    await vnext_runner.handle_message(case_update, ctx)
+
+    first_reply = case_update.message.reply_text.call_args[0][0]
+    assert "Draft ready" not in first_reply
+    assert "say 'done'" in first_reply
+    assert "state" not in first_reply
+
+    done_update = _make_update(chat_id=88, message_text="done")
+    await vnext_runner.handle_message(done_update, ctx)
+
+    done_reply = done_update.message.reply_text.call_args[0][0]
+    assert "Draft ready" in done_reply
+    assert "Recommended form: CBD" in done_reply
+    assert "not a Kaizen draft" in done_reply
+
+
+async def test_file_request_after_collected_case_shows_preview_not_filing():
+    with patch.dict(
+        "os.environ",
+        {VNEXT_TOKEN_ENV: "vnext-only", **{k: "" for k in PRODUCTION_TOKEN_ENVS}},
+        clear=False,
+    ):
+        import conversational_vnext_bot
+
+        handler = conversational_vnext_bot.build_handler(
+            {VNEXT_TOKEN_ENV: "vnext-only", **{k: "" for k in PRODUCTION_TOKEN_ENVS}}
+        )
+    assert handler is not None
+
+    ctx = _make_context(handler=handler)
+    await vnext_runner.handle_message(
+        _make_update(
+            chat_id=89,
+            message_text="62M chest pain in ED, STEMI on ECG, consultant supervised",
+        ),
+        ctx,
+    )
+
+    file_update = _make_update(chat_id=89, message_text="file this")
+    await vnext_runner.handle_message(file_update, ctx)
+
+    reply = file_update.message.reply_text.call_args[0][0]
+    assert "Draft ready" in reply
+    assert "Kaizen filing not wired" in reply
+    assert "Private vNext test bot: Kaizen filing is not wired" not in reply
 
 
 # ---------------------------------------------------------------------------

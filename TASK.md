@@ -1,5 +1,24 @@
 # Active Task — Private Beta Launch Cut
 
+> **2026-05-29 addendum — vNext conversational collector repair slice.**
+> Moeed's first live dogfood exposed the real issue: the private vNext bot
+> still behaved like a deterministic parser harness, not a smart case-taking
+> assistant. This slice adds `backend/vnext_dialogue_policy.py` and changes
+> the private runner so rich case input is acknowledged conversationally first:
+> it collects facts across turns, asks one highest-value follow-up, and only
+> shows the recommendation/local preview when the user says "done" or asks to
+> draft/file/save/preview. "File this" is now treated as a completion request
+> for the private bot preview path, not a Kaizen filing action. `/start` copy
+> now tells testers they can add details over multiple messages. Raw engine
+> state names are no longer exposed in normal private-bot replies. Public
+> Portfolio Guru, Kaizen filing, billing, credentials, launchd, and production
+> token paths remain untouched. Verification: focused private-vNext gate green
+> at 192 passed, 1 warning; full offline backend gate green at 818 passed,
+> 13 deselected, 43 warnings, 3 snapshots passed; local smoke confirmed
+> first/second case messages collect and "done" shows CBD preview. Private
+> bot restarted on the new code. Next step: dogfood the same case over
+> multiple messages and say "done".
+
 > **2026-05-29 addendum — vNext form-type recommendation + local preview slice.**
 > Added two new pure helper modules behind the private vNext bot.
 > `backend/vnext_form_recommender.py` implements a deterministic rule-based

@@ -28,7 +28,9 @@ import sys
 from typing import Any, Callable
 
 from conversational_case_engine import CaseWorkspace, EngineSnapshot, apply_event
+from conversational_case_engine import IngestEvent, IngestKind, SourceType
 from telegram_vnext_adapter import event_from_telegram_message
+from vnext_dialogue_policy import is_completion_request
 
 VNEXT_TOKEN_ENV = "PG_VNEXT_BOT_TOKEN"
 
@@ -96,10 +98,29 @@ def build_handler(
         return None
 
     def _handle(workspace: CaseWorkspace, message: Any) -> EngineSnapshot:
+        text = _message_text(message)
+        if is_completion_request(text):
+            event = IngestEvent(
+                turn_id=f"{event_from_telegram_message(message).turn_id}:completion",
+                text=text,
+                source_type=SourceType.TEXT,
+                kind=IngestKind.REQUEST_DRAFT,
+            )
+            return apply_event(workspace, event)
         event = event_from_telegram_message(message)
         return apply_event(workspace, event)
 
     return _handle
+
+
+def _message_text(message: Any) -> str:
+    text = getattr(message, "text", None)
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+    caption = getattr(message, "caption", None)
+    if isinstance(caption, str) and caption.strip():
+        return caption.strip()
+    return ""
 
 
 def main(argv: list[str] | None = None) -> int:

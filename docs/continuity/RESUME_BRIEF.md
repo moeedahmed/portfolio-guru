@@ -7,24 +7,24 @@ Status: current
 
 - Repo: /Users/moeedahmed/projects/portfolio-guru
 - Branch: chore/telegram-bot-qa-discipline
-- Last commit: c8fe80c 2026-05-29 feat: add vNext source-tied clinical extraction
+- Last commit: db72f89 2026-05-29 feat: add vNext local preview recommendation
 - Uncommitted changes: yes (this slice — not yet committed; see TASK.md addendum)
 
 ## Latest vNext slice (2026-05-29)
 
-Added deterministic form recommendation and local preview helpers for the
-private vNext bot. `vnext_form_recommender.py` recommends CBD/DOPS/PROC_LOG/
-US_CASE/REFLECT_LOG only from captured source-tied facts, or returns a targeted
-missing-detail prompt. `vnext_draft_preview.py` builds a local dogfood preview
-marked as not a Kaizen draft. `vnext_runner.py` now includes that preview on
-OFFER_DRAFT. Public bot and Kaizen filing remain untouched.
+Added a conversational collector layer after live dogfood showed the private
+vNext bot still behaved like a parser harness. `vnext_dialogue_policy.py`
+detects completion intents, summarises captured facts, and asks one useful
+missing-detail question. `vnext_runner.py` now collects across turns and only
+shows the local recommendation/preview when the user says done/draft/file/save/
+preview. Public bot and Kaizen filing remain untouched.
 
 ## Next step
 
-- Verify and commit this slice.
-- Restart the live private bot after verification.
-- Dogfood the live private bot on realistic messy cases and compare against the
-  current public bot before any public identity migration discussion.
+- Commit this slice after verification.
+- Dogfood the live private bot over multiple messages, then say "done", and
+  compare against the current public bot before any public identity migration
+  discussion.
 
 ## Immediate read before restarting
 
@@ -44,6 +44,7 @@ OFFER_DRAFT. Public bot and Kaizen filing remain untouched.
 
 ## Recent commits
 
+- db72f89 2026-05-29 feat: add vNext local preview recommendation
 - c8fe80c 2026-05-29 feat: add vNext source-tied clinical extraction
 - 0d04468 2026-05-28 feat: run private vNext Telegram bot
 - 75a9fa5 2026-05-28 feat: add conservative vNext text fact extractor
@@ -57,10 +58,11 @@ OFFER_DRAFT. Public bot and Kaizen filing remain untouched.
 ## Uncommitted change summary
 
 - ?? .openclaw/
-- ?? backend/tests/test_vnext_draft_preview.py
-- ?? backend/tests/test_vnext_form_recommender.py
-- ?? backend/vnext_draft_preview.py
-- ?? backend/vnext_form_recommender.py
+- M backend/conversational_vnext_bot.py
+- M backend/tests/test_vnext_runner.py
+- M backend/vnext_runner.py
+- ?? backend/tests/test_vnext_dialogue_policy.py
+- ?? backend/vnext_dialogue_policy.py
 - ?? HEARTBEAT.md
 - ?? IDENTITY.md
 - ?? SOUL.md

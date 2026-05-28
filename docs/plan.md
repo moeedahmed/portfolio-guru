@@ -353,10 +353,32 @@ Slice 6 (form-type recommendation + local preview) — implemented 2026-05-29:
 - 51 new focused tests (26 recommender + 25 preview); focused private-vNext
   gate green at 142 passed; full offline gate green at 810 passed.
 
-Slice 7+ (future, gated on live dogfood):
+Slice 7 (conversational collector repair) — implemented 2026-05-29:
+
+- Live dogfood showed the private bot was exposing the engine too early:
+  a rich case could jump straight to a preview rather than behaving like a
+  case-taking assistant.
+- `backend/vnext_dialogue_policy.py` adds the private-bot conversation layer:
+  completion-intent detection (`done`, `draft it`, `file this`, `save it`,
+  `preview`), captured-fact summaries, highest-value missing-detail prompts,
+  and natural not-ready/collecting replies.
+- `vnext_runner._build_reply()` now collects conversationally first. It hides
+  the preview until the user asks to finish, then shows the existing local
+  recommendation/preview. Save/file wording remains dogfood-only and never
+  touches Kaizen.
+- `conversational_vnext_bot.build_handler()` maps completion intents to the
+  engine's draft-request path so "done" and "file this" operate on the current
+  workspace rather than becoming new facts or a brittle menu action.
+- `/start` copy now tells testers to add details over multiple messages and
+  say "done" for the recommendation/preview.
+- Public Portfolio Guru, Kaizen filing, credentials, billing, launchd, and
+  production token paths remain unchanged.
+
+Slice 8+ (future, gated on live dogfood):
 
 - Dogfood the live private bot using `scripts/run_vnext_local.sh` and verify
-  DRAFT_READY + form recommendation on realistic messy clinical cases.
+  multi-turn collection + completion-triggered preview on realistic messy
+  clinical cases.
 - Compare vNext dogfood output against the current public bot on the same
   messy cases before any public bot identity migration discussion.
 
