@@ -1,13 +1,13 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-05-28T06:35:36+00:00
-Status: ready
+Generated: 2026-05-28T20:44:32+00:00
+Status: stale_or_needs_review
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
 - Branch: chore/telegram-bot-qa-discipline
-- Last commit: 3b78fff 2026-05-27 fix: harden LAT Kaizen field filling
-- Uncommitted changes: no
+- Last commit: 75a9fa5 2026-05-28 feat: add conservative vNext text fact extractor
+- Uncommitted changes: yes
 
 ## Immediate read before restarting
 1. Product hub Status + Brief in Notion
@@ -15,22 +15,34 @@ Status: ready
 3. `TASK.md` for active sprint state, if present
 4. This resume brief for drift warnings and repo state
 
+## Warnings
+- Repo has uncommitted changes — capture/commit or summarise before switching context
+
 ## Practical AGENTS.md check
 - Useful for coding-agent/ACP work: yes
 - No missing practical sections
 
 ## Recent commits
+- 75a9fa5 2026-05-28 feat: add conservative vNext text fact extractor
+- b14c37d 2026-05-28 feat: add vNext Telegram→engine adapter
+- 5d7425b 2026-05-28 feat: scaffold vNext conversational case engine
+- 1c79a36 2026-05-28 fix: keep form choice escape hatch
+- 9eb87b3 2026-05-28 fix: guard QIAT stage and curriculum tags
+- 86242e5 2026-05-28 fix: gate new input after failed filing
 - 3b78fff 2026-05-27 fix: harden LAT Kaizen field filling
 - cf2b9ba 2026-05-27 fix: simplify draft rationale footer
-- 60ffe09 2026-05-27 docs: record attachment beta proof
-- c4a1e90 2026-05-27 fix: use Kaizen upload chooser for attachments
-- efc3110 2026-05-27 docs(memory): update restart context memory log for attachment handoff
-- 21b50d5 2026-05-27 feat(bot): implement beta-ready attachment handoff for Telegram documents
-- 25babad 2026-05-27 fix: keep kaizen descriptions concise
-- 9a93c26 2026-05-27 fix: sanitise user-visible form names
+
+## Uncommitted change summary
+- M docs/continuity/RESUME_BRIEF.md
+- ?? .openclaw/
+- ?? HEARTBEAT.md
+- ?? IDENTITY.md
+- ?? SOUL.md
+- ?? TOOLS.md
+- ?? USER.md
 
 ## Repo context snapshot
-### AGENTS.md — present, 4 days old
+### AGENTS.md — present, 5 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md
 - ## Project
@@ -45,7 +57,7 @@ Key headings:
 - ## Key Design Decisions
 - ## Continuity Protocol
 
-### CLAUDE.md — present, 4 days old
+### CLAUDE.md — present, 5 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md
 - ## Project
@@ -72,7 +84,7 @@ Key headings:
 - # 539 passed, 22 skipped, 13 deselected, 3 snapshots passed
 - ## Orchestrator Hand-Off
 
-### WORKFLOWS.md — present, 0 days old
+### WORKFLOWS.md — present, 1 days old
 Key headings:
 - # Portfolio Guru — Agent Workflow Reference
 - ## Conversation States
@@ -88,6 +100,6 @@ Key headings:
 - ## Data Flow
 
 ## Recommended restart path
-Continuity context looks sufficient; proceed with normal product-docs workflow.
+Refresh the product hub/Brief and repo context before a new build sprint.
 
 If this product has been idle for weeks, do not start implementation from memory. Refresh the product hub Status/Brief first, then create or update `TASK.md` for the next sprint.

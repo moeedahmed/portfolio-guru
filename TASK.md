@@ -1,5 +1,35 @@
 # Active Task — Private Beta Launch Cut
 
+> **2026-05-28 addendum — vNext private polling loop slice.**
+> Wired `build_handler()` from `conversational_vnext_bot` into a real
+> `python-telegram-bot` v22 polling loop in the new module
+> `backend/vnext_runner.py`. The runner starts only when
+> `PG_VNEXT_BOT_TOKEN` is set and the production-token guard is clean;
+> it stores per-chat `CaseWorkspace` objects in an in-memory dict
+> (dogfood-only, no DB/Kaizen/credentials/billing). Added `/start` and
+> `/reset` command handlers; ordinary text/voice/photo/document messages
+> route through `telegram_vnext_adapter.event_from_telegram_message` →
+> `conversational_case_engine.apply_event` and receive short dogfood-
+> safe reply text derived from `NextAction` kinds. Voice/image/document
+> are acknowledged via the adapter placeholders — no file downloads,
+> no whisper/vision calls. Save requests reply with "Kaizen filing is
+> not wired in this slice". `conversational_vnext_bot.main()` message
+> updated to point to `vnext_runner.py`; the no-import-telegram AST
+> guard and all prior safety invariant tests still pass. Added
+> `scripts/run_vnext_local.sh`: expects `PG_VNEXT_BOT_TOKEN` already
+> set, or reads `PG_VNEXT_BOT_TOKEN_BWS_ID` env var at runtime to
+> fetch from BWS without hardcoding any secret ID. Verification:
+> focused vNext gate (`tests/test_vnext_runner.py` 23 new,
+> `tests/test_conversational_vnext_bot.py`, `tests/test_telegram_vnext_adapter.py`,
+> `tests/test_conversational_case_engine.py`, `tests/test_vnext_text_extractor.py`,
+> `tests/test_conversational_router.py`) green at 112 passed; full
+> offline backend gate green at 738 passed, 13 deselected, 43 warnings,
+> 3 snapshots passed. No live Telegram, Kaizen, launchd, deploy, or
+> public-bot change. Next step: layer richer source-tied fact extraction
+> (presenting complaint, diagnosis, supervision, procedure) behind the
+> same verbatim-from-source invariant so the engine can progress past
+> `COLLECTING` into `DRAFT_READY`.
+
 > **2026-05-28 addendum — vNext conservative text extraction slice (offline).**
 > Wired the first source-tied fact extractor into the private vNext path so a
 > text Telegram case can begin to populate `CaseFact` values without an LLM,

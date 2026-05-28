@@ -304,18 +304,32 @@ Slice 3 (offline conservative text extraction) — implemented:
   does not import `python-telegram-bot`, register handlers, or perform
   any I/O.
 
-Slice 4+ (future, gated on dogfood):
+Slice 4 (polling loop) — implemented:
 
-- Wire `build_handler` into a real polling loop on the private bot
-  token.
+- `backend/vnext_runner.py` wires `build_handler()` into a real
+  `python-telegram-bot` v22 polling loop. Per-chat `CaseWorkspace`
+  objects are stored in an in-memory dict (dogfood-only). `/start`
+  and `/reset` commands reset the workspace. Ordinary messages route
+  through the adapter → engine and reply with short dogfood-safe text
+  derived from `NextAction` kinds. Voice/image/document are acknowledged
+  via adapter placeholders — no downloads, no whisper/vision calls.
+  Save requests reply with "Kaizen filing is not wired in this slice."
+- `scripts/run_vnext_local.sh` is the local runner: uses
+  `PG_VNEXT_BOT_TOKEN` from the environment or fetches it from BWS
+  via `PG_VNEXT_BOT_TOKEN_BWS_ID` (no hardcoded secret IDs).
+- `conversational_vnext_bot.main()` updated to point at the runner;
+  all prior safety invariant tests still pass.
+
+Slice 5+ (future, gated on dogfood):
+
 - Layer richer source-tied fact extraction (presenting complaint,
   diagnosis, supervision, procedure, learning point) behind the same
   "verbatim from the source" invariant so the engine can progress past
   `COLLECTING` into `DRAFT_READY` without inventing clinical facts.
   Stricter sources (image/document) must remain unconfirmed until the
   user explicitly confirms each extracted fact.
-- Compare vNext drafts against the current bot on the same messy cases
-  before discussing any public bot identity migration.
+- Compare vNext dogfood output against the current public bot on the
+  same messy cases before any public bot identity migration discussion.
 
 ### Phase 5 - Filing command activation
 

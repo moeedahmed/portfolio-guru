@@ -127,10 +127,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     print(
-        "[vNext] scaffold enabled but intentionally no-op in this slice. "
-        "Use conversational_case_engine.apply_event from a future slice "
-        "to wire a private polling loop. No Telegram, Kaizen, launchd, "
-        "or credential action will run from this module.",
+        "[vNext] scaffold enabled — this entry point is a no-op. "
+        "Run backend/vnext_runner.py to start the private polling loop. "
+        "No Telegram, Kaizen, launchd, or credential action runs from this module.",
         file=sys.stderr,
     )
     return 0
