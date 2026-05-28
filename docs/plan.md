@@ -320,16 +320,29 @@ Slice 4 (polling loop) — implemented:
 - `conversational_vnext_bot.main()` updated to point at the runner;
   all prior safety invariant tests still pass.
 
-Slice 5+ (future, gated on dogfood):
+Slice 5 (richer extraction + draft-readiness) — implemented 2026-05-29:
 
-- Layer richer source-tied fact extraction (presenting complaint,
-  diagnosis, supervision, procedure, learning point) behind the same
-  "verbatim from the source" invariant so the engine can progress past
-  `COLLECTING` into `DRAFT_READY` without inventing clinical facts.
-  Stricter sources (image/document) must remain unconfirmed until the
-  user explicitly confirms each extracted fact.
-- Compare vNext dogfood output against the current public bot on the
-  same messy cases before any public bot identity migration discussion.
+- `backend/vnext_text_extractor.py` extended with six verbatim extractors:
+  `setting`, `presenting_complaint`, `diagnosis`, `procedure`,
+  `supervision`, and `learning_point`. All matched from doctor's own text;
+  no LLM, no network, no inference.
+- `conversational_case_engine._is_draft_ready()` added: ≥ 3 eligible facts
+  with ≥ 1 clinical key → DRAFT_READY in one turn. Stricter sources (image/
+  document) remain unconfirmed until the user explicitly confirms each fact.
+- `vnext_runner._build_reply()` now shows captured fact key=value pairs in
+  both `ACK_CASE_DETAILS` and `OFFER_DRAFT` replies for dogfood clarity.
+- Acceptance-criteria test: "62M chest pain in ED, STEMI on ECG, cath lab
+  activated, consultant supervised, learned to escalate early" → 8 facts →
+  DRAFT_READY in one message; all tests green.
+
+Slice 6+ (future, gated on live dogfood):
+
+- Dogfood the live private bot using `scripts/run_vnext_local.sh` and verify
+  DRAFT_READY is reached on realistic messy clinical cases.
+- Layer form-type recommendation and local preview generation (a simple
+  summary from captured facts, not a Kaizen draft).
+- Compare vNext dogfood output against the current public bot on the same
+  messy cases before any public bot identity migration discussion.
 
 ### Phase 5 - Filing command activation
 

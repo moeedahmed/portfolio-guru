@@ -25,7 +25,8 @@ def _action_kinds(snapshot) -> list[ActionKind]:
     return [action.kind for action in snapshot.actions]
 
 
-def test_full_case_in_one_message_collects_source_backed_facts():
+def test_full_case_in_one_message_reaches_draft_ready():
+    """A rich text case with ≥3 facts (including a clinical key) goes straight to DRAFT_READY."""
     workspace = new_workspace()
     event = IngestEvent(
         turn_id="t1",
@@ -45,7 +46,8 @@ def test_full_case_in_one_message_collects_source_backed_facts():
 
     snapshot = apply_event(workspace, event)
 
-    assert snapshot.workspace.state is CaseState.COLLECTING
+    # 4 eligible facts including clinical keys → draft-ready threshold met
+    assert snapshot.workspace.state is CaseState.DRAFT_READY
     assert {fact.key for fact in snapshot.workspace.facts} == {
         "age",
         "sex",
@@ -56,7 +58,7 @@ def test_full_case_in_one_message_collects_source_backed_facts():
         fact.source_type is SourceType.TEXT and fact.source_turn_id == "t1"
         for fact in snapshot.workspace.facts
     )
-    assert _action_kinds(snapshot) == [ActionKind.ACK_CASE_DETAILS]
+    assert _action_kinds(snapshot) == [ActionKind.OFFER_DRAFT]
 
 
 def test_fragmented_case_details_accumulate_in_one_workspace():
@@ -91,7 +93,8 @@ def test_fragmented_case_details_accumulate_in_one_workspace():
 
     assert snapshot is not None
     assert snapshot.workspace.case_id == workspace.case_id
-    assert snapshot.workspace.state is CaseState.COLLECTING
+    # 4 facts including clinical keys — draft-ready threshold met by t2 onward.
+    assert snapshot.workspace.state is CaseState.DRAFT_READY
     assert {fact.key for fact in snapshot.workspace.facts} == {
         "age",
         "sex",
@@ -378,6 +381,106 @@ def test_case_fact_draft_eligibility_policy():
     assert text_fact.draft_eligible is True
     assert image_fact.draft_eligible is False
     assert confirmed_image.draft_eligible is True
+
+
+def test_rich_text_case_reaches_draft_ready_in_one_turn():
+    """Acceptance-criteria: full STEMI case → DRAFT_READY in a single message."""
+    workspace = new_workspace()
+    event = IngestEvent(
+        turn_id="t1",
+        text=(
+            "62M chest pain in ED, STEMI on ECG, cath lab activated, "
+            "consultant supervised, learned to escalate early"
+        ),
+        source_type=SourceType.TEXT,
+        kind=IngestKind.CASE_DETAIL,
+        extracted_facts=(
+            ("age", "62"),
+            ("sex", "M"),
+            ("setting", "ED"),
+            ("presenting_complaint", "chest pain"),
+            ("diagnosis", "STEMI"),
+            ("procedure", "cath lab"),
+            ("supervision", "consultant"),
+            ("learning_point", "learned to escalate early"),
+        ),
+    )
+    snapshot = apply_event(workspace, event)
+
+    assert snapshot.workspace.state is CaseState.DRAFT_READY
+    assert ActionKind.OFFER_DRAFT in _action_kinds(snapshot)
+    eligible_keys = {f.key for f in snapshot.workspace.draft_eligible_facts()}
+    assert {"age", "diagnosis", "supervision"} <= eligible_keys
+
+
+def test_engine_readiness_threshold_requires_clinical_fact():
+    """Demographics alone (age + sex) do not satisfy the draft-ready threshold."""
+    workspace = new_workspace()
+    event = IngestEvent(
+        turn_id="t1",
+        text="Saw 62M in clinic",
+        source_type=SourceType.TEXT,
+        kind=IngestKind.CASE_DETAIL,
+        extracted_facts=(("age", "62"), ("sex", "M")),
+    )
+    snapshot = apply_event(workspace, event)
+
+    # 2 eligible facts, none clinical → stays in COLLECTING
+    assert snapshot.workspace.state is CaseState.COLLECTING
+    assert _action_kinds(snapshot) == [ActionKind.ACK_CASE_DETAILS]
+
+
+def test_side_question_does_not_advance_to_draft_ready():
+    """Side questions in clinical language must not trigger DRAFT_READY."""
+    workspace = apply_event(
+        new_workspace(),
+        IngestEvent(
+            turn_id="t1",
+            text="62M STEMI, cath lab",
+            source_type=SourceType.TEXT,
+            kind=IngestKind.CASE_DETAIL,
+            extracted_facts=(("age", "62"), ("diagnosis", "STEMI")),
+        ),
+    ).workspace
+
+    side_event = IngestEvent(
+        turn_id="t2",
+        text="By the way, what forms cover STEMI consultant supervisor cases in ED?",
+        source_type=SourceType.TEXT,
+        kind=IngestKind.SIDE_QUESTION,
+    )
+    snapshot = apply_event(workspace, side_event)
+
+    # Side question must not inject facts or advance state
+    assert snapshot.workspace.facts == workspace.facts
+    assert snapshot.workspace.state == workspace.state
+    assert _action_kinds(snapshot) == [ActionKind.ANSWER_CHAT]
+
+
+def test_save_request_does_not_become_case_facts():
+    """'File this to Kaizen' must not promote clinical terms into the workspace."""
+    workspace = apply_event(
+        new_workspace(),
+        IngestEvent(
+            turn_id="t1",
+            text="62M STEMI, supervised",
+            source_type=SourceType.TEXT,
+            kind=IngestKind.CASE_DETAIL,
+            extracted_facts=(("age", "62"), ("diagnosis", "STEMI")),
+        ),
+    ).workspace
+
+    save_event = IngestEvent(
+        turn_id="t2",
+        text="file this STEMI consultant case to Kaizen",
+        source_type=SourceType.TEXT,
+        kind=IngestKind.REQUEST_SAVE,
+    )
+    snapshot = apply_event(workspace, save_event)
+
+    # Save request should not add facts
+    assert snapshot.workspace.facts == workspace.facts
+    assert ActionKind.DRAFT_NOT_READY in _action_kinds(snapshot)
 
 
 def test_chat_turns_record_separately_from_case_facts():

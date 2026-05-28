@@ -133,18 +133,24 @@ def _build_reply(snapshot: EngineSnapshot) -> str:
                 "Use /reset to start a new case."
             )
         elif action.kind is ActionKind.REQUEST_CASE_CONFIRMATION:
-            keys = ", ".join(f.key for f in snapshot.workspace.facts) or "none"
+            fact_lines = "\n".join(f"  {f.key}: {f.value}" for f in snapshot.workspace.facts)
             parts.append(
-                f"Case signal detected (state: {state}). "
-                f"Facts so far: {keys}. Keep adding detail or /reset."
+                f"Case signal detected (state: {state}).\n"
+                f"Facts so far:\n{fact_lines or '  (none)'}\n"
+                "Keep adding detail or /reset."
             )
         elif action.kind is ActionKind.ACK_CASE_DETAILS:
-            keys = ", ".join(f.key for f in eligible) or "none"
-            parts.append(f"Case updated (state: {state}). Eligible facts: {keys}.")
+            fact_lines = "\n".join(f"  {f.key}: {f.value}" for f in eligible)
+            parts.append(
+                f"Case updated (state: {state}).\n"
+                f"Captured facts:\n{fact_lines or '  (none)'}"
+            )
         elif action.kind is ActionKind.OFFER_DRAFT:
             n = action.payload.get("eligible_facts", "?")
+            fact_lines = "\n".join(f"  {f.key}: {f.value}" for f in eligible)
             parts.append(
-                f"Draft ready (state: {state}, eligible facts: {n}). "
+                f"Draft ready — {n} source-tied facts captured:\n"
+                f"{fact_lines}\n"
                 "Kaizen filing not wired — dogfood only."
             )
         elif action.kind is ActionKind.DRAFT_NOT_READY:

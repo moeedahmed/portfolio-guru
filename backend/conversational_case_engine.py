@@ -221,6 +221,28 @@ def apply_event(workspace: CaseWorkspace, event: IngestEvent) -> EngineSnapshot:
     )
 
 
+_DRAFT_READY_MIN_FACTS: int = 3
+
+# Keys produced by clinical extractors (not demographics alone).
+_CLINICAL_KEYS: frozenset[str] = frozenset(
+    {"setting", "presenting_complaint", "diagnosis", "procedure", "supervision", "learning_point"}
+)
+
+
+def _is_draft_ready(facts: tuple[CaseFact, ...]) -> bool:
+    """True when there are enough source-backed facts to offer a draft.
+
+    Requires at least :data:`_DRAFT_READY_MIN_FACTS` draft-eligible facts,
+    at least one of which must be a clinical fact (not demographics alone).
+    This lets a rich text case skip the provisional-confirmation step and
+    go straight to DRAFT_READY without waiting for explicit user confirmation.
+    """
+    eligible = [f for f in facts if f.draft_eligible]
+    if len(eligible) < _DRAFT_READY_MIN_FACTS:
+        return False
+    return bool({f.key for f in eligible} & _CLINICAL_KEYS)
+
+
 def _ingest_case_facts(
     workspace: CaseWorkspace,
     event: IngestEvent,
@@ -231,9 +253,18 @@ def _ingest_case_facts(
     merged_facts = _merge_facts(workspace.facts, new_facts)
     chat_turns = _append_chat_turn(workspace.chat_turns, event)
 
-    if provisional and not workspace.facts:
-        next_state = CaseState.POSSIBLE_CASE
+    if _is_draft_ready(merged_facts):
+        eligible = tuple(f for f in merged_facts if f.draft_eligible)
+        next_state = CaseState.DRAFT_READY
         actions: tuple[NextAction, ...] = (
+            NextAction(
+                kind=ActionKind.OFFER_DRAFT,
+                payload={"eligible_facts": str(len(eligible))},
+            ),
+        )
+    elif provisional and not workspace.facts:
+        next_state = CaseState.POSSIBLE_CASE
+        actions = (
             NextAction(
                 kind=ActionKind.REQUEST_CASE_CONFIRMATION,
                 payload={"reason": "ambiguous_case_signal"},

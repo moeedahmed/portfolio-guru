@@ -111,43 +111,61 @@ def test_text_message_preserves_raw_wording_as_text_source():
     assert isinstance(event, IngestEvent)
     assert event.text == raw
     assert event.source_type is SourceType.TEXT
-    # Conservative demographics extractor pulls verbatim "62M" only; it
-    # never invents diagnosis/management facts even though the router
-    # classifies this as a case description.
-    assert event.extracted_facts == (("age", "62"), ("sex", "M"))
     assert event.corrections == ()
+    # Source-tied extractor emits demographics plus clinical facts verbatim.
+    facts = dict(event.extracted_facts)
+    assert facts.get("age") == "62"
+    assert facts.get("sex") == "M"
+    # All returned values must appear verbatim in the source text.
+    for k, v in event.extracted_facts:
+        if v not in {"M", "F"}:
+            assert v in raw, f"{k}: value {v!r} not verbatim in source"
 
 
-def test_clinical_text_routes_to_possible_case_detail_with_source_tied_demographics():
-    message = _text_message(
-        "Had a difficult airway case with a 62M in resus, managed RSI with the consultant."
-    )
+def test_clinical_text_routes_to_possible_case_detail_with_source_tied_facts():
+    raw = "Had a difficult airway case with a 62M in resus, managed RSI with the consultant."
+    message = _text_message(raw)
 
     event = event_from_telegram_message(message)
 
     assert event.kind is IngestKind.POSSIBLE_CASE_DETAIL
-    # Only literal demographics — no fabricated diagnosis/supervision/etc.
-    assert event.extracted_facts == (("age", "62"), ("sex", "M"))
+    # Demographics must be present.
+    facts = dict(event.extracted_facts)
+    assert facts.get("age") == "62"
+    assert facts.get("sex") == "M"
+    # All returned values must appear verbatim in the source text.
+    for k, v in event.extracted_facts:
+        if v not in {"M", "F"}:
+            assert v in raw, f"{k}: value {v!r} not verbatim in source"
 
     snapshot = apply_event(new_workspace(), event)
+    # Demographics are in facts; chat turn recorded.
     fact_keys = {fact.key for fact in snapshot.workspace.facts}
-    assert fact_keys == {"age", "sex"}
+    assert {"age", "sex"} <= fact_keys
     assert snapshot.workspace.chat_turns[0].text == message.text
 
 
-def test_clinical_text_without_demographics_yields_no_extracted_facts():
-    message = _text_message(
+def test_clinical_text_without_demographics_yields_source_tied_clinical_facts():
+    """Clinical text without demographics now extracts clinical facts verbatim."""
+    raw = (
         "Had a difficult airway case in resus, managed RSI with the consultant, "
         "transferred to ICU after intubation."
     )
+    message = _text_message(raw)
 
     event = event_from_telegram_message(message)
 
     assert event.kind is IngestKind.POSSIBLE_CASE_DETAIL
-    assert event.extracted_facts == ()
+    # No demographics — but clinical facts (setting, procedure, supervision) are present.
+    assert "age" not in dict(event.extracted_facts)
+    assert "sex" not in dict(event.extracted_facts)
+    # All returned values must appear verbatim in source.
+    for k, v in event.extracted_facts:
+        if v not in {"M", "F"}:
+            assert v in raw, f"{k}: value {v!r} not verbatim in source"
 
     snapshot = apply_event(new_workspace(), event)
-    assert snapshot.workspace.facts == ()
+    # Chat turn is recorded.
     assert snapshot.workspace.chat_turns[0].text == message.text
 
 

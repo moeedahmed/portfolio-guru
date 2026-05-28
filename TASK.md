@@ -1,5 +1,33 @@
 # Active Task — Private Beta Launch Cut
 
+> **2026-05-29 addendum — vNext richer source-tied extraction + draft-readiness slice.**
+> Extended `backend/vnext_text_extractor.py` with six new verbatim-from-source
+> extractors: `setting` (ED/ICU/resus/HDU/CCU/…), `presenting_complaint` (chest pain,
+> dyspnoea, collapse, …), `diagnosis` (STEMI/sepsis/PE/AF/…), `procedure`
+> (RSI/cath lab/central line/fascia iliaca/…), `supervision` (consultant/registrar/
+> independently/…), and `learning_point` (learned to/key learning/reflect on …).
+> All values are matched verbatim from the doctor's own text; no LLM, no network,
+> no inference, no Kaizen touch. Added a draft-readiness threshold to
+> `conversational_case_engine.py`: `_is_draft_ready()` returns True when ≥ 3
+> draft-eligible facts are present and at least one carries a clinical key —
+> allowing a rich text case to skip the provisional-confirmation step and jump
+> directly to `DRAFT_READY` / `OFFER_DRAFT` in a single turn. `vnext_runner.py`
+> replies now show captured fact key=value pairs in full for both `ACK_CASE_DETAILS`
+> and `OFFER_DRAFT` actions. Acceptance-criteria case: "62M chest pain in ED, STEMI
+> on ECG, cath lab activated, consultant supervised, learned to escalate early"
+> produces 8 source-tied facts and reaches DRAFT_READY in one message. Side
+> questions containing clinical terms do not add facts (router gate unchanged).
+> Save requests ("file this to Kaizen") do not become case facts and produce
+> DRAFT_NOT_READY when not yet draft-ready. Image/document/voice remain no-download,
+> no-extraction, not draft-eligible. No change to bot.py, launchd, Kaizen filing,
+> credentials, billing, or any live runtime. Verification: focused vNext gate
+> (test_vnext_text_extractor, test_conversational_case_engine,
+> test_telegram_vnext_adapter, test_conversational_vnext_bot, test_vnext_runner,
+> test_conversational_router) green at 139 passed, 1 warning; full offline backend
+> gate green at 765 passed, 13 deselected, 43 warnings, 3 snapshots passed. Next
+> step: dogfood the bot live using `scripts/run_vnext_local.sh`, then layer
+> form-type recommendation and local preview generation from captured facts.
+
 > **2026-05-28 addendum — vNext private polling loop slice.**
 > Wired `build_handler()` from `conversational_vnext_bot` into a real
 > `python-telegram-bot` v22 polling loop in the new module
