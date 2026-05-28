@@ -293,9 +293,26 @@ def test_build_reply_draft_not_ready_shows_reason():
 
 def test_build_reply_answer_chat_prompts_case():
     snap = _snapshot_with_action(ActionKind.ANSWER_CHAT)
-    text = vnext_runner._build_reply(snap)
+    text = vnext_runner._build_reply(snap, message_text="blurple")
     assert "case" in text.lower()
     assert "state" not in text
+
+
+def test_build_reply_answer_chat_handles_greeting():
+    snap = _snapshot_with_action(ActionKind.ANSWER_CHAT)
+    text = vnext_runner._build_reply(snap, message_text="hello there")
+
+    assert "Hi" in text
+    assert "say 'done'" not in text
+
+
+def test_build_reply_answer_chat_handles_features_question():
+    snap = _snapshot_with_action(ActionKind.ANSWER_CHAT)
+    text = vnext_runner._build_reply(snap, message_text="what are your features")
+
+    assert "collect a case over multiple messages" in text
+    assert "Kaizen filing is deliberately not connected" in text
+    assert "say 'done'" not in text
 
 
 def test_build_reply_abandon_case():
@@ -419,6 +436,30 @@ async def test_file_request_after_collected_case_shows_preview_not_filing():
     assert "Draft ready" in reply
     assert "Kaizen filing not wired" in reply
     assert "Private vNext test bot: Kaizen filing is not wired" not in reply
+
+
+async def test_side_chat_does_not_get_case_collection_prompt_or_pollute_workspace():
+    with patch.dict(
+        "os.environ",
+        {VNEXT_TOKEN_ENV: "vnext-only", **{k: "" for k in PRODUCTION_TOKEN_ENVS}},
+        clear=False,
+    ):
+        import conversational_vnext_bot
+
+        handler = conversational_vnext_bot.build_handler(
+            {VNEXT_TOKEN_ENV: "vnext-only", **{k: "" for k in PRODUCTION_TOKEN_ENVS}}
+        )
+    assert handler is not None
+
+    ctx = _make_context(handler=handler)
+    for text in ("hello there", "how are you", "what are your features"):
+        update = _make_update(chat_id=91, message_text=text)
+        await vnext_runner.handle_message(update, ctx)
+        reply = update.message.reply_text.call_args[0][0]
+        assert "Got it. I have" not in reply
+        assert "say 'done'" not in reply
+
+    assert vnext_runner._workspaces[91].draft_eligible_facts() == ()
 
 
 # ---------------------------------------------------------------------------

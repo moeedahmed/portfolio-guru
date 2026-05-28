@@ -17,8 +17,16 @@
 > 13 deselected, 43 warnings, 3 snapshots passed; local smoke confirmed
 > first/second case messages collect and "done" shows CBD preview. Private
 > bot restarted on the new code. Follow-up polish removed a duplicated
-> "say done" instruction and added regression coverage. Next step: dogfood
-> the same case over multiple messages and say "done".
+> "say done" instruction and added regression coverage. Second live dogfood
+> exposed the next gap: greetings/features/ordinary chat were safe but dumb,
+> all receiving the same collector nudge. The reply policy now answers
+> greetings, wellbeing checks, and feature/help questions as chat; those turns
+> do not create case facts or show the case-collection prompt. Verification:
+> focused side-chat/vNext tests green at 76 passed, 1 warning; full offline
+> backend gate green at 822 passed, 13 deselected, 43 warnings, 3 snapshots
+> passed; local smoke confirmed "hello there", "how are you", and "what are
+> your features" produce distinct chat replies before case capture still works.
+> Next step: dogfood the same opening chat plus case flow in Telegram.
 
 > **2026-05-29 addendum — vNext form-type recommendation + local preview slice.**
 > Added two new pure helper modules behind the private vNext bot.

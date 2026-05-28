@@ -55,6 +55,7 @@ from vnext_dialogue_policy import (
     collecting_reply,
     is_completion_request,
     not_ready_reply,
+    side_chat_reply,
 )
 from vnext_form_recommender import recommend
 
@@ -125,14 +126,22 @@ async def handle_message(
     workspace = _get_workspace(chat_id)
     snapshot: EngineSnapshot = handler(workspace, update.message)
     _workspaces[chat_id] = snapshot.workspace
-    completion_requested = is_completion_request(_message_text(update.message))
+    message_text = _message_text(update.message)
+    completion_requested = is_completion_request(message_text)
     await update.message.reply_text(
-        _build_reply(snapshot, completion_requested=completion_requested)
+        _build_reply(
+            snapshot,
+            completion_requested=completion_requested,
+            message_text=message_text,
+        )
     )
 
 
 def _build_reply(
-    snapshot: EngineSnapshot, *, completion_requested: bool = False
+    snapshot: EngineSnapshot,
+    *,
+    completion_requested: bool = False,
+    message_text: str | None = None,
 ) -> str:
     """Translate engine NextAction tuples into short dogfood-safe reply text."""
     parts: list[str] = []
@@ -159,11 +168,7 @@ def _build_reply(
         elif action.kind is ActionKind.DRAFT_NOT_READY:
             parts.append(not_ready_reply(snapshot.workspace))
         elif action.kind is ActionKind.ANSWER_CHAT:
-            parts.append(
-                "I can help with portfolio questions, but this private bot is mainly "
-                "testing case capture right now. Keep adding case details, or say "
-                "'done' when you want the form recommendation and preview."
-            )
+            parts.append(side_chat_reply(message_text, snapshot.workspace))
         elif action.kind is ActionKind.START_NEW_CASE:
             parts.append("New case started. Tell me what happened.")
         elif action.kind is ActionKind.ABANDON_CASE:
