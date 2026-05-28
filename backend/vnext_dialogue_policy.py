@@ -77,9 +77,12 @@ def next_missing_prompt(workspace: CaseWorkspace) -> str:
 
 def collecting_reply(workspace: CaseWorkspace) -> str:
     """Natural acknowledgement while the user is still sharing information."""
+    prompt = next_missing_prompt(workspace)
+    if "say 'done'" in prompt:
+        return f"Got it. {captured_fact_summary(workspace)}\n\n{prompt}"
     return (
         f"Got it. {captured_fact_summary(workspace)}\n\n"
-        f"{next_missing_prompt(workspace)}\n"
+        f"{prompt}\n"
         "When you are done, say 'done' and I will recommend the form and show a preview."
     )
 
@@ -90,4 +93,3 @@ def not_ready_reply(workspace: CaseWorkspace) -> str:
         f"Not enough to preview yet. {captured_fact_summary(workspace)}\n\n"
         f"{next_missing_prompt(workspace)}"
     )
-

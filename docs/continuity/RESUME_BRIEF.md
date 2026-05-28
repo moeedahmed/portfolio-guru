@@ -1,49 +1,29 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-05-29 (manual update after continuity check)
-Status: current
+Generated: 2026-05-28T23:48:12+00:00
+Status: stale_or_needs_review
 
 ## Where we left off
-
 - Repo: /Users/moeedahmed/projects/portfolio-guru
 - Branch: chore/telegram-bot-qa-discipline
-- Last commit: db72f89 2026-05-29 feat: add vNext local preview recommendation
-- Uncommitted changes: yes (this slice — not yet committed; see TASK.md addendum)
-
-## Latest vNext slice (2026-05-29)
-
-Added a conversational collector layer after live dogfood showed the private
-vNext bot still behaved like a parser harness. `vnext_dialogue_policy.py`
-detects completion intents, summarises captured facts, and asks one useful
-missing-detail question. `vnext_runner.py` now collects across turns and only
-shows the local recommendation/preview when the user says done/draft/file/save/
-preview. Public bot and Kaizen filing remain untouched.
-
-## Next step
-
-- Commit this slice after verification.
-- Dogfood the live private bot over multiple messages, then say "done", and
-  compare against the current public bot before any public identity migration
-  discussion.
+- Last commit: c642962 2026-05-29 fix: make vNext collect cases conversationally
+- Uncommitted changes: yes
 
 ## Immediate read before restarting
-
 1. Product hub Status + Brief in Notion
 2. `AGENTS.md` for durable repo context
 3. `TASK.md` for active sprint state, if present
 4. This resume brief for drift warnings and repo state
 
 ## Warnings
-
 - Repo has uncommitted changes — capture/commit or summarise before switching context
 
 ## Practical AGENTS.md check
-
 - Useful for coding-agent/ACP work: yes
 - No missing practical sections
 
 ## Recent commits
-
+- c642962 2026-05-29 fix: make vNext collect cases conversationally
 - db72f89 2026-05-29 feat: add vNext local preview recommendation
 - c8fe80c 2026-05-29 feat: add vNext source-tied clinical extraction
 - 0d04468 2026-05-28 feat: run private vNext Telegram bot
@@ -51,18 +31,9 @@ preview. Public bot and Kaizen filing remain untouched.
 - b14c37d 2026-05-28 feat: add vNext Telegram→engine adapter
 - 5d7425b 2026-05-28 feat: scaffold vNext conversational case engine
 - 1c79a36 2026-05-28 fix: keep form choice escape hatch
-- 9eb87b3 2026-05-28 fix: guard QIAT stage and curriculum tags
-- 86242e5 2026-05-28 fix: gate new input after failed filing
-- 3b78fff 2026-05-27 fix: harden LAT Kaizen field filling
 
 ## Uncommitted change summary
-
 - ?? .openclaw/
-- M backend/conversational_vnext_bot.py
-- M backend/tests/test_vnext_runner.py
-- M backend/vnext_runner.py
-- ?? backend/tests/test_vnext_dialogue_policy.py
-- ?? backend/vnext_dialogue_policy.py
 - ?? HEARTBEAT.md
 - ?? IDENTITY.md
 - ?? SOUL.md
@@ -70,11 +41,8 @@ preview. Public bot and Kaizen filing remain untouched.
 - ?? USER.md
 
 ## Repo context snapshot
-
 ### AGENTS.md — present, 5 days old
-
 Key headings:
-
 - # Portfolio Guru — AGENTS.md
 - ## Project
 - ## Current Bot State
@@ -89,9 +57,7 @@ Key headings:
 - ## Continuity Protocol
 
 ### CLAUDE.md — present, 5 days old
-
 Key headings:
-
 - # Portfolio Guru — AGENTS.md
 - ## Project
 - ## Current Bot State
@@ -106,9 +72,7 @@ Key headings:
 - ## Continuity Protocol
 
 ### TASK.md — present, 0 days old
-
 Key headings:
-
 - # Active Task — Private Beta Launch Cut
 - ## Objective
 - ## Current Slice
@@ -120,9 +84,7 @@ Key headings:
 - ## Orchestrator Hand-Off
 
 ### WORKFLOWS.md — present, 1 days old
-
 Key headings:
-
 - # Portfolio Guru — Agent Workflow Reference
 - ## Conversation States
 - ## Flow 1 — First-Time User
@@ -137,7 +99,6 @@ Key headings:
 - ## Data Flow
 
 ## Recommended restart path
-
 Refresh the product hub/Brief and repo context before a new build sprint.
 
 If this product has been idle for weeks, do not start implementation from memory. Refresh the product hub Status/Brief first, then create or update `TASK.md` for the next sprint.

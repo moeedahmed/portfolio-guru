@@ -362,6 +362,34 @@ async def test_rich_case_collects_first_and_previews_only_when_done():
     assert "not a Kaizen draft" in done_reply
 
 
+async def test_collected_case_does_not_duplicate_done_instruction():
+    with patch.dict(
+        "os.environ",
+        {VNEXT_TOKEN_ENV: "vnext-only", **{k: "" for k in PRODUCTION_TOKEN_ENVS}},
+        clear=False,
+    ):
+        import conversational_vnext_bot
+
+        handler = conversational_vnext_bot.build_handler(
+            {VNEXT_TOKEN_ENV: "vnext-only", **{k: "" for k in PRODUCTION_TOKEN_ENVS}}
+        )
+    assert handler is not None
+
+    ctx = _make_context(handler=handler)
+    update = _make_update(
+        chat_id=90,
+        message_text=(
+            "62M chest pain in ED, STEMI on ECG, cath lab activated, "
+            "consultant supervised, learned to escalate early"
+        ),
+    )
+
+    await vnext_runner.handle_message(update, ctx)
+
+    reply = update.message.reply_text.call_args[0][0]
+    assert reply.lower().count("say 'done'") == 1
+
+
 async def test_file_request_after_collected_case_shows_preview_not_filing():
     with patch.dict(
         "os.environ",

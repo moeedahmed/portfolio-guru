@@ -13,11 +13,12 @@
 > state names are no longer exposed in normal private-bot replies. Public
 > Portfolio Guru, Kaizen filing, billing, credentials, launchd, and production
 > token paths remain untouched. Verification: focused private-vNext gate green
-> at 192 passed, 1 warning; full offline backend gate green at 818 passed,
+> at 193 passed, 1 warning; full offline backend gate green at 819 passed,
 > 13 deselected, 43 warnings, 3 snapshots passed; local smoke confirmed
 > first/second case messages collect and "done" shows CBD preview. Private
-> bot restarted on the new code. Next step: dogfood the same case over
-> multiple messages and say "done".
+> bot restarted on the new code. Follow-up polish removed a duplicated
+> "say done" instruction and added regression coverage. Next step: dogfood
+> the same case over multiple messages and say "done".
 
 > **2026-05-29 addendum — vNext form-type recommendation + local preview slice.**
 > Added two new pure helper modules behind the private vNext bot.
