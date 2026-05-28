@@ -111,13 +111,34 @@ def test_text_message_preserves_raw_wording_as_text_source():
     assert isinstance(event, IngestEvent)
     assert event.text == raw
     assert event.source_type is SourceType.TEXT
-    assert event.extracted_facts == ()
+    # Conservative demographics extractor pulls verbatim "62M" only; it
+    # never invents diagnosis/management facts even though the router
+    # classifies this as a case description.
+    assert event.extracted_facts == (("age", "62"), ("sex", "M"))
     assert event.corrections == ()
 
 
-def test_clinical_text_routes_to_possible_case_detail_without_fabricated_facts():
+def test_clinical_text_routes_to_possible_case_detail_with_source_tied_demographics():
     message = _text_message(
         "Had a difficult airway case with a 62M in resus, managed RSI with the consultant."
+    )
+
+    event = event_from_telegram_message(message)
+
+    assert event.kind is IngestKind.POSSIBLE_CASE_DETAIL
+    # Only literal demographics — no fabricated diagnosis/supervision/etc.
+    assert event.extracted_facts == (("age", "62"), ("sex", "M"))
+
+    snapshot = apply_event(new_workspace(), event)
+    fact_keys = {fact.key for fact in snapshot.workspace.facts}
+    assert fact_keys == {"age", "sex"}
+    assert snapshot.workspace.chat_turns[0].text == message.text
+
+
+def test_clinical_text_without_demographics_yields_no_extracted_facts():
+    message = _text_message(
+        "Had a difficult airway case in resus, managed RSI with the consultant, "
+        "transferred to ICU after intubation."
     )
 
     event = event_from_telegram_message(message)
@@ -128,6 +149,27 @@ def test_clinical_text_routes_to_possible_case_detail_without_fabricated_facts()
     snapshot = apply_event(new_workspace(), event)
     assert snapshot.workspace.facts == ()
     assert snapshot.workspace.chat_turns[0].text == message.text
+
+
+def test_extraction_only_runs_for_possible_case_detail_text():
+    """SIDE_QUESTION / REQUEST_SAVE text never feeds the case workspace.
+
+    Even when a portfolio question or save command literally contains
+    "62M", we refuse to promote it into a case fact — the router has
+    already decided this turn is not case material.
+    """
+
+    portfolio_q = event_from_telegram_message(
+        _text_message("What forms would a 62M chest pain case support?")
+    )
+    assert portfolio_q.kind is IngestKind.SIDE_QUESTION
+    assert portfolio_q.extracted_facts == ()
+
+    save_cmd = event_from_telegram_message(
+        _text_message("File this 45F sepsis case as a CBD in Kaizen")
+    )
+    assert save_cmd.kind is IngestKind.REQUEST_SAVE
+    assert save_cmd.extracted_facts == ()
 
 
 def test_portfolio_question_text_routes_to_side_question():

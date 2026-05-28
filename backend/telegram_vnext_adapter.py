@@ -3,16 +3,22 @@
 Pure conversion layer for the private vNext test bot. Given a
 Telegram-like message it produces an :class:`IngestEvent` the
 conversational case engine can apply. Nothing in this module reaches
-for the network, the LLMs, Kaizen, or any extraction pipeline — voice,
-image and document inputs are emitted with the correct source type and
-no extracted facts so the engine can apply its stricter-source policy
-without ever seeing fabricated content from this slice.
+for the network, an LLM, or Kaizen — voice, image and document inputs
+are emitted with the correct source type and no extracted facts so the
+engine can apply its stricter-source policy without ever seeing
+fabricated content from this slice.
+
+Text inputs additionally pass through the conservative
+:func:`vnext_text_extractor.extract_text_facts` adapter when the router
+classifies them as case material. The extractor is a pure regex over
+demographic literals (age, sex) — it never calls out, never infers
+diagnosis/management/supervision, and returns an empty tuple when the
+text is ambiguous so the engine stays in ``possible_case`` and asks the
+user to confirm before drafting.
 
 The adapter is duck-typed: it works with ``telegram.Message`` from
 ``python-telegram-bot`` and with any lightweight stand-in that exposes
-the same attributes. A future slice can wire real extractors in by
-inspecting the returned event's ``source_type`` and replaying with
-populated ``extracted_facts``.
+the same attributes.
 """
 
 from __future__ import annotations
@@ -22,6 +28,7 @@ from typing import Any
 
 from conversational_case_engine import IngestEvent, IngestKind, SourceType
 from conversational_router import ConversationalIntent, route_message
+from vnext_text_extractor import extract_text_facts
 
 SUPPORTED_DOCUMENT_EXTENSIONS: tuple[str, ...] = (
     ".pdf",
@@ -54,11 +61,14 @@ def event_from_telegram_message(
 
     text = _stripped(_get(message, "text"))
     if text:
+        kind = _kind_for_text(text)
+        extracted = _extracted_facts_for_text(text, kind)
         return IngestEvent(
             turn_id=turn_id,
             text=text,
             source_type=SourceType.TEXT,
-            kind=_kind_for_text(text),
+            kind=kind,
+            extracted_facts=extracted,
         )
 
     voice = _get(message, "voice") or _get(message, "audio")
@@ -113,6 +123,22 @@ def _kind_for_text(text: str) -> IngestKind:
     if intent is ConversationalIntent.FILE_TO_KAIZEN:
         return IngestKind.REQUEST_SAVE
     return IngestKind.SIDE_QUESTION
+
+
+def _extracted_facts_for_text(
+    text: str, kind: IngestKind
+) -> tuple[tuple[str, str], ...]:
+    """Run the conservative text extractor only on case-bearing text.
+
+    Side questions and save requests are not case material, so we never
+    extract from them even when they happen to mention a demographic
+    literal — leaving the engine on its conversational path instead of
+    promoting an off-topic message into the case workspace.
+    """
+
+    if kind is not IngestKind.POSSIBLE_CASE_DETAIL:
+        return ()
+    return extract_text_facts(text)
 
 
 def _resolve_turn_id(message: Any) -> str:

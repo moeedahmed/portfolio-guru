@@ -1,5 +1,38 @@
 # Active Task — Private Beta Launch Cut
 
+> **2026-05-28 addendum — vNext conservative text extraction slice (offline).**
+> Wired the first source-tied fact extractor into the private vNext path so a
+> text Telegram case can begin to populate `CaseFact` values without an LLM,
+> network call, Kaizen touch, credential read, or database hit. New module
+> `backend/vnext_text_extractor.py` pulls demographic literals (age, sex) from
+> the doctor's own wording via narrow regex over shorthand (`62M`, `45 F`) and
+> "X year old man/woman/lady/..." phrasing; the value must appear verbatim in
+> the source, and the function returns an empty tuple whenever the text is
+> ambiguous so the engine stays in `possible_case` and the orchestrator must
+> ask the user for confirmation before drafting. `telegram_vnext_adapter`
+> calls the extractor only when the router has classified the text as
+> `POSSIBLE_CASE_DETAIL` — `SIDE_QUESTION` and `REQUEST_SAVE` text never
+> promotes into the case workspace even when it happens to mention a
+> demographic. Voice / image / document continue to emit empty
+> `extracted_facts` with `SourceType.VOICE` / `IMAGE` / `DOCUMENT`, so media
+> stays stricter/unconfirmed and is never draft-eligible in this slice. The
+> private vNext `build_handler()` factory is still the disabled-by-default
+> construction seam: `None` when `PG_VNEXT_BOT_TOKEN` is missing or collides
+> with any production token env var, and the module still does not import
+> `python-telegram-bot`, register handlers, hook into launchd, or perform any
+> I/O. Verification: focused vNext gate (`tests/test_vnext_text_extractor.py`,
+> `tests/test_conversational_case_engine.py`,
+> `tests/test_conversational_vnext_bot.py`,
+> `tests/test_telegram_vnext_adapter.py`,
+> `tests/test_conversational_router.py`) green at 88 passed, 1 warning; full
+> offline backend gate green at 714 passed, 13 deselected, 43 warnings,
+> 3 snapshots passed. No live Telegram, Kaizen, launchd, deploy, push, or
+> public-bot change. Next step: still gated on dogfood proof — wire a real
+> polling loop on the private `PG_VNEXT_BOT_TOKEN`, then layer richer
+> extraction (diagnosis, supervision, procedure) behind the same source-tied
+> invariant so the engine can progress past `COLLECTING` into `DRAFT_READY`
+> without inventing clinical facts.
+
 > **2026-05-28 addendum — vNext Telegram→engine adapter slice (offline).**
 > Built the next vNext private-bot slice on top of the engine scaffold from
 > commit `5d7425b`. Added `backend/telegram_vnext_adapter.py`, a pure

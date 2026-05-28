@@ -118,9 +118,71 @@ def test_build_handler_processes_text_message_into_engine_snapshot(monkeypatch):
 
     assert isinstance(snapshot, EngineSnapshot)
     assert snapshot.workspace.case_id == workspace.case_id
+    # Demographics are extracted source-tied from "62M"; clinical narrative
+    # is preserved as a chat turn but not fabricated into facts.
     assert snapshot.workspace.state is CaseState.POSSIBLE_CASE
-    assert snapshot.workspace.facts == ()
+    fact_keys = {fact.key for fact in snapshot.workspace.facts}
+    assert fact_keys == {"age", "sex"}
+    assert all(
+        fact.source_type is SourceType.TEXT for fact in snapshot.workspace.facts
+    )
     assert snapshot.workspace.chat_turns[0].source_type is SourceType.TEXT
+
+
+def test_handler_progresses_to_collecting_on_second_case_fragment(monkeypatch):
+    """A second case-like fragment with new demographics should move the
+    workspace out of ``possible_case`` into ``collecting`` while keeping
+    facts source-tied and draft-eligible (no stricter sources here)."""
+
+    monkeypatch.setenv(VNEXT_TOKEN_ENV, "vnext-only")
+    for prod_env in PRODUCTION_TOKEN_ENVS:
+        monkeypatch.delenv(prod_env, raising=False)
+
+    handler = build_handler()
+    assert handler is not None
+
+    workspace = new_workspace()
+    first = handler(
+        workspace,
+        _bare_text_message("Saw a 62M in resus with chest pain after RSI."),
+    )
+    assert first.workspace.state is CaseState.POSSIBLE_CASE
+
+    second = handler(
+        first.workspace,
+        _bare_text_message(
+            "Follow up: 65 year old man, presented to ED with chest pain, "
+            "consultant supervised the procedure."
+        ),
+    )
+    assert second.workspace.state is CaseState.COLLECTING
+    # Second fragment overrides the demographic facts with its newer
+    # source-tied values; both stay source-tied to TEXT and draft-eligible
+    # because text is not a stricter source.
+    age_fact = second.workspace.fact_for("age")
+    assert age_fact is not None and age_fact.value == "65"
+    assert age_fact.draft_eligible is True
+
+
+def test_handler_does_not_extract_from_side_question_text(monkeypatch):
+    monkeypatch.setenv(VNEXT_TOKEN_ENV, "vnext-only")
+    for prod_env in PRODUCTION_TOKEN_ENVS:
+        monkeypatch.delenv(prod_env, raising=False)
+
+    handler = build_handler()
+    assert handler is not None
+
+    snapshot = handler(
+        new_workspace(),
+        _bare_text_message(
+            "What forms would a 62M chest pain case support for SLO11?"
+        ),
+    )
+
+    # Portfolio question with a demographic literal must not promote
+    # itself into the case workspace.
+    assert snapshot.workspace.state is CaseState.IDLE
+    assert snapshot.workspace.facts == ()
 
 
 def test_build_handler_passes_image_through_as_unconfirmed_stricter_source(monkeypatch):

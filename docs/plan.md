@@ -278,13 +278,42 @@ Slice 2 (offline adapter layer) — implemented:
   `python-telegram-bot`, register handlers, hook into launchd, or
   perform any I/O.
 
-Slice 3+ (future, gated on dogfood):
+Slice 3 (offline conservative text extraction) — implemented:
 
-- Wire `build_handler` into a real polling loop on the private bot token.
-- Plug in LLM-backed or rule-based fact extraction so the engine can
-  move past `POSSIBLE_CASE` and produce real drafts. Stricter sources
-  (image/document) must remain unconfirmed until the user explicitly
-  confirms the extracted facts.
+- `backend/vnext_text_extractor.py` adds a pure regex extractor that
+  pulls demographic literals (age, sex) directly from the doctor's own
+  text — shorthand patterns like `62M` / `45 F` and "X year old
+  man/woman/lady/..." phrasing. The extracted value must appear
+  verbatim in the source; ambiguous input returns an empty tuple so
+  the engine stays in `possible_case` and the orchestrator asks the
+  user for confirmation before drafting. The extractor never calls an
+  LLM, never reaches the network, never touches Kaizen, credentials,
+  or the database.
+- `telegram_vnext_adapter` runs the extractor only when the router has
+  classified the text as `POSSIBLE_CASE_DETAIL`. Side questions and
+  save commands never promote demographic literals into the case
+  workspace, even when they happen to mention one — the router has
+  already decided the turn is not case material.
+- Voice / image / document inputs continue to emit empty
+  `extracted_facts` with their stricter source types. Media stays
+  unconfirmed and is never draft-eligible until a future slice wires
+  vision/whisper/document extraction and the user confirms each fact.
+- `build_handler` remains the disabled-by-default construction seam:
+  `None` unless `PG_VNEXT_BOT_TOKEN` is set, and `None` if that token
+  collides with any known production token env var. The module still
+  does not import `python-telegram-bot`, register handlers, or perform
+  any I/O.
+
+Slice 4+ (future, gated on dogfood):
+
+- Wire `build_handler` into a real polling loop on the private bot
+  token.
+- Layer richer source-tied fact extraction (presenting complaint,
+  diagnosis, supervision, procedure, learning point) behind the same
+  "verbatim from the source" invariant so the engine can progress past
+  `COLLECTING` into `DRAFT_READY` without inventing clinical facts.
+  Stricter sources (image/document) must remain unconfirmed until the
+  user explicitly confirms each extracted fact.
 - Compare vNext drafts against the current bot on the same messy cases
   before discussing any public bot identity migration.
 
