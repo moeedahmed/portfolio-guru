@@ -6655,10 +6655,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             msg = (
                 f"❌ Filing didn't complete\n"
                 f"{form_name}\n\n"
-                f"{recovery_block}\n\n"
-                f"Open blank {form_name} in Kaizen to fill manually:\n{kaizen_url}\n\n"
-                f"{_DRAFT_DIVIDER}\n\n"
-                f"{failed_summary}"
+                f"{recovery_block}"
             )
             if not recovery and error:
                 msg += f"\n\nDetails: {sanitize_internal_form_codes(error)}"
@@ -6667,13 +6664,10 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             recovery_block = sanitize_internal_form_codes(
                 recovery or "Try again, or fill the form manually in your portfolio."
             )
-            failed_summary = _format_failed_filing_summary(error, skipped)
             msg = (
                 f"❌ Filing didn't complete\n"
                 f"{form_name}\n\n"
-                f"{recovery_block}\n\n"
-                f"{_DRAFT_DIVIDER}\n\n"
-                f"{failed_summary}"
+                f"{recovery_block}"
             )
             if not recovery and error:
                 msg += f"\n\nDetails: {sanitize_internal_form_codes(error)}"

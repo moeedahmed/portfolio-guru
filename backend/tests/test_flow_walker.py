@@ -1526,7 +1526,6 @@ class TestFlowWalker:
         assert result == AWAIT_APPROVAL
         assert recovery_line in text
         assert "Filing didn't complete" in text
-        assert "Saved in Kaizen: not confirmed" in text
         buttons = sim.get_last_buttons()
         assert ('📋 File another case', 'ACTION|file') in buttons
         assert ('❌ Cancel', 'ACTION|cancel') in buttons
