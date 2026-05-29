@@ -6656,15 +6656,9 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     context.user_data["last_filing_report"] = msg
 
     if status == "success":
-        # Add amend button to the primary row — compact, no extra row.
-        amend_btn = InlineKeyboardButton("✏️ Amend this draft", callback_data="AMEND|amend")
-        existing_rows = list(end_keyboard.inline_keyboard) if end_keyboard else []
-        existing_rows = [list(row) for row in existing_rows]
-        if existing_rows:
-            existing_rows[0].append(amend_btn)
-        else:
-            existing_rows = [[amend_btn]]
-        end_keyboard = InlineKeyboardMarkup(existing_rows)
+        # The draft preview is visible above — a clean success message with
+        # reply-hint text is sufficient. No amend/extra buttons needed.
+        pass
 
     # Keep the reviewed draft visible. The temporary progress message becomes
     # the final report so completion stays to one message.

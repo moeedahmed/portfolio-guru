@@ -1006,7 +1006,6 @@ class TestFlowWalker:
         # First button may be File another case or the amend button row
         assert ('📋 File another case', 'ACTION|file') in buttons
         assert ('👍 It worked', 'FEEDBACK|good|CBD|success') not in buttons
-        assert ('✏️ Amend this draft', 'AMEND|amend') in buttons
         assert ("👎 Didn't work", 'FEEDBACK|bad|CBD|success') not in buttons
         assert ('🧰 More options', 'ACTION|post_file_more|CBD|success') not in buttons
         assert not any(label in {'💬 Something missing?', '⚙️ Settings', '🏠 Main menu'} for label, _ in buttons)
