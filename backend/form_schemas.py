@@ -62,7 +62,7 @@ FORM_SCHEMAS = {
             {"key": "clinical_setting",     "label": "Clinical Setting",        "type": "text",     "required": True},
             {"key": "stage_of_training",    "label": "Stage of Training",       "type": "dropdown", "required": True,
              "options": ["Intermediate/ST3", "Higher/ST4-ST6", "PEM Sub-specialty", "ACCS ST1-ST2/CT1-CT2"]},
-            {"key": "procedural_skill",     "label": "ST4-ST6 procedural skill (2025 Update)", "type": "dropdown", "required": True,
+            {"key": "procedural_skill",     "label": "ST4-ST6 procedural skill", "type": "dropdown", "required": True,
              "options": ["Paediatric sedation", "Adult sedation", "Advanced airway management",
                          "Non-invasive ventilation", "Open Chest drain", "Resuscitative thoracotomy",
                          "Lateral Canthotomy", "DC cardioversion", "External pacing", "Pericardiocentesis",
@@ -250,7 +250,7 @@ FORM_SCHEMAS = {
             {"key": "accs_procedural_skill",  "label": "ACCS Procedural skills (Update 2025)", "type": "dropdown", "required": False,
              "options": ["- n/a -"],
              "field_id": "eed0e8dc-075d-4661-aea5-2c3238af4c5b"},
-            {"key": "intermediate_procedural_skill", "label": "Intermediate Procedural skills (2025 Update)", "type": "dropdown", "required": False,
+            {"key": "intermediate_procedural_skill", "label": "Intermediate Procedural skills", "type": "dropdown", "required": False,
              "options": ["- n/a -"],
              "field_id": "31bd55b7-0e32-4918-8cc0-4ba33af83772"},
             {"key": "higher_procedural_skill", "label": "ST4-ST6 Higher EM Procedural skill", "type": "dropdown", "required": False,
@@ -288,7 +288,7 @@ FORM_SCHEMAS = {
             {"key": "higher_procedural_skill_other", "label": "If Other (Higher EM procedural Skill), please specify:", "type": "text", "required": False,
              "conditional_required_when": {"higher_procedural_skill": "Other"},
              "field_id": "4fea8fcc-185c-4917-bfe0-2dc63f7dccb3"},
-            {"key": "intermediate_procedural_skill", "label": "Intermediate Procedural skills (2025 Update)", "type": "dropdown", "required": False,
+            {"key": "intermediate_procedural_skill", "label": "Intermediate Procedural skills", "type": "dropdown", "required": False,
              "options": ["- n/a -", "Other"]},
             {"key": "accs_procedural_skill",  "label": "ACCS Procedural skills (Update 2025)", "type": "dropdown", "required": False,
              "options": ["- n/a -", "Other"]},
@@ -481,7 +481,7 @@ FORM_SCHEMAS = {
     # ─── Management section forms ─────────────────────────────────────────
 
     "MGMT_ROTA": {
-        "name": "Management: Rota (2021/2025)",
+        "name": "Management: Rota",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
@@ -491,7 +491,7 @@ FORM_SCHEMAS = {
     },
 
     "MGMT_RISK": {
-        "name": "Management: Risk Register (2021/2025)",
+        "name": "Management: Risk Register",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
@@ -501,7 +501,7 @@ FORM_SCHEMAS = {
     },
 
     "MGMT_RECRUIT": {
-        "name": "Management: Recruitment (2021/2025)",
+        "name": "Management: Recruitment",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
@@ -511,7 +511,7 @@ FORM_SCHEMAS = {
     },
 
     "MGMT_PROJECT": {
-        "name": "Management: Project Record (2021/2025)",
+        "name": "Management: Project Record",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
@@ -521,7 +521,7 @@ FORM_SCHEMAS = {
     },
 
     "MGMT_RISK_PROC": {
-        "name": "Management: Procedure to Reduce Risk (2021/2025)",
+        "name": "Management: Procedure to Reduce Risk",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
@@ -531,7 +531,7 @@ FORM_SCHEMAS = {
     },
 
     "MGMT_TRAINING_EVT": {
-        "name": "Management: Organising a Training Event (2021/2025)",
+        "name": "Management: Organising a Training Event",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
@@ -541,7 +541,7 @@ FORM_SCHEMAS = {
     },
 
     "MGMT_GUIDELINE": {
-        "name": "Management: Introduction of Guideline (2021/2025)",
+        "name": "Management: Introduction of Guideline",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
@@ -551,7 +551,7 @@ FORM_SCHEMAS = {
     },
 
     "MGMT_INFO": {
-        "name": "Management: Information Management (2021/2025)",
+        "name": "Management: Information Management",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
@@ -561,7 +561,7 @@ FORM_SCHEMAS = {
     },
 
     "MGMT_INDUCTION": {
-        "name": "Management: Induction Programme (2021/2025)",
+        "name": "Management: Induction Programme",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
@@ -571,7 +571,7 @@ FORM_SCHEMAS = {
     },
 
     "MGMT_EXPERIENCE": {
-        "name": "Management Experience (2021/2025)",
+        "name": "Management Experience",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
@@ -581,7 +581,7 @@ FORM_SCHEMAS = {
     },
 
     "MGMT_REPORT": {
-        "name": "Management: Writing a Report (2021/2025)",
+        "name": "Management: Writing a Report",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
@@ -591,7 +591,7 @@ FORM_SCHEMAS = {
     },
 
     "APPRAISAL": {
-        "name": "Appraisal of Others (2021/2025)",
+        "name": "Appraisal of Others",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
@@ -601,7 +601,7 @@ FORM_SCHEMAS = {
     },
 
     "BUSINESS_CASE": {
-        "name": "Business Case (2021/2025)",
+        "name": "Business Case",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
@@ -611,7 +611,7 @@ FORM_SCHEMAS = {
     },
 
     "CLIN_GOV": {
-        "name": "Clinical Governance Meetings (2021/2025)",
+        "name": "Clinical Governance Meetings",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
@@ -621,7 +621,7 @@ FORM_SCHEMAS = {
     },
 
     "MGMT_COMPLAINT": {
-        "name": "Complaint (Management - 2021/2025)",
+        "name": "Complaint (Management)",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
@@ -631,7 +631,7 @@ FORM_SCHEMAS = {
     },
 
     "COST_IMPROVE": {
-        "name": "Cost Improvement Plan (2021/2025)",
+        "name": "Cost Improvement Plan",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
@@ -641,7 +641,7 @@ FORM_SCHEMAS = {
     },
 
     "CRIT_INCIDENT": {
-        "name": "Critical Incident (2021/2025)",
+        "name": "Critical Incident",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
@@ -651,7 +651,7 @@ FORM_SCHEMAS = {
     },
 
     "EQUIP_SERVICE": {
-        "name": "Introduction of Equipment or Service (2021/2025)",
+        "name": "Introduction of Equipment or Service",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
@@ -663,7 +663,7 @@ FORM_SCHEMAS = {
     # ─── Research, Audit & QI ─────────────────────────────────────────────
 
     "AUDIT": {
-        "name": "Audit Assessment Tool (2021/2025)",
+        "name": "Audit Assessment Tool",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
@@ -673,7 +673,7 @@ FORM_SCHEMAS = {
     },
 
     "RESEARCH": {
-        "name": "Research Activity (2021/2025)",
+        "name": "Research Activity",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
@@ -705,7 +705,7 @@ FORM_SCHEMAS = {
     },
 
     "PDP": {
-        "name": "Personal Development Plan (2021/2025)",
+        "name": "Personal Development Plan",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
