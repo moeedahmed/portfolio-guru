@@ -422,7 +422,7 @@ FORM_SCHEMAS = {
     # ===== NEWLY DISCOVERED FORMS (full catalogue) =====
 
     "ESLE_ASSESS": {
-        "name": "ESLE: Part 1 & 2 (2025 Update)",
+        "name": "ESLE: Part 1 & 2",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date", "type": "date", "required": True},
@@ -435,7 +435,7 @@ FORM_SCHEMAS = {
     },
 
     "REFLECT_LOG": {
-        "name": "Reflective Practice Log (2025 Update)",
+        "name": "Reflective Practice Log",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter",  "label": "Date",                            "type": "date",     "required": True},
@@ -455,7 +455,7 @@ FORM_SCHEMAS = {
     },
 
     "TEACH_OBS": {
-        "name": "Teaching Observation Tool (2025 Update)",
+        "name": "Teaching Observation Tool",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",              "type": "date",     "required": True},
@@ -468,7 +468,7 @@ FORM_SCHEMAS = {
     },
 
     "TEACH_CONFID": {
-        "name": "Management: Teach Confidentiality (2025 Update)",
+        "name": "Management: Teach Confidentiality",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date",       "type": "date", "required": True},
@@ -745,7 +745,7 @@ FORM_SCHEMAS = {
     },
 
     "FILE_UPLOAD": {
-        "name": "File Upload - Miscellaneous (2025 Update)",
+        "name": "File Upload - Miscellaneous",
         "filer_available": True,
         "fields": [
             {"key": "date_of_encounter", "label": "Date", "type": "date", "required": True},
