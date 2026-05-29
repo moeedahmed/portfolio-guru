@@ -1,0 +1,53 @@
+# Claude Code — files Claude should never read
+# Blocks expensive/unnecessary files from entering context
+
+# Dependencies
+node_modules/
+backend/venv/
+.venv/
+backend/__pycache__/
+__pycache__/
+
+# Build artifacts
+dist/
+build/
+.next/
+*.pyc
+*.pyo
+
+# Logs and caches
+*.log
+*.lock
+.pytest_cache/
+*.pkl
+
+# Backups and archives
+*.bak
+*.bak.*
+bak-*
+_backups/
+_archived/
+archive/
+
+# Secrets and config
+.env
+.env.*
+*.token
+
+# Git internals
+.git/objects/
+.git/refs/
+
+# Large data files
+*.jsonl
+*.db
+*.sqlite
+
+# Media assets Claude doesn't need
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp3
+*.mp4
+*.wav

@@ -1,183 +1,42 @@
-# Portfolio Guru — AGENTS.md
+# Portfolio Guru — AGENTS.md (Claude Code Project Context)
 
-## Project
+## Identity
 
-Portfolio Guru automates e-portfolio filing for UK EM trainees. A doctor sends a clinical case via Telegram (text, voice, or photo); the bot extracts structured WPBA data, recommends/accepts a form type, previews a draft, then saves a Kaizen draft after user approval. Live supervisor submission is never automatic.
+Portfolio Guru automates e-portfolio filing for UK EM trainees. A doctor sends a clinical case via Telegram (text, voice, photo, document); the bot extracts structured WPBA data, recommends/accepts a form type, previews a draft, then saves a Kaizen draft on approval. Supervisor submission is never automatic.
 
-## Current Bot State
+## Current State
 
-- Phase: local/private beta on Moeed's Mac Mini.
-- Runtime: launchd service `com.portfolioguru.bot`, working directory `/Users/moeedahmed/projects/portfolio-guru`.
-- Logs: `/tmp/portfolio-guru-bot.log`, plus `~/Library/Logs/portfolio-guru/launchd.out.log` and `.err.log`.
-- Deploy: GitHub Actions self-hosted Mac Mini runner runs `scripts/deploy_mac.sh` on pushes to `main`.
-- Current branch: `main`; GitHub/main is the intended source of truth for deploys.
-- Supported inputs: text, Telegram voice/audio, and images/photos.
-- Supported output: Kaizen draft save only; user reviews/submits manually.
-- Disabled/coming soon: `/bulk`, `/unsigned`, `/chase` return coming-soon messages; old code remains after early `return` and must not be treated as live.
-
-## Stack
-
-- Telegram bot: `python-telegram-bot` v21+ in polling mode.
-- LLM extraction: Gemini fast model from `backend/model_config.py`, with DeepSeek/OpenAI fallback for eligible tiers.
-- Vision/voice: Gemini Vision/audio paths, with configured fallback models where implemented.
-- Browser automation: deterministic Playwright via browser-harness CDP for DOM-mapped forms (46 verified Kaizen form types). browser-use (LLM agent) is an emergency bridge only — replaced by browser-harness domain skills for any new platform.
-- Storage: Fernet-encrypted SQLite credentials/profile/state stores; PicklePersistence for Telegram conversation state.
-- Target platform: Kaizen ePortfolio (`eportfolio.rcem.ac.uk` → `kaizenep.com`).
-
-## Key Constraints
-
-- Never log credentials, decrypted values, or bot/API tokens.
-- Never submit forms or send supervisor requests; save drafts only.
-- Use launchd on macOS; do not use systemd/systemctl.
-- Treat live Kaizen filing as approval-sensitive; manual/live tests can create draft artefacts that may need cleanup.
-- If docs disagree with git, tests, launchd status, or logs, runtime evidence wins and docs must be corrected before major work continues.
+- Phase: local/private beta on Mac Mini. Deploy: GitHub Actions self-hosted runner, push to `main`.
+- Stack: python-telegram-bot v21+ polling, Gemini fast extraction, Playwright/CDP for DOM-mapped Kaizen forms, Fernet-encrypted SQLite, PicklePersistence.
+- Target: Kaizen ePortfolio (`eportfolio.rcem.ac.uk` → `kaizenep.com`).
+- Inputs: text, voice, audio, photos, documents.
+- Output: Kaizen draft save only. No supervisor submission.
+- Disabled code: `/bulk`, `/unsigned`, `/chase` return early with "coming soon" — code below the return is not live.
 
 ## Filing Routing Discipline
 
-Single source of truth: `backend/filer_router.py` defines which filing method is used for each form type.
+Single source: `backend/filer_router.py` selects the method per form type.
 
-**DOM-mapped forms** → deterministic Playwright via browser-harness CDP (`localhost:18800`). Always. No escalation to browser-use. If Playwright returns partial, the DOM map gap is logged and returned for fixing. Never credentials in LLM prompts.
+- **DOM-mapped forms** → deterministic Playwright via CDP (`localhost:18800`). No browser-use. If partial, log gap and fix — never credentials in LLM prompts.
+- **Unknown form types on supported platform** → browser-use via CDP as emergency bridge. Auth in persistent Chrome session, never in prompt.
+- **Unknown platforms** → browser-harness + domain skills first. User connects their Chrome, CDP navigates, persists helpers.
+- browser-use is NEVER a substitute for DOM mapping.
 
-**Unknown form types** (no DOM mapping on a supported platform) → browser-use via CDP (`localhost:18800`). The persistent Chrome session handles auth; credentials never enter the LLM prompt. If the session is lost, report SESSION_EXPIRED — do not attempt login.
+## Key Known Failure Modes
 
-**Unknown platforms** (Horus, SOAR, etc.) → browser-harness + domain skills first. browser-use is an emergency bridge only, replaced by written domain skills. The pattern is: user connects their own Chrome → browser-harness navigates via CDP → learns the layout → persists helpers for next time. No credentials ever touch the system.
+- Disabled features have code paths below `return` — never treat as live.
+- Kaizen date format: `d/m/yyyy`, not US `m/d/yyyy`.
+- Two separate filer implementations: `filer.py` (browser-use) and `browser_filer.py` (Playwright). Shared logic, different failure modes.
+- LLM extraction is non-deterministic — test with multiple runs.
+- Playwright selectors break on Kaizen UI updates (third-party, no notice).
+- Gemini fallback ordering in `model_config.py` — adding a model means updating all callers.
 
-**What browser-use is NOT:** browser-use is NOT a substitute for DOM mapping or domain skills. It is a last-resort LLM agent for pages that CDP/Playwright cannot handle (rare). The `browser_use` Python package must never bypass the CDP auth profile with embedded credentials.
+## Safety
 
-## Known Failure Modes
-
-These are common mistakes in this codebase:
-
-- **Disabled features still have code paths:** `/bulk`, `/unsigned`, `/chase` return "coming soon" with an early `return`. Never treat the code below that return as live or production-relevant.
-- **Kaizen date format is `d/m/yyyy`:** Not US `m/d/yyyy`. Extracted dates from clinical text need conversion before filing. This is the most common Kaizen filing error.
-- **Two separate filer implementations:** `filer.py` (browser-use / CBD) and `browser_filer.py` (deterministic Playwright). They share logic in places but have different failure modes. Tests for one don't cover the other.
-- **Fernet-encrypted stores are read-once per process:** The decrypt-and-hold pattern means stale credentials persist in memory until restart. Don't add credential refresh logic — it's deliberate for stability.
-- **LLM extraction is non-deterministic:** The same input can produce different form recommendations on different calls. Test extraction with multiple runs, not one-off passes.
-- **Gemini fallback ordering:** `model_config.py` defines which models are tried in what order. Adding a new model there means updating all callers — not just the config array.
-- **Playwright selectors break on Kaizen UI changes:** Kaizen is a third-party platform that updates without notice. Deterministic selectors (XPath, CSS) are brittle. When tests fail after a Kaizen deploy, check selectors first.
-- **launchd logs are rotated:/tmp/ logs are lost on reboot.** Long-term debugging needs the `~/Library/Logs/` files.
+- Never log credentials, decrypted values, or tokens.
+- Never submit forms to supervisors. Draft-only saves.
+- If docs disagree with git/tests/runtime, runtime evidence wins and docs must be corrected.
 
 ## Supported Forms
 
-`FORM_SCHEMAS` covers the structured form fields; `FORM_UUIDS` in `backend/extractor.py` maps form routes to Kaizen UUIDs. Verify counts from code before quoting them. Current known doc gap: real Kaizen filing confidence is still only partially verified until skipped Kaizen filer tests are rewritten and a non-live deterministic filing smoke test exists.
-
-Kaizen URL pattern: `https://kaizenep.com/events/new-section/<UUID>`.
-Kaizen date format: `d/m/yyyy`.
-
-## Key Files
-
-```text
-backend/bot.py              Telegram handlers, draft preview, approval/edit flow
-backend/extractor.py        LLM extraction, form recommendation, form UUID routing
-backend/form_schemas.py     Kaizen form schema definitions
-backend/model_config.py     Model names and fallback ordering
-backend/filer.py            browser-use CBD auto-filer path
-backend/browser_filer.py    Deterministic/browser filing helpers
-backend/vision.py           Image extraction
-backend/whisper.py          Audio transcription
-backend/credentials.py      Fernet-encrypted credential store
-backend/profile_store.py    Training level/curriculum storage
-backend/run_local.sh        Local startup with BWS-loaded secrets
-start-bot.sh                launchd entrypoint
-scripts/deploy_mac.sh       Mac Mini deploy script
-docs/MAC_MINI_DEPLOYMENT.md Deployment/runbook truth
-docs/continuity/RESUME_BRIEF.md Generated restart snapshot
-TASK.md                     One active sprint only
-WORKFLOWS.md                Bot flow reference
-```
-
-## Conversation States
-
-`AWAIT_USERNAME=0`, `AWAIT_PASSWORD=1`, `AWAIT_FORM_CHOICE=2`, `AWAIT_APPROVAL=3`, `AWAIT_EDIT_FIELD=4`, `AWAIT_EDIT_VALUE=5`, `AWAIT_CASE_INPUT=6`, `AWAIT_TRAINING_LEVEL=7`.
-
-## Key Design Decisions
-
-- Draft-only filing: doctor must review and submit/sign-off manually.
-- `allow_reentry=False` on case conversation prevents voice/photo from restarting flow mid-edit.
-- Draft persistence stores Pydantic objects as plain dicts via `_store_draft`/`_load_draft`.
-- KC-first curriculum selection: KCs picked from case context, SLOs derived.
-- `curriculum_links` = SLO codes; `key_capabilities` = full KC strings.
-- LLM calls must avoid blocking the event loop.
-- Stale button guards should give clean user-facing recovery messages.
-
-## Continuity Protocol
-
-Before substantial work:
-
-1. Read the Notion Portfolio Guru hub: Status, Architecture, Brief, Features, recent Log.
-2. Run `check-product-continuity.py /Users/moeedahmed/projects/portfolio-guru --write-resume` and read `docs/continuity/RESUME_BRIEF.md`.
-3. Read `TASK.md` and verify it is the single active sprint.
-4. Inspect git status, recent commits, relevant tests, and live launchd/log state if runtime matters.
-5. Refresh stale Notion/repo context before coding.
-
-After meaningful changes: update Notion Status/Architecture/Features/Log as relevant, update this file only for permanent context changes, update/archive `TASK.md`, run tests, and commit coherent work.
-
-## Testing
-
-Default offline gate:
-
-```bash
-cd /Users/moeedahmed/projects/portfolio-guru/backend
-source venv/bin/activate
-python -m pytest tests/ -v --ignore=tests/test_e2e.py --ignore=tests/test_e2e_live.py
-```
-
-Manual/live gates:
-
-```bash
-pytest tests/ -v -m live
-KAIZEN_LIVE_TESTS=1 pytest tests/test_kaizen_integration.py -v -m kaizen -s
-```
-
-Live gates need explicit approval because they can touch Telegram/Kaizen or leave draft artefacts.
-Kaizen integration tests require `KAIZEN_LIVE_TESTS=1` even when credentials are exported. Each live run writes a unique manifest and run token. Delete only drafts whose event ID is listed in that exact manifest and whose content contains that exact run token; never delete by form type, date, or generic test wording.
-
-
-## Compatibility
-
-`CLAUDE.md` is a symlink to this file for Claude Code compatibility. Do not maintain duplicate long-form agent context files.
-
-## Product Direction
-
-### Portfolio Types
-There are exactly **three portfolio types** for users who file their own tickets:
-1. **ACCS (ST1–2)** — ACCS training level
-2. **Intermediate (ST3)** — ST3 training level
-3. **Higher (ST4–6)** — Higher specialty training
-
-SAS / Fellow doctors are assigned one of these three based on their competency level (Kaizen assigns them ACCS/Intermediate/Higher by level, not by job title).
-
-**There is no Consultant portfolio type.** Consultants do not file their own e-portfolio tickets in Kaizen — they become Clinical Supervisors.
-
-### Clinical Supervisor Mode (Next Major Feature)
-Once the filing aspect is complete, the next build is a **Clinical Supervisor mode** — a completely separate product role within Portfolio Guru.
-
-**Clinical Supervisor workflow:**
-1. Supervisor receives a Telegram notification when a new ticket is assigned to them for assessment
-2. Notification includes a button to open the ticket
-3. Ticket content rendered in Telegram for the supervisor to read
-4. Supervisor dictates/voices their assessment feedback as a Telegram conversation
-5. Bot converts the conversation into the "part two" assessment fields of the form
-6. Saved as a Kaizen draft
-7. Rest of the filing engine re-used
-
-**Notification layer (universal, benefits everyone):**
-- MSF invitations, cross-trainee assessments, any "form sent to you" scenario
-- Not Clinical Supervisor-only — benefits trainees receiving MSFs too
-- Inbound notification → open → read → respond → file as draft
-
-**Architecture note:** The Clinical Supervisor mode is a separate interaction pattern (inbound notif + read + assess) but shares ~80% of the filing engine. It needs its own trigger, UX, and form-context rendering. Treat as a separate feature track, not a portfolio type setting.
-
-### Auto-Detect Role Mapping
-```python
-role_map = {"hst": "HIGHER", "accs": "ACCS", "accs_intermediate": "INTERMEDIATE", "assessor": "HIGHER"}
-```
-`assessor` maps to `HIGHER` — the Clinical Supervisor account has no personal portfolio. For now, supervisor functionality is a separate feature track (see above).
-
-**Note:** The three portfolio types (ACCS, Intermediate, Higher) are the only valid options. SAS/Fellow doctors pick by their actual level. Consultants become Clinical Supervisors and don't file personal tickets.
-
-### Credentials Reference
-- `drmoeedahmed@gmail.com` — Higher Trainee (ST5). Full HST form set including 2025 updates, progression, CCT.
-- `mharisq79@gmail.com` — ACCS/Intermediate. ACCS-specific forms (EPA, ASAT, HALO, IAC).
-- `ahmed.mahdi@stgeorges.nhs.uk` — Clinical Supervisor. No personal portfolio ("You cannot create any events!"). Only supervisors trainees.
-- `drsanazehra@gmail.com` — SAS (Non-Trainee Higher). Same form set as Higher trainee minus progression/CCT forms.
+Full form catalogue and DOM coverage status: `docs/form-coverage.md`. Currently 46 verified forms with DOM mappings, covering CBD, DOPS, Mini-CEX, ACAT, reflections, teaching, procedurals, management, US cases, and more.
