@@ -1025,7 +1025,7 @@ def _build_next_step_keyboard(user_id: int) -> InlineKeyboardMarkup | None:
 def _cancelled_next_step_text(user_id: int, scope: str = "Cancelled") -> str:
     if _setup_needs_finishing(user_id):
         return f"❌ {scope}. Connect Kaizen to start filing."
-    return f"✅ {scope}. Just send your next case when ready."
+    return f"↩️ {scope}. Just send your next case when ready."
 
 
 def _expired_prompt_text(user_id: int) -> str:
