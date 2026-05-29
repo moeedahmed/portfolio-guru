@@ -5730,7 +5730,14 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 _track_latest_message(context, ack)
                 return await _process_case_text(update.message, context, user_id, case_text, input_source)
             else:
-                await ack.edit_text("📷 Image read. Finding matching forms…")
+                if _gathering_enabled(context) and not (context.user_data.get("chosen_form") and context.user_data.get("awaiting_detail")):
+                    reply_text, reply_markup = _gathering_reply(context)
+                    await ack.edit_text(reply_text, reply_markup=reply_markup)
+                    context.user_data["gathering_msg_id"] = ack.message_id
+                    context.user_data["gathering_chat_id"] = ack.chat_id
+                    context.user_data["_gathering_ack_used"] = True
+                else:
+                    await ack.edit_text("📷 Image read. Finding matching forms…")
             _track_latest_message(context, ack)
         except Exception as e:
             ocr_done.set()
@@ -5785,7 +5792,14 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             if len(case_text) > max_chars:
                 case_text = case_text[:max_chars] + "\n\n[Document truncated — using first 15,000 characters]"
             
-            await ack.edit_text(f"📄 *{file_name}* read. Finding matching forms…", parse_mode="Markdown")
+            if _gathering_enabled(context) and not (context.user_data.get("chosen_form") and context.user_data.get("awaiting_detail")):
+                reply_text, reply_markup = _gathering_reply(context)
+                await ack.edit_text(reply_text, reply_markup=reply_markup)
+                context.user_data["gathering_msg_id"] = ack.message_id
+                context.user_data["gathering_chat_id"] = ack.chat_id
+                context.user_data["_gathering_ack_used"] = True
+            else:
+                await ack.edit_text(f"📄 *{file_name}* read. Finding matching forms…", parse_mode="Markdown")
             _track_latest_message(context, ack)
             context.user_data["document_name"] = file_name
 
@@ -5851,6 +5865,8 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             context.user_data["attachment_path"] = attachment_path_to_save
             context.user_data["attachment_name"] = attachment_name_to_save
         _append_gathering_case(context, case_text, input_source)
+        if context.user_data.pop("_gathering_ack_used", False):
+            return AWAIT_GATHERING
         reply_text, reply_markup = _gathering_reply(context)
         gathering_msg = await update.message.reply_text(reply_text, reply_markup=reply_markup)
         context.user_data["gathering_msg_id"] = gathering_msg.message_id
