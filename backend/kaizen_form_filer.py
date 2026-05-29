@@ -1813,28 +1813,8 @@ async def fill_kaizen_form(
         field_map = {**COMMON_HEADER_FIELD_MAP, **base_field_map}
 
         if form_type == "DOPS":
-            from dops_filing import (
-                dops_blocking_misses,
-                dops_quality_gate,
-                normalise_dops_fields,
-            )
+            from dops_filing import normalise_dops_fields
             fields = normalise_dops_fields(fields)
-            quality_misses = dops_quality_gate(fields)
-            blocking = dops_blocking_misses(fields, gate_misses=quality_misses)
-            if blocking:
-                return {
-                    "status": "partial",
-                    "filled": [],
-                    "skipped": list(fields.keys()),
-                    "errors": [
-                        "DOPS draft is missing required Kaizen fields: "
-                        + ", ".join(blocking)
-                        + ". Not saving — add the detail and try again."
-                    ],
-                    "screenshot": None,
-                    "quality_gate_failed": True,
-                    "missing_for_quality": blocking,
-                }
         fields, header_meta = apply_common_header_defaults(form_type, fields, field_map)
         fields = drop_consumed_unmapped_schema_fields(form_type, fields)
 
@@ -2744,7 +2724,6 @@ async def file_to_kaizen(
     attachment_path: Optional[str] = None,
     attachment_drive_url: Optional[str] = None,
     reuse_draft: bool = False,
-    force_override: bool = False,
 ) -> Dict[str, Any]:
     """
     File a form to Kaizen as a draft (legacy API).
@@ -2769,36 +2748,9 @@ async def file_to_kaizen(
     if form_type == "PROC_LOG" and fields.get("date_of_activity") and not fields.get("date_occurred_on"):
         fields = dict(fields)
         fields["date_occurred_on"] = fields["date_of_activity"]
-    if form_type == "DOPS" and not force_override:    # Adapt extractor-schema keys (indication, trainee_performance, etc.)
-        # into the Kaizen DOM keys defined in FORM_FIELD_MAP["DOPS"], then
-        # refuse to file when the resulting draft would be genuinely unsafe
-        # (no procedure, or no clinical substance in the narrative). Lesser
-        # gaps — missing date, missing stage, a single empty semantic block —
-        # are recoverable in Kaizen; the bot has already warned the user.
-        # `quality_gate_failed` gives the bot a structural signal so it can
-        # route the user back to draft approval rather than reporting
-        # "filing failed".
-        from dops_filing import (
-            dops_blocking_misses,
-            dops_quality_gate,
-            normalise_dops_fields,
-        )
+    if form_type == "DOPS":
+        from dops_filing import normalise_dops_fields
         fields = normalise_dops_fields(fields)
-        quality_misses = dops_quality_gate(fields)
-        blocking = dops_blocking_misses(fields, gate_misses=quality_misses)
-        if blocking:
-            return {
-                "status": "partial",
-                "filled": [],
-                "skipped": list(fields.keys()),
-                "error": (
-                    "DOPS draft is missing required Kaizen fields: "
-                    + ", ".join(blocking)
-                    + ". Not saving — add the detail and try again."
-                ),
-                "quality_gate_failed": True,
-                "missing_for_quality": blocking,
-            }
     fields, header_meta = apply_common_header_defaults(form_type, fields, field_map)
     fields = drop_consumed_unmapped_schema_fields(form_type, fields)
     browser = None

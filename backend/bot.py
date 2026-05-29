@@ -1804,15 +1804,8 @@ def _build_explicit_form_keyboard(form_type: str):
     ])
 
 
-def _build_approval_keyboard(improved_once: bool = False, can_back_to_missing: bool = False, quality_gate: bool = False):
+def _build_approval_keyboard(improved_once: bool = False, can_back_to_missing: bool = False):
     rows = []
-    if quality_gate:
-        # Quality gate warning — must not re-offer "Save as draft" (would loop
-        # through the same gate). "File anyway" reuses APPROVE|draft because the
-        # quality_gate_shown flag set in user_data bypasses the gate on retry.
-        rows.append([InlineKeyboardButton("📤 File anyway", callback_data="APPROVE|draft")])
-        rows.append([InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|draft")])
-        return InlineKeyboardMarkup(rows)
     if improved_once:
         # After Quick Improve is used, remove the improve button entirely
         rows.append([
@@ -2375,7 +2368,9 @@ def _draft_has_useful_content(draft, form_type: str) -> bool:
 
 
 def _draft_missing_review_note(draft, form_type: str) -> str:
-    missing_required, missing_optional, _ = _missing_template_fields(draft, form_type)
+    fields = _draft_fields_for_review(draft)
+    missing_required = _universal_pre_file_gate(form_type, fields)
+    _, missing_optional, _ = _missing_template_fields(draft, form_type)
     coach = _draft_coach_note(draft)
     if not missing_required and not missing_optional and not coach:
         return ""
@@ -2384,9 +2379,9 @@ def _draft_missing_review_note(draft, form_type: str) -> str:
 
     lines = ["", "🧩 *Missing details*"]
     if missing_required:
-        labels = ", ".join(field["label"] for field in missing_required[:6])
+        labels = ", ".join(missing_required[:6])
         extra = f" (+{len(missing_required) - 6} more)" if len(missing_required) > 6 else ""
-        lines.append(f"Required: {labels}{extra}.")
+        lines.append(f"⚠️ *Warning: Missing required fields:* {labels}{extra}")
     if missing_optional:
         labels = ", ".join(field["label"] for field in missing_optional[:3])
         extra = f" (+{len(missing_optional) - 3} more)" if len(missing_optional) > 3 else ""
@@ -2442,87 +2437,43 @@ async def _ask_for_more_detail_before_draft(message, context: ContextTypes.DEFAU
     return AWAIT_CASE_INPUT
 
 
+def _universal_pre_file_gate(form_type: str, fields: dict) -> list[str]:
+    """Return friendly labels for missing schema-required fields.
 
-
-_GATE_TO_FRIENDLY_LABEL = {
-    "Date occurred on": "Date",
-    "Stage of training": "Stage of Training",
-    "Procedural skill": "Procedure / procedural skill",
-    # Thin case_observed is functionally a missing indication block.
-    "Case observed narrative": "Indication",
-    "Indication": "Indication",
-    "Trainee performance": "Trainee Performance",
-    "Reflection (needs clearer wording)": "Reflection (needs clearer wording)",
-}
-
-
-def _pre_file_missing_fields(form_type: str, fields: dict) -> list[str]:
-    """Return every quality gap the user should see before saving.
-
-    Includes both blocking and warning-level misses. The Save handler then
-    asks `_pre_file_blocking_fields` whether any of these are severe enough
-    to refuse the save outright.
+    The universal gate warns but never blocks.
     """
     base_form = _normalise_form_type(form_type)
-    if base_form != "DOPS":
-        return []
+    adapted_fields = dict(fields or {})
+    if base_form == "DOPS":
+        from dops_filing import normalise_dops_fields
+        adapted_fields = normalise_dops_fields(adapted_fields)
 
-    aliases = {
-        "Date": ["date_of_encounter", "date_of_event", "end_date"],
-        "Procedure / procedural skill": ["procedure_name", "procedural_skill"],
-        "Clinical Setting": ["clinical_setting", "placement"],
-        "Stage of Training": ["stage_of_training", "stage"],
-    }
+    schema = FORM_SCHEMAS.get(form_type, {})
     missing: list[str] = []
-    for label, keys in aliases.items():
-        values = [fields.get(k) for k in keys]
-        if not any(not _is_missing_field_value(v) for v in values):
-            missing.append(label)
+    for field in schema.get("fields", []):
+        if field.get("type") == "kc_tick" or field.get("key") == "key_capabilities":
+            continue
+        if field.get("required"):
+            val = adapted_fields.get(field["key"])
+            if _is_missing_field_value(val):
+                label = field["label"]
+                if form_type == "DOPS" and field["key"] in ("procedure_name", "procedural_skill"):
+                    label = "Procedure / procedural skill"
+                elif form_type == "DOPS" and field["key"] == "trainee_performance":
+                    label = "Trainee Performance"
+                elif form_type == "DOPS" and field["key"] == "clinical_setting":
+                    label = "Clinical Setting"
+                elif form_type == "DOPS" and field["key"] == "date_of_encounter":
+                    label = "Date"
 
-    from dops_filing import normalise_dops_fields, dops_quality_gate
-    gate_misses = dops_quality_gate(normalise_dops_fields(fields))
-    for m in gate_misses:
-        friendly = _GATE_TO_FRIENDLY_LABEL.get(m, m)
-        if friendly not in missing:
-            missing.append(friendly)
-
+                if label not in missing:
+                    missing.append(label)
     return missing
 
 
-def _pre_file_blocking_fields(form_type: str, fields: dict) -> list[str]:
-    """Return friendly labels for misses severe enough to refuse the save.
-
-    Only DOPS gates today. A draft is genuinely unsafe when the procedure
-    is absent or the narrative has no clinical substance at all — see
-    `dops_blocking_misses` for the precise rule.
-    """
-    base_form = _normalise_form_type(form_type)
-    if base_form != "DOPS":
-        return []
-
-    from dops_filing import dops_blocking_misses, normalise_dops_fields
-    blocking_gate = dops_blocking_misses(normalise_dops_fields(fields))
-    blocking: list[str] = []
-    for m in blocking_gate:
-        friendly = _GATE_TO_FRIENDLY_LABEL.get(m, m)
-        if friendly not in blocking:
-            blocking.append(friendly)
-    return blocking
 
 
-def _format_pre_file_missing_message(form_type: str, missing: list[str]) -> str:
-    """Inline warning block appended to the draft preview when blocking gaps
-    remain. Returns just the warning — no header — so the morphing message
-    stays a single thread from preview → gate → save → result."""
-    if not missing:
-        return ""
-    shown = missing[:3]
-    bullets = ", ".join(shown)
-    extra = f" (+{len(missing) - 3} more)" if len(missing) > 3 else ""
-    return (
-        f"⚠️ *Missing:* {bullets}{extra}\n"
-        "💬 Reply to add the detail, or tap *File anyway* to save what you have."
-    )
+
 
 def _format_template_review(form_type: str, draft) -> str:
     form_name = _form_display_name(form_type)
@@ -6213,25 +6164,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     form_name = schema.get("name", form_type)
     form_emoji = FORM_EMOJIS.get(form_type, "📋")
 
-    blocking_before_file = _pre_file_blocking_fields(form_type, fields)
-    # Morph the existing draft-preview message into the gate warning so the
-    # filing flow stays a single message thread (no stacking).
-    if blocking_before_file and not context.user_data.get("quality_gate_shown", False):
-        context.user_data["quality_gate_shown"] = True
-        preview_text = _format_draft_preview(draft, _chosen_form_reason(context, form_type))
-        warning_block = _format_pre_file_missing_message(form_type, blocking_before_file)
-        await _safe_edit_text(
-            source_message,
-            f"{preview_text}\n\n{warning_block}",
-            reply_markup=_build_approval_keyboard(
-                improved_once=context.user_data.get("quick_improve_used", False),
-                quality_gate=True,
-            ),
-            parse_mode="Markdown",
-        )
-        return AWAIT_APPROVAL
-    # Non-blocking gaps no longer get a separate warning — the user already
-    # saw what was missing on the draft preview before approving.
+
 
     # Save local JSON backup
     import json as _json
@@ -6313,7 +6246,6 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 form_name=form_name,
                 reuse_draft=reuse_existing_draft,
                 attachment_path=attachment_path,
-                force_override=bool(context.user_data.get("quality_gate_shown")),
             ),
             timeout=300,  # 5 min — browser-use path may take longer
         )
@@ -6367,9 +6299,6 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         typing_stop.set()
         typing_task.cancel()
         progress_task.cancel()
-        # Filing attempt is over (success, timeout, or exception) — clear the
-        # gate bypass so a subsequent retry re-checks quality.
-        context.user_data.pop("quality_gate_shown", None)
 
     status = result["status"]
     filled = result.get("filled", [])

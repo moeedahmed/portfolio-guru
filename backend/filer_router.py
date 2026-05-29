@@ -97,7 +97,6 @@ async def route_filing(
     reuse_draft: bool = False,
     attachment_path: Optional[str] = None,
     attachment_drive_url: Optional[str] = None,
-    force_override: bool = False,
 ) -> Dict[str, Any]:
     """
     Route a filing request to the appropriate filer.
@@ -170,7 +169,6 @@ async def route_filing(
                 curriculum_links,
                 submit=submit,
                 reuse_draft=reuse_draft,
-                force_override=force_override,
                 attachment_path=attachment_path,
                 attachment_drive_url=attachment_drive_url,
             )
@@ -268,7 +266,6 @@ async def _route_deterministic(
     curriculum_links: Optional[List[str]],
     submit: bool = False,
     reuse_draft: bool = False,
-    force_override: bool = False,
     attachment_path: Optional[str] = None,
     attachment_drive_url: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -280,7 +277,6 @@ async def _route_deterministic(
             fields=fields,
             username=credentials["username"],
             password=credentials["password"],
-            force_override=force_override,
             curriculum_links=curriculum_links,
             submit=submit,
             reuse_draft=reuse_draft,

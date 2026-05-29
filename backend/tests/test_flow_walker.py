@@ -1141,63 +1141,7 @@ class TestFlowWalker:
         assert result == ConversationHandler.END
         assert 'was saved to kaizen as a draft' in sim.get_last_text().lower()
 
-    @pytest.mark.asyncio
-    async def test_thin_dops_save_returns_to_approval_with_missing_detail_copy(self):
-        """A thin DOPS draft must not reach route_filing. The user is kept on
-        the draft-approval screen with a concise list of missing detail and
-        the same Save/Quick improve/Cancel keyboard. The reviewed draft
-        preview message stays intact — the blocker arrives as a separate
-        message so the user can still see what they reviewed.
-        """
-        from bot import AWAIT_APPROVAL, handle_approval_approve
-        from models import FormDraft
 
-        thin_dops = FormDraft(
-            form_type='DOPS',
-            uuid='uuid-dops',
-            fields={
-                'date_of_encounter': '2026-05-19',
-                'stage_of_training': 'Higher/ST4-ST6',
-                'clinical_setting': 'Emergency Department',
-                'procedure_name': 'DC cardioversion',
-                # No indication, no trainee performance — label-only narrative.
-                'case_observed': 'Procedure observed: DC cardioversion',
-            },
-        )
-
-        sim = BotSimulator()
-        update = sim._make_callback_update('APPROVE|draft')
-        context = sim._make_context()
-        context.user_data['draft_data'] = {
-            '_type': 'FORM',
-            'form_type': thin_dops.form_type,
-            'fields': thin_dops.fields,
-            'uuid': thin_dops.uuid,
-        }
-
-        route_filing_mock = AsyncMock(return_value={
-            'status': 'success', 'filled': [], 'skipped': [], 'method': 'deterministic',
-        })
-
-        with patch('bot.get_credentials', return_value=('user', 'pass')), \
-             patch('bot.route_filing', new=route_filing_mock):
-            result = await handle_approval_approve(update, context)
-
-        # The gate fires BEFORE Kaizen is touched.
-        route_filing_mock.assert_not_awaited()
-        assert result == AWAIT_APPROVAL
-        # Draft is preserved so the user can fix it.
-        assert context.user_data.get('draft_data')
-        # The reviewed draft preview message IS morphed in place — gate
-        # warning is appended inline so the filing flow stays a single thread.
-        assert update.callback_query.message.edit_text.await_count >= 1
-        text = (sim.get_last_text() or '').lower()
-        assert 'indication' in text
-        assert 'trainee performance' in text
-        # The gate keyboard offers "File anyway" (APPROVE|draft) and Cancel.
-        buttons = {data for _, data in sim.get_last_buttons()}
-        assert 'APPROVE|draft' in buttons
-        assert 'CANCEL|draft' in buttons
 
     @pytest.mark.asyncio
     async def test_dops_save_with_missing_date_proceeds_without_extra_warning(self):
@@ -2470,9 +2414,9 @@ class TestRecentPortfolioFixes:
         assert ('📤 Save as draft', 'APPROVE|draft') in buttons
 
     def test_dops_pre_file_guard_blocks_blank_voice_draft(self):
-        from bot import _pre_file_missing_fields
+        from bot import _universal_pre_file_gate
 
-        missing = _pre_file_missing_fields('DOPS', {
+        missing = _universal_pre_file_gate('DOPS', {
             'end_date': '14/5/2026',
             'stage_of_training': 'Higher/ST4-ST6',
         })
@@ -2488,9 +2432,9 @@ class TestRecentPortfolioFixes:
         and passed, so a near-empty Kaizen draft slipped through. The
         strengthened guard must catch it.
         """
-        from bot import _pre_file_missing_fields
+        from bot import _universal_pre_file_gate
 
-        missing = _pre_file_missing_fields('DOPS', {
+        missing = _universal_pre_file_gate('DOPS', {
             'date_of_encounter': '2026-05-19',
             'stage_of_training': 'Higher/ST4-ST6',
             'clinical_setting': 'Emergency Department',
@@ -2504,25 +2448,22 @@ class TestRecentPortfolioFixes:
         assert 'Indication' in missing
         assert 'Trainee Performance' in missing
 
-    def test_dops_pre_file_guard_blocks_incoherent_reflection(self):
-        """A two-word fragment reflection is worthless to an assessor. The
-        guard surfaces it so the user adds a real reflection before save.
+    def test_pre_file_guard_flags_missing_reflection_when_required(self):
+        """If a field like reflection is required in the schema, the universal
+        gate flags it when it is missing or empty.
         """
-        from bot import _pre_file_missing_fields
+        from bot import _universal_pre_file_gate
 
-        missing = _pre_file_missing_fields('DOPS', {
+        missing = _universal_pre_file_gate('MINI_CEX', {
             'date_of_encounter': '2026-05-19',
             'stage_of_training': 'Higher/ST4-ST6',
-            'procedure_name': 'DC cardioversion',
-            'indication': 'Unstable AF with RVR and hypotension requiring emergency cardioversion.',
-            'trainee_performance': (
-                'I led the synchronised cardioversion under ketamine sedation, '
-                'delivered three escalating shocks, escalated to ITU.'
-            ),
-            'reflection': 'ok done',
+            'clinical_setting': 'Emergency Department',
+            'patient_presentation': 'Chest pain',
+            'clinical_reasoning': 'Worked up and managed appropriately.',
+            'reflection': '',
         })
 
-        assert any('Reflection' in m for m in missing), missing
+        assert 'Reflection' in missing
 
     def test_post_filing_keyboard_offers_same_case_another_wpba(self):
         from bot import _build_post_filing_keyboard
