@@ -1003,10 +1003,9 @@ class TestFlowWalker:
             result = await handle_approval_approve(update, context)
 
         assert result == ConversationHandler.END
-        # The original reviewed draft is not edited into a progress message.
-        assert update.callback_query.message.edit_text.await_count == 0
-        # The temporary progress message becomes the final report; no extra
-        # "Filing finished" message is sent before the report.
+        # The progress message is sent as a new message (1 reply), then the
+        # final report edits that progress message (1 edit). The original
+        # draft preview survives in the chat history above.
         assert sim.messages_sent[-1][0] == 'edit'
         assert 'case-based discussion saved' in sim.get_last_text().lower()
         assert 'filing finished' not in sim.get_last_text().lower()
@@ -1189,26 +1188,24 @@ class TestFlowWalker:
         assert result == AWAIT_APPROVAL
         # Draft is preserved so the user can fix it.
         assert context.user_data.get('draft_data')
-        # The reviewed draft preview message text must NOT be overwritten
-        # with the blocker — only the approval keyboard is disarmed.
-        assert update.callback_query.message.edit_text.await_count == 0
+        # The reviewed draft preview message IS morphed in place — gate
+        # warning is appended inline so the filing flow stays a single thread.
+        assert update.callback_query.message.edit_text.await_count >= 1
         text = (sim.get_last_text() or '').lower()
         assert 'indication' in text
         assert 'trainee performance' in text
-        # The approval keyboard is still in place so user can edit and resave.
+        # The gate keyboard offers "File anyway" (APPROVE|draft) and Cancel.
         buttons = {data for _, data in sim.get_last_buttons()}
         assert 'APPROVE|draft' in buttons
         assert 'CANCEL|draft' in buttons
 
     @pytest.mark.asyncio
-    async def test_dops_save_with_missing_date_proceeds_with_separate_warning(self):
+    async def test_dops_save_with_missing_date_proceeds_without_extra_warning(self):
         """A DOPS draft missing only the date is useful enough to file — the
-        bot must respect the user's explicit Save as draft, warn about the
-        gap in a separate message, leave the reviewed draft preview intact,
-        and call route_filing so Kaizen actually receives the draft.
-
-        Dogfood ask: 'missing fields can be warned about, but explicit Save
-        as draft should proceed unless the draft is genuinely unsafe/near-empty'.
+        bot must respect the user's explicit Save as draft and call
+        route_filing so Kaizen actually receives the draft. No separate
+        "heads-up" warning is sent — the user already saw the gap on the
+        draft preview, and the filing flow stays a single morphing message.
         """
         from bot import handle_approval_approve
         from models import FormDraft
@@ -1263,38 +1260,22 @@ class TestFlowWalker:
         # The user's explicit Save was honoured — the save was attempted.
         route_filing_mock.assert_awaited_once()
         assert result == ConversationHandler.END
-        # The reviewed draft preview was not overwritten with a blocker.
-        assert update.callback_query.message.edit_text.await_count == 0
-        # A separate warning message mentions the missing Date and frames
-        # it as a recoverable gap (not the "saving..." progress ack).
+        # No separate non-blocking warning message is sent — the only
+        # outbound messages for this flow are edits on the morphing source
+        # message (Saving… → final report). The draft preview already
+        # surfaced the missing detail before the user approved.
         fresh_messages = [
             text for kind, text, _ in sim.messages_sent
             if kind in ('reply', 'send') and text
         ]
-        warning_candidates = [
+        gap_warnings = [
             text for text in fresh_messages
             if 'date' in text.lower()
-            and ('gap' in text.lower() or 'add' in text.lower())
+            and ('gap' in text.lower() or 'add these in kaizen' in text.lower())
         ]
-        assert warning_candidates, (
-            'expected a separate warning mentioning the missing Date '
-            'and framing it as a gap to add later; '
-            f'got messages: {[(k, t) for k, t, _ in sim.messages_sent]}'
-        )
-        # And the warning lands BEFORE the save ack — the order matters so
-        # the user reads the gap heads-up first.
-        message_texts = [text for _, text, _ in sim.messages_sent if text]
-        warning_idx = next(
-            (i for i, t in enumerate(message_texts) if t in warning_candidates),
-            -1,
-        )
-        ack_idx = next(
-            (i for i, t in enumerate(message_texts) if 'kaizen draft…' in t.lower()),
-            -1,
-        )
-        assert 0 <= warning_idx < ack_idx, (
-            f'warning should precede save ack; warning idx={warning_idx}, '
-            f'ack idx={ack_idx}, messages={message_texts}'
+        assert not gap_warnings, (
+            'expected no separate gap-warning message; '
+            f'got: {gap_warnings}'
         )
 
     @pytest.mark.asyncio

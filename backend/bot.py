@@ -2509,29 +2509,17 @@ def _pre_file_blocking_fields(form_type: str, fields: dict) -> list[str]:
 
 
 def _format_pre_file_missing_message(form_type: str, missing: list[str]) -> str:
-    form_name = _form_display_name(form_type)
+    """Inline warning block appended to the draft preview when blocking gaps
+    remain. Returns just the warning — no header — so the morphing message
+    stays a single thread from preview → gate → save → result."""
+    if not missing:
+        return ""
     shown = missing[:3]
-    questions = "\n".join(f"• {item}" for item in shown)
-    extra = f"\n\nI found {len(missing) - 3} more gaps too, but start with these." if len(missing) > 3 else ""
+    bullets = ", ".join(shown)
+    extra = f" (+{len(missing) - 3} more)" if len(missing) > 3 else ""
     return (
-        f"🟡 *{form_name} needs a bit more detail before I file it.*\n\n"
-        "I’m not going to create a mostly blank Kaizen draft. Please send the missing detail for:\n"
-        f"{questions}{extra}"
-        "\n\n💬 Reply to add more detail, or tap **File anyway** to save what you have."
-    )
-
-
-def _format_pre_file_warning_message(form_type: str, missing: list[str]) -> str:
-    """Heads-up before the save proceeds. The user has approved the draft;
-    this just flags gaps they (or Kaizen) will need to handle after."""
-    form_name = _form_display_name(form_type)
-    shown = missing[:3]
-    bullets = "\n".join(f"• {item}" for item in shown)
-    extra = f"\n\n{len(missing) - 3} more to add in Kaizen too." if len(missing) > 3 else ""
-    return (
-        f"🟡 *Saving {form_name} despite some gaps.* "
-        "Add these in Kaizen after the save:\n"
-        f"{bullets}{extra}"
+        f"⚠️ *Missing:* {bullets}{extra}\n"
+        "💬 Reply to add the detail, or tap *File anyway* to save what you have."
     )
 
 def _format_template_review(form_type: str, draft) -> str:
@@ -6223,18 +6211,16 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     form_name = schema.get("name", form_type)
     form_emoji = FORM_EMOJIS.get(form_type, "📋")
 
-    missing_before_file = _pre_file_missing_fields(form_type, fields)
     blocking_before_file = _pre_file_blocking_fields(form_type, fields)
-    # Always deliver the gate text as a fresh message so the reviewed draft
-    # preview stays visible — the user just approved it and shouldn't lose
-    # the context they reviewed.
+    # Morph the existing draft-preview message into the gate warning so the
+    # filing flow stays a single message thread (no stacking).
     if blocking_before_file and not context.user_data.get("quality_gate_shown", False):
-        # First time hitting the gate — warn the user and arm the bypass so the
-        # next APPROVE|draft click ("File anyway") skips this check.
         context.user_data["quality_gate_shown"] = True
-        message = _format_pre_file_missing_message(form_type, blocking_before_file)
-        await source_message.reply_text(
-            message,
+        preview_text = _format_draft_preview(draft, _chosen_form_reason(context, form_type))
+        warning_block = _format_pre_file_missing_message(form_type, blocking_before_file)
+        await _safe_edit_text(
+            source_message,
+            f"{preview_text}\n\n{warning_block}",
             reply_markup=_build_approval_keyboard(
                 improved_once=context.user_data.get("quick_improve_used", False),
                 quality_gate=True,
@@ -6242,14 +6228,8 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             parse_mode="Markdown",
         )
         return AWAIT_APPROVAL
-    if missing_before_file:
-        # User explicitly approved a draft with non-blocking gaps. Warn,
-        # then proceed to file — they remain in control.
-        warning = _format_pre_file_warning_message(form_type, missing_before_file)
-        try:
-            await source_message.reply_text(warning, parse_mode="Markdown")
-        except Exception:
-            logger.warning("Pre-file warning message failed to send", exc_info=True)
+    # Non-blocking gaps no longer get a separate warning — the user already
+    # saw what was missing on the draft preview before approving.
 
     # Save local JSON backup
     import json as _json
@@ -6272,10 +6252,11 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
 
     # Determine platform (default: kaizen; future: from user profile)
     platform = "kaizen"
-    if is_callback:
-        ack = await source_message.reply_text(f"📤 Saving {form_name} as a Kaizen draft…")
-    else:
-        ack = await source_message.reply_text(f"📤 Saving {form_name} as a Kaizen draft…")
+    saving_text = f"📤 Saving {form_name} as a Kaizen draft…"
+    # Send a new progress message so the draft preview survives in the chat
+    # history — the user can scroll up to verify what was filed. The progress
+    # message is later edited with the final result.
+    ack = await source_message.reply_text(saving_text)
 
     reuse_existing_draft = bool(context.user_data.pop("retry_filing_requested", False))
 
