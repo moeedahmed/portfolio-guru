@@ -2654,13 +2654,32 @@ def _format_generic_draft(draft: FormDraft) -> str:
 # === COMMAND HANDLERS ===
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle /start — welcome message + deep links.
+
+    Dedup guard: PTB fires ALL matching handler registrations across all groups.
+    /start is registered in multiple places (conversation fallbacks + group=1),
+    so the same update can fire start() twice. We guard by storing the update_id
+    *before* user_data.clear() so the second invocation (which runs after the
+    first finishes, since group=0 handlers are awaited) sees it and returns early.
+    """
+    dedup_key = "_start_dedup"
+    if context.user_data.get(dedup_key) == update.update_id:
+        # Already handled this /start update — skip duplicate
+        return ConversationHandler.END
+
     context.user_data.clear()
+    context.user_data[dedup_key] = update.update_id
 
     # Handle deep links: /start setup, /start file
+    # These return ConversationHandler.END so the state doesn't leak into
+    # case_conv -- setup_start manages setup_conv conversation state on its
+    # own, and AWAIT_CASE_INPUT would set a state we can't process from
+    # case_conv's entry point.
     if context.args:
         deep_link = context.args[0].lower()
         if deep_link == "setup":
-            return await setup_start(update, context)
+            await setup_start(update, context)
+            return ConversationHandler.END
         elif deep_link == "file":
             if has_credentials(update.effective_user.id):
                 await update.message.reply_text(FILE_CASE_PROMPT)
@@ -7354,6 +7373,9 @@ def build_application() -> Application:
     # Main conversation handler for case filing flow
     case_conv = ConversationHandler(
         entry_points=[
+            # /start enters the conversation so it's handled by a single handler,
+            # not duplicated across group=0 fallbacks + group=1 standalone.
+            CommandHandler("start", start),
             # Let thin-case buttons re-enter the case conversation even if the
             # user taps them after the active state has been lost.
             CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:file|reset|cancel|continue_thin|unsigned|status|health|help|voice)$"),
@@ -7551,7 +7573,10 @@ def build_application() -> Application:
     application.add_handler(setup_conv)
     application.add_handler(voice_conv)
     application.add_handler(case_conv)
-    application.add_handler(CommandHandler("start", start), group=1)
+    # /start is handled by case_conv entry point (when not in a conversation) or
+    # case_conv fallback (when in case_conv). Do NOT add a standalone handler at
+    # group=1 — PTB fires ALL matching handler registrations across all groups,
+    # and a duplicate would cause duplicate welcome messages.
 
     # NOTE: CallbackQueryHandler already registered in case_conv fallbacks.
     # Do NOT add a second one here — causes duplicate message delivery.
