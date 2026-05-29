@@ -180,7 +180,7 @@ async def test_login_failure_returns_failed(mock_playwright_ctx):
 async def test_login_success_proceeds_to_form(mock_playwright_ctx):
     mock_page = mock_playwright_ctx
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
             result = await file_to_kaizen("CBD", {"clinical_reasoning": "test"}, "user", "pass")
             assert result["status"] != "failed" or "Login" not in (result["error"] or "")
             mock_page.goto.assert_called()
@@ -203,7 +203,7 @@ async def test_form_page_redirect_returns_failed(mock_playwright_ctx):
 @pytest.mark.asyncio
 async def test_all_fields_filled_returns_success(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
             with patch("kaizen_form_filer._verify_entry_saved", AsyncMock(return_value=True)):
                 fields = {
                     "date_of_encounter": "2026-03-21",
@@ -220,7 +220,7 @@ async def test_all_fields_filled_returns_success(mock_playwright_ctx):
 @pytest.mark.asyncio
 async def test_missing_fields_returns_partial(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
             # Under the new internals, fields not present in the input are NOT
             # counted as skipped. To trigger a partial/skipped status, we must
             # explicitly pass an empty/None value for a mapped field.
@@ -238,7 +238,7 @@ async def test_save_fails_returns_failed_not_partial(mock_playwright_ctx):
     """Regression: save failure must return 'failed', not 'partial'.
     This was the original bug — false success when save failed."""
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=False)):
+        with patch("kaizen_form_filer._save_form", AsyncMock(return_value=False)):
             fields = {
                 "date_of_encounter": "2026-03-21",
                 "stage_of_training": "Higher",
@@ -256,7 +256,7 @@ async def test_save_fails_returns_failed_not_partial(mock_playwright_ctx):
 @pytest.mark.asyncio
 async def test_empty_string_field_is_skipped(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
             fields = {
                 "date_of_encounter": "2026-03-21",
                 "stage_of_training": "Higher",
@@ -270,7 +270,7 @@ async def test_empty_string_field_is_skipped(mock_playwright_ctx):
 @pytest.mark.asyncio
 async def test_none_field_is_skipped(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
             fields = {
                 "date_of_encounter": "2026-03-21",
                 "stage_of_training": "Higher",
@@ -286,7 +286,7 @@ async def test_none_field_is_skipped(mock_playwright_ctx):
 @pytest.mark.asyncio
 async def test_stage_defaults_to_higher_for_st5(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
             fields = {"stage_of_training": "ST5", "clinical_reasoning": "test"}
             result = await file_to_kaizen("CBD", fields, "user", "pass")
             assert "stage_of_training" in result["filled"]
@@ -301,7 +301,7 @@ async def test_stage_defaults_to_higher_for_st5(mock_playwright_ctx):
 @pytest.mark.asyncio
 async def test_stage_maps_accs_for_st1(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
             fields = {"stage_of_training": "ST1", "clinical_reasoning": "test"}
             result = await file_to_kaizen("CBD", fields, "user", "pass")
             assert "stage_of_training" in result["filled"]
@@ -316,7 +316,7 @@ async def test_stage_maps_accs_for_st1(mock_playwright_ctx):
 @pytest.mark.asyncio
 async def test_stage_maps_intermediate_for_st3(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
             fields = {"stage_of_training": "ST3", "clinical_reasoning": "test"}
             result = await file_to_kaizen("CBD", fields, "user", "pass")
             assert "stage_of_training" in result["filled"]
@@ -342,7 +342,7 @@ def test_emoji_stripped_before_fill():
 @pytest.mark.asyncio
 async def test_emoji_stripped_in_fill_field(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
             fields = {
                 "date_of_encounter": "2026-03-21",
                 "stage_of_training": "Higher",
@@ -358,7 +358,7 @@ async def test_emoji_stripped_in_fill_field(mock_playwright_ctx):
 @pytest.mark.asyncio
 async def test_reflect_log_fills_all_gibbs_fields(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
             with patch("kaizen_form_filer._verify_entry_saved", AsyncMock(return_value=True)):
                 fields = {
                     "date_of_encounter": "2026-03-21",
@@ -431,7 +431,7 @@ def test_no_duplicate_uuids_within_form():
 @pytest.mark.asyncio
 async def test_curriculum_links_trigger_tick_attempt(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
             with patch("kaizen_form_filer._fill_curriculum_links", AsyncMock(return_value=([], []))) as mock_fill:
                 fields = {"stage_of_training": "Higher", "clinical_reasoning": "test"}
                 result = await file_to_kaizen(
@@ -447,7 +447,7 @@ async def test_curriculum_links_trigger_tick_attempt(mock_playwright_ctx):
 @pytest.mark.asyncio
 async def test_no_curriculum_links_skips_tick(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
-        with patch("kaizen_form_filer._save_draft_legacy", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
             with patch("kaizen_form_filer._fill_curriculum_links", AsyncMock(return_value=([], []))) as mock_fill:
                 fields = {"stage_of_training": "Higher", "clinical_reasoning": "test"}
                 result = await file_to_kaizen("CBD", fields, "user", "pass")
@@ -526,7 +526,7 @@ async def test_fill_text_click_non_actionable_fallback(mock_playwright_ctx):
     assert result is True
 
 
-# ─── _save_draft_legacy selectors ────────────────────────────────────────────
+# ─── _save_form selectors ────────────────────────────────────────────
 
 
 def _make_save_page(available_selectors: dict):
@@ -551,48 +551,49 @@ def _make_save_page(available_selectors: dict):
         return loc
 
     page.locator = locator
+    page.inner_text = AsyncMock(return_value="")
     return page, clicked
 
 
 @pytest.mark.asyncio
-async def test_save_draft_legacy_clicks_plain_save_anchor_on_edit_draft_page():
+async def test_save_form_clicks_plain_save_anchor_on_edit_draft_page():
     """Edit-existing-draft page renders save as <a>Save</a> — the bug behind
     the DOPS "No save button/link found" failure."""
-    from kaizen_form_filer import _save_draft_legacy
+    from kaizen_form_filer import _save_form
 
     page, clicked = _make_save_page({'a:has-text("Save")': "Save"})
     with patch("kaizen_form_filer.asyncio.sleep", new=AsyncMock()):
-        result = await _save_draft_legacy(page)
+        result = await _save_form(page, True)
 
     assert result is True
     assert clicked == [('a:has-text("Save")', "Save")]
 
 
 @pytest.mark.asyncio
-async def test_save_draft_legacy_prefers_save_as_draft_over_plain_save():
+async def test_save_form_prefers_save_as_draft_over_plain_save():
     """When both exist, the more specific 'Save as draft' anchor wins."""
-    from kaizen_form_filer import _save_draft_legacy
+    from kaizen_form_filer import _save_form
 
     page, clicked = _make_save_page({
         'a:has-text("Save as draft")': "Save as draft",
         'a:has-text("Save")': "Save",
     })
     with patch("kaizen_form_filer.asyncio.sleep", new=AsyncMock()):
-        result = await _save_draft_legacy(page)
+        result = await _save_form(page, True)
 
     assert result is True
     assert clicked[0][0] == 'a:has-text("Save as draft")'
 
 
 @pytest.mark.asyncio
-async def test_save_draft_legacy_blocks_dangerous_buttons():
+async def test_save_form_blocks_dangerous_buttons():
     """A 'Save' anchor whose actual text is destructive (e.g. matched a
     'Save and submit' button) must not be clicked."""
-    from kaizen_form_filer import _save_draft_legacy
+    from kaizen_form_filer import _save_form
 
     page, clicked = _make_save_page({'a:has-text("Save")': "Save and submit"})
     with patch("kaizen_form_filer.asyncio.sleep", new=AsyncMock()):
-        result = await _save_draft_legacy(page)
+        result = await _save_form(page, True)
 
     assert result is False
     assert clicked == []

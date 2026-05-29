@@ -72,7 +72,7 @@ async def test_repeated_tickets_create_new_forms_by_default():
          patch("kaizen_form_filer._login", new=AsyncMock(return_value=True)), \
          patch("kaizen_form_filer._find_existing_draft", new=AsyncMock(return_value=True)) as find_existing, \
          patch("kaizen_form_filer._fill_field_legacy", new=AsyncMock(return_value=True)), \
-         patch("kaizen_form_filer._save_draft_legacy", new=AsyncMock(return_value=True)), \
+         patch("kaizen_form_filer._save_form", new=AsyncMock(return_value=True)), \
          patch("kaizen_form_filer._verify_entry_saved", new=AsyncMock(return_value=True)), \
          patch("kaizen_form_filer.asyncio.sleep", new=AsyncMock()):
         first = await file_to_kaizen("PROC_LOG", fields, "user", "pass")

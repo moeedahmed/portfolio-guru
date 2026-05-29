@@ -1161,6 +1161,16 @@ FORM_UUIDS = {
     "TEACH_CONFID_2021":  "563d2c82-46b5-41d7-b601-58a45b347a3a",
 }
 
+# ─── Per-form field normalisers ──────────────────────────────────────────────
+# Forms whose extractor output needs schema-specific reshaping before deterministic
+# filling. Keyed by canonical form_type. Default is identity (no transform).
+from dops_filing import normalise_dops_fields
+
+FORM_FIELD_NORMALISERS = {
+    "DOPS": normalise_dops_fields,
+}
+
+
 _FORM_FIELD_MAP_VARIANT_BASES = {
     "CBD_2021": "CBD",
     "DOPS_2021": "DOPS",
@@ -1671,7 +1681,13 @@ async def _fill_curriculum_links(
 # ─── Save ─────────────────────────────────────────────────────────────────────
 
 async def _save_form(page: Page, as_draft: bool) -> bool:
-    """Save the form as draft. Never Submit/Send. Returns True on success."""
+    """Save the form as draft. Never Submit/Send. Returns True on success.
+
+    The bare `a:has-text("Save")` and `button:has-text("Save")` fallbacks cover
+    Kaizen's edit-existing-draft page (`/events/fillin/...`), which renders the
+    save control as a plain Save anchor rather than the "Save as draft" used on
+    `new-section`.
+    """
     if as_draft:
         selectors = [
             'a:has-text("Save as draft")',
@@ -1680,6 +1696,7 @@ async def _save_form(page: Page, as_draft: bool) -> bool:
             'button:has-text("Save as Draft")',
             'button:has-text("Save Draft")',
             'a:has-text("Save")',
+            'button:has-text("Save")',
         ]
     else:
         selectors = [
@@ -2237,42 +2254,7 @@ async def _fill_field_legacy(page: Page, dom_id: str, value: Any, field_key: str
 
 
 
-# ─── Legacy save/submit/verify ───────────────────────────────────────────────
-
-async def _save_draft_legacy(page: Page) -> bool:
-    """Click Save as Draft. Never Submit/Send. Returns True on success.
-
-    The plain `a:has-text("Save")` fallback covers Kaizen's edit-existing-draft
-    page (`/events/fillin/...`), which renders the save control as a bare
-    `<a>Save</a>` rather than the "Save as draft" anchor used on `new-section`.
-    """
-    save_selectors = [
-        'a:has-text("Save as draft")',
-        'a:has-text("Save as Draft")',
-        'a:has-text("Save draft")',
-        'button:has-text("Save as Draft")',
-        'button:has-text("Save Draft")',
-        'a:has-text("Save")',
-        'button:has-text("Save")',
-    ]
-    for selector in save_selectors:
-        try:
-            el = page.locator(selector).first
-            if await el.count() > 0:
-                el_text = (await el.inner_text()).strip()
-                if any(danger in el_text.lower() for danger in ["submit", "send", "sign", "approve", "reject", "delete"]):
-                    logger.warning(f"BLOCKED dangerous element: '{el_text}'")
-                    continue
-                await el.click()
-                await asyncio.sleep(3)
-                logger.info(f"Clicked save: '{el_text}'")
-                return True
-        except Exception as e:
-            logger.debug(f"Save selector {selector} failed: {e}")
-            continue
-    logger.warning("No save button/link found — cannot confirm entry was saved")
-    return False
-
+# ─── Legacy submit/verify ────────────────────────────────────────────────────
 
 async def _submit_entry(page: Page) -> bool:
     """Click Submit/Save (for self-contained log forms with no assessor)."""
@@ -2297,7 +2279,7 @@ async def _submit_entry(page: Page) -> bool:
         except Exception as e:
             logger.debug(f"Submit selector {selector} failed: {e}")
             continue
-    logger.warning("No submit button found — falling back to _save_draft_legacy()")
+    logger.warning("No submit button found — falling back to _save_form()")
     return False
 
 
@@ -2774,9 +2756,9 @@ async def file_to_kaizen(
     if form_type == "PROC_LOG" and fields.get("date_of_activity") and not fields.get("date_occurred_on"):
         fields = dict(fields)
         fields["date_occurred_on"] = fields["date_of_activity"]
-    if form_type == "DOPS":
-        from dops_filing import normalise_dops_fields
-        fields = normalise_dops_fields(fields)
+    normaliser = FORM_FIELD_NORMALISERS.get(form_type)
+    if normaliser:
+        fields = normaliser(fields)
     fields, header_meta = apply_common_header_defaults(form_type, fields, field_map)
     fields = drop_consumed_unmapped_schema_fields(form_type, fields)
     browser = None
@@ -2889,9 +2871,9 @@ async def file_to_kaizen(
         if submit:
             saved = await _submit_entry(page)
             if not saved:
-                saved = await _save_draft_legacy(page)
+                saved = await _save_form(page, True)
         else:
-            saved = await _save_draft_legacy(page)
+            saved = await _save_form(page, True)
 
         saved_url = page.url if saved and not submit else None
 

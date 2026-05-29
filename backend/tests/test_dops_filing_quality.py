@@ -299,7 +299,7 @@ async def test_file_to_kaizen_dops_proceeds_when_only_date_is_missing():
          patch("kaizen_form_filer.async_playwright") as ap_mock, \
          patch("kaizen_form_filer._login", new=AsyncMock(return_value=True)), \
          patch("kaizen_form_filer._fill_field_legacy", new=AsyncMock(return_value=True)) as fill_mock, \
-         patch("kaizen_form_filer._save_draft_legacy", new=AsyncMock(return_value=True)) as save_mock, \
+         patch("kaizen_form_filer._save_form", new=AsyncMock(return_value=True)) as save_mock, \
          patch("kaizen_form_filer._verify_entry_saved", new=AsyncMock(return_value=True)), \
          patch("kaizen_form_filer._fill_curriculum_links", new=AsyncMock(return_value=([], []))), \
          patch("kaizen_form_filer.asyncio.sleep", new=AsyncMock()):
@@ -343,7 +343,7 @@ async def test_file_to_kaizen_dops_proceeds_when_fields_are_populated():
          patch("kaizen_form_filer.async_playwright") as ap_mock, \
          patch("kaizen_form_filer._login", new=AsyncMock(return_value=True)), \
          patch("kaizen_form_filer._fill_field_legacy", new=AsyncMock(return_value=True)), \
-         patch("kaizen_form_filer._save_draft_legacy", new=AsyncMock(return_value=True)) as save_mock, \
+         patch("kaizen_form_filer._save_form", new=AsyncMock(return_value=True)) as save_mock, \
          patch("kaizen_form_filer._verify_entry_saved", new=AsyncMock(return_value=True)), \
          patch("kaizen_form_filer._fill_curriculum_links", new=AsyncMock(return_value=([], []))), \
          patch("kaizen_form_filer.asyncio.sleep", new=AsyncMock()):
@@ -384,7 +384,7 @@ async def test_file_to_kaizen_dops_attempts_normalised_placement_from_clinical_s
          patch("kaizen_form_filer.async_playwright") as ap_mock, \
          patch("kaizen_form_filer._login", new=AsyncMock(return_value=True)), \
          patch("kaizen_form_filer._fill_field_legacy", new=AsyncMock(return_value=True)) as fill_mock, \
-         patch("kaizen_form_filer._save_draft_legacy", new=AsyncMock(return_value=True)), \
+         patch("kaizen_form_filer._save_form", new=AsyncMock(return_value=True)), \
          patch("kaizen_form_filer._verify_entry_saved", new=AsyncMock(return_value=True)), \
          patch("kaizen_form_filer._fill_curriculum_links", new=AsyncMock(return_value=([], []))), \
          patch("kaizen_form_filer.asyncio.sleep", new=AsyncMock()):

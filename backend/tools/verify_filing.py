@@ -18,7 +18,7 @@ from playwright.async_api import async_playwright
 from credentials import get_credentials
 from kaizen_form_filer import (
     FORM_UUIDS, FORM_FIELD_MAP, _login, _fill_field_legacy,
-    _save_draft_legacy, _to_uk_date
+    _save_form, _to_uk_date
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -140,7 +140,7 @@ async def verify():
                 skipped.append(field_key)
 
         # Save draft
-        saved = await _save_draft_legacy(page)
+        saved = await _save_form(page, True)
 
         status = "success" if saved and filled else ("partial" if filled else "failed")
         results[form_type] = {

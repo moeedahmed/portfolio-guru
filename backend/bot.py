@@ -912,7 +912,7 @@ def _gathering_done_keyboard() -> InlineKeyboardMarkup:
 
 
 def _gathering_reply(context) -> tuple[str, InlineKeyboardMarkup]:
-    text = "📥 Captured.\n\nWant to add a photo, voice note, or more detail?"
+    text = "📥 Captured. Want to add a photo, voice note, or more detail?"
     return text, _gathering_done_keyboard()
 
 
@@ -5621,7 +5621,14 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 tmp_path = tmp.name
                 await voice_file.download_to_drive(tmp_path)
                 case_text = await transcribe_voice(tmp_path)
-            await ack.edit_text("🎙️ Voice note read. Finding matching forms…")
+            if _gathering_enabled(context) and not (context.user_data.get("chosen_form") and context.user_data.get("awaiting_detail")):
+                reply_text, reply_markup = _gathering_reply(context)
+                await ack.edit_text(reply_text, reply_markup=reply_markup)
+                context.user_data["gathering_msg_id"] = ack.message_id
+                context.user_data["gathering_chat_id"] = ack.chat_id
+                context.user_data["_gathering_ack_used"] = True
+            else:
+                await ack.edit_text("🎙️ Voice note read. Finding matching forms…")
             _track_latest_message(context, ack)
         except Exception as e:
             await ack.edit_text(
