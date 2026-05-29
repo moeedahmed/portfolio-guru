@@ -3643,7 +3643,11 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
 
     if action == "setup":
-        if has_credentials(user_id):
+        # force_reconnect is set when the user lands here after a Login failed
+        # filing — their saved credentials no longer work, so the
+        # "already connected" branch would leave them stuck.
+        force_reconnect = context.user_data.pop("force_reconnect", False)
+        if has_credentials(user_id) and not force_reconnect:
             await query.message.reply_text(
                 "Your Kaizen account is already connected. Just send your next case to file it."
             )
@@ -6538,6 +6542,46 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             )
             status_line = "⚠️ Filing needs manual review."
     else:
+        # Login failures need a dedicated path: the generic "try again / file
+        # another / cancel" keyboard gives the user no way to re-enter
+        # credentials, so they get stuck. Detect the marker the filers raise
+        # ("Login failed", see browser_filer.py and kaizen_form_filer.py) and
+        # swap in a reconnect-first keyboard with a clear session-expired
+        # message. force_reconnect lets the ACTION|setup handler bypass the
+        # "already connected" short-circuit when the user taps Reconnect.
+        is_login_failure = bool(error) and "Login failed" in error
+        if is_login_failure and platform == "kaizen":
+            context.user_data["force_reconnect"] = True
+            msg = (
+                f"❌ Filing didn't complete\n"
+                f"{form_name}\n\n"
+                "Your Kaizen session has expired. Tap 'Reconnect Kaizen' to "
+                "re-enter your credentials, or try again if it was a "
+                "temporary issue."
+            )
+            end_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔑 Reconnect Kaizen", callback_data="ACTION|setup")],
+                [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_filing")],
+                [InlineKeyboardButton("🆕 Start fresh", callback_data="ACTION|reset")],
+            ])
+            status_line = "❌ Filing stopped."
+            context.user_data["last_filing_status"] = status
+            context.user_data["last_filing_form_name"] = form_name
+            context.user_data["last_filing_report"] = msg
+            try:
+                await ack.edit_text(msg, reply_markup=end_keyboard)
+            except Exception:
+                logger.warning("Could not edit login-failure report, falling back to fresh message", exc_info=True)
+                try:
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text=msg,
+                        reply_markup=end_keyboard,
+                    )
+                except Exception:
+                    logger.warning("Could not send fallback login-failure report", exc_info=True)
+            return AWAIT_APPROVAL
+
         # Show manual link for Kaizen; generic message for other platforms
         recovery = ""
         try:

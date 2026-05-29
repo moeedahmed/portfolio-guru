@@ -1531,12 +1531,12 @@ class TestFlowWalker:
             'uuid': thin_draft.uuid,
         }
 
-        recovery_line = "Kaizen rejected the login — your password may have changed. Update credentials and retry."
+        recovery_line = "Kaizen returned an unexpected error. Try again or fill manually."
 
         with patch('bot.get_credentials', return_value=('user', 'pass')), \
              patch('bot.route_filing', new_callable=AsyncMock, return_value={
                  'status': 'failed', 'filled': [], 'skipped': [], 'method': 'deterministic',
-                 'error': 'Login failed',
+                 'error': 'Save button not found or click failed',
              }), \
              patch('bot.compose_filing_recovery_copy', new=AsyncMock(return_value=recovery_line)):
             result = await handle_approval_approve(update, context)
@@ -1549,6 +1549,40 @@ class TestFlowWalker:
         buttons = sim.get_last_buttons()
         assert ('📋 File another case', 'ACTION|file') in buttons
         assert ('❌ Cancel', 'ACTION|cancel') in buttons
+
+    @pytest.mark.asyncio
+    async def test_failed_login_shows_reconnect_keyboard(self, thin_draft):
+        from bot import AWAIT_APPROVAL, handle_approval_approve
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('APPROVE|draft')
+        context = sim._make_context()
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin_draft.form_type,
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+
+        with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.route_filing', new_callable=AsyncMock, return_value={
+                 'status': 'failed', 'filled': [], 'skipped': [], 'method': 'deterministic',
+                 'error': 'Login failed',
+             }), \
+             patch('bot.compose_filing_recovery_copy', new=AsyncMock(return_value='ignored')):
+            result = await handle_approval_approve(update, context)
+
+        text = sim.get_last_text()
+        assert result == AWAIT_APPROVAL
+        assert "Kaizen session has expired" in text
+        assert "Reconnect Kaizen" in text
+        buttons = sim.get_last_buttons()
+        assert ('🔑 Reconnect Kaizen', 'ACTION|setup') in buttons
+        assert ('🔄 Try Again', 'ACTION|retry_filing') in buttons
+        assert ('🆕 Start fresh', 'ACTION|reset') in buttons
+        # Draft must be preserved so Try Again can pick it up
+        assert context.user_data.get('draft_data') is not None
+        assert context.user_data.get('force_reconnect') is True
 
     @pytest.mark.asyncio
     async def test_failed_filing_falls_back_to_static_when_llm_empty(self, thin_draft):
