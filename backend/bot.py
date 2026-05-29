@@ -2159,7 +2159,7 @@ def _format_draft_rationale(reason: str | None, form_type: str) -> str:
         return ""
     name = public_form_name(form_type) or form_type
     short = short[0].lower() + short[1:]
-    return f"I've treated this as a {name} because {short}."
+    return f"I've treated this as a {name}: {short}."
 
 
 def _draft_rationale_footer(reason: str | None, form_type: str) -> str:
@@ -3578,6 +3578,49 @@ async def handle_info_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
 
+async def handle_same_case_another(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle 'Same case, new WPBA' — reuse case text for another form type.
+
+    Registered as a ConversationHandler entry point so the returned state
+    (AWAIT_FORM_CHOICE via _process_case_text) is tracked correctly. If this
+    runs from the top-level handler instead, the state transition is lost
+    and the subsequent FORM|*/CANCEL|* taps silently no-op.
+    """
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+
+    case_text = (
+        context.user_data.get("last_filed_case_text")
+        or context.user_data.get("case_text")
+        or ""
+    ).strip()
+    filed_form = (
+        context.user_data.get("last_filed_form_type")
+        or context.user_data.get("excluded_form_type")
+        or ""
+    )
+    if not case_text:
+        await query.message.reply_text(
+            "That same-case shortcut has expired. Send the case again, or start a new case and I’ll draft the next WPBA.",
+            reply_markup=_build_next_step_keyboard(user_id),
+        )
+        return ConversationHandler.END
+
+    # Selective cleanup — preserve conversation handler state keys
+    for key in list(context.user_data.keys()):
+        if key not in ("case_text", "excluded_form_type"):
+            del context.user_data[key]
+    context.user_data["case_text"] = case_text
+    context.user_data["excluded_form_type"] = filed_form
+
+    ack = await query.message.reply_text(
+        "🔁 Reusing the same case. Finding other WPBA options…"
+    )
+    _track_latest_message(context, ack)
+    return await _process_case_text(query.message, context, user_id, case_text, "same case")
+
+
 async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle all ACTION| buttons — universal dispatcher for button-first UX."""
     query = update.callback_query
@@ -3637,30 +3680,10 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         return AWAIT_CASE_INPUT
 
     elif action == "same_case_another":
-        case_text = (
-            context.user_data.get("last_filed_case_text")
-            or context.user_data.get("case_text")
-            or ""
-        ).strip()
-        filed_form = (
-            context.user_data.get("last_filed_form_type")
-            or context.user_data.get("excluded_form_type")
-            or ""
-        )
-        if not case_text:
-            await query.message.reply_text(
-                "That same-case shortcut has expired. Send the case again, or start a new case and I’ll draft the next WPBA.",
-                reply_markup=_build_next_step_keyboard(user_id),
-            )
-            return ConversationHandler.END
-        context.user_data.clear()
-        context.user_data["case_text"] = case_text
-        context.user_data["excluded_form_type"] = filed_form
-        ack = await query.message.reply_text(
-            "🔁 Reusing the same case. Finding other WPBA options…"
-        )
-        _track_latest_message(context, ack)
-        return await _process_case_text(query.message, context, user_id, case_text, "same case")
+        # Handled by dedicated ConversationHandler entry point (handle_same_case_another).
+        # Reaching here means the top-level pattern accidentally captured it.
+        logger.warning("same_case_another reached top-level handler (fallback)")
+        return ConversationHandler.END
 
     elif action.startswith("post_file_more|"):
         parts = action.split("|")
@@ -6330,11 +6353,14 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     defaulted_fields = set(result.get("defaulted_fields") or [])
     date_default_note = ""
     if "date_of_encounter" in defaulted_fields:
+        from datetime import date as _today
         default_date = result.get("activity_date") or fields.get("date_of_encounter") or fields.get("date_of_event")
-        date_default_note = (
-            f"\n📅 I used today's date"
-            f"{f' ({default_date})' if default_date else ''} because no case date was given."
-        )
+        # Suppress the note when today's date is already shown in the header
+        if default_date != _today.today().isoformat():
+            date_default_note = (
+                f"\n📅 I used today's date"
+                f"{f' ({default_date})' if default_date else ''} because no case date was given."
+            )
     required_labels = {field["label"] for field in _template_requirements(form_type)[0]}
     required_keys = {field["key"] for field in _template_requirements(form_type)[0]}
     skipped_required = [s for s in skipped if s in required_keys or s in required_labels]
@@ -7602,6 +7628,7 @@ def build_application() -> Application:
             # Let thin-case buttons re-enter the case conversation even if the
             # user taps them after the active state has been lost.
             CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:file|reset|cancel|continue_thin|unsigned|status|health|help|voice)$"),
+            CallbackQueryHandler(handle_same_case_another, pattern=r"^ACTION\|same_case_another$"),
             CallbackQueryHandler(handle_amend_draft, pattern=r"^AMEND\|"),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_case_input),
             MessageHandler(filters.VOICE, handle_case_input),
@@ -7752,7 +7779,7 @@ def build_application() -> Application:
     application.add_handler(
         CallbackQueryHandler(
             handle_action_button,
-            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|setup$|voice$).+",
+            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|setup$|voice$|same_case_another$).+",
         )
     )
     application.add_handler(CallbackQueryHandler(handle_feedback, pattern=r"^FEEDBACK\|"))

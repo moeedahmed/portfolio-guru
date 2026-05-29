@@ -239,7 +239,7 @@ class TestFlowWalker:
         text = sim.get_last_text()
 
         expected_reason = (
-            "ℹ️ I've treated this as a Case-Based Discussion because "
+            "ℹ️ I've treated this as a Case-Based Discussion: "
             "the case is a reflective discussion of one patient."
         )
         assert expected_reason in text
@@ -299,7 +299,7 @@ class TestFlowWalker:
         text = sim.get_last_text()
 
         assert _DRAFT_DIVIDER not in text
-        assert "I've treated this as a Leadership Assessment Tool because" in text
+        assert "I've treated this as a Leadership Assessment Tool:" in text
         # None of the internal/model-flavoured phrasing should reach the user.
         assert 'the trainee' not in text.lower()
         assert 'EPIC' not in text
@@ -1377,7 +1377,7 @@ class TestFlowWalker:
 
     @pytest.mark.asyncio
     async def test_stale_post_filing_more_rebuilds_compact_actions(self, thin_draft):
-        from bot import handle_action_button
+        from bot import handle_action_button, handle_same_case_another
 
         sim = BotSimulator()
         update = sim._make_callback_update('ACTION|post_file_more|CBD|partial')
@@ -1656,7 +1656,7 @@ class TestFlowWalker:
 
     @pytest.mark.asyncio
     async def test_global_try_again_button_can_retry_after_conversation_end(self, thin_draft):
-        from bot import handle_action_button
+        from bot import handle_action_button, handle_same_case_another
 
         sim = BotSimulator()
         context = sim._make_context()
@@ -2971,7 +2971,7 @@ class TestRecentPortfolioFixes:
         ORIGINAL submitted case text — never the saved draft text or a
         bot-generated draft — and route back to the assessment-type
         recommendation step so the user doesn't re-send the case."""
-        from bot import AWAIT_FORM_CHOICE, handle_action_button
+        from bot import AWAIT_FORM_CHOICE, handle_same_case_another
 
         original_case_text = (
             "45M with epigastric pain radiating to back, raised lipase, "
@@ -2997,7 +2997,7 @@ class TestRecentPortfolioFixes:
                  new_callable=AsyncMock,
                  return_value=recommended_forms,
              ) as recommend_mock:
-            result = await handle_action_button(
+            result = await handle_same_case_another(
                 sim._make_callback_update('ACTION|same_case_another'), context
             )
 
@@ -3020,7 +3020,7 @@ class TestRecentPortfolioFixes:
     async def test_same_case_transition_message_is_replaced_by_form_list(
         self, recommended_forms
     ):
-        from bot import AWAIT_FORM_CHOICE, handle_action_button
+        from bot import AWAIT_FORM_CHOICE, handle_same_case_another
 
         sim = BotSimulator()
         context = sim._make_context()
@@ -3031,7 +3031,7 @@ class TestRecentPortfolioFixes:
              patch('bot.get_training_level', return_value='ST5'), \
              patch('bot.get_curriculum', return_value='2025'), \
              patch('bot.recommend_form_types', new_callable=AsyncMock, return_value=recommended_forms):
-            result = await handle_action_button(
+            result = await handle_same_case_another(
                 sim._make_callback_update('ACTION|same_case_another'), context
             )
 
@@ -3042,13 +3042,13 @@ class TestRecentPortfolioFixes:
 
     @pytest.mark.asyncio
     async def test_same_case_stale_button_explains_expiry_without_dead_end(self):
-        from bot import handle_action_button
+        from bot import handle_action_button, handle_same_case_another
 
         sim = BotSimulator()
         context = sim._make_context()
 
         with patch('bot._setup_needs_finishing', return_value=False):
-            result = await handle_action_button(
+            result = await handle_same_case_another(
                 sim._make_callback_update('ACTION|same_case_another'), context
             )
 
@@ -3176,7 +3176,7 @@ class TestTrainingStageGroups:
 
     @pytest.mark.asyncio
     async def test_training_level_options_use_kaizen_stage_groups(self):
-        from bot import handle_action_button
+        from bot import handle_action_button, handle_same_case_another
 
         sim = BotSimulator()
         update = sim._make_callback_update('ACTION|change_level')
