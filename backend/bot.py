@@ -6059,7 +6059,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
             recommendations,
             curriculum=get_curriculum(update.effective_user.id),
         )
-        best = next((rec for rec in filtered if getattr(rec, "uuid", None)), None)
+        best = filtered[0] if filtered else None
         if not best:
             await query.edit_message_text(
                 "I couldn't find a best-fit form from the recommendations. Pick one manually:",
