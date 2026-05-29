@@ -5905,13 +5905,12 @@ async def handle_gathering_input(update: Update, context: ContextTypes.DEFAULT_T
     if is_completion_request(raw_text) or _is_case_bundle_done(raw_text):
         return await _finish_gathering_case(update, context)
 
-    if _gathering_case_active(context):
-        routed = route_message(raw_text)
-        if routed.intent is ConversationalIntent.FILE_TO_KAIZEN:
-            return await _finish_gathering_case(update, context)
-        if _looks_like_gathering_side_chat(raw_text, routed.intent):
-            await update.message.reply_text(side_chat_reply(raw_text, _gathering_workspace(context)))
-            return AWAIT_GATHERING
+    routed = route_message(raw_text)
+    if routed.intent is ConversationalIntent.FILE_TO_KAIZEN:
+        return await _finish_gathering_case(update, context)
+    if _looks_like_gathering_side_chat(raw_text, routed.intent):
+        await update.message.reply_text(side_chat_reply(raw_text, _gathering_workspace(context)))
+        return AWAIT_GATHERING
 
     _append_gathering_case(context, raw_text, "text")
     await update.message.reply_text(_gathering_reply(context))
