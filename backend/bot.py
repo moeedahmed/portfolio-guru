@@ -1277,6 +1277,34 @@ def _apply_profile_training_stage(draft, user_id: int, form_type: str) -> None:
             pass
 
 
+def _apply_default_dates(draft, form_type: str) -> None:
+    """Default missing required date fields to today.
+
+    The preview is generated before filing, so without this the user sees
+    `_— needs your detail_` for the date even though filing would have
+    defaulted it anyway via `apply_common_header_defaults`. Mirror that
+    behaviour at draft time so what the user previews matches what gets filed.
+    """
+    from datetime import date as _date
+
+    schema_fields = FORM_SCHEMAS.get(form_type, {}).get("fields", [])
+    if not schema_fields:
+        return
+    today_iso = _date.today().isoformat()
+    for field in schema_fields:
+        if field.get("type") != "date" or not field.get("required"):
+            continue
+        key = field["key"]
+        if isinstance(draft, FormDraft):
+            if _is_missing_field_value(draft.fields.get(key)):
+                draft.fields[key] = today_iso
+        elif hasattr(draft, key) and _is_missing_field_value(getattr(draft, key, None)):
+            try:
+                setattr(draft, key, today_iso)
+            except Exception:
+                pass
+
+
 def _default_allowed_forms_for_unknown_training() -> list[str]:
     seen = set()
     forms = []
@@ -2123,65 +2151,21 @@ def _draft_header(title: str) -> list[str]:
     ]
 
 
-_RATIONALE_FRAMEWORK_TAIL_RE = re.compile(
-    r",?\s*(?:which |that )?fits[^.]*?(?:framework|tool|form|wpba)[^.,]*",
-    flags=re.IGNORECASE,
-)
-_RATIONALE_TRAINEE_VERB_RE = re.compile(
-    r"\bthe trainee (?:actively |successfully )?"
-    r"(?:performed|led|demonstrated|carried out|undertook|managed) (?:a |the )?",
-    flags=re.IGNORECASE,
-)
-
-
-def _sanitise_form_rationale(text: str) -> str:
-    """Strip model-justification phrasing from a form-choice rationale.
-
-    Targets the wording that reads as internal model reasoning rather than
-    user-facing prose: parenthetical clarifications, third-person trainee
-    framing, "fits framework X assessed by Y" tails, and "Best fit for"
-    self-justification."""
-    cleaned = sanitize_internal_form_codes(text or "")
-    cleaned = re.sub(r"\s*\([^)]*\)", "", cleaned)
-    cleaned = _RATIONALE_FRAMEWORK_TAIL_RE.sub("", cleaned)
-    cleaned = _RATIONALE_TRAINEE_VERB_RE.sub("", cleaned)
-    cleaned = re.sub(r"\bthe trainee\b", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"^\s*best fit for\s+", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.;:")
-    return cleaned
-
-
-def _format_draft_rationale(reason: str | None, form_type: str) -> str:
-    """Render the chosen form's rationale as concise, user-facing copy."""
-    cleaned = _sanitise_form_rationale(reason or "")
-    short = _short_plain_text(cleaned, max_words=20).rstrip(".")
-    if not short:
-        return ""
-    name = public_form_name(form_type) or form_type
-    short = short[0].lower() + short[1:]
-    return f"I've treated this as a {name}: {short}."
-
-
-def _draft_rationale_footer(reason: str | None, form_type: str) -> str:
-    """Form-choice rationale appended after the draft body.
-
-    Portfolio content still leads the message; a blank line is enough
-    visual separation between the draft body and the rationale, so the
-    heavier ASCII divider is intentionally omitted here to keep the
-    preview mobile-friendly."""
-    rendered = _format_draft_rationale(reason, form_type)
-    if not rendered:
-        return ""
-    return f"\n\nℹ️ {rendered}\n"
-
-
 def _format_draft_preview(draft, reason: str | None = None) -> str:
     """Format draft data as a preview message. Dispatches based on type."""
     if isinstance(draft, FormDraft):
         preview = _format_generic_draft(draft)
-        return preview + _draft_missing_review_note(draft, draft.form_type)
+        return preview + _draft_coach_note_suffix(draft)
     preview = _format_cbd_draft(draft)
-    return preview + _draft_missing_review_note(draft, "CBD")
+    return preview + _draft_coach_note_suffix(draft)
+
+
+def _draft_coach_note_suffix(draft) -> str:
+    """Render the optional coach note as a single 💡 line, if any."""
+    coach = _draft_coach_note(draft)
+    if not coach:
+        return ""
+    return f"\n💡 {coach.removeprefix('Coach note: ').strip()}"
 
 
 def _draft_fields_for_review(draft) -> dict:
@@ -2365,32 +2349,6 @@ def _draft_has_useful_content(draft, form_type: str) -> bool:
     if len(present_fields) >= 2:
         return True
     return False
-
-
-def _draft_missing_review_note(draft, form_type: str) -> str:
-    fields = _draft_fields_for_review(draft)
-    missing_required = _universal_pre_file_gate(form_type, fields)
-    _, missing_optional, _ = _missing_template_fields(draft, form_type)
-    coach = _draft_coach_note(draft)
-    if not missing_required and not missing_optional and not coach:
-        return ""
-    if not missing_required and not missing_optional:
-        return f"\n💡 {coach.removeprefix('Coach note: ').strip()}"
-
-    lines = ["", "🧩 *Missing details*"]
-    if missing_required:
-        labels = ", ".join(missing_required[:6])
-        extra = f" (+{len(missing_required) - 6} more)" if len(missing_required) > 6 else ""
-        lines.append(f"⚠️ *Warning: Missing required fields:* {labels}{extra}")
-    if missing_optional:
-        labels = ", ".join(field["label"] for field in missing_optional[:3])
-        extra = f" (+{len(missing_optional) - 3} more)" if len(missing_optional) > 3 else ""
-        lines.append(f"Helpful if you have it: {labels}{extra}.")
-    if coach:
-        lines.append(coach)
-    if missing_required or missing_optional:
-        lines.append("Blank fields are left blank rather than invented. Reply with extra detail to update the draft.")
-    return "\n".join(lines)
 
 
 async def _show_draft_review(
@@ -4488,6 +4446,7 @@ async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: in
             timeout=45,
         )
     _apply_profile_training_stage(draft, user_id, form_type)
+    _apply_default_dates(draft, form_type)
     _store_pending_draft(context, draft)
     context.user_data["chosen_form"] = form_type
     context.user_data["awaiting_detail"] = True
@@ -5645,7 +5604,6 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 await voice_file.download_to_drive(tmp_path)
                 case_text = await transcribe_voice(tmp_path)
             if _gathering_enabled(context) and not (context.user_data.get("chosen_form") and context.user_data.get("awaiting_detail")):
-                await _delete_previous_gathering_message(context)
                 reply_text, reply_markup = _gathering_reply(context)
                 await ack.edit_text(reply_text, reply_markup=reply_markup)
                 context.user_data["gathering_msg_id"] = ack.message_id
@@ -5703,7 +5661,6 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 return await _process_case_text(update.message, context, user_id, case_text, input_source)
             else:
                 if _gathering_enabled(context) and not (context.user_data.get("chosen_form") and context.user_data.get("awaiting_detail")):
-                    await _delete_previous_gathering_message(context)
                     reply_text, reply_markup = _gathering_reply(context)
                     await ack.edit_text(reply_text, reply_markup=reply_markup)
                     context.user_data["gathering_msg_id"] = ack.message_id
@@ -5738,6 +5695,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
             return ConversationHandler.END
         
+        await _delete_previous_gathering_message(context)
         ack = await update.message.reply_text(f"📄 Reading *{file_name}*…", parse_mode="Markdown")
         tmp_path = None
         try:
@@ -5766,7 +5724,6 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 case_text = case_text[:max_chars] + "\n\n[Document truncated — using first 15,000 characters]"
             
             if _gathering_enabled(context) and not (context.user_data.get("chosen_form") and context.user_data.get("awaiting_detail")):
-                await _delete_previous_gathering_message(context)
                 reply_text, reply_markup = _gathering_reply(context)
                 await ack.edit_text(reply_text, reply_markup=reply_markup)
                 context.user_data["gathering_msg_id"] = ack.message_id

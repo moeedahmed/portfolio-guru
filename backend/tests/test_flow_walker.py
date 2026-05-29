@@ -174,14 +174,18 @@ class TestFlowWalker:
         assert 'APPROVE|submit' not in button_data
         text = sim.get_last_text()
         assert 'Case-Based Discussion draft ready' in text
-        assert 'Missing details' in text
+        # Required-but-missing fields surface inline with the missing marker
+        # next to each field label; the universal gate at file-time catches
+        # them too. The verbose "🧩 Missing details" block has been removed.
         assert 'Stage of Training' in text
-        assert 'Blank fields are left blank rather than invented' in text
+        assert 'Missing details' not in text
+        assert 'Missing required fields' not in text
+        assert 'Blank fields are left blank rather than invented' not in text
 
     @pytest.mark.asyncio
-    async def test_draft_preview_keeps_missing_details_after_body_without_divider_sandwich(self, thin_draft):
-        """Missing details should sit after the portfolio body without making
-        the draft feel trapped between large instruction blocks."""
+    async def test_draft_preview_orders_body_before_reply_hint(self, thin_draft):
+        """Portfolio body sits cleanly before the reply hint without any
+        intermediate 'missing details' instruction block."""
         from bot import _DRAFT_DIVIDER, handle_form_choice
 
         sim = BotSimulator()
@@ -201,11 +205,11 @@ class TestFlowWalker:
         first_field_pos = text.index('📅')
         assert '📋 *Draft preview*' not in text
         assert text.count(_DRAFT_DIVIDER) == 0
+        assert '🧩 *Missing details*' not in text
 
         curriculum_pos = text.index('📚 *Curriculum:*')
-        missing_pos = text.index('🧩 *Missing details*')
         reply_hint_pos = text.index('💬 Reply to refine this draft')
-        assert first_field_pos < curriculum_pos < missing_pos < reply_hint_pos
+        assert first_field_pos < curriculum_pos < reply_hint_pos
 
     @pytest.mark.asyncio
     async def test_draft_preview_keeps_why_this_form_compact(self, thin_draft):
@@ -451,7 +455,9 @@ class TestFlowWalker:
 
         assert result == AWAIT_APPROVAL
         assert 'draft ready' in sim.get_last_text().lower()
-        assert 'Helpful if you have it: Supervisor' in sim.get_last_text()
+        # Optional missing fields no longer surface a "Helpful if you have it"
+        # banner; the approval keyboard still appears so the user can save anyway.
+        assert 'Helpful if you have it' not in sim.get_last_text()
         assert any(data == 'APPROVE|draft' for _, data in sim.get_last_buttons())
 
     def test_draft_preview_splits_long_narrative_without_mutating_fields(self, thin_draft):
