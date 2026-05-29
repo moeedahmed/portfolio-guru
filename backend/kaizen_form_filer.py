@@ -2744,6 +2744,7 @@ async def file_to_kaizen(
     attachment_path: Optional[str] = None,
     attachment_drive_url: Optional[str] = None,
     reuse_draft: bool = False,
+    force_override: bool = False,
 ) -> Dict[str, Any]:
     """
     File a form to Kaizen as a draft (legacy API).
@@ -2768,8 +2769,7 @@ async def file_to_kaizen(
     if form_type == "PROC_LOG" and fields.get("date_of_activity") and not fields.get("date_occurred_on"):
         fields = dict(fields)
         fields["date_occurred_on"] = fields["date_of_activity"]
-    if form_type == "DOPS":
-        # Adapt extractor-schema keys (indication, trainee_performance, etc.)
+    if form_type == "DOPS" and not force_override:    # Adapt extractor-schema keys (indication, trainee_performance, etc.)
         # into the Kaizen DOM keys defined in FORM_FIELD_MAP["DOPS"], then
         # refuse to file when the resulting draft would be genuinely unsafe
         # (no procedure, or no clinical substance in the narrative). Lesser

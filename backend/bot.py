@@ -1938,9 +1938,11 @@ def _build_post_filing_keyboard(
     rows: list[list[InlineKeyboardButton]] = []
 
     if status == "failed":
-        rows.append([InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")])
-        rows.append([InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file")])
-        rows.append([_BTN_CANCEL])
+        rows.append([
+            InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing"),
+            InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file"),
+            _BTN_CANCEL,
+        ])
         return InlineKeyboardMarkup(rows)
 
     if status == "partial" or uncertain:
@@ -6311,6 +6313,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 form_name=form_name,
                 reuse_draft=reuse_existing_draft,
                 attachment_path=attachment_path,
+                force_override=bool(context.user_data.get("quality_gate_shown")),
             ),
             timeout=300,  # 5 min — browser-use path may take longer
         )
