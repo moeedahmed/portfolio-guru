@@ -1810,7 +1810,6 @@ def _build_approval_keyboard(improved_once: bool = False, can_back_to_missing: b
         # Quality gate warning — must not re-offer "Save as draft" (would loop
         # through the same gate). "File anyway" reuses APPROVE|draft because the
         # quality_gate_shown flag set in user_data bypasses the gate on retry.
-        rows.append([InlineKeyboardButton("✏️ Add more detail", callback_data="IMPROVE|reflection")])
         rows.append([InlineKeyboardButton("📤 File anyway", callback_data="APPROVE|draft")])
         rows.append([InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|draft")])
         return InlineKeyboardMarkup(rows)
@@ -2518,6 +2517,7 @@ def _format_pre_file_missing_message(form_type: str, missing: list[str]) -> str:
         f"🟡 *{form_name} needs a bit more detail before I file it.*\n\n"
         "I’m not going to create a mostly blank Kaizen draft. Please send the missing detail for:\n"
         f"{questions}{extra}"
+        "\n\n💬 Reply to add more detail, or tap **File anyway** to save what you have."
     )
 
 
