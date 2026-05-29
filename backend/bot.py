@@ -1804,8 +1804,16 @@ def _build_explicit_form_keyboard(form_type: str):
     ])
 
 
-def _build_approval_keyboard(improved_once: bool = False, can_back_to_missing: bool = False):
+def _build_approval_keyboard(improved_once: bool = False, can_back_to_missing: bool = False, quality_gate: bool = False):
     rows = []
+    if quality_gate:
+        # Quality gate warning — must not re-offer "Save as draft" (would loop
+        # through the same gate). "File anyway" reuses APPROVE|draft because the
+        # quality_gate_shown flag set in user_data bypasses the gate on retry.
+        rows.append([InlineKeyboardButton("✏️ Add more detail", callback_data="IMPROVE|reflection")])
+        rows.append([InlineKeyboardButton("📤 File anyway", callback_data="APPROVE|draft")])
+        rows.append([InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|draft")])
+        return InlineKeyboardMarkup(rows)
     if improved_once:
         # After Quick Improve is used, remove the improve button entirely
         rows.append([
@@ -6204,12 +6212,16 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     # Always deliver the gate text as a fresh message so the reviewed draft
     # preview stays visible — the user just approved it and shouldn't lose
     # the context they reviewed.
-    if blocking_before_file:
+    if blocking_before_file and not context.user_data.get("quality_gate_shown", False):
+        # First time hitting the gate — warn the user and arm the bypass so the
+        # next APPROVE|draft click ("File anyway") skips this check.
+        context.user_data["quality_gate_shown"] = True
         message = _format_pre_file_missing_message(form_type, blocking_before_file)
         await source_message.reply_text(
             message,
             reply_markup=_build_approval_keyboard(
-                improved_once=context.user_data.get("quick_improve_used", False)
+                improved_once=context.user_data.get("quick_improve_used", False),
+                quality_gate=True,
             ),
             parse_mode="Markdown",
         )
@@ -6249,8 +6261,23 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     else:
         ack = await source_message.reply_text(f"📤 Saving {form_name} as a Kaizen draft…")
 
+    reuse_existing_draft = bool(context.user_data.pop("retry_filing_requested", False))
+
+    # Retrieve attachment path and validate existence / support
+    attachment_path = context.user_data.get("attachment_path")
+    attachment_skipped_reason = None
+    if attachment_path:
+        if not os.path.exists(attachment_path):
+            attachment_skipped_reason = "attachment (file missing)"
+            attachment_path = None
+        elif not is_supported_document(context.user_data.get("attachment_name", "")):
+            attachment_skipped_reason = "attachment (unsupported type)"
+            attachment_path = None
+
     # Progress edits during the long filing wait so the user doesn't see a
-    # static message for up to 5 minutes.
+    # static message for up to 5 minutes. Started here — immediately before
+    # route_filing — so earlier early-returns (gate, missing creds) never pay
+    # the asyncio.create_task overhead.
     typing_stop = asyncio.Event()
     typing_task = asyncio.create_task(_typing_until(update.effective_chat, typing_stop))
 
@@ -6275,18 +6302,6 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             pass
 
     progress_task = asyncio.create_task(_filing_progress())
-    reuse_existing_draft = bool(context.user_data.pop("retry_filing_requested", False))
-    
-    # Retrieve attachment path and validate existence / support
-    attachment_path = context.user_data.get("attachment_path")
-    attachment_skipped_reason = None
-    if attachment_path:
-        if not os.path.exists(attachment_path):
-            attachment_skipped_reason = "attachment (file missing)"
-            attachment_path = None
-        elif not is_supported_document(context.user_data.get("attachment_name", "")):
-            attachment_skipped_reason = "attachment (unsupported type)"
-            attachment_path = None
 
     try:
         result = await asyncio.wait_for(
@@ -6352,6 +6367,9 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         typing_stop.set()
         typing_task.cancel()
         progress_task.cancel()
+        # Filing attempt is over (success, timeout, or exception) — clear the
+        # gate bypass so a subsequent retry re-checks quality.
+        context.user_data.pop("quality_gate_shown", None)
 
     status = result["status"]
     filled = result.get("filled", [])
