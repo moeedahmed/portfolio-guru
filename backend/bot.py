@@ -5622,6 +5622,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 await voice_file.download_to_drive(tmp_path)
                 case_text = await transcribe_voice(tmp_path)
             if _gathering_enabled(context) and not (context.user_data.get("chosen_form") and context.user_data.get("awaiting_detail")):
+                await _delete_previous_gathering_message(context)
                 reply_text, reply_markup = _gathering_reply(context)
                 await ack.edit_text(reply_text, reply_markup=reply_markup)
                 context.user_data["gathering_msg_id"] = ack.message_id
@@ -5679,6 +5680,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 return await _process_case_text(update.message, context, user_id, case_text, input_source)
             else:
                 if _gathering_enabled(context) and not (context.user_data.get("chosen_form") and context.user_data.get("awaiting_detail")):
+                    await _delete_previous_gathering_message(context)
                     reply_text, reply_markup = _gathering_reply(context)
                     await ack.edit_text(reply_text, reply_markup=reply_markup)
                     context.user_data["gathering_msg_id"] = ack.message_id
@@ -5741,6 +5743,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 case_text = case_text[:max_chars] + "\n\n[Document truncated — using first 15,000 characters]"
             
             if _gathering_enabled(context) and not (context.user_data.get("chosen_form") and context.user_data.get("awaiting_detail")):
+                await _delete_previous_gathering_message(context)
                 reply_text, reply_markup = _gathering_reply(context)
                 await ack.edit_text(reply_text, reply_markup=reply_markup)
                 context.user_data["gathering_msg_id"] = ack.message_id
@@ -5815,6 +5818,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         _append_gathering_case(context, case_text, input_source)
         if context.user_data.pop("_gathering_ack_used", False):
             return AWAIT_GATHERING
+        await _delete_previous_gathering_message(context)
         reply_text, reply_markup = _gathering_reply(context)
         gathering_msg = await update.message.reply_text(reply_text, reply_markup=reply_markup)
         context.user_data["gathering_msg_id"] = gathering_msg.message_id
@@ -5860,6 +5864,17 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         ack = await update.message.reply_text(CAPTURED_ACK, parse_mode="Markdown")
         _track_latest_message(context, ack)
     return await _process_case_text(update.message, context, user_id, case_text, input_source)
+
+
+async def _delete_previous_gathering_message(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Remove the prior gathering bubble so only one is on screen at a time."""
+    old_msg_id = context.user_data.pop("gathering_msg_id", None)
+    old_chat_id = context.user_data.pop("gathering_chat_id", None)
+    if old_msg_id and old_chat_id:
+        try:
+            await context.bot.delete_message(chat_id=old_chat_id, message_id=old_msg_id)
+        except Exception:
+            pass
 
 
 async def _finish_gathering_case(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -5924,6 +5939,7 @@ async def handle_gathering_input(update: Update, context: ContextTypes.DEFAULT_T
         return AWAIT_GATHERING
 
     _append_gathering_case(context, raw_text, "text")
+    await _delete_previous_gathering_message(context)
     gathering_msg = await update.message.reply_text(
         collecting_reply(_gathering_workspace(context)),
         reply_markup=_gathering_done_keyboard(),
