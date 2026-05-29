@@ -1210,6 +1210,33 @@ EXPAND_SLO_JS = """(sloText) => {
     return false;
 }"""
 
+# Edit-existing-draft (view-section / fillin) re-renders the curriculum tree
+# with different Angular classes than new-section, so the strict `a.ng-binding`
+# selector misses the SLO anchors. Walk a broader set of clickable elements,
+# and as a last resort match by SLO number alone.
+EXPAND_SLO_FALLBACK_JS = """(sloText) => {
+    var nodes = document.querySelectorAll('a, button, [ng-click], [data-target], .panel-heading, .accordion-toggle');
+    for (var i = 0; i < nodes.length; i++) {
+        var text = (nodes[i].textContent || '').trim();
+        if (text.indexOf(sloText) !== -1) {
+            nodes[i].click();
+            return true;
+        }
+    }
+    var m = sloText.match(/SLO\\s*\\d+/);
+    if (m) {
+        var sloOnly = m[0].replace(/\\s+/g, '');
+        for (var j = 0; j < nodes.length; j++) {
+            var t2 = (nodes[j].textContent || '').replace(/\\s+/g, '');
+            if (t2.indexOf(sloOnly) !== -1) {
+                nodes[j].click();
+                return true;
+            }
+        }
+    }
+    return false;
+}"""
+
 TICK_KC_JS = """(prefix) => {
     function variants(raw) {
         var out = [raw];
@@ -1239,6 +1266,45 @@ TICK_KC_JS = """(prefix) => {
                 }
                 return { found: true, no_cb: true };
             }
+        }
+    }
+    return { found: false };
+}"""
+
+# Edit-existing-draft view re-renders KC rows without `span.ng-binding.ng-scope`,
+# and sometimes nests the checkbox outside the LI ancestor. Fall back to a
+# broader text scan across labels/divs/list items, climb to whichever ancestor
+# carries a checkbox, and click the label as a last resort.
+TICK_KC_FALLBACK_JS = """(prefix) => {
+    function normalise(s) { return (s || '').toLowerCase().replace(/\\s+/g, ' ').trim(); }
+    var m = prefix.match(/SLO\\s*(\\d+)\\s*KC\\s*(\\d+)/i);
+    if (!m) return { found: false };
+    var sloNum = m[1], kcNum = m[2];
+    var patterns = [
+        'slo' + sloNum + ' kc' + kcNum,
+        'slo ' + sloNum + ' kc ' + kcNum,
+        'slo' + sloNum + ' key capability ' + kcNum,
+        'slo ' + sloNum + ' key capability ' + kcNum,
+    ];
+    var nodes = document.querySelectorAll('li, label, .list-group-item, .checkbox, div.ng-scope, span');
+    for (var i = 0; i < nodes.length; i++) {
+        var t = normalise(nodes[i].textContent);
+        if (!patterns.some(function(p) { return t.indexOf(p) !== -1; })) continue;
+        var container = nodes[i];
+        var hops = 0;
+        while (container && hops < 6) {
+            var cb = container.querySelector ? container.querySelector('input[type="checkbox"]') : null;
+            if (cb) {
+                if (!cb.checked) cb.click();
+                return { found: true, checked: cb.checked, text: t.slice(0, 70) };
+            }
+            container = container.parentElement;
+            hops++;
+        }
+        var lbl = nodes[i].querySelector ? nodes[i].querySelector('label') : null;
+        if (lbl) {
+            lbl.click();
+            return { found: true, checked: true, text: t.slice(0, 70) };
         }
     }
     return { found: false };
@@ -1366,18 +1432,45 @@ async def _fill_date(page: Page, dom_id: str, raw_value: str) -> bool:
     await asyncio.sleep(1)
 
     # Verify — Kaizen strips leading zeros (28/03/2026 → 28/3/2026)
+    def _norm(d):
+        parts = d.split("/") if d else []
+        if len(parts) == 3:
+            return f"{int(parts[0])}/{int(parts[1])}/{parts[2]}"
+        return d
+
     val = await el.evaluate("el => el.value")
-    if val:
-        # Normalise both for comparison (strip leading zeros from day/month)
-        def _norm(d):
-            parts = d.split("/")
-            if len(parts) == 3:
-                return f"{int(parts[0])}/{int(parts[1])}/{parts[2]}"
-            return d
-        if _norm(val) == _norm(uk_date):
-            logger.info(f"Date filled: {dom_id} = {val}")
-            return True
-    logger.warning(f"Date verify mismatch: expected {uk_date}, got {val}")
+    if val and _norm(val) == _norm(uk_date):
+        logger.info(f"Date filled: {dom_id} = {val}")
+        return True
+
+    # Kaizen's edit-existing-draft view (view-section / fillin URLs) wires the
+    # date field through a different Angular directive than new-section. The
+    # type+Tab path silently leaves the model untouched there. Retry by setting
+    # the value directly and dispatching the events Angular watches for, then
+    # re-verify before giving up.
+    logger.warning(
+        f"Date verify mismatch on type+Tab path: expected {uk_date}, got {val}. "
+        "Retrying via direct JS value assignment."
+    )
+    await page.evaluate(
+        """({domId, value}) => {
+            const el = document.getElementById(domId);
+            if (!el) return false;
+            el.focus();
+            el.value = value;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            el.dispatchEvent(new Event('blur', { bubbles: true }));
+            return true;
+        }""",
+        {"domId": dom_id, "value": uk_date},
+    )
+    await asyncio.sleep(1)
+    val = await el.evaluate("el => el.value")
+    if val and _norm(val) == _norm(uk_date):
+        logger.info(f"Date filled via JS fallback: {dom_id} = {val}")
+        return True
+    logger.warning(f"Date verify mismatch after JS fallback: expected {uk_date}, got {val}")
     return False
 
 
@@ -1385,6 +1478,14 @@ async def _fill_date(page: Page, dom_id: str, raw_value: str) -> bool:
 
 async def _fill_stage(page: Page, dom_id: str, stage_label: str) -> bool:
     """Fill stage of training dropdown using Angular select value."""
+    # Empty stage means the user didn't declare a training level. Better to
+    # skip and leave the dropdown untouched than to guess and write the wrong
+    # stage onto a real portfolio draft.
+    stage_label = (stage_label or "").strip()
+    if not stage_label:
+        logger.info(f"Stage skipped: no stage_label provided for {dom_id}")
+        return False
+
     # QIAT uses a different stage dropdown with individual year values
     is_qiat_stage = (dom_id == "415a72f2-7cf3-420a-bee4-9a7aed746612")
     values_map = QIAT_STAGE_VALUES if is_qiat_stage else STAGE_SELECT_VALUES
@@ -1657,6 +1758,12 @@ async def _fill_curriculum_links(
     for slo in sorted(slos):
         slo_text = f"{stage_prefix} {slo}:"
         expanded = await page.evaluate(EXPAND_SLO_JS, slo_text)
+        if not expanded:
+            # edit-existing-draft view renders SLO anchors with different
+            # classes; the strict selector misses them. Try the broader scan.
+            expanded = await page.evaluate(EXPAND_SLO_FALLBACK_JS, slo_text)
+            if expanded:
+                logger.info(f"Expanded via fallback: {slo_text}")
         if expanded:
             logger.info(f"Expanded: {slo_text}")
         else:
@@ -1666,6 +1773,13 @@ async def _fill_curriculum_links(
 
     for target in kc_targets:
         result = await page.evaluate(TICK_KC_JS, target)
+        if not (result.get("found") and result.get("checked")):
+            # Either the KC row was not located, or it was found without a
+            # reachable checkbox. Re-scan with the broader selector set.
+            fallback = await page.evaluate(TICK_KC_FALLBACK_JS, target)
+            if fallback.get("found") and fallback.get("checked"):
+                result = fallback
+                logger.info(f"KC ticked via fallback: {target}")
         if result.get("found") and result.get("checked"):
             ticked.append(target)
             logger.info(f"KC ticked: {target}")

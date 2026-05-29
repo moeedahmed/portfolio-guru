@@ -224,6 +224,9 @@ DOPS_KC_BREADTH_TRIGGERS: dict[str, tuple[str, ...]] = {
         "unstable", "hypotens", "hypoperfus", "perfusion",
         "fluid resus", "vasopressor", "noradrenaline", "metaraminol",
         "circulatory support", "rvr", "rapid ventricular",
+        "haematemesis", "melaena", "gi bleed", "gastrointestinal",
+        "ogd", "endoscop", "variceal", "ppi",
+        "blood transfusion", "cross-match", "cross match", " hb ",
     ),
     "SLO3 KC3": (
         "peri-arrest", "peri arrest", "periarrest", "arrhythmia",
@@ -236,6 +239,7 @@ DOPS_KC_BREADTH_TRIGGERS: dict[str, tuple[str, ...]] = {
     "SLO3 KC5": (
         "team leader", "led resus", "resus team", "led the resus",
         "med reg", " itu", " icu", "escalat",
+        "coordinated", "led the team", "directed", "referral",
     ),
     "SLO6 KC2": (
         "sedation", "ketamine", "propofol", "midazolam",
@@ -244,6 +248,17 @@ DOPS_KC_BREADTH_TRIGGERS: dict[str, tuple[str, ...]] = {
         "synchronised shock", "synchronised cardioversion",
     ),
 }
+
+
+# Default KCs added when trigger-based supplementation produces fewer than
+# three KCs for a case that did surface at least one KC (LLM or trigger).
+# Chosen to cover the broadest swathe of undifferentiated acute ED activity:
+# life-threatening management, resus team leadership, procedural skills.
+DOPS_KC_DEFAULT_FALLBACKS: tuple[str, ...] = (
+    "SLO3 KC2",
+    "SLO3 KC5",
+    "SLO6 KC2",
+)
 
 
 # Full KC text mirrored from `RCEM_KC_MAP` in extractor.py. Keep in lock-step
@@ -299,6 +314,24 @@ def suggest_dops_kc_breadth(
             continue
         augmented.append(full)
         present_prefixes.add(prefix)
+
+    # Universal breadth fallback: a real DOPS case that already produced at
+    # least one KC (LLM or trigger) should rarely sit below three. Top up with
+    # the broad default KCs, never enough to drown out the genuine picks but
+    # enough that the curriculum tag tree gets a credible breadth signal. We
+    # deliberately do not fire on a fully empty result — that is the bland /
+    # unrelated case shape (e.g. pure teaching observation) and adding KCs
+    # there would fabricate evidence.
+    if augmented and len(augmented) < 3:
+        for code in DOPS_KC_DEFAULT_FALLBACKS:
+            if len(augmented) >= 3:
+                break
+            full = DOPS_KC_FULL_TEXT[code]
+            prefix = _kc_code_prefix(full)
+            if prefix in present_prefixes:
+                continue
+            augmented.append(full)
+            present_prefixes.add(prefix)
     return augmented
 
 
