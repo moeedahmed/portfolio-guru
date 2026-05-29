@@ -261,7 +261,7 @@ def test_build_reply_request_case_confirmation_shows_state():
     snap = _snapshot_with_action(ActionKind.REQUEST_CASE_CONFIRMATION)
     text = vnext_runner._build_reply(snap)
     assert "Noted" in text
-    assert "draft it" in text
+    assert "Done" in text
     assert "state" not in text
 
 
@@ -269,7 +269,7 @@ def test_build_reply_ack_case_details_shows_state():
     snap = _snapshot_with_action(ActionKind.ACK_CASE_DETAILS)
     text = vnext_runner._build_reply(snap)
     assert "Noted" in text
-    assert "draft it" in text
+    assert "Done" in text
     assert "state" not in text
 
 
@@ -369,7 +369,7 @@ async def test_rich_case_collects_first_and_previews_only_when_done():
 
     first_reply = case_update.message.reply_text.call_args[0][0]
     assert "Draft ready" not in first_reply
-    assert "draft it" in first_reply
+    assert "Done" in first_reply
     assert "state" not in first_reply
 
     done_update = _make_update(chat_id=88, message_text="done")
@@ -406,7 +406,7 @@ async def test_collected_case_does_not_duplicate_done_instruction():
     await vnext_runner.handle_message(update, ctx)
 
     reply = update.message.reply_text.call_args[0][0]
-    assert reply.lower().count('"draft it"') == 1
+    assert reply.count("Done") == 1
 
 
 async def test_file_request_after_collected_case_shows_preview_not_filing():

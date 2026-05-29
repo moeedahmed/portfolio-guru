@@ -3,7 +3,13 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 import bot
-from bot import AWAIT_FORM_CHOICE, AWAIT_GATHERING, handle_case_input, handle_gathering_input
+from bot import (
+    AWAIT_FORM_CHOICE,
+    AWAIT_GATHERING,
+    gather_done_callback,
+    handle_case_input,
+    handle_gathering_input,
+)
 from tests.bot_simulator import BotSimulator
 
 
@@ -30,7 +36,7 @@ async def test_gathering_mode_starts_collection_instead_of_recommending(monkeypa
     assert result == AWAIT_GATHERING
     assert process_case.await_count == 0
     assert context.user_data["gathering_case"]["parts"][0]["text"] == _FIRST_CASE
-    assert any('"draft it"' in message for _, message, _ in sim.messages_sent)
+    assert any("Got it" in message for _, message, _ in sim.messages_sent)
 
 
 @pytest.mark.asyncio
@@ -93,3 +99,36 @@ async def test_env_var_can_disable_gathering_mode_globally(monkeypatch):
     sim = BotSimulator()
     context = sim._make_context()
     assert bot._gathering_enabled(context) is False
+
+
+@pytest.mark.asyncio
+async def test_gathering_reply_offers_done_button(monkeypatch):
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_text_update(_FIRST_CASE)
+
+    with patch("bot.has_credentials", return_value=True), \
+         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 0, 10, "free"))), \
+         patch("bot._process_case_text", new=AsyncMock(return_value=AWAIT_FORM_CHOICE)):
+        await handle_case_input(update, context)
+
+    assert ("✅ Done", "GATHER|done") in sim.get_last_buttons()
+
+
+@pytest.mark.asyncio
+async def test_gather_done_callback_finishes_case(monkeypatch):
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+    bot._append_gathering_case(context, _FIRST_CASE, "text")
+    update = sim._make_callback_update("GATHER|done")
+
+    process_case = AsyncMock(return_value=AWAIT_FORM_CHOICE)
+    with patch("bot._process_case_text", new=process_case):
+        result = await gather_done_callback(update, context)
+
+    assert result == AWAIT_FORM_CHOICE
+    process_case.assert_awaited_once()
+    assert "gathering_case" not in context.user_data
+    update.callback_query.answer.assert_awaited()

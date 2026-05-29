@@ -907,8 +907,13 @@ def _gathering_workspace(context) -> CaseWorkspace:
     return CaseWorkspace(case_id="main-bot-gathering", state=CaseState.COLLECTING, facts=tuple(facts))
 
 
-def _gathering_reply(context) -> str:
-    return 'Got it. Want to add more detail, a photo, or a voice note? Or say "draft it" when ready.'
+def _gathering_done_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("✅ Done", callback_data="GATHER|done")]])
+
+
+def _gathering_reply(context) -> tuple[str, InlineKeyboardMarkup]:
+    text = "📥 Got it.\n\nWant to add a photo, voice note, or more detail?"
+    return text, _gathering_done_keyboard()
 
 
 def _looks_like_gathering_side_chat(text: str, intent: ConversationalIntent) -> bool:
@@ -5838,7 +5843,8 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             context.user_data["attachment_path"] = attachment_path_to_save
             context.user_data["attachment_name"] = attachment_name_to_save
         _append_gathering_case(context, case_text, input_source)
-        await update.message.reply_text(_gathering_reply(context))
+        reply_text, reply_markup = _gathering_reply(context)
+        await update.message.reply_text(reply_text, reply_markup=reply_markup)
         return AWAIT_GATHERING
 
     if chosen_form and context.user_data.get("awaiting_detail"):
@@ -5886,12 +5892,19 @@ async def _finish_gathering_case(update: Update, context: ContextTypes.DEFAULT_T
     user_id = update.effective_user.id
     case_text, input_source = _combined_gathering_case(context)
     _clear_gathering_case(context)
+    message = update.effective_message
     if not case_text:
-        await update.message.reply_text("I was gathering the case, but nothing readable came through. Send it again when ready.")
+        await message.reply_text("I was gathering the case, but nothing readable came through. Send it again when ready.")
         return AWAIT_CASE_INPUT
-    ack = await update.message.reply_text(CAPTURED_ACK, parse_mode="Markdown")
+    ack = await message.reply_text(CAPTURED_ACK, parse_mode="Markdown")
     _track_latest_message(context, ack)
-    return await _process_case_text(update.message, context, user_id, case_text, input_source)
+    return await _process_case_text(message, context, user_id, case_text, input_source)
+
+
+async def gather_done_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    return await _finish_gathering_case(update, context)
 
 
 async def handle_gathering_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -5918,7 +5931,10 @@ async def handle_gathering_input(update: Update, context: ContextTypes.DEFAULT_T
         return AWAIT_GATHERING
 
     _append_gathering_case(context, raw_text, "text")
-    await update.message.reply_text(collecting_reply(_gathering_workspace(context)))
+    await update.message.reply_text(
+        collecting_reply(_gathering_workspace(context)),
+        reply_markup=_gathering_done_keyboard(),
+    )
     return AWAIT_GATHERING
 
 
@@ -7621,6 +7637,7 @@ def build_application() -> Application:
                 MessageHandler(filters.AUDIO, handle_case_input),
                 MessageHandler(filters.PHOTO, handle_case_input),
                 MessageHandler(filters.Document.ALL, handle_case_input),
+                CallbackQueryHandler(gather_done_callback, pattern=r"^GATHER\|done$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
             ],
             AWAIT_FORM_CHOICE: [
