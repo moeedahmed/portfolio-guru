@@ -1,5 +1,19 @@
 # Active Task — Private Beta Launch Cut
 
+> **2026-05-29 addendum — main-bot opt-in gathering mode slice.**
+> The vNext conversational collector has now been promoted into the main bot
+> as an opt-in, deployment-gated slice. `PG_GATHERING_MODE=1` enables the
+> `/gather on|off` user toggle. When enabled for a user, the first case input
+> enters `AWAIT_GATHERING`, stores sequential text/voice/photo/document content
+> as one case, answers simple side questions without adding them to the case,
+> and hands the combined case back to the existing `_process_case_text` flow
+> only when the user says "done" / "file this" / "preview". Existing users stay
+> on the old single-message flow unless both the env flag and user toggle are
+> on. No Kaizen filing, credential, billing, database, or deployment change in
+> this slice. Verification: focused gathering/vNext gate green at 73 passed,
+> 1 warning; full backend gate green at 825 passed, 24 deselected, 43 warnings,
+> 3 snapshots passed.
+
 > **2026-05-29 addendum — vNext conversational collector repair slice.**
 > Moeed's first live dogfood exposed the real issue: the private vNext bot
 > still behaved like a deterministic parser harness, not a smart case-taking

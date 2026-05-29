@@ -27,7 +27,10 @@ from documents import extract_from_document, is_supported_document
 from profile_store import init_profile_db, store_training_level, get_training_level, get_voice_profile, store_voice_profile, clear_voice_profile, store_curriculum, get_curriculum
 from bulk_filer import bulk_file
 from kaizen_unsigned_scraper import scrape_unsigned_tickets
-from conversational_router import route_message
+from conversational_case_engine import CaseFact, CaseState, CaseWorkspace, SourceType
+from conversational_router import ConversationalIntent, route_message
+from vnext_dialogue_policy import collecting_reply, is_completion_request, side_chat_reply
+from vnext_text_extractor import extract_text_facts
 from message_policy import render_message
 import chase_guard
 
@@ -818,13 +821,110 @@ def _combined_pending_case_bundle(context) -> tuple[str, str]:
     source = "mixed" if len(sources) > 1 else sources[0]
     return combine_case_inputs(parts[0], parts[1:]) if parts else "", source
 
+_GATHERING_MODE_TRUE_VALUES = {"1", "true", "yes", "on"}
+_GATHERING_CASE_KEY = "gathering_case"
+_GATHERING_CHAT_INTENTS = {
+    ConversationalIntent.PORTFOLIO_QUESTION,
+    ConversationalIntent.ACCOUNT_OR_BILLING,
+    ConversationalIntent.SETUP_OR_CREDENTIALS,
+}
+
+
+def _gathering_env_enabled() -> bool:
+    return os.environ.get("PG_GATHERING_MODE", "").strip().lower() in _GATHERING_MODE_TRUE_VALUES
+
+
+def _gathering_enabled(context) -> bool:
+    return _gathering_env_enabled() and bool(context.user_data.get("gathering_mode"))
+
+
+def _gathering_case_active(context) -> bool:
+    return bool((context.user_data.get(_GATHERING_CASE_KEY) or {}).get("parts"))
+
+
+def _clear_gathering_case(context) -> None:
+    context.user_data.pop(_GATHERING_CASE_KEY, None)
+
+
+def _append_gathering_case(context, text: str, source: str) -> None:
+    text = (text or "").strip()
+    if not text:
+        return
+    now = time.time()
+    case = context.user_data.setdefault(
+        _GATHERING_CASE_KEY,
+        {"parts": [], "sources": [], "facts": [], "created_at": now, "updated_at": now},
+    )
+    case.setdefault("created_at", now)
+    case["updated_at"] = now
+    case.setdefault("parts", []).append({"source": source, "text": text})
+    sources = case.setdefault("sources", [])
+    if source not in sources:
+        sources.append(source)
+    case.setdefault("facts", []).extend(
+        {"key": key, "value": value, "source": source}
+        for key, value in extract_text_facts(text)
+    )
+
+
+def _combined_gathering_case(context) -> tuple[str, str]:
+    case = context.user_data.get(_GATHERING_CASE_KEY) or {}
+    parts = [
+        part.get("text", "").strip()
+        for part in case.get("parts", [])
+        if part.get("text", "").strip()
+    ]
+    sources = case.get("sources") or ["text"]
+    source = "mixed" if len(sources) > 1 else sources[0]
+    return combine_case_inputs(parts[0], parts[1:]) if parts else "", source
+
+
+def _gathering_workspace(context) -> CaseWorkspace:
+    case = context.user_data.get(_GATHERING_CASE_KEY) or {}
+    facts: list[CaseFact] = []
+    for idx, fact in enumerate(case.get("facts", []), start=1):
+        source_name = fact.get("source", "text")
+        source_type = {
+            "voice": SourceType.VOICE,
+            "photo": SourceType.IMAGE,
+            "document": SourceType.DOCUMENT,
+        }.get(source_name, SourceType.TEXT)
+        facts.append(
+            CaseFact(
+                key=fact.get("key", ""),
+                value=fact.get("value", ""),
+                source_type=source_type,
+                source_turn_id=f"gathering-{idx}",
+                confirmed=source_type is SourceType.TEXT,
+            )
+        )
+    return CaseWorkspace(case_id="main-bot-gathering", state=CaseState.COLLECTING, facts=tuple(facts))
+
+
+def _gathering_reply(context) -> str:
+    workspace = _gathering_workspace(context)
+    if workspace.draft_eligible_facts():
+        return collecting_reply(workspace)
+    return (
+        "Got it — I’ll keep this case open while you add more detail.\n\n"
+        "Send more text, photos, voice notes, or documents. Say 'done' when you want me to recommend the form."
+    )
+
+
+def _looks_like_gathering_side_chat(text: str, intent: ConversationalIntent) -> bool:
+    if intent in _GATHERING_CHAT_INTENTS:
+        return True
+    normalised = " ".join((text or "").strip().lower().strip("?!.,").split())
+    return normalised in {"hi", "hello", "hey", "help", "how does this work", "what can you do"}
+
 # ConversationHandler states
 (AWAIT_USERNAME, AWAIT_PASSWORD,
  AWAIT_FORM_CHOICE, AWAIT_APPROVAL,
  AWAIT_EDIT_FIELD, AWAIT_EDIT_VALUE,
  AWAIT_CASE_INPUT, AWAIT_TRAINING_LEVEL,
  AWAIT_VOICE_EXAMPLES, AWAIT_TEMPLATE_REVIEW,
- AWAIT_CURRICULUM, AWAIT_FORM_SEARCH) = range(12)
+ AWAIT_CURRICULUM, AWAIT_FORM_SEARCH,
+ AWAIT_GATHERING) = range(13)
 
 # Common button patterns used across the bot
 _BTN_SETUP = InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")
@@ -4142,6 +4242,34 @@ async def beta_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return ConversationHandler.END
 
 
+async def gather_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Toggle opt-in multi-message gathering for the current user."""
+    args = [arg.strip().lower() for arg in (context.args or [])]
+    if not _gathering_env_enabled():
+        context.user_data["gathering_mode"] = False
+        _clear_gathering_case(context)
+        await update.message.reply_text("Gathering mode is not enabled on this deployment yet.")
+        return ConversationHandler.END
+
+    if args and args[0] in {"on", "enable", "enabled", "yes"}:
+        context.user_data["gathering_mode"] = True
+        _clear_gathering_case(context)
+        await update.message.reply_text(
+            "Gathering mode is on. Send one case over multiple messages, then say 'done' when ready."
+        )
+        return ConversationHandler.END
+
+    if args and args[0] in {"off", "disable", "disabled", "no"}:
+        context.user_data["gathering_mode"] = False
+        _clear_gathering_case(context)
+        await update.message.reply_text("Gathering mode is off. I’ll go back to drafting from each case message.")
+        return ConversationHandler.END
+
+    status = "on" if context.user_data.get("gathering_mode") else "off"
+    await update.message.reply_text(f"Gathering mode is {status}. Use /gather on or /gather off.")
+    return ConversationHandler.END
+
+
 async def assignbeta_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle /assignbeta @username — admin-only beta approval."""
     if update.effective_user.id != ADMIN_USER_ID:
@@ -5701,6 +5829,13 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return AWAIT_CASE_INPUT
 
     chosen_form = context.user_data.get("chosen_form")
+    if _gathering_enabled(context) and not (chosen_form and context.user_data.get("awaiting_detail")):
+        if not _gathering_case_active(context):
+            _clear_case_review_state(context, keep_case=False)
+        _append_gathering_case(context, case_text, input_source)
+        await update.message.reply_text(_gathering_reply(context))
+        return AWAIT_GATHERING
+
     if chosen_form and context.user_data.get("awaiting_detail"):
         context.user_data["case_text"] = case_text
         context.user_data["case_input_source"] = input_source
@@ -5740,6 +5875,47 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         ack = await update.message.reply_text(CAPTURED_ACK, parse_mode="Markdown")
         _track_latest_message(context, ack)
     return await _process_case_text(update.message, context, user_id, case_text, input_source)
+
+
+async def _finish_gathering_case(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user_id = update.effective_user.id
+    case_text, input_source = _combined_gathering_case(context)
+    _clear_gathering_case(context)
+    if not case_text:
+        await update.message.reply_text("I was gathering the case, but nothing readable came through. Send it again when ready.")
+        return AWAIT_CASE_INPUT
+    ack = await update.message.reply_text(CAPTURED_ACK, parse_mode="Markdown")
+    _track_latest_message(context, ack)
+    return await _process_case_text(update.message, context, user_id, case_text, input_source)
+
+
+async def handle_gathering_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle extra messages while the opt-in gathering mode is active."""
+    if not _gathering_enabled(context):
+        _clear_gathering_case(context)
+        return await handle_case_input(update, context)
+
+    if not update.message or not update.message.text:
+        return await handle_case_input(update, context)
+
+    raw_text = update.message.text.strip()
+    if not raw_text:
+        return AWAIT_GATHERING
+
+    if is_completion_request(raw_text) or _is_case_bundle_done(raw_text):
+        return await _finish_gathering_case(update, context)
+
+    if _gathering_case_active(context):
+        routed = route_message(raw_text)
+        if routed.intent is ConversationalIntent.FILE_TO_KAIZEN:
+            return await _finish_gathering_case(update, context)
+        if _looks_like_gathering_side_chat(raw_text, routed.intent):
+            await update.message.reply_text(side_chat_reply(raw_text, _gathering_workspace(context)))
+            return AWAIT_GATHERING
+
+    _append_gathering_case(context, raw_text, "text")
+    await update.message.reply_text(_gathering_reply(context))
+    return AWAIT_GATHERING
 
 
 async def handle_form_search_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -7395,6 +7571,14 @@ def build_application() -> Application:
                 MessageHandler(filters.Document.ALL, handle_case_input),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|continue_thin$"),
             ],
+            AWAIT_GATHERING: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_gathering_input),
+                MessageHandler(filters.VOICE, handle_case_input),
+                MessageHandler(filters.AUDIO, handle_case_input),
+                MessageHandler(filters.PHOTO, handle_case_input),
+                MessageHandler(filters.Document.ALL, handle_case_input),
+                CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
+            ],
             AWAIT_FORM_CHOICE: [
                 CallbackQueryHandler(handle_form_choice, pattern=r"^FORM\|"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
@@ -7458,6 +7642,7 @@ def build_application() -> Application:
             CommandHandler("start", start),
             CommandHandler("help", help_command),
             CommandHandler("settings", settings_command),
+            CommandHandler("gather", gather_command),
             CommandHandler("cancel", setup_cancel),
             CallbackQueryHandler(
                 handle_callback,
@@ -7507,6 +7692,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("plan", upgrade_command))
     application.add_handler(CommandHandler("settier", settier_command))
     application.add_handler(CommandHandler("beta", beta_command))
+    application.add_handler(CommandHandler("gather", gather_command))
     application.add_handler(CommandHandler("assignbeta", assignbeta_command))
     application.add_handler(CallbackQueryHandler(handle_upgrade_button, pattern=r"^UPGRADE\|"))
     application.add_handler(CallbackQueryHandler(handle_unsigned_range_pick, pattern=r"^UNSIGNED\|"))

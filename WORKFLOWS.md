@@ -20,6 +20,7 @@ smoke checklist lives in `scripts/dogfood_smoke.sh`.
 | `AWAIT_APPROVAL`    | Draft preview shown. Waiting for File / Edit / Cancel.       |
 | `AWAIT_EDIT_FIELD`  | Edit mode. Waiting for user to select which field to change. |
 | `AWAIT_EDIT_VALUE`  | Edit mode. Waiting for user to provide the new field value.  |
+| `AWAIT_GATHERING`   | Opt-in collector. Waiting for more case detail or "done".    |
 | `AWAIT_USERNAME`    | Setup flow. Waiting for Kaizen username.                     |
 | `AWAIT_PASSWORD`    | Setup flow. Waiting for Kaizen password.                     |
 
@@ -61,6 +62,14 @@ User sends input (text / voice / photo)
   CHITCHAT → friendly reply, return to idle
   QUESTION → answer_question(text), return to idle
   CASE     → proceed
+
+If `PG_GATHERING_MODE=1` and the user has enabled `/gather on`:
+  → Store this input as part of one open case
+  → State → AWAIT_GATHERING
+  → Subsequent case detail is appended
+  → Simple side questions are answered as chat, not case content
+  → User says "done" / "file this" / "preview"
+  → Combined case text continues through the normal recommendation flow
 
 Detect input type:
   text  → use as-is
