@@ -1671,26 +1671,46 @@ async def _fill_curriculum_links(
 # ─── Save ─────────────────────────────────────────────────────────────────────
 
 async def _save_form(page: Page, as_draft: bool) -> bool:
-    """Save the form as draft or send to assessor."""
+    """Save the form as draft. Never Submit/Send. Returns True on success."""
     if as_draft:
-        save_link = page.locator("a:has-text('Save as draft')").first
+        selectors = [
+            'a:has-text("Save as draft")',
+            'a:has-text("Save as Draft")',
+            'a:has-text("Save draft")',
+            'button:has-text("Save as Draft")',
+            'button:has-text("Save Draft")',
+            'a:has-text("Save")',
+        ]
     else:
-        save_link = page.locator("a:has-text('Send to assessor'), button:has-text('Send to assessor')").first
+        selectors = [
+            'a:has-text("Send to assessor")',
+            'button:has-text("Send to assessor")',
+        ]
 
-    if not await save_link.count():
-        logger.error("Save button not found")
-        return False
+    for selector in selectors:
+        try:
+            el = page.locator(selector).first
+            if await el.count() > 0:
+                el_text = (await el.inner_text()).strip()
+                if any(danger in el_text.lower() for danger in ["submit", "send", "sign", "approve", "reject", "delete"]):
+                    if not as_draft and "send to assessor" in el_text.lower():
+                        pass
+                    else:
+                        logger.warning(f"BLOCKED dangerous element: '{el_text}'")
+                        continue
+                await el.click()
+                await asyncio.sleep(5)
+                logger.info(f"Clicked save: '{el_text}'")
+                body_text = await page.inner_text("body")
+                if "LAST SAVED" in body_text.upper() or "SAVED" in body_text.upper():
+                    logger.info("Form saved successfully")
+                return True
+        except Exception as e:
+            logger.debug(f"Save selector {selector} failed: {e}")
+            continue
 
-    await save_link.click()
-    await asyncio.sleep(5)
-
-    # Verify save
-    body_text = await page.inner_text("body")
-    if "LAST SAVED" in body_text.upper() or "SAVED" in body_text.upper():
-        logger.info("Form saved successfully")
-        return True
-    logger.warning("Save may have failed — 'LAST SAVED' not found in body")
-    return True  # Proceed anyway — save might have worked
+    logger.error("Save button not found")
+    return False
 
 
 async def _verify_sent_to_assessor(page: Page, expected_assessor: str = "") -> bool:
