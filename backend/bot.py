@@ -1213,6 +1213,7 @@ TRAINING_LEVEL_LABELS = {
     "ACCS": "ACCS (ST1–2)",
     "INTERMEDIATE": "Intermediate (ST3)",
     "HIGHER": "Higher (ST4–6)",
+    "SAS": "SAS / CESR / Non-trainee",
     "ST3": "Intermediate (ST3)",
     "ST4": "Higher (ST4–6)",
     "ST5": "Higher (ST4–6)",
@@ -2951,8 +2952,8 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     except Exception:
         # Cache failure must never block the login success path.
         logger.warning("Kaizen role cache update failed", exc_info=True)
-    role_map = {"hst": "HIGHER", "accs": "ACCS", "accs_intermediate": "INTERMEDIATE", "assessor": "HIGHER"}
-    label_map = {"hst": "Higher Specialist Trainee", "accs": "ACCS Trainee", "accs_intermediate": "ACCS + Intermediate Trainee", "assessor": "Clinical Supervisor"}
+    role_map = {"hst": "HIGHER", "accs": "ACCS", "accs_intermediate": "INTERMEDIATE", "sas": "SAS", "assessor": "HIGHER"}
+    label_map = {"hst": "Higher Specialist Trainee", "accs": "ACCS Trainee", "accs_intermediate": "ACCS + Intermediate Trainee", "sas": "SAS / CESR / Non-trainee", "assessor": "Clinical Supervisor"}
     
     auto_level = role_map.get(detected_role)
     if auto_level:
@@ -2981,6 +2982,7 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 [InlineKeyboardButton("ACCS (ST1–2)", callback_data="SETLEVEL|ACCS")],
                 [InlineKeyboardButton("Intermediate (ST3)", callback_data="SETLEVEL|INTERMEDIATE")],
                 [InlineKeyboardButton("Higher (ST4–6)", callback_data="SETLEVEL|HIGHER")],
+                [InlineKeyboardButton("SAS / CESR / Non-trainee", callback_data="SETLEVEL|SAS")],
             ])
         )
         return AWAIT_TRAINING_LEVEL
@@ -3831,6 +3833,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             [InlineKeyboardButton("ACCS (ST1–2)", callback_data="SETLEVEL|ACCS")],
             [InlineKeyboardButton("Intermediate (ST3)", callback_data="SETLEVEL|INTERMEDIATE")],
             [InlineKeyboardButton("Higher (ST4–6)", callback_data="SETLEVEL|HIGHER")],
+            [InlineKeyboardButton("SAS / CESR / Non-trainee", callback_data="SETLEVEL|SAS")],
             [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
         ])
         await query.message.edit_text(
