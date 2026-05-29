@@ -12,19 +12,19 @@
 
 ## Emoji Categories
 
-| Emoji | Meaning |
-|---|---|
-| 🩺 | Portfolio Guru identity / welcome / general |
-| 📥 | Case captured / input received |
-| ⚠️ | Warning or attention needed |
-| ❌ | Error or failure |
-| ✅ | Success / complete |
-| 🔑 | Credentials / login / setup |
-| 📤 | Saving / uploading / filing in progress |
-| ✏️ | Edit / refine |
-| 📋 | Form / WPBA reference |
-| 💬 | Reply / chat action hint |
-| 🔙 | Back navigation |
+| Emoji | Meaning                                     |
+| ----- | ------------------------------------------- |
+| 🩺    | Portfolio Guru identity / welcome / general |
+| 📥    | Case captured / input received              |
+| ⚠️    | Warning or attention needed                 |
+| ❌    | Error or failure                            |
+| ✅    | Success / complete                          |
+| 🔑    | Credentials / login / setup                 |
+| 📤    | Saving / uploading / filing in progress     |
+| ✏️    | Edit / refine                               |
+| 📋    | Form / WPBA reference                       |
+| 💬    | Reply / chat action hint                    |
+| 🔙    | Back navigation                             |
 
 ## Message Structure
 
@@ -39,13 +39,19 @@
 ## Gathering Mode Messages
 
 First capture:
+
 ```
-📥 Got it.
+📥 Captured.
 
 Want to add a photo, voice note, or more detail?
 ```
 
+When user taps ✅ Done, this message is edited in place to the full CAPTURED_ACK
+("📥 Captured. I'll turn this into portfolio evidence…") and the keyboard is
+removed; the form recommendation arrives as a new message.
+
 After subsequent messages:
+
 ```
 📥 Noted.
 
@@ -53,6 +59,7 @@ Add more or tap Done when ready.
 ```
 
 Completion prompt (when user says "done" or taps button):
+
 ```
 📥 Ready for the next step.
 ```
@@ -60,6 +67,7 @@ Completion prompt (when user says "done" or taps button):
 ## Example Existing Messages
 
 Welcome:
+
 ```
 🩺 Portfolio Guru — RCEM portfolio drafts from rough notes.
 
@@ -74,6 +82,7 @@ Tap 🔗 Connect to start.
 ```
 
 Connected welcome:
+
 ```
 🩺 Portfolio Guru is ready.
 
@@ -82,6 +91,7 @@ I'll only use what you send and won't invent clinical detail.
 ```
 
 Draft saved:
+
 ```
 ✅ Kaizen draft saved
 {Form name} saved as a Kaizen draft. 📅 {date}

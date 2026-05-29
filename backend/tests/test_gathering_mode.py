@@ -36,7 +36,7 @@ async def test_gathering_mode_starts_collection_instead_of_recommending(monkeypa
     assert result == AWAIT_GATHERING
     assert process_case.await_count == 0
     assert context.user_data["gathering_case"]["parts"][0]["text"] == _FIRST_CASE
-    assert any("Got it" in message for _, message, _ in sim.messages_sent)
+    assert any("Captured" in message for _, message, _ in sim.messages_sent)
 
 
 @pytest.mark.asyncio

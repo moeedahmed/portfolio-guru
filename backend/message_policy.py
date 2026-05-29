@@ -87,7 +87,7 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         key="file_case_prompt",
         message_class=MessageClass.FIXED,
         text=(
-            "Send what happened — text, voice note, photo, or document.\n"
+            "📥 Send what happened — text, voice note, photo, or document.\n\n"
             "Include the patient’s presentation, what you did, outcome, and learning point if you have them."
         ),
     ),
@@ -105,7 +105,7 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         key="thin_case_detail_request",
         message_class=MessageClass.FIXED,
         text=(
-            "I need a bit more clinical detail before drafting.\n\n"
+            "📋 I need a bit more clinical detail before drafting.\n\n"
             "Send rough notes with: patient/presentation, what you did, outcome, and what you learned."
         ),
         safety_critical=True,

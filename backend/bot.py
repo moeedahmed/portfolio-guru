@@ -912,7 +912,7 @@ def _gathering_done_keyboard() -> InlineKeyboardMarkup:
 
 
 def _gathering_reply(context) -> tuple[str, InlineKeyboardMarkup]:
-    text = "📥 Got it.\n\nWant to add a photo, voice note, or more detail?"
+    text = "📥 Captured.\n\nWant to add a photo, voice note, or more detail?"
     return text, _gathering_done_keyboard()
 
 
@@ -2061,7 +2061,7 @@ def _build_form_recommendation_text(
     *,
     input_source: str | None = None,
     curriculum: str = "2025",
-    opening: str = "Forms that fit your case:",
+    opening: str = "📋 Forms that fit your case:",
     closing: str = "Tap Use best fit for the fastest draft, or choose another form.",
 ) -> str:
     visible_recommendations = [r for r in recommendations if getattr(r, "uuid", None)]
@@ -5291,7 +5291,7 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
                     recommendations,
                     input_source=context.user_data.get("case_input_source"),
                     curriculum=get_curriculum(update.effective_user.id),
-                    opening="Other options that fit:",
+                    opening="📋 Other options that fit:",
                     closing=f"Pick one to switch, or keep going with {form_name}.",
                 )
                 context.user_data["form_recommendations"] = recommendations
@@ -5508,7 +5508,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     case_text, input_source = _combined_pending_case_bundle(context)
                     _clear_pending_case_bundle(context)
                     if not case_text:
-                        await update.message.reply_text("I was waiting for the rest of the case, but nothing readable came through. Send the case again when ready.")
+                        await update.message.reply_text("⚠️ I was waiting for the rest of the case, but nothing readable came through.\n\nSend the case again when ready.")
                         return AWAIT_CASE_INPUT
                     ack = await update.message.reply_text(CAPTURED_ACK, parse_mode="Markdown")
                     _track_latest_message(context, ack)
@@ -5844,7 +5844,9 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             context.user_data["attachment_name"] = attachment_name_to_save
         _append_gathering_case(context, case_text, input_source)
         reply_text, reply_markup = _gathering_reply(context)
-        await update.message.reply_text(reply_text, reply_markup=reply_markup)
+        gathering_msg = await update.message.reply_text(reply_text, reply_markup=reply_markup)
+        context.user_data["gathering_msg_id"] = gathering_msg.message_id
+        context.user_data["gathering_chat_id"] = gathering_msg.chat_id
         return AWAIT_GATHERING
 
     if chosen_form and context.user_data.get("awaiting_detail"):
@@ -5891,13 +5893,32 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def _finish_gathering_case(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     case_text, input_source = _combined_gathering_case(context)
+    gathering_msg_id = context.user_data.pop("gathering_msg_id", None)
+    gathering_chat_id = context.user_data.pop("gathering_chat_id", None)
     _clear_gathering_case(context)
     message = update.effective_message
     if not case_text:
-        await message.reply_text("I was gathering the case, but nothing readable came through. Send it again when ready.")
+        await message.reply_text("⚠️ I was gathering the case, but nothing readable came through.\n\nSend it again when ready.")
         return AWAIT_CASE_INPUT
-    ack = await message.reply_text(CAPTURED_ACK, parse_mode="Markdown")
-    _track_latest_message(context, ack)
+    edited_in_place = False
+    if gathering_msg_id and gathering_chat_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=gathering_chat_id,
+                message_id=gathering_msg_id,
+                text=CAPTURED_ACK,
+                parse_mode="Markdown",
+            )
+            context.user_data["last_bot_msg_id"] = gathering_msg_id
+            context.user_data["last_bot_chat_id"] = gathering_chat_id
+            context.user_data["status_msg_id"] = gathering_msg_id
+            context.user_data["status_msg_chat"] = gathering_chat_id
+            edited_in_place = True
+        except Exception:
+            edited_in_place = False
+    if not edited_in_place:
+        ack = await message.reply_text(CAPTURED_ACK, parse_mode="Markdown")
+        _track_latest_message(context, ack)
     return await _process_case_text(message, context, user_id, case_text, input_source)
 
 
@@ -5931,10 +5952,12 @@ async def handle_gathering_input(update: Update, context: ContextTypes.DEFAULT_T
         return AWAIT_GATHERING
 
     _append_gathering_case(context, raw_text, "text")
-    await update.message.reply_text(
+    gathering_msg = await update.message.reply_text(
         collecting_reply(_gathering_workspace(context)),
         reply_markup=_gathering_done_keyboard(),
     )
+    context.user_data["gathering_msg_id"] = gathering_msg.message_id
+    context.user_data["gathering_chat_id"] = gathering_msg.chat_id
     return AWAIT_GATHERING
 
 
