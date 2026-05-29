@@ -49,8 +49,9 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         message_class=MessageClass.FIXED,
         text=(
             "🩺 Portfolio Guru is ready.\n\n"
-            "Send what happened — text, voice, photo, or document. Rough notes are enough; "
-            "I’ll only use what you send and won’t invent clinical detail."
+            "Send what happened — text, voice, photo, or document. Add more across messages if you "
+            "like, then say \"draft it\" when ready. I’ll only use what you send and won’t invent "
+            "clinical detail."
         ),
         safety_critical=True,
     ),

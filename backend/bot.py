@@ -821,7 +821,7 @@ def _combined_pending_case_bundle(context) -> tuple[str, str]:
     source = "mixed" if len(sources) > 1 else sources[0]
     return combine_case_inputs(parts[0], parts[1:]) if parts else "", source
 
-_GATHERING_MODE_TRUE_VALUES = {"1", "true", "yes", "on"}
+_GATHERING_MODE_FALSE_VALUES = {"0", "false", "no", "off", "disabled"}
 _GATHERING_CASE_KEY = "gathering_case"
 _GATHERING_CHAT_INTENTS = {
     ConversationalIntent.PORTFOLIO_QUESTION,
@@ -831,11 +831,17 @@ _GATHERING_CHAT_INTENTS = {
 
 
 def _gathering_env_enabled() -> bool:
-    return os.environ.get("PG_GATHERING_MODE", "").strip().lower() in _GATHERING_MODE_TRUE_VALUES
+    # Gathering mode is the default. The env var only acts as a deployment-level
+    # opt-out: setting PG_GATHERING_MODE to 0/false/no/off disables it for everyone.
+    return os.environ.get("PG_GATHERING_MODE", "").strip().lower() not in _GATHERING_MODE_FALSE_VALUES
 
 
 def _gathering_enabled(context) -> bool:
-    return _gathering_env_enabled() and bool(context.user_data.get("gathering_mode"))
+    if not _gathering_env_enabled():
+        return False
+    # Default on for every user. Power users opt out via /gather off, which
+    # explicitly sets gathering_mode to False.
+    return context.user_data.get("gathering_mode") is not False
 
 
 def _gathering_case_active(context) -> bool:
@@ -902,13 +908,7 @@ def _gathering_workspace(context) -> CaseWorkspace:
 
 
 def _gathering_reply(context) -> str:
-    workspace = _gathering_workspace(context)
-    if workspace.draft_eligible_facts():
-        return collecting_reply(workspace)
-    return (
-        "Got it — I’ll keep this case open while you add more detail.\n\n"
-        "Send more text, photos, voice notes, or documents. Say 'done' when you want me to recommend the form."
-    )
+    return 'Got it. Want to add more detail, a photo, or a voice note? Or say "draft it" when ready.'
 
 
 def _looks_like_gathering_side_chat(text: str, intent: ConversationalIntent) -> bool:
@@ -4250,29 +4250,24 @@ async def beta_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 
 async def gather_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Toggle opt-in multi-message gathering for the current user."""
+    """Toggle multi-message gathering for the current user. Default is on."""
     args = [arg.strip().lower() for arg in (context.args or [])]
-    if not _gathering_env_enabled():
-        context.user_data["gathering_mode"] = False
-        _clear_gathering_case(context)
-        await update.message.reply_text("Gathering mode is not enabled on this deployment yet.")
-        return ConversationHandler.END
 
     if args and args[0] in {"on", "enable", "enabled", "yes"}:
         context.user_data["gathering_mode"] = True
         _clear_gathering_case(context)
         await update.message.reply_text(
-            "Gathering mode is on. Send one case over multiple messages, then say 'done' when ready."
+            'Gathering mode is on. Send a case across messages, then say "draft it" when ready.'
         )
         return ConversationHandler.END
 
     if args and args[0] in {"off", "disable", "disabled", "no"}:
         context.user_data["gathering_mode"] = False
         _clear_gathering_case(context)
-        await update.message.reply_text("Gathering mode is off. I’ll go back to drafting from each case message.")
+        await update.message.reply_text("Gathering mode is off. I’ll draft from each case message instead.")
         return ConversationHandler.END
 
-    status = "on" if context.user_data.get("gathering_mode") else "off"
+    status = "on" if _gathering_enabled(context) else "off"
     await update.message.reply_text(f"Gathering mode is {status}. Use /gather on or /gather off.")
     return ConversationHandler.END
 
@@ -5839,6 +5834,9 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if _gathering_enabled(context) and not (chosen_form and context.user_data.get("awaiting_detail")):
         if not _gathering_case_active(context):
             _clear_case_review_state(context, keep_case=False)
+        if attachment_path_to_save:
+            context.user_data["attachment_path"] = attachment_path_to_save
+            context.user_data["attachment_name"] = attachment_name_to_save
         _append_gathering_case(context, case_text, input_source)
         await update.message.reply_text(_gathering_reply(context))
         return AWAIT_GATHERING
@@ -5920,7 +5918,7 @@ async def handle_gathering_input(update: Update, context: ContextTypes.DEFAULT_T
         return AWAIT_GATHERING
 
     _append_gathering_case(context, raw_text, "text")
-    await update.message.reply_text(_gathering_reply(context))
+    await update.message.reply_text(collecting_reply(_gathering_workspace(context)))
     return AWAIT_GATHERING
 
 

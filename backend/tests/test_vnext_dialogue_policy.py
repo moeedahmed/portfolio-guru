@@ -73,8 +73,8 @@ def test_collecting_reply_asks_for_done_without_raw_state():
 
     reply = collecting_reply(workspace)
 
-    assert "Got it" in reply
-    assert "say 'done'" in reply
+    assert "Noted" in reply
+    assert "draft it" in reply
     assert "state" not in reply.lower()
 
 

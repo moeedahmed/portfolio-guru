@@ -16,10 +16,9 @@ _FIRST_CASE = (
 
 @pytest.mark.asyncio
 async def test_gathering_mode_starts_collection_instead_of_recommending(monkeypatch):
-    monkeypatch.setenv("PG_GATHERING_MODE", "1")
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
     sim = BotSimulator()
     context = sim._make_context()
-    context.user_data["gathering_mode"] = True
     update = sim._make_text_update(_FIRST_CASE)
 
     process_case = AsyncMock(return_value=AWAIT_FORM_CHOICE)
@@ -31,15 +30,14 @@ async def test_gathering_mode_starts_collection_instead_of_recommending(monkeypa
     assert result == AWAIT_GATHERING
     assert process_case.await_count == 0
     assert context.user_data["gathering_case"]["parts"][0]["text"] == _FIRST_CASE
-    assert any("say 'done'" in message for _, message, _ in sim.messages_sent)
+    assert any('"draft it"' in message for _, message, _ in sim.messages_sent)
 
 
 @pytest.mark.asyncio
 async def test_gathering_mode_combines_parts_when_user_says_done(monkeypatch):
-    monkeypatch.setenv("PG_GATHERING_MODE", "1")
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
     sim = BotSimulator()
     context = sim._make_context()
-    context.user_data["gathering_mode"] = True
     bot._append_gathering_case(context, _FIRST_CASE, "text")
     bot._append_gathering_case(context, "Reflection: I need to escalate ACS cases earlier.", "text")
     update = sim._make_text_update("done")
@@ -58,10 +56,9 @@ async def test_gathering_mode_combines_parts_when_user_says_done(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_gathering_mode_answers_side_question_without_adding_case_detail(monkeypatch):
-    monkeypatch.setenv("PG_GATHERING_MODE", "1")
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
     sim = BotSimulator()
     context = sim._make_context()
-    context.user_data["gathering_mode"] = True
     bot._append_gathering_case(context, _FIRST_CASE, "text")
     original_parts = list(context.user_data["gathering_case"]["parts"])
     update = sim._make_text_update("How does this work?")
@@ -71,3 +68,28 @@ async def test_gathering_mode_answers_side_question_without_adding_case_detail(m
     assert result == AWAIT_GATHERING
     assert context.user_data["gathering_case"]["parts"] == original_parts
     assert any("collect a case over multiple messages" in message for _, message, _ in sim.messages_sent)
+
+
+@pytest.mark.asyncio
+async def test_gathering_mode_is_default_without_user_toggle(monkeypatch):
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+    assert bot._gathering_enabled(context) is True
+
+
+@pytest.mark.asyncio
+async def test_user_can_opt_out_of_gathering_mode(monkeypatch):
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["gathering_mode"] = False
+    assert bot._gathering_enabled(context) is False
+
+
+@pytest.mark.asyncio
+async def test_env_var_can_disable_gathering_mode_globally(monkeypatch):
+    monkeypatch.setenv("PG_GATHERING_MODE", "off")
+    sim = BotSimulator()
+    context = sim._make_context()
+    assert bot._gathering_enabled(context) is False

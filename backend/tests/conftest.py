@@ -34,6 +34,20 @@ def _isolate_filing_artefacts(tmp_path, monkeypatch):
     monkeypatch.delenv("PORTFOLIO_GURU_DOM_AUTOLEARN", raising=False)
     yield
 
+
+@pytest.fixture(autouse=True)
+def _default_gathering_mode_off(monkeypatch):
+    """Default tests to the legacy instant-draft flow.
+
+    Gathering mode is the production default, but most tests pre-date that and
+    assert on the form-choice / draft preview paths. Setting PG_GATHERING_MODE
+    to off here mirrors a deployment-level opt-out so those tests keep
+    exercising the instant-draft flow. Tests that need to exercise gathering
+    call monkeypatch.delenv("PG_GATHERING_MODE", raising=False) themselves.
+    """
+    monkeypatch.setenv("PG_GATHERING_MODE", "off")
+    yield
+
 @pytest.fixture
 def mock_update():
     """Fake Telegram update — simulates a user sending a message."""
