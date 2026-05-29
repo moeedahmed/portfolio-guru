@@ -238,17 +238,10 @@ class TestFlowWalker:
 
         text = sim.get_last_text()
 
-        expected_reason = (
-            "ℹ️ I've treated this as a Case-Based Discussion: "
-            "the case is a reflective discussion of one patient."
-        )
-        assert expected_reason in text
         assert _DRAFT_DIVIDER not in text
         first_field_pos = text.index('📅')
         curriculum_pos = text.index('📚 *Curriculum:*')
-        why_pos = text.index(expected_reason)
-        # Draft fields come first, then curriculum, then rationale (no divider).
-        assert first_field_pos < curriculum_pos < why_pos
+        assert first_field_pos < curriculum_pos
         assert '*Why this form:*' not in text
 
     @pytest.mark.asyncio
@@ -299,7 +292,7 @@ class TestFlowWalker:
         text = sim.get_last_text()
 
         assert _DRAFT_DIVIDER not in text
-        assert "I've treated this as a Leadership Assessment Tool:" in text
+        assert "I've treated this as a Leadership Assessment Tool:" not in text
         # None of the internal/model-flavoured phrasing should reach the user.
         assert 'the trainee' not in text.lower()
         assert 'EPIC' not in text

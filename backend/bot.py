@@ -2179,9 +2179,9 @@ def _format_draft_preview(draft, reason: str | None = None) -> str:
     """Format draft data as a preview message. Dispatches based on type."""
     if isinstance(draft, FormDraft):
         preview = _format_generic_draft(draft)
-        return preview + _draft_rationale_footer(reason, draft.form_type) + _draft_missing_review_note(draft, draft.form_type)
+        return preview + _draft_missing_review_note(draft, draft.form_type)
     preview = _format_cbd_draft(draft)
-    return preview + _draft_rationale_footer(reason, "CBD") + _draft_missing_review_note(draft, "CBD")
+    return preview + _draft_missing_review_note(draft, "CBD")
 
 
 def _draft_fields_for_review(draft) -> dict:
