@@ -260,7 +260,7 @@ def test_build_reply_save_draft_explains_not_wired():
 def test_build_reply_request_case_confirmation_shows_state():
     snap = _snapshot_with_action(ActionKind.REQUEST_CASE_CONFIRMATION)
     text = vnext_runner._build_reply(snap)
-    assert "Noted" in text
+    assert "Captured" in text
     assert "Done" in text
     assert "state" not in text
 
@@ -268,7 +268,7 @@ def test_build_reply_request_case_confirmation_shows_state():
 def test_build_reply_ack_case_details_shows_state():
     snap = _snapshot_with_action(ActionKind.ACK_CASE_DETAILS)
     text = vnext_runner._build_reply(snap)
-    assert "Noted" in text
+    assert "Captured" in text
     assert "Done" in text
     assert "state" not in text
 
