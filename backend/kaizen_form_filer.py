@@ -2124,6 +2124,46 @@ async def connect_cdp_browser() -> tuple:
         return None, None
 
 
+async def _cdp_re_login(page: Page, username: str, password: str) -> bool:
+    """Re-authenticate Kaizen inside the persistent CDP browser session.
+
+    Used when the CDP-connected Chrome has a stale Kaizen session (common
+    after prolonged inactivity). Navigates the existing CDP page to the
+    RCEM SSO portal and fills the login form **inside the persistent
+    profile**, so saved cookies/passwords remain available and the session
+    is refreshed for future filing attempts.
+
+    This is preferred over headless Playwright login because:
+    - The persistent Chrome profile has saved cookies/passwords from prior
+      manual logins
+    - SSO portals sometimes block headless Chrome
+    - MFA tokens cached in the profile can reduce re-authentication friction
+    """
+    try:
+        await page.goto("https://eportfolio.rcem.ac.uk",
+                        wait_until="domcontentloaded", timeout=30000)
+        await asyncio.sleep(3)
+
+        login_input = page.locator('input[name="login"]')
+        if await login_input.count() > 0:
+            await login_input.fill(username)
+            await page.locator('button[type="submit"]').click()
+            await asyncio.sleep(3)
+
+            pwd_input = page.locator('input[name="password"]')
+            if await pwd_input.count() > 0:
+                await pwd_input.fill(password)
+                await page.locator('button[type="submit"]').click()
+
+        await page.wait_for_url("**/kaizenep.com/**", timeout=45000)
+        await asyncio.sleep(3)
+        logger.info(f"CDP re-login succeeded: {page.url}")
+        return True
+    except Exception as e:
+        logger.error(f"CDP re-login failed: {e}")
+        return False
+
+
 # ─── Legacy field filling (used by file_to_kaizen) ──────────────────────────
 
 async def _fill_field_legacy(page: Page, dom_id: str, value: Any, field_key: str, form_type: str = "") -> bool:
@@ -2781,6 +2821,20 @@ async def file_to_kaizen(
 
         if use_cdp and "kaizenep.com" in page.url:
             logger.info("CDP: already logged in, skipping login")
+        elif use_cdp:
+            # CDP browser connected but page isn't on Kaizen — session may have
+            # expired. Try re-login inside the persistent CDP browser first.
+            if not await _cdp_re_login(page, username, password):
+                logger.warning("CDP re-login failed; falling back to headless Playwright")
+                # Fall through to the headless path below
+                if not await _login(page, username, password):
+                    return {
+                        "status": "failed", "filled": [], "skipped": [],
+                        "error": (
+                            "Your Kaizen session expired and we couldn't re-authenticate. "
+                            "Use /settings to reconnect your credentials."
+                        ),
+                    }
         else:
             if not await _login(page, username, password):
                 return {"status": "failed", "filled": [], "skipped": [], "error": "Login failed"}
