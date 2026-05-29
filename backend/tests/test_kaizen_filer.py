@@ -524,3 +524,75 @@ async def test_fill_text_click_non_actionable_fallback(mock_playwright_ctx):
     assert click_calls[1][1].get("force") is True
     el.focus.assert_called_once()
     assert result is True
+
+
+# ─── _save_draft_legacy selectors ────────────────────────────────────────────
+
+
+def _make_save_page(available_selectors: dict):
+    """Build a page whose locator(selector) reports presence per available_selectors."""
+    page = MagicMock()
+    clicked = []
+
+    def locator(selector):
+        loc = MagicMock()
+        first = MagicMock()
+        text = available_selectors.get(selector)
+        if text is None:
+            first.count = AsyncMock(return_value=0)
+        else:
+            first.count = AsyncMock(return_value=1)
+            first.inner_text = AsyncMock(return_value=text)
+
+            async def _click():
+                clicked.append((selector, text))
+            first.click = _click
+        loc.first = first
+        return loc
+
+    page.locator = locator
+    return page, clicked
+
+
+@pytest.mark.asyncio
+async def test_save_draft_legacy_clicks_plain_save_anchor_on_edit_draft_page():
+    """Edit-existing-draft page renders save as <a>Save</a> — the bug behind
+    the DOPS "No save button/link found" failure."""
+    from kaizen_form_filer import _save_draft_legacy
+
+    page, clicked = _make_save_page({'a:has-text("Save")': "Save"})
+    with patch("kaizen_form_filer.asyncio.sleep", new=AsyncMock()):
+        result = await _save_draft_legacy(page)
+
+    assert result is True
+    assert clicked == [('a:has-text("Save")', "Save")]
+
+
+@pytest.mark.asyncio
+async def test_save_draft_legacy_prefers_save_as_draft_over_plain_save():
+    """When both exist, the more specific 'Save as draft' anchor wins."""
+    from kaizen_form_filer import _save_draft_legacy
+
+    page, clicked = _make_save_page({
+        'a:has-text("Save as draft")': "Save as draft",
+        'a:has-text("Save")': "Save",
+    })
+    with patch("kaizen_form_filer.asyncio.sleep", new=AsyncMock()):
+        result = await _save_draft_legacy(page)
+
+    assert result is True
+    assert clicked[0][0] == 'a:has-text("Save as draft")'
+
+
+@pytest.mark.asyncio
+async def test_save_draft_legacy_blocks_dangerous_buttons():
+    """A 'Save' anchor whose actual text is destructive (e.g. matched a
+    'Save and submit' button) must not be clicked."""
+    from kaizen_form_filer import _save_draft_legacy
+
+    page, clicked = _make_save_page({'a:has-text("Save")': "Save and submit"})
+    with patch("kaizen_form_filer.asyncio.sleep", new=AsyncMock()):
+        result = await _save_draft_legacy(page)
+
+    assert result is False
+    assert clicked == []

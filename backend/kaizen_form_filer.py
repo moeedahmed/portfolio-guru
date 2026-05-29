@@ -2240,13 +2240,19 @@ async def _fill_field_legacy(page: Page, dom_id: str, value: Any, field_key: str
 # ─── Legacy save/submit/verify ───────────────────────────────────────────────
 
 async def _save_draft_legacy(page: Page) -> bool:
-    """Click Save as Draft. Never Submit/Send. Returns True on success."""
+    """Click Save as Draft. Never Submit/Send. Returns True on success.
+
+    The plain `a:has-text("Save")` fallback covers Kaizen's edit-existing-draft
+    page (`/events/fillin/...`), which renders the save control as a bare
+    `<a>Save</a>` rather than the "Save as draft" anchor used on `new-section`.
+    """
     save_selectors = [
         'a:has-text("Save as draft")',
         'a:has-text("Save as Draft")',
         'a:has-text("Save draft")',
         'button:has-text("Save as Draft")',
         'button:has-text("Save Draft")',
+        'a:has-text("Save")',
         'button:has-text("Save")',
     ]
     for selector in save_selectors:
@@ -2254,7 +2260,7 @@ async def _save_draft_legacy(page: Page) -> bool:
             el = page.locator(selector).first
             if await el.count() > 0:
                 el_text = (await el.inner_text()).strip()
-                if any(danger in el_text.lower() for danger in ["submit", "send"]):
+                if any(danger in el_text.lower() for danger in ["submit", "send", "sign", "approve", "reject", "delete"]):
                     logger.warning(f"BLOCKED dangerous element: '{el_text}'")
                     continue
                 await el.click()
