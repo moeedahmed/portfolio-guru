@@ -1974,6 +1974,9 @@ async def _verify_filing_qa(
     WARNING log and never raise.
     """
     from post_filing_qa import score_qa_buckets
+    from qa_fix_script import is_fixable_gap, record_gap
+
+    discovery_url = page.url
 
     filled: List[str] = []
     empty_expected: List[str] = []
@@ -2032,7 +2035,7 @@ async def _verify_filing_qa(
             filled.append(key)
         elif was_drafted:
             empty_expected.append(key)
-            gaps.append({
+            gap = {
                 "field": key,
                 "dom_id": dom_id,
                 "form_type": form_type,
@@ -2043,7 +2046,18 @@ async def _verify_filing_qa(
                     "dom_element_missing" if missing_dom
                     else "value_not_persisted"
                 ),
-            })
+            }
+            gaps.append(gap)
+            if is_fixable_gap(gap):
+                record_gap(
+                    form_type=form_type,
+                    field_key=key,
+                    gap_kind=gap["kind"],
+                    reason=gap["reason"],
+                    dom_id=dom_id,
+                    discovery_url=discovery_url,
+                    expected_preview=gap["expected_preview"],
+                )
         else:
             empty_acceptable.append(key)
 
@@ -2066,7 +2080,7 @@ async def _verify_filing_qa(
             filled.append(label)
         else:
             empty_expected.append(label)
-            gaps.append({
+            gap = {
                 "field": label,
                 "dom_id": None,
                 "form_type": form_type,
@@ -2074,7 +2088,17 @@ async def _verify_filing_qa(
                 "missing_dom": False,
                 "expected_preview": target_str,
                 "reason": "kc_not_ticked",
-            })
+            }
+            gaps.append(gap)
+            if is_fixable_gap(gap):
+                record_gap(
+                    form_type=form_type,
+                    field_key=label,
+                    gap_kind="kc_checkbox",
+                    reason="kc_not_ticked",
+                    discovery_url=discovery_url,
+                    expected_preview=target_str,
+                )
 
     score = score_qa_buckets(
         filled=filled,

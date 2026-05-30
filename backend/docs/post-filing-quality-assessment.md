@@ -104,12 +104,22 @@ PY
 
 For ad-hoc summaries of a stored result, use `post_filing_qa.format_qa_summary(qa)`.
 
-## Turning a gap into a DOM mapping fix
+## Turning a gap into a DOM mapping fix — the Gap-to-Fix discipline
+
+QA tells you what broke. The Gap-to-Fix discipline (full rules:
+`backend/qa_discipline.md`) is the second step: it turns each gap into a
+targeted, verified, permanent fix instead of an ad-hoc patch that drifts.
+
+In code, `_verify_filing_qa` calls `qa_fix_script.record_gap()` for every
+_fixable_ gap — dropdowns, checkboxes, KC checkboxes, and missing DOM
+elements (see `FIXABLE_GAP_KINDS` / `FIXABLE_GAP_REASONS`). Plain
+text/textarea gaps are not recorded automatically because they usually
+indicate an upstream extractor issue rather than a filer fix.
 
 The improvement cycle:
 
 ```
-gap  →  inspect CDP  →  fix FORM_FIELD_MAP  →  retest
+gap  →  record_gap()  →  inspect CDP  →  fix FORM_FIELD_MAP  →  refile  →  mark_fixed()
 ```
 
 1. **Read the gap.** Each gap carries `form_type`, `field`, `dom_id`, `kind`, and a `reason`:

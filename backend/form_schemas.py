@@ -380,6 +380,7 @@ FORM_SCHEMAS = {
         "fields": [
             {"key": "reflection_title",     "label": "Title of reflection",         "type": "text",     "required": True},
             {"key": "date_of_incident",     "label": "Date of incident",            "type": "date",     "required": True},
+            {"key": "stage_of_training",    "label": "Stage of Training",            "type": "select",  "required": False, "options": ["Higher/ST4-ST6", "Intermediate/ST3", "ACCS ST1-ST2/CT1-CT2"]},
             {"key": "description",          "label": "Description of case including adverse events", "type": "text", "required": True},
             {"key": "root_causes",          "label": "Root causes of events",       "type": "text",     "required": True},
             {"key": "contributing_factors", "label": "Contributing factors",        "type": "text",     "required": True},
