@@ -3270,6 +3270,21 @@ async def file_to_kaizen(
             status = "failed"
             save_error = "No fields were filled"
 
+        # Log filing result for the autonomous gap-fix loop
+        from filing_result_logger import log_filing_result
+        from qa_fix_script import is_fixable_gap
+        try:
+            fixable = [g for g in (filing_qa or {}).get("gaps", []) if is_fixable_gap(g)] if filing_qa else []
+            log_filing_result(
+                form_type=form_type,
+                status=status,
+                qa_result=filing_qa,
+                fixable_gaps=fixable,
+                error_hint=save_error,
+            )
+        except Exception as log_exc:
+            logger.warning(f"Filing result log error (non-blocking) for {form_type}: {log_exc}")
+
         return {
             "status": status,
             "filled": filled,
