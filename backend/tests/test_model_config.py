@@ -25,7 +25,7 @@ def test_extractor_defaults_to_deepseek(monkeypatch):
     from extractor import _select_providers
 
     providers = _select_providers()
-    assert [p["name"] for p in providers] == ["deepseek-v4"]
+    assert [p["name"] for p in providers] == ["deepseek-v4", "gpt-4o"]
 
 
 def test_extractor_gemini_pro_override_reads_model_at_runtime(monkeypatch):
@@ -84,4 +84,4 @@ def test_extractor_default_unaffected_by_3_5_flash_being_available(monkeypatch):
     from extractor import _select_providers
 
     providers = _select_providers()
-    assert [p["name"] for p in providers] == ["deepseek-v4"]
+    assert [p["name"] for p in providers] == ["deepseek-v4", "gpt-4o"]
