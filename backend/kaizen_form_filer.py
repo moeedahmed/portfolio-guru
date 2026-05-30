@@ -1352,7 +1352,7 @@ async def _connect_cdp() -> tuple:
 async def _login(page: Page, username: str, password: str) -> bool:
     """Log in to Kaizen via RCEM portal (two-step: username → password)."""
     try:
-        await page.goto("https://eportfolio.rcem.ac.uk", wait_until="networkidle", timeout=30000)
+        await page.goto("https://eportfolio.rcem.ac.uk", wait_until="load", timeout=30000)
         await asyncio.sleep(2)
 
         # Step 1: Username
