@@ -4253,12 +4253,53 @@ async def beta_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     from supabase_sync import store_beta_request
     store_beta_request(user_id, username)
 
-    reply = "✅ Beta request submitted!"
-    if username:
-        reply += f"\n\nTell Dr Ahmed your Telegram @username is **@{username}**. He'll upgrade you shortly."
-    else:
-        reply += "\n\nSet a Telegram @username in Settings → Username, then try /beta again."
-    await update.message.reply_text(reply, parse_mode="Markdown")
+    # Notify Moeed directly
+    try:
+        name = (update.effective_user.first_name or "") + " " + (update.effective_user.last_name or "")
+        name = name.strip() or "Unknown"
+        tag = f"@{username}" if username else "(no @username)"
+        user_id = update.effective_user.id
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=(
+                f"📩 Beta request from {name} ({tag})\n"
+                f"ID: `{user_id}`\n\n"
+                f"/setbeta {user_id} on"
+            ),
+            parse_mode="Markdown",
+        )
+    except Exception:
+        pass
+
+    reply = "✅ Beta request submitted! Dr Ahmed will upgrade you shortly."
+    await update.message.reply_text(reply)
+    return ConversationHandler.END
+
+
+async def listusers_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Admin-only — list all users with credentials."""
+    if update.effective_user.id != ADMIN_USER_ID:
+        await update.message.reply_text("🚫 Admin only.")
+        return ConversationHandler.END
+
+    from credentials import engine as cred_engine, UserCredential
+    from sqlmodel import Session, select
+    lines = []
+    try:
+        with Session(cred_engine) as session:
+            creds = session.exec(select(UserCredential).order_by(UserCredential.telegram_user_id)).all()
+        for c in creds:
+            b = await is_beta_tester(c.telegram_user_id)
+            badge = "⭐ " if b else ""
+            lines.append(f"{badge}ID: `{c.telegram_user_id}`")
+        if not lines:
+            lines.append("No users have connected Kaizen credentials yet.")
+    except Exception as e:
+        lines = [f"Error: {e}"]
+
+    header = "📋 Users with credentials:\n\n"
+    msg = header + "\n".join(lines)
+    await update.message.reply_text(msg, parse_mode="Markdown")
     return ConversationHandler.END
 
 
@@ -7831,6 +7872,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("settier", settier_command))
     application.add_handler(CommandHandler("setbeta", setbeta_command))
     application.add_handler(CommandHandler("beta", beta_command))
+    application.add_handler(CommandHandler("listusers", listusers_command))
     application.add_handler(CommandHandler("gather", gather_command))
     application.add_handler(CommandHandler("assignbeta", assignbeta_command))
     application.add_handler(CallbackQueryHandler(handle_upgrade_button, pattern=r"^UPGRADE\|"))
