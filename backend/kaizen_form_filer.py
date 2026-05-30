@@ -1319,23 +1319,24 @@ COUNT_TICKED_JS = """() => {
 # ─── CDP connection ──────────────────────────────────────────────────────────
 
 async def _connect_cdp() -> tuple:
-    """Connect to managed Chrome via CDP, or fall back to headless Chromium."""
+    """Connect to managed Chrome via CDP and open an isolated context, or fall
+    back to headless Chromium.
+
+    Always returns a page in a fresh, isolated browser context — never reuses
+    the persistent CDP profile's existing pages. This is required for per-user
+    safety: the persistent CDP Chrome may be logged into a different user's
+    Kaizen account, so reusing its pages would save drafts to the wrong
+    portfolio. Each call gets its own context, authenticates with the caller's
+    credentials, and leaves the persistent profile untouched.
+
+    Callers must close ``page.context`` before ``pw.stop()``.
+    """
     pw = await async_playwright().start()
     try:
         browser = await pw.chromium.connect_over_cdp(CDP_URL, no_defaults=True)
-        # Reuse existing Kaizen page if available
-        for context in browser.contexts:
-            for page in context.pages:
-                if "kaizenep.com" in page.url:
-                    logger.info(f"CDP: reusing Kaizen page: {page.url}")
-                    return page, pw
-        # Open new page
-        if browser.contexts:
-            page = await browser.contexts[0].new_page()
-        else:
-            ctx = await browser.new_context()
-            page = await ctx.new_page()
-        logger.info("CDP: opened new page")
+        ctx = await browser.new_context()
+        page = await ctx.new_page()
+        logger.info("CDP: opened isolated context for per-user session")
         return page, pw
     except Exception as e:
         logger.warning(f"CDP not available ({e}) — falling back to headless Chromium")
@@ -2158,22 +2159,24 @@ async def fill_kaizen_form(
     filled = []
     skipped = []
     errors = []
+    page = None
     pw = None
     form_type = canonical_form_type(form_type)
     fields = normalise_fields_for_deterministic_filing(form_type, fields)
 
     try:
-        # Connect to managed Chrome
+        # Connect to managed Chrome via an isolated context — never reuse a
+        # pre-existing logged-in page from the persistent CDP profile.
         page, pw = await _connect_cdp()
         if not page:
             return {"status": "failed", "filled": [], "skipped": [], "errors": ["CDP connection failed"], "screenshot": None}
 
-        # Check if we need to login
-        current_url = page.url
-        if "kaizenep.com" not in current_url:
-            logged_in = await _login(page, username, password)
-            if not logged_in:
-                return {"status": "failed", "filled": [], "skipped": [], "errors": ["Login failed"], "screenshot": None}
+        # Fresh context is always on about:blank, so authenticate with the
+        # caller's credentials. This guarantees the draft saves to their
+        # portfolio, not to whoever the persistent profile happens to be.
+        logged_in = await _login(page, username, password)
+        if not logged_in:
+            return {"status": "failed", "filled": [], "skipped": [], "errors": ["Login failed"], "screenshot": None}
 
         # Navigate to the form
         if draft_uuid:
@@ -2384,6 +2387,11 @@ async def fill_kaizen_form(
             "screenshot": None,
         }
     finally:
+        if page is not None:
+            try:
+                await page.context.close()
+            except Exception:
+                pass
         if pw:
             await pw.stop()
 
@@ -2457,28 +2465,23 @@ for _alias, _target in FORM_TYPE_ALIASES.items():
 
 async def connect_cdp_browser() -> tuple:
     """
-    Connect to an existing managed browser via CDP.
+    Connect to an existing managed browser via CDP and open an isolated context.
     Returns (page, playwright_instance) or (None, None) on failure.
-    The caller must NOT close the browser — it's shared.
+
+    The caller must NOT close the browser process (it's shared with other
+    sessions and the persistent profile), but MUST close ``page.context`` to
+    avoid leaking incognito contexts inside the shared browser.
+
+    The isolated context guarantees that authentication uses the caller's
+    credentials and drafts save to the caller's portfolio — never to whichever
+    user happens to be logged into the persistent CDP profile.
     """
     try:
         pw = await async_playwright().start()
         browser = await pw.chromium.connect_over_cdp(CDP_URL, no_defaults=True)
-
-        # Look for an existing Kaizen page
-        for context in browser.contexts:
-            for page in context.pages:
-                if "kaizenep.com" in page.url:
-                    logger.info(f"CDP: reusing existing Kaizen page: {page.url}")
-                    return page, pw
-
-        # No Kaizen page found — open a new one in the first context
-        if browser.contexts:
-            page = await browser.contexts[0].new_page()
-        else:
-            ctx = await browser.new_context()
-            page = await ctx.new_page()
-        logger.info("CDP: opened new page in managed browser")
+        ctx = await browser.new_context()
+        page = await ctx.new_page()
+        logger.info("CDP: opened isolated context for per-user session")
         return page, pw
     except Exception as e:
         logger.warning(f"CDP connection failed ({e}), falling back to headless")
@@ -2985,11 +2988,10 @@ async def delete_all_drafts_of_type(
             browser = await pw.chromium.launch(headless=True)
             page = await browser.new_page()
 
-        if use_cdp and "kaizenep.com" in page.url:
-            logger.info("CDP: already logged in, skipping login")
-        else:
-            if not await _login(page, username, password):
-                return {"deleted": 0, "errors": 0, "error": "Login failed"}
+        # CDP sessions now use isolated contexts (clean cookies), so we always
+        # need to authenticate with the caller's credentials.
+        if not await _login(page, username, password):
+            return {"deleted": 0, "errors": 0, "error": "Login failed"}
 
         for iteration in range(max_deletions):
             await page.goto("https://kaizenep.com/activities", wait_until="domcontentloaded", timeout=40000)
@@ -3052,6 +3054,11 @@ async def delete_all_drafts_of_type(
         logger.error(f"Draft deletion error: {e}", exc_info=True)
         return {"deleted": deleted, "errors": errors, "error": str(e)}
     finally:
+        if use_cdp and page is not None:
+            try:
+                await page.context.close()
+            except Exception:
+                pass
         if browser and not use_cdp:
             try:
                 await browser.close()
@@ -3123,25 +3130,18 @@ async def file_to_kaizen(
             browser = await pw.chromium.launch(headless=True)
             page = await browser.new_page()
 
-        if use_cdp and "kaizenep.com" in page.url:
-            logger.info("CDP: already logged in, skipping login")
-        elif use_cdp:
-            # CDP browser connected but page isn't on Kaizen — session may have
-            # expired. Try re-login inside the persistent CDP browser first.
-            if not await _cdp_re_login(page, username, password):
-                logger.warning("CDP re-login failed; falling back to headless Playwright")
-                # Fall through to the headless path below
-                if not await _login(page, username, password):
-                    return {
-                        "status": "failed", "filled": [], "skipped": [],
-                        "error": (
-                            "Your Kaizen session expired and we couldn't re-authenticate. "
-                            "Use /settings to reconnect your credentials."
-                        ),
-                    }
-        else:
-            if not await _login(page, username, password):
-                return {"status": "failed", "filled": [], "skipped": [], "error": "Login failed"}
+        # CDP sessions now use isolated contexts (clean cookies), so we always
+        # need to authenticate with the caller's credentials. This guarantees
+        # the draft saves to their portfolio, not to whoever the persistent
+        # CDP profile happens to be logged in as.
+        if not await _login(page, username, password):
+            return {
+                "status": "failed", "filled": [], "skipped": [],
+                "error": (
+                    "Could not log in to Kaizen with your saved credentials. "
+                    "Use /settings to reconnect."
+                ),
+            }
 
         # Navigate to a new form by default. Reusing same-form drafts can
         # overwrite repeated ARCP tickets that legitimately share form type/date.
@@ -3304,6 +3304,11 @@ async def file_to_kaizen(
             "error": str(e),
         }
     finally:
+        if use_cdp and page is not None:
+            try:
+                await page.context.close()
+            except Exception:
+                pass
         if browser and not use_cdp:
             try:
                 await browser.close()
@@ -3362,11 +3367,10 @@ async def detect_and_delete_test_drafts(
             browser = await pw.chromium.launch(headless=True)
             page = await browser.new_page()
         
-        if use_cdp and "kaizenep.com" in page.url:
-            logger.info("CDP: already logged in, skipping login")
-        else:
-            if not await _login(page, username, password):
-                return {"found": 0, "deleted": 0, "errors": 1, "details": ["Login failed"]}
+        # CDP sessions now use isolated contexts (clean cookies), so we always
+        # need to authenticate with the caller's credentials.
+        if not await _login(page, username, password):
+            return {"found": 0, "deleted": 0, "errors": 1, "details": ["Login failed"]}
         
         # Navigate to activities page
         await page.goto("https://kaizenep.com/activities", wait_until="domcontentloaded", timeout=40000)
@@ -3499,6 +3503,11 @@ async def detect_and_delete_test_drafts(
             "error": str(e)
         }
     finally:
+        if use_cdp and page is not None:
+            try:
+                await page.context.close()
+            except Exception:
+                pass
         if browser and not use_cdp:
             try:
                 await browser.close()

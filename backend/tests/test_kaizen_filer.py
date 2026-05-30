@@ -173,7 +173,7 @@ async def test_login_failure_returns_failed(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=False)):
         result = await file_to_kaizen("CBD", {"clinical_reasoning": "test"}, "user", "pass")
         assert result["status"] == "failed"
-        assert result["error"] == "Login failed"
+        assert "log in" in result["error"].lower()
 
 
 @pytest.mark.asyncio
