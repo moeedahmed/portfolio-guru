@@ -1660,6 +1660,44 @@ def _track_funnel_event(context, event: str, **metadata) -> None:
     logger.info("Portfolio Guru funnel event=%s metadata=%s", event, safe)
 
 
+def _log_filing_attempt(
+    *,
+    user_id: int,
+    username: str | None,
+    form_type: str,
+    status: str,
+    error: str | None = None,
+    skipped: list | None = None,
+) -> None:
+    """Append a per-user filing-attempt record to filing-log.ndjson.
+
+    Keyed by Telegram user_id so we can answer "what errors did user X hit
+    this week" without grepping the main bot log. PHI-free: records form
+    type, status, and the error string from the filer (which is a generic
+    message, not case content).
+    """
+    import json as _json
+    import pathlib
+    from datetime import datetime, timezone
+    try:
+        log_dir = pathlib.Path.home() / ".openclaw/data/portfolio-guru"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        record = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "user_id": user_id,
+            "username": username,
+            "form_type": form_type,
+            "status": status,
+            "error": error,
+            "skipped": list(skipped) if skipped else [],
+            "version": 1,
+        }
+        with open(log_dir / "filing-log.ndjson", "a") as f:
+            f.write(_json.dumps(record) + "\n")
+    except Exception:
+        logger.warning("Filing-log append failed", exc_info=True)
+
+
 _2021_CURRICULUM_FORM_ALIASES = {
     # User-facing assessed ESLE is named ESLE_ASSESS in Portfolio Guru, but the
     # Kaizen 2021 curriculum form is keyed as ESLE_2021.
@@ -6260,6 +6298,13 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     except asyncio.TimeoutError:
         typing_stop.set()
         progress_task.cancel()
+        _log_filing_attempt(
+            user_id=user_id,
+            username=getattr(update.effective_user, "username", None),
+            form_type=form_type,
+            status="timeout",
+            error="Filing exceeded 300s timeout",
+        )
         kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS.get(form_type, '')}" if FORM_UUIDS.get(form_type) else "https://kaizenep.com/activities"
         timeout_msg = (
             f"⏱ Filing took too long — Kaizen may have timed out the session."
@@ -6284,6 +6329,13 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         typing_stop.set()
         progress_task.cancel()
         logger.error(f"Filer error for {form_type}: {e}", exc_info=True)
+        _log_filing_attempt(
+            user_id=user_id,
+            username=getattr(update.effective_user, "username", None),
+            form_type=form_type,
+            status="exception",
+            error=str(e),
+        )
         # Keep draft data for retry — do NOT clear user_data
         retry_keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_filing")],
@@ -6324,6 +6376,14 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     if status == "success" and skipped_required:
         status = "partial"
         error = error or "Required fields were skipped during filing: " + ", ".join(str(s) for s in skipped_required[:4])
+    _log_filing_attempt(
+        user_id=user_id,
+        username=getattr(update.effective_user, "username", None),
+        form_type=form_type,
+        status=status,
+        error=error,
+        skipped=[str(s) for s in skipped],
+    )
     proof_report = _format_proof_report(
         status,
         form_name,
@@ -6539,7 +6599,11 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         # swap in a reconnect-first keyboard with a clear session-expired
         # message. force_reconnect lets the ACTION|setup handler bypass the
         # "already connected" short-circuit when the user taps Reconnect.
-        is_login_failure = bool(error) and "Login failed" in error
+        is_login_failure = bool(error) and (
+            "Login failed" in error
+            or "Could not log in to Kaizen" in error
+            or "could not log in" in error.lower()
+        )
         if is_login_failure and platform == "kaizen":
             context.user_data["force_reconnect"] = True
             msg = (
