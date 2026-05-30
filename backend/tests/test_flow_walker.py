@@ -1454,14 +1454,13 @@ class TestFlowWalker:
             'uuid': thin_draft.uuid,
         }
 
-        recovery_line = "Kaizen returned an unexpected error. Try again or fill manually."
+        recovery_line = "Try again, or open the form in Kaizen and fill it manually."
 
         with patch('bot.get_credentials', return_value=('user', 'pass')), \
              patch('bot.route_filing', new_callable=AsyncMock, return_value={
                  'status': 'failed', 'filled': [], 'skipped': [], 'method': 'deterministic',
                  'error': 'Save button not found or click failed',
-             }), \
-             patch('bot.compose_filing_recovery_copy', new=AsyncMock(return_value=recovery_line)):
+             }):
             result = await handle_approval_approve(update, context)
 
         text = sim.get_last_text()

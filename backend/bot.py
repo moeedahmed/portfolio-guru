@@ -1690,11 +1690,11 @@ def _log_filing_attempt(
         record = {
             "ts": datetime.now(timezone.utc).isoformat(),
             "user_id": user_id,
-            "username": username,
+            "username": str(username) if username is not None else None,
             "form_type": form_type,
             "status": status,
-            "error": error,
-            "skipped": list(skipped) if skipped else [],
+            "error": str(error) if error is not None else None,
+            "skipped": [str(s) for s in (skipped or [])],
             "version": 1,
         }
         with open(log_dir / "filing-log.ndjson", "a") as f:
@@ -6234,6 +6234,93 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return await _show_draft_review(query.message, context, draft, form_type)
 
 
+_FIELD_FRIENDLY = {
+    "curriculum_links": "SLO links",
+    "key_capabilities": "Key Capabilities",
+    "year_of_training": "Year of training",
+    "age_of_patient": "Patient age",
+    "end_date": "End date",
+    "date_of_activity": "Date of activity",
+    "date_of_encounter": "Date of encounter",
+    "stage_of_training": "Stage of training",
+    "higher_procedural_skill": "Procedural skill (Higher)",
+    "intermediate_procedural_skill": "Procedural skill (Intermediate)",
+    "accs_procedural_skill": "Procedural skill (ACCS)",
+    "reflective_comments": "Reflection",
+    "reflection": "Reflection",
+    "clinical_setting": "Clinical setting",
+    "patient_presentation": "Patient presentation",
+    "placement": "Placement",
+    "procedure_name": "Procedure",
+    "procedural_skill": "Procedural skill",
+    "indication": "Indication",
+    "clinical_reasoning": "Case discussion",
+    "trainee_performance": "Trainee performance",
+}
+
+
+def _friendly_field_name(key) -> str:
+    key_str = str(key)
+    return _FIELD_FRIENDLY.get(key_str, key_str.replace("_", " ").capitalize())
+
+
+def _classify_filing_failure(
+    error: str | None,
+    skipped: list,
+    status: str,
+    filled: list,
+) -> str:
+    """Bucket a filing result into a recovery class.
+
+    LOGIN_FAILED — Kaizen rejected the credentials or session expired.
+    SAVE_FAILURE — Fields filled but save click or confirmation did not land.
+    FIELD_FAILURE — One or more fields couldn't be filled; save itself is fine.
+    UNKNOWN — Generic failure with no clear bucket.
+
+    The classifier inspects the error string for marker phrases the filer
+    raises ("Login failed", "Save button not found", "could not confirm").
+    Save-related markers take precedence over field skips because a missed
+    save invalidates the whole draft regardless of how many fields filled.
+    """
+    err = (error or "").lower()
+    if any(token in err for token in (
+        "login failed", "could not log in", "log in to kaizen"
+    )):
+        return "LOGIN_FAILED"
+    save_markers = (
+        "save button", "save may have failed", "save was clicked",
+        "could not confirm",
+    )
+    if error and len(filled) > 0 and any(marker in err for marker in save_markers):
+        return "SAVE_FAILURE"
+    editable_skipped = [
+        s for s in skipped if "attachment" not in str(s).lower()
+    ]
+    if editable_skipped:
+        return "FIELD_FAILURE"
+    return "UNKNOWN"
+
+
+def _build_field_edit_buttons(skipped: list) -> list[list[InlineKeyboardButton]]:
+    """Inline buttons that re-enter AWAIT_EDIT_VALUE for a specific field.
+
+    Caps at 5 buttons so the keyboard doesn't dominate the message.
+    Attachment skip markers are filtered out — they're not editable fields.
+    """
+    rows: list[list[InlineKeyboardButton]] = []
+    seen: set[str] = set()
+    for key in skipped:
+        key_str = str(key)
+        if "attachment" in key_str.lower() or key_str in seen:
+            continue
+        seen.add(key_str)
+        label = f"✏️ Edit {_friendly_field_name(key_str)}"
+        rows.append([InlineKeyboardButton(label[:64], callback_data=f"FIELD|{key_str}")])
+        if len(rows) >= 5:
+            break
+    return rows
+
+
 async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle 'File this draft' approval."""
     query = update.callback_query
@@ -6396,11 +6483,12 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         )
         kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS.get(form_type, '')}" if FORM_UUIDS.get(form_type) else "https://kaizenep.com/activities"
         timeout_msg = (
-            f"⏱ Filing took too long — Kaizen may have timed out the session."
+            "⏱ Filing took too long — Kaizen may be slow right now. "
+            "Tap 'Open in Kaizen' to finish manually, or retry."
         )
         retry_keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_filing")],
-            [InlineKeyboardButton("🔍 Check in Kaizen", url=kaizen_url)],
+            [InlineKeyboardButton("🔗 Open in Kaizen", url=kaizen_url)],
             [InlineKeyboardButton("🆕 Start fresh", callback_data="ACTION|reset")],
         ])
         try:
@@ -6448,6 +6536,60 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     filled = result.get("filled", [])
     skipped = result.get("skipped", [])
     error = result.get("error")
+
+    # SAVE_FAILURE auto-rescue (max 1 retry per filing).
+    # When the filer reports that fields filled but the save click/verify
+    # didn't land, reuse the half-saved draft and try again with a fresh
+    # save pass. Bounded to one extra attempt — if the second pass still
+    # fails the user gets the structured save-failure message and a manual
+    # retry button.
+    if (
+        status in ("failed", "partial")
+        and len(filled) > 0
+        and _classify_filing_failure(error, skipped, status, filled) == "SAVE_FAILURE"
+    ):
+        try:
+            await ack.edit_text(
+                "📤 Save wasn't confirmed — trying an alternative method…"
+            )
+        except Exception:
+            pass
+        retry_typing_stop = asyncio.Event()
+        retry_typing_task = asyncio.create_task(
+            _typing_until(update.effective_chat, retry_typing_stop)
+        )
+        try:
+            retry_result = await asyncio.wait_for(
+                route_filing(
+                    platform=platform,
+                    form_type=form_type,
+                    fields=fields,
+                    credentials={"username": username, "password": password},
+                    curriculum_links=curriculum_links,
+                    form_name=form_name,
+                    reuse_draft=True,
+                    attachment_path=attachment_path,
+                ),
+                timeout=180,
+            )
+            if attachment_skipped_reason:
+                if "skipped" not in retry_result:
+                    retry_result["skipped"] = []
+                if attachment_skipped_reason not in retry_result["skipped"]:
+                    retry_result["skipped"].append(attachment_skipped_reason)
+            result = retry_result
+            status = result["status"]
+            filled = result.get("filled", [])
+            skipped = result.get("skipped", [])
+            error = result.get("error")
+        except Exception as retry_exc:
+            logger.warning(
+                "Save-rescue retry for %s failed: %s", form_type, retry_exc
+            )
+        finally:
+            retry_typing_stop.set()
+            retry_typing_task.cancel()
+
     defaulted_fields = set(result.get("defaulted_fields") or [])
     date_default_note = ""
     if "date_of_encounter" in defaulted_fields:
@@ -6511,6 +6653,18 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         same_case_available=bool(filed_case_text and status in ("success", "partial") and not uncertain_save),
         saved_url=saved_url,
     )
+
+    # FIELD_FAILURE: surface "Edit [field]" buttons for the specific fields
+    # that didn't fill, so the user can correct them in place without
+    # re-entering the whole case. Only on partial-with-no-save-error — when
+    # save itself is uncertain (uncertain_save) the issue is the draft, not
+    # the fields, so editing a field wouldn't help until the save is sorted.
+    if status == "partial" and not uncertain_save and skipped:
+        edit_rows = _build_field_edit_buttons(skipped)
+        if edit_rows:
+            end_keyboard = InlineKeyboardMarkup(
+                edit_rows + list(end_keyboard.inline_keyboard)
+            )
 
     # Track usage for successful filings
     usage_line = ""
@@ -6590,24 +6744,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         )
         status_line = "✅ Draft saved."
     elif status == "partial":
-        _FIELD_FRIENDLY = {
-            "curriculum_links": "SLO links",
-            "key_capabilities": "Key Capabilities",
-            "year_of_training": "Year of training",
-            "age_of_patient": "Patient age",
-            "end_date": "End date",
-            "date_of_activity": "Date of activity",
-            "date_of_encounter": "Date of encounter",
-            "stage_of_training": "Stage of training",
-            "higher_procedural_skill": "Procedural skill (Higher)",
-            "intermediate_procedural_skill": "Procedural skill (Intermediate)",
-            "accs_procedural_skill": "Procedural skill (ACCS)",
-            "reflective_comments": "Reflection",
-            "reflection": "Reflection",
-            "clinical_setting": "Clinical setting",
-            "patient_presentation": "Patient presentation",
-        }
-        skipped_names = [_FIELD_FRIENDLY.get(s, s.replace("_", " ").capitalize()) for s in skipped]
+        skipped_names = [_friendly_field_name(s) for s in skipped]
         if len(skipped_names) > 3:
             skipped_display = ", ".join(skipped_names[:3]) + f" and {len(skipped_names) - 3} other{'s' if len(skipped_names) - 3 != 1 else ''}"
         else:
@@ -6624,21 +6761,17 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 link_text = "\n\n[Check your Kaizen drafts](https://kaizenep.com/activities)"
             else:
                 link_text = ""
-            recovery = ""
-            try:
-                recovery = await compose_filing_recovery_copy("partial", error)
-            except Exception:
-                logger.warning("Recovery copy generation failed", exc_info=True)
-            recovery_block = sanitize_internal_form_codes(
-                recovery or f"Check your portfolio — the draft may not have saved.\n\nDetails: {error}"
-            )
             fields_filled_str = f"{len(filled)} field{'s' if len(filled) != 1 else ''} filled"
+            recovery_block = (
+                "Fields filled but save wasn't confirmed. "
+                "The draft may not have saved — open Kaizen to verify before retrying."
+            )
             msg = (
                 f"⚠️ Filing had issues — check Kaizen\n"
                 f"{form_name}\n\n"
                 f"{fields_filled_str}.\n\n"
                 f"{_DRAFT_DIVIDER}\n\n"
-                f"{recovery_block}{link_text}{usage_line}{proof_report}"
+                f"{recovery_block}{link_text}{usage_line}"
             )
             status_line = "⚠️ Filing needs attention."
         else:
@@ -6725,40 +6858,72 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                     logger.warning("Could not send fallback login-failure report", exc_info=True)
             return AWAIT_APPROVAL
 
-        # Show manual link for Kaizen; generic message for other platforms
-        recovery = ""
-        try:
-            recovery = await compose_filing_recovery_copy("failed", error or "")
-        except Exception:
-            logger.warning("Recovery copy generation failed", exc_info=True)
-        if platform == "kaizen" and FORM_UUIDS.get(form_type):
-            kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS[form_type]}"
-            recovery_block = sanitize_internal_form_codes(
-                recovery or "Try again, or open the form in Kaizen and fill it manually."
+        # Structured failure messaging — bucket the error and tailor the copy
+        # plus keyboard so the user has a concrete next step instead of a
+        # generic "try again" wall. The bucketing rules live in
+        # _classify_filing_failure(); see that helper for the marker phrases
+        # each filer raises.
+        classification = _classify_filing_failure(error, skipped, status, filled)
+        kaizen_url = (
+            f"https://kaizenep.com/events/new-section/{FORM_UUIDS[form_type]}"
+            if platform == "kaizen" and FORM_UUIDS.get(form_type)
+            else None
+        )
+        details_suffix = (
+            f"\n\nDetails: {sanitize_internal_form_codes(error)}" if error else ""
+        )
+
+        if classification == "SAVE_FAILURE":
+            body = (
+                "Fields filled but save wasn't confirmed. "
+                "Tapping retry will try an alternative save method."
             )
-            failed_summary = _format_failed_filing_summary(error, skipped)
-            # "manually" wording is honest here — filing failed, so the link
-            # is opening a fresh blank form on purpose, not pretending to
-            # jump to a saved draft.
-            msg = (
-                f"❌ Filing didn't complete\n"
-                f"{form_name}\n\n"
-                f"{recovery_block}"
+            msg = f"❌ Filing didn't complete\n{form_name}\n\n{body}{details_suffix}"
+            rows = [[InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_filing")]]
+            if kaizen_url:
+                rows.append([InlineKeyboardButton("🔗 Open in Kaizen", url=kaizen_url)])
+            rows.append([
+                InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file"),
+                _BTN_CANCEL,
+            ])
+            end_keyboard = InlineKeyboardMarkup(rows)
+            status_line = "❌ Save not confirmed."
+        elif classification == "FIELD_FAILURE":
+            editable_skipped = [
+                s for s in skipped if "attachment" not in str(s).lower()
+            ]
+            field_names = [_friendly_field_name(s) for s in editable_skipped[:5]]
+            field_list = ", ".join(field_names) if field_names else "some fields"
+            body = (
+                f"Some fields need attention: {field_list}. "
+                f"Tap 'Edit [field]' to fix one, or retry the whole filing."
             )
-            if not recovery and error:
-                msg += f"\n\nDetails: {sanitize_internal_form_codes(error)}"
-            status_line = "❌ Filing stopped."
-        else:
-            recovery_block = sanitize_internal_form_codes(
-                recovery or "Try again, or fill the form manually in your portfolio."
+            msg = f"❌ Filing didn't complete\n{form_name}\n\n{body}{details_suffix}"
+            rows = _build_field_edit_buttons(skipped)
+            rows.append([InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_filing")])
+            if kaizen_url:
+                rows.append([InlineKeyboardButton("🔗 Open in Kaizen", url=kaizen_url)])
+            rows.append([
+                InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file"),
+                _BTN_CANCEL,
+            ])
+            end_keyboard = InlineKeyboardMarkup(rows)
+            status_line = "❌ Some fields didn't fill."
+        else:  # UNKNOWN
+            body = (
+                "Try again, or open the form in Kaizen and fill it manually."
+                if kaizen_url
+                else "Try again, or fill the form manually in your portfolio."
             )
-            msg = (
-                f"❌ Filing didn't complete\n"
-                f"{form_name}\n\n"
-                f"{recovery_block}"
-            )
-            if not recovery and error:
-                msg += f"\n\nDetails: {sanitize_internal_form_codes(error)}"
+            msg = f"❌ Filing didn't complete\n{form_name}\n\n{body}{details_suffix}"
+            rows = [[InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_filing")]]
+            if kaizen_url:
+                rows.append([InlineKeyboardButton("🔗 Open in Kaizen", url=kaizen_url)])
+            rows.append([
+                InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file"),
+                _BTN_CANCEL,
+            ])
+            end_keyboard = InlineKeyboardMarkup(rows)
             status_line = "❌ Filing stopped."
 
     context.user_data["last_filing_status"] = status
@@ -7058,7 +7223,27 @@ async def handle_approval_edit(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def handle_edit_field(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Unused — kept for state compatibility."""
+    """Enter per-field edit mode after a failed/partial filing.
+
+    Sets edit_field so the next user reply is routed back through
+    handle_edit_value, which regenerates the draft with the new value
+    folded into the case context. Returns AWAIT_EDIT_VALUE so the
+    conversation handler accepts text/voice/photo replies.
+    """
+    query = update.callback_query
+    if query is None:
+        return AWAIT_EDIT_VALUE
+    await query.answer()
+    field_key = query.data.split("|", 1)[1] if "|" in (query.data or "") else ""
+    if not field_key:
+        return AWAIT_EDIT_VALUE
+    context.user_data["edit_field"] = field_key
+    label = _friendly_field_name(field_key)
+    await query.message.reply_text(
+        f"What should *{label}* be? Send the corrected text, a voice note, or a photo "
+        f"and I'll regenerate the draft with that change.",
+        parse_mode="Markdown",
+    )
     return AWAIT_EDIT_VALUE
 
 
@@ -7795,6 +7980,7 @@ def build_application() -> Application:
                 CallbackQueryHandler(handle_quick_improve, pattern=r"^IMPROVE\|reflection$"),
                 CallbackQueryHandler(handle_review_draft, pattern=r"^REVIEW\|draft$"),
                 CallbackQueryHandler(handle_approval_edit, pattern=r"^EDIT\|"),
+                CallbackQueryHandler(handle_edit_field, pattern=r"^FIELD\|"),
                 CallbackQueryHandler(handle_amend_draft, pattern=r"^AMEND\|"),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|retry_filing$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),

@@ -1802,6 +1802,12 @@ async def _save_form(page: Page, as_draft: bool) -> bool:
     Kaizen's edit-existing-draft page (`/events/fillin/...`), which renders the
     save control as a plain Save anchor rather than the "Save as draft" used on
     `new-section`.
+
+    Two-pass strategy: the first pass clicks whatever save control is currently
+    visible. If nothing matches, a second pass waits briefly (the save bar can
+    lag the form render) and broadens the selectors to legacy `input[type=submit]`
+    forms. Bounded to one extra attempt — beyond that the bot's higher-level
+    auto-rescue takes over with a fresh route_filing call.
     """
     if as_draft:
         selectors = [
@@ -1819,6 +1825,38 @@ async def _save_form(page: Page, as_draft: bool) -> bool:
             'button:has-text("Send to assessor")',
         ]
 
+    if await _try_save_selectors(page, selectors, as_draft):
+        return True
+
+    if not as_draft:
+        logger.error("Save button not found")
+        return False
+
+    # Second pass: brief wait + legacy submit-style selectors. Some Kaizen
+    # form revisions render the save bar after a delayed XHR, so the first
+    # pass can race past it on slow connections.
+    logger.info("Save button not found on first pass — retrying with broader selectors")
+    try:
+        await page.wait_for_load_state("networkidle", timeout=3000)
+    except Exception:
+        pass
+    await asyncio.sleep(2)
+    fallback_selectors = selectors + [
+        'input[type="submit"][value*="Save" i]',
+        'input[type="button"][value*="Save" i]',
+        '[role="button"]:has-text("Save")',
+    ]
+    if await _try_save_selectors(page, fallback_selectors, as_draft):
+        return True
+
+    logger.error("Save button not found after retry")
+    return False
+
+
+async def _try_save_selectors(
+    page: Page, selectors: list[str], as_draft: bool
+) -> bool:
+    """Click the first matching save selector. Returns True on success."""
     for selector in selectors:
         try:
             el = page.locator(selector).first
@@ -1840,8 +1878,6 @@ async def _save_form(page: Page, as_draft: bool) -> bool:
         except Exception as e:
             logger.debug(f"Save selector {selector} failed: {e}")
             continue
-
-    logger.error("Save button not found")
     return False
 
 
