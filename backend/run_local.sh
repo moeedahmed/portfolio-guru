@@ -52,18 +52,21 @@ export GEMINI_FAST_MODEL="${GEMINI_FAST_MODEL:-gemini-3-flash-preview}"
 export GEMINI_STABLE_MODEL="${GEMINI_STABLE_MODEL:-gemini-2.5-flash}"
 export GEMINI_PREMIUM_MODEL="${GEMINI_PREMIUM_MODEL:-gemini-3.1-pro-preview}"
 export GEMINI_3_5_FLASH_MODEL="${GEMINI_3_5_FLASH_MODEL:-gemini-3.5-flash}"
-export PORTFOLIO_GURU_EXTRACTOR_PROVIDER="${PORTFOLIO_GURU_EXTRACTOR_PROVIDER:-openai/gpt-4o}"
+export PORTFOLIO_GURU_EXTRACTOR_PROVIDER="${PORTFOLIO_GURU_EXTRACTOR_PROVIDER:-deepseek/deepseek-v4-flash}"
 export PG_GATHERING_MODE="${PG_GATHERING_MODE:-1}"
 export PG_VNEXT_BOT_TOKEN=""
 echo "Models: gemini-fast=$GEMINI_FAST_MODEL gemini-stable=$GEMINI_STABLE_MODEL extractor=$PORTFOLIO_GURU_EXTRACTOR_PROVIDER"
 FERNET_SECRET_KEY="$(get_secret 9e653679-9a33-4c23-a15c-b405015713de)"
 export FERNET_SECRET_KEY
-OPENAI_API_KEY="$(try_secret 612865f1-b9f5-4714-8653-b45a00036712)"
-if [ -n "$OPENAI_API_KEY" ]; then
-  export OPENAI_API_KEY
-fi
+# OpenAI keys not in use — extractor uses DeepSeek
+# DEEPSEEK_API_KEY_PORTFOLIO is loaded below
 DEEPSEEK_API_KEY="$(get_secret c5d82503-3d1d-427b-9be1-b44e01564203)"
 export DEEPSEEK_API_KEY
+
+# OpenAI keys — NOT loaded unless explicitly requested
+# if [ -n "$OPENAI_API_KEY" ]; then
+#   export OPENAI_API_KEY
+# fi
 # Stripe (Portfolio Guru account)
 STRIPE_SECRET_KEY="$(get_secret 4450d6ac-f7a2-4802-a27a-b428006488c9)"
 export STRIPE_SECRET_KEY

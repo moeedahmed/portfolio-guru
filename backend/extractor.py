@@ -112,12 +112,6 @@ PROVIDERS = [
         "base_url": "https://api.deepseek.com",
         "env_key": "DEEPSEEK_API_KEY",
     },
-    {
-        "name": "gpt-4o",
-        "type": "openai",
-        "model": "gpt-4o",
-        "env_key": "OPENAI_API_KEY",
-    },
 ]
 
 PREMIUM_PROVIDERS = [
@@ -159,8 +153,6 @@ def _select_providers(tier: str = ""):
         return PREMIUM_PROVIDERS
     if requested in {"gemini-3-5-flash", "gemini-flash-3-5", "gemini-flash-35"}:
         return GEMINI_3_5_FLASH_PROVIDERS
-    if requested in {"openai/gpt-4o", "gpt-4o", "openai-gpt-4o"}:
-        return [p for p in PROVIDERS if p["name"] == "gpt-4o"]
     return PROVIDERS
 
 
