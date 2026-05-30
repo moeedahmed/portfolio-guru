@@ -597,3 +597,159 @@ async def test_save_form_blocks_dangerous_buttons():
 
     assert result is False
     assert clicked == []
+
+
+# ─── Section J: Post-filing QA verification ───────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_verify_filing_qa_returns_three_bucket_structure():
+    """The QA function returns a dict with filled, empty_expected, empty_acceptable lists."""
+    from kaizen_form_filer import _verify_filing_qa
+
+    page = AsyncMock()
+    page.evaluate = AsyncMock(return_value={"tag": "TEXTAREA", "value": "filled text"})
+
+    field_map = {
+        "reflection": "uuid-reflection",
+        "clinical_reasoning": "uuid-cr",
+    }
+    expected_fields = {
+        "reflection": "expected reflection",
+        "clinical_reasoning": "expected reasoning",
+    }
+
+    result = await _verify_filing_qa(page, "CBD", expected_fields, field_map)
+
+    assert isinstance(result, dict)
+    assert set(result.keys()) >= {"filled", "empty_expected", "empty_acceptable"}
+    assert isinstance(result["filled"], list)
+    assert isinstance(result["empty_expected"], list)
+    assert isinstance(result["empty_acceptable"], list)
+    assert "reflection" in result["filled"]
+    assert "clinical_reasoning" in result["filled"]
+
+
+@pytest.mark.asyncio
+async def test_verify_filing_qa_categorises_empty_fields():
+    """Empty DOM values go to empty_expected if the caller expected a value,
+    otherwise to empty_acceptable."""
+    from kaizen_form_filer import _verify_filing_qa
+
+    async def evaluate_mock(_js, dom_id):
+        if dom_id == "uuid-reflection":
+            return {"tag": "TEXTAREA", "value": ""}
+        if dom_id == "uuid-optional":
+            return {"tag": "INPUT", "value": ""}
+        return {"tag": "TEXTAREA", "value": "filled"}
+
+    page = AsyncMock()
+    page.evaluate = AsyncMock(side_effect=evaluate_mock)
+
+    field_map = {
+        "reflection": "uuid-reflection",
+        "clinical_reasoning": "uuid-cr",
+        "optional_other": "uuid-optional",
+    }
+    expected_fields = {
+        "reflection": "user supplied this",
+        "clinical_reasoning": "user supplied this",
+    }
+
+    result = await _verify_filing_qa(page, "CBD", expected_fields, field_map)
+
+    assert "reflection" in result["empty_expected"]
+    assert "clinical_reasoning" in result["filled"]
+    assert "optional_other" in result["empty_acceptable"]
+
+
+@pytest.mark.asyncio
+async def test_verify_filing_qa_handles_select_via_selected_index():
+    """SELECT elements are filled when selectedIndex > 0."""
+    from kaizen_form_filer import _verify_filing_qa
+
+    async def evaluate_mock(_js, dom_id):
+        if dom_id == "uuid-stage":
+            return {"tag": "SELECT", "selectedIndex": 2, "value": "Higher"}
+        if dom_id == "uuid-placement":
+            return {"tag": "SELECT", "selectedIndex": 0, "value": ""}
+        return {"tag": "INPUT", "value": ""}
+
+    page = AsyncMock()
+    page.evaluate = AsyncMock(side_effect=evaluate_mock)
+
+    field_map = {
+        "stage_of_training": "uuid-stage",
+        "placement": "uuid-placement",
+    }
+    expected_fields = {
+        "stage_of_training": "Higher",
+        "placement": "ED",
+    }
+
+    result = await _verify_filing_qa(page, "DOPS", expected_fields, field_map)
+
+    assert "stage_of_training" in result["filled"]
+    assert "placement" in result["empty_expected"]
+
+
+@pytest.mark.asyncio
+async def test_verify_filing_qa_missing_dom_element_is_empty():
+    """A missing DOM element logs WARNING and counts as empty."""
+    from kaizen_form_filer import _verify_filing_qa
+
+    page = AsyncMock()
+    page.evaluate = AsyncMock(return_value={"missing": True})
+
+    field_map = {"reflection": "uuid-missing"}
+    expected_fields = {"reflection": "should be filled"}
+
+    result = await _verify_filing_qa(page, "CBD", expected_fields, field_map)
+
+    assert "reflection" not in result["filled"]
+    assert "reflection" in result["empty_expected"]
+
+
+@pytest.mark.asyncio
+async def test_file_to_kaizen_includes_filing_qa_in_result(mock_playwright_ctx):
+    """filing_qa key appears in the file_to_kaizen result when filing succeeded."""
+    with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
+            with patch("kaizen_form_filer._verify_entry_saved", AsyncMock(return_value=True)):
+                with patch(
+                    "kaizen_form_filer._verify_filing_qa",
+                    AsyncMock(return_value={
+                        "filled": ["reflection"],
+                        "empty_expected": [],
+                        "empty_acceptable": [],
+                    }),
+                ):
+                    fields = {
+                        "date_of_encounter": "2026-03-21",
+                        "stage_of_training": "Higher",
+                        "clinical_reasoning": "test",
+                        "reflection": "test",
+                    }
+                    result = await file_to_kaizen("CBD", fields, "user", "pass")
+                    assert "filing_qa" in result
+                    assert result["filing_qa"]["filled"] == ["reflection"]
+
+
+@pytest.mark.asyncio
+async def test_file_to_kaizen_qa_exception_does_not_fail_filing(mock_playwright_ctx):
+    """QA exceptions must not prevent returning a saved filing result."""
+    with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
+            with patch("kaizen_form_filer._verify_entry_saved", AsyncMock(return_value=True)):
+                with patch(
+                    "kaizen_form_filer._verify_filing_qa",
+                    AsyncMock(side_effect=RuntimeError("simulated QA failure")),
+                ):
+                    fields = {
+                        "date_of_encounter": "2026-03-21",
+                        "stage_of_training": "Higher",
+                        "clinical_reasoning": "test",
+                        "reflection": "test",
+                    }
+                    result = await file_to_kaizen("CBD", fields, "user", "pass")
+                    assert result["status"] in ("success", "partial")
+                    assert "filing_qa" in result

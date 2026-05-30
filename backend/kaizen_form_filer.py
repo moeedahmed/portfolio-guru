@@ -1902,6 +1902,212 @@ async def _verify_fields(page: Page, fields: dict, field_map: dict, filled_keys:
     return issues
 
 
+# ─── Post-filing QA verification (non-blocking) ──────────────────────────────
+
+_QA_READ_FIELD_JS = """(domId) => {
+    const el = document.getElementById(domId);
+    if (!el) return {missing: true};
+    const tag = el.tagName;
+    if (tag === 'SELECT') {
+        return {tag, selectedIndex: el.selectedIndex, value: el.value || ''};
+    }
+    if (tag === 'INPUT' && el.type === 'checkbox') {
+        return {tag, type: 'checkbox', checked: !!el.checked};
+    }
+    return {tag, value: (el.value || el.textContent || '').trim()};
+}"""
+
+_QA_READ_KC_JS = """(prefix) => {
+    function variants(raw) {
+        var out = [raw];
+        var m = raw.match(/\\bSLO\\s*(\\d+)\\s*KC\\s*(\\d+)\\b/i);
+        if (m) {
+            out.push('SLO' + m[1] + ' Key Capability ' + m[2]);
+            out.push('SLO ' + m[1] + ' Key Capability ' + m[2]);
+        }
+        return out.map(function(v) { return v.toLowerCase().replace(/\\s+/g, ' ').trim(); });
+    }
+    var wanted = variants(prefix);
+    var spans = document.querySelectorAll('span.ng-binding');
+    for (var i = 0; i < spans.length; i++) {
+        var txt = spans[i].textContent.trim();
+        var normalised = txt.toLowerCase().replace(/\\s+/g, ' ').trim();
+        if (wanted.some(function(v) { return normalised.indexOf(v) !== -1; })) {
+            var li = spans[i].parentElement;
+            while (li && li.tagName !== 'LI') { li = li.parentElement; }
+            if (li) {
+                var cb = li.querySelector('input[type="checkbox"]');
+                if (cb) return !!cb.checked;
+            }
+        }
+    }
+    return false;
+}"""
+
+
+async def _verify_filing_qa(
+    page: Page,
+    form_type: str,
+    expected_fields: Dict[str, Any],
+    field_map: Dict[str, str],
+) -> Dict[str, Any]:
+    """Non-blocking post-filing QA pass.
+
+    Reads each mapped DOM element after the draft was saved and categorises
+    every field into one of three buckets:
+
+      - filled              — DOM element has a non-empty value / checked state
+      - empty_expected      — DOM is empty but the caller passed a value for it
+      - empty_acceptable    — DOM is empty and the caller did not set it
+
+    Curriculum KCs from `expected_fields["key_capabilities"]` (or
+    `expected_fields["curriculum_links"]` as a fallback) are probed by text
+    and reported as `kc:<target>` entries inside the same buckets.
+
+    Also returns:
+      - counts    — {filled, drafted, empty_but_drafted, empty_not_drafted}
+      - score     — {filled_pct, drafted_pct, band: GREEN|AMBER|RED}
+      - gaps      — per-field detail for fields that were drafted but empty,
+                    including dom_id so each gap becomes a DOM mapping task
+
+    The result is non-blocking: DOM probe errors degrade to "empty" with a
+    WARNING log and never raise.
+    """
+    from post_filing_qa import score_qa_buckets
+
+    filled: List[str] = []
+    empty_expected: List[str] = []
+    empty_acceptable: List[str] = []
+    gaps: List[Dict[str, Any]] = []
+    field_states: Dict[str, Dict[str, Any]] = {}
+
+    def _is_meaningful(value: Any) -> bool:
+        return value not in (None, "", [], {}, ())
+
+    def _expected_preview(value: Any, limit: int = 80) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, (list, tuple, set)):
+            value = ", ".join(str(item) for item in value if str(item).strip())
+        text = str(value).strip()
+        return text if len(text) <= limit else text[: limit - 1] + "…"
+
+    def _classify_kind(state: Dict[str, Any]) -> str:
+        if state.get("tag") == "SELECT":
+            return "dropdown"
+        if state.get("type") == "checkbox":
+            return "checkbox"
+        if state.get("tag") == "TEXTAREA":
+            return "textarea"
+        return "text"
+
+    for key, dom_id in field_map.items():
+        try:
+            state = await page.evaluate(_QA_READ_FIELD_JS, dom_id)
+        except Exception as exc:
+            logger.warning(f"QA[{form_type}]: error reading {key} (dom_id={dom_id}): {exc}")
+            state = {"error": str(exc)}
+
+        if not isinstance(state, dict):
+            state = {"value": state}
+
+        field_states[key] = state
+        is_filled = False
+        missing_dom = bool(state.get("missing"))
+        if missing_dom:
+            logger.warning(f"QA[{form_type}]: DOM element missing for {key} (dom_id={dom_id})")
+        elif state.get("error"):
+            pass
+        elif state.get("tag") == "SELECT":
+            is_filled = int(state.get("selectedIndex") or 0) > 0
+        elif state.get("type") == "checkbox":
+            is_filled = bool(state.get("checked"))
+        else:
+            is_filled = bool(str(state.get("value") or "").strip())
+
+        expected_value = expected_fields.get(key)
+        was_drafted = _is_meaningful(expected_value)
+
+        if is_filled:
+            filled.append(key)
+        elif was_drafted:
+            empty_expected.append(key)
+            gaps.append({
+                "field": key,
+                "dom_id": dom_id,
+                "form_type": form_type,
+                "kind": _classify_kind(state),
+                "missing_dom": missing_dom,
+                "expected_preview": _expected_preview(expected_value),
+                "reason": (
+                    "dom_element_missing" if missing_dom
+                    else "value_not_persisted"
+                ),
+            })
+        else:
+            empty_acceptable.append(key)
+
+    kc_targets = (
+        expected_fields.get("key_capabilities")
+        or expected_fields.get("curriculum_links")
+        or []
+    )
+    if isinstance(kc_targets, (str, bytes)):
+        kc_targets = [kc_targets]
+    for target in kc_targets:
+        target_str = str(target)
+        try:
+            is_checked = await page.evaluate(_QA_READ_KC_JS, target_str)
+        except Exception as exc:
+            logger.warning(f"QA[{form_type}]: error reading KC {target_str}: {exc}")
+            is_checked = False
+        label = f"kc:{target_str}"
+        if is_checked:
+            filled.append(label)
+        else:
+            empty_expected.append(label)
+            gaps.append({
+                "field": label,
+                "dom_id": None,
+                "form_type": form_type,
+                "kind": "kc_checkbox",
+                "missing_dom": False,
+                "expected_preview": target_str,
+                "reason": "kc_not_ticked",
+            })
+
+    score = score_qa_buckets(
+        filled=filled,
+        empty_expected=empty_expected,
+        empty_acceptable=empty_acceptable,
+    )
+
+    logger.info(f"QA[{form_type}] filled ({len(filled)}): {filled}")
+    logger.info(f"QA[{form_type}] empty (expected, {len(empty_expected)}): {empty_expected}")
+    logger.info(f"QA[{form_type}] empty (acceptable, {len(empty_acceptable)}): {empty_acceptable}")
+    logger.info(
+        f"QA[{form_type}] score: band={score['band']} "
+        f"filled_pct={score['filled_pct']} drafted_pct={score['drafted_pct']}"
+    )
+    if gaps:
+        logger.info(f"QA[{form_type}] gaps ({len(gaps)}): "
+                    + ", ".join(f"{g['field']}({g['reason']})" for g in gaps))
+
+    return {
+        "filled": filled,
+        "empty_expected": empty_expected,
+        "empty_acceptable": empty_acceptable,
+        "counts": {
+            "filled": len(filled),
+            "drafted": len(filled) + len(empty_expected),
+            "empty_but_drafted": len(empty_expected),
+            "empty_not_drafted": len(empty_acceptable),
+        },
+        "score": score,
+        "gaps": gaps,
+    }
+
+
 # ─── Main entry point ────────────────────────────────────────────────────────
 
 async def fill_kaizen_form(
@@ -2996,6 +3202,15 @@ async def file_to_kaizen(
         if saved and len(filled) > 0 and not submit:
             verified = await _verify_entry_saved(page, form_type, fields)
 
+        # Post-filing QA — non-blocking, monitoring only.
+        filing_qa: Optional[Dict[str, List[str]]] = None
+        if saved and not submit:
+            try:
+                filing_qa = await _verify_filing_qa(page, form_type, fields, field_map)
+            except Exception as qa_exc:
+                logger.warning(f"Post-filing QA error (non-blocking) for {form_type}: {qa_exc}")
+                filing_qa = None
+
         # Determine status
         if not saved:
             status = "failed"
@@ -3021,6 +3236,7 @@ async def file_to_kaizen(
             "skipped": skipped,
             "error": save_error,
             "saved_url": saved_url,
+            "filing_qa": filing_qa,
             **header_meta,
         }
 
