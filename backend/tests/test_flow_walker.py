@@ -2469,10 +2469,10 @@ class TestRecentPortfolioFixes:
         keyboard = _build_post_filing_keyboard('CBD', 'success', same_case_available=True)
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
 
-        assert ('🔁 Same case, new WPBA', 'ACTION|same_case_another') in buttons
+        assert ('💾 Save as new WBA', 'ACTION|same_case_another') in buttons
         assert ('📋 File another case', 'ACTION|file') in buttons
         assert [
-            ('🔁 Same case, new WPBA', 'ACTION|same_case_another'),
+            ('💾 Save as new WBA', 'ACTION|same_case_another'),
             ('📋 File another case', 'ACTION|file'),
         ] in [
             [(b.text, b.callback_data) for b in row]
@@ -2488,7 +2488,7 @@ class TestRecentPortfolioFixes:
         keyboard = _build_post_filing_keyboard('CBD', 'partial', same_case_available=True)
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
 
-        assert ('🔁 Same case, new WPBA', 'ACTION|same_case_another') in buttons
+        assert ('💾 Save as new WBA', 'ACTION|same_case_another') in buttons
 
     def test_post_filing_keyboard_no_same_case_for_uncertain_partial(self):
         """Uncertain partial (partial + error) must NOT offer Same case
@@ -2498,7 +2498,7 @@ class TestRecentPortfolioFixes:
         keyboard = _build_post_filing_keyboard('CBD', 'partial', uncertain=True, same_case_available=True)
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
 
-        assert ('🔁 Same case, new WPBA', 'ACTION|same_case_another') not in buttons
+        assert ('💾 Save as new WBA', 'ACTION|same_case_another') not in buttons
         assert ('🔄 Try again', 'ACTION|retry_filing') in buttons
 
     def test_post_filing_keyboard_links_to_saved_draft_url_when_present(self):
@@ -2714,7 +2714,7 @@ class TestRecentPortfolioFixes:
             for row in sim.messages_sent[-1][2].inline_keyboard
             if row
         ]
-        assert ('🔁 Same case, new WPBA', 'ACTION|same_case_another') in buttons, (
+        assert ('💾 Save as new WBA', 'ACTION|same_case_another') in buttons, (
             f"Clean partial should surface 'Same case' button. Got: {buttons!r}"
         )
 
@@ -2767,7 +2767,7 @@ class TestRecentPortfolioFixes:
             for row in sim.messages_sent[-1][2].inline_keyboard
             if row
         ]
-        assert ('🔁 Same case, new WPBA', 'ACTION|same_case_another') in buttons, (
+        assert ('💾 Save as new WBA', 'ACTION|same_case_another') in buttons, (
             f"Success should surface 'Same case' button. Got: {buttons!r}"
         )
         """Successful save also reads as a new step: 'Kaizen draft saved' on top, then

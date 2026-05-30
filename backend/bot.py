@@ -1929,7 +1929,7 @@ def _build_post_review_keyboard(improved_once: bool = False):
     return _build_approval_keyboard(improved_once=improved_once)
 
 
-_POST_FILING_SAME_CASE_LABEL = "🔁 Same case, new WPBA"
+_POST_FILING_SAME_CASE_LABEL = "💾 Save as new WBA"
 _POST_FILING_NEW_CASE_LABEL = "📋 File another case"
 
 
