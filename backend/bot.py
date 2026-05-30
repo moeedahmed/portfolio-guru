@@ -4544,7 +4544,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
             _track_funnel_event(context, "recommendation_empty", source=input_source)
             await _send_latest_message(
                 message, context,
-                "Couldn't determine the best form — browse all types below.",
+                "Nothing left to recommend for this case — browse all types below.",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("📋 See all forms", callback_data="FORM|show_all")],
                     [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_recommend")],
