@@ -1951,7 +1951,7 @@ class TestFlowWalker:
         assert 'your settings' in text.lower()
         # The merged dashboard surfaces plan + usage that used to be in /status.
         assert 'plan: free' in text.lower()
-        assert '2/25 cases' in text.lower()
+        assert '2/5 cases' in text.lower()
 
     @pytest.mark.asyncio
     async def test_conversational_router_shadow_logs_text_without_routing(self):

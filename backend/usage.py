@@ -15,7 +15,7 @@ DB_PATH = os.environ.get("USAGE_DB_PATH", _DEFAULT_DB)
 # - pro: legacy tier (100/mo). No new sign-ups; existing subscribers honoured.
 # - pro_plus: Unlimited, the only paid tier currently sold (£9.99/mo).
 TIER_LIMITS = {
-    "free": 25,
+    "free": 5,
     "pro": 100,
     "pro_plus": -1,
 }
@@ -56,6 +56,11 @@ async def _ensure_db():
                 processed_at TEXT DEFAULT (datetime('now'))
             )
         """)
+        # Additive migration: is_beta flag (unlimited override, not a paid tier).
+        try:
+            await db.execute("ALTER TABLE user_profiles ADD COLUMN is_beta INTEGER DEFAULT 0")
+        except Exception:
+            pass  # column already exists
         await db.commit()
 
 
@@ -118,12 +123,46 @@ async def get_user_tier(user_id: int) -> str:
 
 
 async def get_monthly_limit(tier: str) -> int:
-    """Return case limit for tier: free=10, pro=100, pro_plus/Unlimited=-1."""
-    return TIER_LIMITS.get(tier, 10)
+    """Return case limit for tier: free=5, pro=100, pro_plus/Unlimited=-1."""
+    return TIER_LIMITS.get(tier, 5)
+
+
+async def is_beta_tester(user_id: int) -> bool:
+    """Return True if the user has the beta_tester unlimited override."""
+    await _ensure_db()
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT is_beta FROM user_profiles WHERE telegram_user_id = ?",
+            (user_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return bool(row[0]) if row and row[0] is not None else False
+
+
+async def set_beta_tester(user_id: int, is_beta: bool) -> None:
+    """Upsert the beta_tester flag for a user (unlimited override, orthogonal to tier)."""
+    await _ensure_db()
+    flag = 1 if is_beta else 0
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO user_profiles (telegram_user_id, is_beta)
+               VALUES (?, ?)
+               ON CONFLICT(telegram_user_id) DO UPDATE SET
+                   is_beta = excluded.is_beta,
+                   updated_at = datetime('now')""",
+            (user_id, flag),
+        )
+        await db.commit()
 
 
 async def check_can_file(user_id: int) -> tuple:
-    """Check if user can file. Returns (allowed, used, limit, tier)."""
+    """Check if user can file. Returns (allowed, used, limit, tier).
+
+    Beta testers bypass the tier limit and report tier="beta", limit=-1.
+    """
+    if await is_beta_tester(user_id):
+        used = await get_cases_this_month(user_id)
+        return (True, used, -1, "beta")
     tier = await get_user_tier(user_id)
     limit = await get_monthly_limit(tier)
     used = await get_cases_this_month(user_id)

@@ -15,7 +15,7 @@ from telegram.ext import (
 )
 from store import store_credentials, get_credentials, has_credentials, init
 from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, is_reuse_request, review_draft, analyse_portfolio_health, summarise_recent_activity, generate_nudge_copy, extract_field_updates, compose_filing_recovery_copy, combine_case_inputs
-from usage import record_case_filed, get_cases_this_month, check_can_file, get_user_tier, set_user_tier, get_case_history, TIER_LIMITS, get_all_active_users, get_cases_this_week
+from usage import record_case_filed, get_cases_this_month, check_can_file, get_user_tier, set_user_tier, get_case_history, TIER_LIMITS, get_all_active_users, get_cases_this_week, is_beta_tester, set_beta_tester
 from filer_router import route_filing
 from kaizen_form_filer import FORM_UUIDS
 from form_schemas import FORM_SCHEMAS
@@ -1431,6 +1431,7 @@ def _settings_view_components(
     tier: str | None = None,
     used: int | None = None,
     connected: bool | None = None,
+    is_beta: bool = False,
 ) -> tuple[str, InlineKeyboardMarkup]:
     """Render the settings page text + keyboard.
 
@@ -1448,7 +1449,11 @@ def _settings_view_components(
     plan_lines = []
     if connected is False:
         plan_lines.append("🔗 Kaizen: not connected")
-    if tier is not None:
+    if is_beta:
+        plan_lines.append("⭐ Plan: Beta (unlimited)")
+        if used is not None:
+            plan_lines.append(f"📋 Cases filed: {used} this month")
+    elif tier is not None:
         tier_pretty = {"free": "Free", "pro": "Pro", "pro_plus": "Unlimited"}.get(tier, tier.title())
         plan_lines.append(f"⭐ Plan: {tier_pretty}")
         if used is not None:
@@ -3095,6 +3100,7 @@ async def _voice_show_settings_screen(update: Update, context: ContextTypes.DEFA
         tier=await get_user_tier(user_id),
         used=used,
         connected=has_credentials(user_id),
+        is_beta=await is_beta_tester(user_id),
     )
     await _flow_edit(update, context, text, reply_markup=keyboard, flow_key="voice")
     _flow_done(context, "voice")
@@ -4066,7 +4072,11 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     except Exception:
         used = 0
     text, keyboard = _settings_view_components(
-        user_id, tier=tier, used=used, connected=has_credentials(user_id)
+        user_id,
+        tier=tier,
+        used=used,
+        connected=has_credentials(user_id),
+        is_beta=await is_beta_tester(user_id),
     )
     await update.message.reply_text(text, reply_markup=keyboard)
     return ConversationHandler.END
@@ -4188,6 +4198,36 @@ async def settier_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     await set_user_tier(target_id, tier)
     await update.message.reply_text(f"✅ Set user {target_id} to {TIER_LABELS.get(tier, tier)}.")
+    return ConversationHandler.END
+
+
+async def setbeta_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle /setbeta <user_id> <on|off> — admin-only beta_tester flag toggle."""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("🚫 Admin only.")
+        return ConversationHandler.END
+
+    args = context.args
+    if not args or len(args) < 2:
+        await update.message.reply_text("Usage: /setbeta <user_id> <on|off>")
+        return ConversationHandler.END
+
+    try:
+        target_id = int(args[0])
+    except ValueError:
+        await update.message.reply_text("Invalid user ID. Usage: /setbeta <user_id> <on|off>")
+        return ConversationHandler.END
+
+    state = args[1].lower()
+    if state not in ("on", "off"):
+        await update.message.reply_text("State must be 'on' or 'off'. Usage: /setbeta <user_id> <on|off>")
+        return ConversationHandler.END
+
+    flag = state == "on"
+    await set_beta_tester(target_id, flag)
+    label = "Beta (unlimited)" if flag else "off (back to tier limits)"
+    await update.message.reply_text(f"✅ Set user {target_id} beta_tester → {label}.")
     return ConversationHandler.END
 
 
@@ -5566,7 +5606,11 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 except Exception:
                     used = 0
                 stats_text, stats_kb = _settings_view_components(
-                    user_id, tier=tier, used=used, connected=has_credentials(user_id)
+                    user_id,
+                    tier=tier,
+                    used=used,
+                    connected=has_credentials(user_id),
+                    is_beta=await is_beta_tester(user_id),
                 )
                 await update.message.reply_text(stats_text, reply_markup=stats_kb)
                 return ConversationHandler.END
@@ -5581,7 +5625,11 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 except Exception:
                     used = 0
                 settings_text, settings_kb = _settings_view_components(
-                    user_id, tier=tier, used=used, connected=has_credentials(user_id)
+                    user_id,
+                    tier=tier,
+                    used=used,
+                    connected=has_credentials(user_id),
+                    is_beta=await is_beta_tester(user_id),
                 )
                 await update.message.reply_text(settings_text, reply_markup=settings_kb)
                 return ConversationHandler.END
@@ -7781,6 +7829,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("upgrade", upgrade_command))
     application.add_handler(CommandHandler("plan", upgrade_command))
     application.add_handler(CommandHandler("settier", settier_command))
+    application.add_handler(CommandHandler("setbeta", setbeta_command))
     application.add_handler(CommandHandler("beta", beta_command))
     application.add_handler(CommandHandler("gather", gather_command))
     application.add_handler(CommandHandler("assignbeta", assignbeta_command))
