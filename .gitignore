@@ -54,6 +54,9 @@ chrome-profile/
 user-data-dir/
 backend/*.lock
 
+# Autonomous filing-fix loop NDJSON output
+backend/logs/
+
 # Local agent/editor settings
 .claude/
 
