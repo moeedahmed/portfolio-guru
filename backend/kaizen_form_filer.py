@@ -3160,6 +3160,22 @@ async def file_to_kaizen(
             else:
                 skipped.append(field_key)
 
+        # Default procedural skills dropdowns to n/a for non-procedural forms
+        _proc_dropdowns = {
+            "eed0e8dc-075d-4661-aea5-2c3238af4c5b": "ACCS Procedural Skills",
+            "31bd55b7-0e32-4918-8cc0-4ba33af83772": "Intermediate Procedural Skills",
+            "8def931e-3a00-43ac-8529-44cdaf34be2d": "Higher EM Procedural Skills",
+        }
+        for dd_id, dd_label in _proc_dropdowns.items():
+            try:
+                sel = page.locator(f"select#{dd_id}")
+                if await sel.count() > 0 and await sel.input_value() == "":
+                    # No selection made — default to n/a
+                    await sel.select_option(label="- n/a -")
+                    logger.info(f"Defaulted {dd_label} to n/a")
+            except Exception:
+                pass
+
         # Curriculum links
         if curriculum_links:
             slo_codes = curriculum_links
