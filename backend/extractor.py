@@ -1367,6 +1367,7 @@ MGMT_* (Management Portfolio forms — Rota, Complaint, Critical Incident, Risk,
 - Requires: Trainee has actually completed the management activity described.
 - Suggest MGMT_ROTA when: Involved in rota planning/management for the department.
 - Suggest MGMT_RISK when: Contributed to the departmental risk register.
+- Suggest MGMT_RECRUIT when: Participated in recruitment processes — ST4/specialty recruitment panels, shortlisting, interviewing, scoring candidates, ranking, or developing recruitment materials.
 - Suggest MGMT_PROJECT when: Led or completed a non-QI project.
 - Suggest MGMT_GUIDELINE when: Introduced, reviewed, or updated a clinical guideline.
 - Suggest MGMT_COMPLAINT (management version) when: Managed a patient complaint process
