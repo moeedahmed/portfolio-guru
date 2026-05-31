@@ -97,6 +97,7 @@ async def route_filing(
     reuse_draft: bool = False,
     attachment_path: Optional[str] = None,
     attachment_drive_url: Optional[str] = None,
+    telegram_user_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Route a filing request to the appropriate filer.
@@ -171,6 +172,7 @@ async def route_filing(
                 reuse_draft=reuse_draft,
                 attachment_path=attachment_path,
                 attachment_drive_url=attachment_drive_url,
+                telegram_user_id=telegram_user_id,
             )
 
             # Record and return regardless of status
@@ -268,6 +270,7 @@ async def _route_deterministic(
     reuse_draft: bool = False,
     attachment_path: Optional[str] = None,
     attachment_drive_url: Optional[str] = None,
+    telegram_user_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Route to the deterministic Playwright filer."""
     if platform == "kaizen":
@@ -282,6 +285,7 @@ async def _route_deterministic(
             reuse_draft=reuse_draft,
             attachment_path=attachment_path,
             attachment_drive_url=attachment_drive_url,
+            telegram_user_id=telegram_user_id,
         )
         result["method"] = "deterministic"
         return result

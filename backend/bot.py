@@ -6596,6 +6596,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 form_name=form_name,
                 reuse_draft=reuse_existing_draft,
                 attachment_path=attachment_path,
+                telegram_user_id=user_id,
             ),
             timeout=300,  # 5 min — browser-use path may take longer
         )
@@ -6702,6 +6703,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                     form_name=form_name,
                     reuse_draft=True,
                     attachment_path=attachment_path,
+                    telegram_user_id=user_id,
                 ),
                 timeout=180,
             )
