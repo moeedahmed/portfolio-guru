@@ -3729,6 +3729,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         # Inline ARCP health check — morphs the menu in place rather than
         # popping a new message, with a Back button to return to the welcome.
         back_btn = InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu")
+        back_markup = InlineKeyboardMarkup([[back_btn]])
 
         if not has_credentials(user_id):
             await query.message.edit_text(
@@ -3747,37 +3748,37 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             )
             return ConversationHandler.END
 
-        await query.message.chat.send_action(constants.ChatAction.TYPING)
-        try:
-            await query.message.edit_text("🔍 Analysing your portfolio…")
-        except Exception:
-            pass
-
-        async def _cb_send_progress(t):
+        async def send_progress():
             try:
-                await query.message.edit_text(t)
+                await query.message.edit_text("🔍 Analysing your portfolio…")
             except Exception:
                 pass
 
-        async def _cb_send_result(t):
+        async def send_result(text, reply_markup):
             await query.message.edit_text(
-                t, parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup([[back_btn]]),
+                text,
+                parse_mode="Markdown",
+                reply_markup=reply_markup or back_markup,
             )
 
-        async def _cb_send_chart(fh):
+        async def send_photo_fn(fh):
             try:
                 await query.message.chat.send_photo(photo=fh)
             except Exception:
                 pass
 
-        return await _run_health_analysis(
-            user_id,
-            send_progress=_cb_send_progress,
-            send_result=_cb_send_result,
-            send_chart=_cb_send_chart,
-            send_help_gate=None,
+        async def fail_fn(text):
+            await query.message.edit_text(text, reply_markup=back_markup)
+
+        await _run_health_analysis(
+            user_id=user_id,
+            chat=query.message.chat,
+            send_progress=send_progress,
+            send_result=send_result,
+            send_photo_fn=send_photo_fn,
+            fail_fn=fail_fn,
         )
+        return ConversationHandler.END
 
     elif action == "settings":
         tier = await get_user_tier(user_id)
@@ -4360,19 +4361,24 @@ async def assignbeta_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def _run_health_analysis(
     user_id: int,
+    chat,
     send_progress,
     send_result,
-    send_chart,
-    send_help_gate,
-) -> int:
-    """Shared portfolio health analysis — called by both /health and inline menu.
+    send_photo_fn,
+    fail_fn,
+) -> None:
+    """Shared portfolio health pipeline.
 
-    Args:
-        send_progress: async callable(text) to show "analysing".
-        send_result: async callable(text) to show final result.
-        send_chart: async callable(file_bytes) to send chart photo.
-        send_help_gate: async callable() — gate failure handler.
+    Callers supply message-sending callbacks so the same logic powers both
+    the /health command (new progress message) and the inline ARCP Health
+    button (morph the menu in place):
+      - send_progress(): show the "analysing" status
+      - send_result(text, reply_markup): render the final analysis text
+      - send_photo_fn(file_handle): send the chart image
+      - fail_fn(text): render an error after the analysis call fails
     """
+    await chat.send_action(constants.ChatAction.TYPING)
+
     training_level = get_training_level(user_id)
     if not training_level:
         training_level = "ST4"
@@ -4385,11 +4391,12 @@ async def _run_health_analysis(
         await send_result(
             "📊 *Portfolio Health*\n\n"
             "No cases filed yet. Start filing cases and come back to check your ARCP readiness.\n\n"
-            "Tip: Send a clinical case to get started."
+            "Tip: Send a clinical case to get started.",
+            None,
         )
-        return ConversationHandler.END
+        return
 
-    await send_progress("📊 Analysing your portfolio...")
+    await send_progress()
 
     chart_path = None
     try:
@@ -4403,7 +4410,7 @@ async def _run_health_analysis(
     if chart_path:
         try:
             with open(chart_path, "rb") as fh:
-                await send_chart(fh)
+                await send_photo_fn(fh)
         except Exception as e:
             logger.warning(f"Sending portfolio chart failed: {e}", exc_info=True)
         finally:
@@ -4418,21 +4425,20 @@ async def _run_health_analysis(
         )
     except asyncio.TimeoutError:
         logger.warning("Portfolio health analysis timed out (45s)")
-        await send_result("⚠️ Analysis took too long — please try again.")
-        return ConversationHandler.END
+        await fail_fn("⚠️ Analysis took too long — please try again.")
+        return
     except Exception as e:
         logger.error(f"Portfolio health analysis failed: {e}", exc_info=True)
-        await send_result("❌ Could not analyse portfolio health. Try again later.")
-        return ConversationHandler.END
+        await fail_fn("❌ Could not analyse portfolio health. Try again later.")
+        return
 
     from datetime import datetime as _dt
     month_label = _dt.now().strftime("%B %Y")
 
     form_dist = analysis.get("form_distribution", {})
-    from form_schemas import FORM_SCHEMAS as _FS
     dist_parts = []
     for ft, count in form_dist.items():
-        name = _FS.get(ft, {}).get("name", ft)
+        name = FORM_SCHEMAS.get(ft, {}).get("name", ft)
         dist_parts.append(f"{name} ({count})")
     dist_str = " · ".join(dist_parts) if dist_parts else "None"
 
@@ -4444,12 +4450,11 @@ async def _run_health_analysis(
     suggestions_str = "\n".join(f"• {s}" for s in suggestions) if suggestions else "• Keep filing cases"
 
     readiness = analysis.get("arcp_readiness", "needs_attention")
-    readiness_map = {
+    readiness_str = {
         "on_track": "🟢 On track",
         "needs_attention": "🟡 Needs attention",
         "at_risk": "🔴 At risk",
-    }
-    readiness_str = readiness_map.get(readiness, readiness)
+    }.get(readiness, readiness)
     total = analysis.get("total_cases", len(history))
 
     msg = (
@@ -4462,8 +4467,7 @@ async def _run_health_analysis(
         f"ARCP readiness: {readiness_str}"
         f"{level_note}"
     )
-    await send_result(msg)
-    return ConversationHandler.END
+    await send_result(msg, None)
 
 
 async def _health_gate_check(user_id: int) -> bool:
@@ -4486,32 +4490,37 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return ConversationHandler.END
 
-    await update.effective_chat.send_action(constants.ChatAction.TYPING)
+    progress_holder: dict = {}
 
-    async def _send_progress(t):
-        nonlocal _pm
-        if not _pm:
-            _pm = await update.message.reply_text(t)
+    async def send_progress():
+        progress_holder["msg"] = await update.message.reply_text("📊 Analysing your portfolio...")
+
+    async def send_result(text, reply_markup):
+        msg = progress_holder.get("msg")
+        if msg is not None:
+            await msg.edit_text(text, parse_mode="Markdown", reply_markup=reply_markup)
         else:
-            try:
-                await _pm.edit_text(t)
-            except Exception:
-                pass
+            await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
 
-    async def _send_result(t):
-        await _pm.edit_text(t, parse_mode="Markdown")
-
-    async def _send_chart(fh):
+    async def send_photo_fn(fh):
         await update.message.reply_photo(photo=fh)
 
-    _pm = None
-    return await _run_health_analysis(
-        user_id,
-        send_progress=_send_progress,
-        send_result=_send_result,
-        send_chart=_send_chart,
-        send_help_gate=None,
+    async def fail_fn(text):
+        msg = progress_holder.get("msg")
+        if msg is not None:
+            await msg.edit_text(text)
+        else:
+            await update.message.reply_text(text)
+
+    await _run_health_analysis(
+        user_id=user_id,
+        chat=update.effective_chat,
+        send_progress=send_progress,
+        send_result=send_result,
+        send_photo_fn=send_photo_fn,
+        fail_fn=fail_fn,
     )
+    return ConversationHandler.END
 
 
 async def curriculum_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
