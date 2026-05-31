@@ -4394,9 +4394,9 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Handle /health — analyse portfolio health against ARCP requirements."""
     user_id = update.effective_user.id
 
-    # Gate: Unlimited only
+    # Gate: Unlimited or beta tester only
     tier = await get_user_tier(user_id)
-    if tier != "pro_plus":
+    if tier != "pro_plus" and not await is_beta_tester(user_id):
         await update.message.reply_text(
             "📊 Portfolio Health is included in Portfolio Guru Unlimited.\n\n"
             "Upgrade to get monthly ARCP readiness analysis.",
