@@ -21,3 +21,4 @@ telethon>=1.39.0
 stripe>=7.0.0
 supabase>=2.9.0
 portalocker>=2.10.0
+matplotlib>=3.9.0

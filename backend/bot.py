@@ -3764,6 +3764,27 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             )
             return ConversationHandler.END
 
+        chart_path = None
+        try:
+            from portfolio_chart import generate_health_chart_async
+            chart_path = await generate_health_chart_async(user_id)
+        except ImportError:
+            logger.info("matplotlib not installed; skipping portfolio chart image")
+        except Exception as e:
+            logger.warning(f"Portfolio chart generation failed: {e}", exc_info=True)
+
+        if chart_path:
+            try:
+                with open(chart_path, "rb") as fh:
+                    await query.message.chat.send_photo(photo=fh)
+            except Exception as e:
+                logger.warning(f"Sending portfolio chart failed: {e}", exc_info=True)
+            finally:
+                try:
+                    os.remove(chart_path)
+                except OSError:
+                    pass
+
         try:
             analysis = await analyse_portfolio_health(history, training_level)
         except Exception:
@@ -4406,6 +4427,29 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return ConversationHandler.END
 
     progress_msg = await update.message.reply_text("📊 Analysing your portfolio...")
+
+    # Generate the chart image first (deterministic, fast). Fall back silently
+    # if matplotlib isn't available — text-only health still ships.
+    chart_path = None
+    try:
+        from portfolio_chart import generate_health_chart_async
+        chart_path = await generate_health_chart_async(user_id)
+    except ImportError:
+        logger.info("matplotlib not installed; skipping portfolio chart image")
+    except Exception as e:
+        logger.warning(f"Portfolio chart generation failed: {e}", exc_info=True)
+
+    if chart_path:
+        try:
+            with open(chart_path, "rb") as fh:
+                await update.message.reply_photo(photo=fh)
+        except Exception as e:
+            logger.warning(f"Sending portfolio chart failed: {e}", exc_info=True)
+        finally:
+            try:
+                os.remove(chart_path)
+            except OSError:
+                pass
 
     try:
         analysis = await asyncio.wait_for(

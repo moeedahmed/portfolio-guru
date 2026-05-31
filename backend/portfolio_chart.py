@@ -1,0 +1,380 @@
+"""
+Portfolio health chart generator.
+
+Renders a deterministic ~800x800 PNG with four panels:
+  - Form types filed this month (horizontal bar)
+  - Curriculum coverage (SLO1–SLO12 grid)
+  - Weekly trend for the current month (bar)
+  - Usage headline ("X of Y cases filed this month — tier")
+
+Pure matplotlib so the layout is reproducible and cheap. No LLM in the
+visual path; the data comes from usage.db and profile_store.
+"""
+from __future__ import annotations
+
+import asyncio
+import calendar
+import io
+import os
+import tempfile
+from collections import Counter
+from datetime import datetime, timedelta
+from typing import Optional
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
+
+from usage import (
+    TIER_LIMITS,
+    get_case_history,
+    get_cases_this_month,
+    get_user_tier,
+    is_beta_tester,
+)
+from profile_store import get_training_level
+
+# Brand palette
+COLOR_HEADER = "#0B1F33"
+COLOR_ACCENT = "#1E6FBA"
+COLOR_ACCENT_DIM = "#A8C6E5"
+COLOR_TEXT_LIGHT = "#FFFFFF"
+COLOR_TEXT_DARK = "#1A1A1A"
+COLOR_MUTED = "#7A8794"
+COLOR_GRID_EMPTY = "#E6EBF0"
+COLOR_GRID_FILLED = "#1E6FBA"
+
+# Each WPBA / activity form maps to one or more SLOs.
+# Conservative mapping — only credit SLOs where the form type genuinely
+# provides evidence. Used solely for the visual coverage grid; the LLM
+# analysis path is unchanged.
+FORM_TO_SLOS = {
+    "CBD": [1, 2, 3, 4, 5, 6, 7],
+    "MINI_CEX": [1, 2, 3, 4, 5, 6, 7],
+    "DOPS": [3, 4, 7],
+    "ACAT": [1, 2, 3, 5],
+    "LAT": [1, 2, 3, 5],
+    "ACAF": [10],
+    "STAT": [1, 3, 5],
+    "MSF": [11],
+    "QIAT": [10],
+    "JCF": [11],
+    "TEACH": [12],
+    "TEACH_OBS": [12],
+    "TEACH_CONFID": [12],
+    "PROC_LOG": [3, 4, 7],
+    "SDL": [12],
+    "US_CASE": [3, 7],
+    "COMPLAINT": [11],
+    "SERIOUS_INC": [10, 11],
+    "EDU_ACT": [12],
+    "FORMAL_COURSE": [12],
+    "ESLE_ASSESS": [1, 2, 3, 4, 5, 6, 7, 8, 9],
+    "REFLECT_LOG": [11],
+    "MGMT_ROTA": [10],
+    "MGMT_RISK": [10],
+    "MGMT_RECRUIT": [10],
+    "MGMT_PROJECT": [10],
+    "MGMT_RISK_PROC": [10],
+    "MGMT_TRAINING_EVT": [10, 12],
+    "MGMT_GUIDELINE": [10],
+    "MGMT_INFO": [10],
+}
+
+
+def _short_form_name(form_type: str) -> str:
+    """Compact label for charting. Falls back to the raw code."""
+    try:
+        from form_schemas import FORM_SCHEMAS
+        full = FORM_SCHEMAS.get(form_type, {}).get("name", form_type)
+    except Exception:
+        full = form_type
+    # Pick a short label — Kaizen names are long.
+    aliases = {
+        "CBD": "CBD",
+        "MINI_CEX": "Mini-CEX",
+        "DOPS": "DOPS",
+        "ACAT": "ACAT",
+        "LAT": "LAT",
+        "ACAF": "ACAF",
+        "STAT": "STAT",
+        "MSF": "MSF",
+        "QIAT": "QIAT",
+        "JCF": "Journal Club",
+        "TEACH": "Teaching",
+        "TEACH_OBS": "Teach Obs",
+        "TEACH_CONFID": "Teach Confid",
+        "PROC_LOG": "Procedural",
+        "SDL": "SDL",
+        "US_CASE": "US Case",
+        "COMPLAINT": "Complaint",
+        "SERIOUS_INC": "Serious Inc",
+        "EDU_ACT": "Educational",
+        "FORMAL_COURSE": "Course",
+        "ESLE_ASSESS": "ESLE",
+        "REFLECT_LOG": "Reflection",
+        "MGMT_ROTA": "Mgmt Rota",
+        "MGMT_RISK": "Mgmt Risk",
+        "MGMT_RECRUIT": "Mgmt Recruit",
+        "MGMT_PROJECT": "Mgmt Project",
+        "MGMT_RISK_PROC": "Mgmt Risk Proc",
+        "MGMT_TRAINING_EVT": "Mgmt Training",
+        "MGMT_GUIDELINE": "Mgmt Guideline",
+        "MGMT_INFO": "Mgmt Info",
+    }
+    if form_type in aliases:
+        return aliases[form_type]
+    return full[:18]
+
+
+def _filter_this_month(history: list[dict]) -> list[dict]:
+    now = datetime.now()
+    key = now.strftime("%Y-%m")
+    out = []
+    for row in history:
+        filed_at = row.get("filed_at") or ""
+        if filed_at.startswith(key):
+            out.append(row)
+    return out
+
+
+def _weekly_buckets(history_this_month: list[dict]) -> list[tuple[str, int]]:
+    """Bucket this month's filings into ISO weeks (Mon–Sun)."""
+    now = datetime.now()
+    _, days_in_month = calendar.monthrange(now.year, now.month)
+    month_start = datetime(now.year, now.month, 1)
+
+    # Build week buckets covering the calendar month.
+    buckets: list[tuple[datetime, datetime, int]] = []
+    cursor = month_start
+    while cursor.day <= days_in_month and cursor.month == now.month:
+        # Each bucket spans Mon..Sun, clipped to the month.
+        week_start = cursor
+        days_until_sunday = 6 - week_start.weekday()
+        week_end = week_start + timedelta(days=days_until_sunday)
+        if week_end.month != now.month:
+            week_end = datetime(now.year, now.month, days_in_month)
+        buckets.append([week_start, week_end, 0])
+        cursor = week_end + timedelta(days=1)
+
+    for row in history_this_month:
+        try:
+            ts = datetime.fromisoformat(row["filed_at"].replace("Z", "+00:00"))
+        except Exception:
+            continue
+        ts = ts.replace(tzinfo=None)
+        for b in buckets:
+            if b[0] <= ts <= b[1].replace(hour=23, minute=59, second=59):
+                b[2] += 1
+                break
+
+    return [(f"{b[0].day}–{b[1].day}", b[2]) for b in buckets]
+
+
+def _coverage_from_history(history_6mo: list[dict]) -> set[int]:
+    covered: set[int] = set()
+    for row in history_6mo:
+        ft = row.get("form_type")
+        for slo in FORM_TO_SLOS.get(ft, []):
+            covered.add(slo)
+    return covered
+
+
+def _render(
+    user_id: int,
+    history_6mo: list[dict],
+    cases_this_month: int,
+    tier: str,
+    limit: int,
+    training_level: Optional[str],
+) -> str:
+    this_month = _filter_this_month(history_6mo)
+    form_counts = Counter(r["form_type"] for r in this_month if r.get("form_type"))
+    weekly = _weekly_buckets(this_month)
+    coverage = _coverage_from_history(history_6mo)
+
+    fig = plt.figure(figsize=(8, 8), dpi=100, facecolor="white")
+
+    # Header band
+    header_ax = fig.add_axes([0, 0.88, 1, 0.12])
+    header_ax.set_facecolor(COLOR_HEADER)
+    header_ax.axis("off")
+    header_ax.add_patch(
+        Rectangle((0, 0), 1, 1, transform=header_ax.transAxes,
+                  color=COLOR_HEADER, zorder=0)
+    )
+    month_label = datetime.now().strftime("%B %Y")
+    header_ax.text(
+        0.04, 0.62, "Portfolio Health",
+        fontsize=20, fontweight="bold", color=COLOR_TEXT_LIGHT,
+        transform=header_ax.transAxes,
+    )
+    level_str = training_level or "Training level not set"
+    header_ax.text(
+        0.04, 0.22, f"{month_label}  ·  {level_str}",
+        fontsize=11, color=COLOR_ACCENT_DIM,
+        transform=header_ax.transAxes,
+    )
+
+    # Usage headline panel
+    usage_ax = fig.add_axes([0.04, 0.74, 0.92, 0.10])
+    usage_ax.axis("off")
+    if limit == -1:
+        usage_text = f"{cases_this_month} cases filed this month"
+        sub_text = f"Plan: {tier} (unlimited)"
+    else:
+        usage_text = f"{cases_this_month} of {limit} cases filed this month"
+        sub_text = f"Plan: {tier}"
+    usage_ax.text(0.0, 0.65, usage_text, fontsize=16, fontweight="bold",
+                  color=COLOR_TEXT_DARK)
+    usage_ax.text(0.0, 0.15, sub_text, fontsize=10, color=COLOR_MUTED)
+
+    # Quota bar (only if there's a finite limit)
+    if limit > 0:
+        frac = min(cases_this_month / limit, 1.0)
+        usage_ax.add_patch(Rectangle((0.55, 0.45), 0.42, 0.18,
+                                     color=COLOR_GRID_EMPTY,
+                                     transform=usage_ax.transAxes))
+        usage_ax.add_patch(Rectangle((0.55, 0.45), 0.42 * frac, 0.18,
+                                     color=COLOR_ACCENT,
+                                     transform=usage_ax.transAxes))
+
+    # Form-type distribution panel (left)
+    forms_ax = fig.add_axes([0.16, 0.40, 0.32, 0.28])
+    forms_ax.set_title("This month by form type", fontsize=11, loc="left",
+                       color=COLOR_TEXT_DARK, pad=8)
+    if form_counts:
+        items = form_counts.most_common(6)
+        labels = [_short_form_name(ft) for ft, _ in items]
+        values = [c for _, c in items]
+        y_pos = range(len(items))
+        forms_ax.barh(y_pos, values, color=COLOR_ACCENT, height=0.6)
+        forms_ax.set_yticks(list(y_pos))
+        forms_ax.set_yticklabels(labels, fontsize=9, color=COLOR_TEXT_DARK)
+        forms_ax.invert_yaxis()
+        forms_ax.set_xlim(0, max(values) + 1)
+        forms_ax.spines["top"].set_visible(False)
+        forms_ax.spines["right"].set_visible(False)
+        forms_ax.spines["left"].set_color(COLOR_MUTED)
+        forms_ax.spines["bottom"].set_color(COLOR_MUTED)
+        forms_ax.tick_params(axis="x", colors=COLOR_MUTED, labelsize=8)
+        for i, v in enumerate(values):
+            forms_ax.text(v + 0.05, i, str(v), va="center",
+                          fontsize=9, color=COLOR_TEXT_DARK)
+    else:
+        forms_ax.text(0.5, 0.5, "No filings yet this month",
+                      ha="center", va="center", fontsize=10,
+                      color=COLOR_MUTED, transform=forms_ax.transAxes)
+        forms_ax.axis("off")
+
+    # SLO coverage grid (right)
+    slo_ax = fig.add_axes([0.55, 0.40, 0.40, 0.28])
+    slo_ax.set_title("Curriculum coverage (SLO 1–12, last 6mo)",
+                     fontsize=11, loc="left", color=COLOR_TEXT_DARK, pad=8)
+    slo_ax.set_xlim(0, 4)
+    slo_ax.set_ylim(0, 3)
+    slo_ax.invert_yaxis()
+    slo_ax.axis("off")
+    for idx in range(12):
+        row, col = divmod(idx, 4)
+        slo_num = idx + 1
+        filled = slo_num in coverage
+        x = col + 0.08
+        y = row + 0.18
+        slo_ax.add_patch(Rectangle(
+            (x, y), 0.84, 0.64,
+            color=COLOR_GRID_FILLED if filled else COLOR_GRID_EMPTY,
+            ec="white", lw=1,
+        ))
+        slo_ax.text(
+            x + 0.42, y + 0.32, f"SLO{slo_num}",
+            ha="center", va="center", fontsize=9, fontweight="bold",
+            color=COLOR_TEXT_LIGHT if filled else COLOR_MUTED,
+        )
+
+    # Weekly trend (bottom, full width)
+    trend_ax = fig.add_axes([0.08, 0.08, 0.87, 0.22])
+    trend_ax.set_title("Filings per week (this month)", fontsize=11,
+                       loc="left", color=COLOR_TEXT_DARK, pad=8)
+    if weekly:
+        labels = [w[0] for w in weekly]
+        values = [w[1] for w in weekly]
+        x_pos = range(len(weekly))
+        trend_ax.bar(x_pos, values, color=COLOR_ACCENT, width=0.55)
+        trend_ax.set_xticks(list(x_pos))
+        trend_ax.set_xticklabels(labels, fontsize=9, color=COLOR_TEXT_DARK)
+        trend_ax.spines["top"].set_visible(False)
+        trend_ax.spines["right"].set_visible(False)
+        trend_ax.spines["left"].set_color(COLOR_MUTED)
+        trend_ax.spines["bottom"].set_color(COLOR_MUTED)
+        trend_ax.tick_params(axis="y", colors=COLOR_MUTED, labelsize=8)
+        trend_ax.set_ylim(0, max(values + [1]) + 1)
+        for i, v in enumerate(values):
+            if v > 0:
+                trend_ax.text(i, v + 0.05, str(v), ha="center",
+                              fontsize=9, color=COLOR_TEXT_DARK)
+    else:
+        trend_ax.axis("off")
+
+    # Save to temp file
+    fd, path = tempfile.mkstemp(prefix=f"portfolio_health_{user_id}_",
+                                suffix=".png")
+    os.close(fd)
+    fig.savefig(path, dpi=100, facecolor="white")
+    plt.close(fig)
+    return path
+
+
+async def _collect(user_id: int) -> dict:
+    """Pull every input the chart needs in parallel-ish."""
+    history = await get_case_history(user_id, months=6)
+    cases = await get_cases_this_month(user_id)
+    tier = await get_user_tier(user_id)
+    beta = await is_beta_tester(user_id)
+    if beta:
+        tier_label = "beta"
+        limit = -1
+    else:
+        tier_label = tier
+        limit = TIER_LIMITS.get(tier, 5)
+    return {
+        "history": history,
+        "cases_this_month": cases,
+        "tier": tier_label,
+        "limit": limit,
+        "training_level": get_training_level(user_id),
+    }
+
+
+async def generate_health_chart_async(user_id: int) -> str:
+    data = await _collect(user_id)
+    return _render(
+        user_id=user_id,
+        history_6mo=data["history"],
+        cases_this_month=data["cases_this_month"],
+        tier=data["tier"],
+        limit=data["limit"],
+        training_level=data["training_level"],
+    )
+
+
+def generate_health_chart(user_id: int) -> str:
+    """Synchronous entry point — convenience wrapper used by smoke tests."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop and loop.is_running():
+        raise RuntimeError(
+            "generate_health_chart() called inside a running event loop — "
+            "use generate_health_chart_async() instead."
+        )
+    return asyncio.run(generate_health_chart_async(user_id))
+
+
+if __name__ == "__main__":
+    import sys
+    uid = int(sys.argv[1]) if len(sys.argv) > 1 else 6912896590
+    print(generate_health_chart(uid))
