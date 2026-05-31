@@ -8306,6 +8306,7 @@ def main():
             ("voice", "Set up your personal writing voice"),
             ("settings", "View status, usage, and preferences"),
             ("link", "Link to your EM Gurus Hub web account"),
+            ("health", "Portfolio health chart and ARCP analysis"),
             ("cancel", "Cancel whatever is happening"),
             ("delete", "Delete all your stored data"),
             ("help", "How to use Portfolio Guru"),
