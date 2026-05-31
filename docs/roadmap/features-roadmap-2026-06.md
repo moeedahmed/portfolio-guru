@@ -192,3 +192,52 @@ Portfolio Guru is an AI Telegram bot that helps UK EM trainees file Kaizen e-por
 - Whether Kaizen will change its AngularJS DOM in the next 3 months (third-party platform, no notice).
 - Whether 10 beta users are enough to validate willingness-to-pay at £9.99/mo.
 - Whether DeepSeek extraction quality degrades under real-world input diversity (voice accents, photo quality, document variety).
+
+---
+
+## CESR / Portfolio Pathway Expansion (Phase 2 Research)
+
+### Market Size
+- **87,000+ UK doctors outside training** vs ~55,000 in training (GMC 2025 data).
+- The non-training cohort includes: trust grade, staff grade, SAS doctors, clinical fellows, overseas IMGs. Many pursue CESR (Certificate of Eligibility for Specialist Registration) — the portfolio pathway to the specialist register.
+- CESR candidates typically spend **2-5 years** building a portfolio. No annual ARCP, no training programme coordinator pushing deadlines.
+- Direct competitor **CESRTrack** (web app, ~500 users) offers curriculum mapping and evidence tracking but no AI extraction or auto-filing.
+
+### Key Differences vs ARCP Trainees
+
+| Dimension | Trainee (ARCP) | CESR / Portfolio Pathway |
+|-----------|----------------|--------------------------|
+| Review cadence | Annual ARCP with defined deadlines | Self-directed, no fixed schedule |
+| Evidence requirements | RCEM-defined per stage | Must demonstrate equivalence to CCT — broader, less structured |
+| Platform | Kaizen EP (mandatory) | Can use any platform, many use Kaizen voluntarily |
+| Support system | ES, TPD, programme coordinator | Alone — no one reminds them |
+| Pain point | "Did I file enough?" | "Is this even the right evidence? Am I on the right track?" |
+| Willingness to pay | Low (NHS trainee income, capped) | Higher (SAS/trust grade pay bands are better, motivation is stronger) |
+
+### Bot Fit for CESR
+
+The core engine already works for both audiences:
+- Evidence ingestion (text/voice/photo/document)
+- Reflection generation
+- Curriculum mapping
+- Portfolio tracking and gap analysis
+
+Changes needed for CESR support:
+1. **Curriculum scope** — CESR uses a different curriculum framework (GMC-approved curriculum + additional evidence requirements). The SLO→KC mapping needs a CESR variant.
+2. **Form types** — CESR candidates file fewer WPBA types (no ESLE, no MSF, no CSR) and more "CEG" (Curriculum Experience) forms. The form map needs CESR-specific entries.
+3. **Health scoring** — instead of "ARCP readiness", score against "evidence equivalence" — roughly how close are they to demonstrating CCT equivalence.
+4. **No Kaizen dependency** — CESR candidates use Kaizen voluntarily, but the bot can work standalone (the filing pipeline is Kaizen-specific; health tracking and portfolio analysis work without Kaizen).
+
+### Recommendation: Phase 2, After Trainee Product-Market Fit
+
+**CESR is the larger addressable market but not where the current beta cohort sits.** All 9 active beta users are trainees using Kaizen. Building CESR support now would mean maintaining two curriculum frameworks, two scoring models, and split onboarding flows — before proving either one generates revenue.
+
+**The approach:**
+1. Prove trainee willingness-to-pay at £9.99/mo with the current feature set (health chart + filing + KC tracking).
+2. Once trainee PMF is confirmed, add a "/mode cesr" command that:
+   - Switches curriculum/evidence map to CESR
+   - Redirects health scoring from ARCP readiness to equivalence scoring
+   - Maintains the same filing pipeline (Kaizen or standalone)
+3. The CESR mode shares 80%+ of the engine. The delta is small enough to build after PMF, not before.
+
+**When to revisit:** After the first 5 paid subscribers from the trainee cohort, or if a CESR candidate asks to beta test.
