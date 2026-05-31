@@ -3737,10 +3737,9 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             )
             return ConversationHandler.END
 
-        tier = await get_user_tier(user_id)
-        if tier != "pro_plus":
+        if not await _health_gate_check(user_id):
             await query.message.edit_text(
-                "📊 ARCP Health is included in Portfolio Guru Unlimited.\n\nUpgrade to get gap analysis and readiness scoring.",
+                "📊 Portfolio Health is included in Portfolio Guru Unlimited.\n\nUpgrade to get gap analysis and readiness scoring.",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
                     [back_btn],
@@ -3749,66 +3748,35 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             return ConversationHandler.END
 
         await query.message.chat.send_action(constants.ChatAction.TYPING)
-        # Show "analysing" in place so the user knows we're working.
         try:
             await query.message.edit_text("🔍 Analysing your portfolio…")
         except Exception:
             pass
 
-        training_level = get_training_level(user_id) or "ST4"
-        history = await get_case_history(user_id, months=6)
-        if not history:
-            await query.message.edit_text(
-                "📊 No cases filed yet — start filing and come back to check your ARCP readiness.",
-                reply_markup=InlineKeyboardMarkup([[back_btn]]),
-            )
-            return ConversationHandler.END
-
-        chart_path = None
-        try:
-            from portfolio_chart import generate_health_chart_async
-            chart_path = await generate_health_chart_async(user_id)
-        except ImportError:
-            logger.info("matplotlib not installed; skipping portfolio chart image")
-        except Exception as e:
-            logger.warning(f"Portfolio chart generation failed: {e}", exc_info=True)
-
-        if chart_path:
+        async def _cb_send_progress(t):
             try:
-                with open(chart_path, "rb") as fh:
-                    await query.message.chat.send_photo(photo=fh)
-            except Exception as e:
-                logger.warning(f"Sending portfolio chart failed: {e}", exc_info=True)
-            finally:
-                try:
-                    os.remove(chart_path)
-                except OSError:
-                    pass
+                await query.message.edit_text(t)
+            except Exception:
+                pass
 
-        try:
-            analysis = await analyse_portfolio_health(history, training_level)
-        except Exception:
+        async def _cb_send_result(t):
             await query.message.edit_text(
-                "Could not run health check — try again later.",
+                t, parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup([[back_btn]]),
             )
-            return ConversationHandler.END
 
-        from datetime import datetime as _dt
-        month_label = _dt.now().strftime("%B %Y")
-        gaps = analysis.get("gaps", [])
-        gaps_str = "\n".join(f"• {g}" for g in gaps) if gaps else "• No major gaps"
-        suggestions = analysis.get("suggestions", [])
-        suggestions_str = "\n".join(f"• {s}" for s in suggestions) if suggestions else "• Keep filing"
-        readiness = analysis.get("arcp_readiness", "needs_attention")
-        readiness_str = {"on_track": "🟢 On track", "needs_attention": "🟡 Needs attention", "at_risk": "🔴 At risk"}.get(readiness, readiness)
-        await query.message.edit_text(
-            f"📊 *Portfolio Health — {month_label}*\n\n"
-            f"⚠️ *Gaps:*\n{gaps_str}\n\n"
-            f"💡 *Suggestions:*\n{suggestions_str}\n\n"
-            f"ARCP readiness: {readiness_str}",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([[back_btn]]),
+        async def _cb_send_chart(fh):
+            try:
+                await query.message.chat.send_photo(photo=fh)
+            except Exception:
+                pass
+
+        return await _run_health_analysis(
+            user_id,
+            send_progress=_cb_send_progress,
+            send_result=_cb_send_result,
+            send_chart=_cb_send_chart,
+            send_help_gate=None,
         )
 
     elif action == "settings":
@@ -4390,24 +4358,21 @@ async def assignbeta_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ConversationHandler.END
 
 
-async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle /health — analyse portfolio health against ARCP requirements."""
-    user_id = update.effective_user.id
+async def _run_health_analysis(
+    user_id: int,
+    send_progress,
+    send_result,
+    send_chart,
+    send_help_gate,
+) -> int:
+    """Shared portfolio health analysis — called by both /health and inline menu.
 
-    # Gate: Unlimited or beta tester only
-    tier = await get_user_tier(user_id)
-    if tier != "pro_plus" and not await is_beta_tester(user_id):
-        await update.message.reply_text(
-            "📊 Portfolio Health is included in Portfolio Guru Unlimited.\n\n"
-            "Upgrade to get monthly ARCP readiness analysis.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
-            ]),
-        )
-        return ConversationHandler.END
-
-    await update.effective_chat.send_action(constants.ChatAction.TYPING)
-
+    Args:
+        send_progress: async callable(text) to show "analysing".
+        send_result: async callable(text) to show final result.
+        send_chart: async callable(file_bytes) to send chart photo.
+        send_help_gate: async callable() — gate failure handler.
+    """
     training_level = get_training_level(user_id)
     if not training_level:
         training_level = "ST4"
@@ -4416,20 +4381,16 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         level_note = ""
 
     history = await get_case_history(user_id, months=6)
-
     if not history:
-        await update.message.reply_text(
+        await send_result(
             "📊 *Portfolio Health*\n\n"
             "No cases filed yet. Start filing cases and come back to check your ARCP readiness.\n\n"
-            "Tip: Send a clinical case to get started.",
-            parse_mode="Markdown",
+            "Tip: Send a clinical case to get started."
         )
         return ConversationHandler.END
 
-    progress_msg = await update.message.reply_text("📊 Analysing your portfolio...")
+    await send_progress("📊 Analysing your portfolio...")
 
-    # Generate the chart image first (deterministic, fast). Fall back silently
-    # if matplotlib isn't available — text-only health still ships.
     chart_path = None
     try:
         from portfolio_chart import generate_health_chart_async
@@ -4442,7 +4403,7 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if chart_path:
         try:
             with open(chart_path, "rb") as fh:
-                await update.message.reply_photo(photo=fh)
+                await send_chart(fh)
         except Exception as e:
             logger.warning(f"Sending portfolio chart failed: {e}", exc_info=True)
         finally:
@@ -4457,17 +4418,16 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
     except asyncio.TimeoutError:
         logger.warning("Portfolio health analysis timed out (45s)")
-        await progress_msg.edit_text("⚠️ Analysis took too long — please try again.")
+        await send_result("⚠️ Analysis took too long — please try again.")
         return ConversationHandler.END
     except Exception as e:
         logger.error(f"Portfolio health analysis failed: {e}", exc_info=True)
-        await progress_msg.edit_text("❌ Could not analyse portfolio health. Try again later.")
+        await send_result("❌ Could not analyse portfolio health. Try again later.")
         return ConversationHandler.END
 
     from datetime import datetime as _dt
     month_label = _dt.now().strftime("%B %Y")
 
-    # Form distribution line
     form_dist = analysis.get("form_distribution", {})
     from form_schemas import FORM_SCHEMAS as _FS
     dist_parts = []
@@ -4476,19 +4436,13 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         dist_parts.append(f"{name} ({count})")
     dist_str = " · ".join(dist_parts) if dist_parts else "None"
 
-    # Strengths
     strengths = analysis.get("strengths", [])
     strengths_str = "\n".join(f"• {s}" for s in strengths) if strengths else "• None identified yet"
-
-    # Gaps
     gaps = analysis.get("gaps", [])
     gaps_str = "\n".join(f"• {g}" for g in gaps) if gaps else "• No major gaps"
-
-    # Suggestions
     suggestions = analysis.get("suggestions", [])
     suggestions_str = "\n".join(f"• {s}" for s in suggestions) if suggestions else "• Keep filing cases"
 
-    # ARCP readiness
     readiness = analysis.get("arcp_readiness", "needs_attention")
     readiness_map = {
         "on_track": "🟢 On track",
@@ -4496,7 +4450,6 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "at_risk": "🔴 At risk",
     }
     readiness_str = readiness_map.get(readiness, readiness)
-
     total = analysis.get("total_cases", len(history))
 
     msg = (
@@ -4509,9 +4462,56 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         f"ARCP readiness: {readiness_str}"
         f"{level_note}"
     )
-
-    await progress_msg.edit_text(msg, parse_mode="Markdown")
+    await send_result(msg)
     return ConversationHandler.END
+
+
+async def _health_gate_check(user_id: int) -> bool:
+    """Check if user can access health. Returns True if allowed."""
+    tier = await get_user_tier(user_id)
+    return tier == "pro_plus" or await is_beta_tester(user_id)
+
+
+async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle /health — analyse portfolio health against ARCP requirements."""
+    user_id = update.effective_user.id
+
+    if not await _health_gate_check(user_id):
+        await update.message.reply_text(
+            "📊 Portfolio Health is included in Portfolio Guru Unlimited.\n\n"
+            "Upgrade to get monthly ARCP readiness analysis.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
+            ]),
+        )
+        return ConversationHandler.END
+
+    await update.effective_chat.send_action(constants.ChatAction.TYPING)
+
+    async def _send_progress(t):
+        nonlocal _pm
+        if not _pm:
+            _pm = await update.message.reply_text(t)
+        else:
+            try:
+                await _pm.edit_text(t)
+            except Exception:
+                pass
+
+    async def _send_result(t):
+        await _pm.edit_text(t, parse_mode="Markdown")
+
+    async def _send_chart(fh):
+        await update.message.reply_photo(photo=fh)
+
+    _pm = None
+    return await _run_health_analysis(
+        user_id,
+        send_progress=_send_progress,
+        send_result=_send_result,
+        send_chart=_send_chart,
+        send_help_gate=None,
+    )
 
 
 async def curriculum_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
