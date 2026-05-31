@@ -31,6 +31,8 @@ from usage import (
     TIER_LIMITS,
     get_case_history,
     get_cases_this_month,
+    get_kc_coverage,
+    get_kc_stats,
     get_user_tier,
     is_beta_tester,
 )
@@ -189,6 +191,11 @@ def _coverage_from_history(history_6mo: list[dict]) -> set[int]:
     return covered
 
 
+def _coverage_from_kcs(kc_coverage: dict[int, list[str]]) -> set[int]:
+    """SLOs with at least one demonstrated KC."""
+    return {slo for slo, kcs in kc_coverage.items() if kcs}
+
+
 def _render(
     user_id: int,
     history_6mo: list[dict],
@@ -196,11 +203,19 @@ def _render(
     tier: str,
     limit: int,
     training_level: Optional[str],
+    kc_coverage: Optional[dict[int, list[str]]] = None,
+    kc_stats: Optional[dict] = None,
 ) -> str:
     this_month = _filter_this_month(history_6mo)
     form_counts = Counter(r["form_type"] for r in this_month if r.get("form_type"))
     weekly = _weekly_buckets(this_month)
-    coverage = _coverage_from_history(history_6mo)
+    # Prefer real KC-derived coverage when the user has any demonstrated KCs;
+    # fall back to the form-type→SLO mapping for users whose filings predate
+    # KC tracking.
+    if kc_coverage and any(kc_coverage.values()):
+        coverage = _coverage_from_kcs(kc_coverage)
+    else:
+        coverage = _coverage_from_history(history_6mo)
 
     fig = plt.figure(figsize=(8, 8), dpi=100, facecolor=COLOR_BG)
     plt.rcParams["font.family"] = "DejaVu Sans"
@@ -335,6 +350,12 @@ def _render(
     else:
         plan_line = f"{tier_pretty} Plan · {cases_this_month}/{limit}"
     level_line = training_level or "Training level not set"
+    kc_line = ""
+    if kc_stats and kc_stats.get("total_kcs", 0) > 0:
+        kc_line = (
+            f"KCs demonstrated: {kc_stats['total_kcs']} across "
+            f"{kc_stats['slos_covered']}/{kc_stats['slos_total']} SLOs"
+        )
 
     usage_ax.text(0.5, 0.74, str(cases_this_month),
                   fontsize=44, fontweight="bold",
@@ -348,6 +369,10 @@ def _render(
     usage_ax.text(0.5, 0.18, level_line,
                   fontsize=10, color=COLOR_LABEL,
                   ha="center", va="center")
+    if kc_line:
+        usage_ax.text(0.5, 0.10, kc_line,
+                      fontsize=9, color=COLOR_LABEL,
+                      ha="center", va="center")
 
     if limit > 0:
         frac = min(cases_this_month / limit, 1.0)
@@ -377,12 +402,20 @@ async def _collect(user_id: int) -> dict:
     else:
         tier_label = tier
         limit = TIER_LIMITS.get(tier, 5)
+    try:
+        kc_coverage = await get_kc_coverage(user_id)
+        kc_stats = await get_kc_stats(user_id)
+    except Exception:
+        kc_coverage = {}
+        kc_stats = None
     return {
         "history": history,
         "cases_this_month": cases,
         "tier": tier_label,
         "limit": limit,
         "training_level": get_training_level(user_id),
+        "kc_coverage": kc_coverage,
+        "kc_stats": kc_stats,
     }
 
 
@@ -395,6 +428,8 @@ async def generate_health_chart_async(user_id: int) -> str:
         tier=data["tier"],
         limit=data["limit"],
         training_level=data["training_level"],
+        kc_coverage=data.get("kc_coverage"),
+        kc_stats=data.get("kc_stats"),
     )
 
 

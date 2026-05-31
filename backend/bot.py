@@ -15,7 +15,7 @@ from telegram.ext import (
 )
 from store import store_credentials, get_credentials, has_credentials, init
 from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, is_reuse_request, review_draft, analyse_portfolio_health, summarise_recent_activity, generate_nudge_copy, extract_field_updates, compose_filing_recovery_copy, combine_case_inputs
-from usage import record_case_filed, get_cases_this_month, check_can_file, get_user_tier, set_user_tier, get_case_history, TIER_LIMITS, get_all_active_users, get_cases_this_week, is_beta_tester, set_beta_tester
+from usage import record_case_filed, get_cases_this_month, check_can_file, get_user_tier, set_user_tier, get_case_history, TIER_LIMITS, get_all_active_users, get_cases_this_week, is_beta_tester, set_beta_tester, save_kc_coverage
 from filer_router import route_filing
 from kaizen_form_filer import FORM_UUIDS
 from form_schemas import FORM_SCHEMAS
@@ -6815,6 +6815,14 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 usage_line = f"\n\n📊 {used}/{limit} cases this month ({tier_label})"
         except Exception:
             logger.warning("Usage tracking failed", exc_info=True)
+
+    if status == "success":
+        try:
+            kcs = fields.get("key_capabilities") or fields.get("curriculum_links")
+            if kcs:
+                await save_kc_coverage(user_id, form_type, kcs)
+        except Exception:
+            logger.warning("KC coverage save failed", exc_info=True)
 
         # Mirror the filed case to Supabase portfolio_cases so the web app's
         # case browser can render it. Encrypt the case_text with the same

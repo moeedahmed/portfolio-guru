@@ -3,7 +3,9 @@ Usage tracking for Portfolio Guru.
 Records filed cases per user for metering and portfolio health analysis.
 Uses aiosqlite for async SQLite access.
 """
+import json
 import os
+import re
 import aiosqlite
 from datetime import datetime, timezone, timedelta
 
@@ -55,6 +57,19 @@ async def _ensure_db():
                 event_type TEXT NOT NULL,
                 processed_at TEXT DEFAULT (datetime('now'))
             )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS kc_coverage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_user_id INTEGER NOT NULL,
+                form_type TEXT NOT NULL,
+                kcs_selected TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_kc_coverage_user
+            ON kc_coverage(telegram_user_id)
         """)
         # Additive migration: is_beta flag (unlimited override, not a paid tier).
         try:
@@ -269,3 +284,130 @@ async def mark_stripe_event_processed(event_id: str, event_type: str):
             (event_id, event_type),
         )
         await db.commit()
+
+
+# KC strings look like "SLO1 KC2: Apply knowledge..." or "SLO10 KC3".
+# The number after SLO is what we need to bucket coverage by SLO.
+_SLO_NUM_RE = re.compile(r"SLO\s*(\d{1,2})", re.IGNORECASE)
+
+
+def _slo_number_for_kc(kc: str) -> int | None:
+    if not isinstance(kc, str):
+        return None
+    match = _SLO_NUM_RE.search(kc)
+    if not match:
+        return None
+    try:
+        n = int(match.group(1))
+    except ValueError:
+        return None
+    return n if 1 <= n <= 12 else None
+
+
+async def save_kc_coverage(user_id: int, form_type: str, kcs) -> None:
+    """Persist the KCs demonstrated by a filed draft.
+
+    `kcs` is the list of KC strings from the draft's `key_capabilities` (or
+    `curriculum_links` fallback). No-ops on empty/invalid input.
+    """
+    if not kcs:
+        return
+    if not isinstance(kcs, (list, tuple)):
+        return
+    cleaned = [str(k).strip() for k in kcs if isinstance(k, (str, int, float)) and str(k).strip()]
+    if not cleaned:
+        return
+    await _ensure_db()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO kc_coverage (telegram_user_id, form_type, kcs_selected) VALUES (?, ?, ?)",
+            (user_id, form_type, json.dumps(cleaned)),
+        )
+        await db.commit()
+
+
+async def get_kc_coverage(user_id: int) -> dict:
+    """Return {slo_number: [kc_string, ...]} for every KC the user has demonstrated.
+
+    KC strings whose SLO number can't be parsed are dropped. Within each
+    SLO bucket the KCs are de-duplicated, keeping first-seen order.
+    """
+    await _ensure_db()
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT kcs_selected FROM kc_coverage WHERE telegram_user_id = ? ORDER BY created_at ASC",
+            (user_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+    buckets: dict[int, list[str]] = {}
+    seen_by_slo: dict[int, set[str]] = {}
+    for (raw,) in rows:
+        try:
+            kcs = json.loads(raw) if raw else []
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(kcs, list):
+            continue
+        for kc in kcs:
+            if not isinstance(kc, str):
+                continue
+            slo = _slo_number_for_kc(kc)
+            if slo is None:
+                continue
+            if kc in seen_by_slo.setdefault(slo, set()):
+                continue
+            seen_by_slo[slo].add(kc)
+            buckets.setdefault(slo, []).append(kc)
+    return buckets
+
+
+async def get_kc_stats(user_id: int) -> dict:
+    """Summarise a user's KC coverage.
+
+    Returns: {
+        total_kcs: int,         # distinct KCs ever demonstrated
+        slos_covered: int,      # SLO buckets with at least one KC
+        slos_total: int,        # always 12
+        recent_kcs: list[str],  # last 5 KC strings (newest first)
+    }
+    """
+    coverage = await get_kc_coverage(user_id)
+    total_kcs = sum(len(v) for v in coverage.values())
+    slos_covered = sum(1 for v in coverage.values() if v)
+
+    await _ensure_db()
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT kcs_selected FROM kc_coverage WHERE telegram_user_id = ? ORDER BY created_at DESC",
+            (user_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+    recent: list[str] = []
+    seen: set[str] = set()
+    for (raw,) in rows:
+        try:
+            kcs = json.loads(raw) if raw else []
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(kcs, list):
+            continue
+        for kc in kcs:
+            if not isinstance(kc, str) or kc in seen:
+                continue
+            if _slo_number_for_kc(kc) is None:
+                continue
+            seen.add(kc)
+            recent.append(kc)
+            if len(recent) >= 5:
+                break
+        if len(recent) >= 5:
+            break
+
+    return {
+        "total_kcs": total_kcs,
+        "slos_covered": slos_covered,
+        "slos_total": 12,
+        "recent_kcs": recent,
+    }
