@@ -37,14 +37,21 @@ from usage import (
 from profile_store import get_training_level
 
 # Brand palette
+COLOR_BG = "#F8FAFC"
 COLOR_HEADER = "#0B1F33"
 COLOR_ACCENT = "#1E6FBA"
+COLOR_ACCENT_LIGHT = "#4A90D9"
 COLOR_ACCENT_DIM = "#A8C6E5"
 COLOR_TEXT_LIGHT = "#FFFFFF"
 COLOR_TEXT_DARK = "#1A1A1A"
+COLOR_LABEL = "#4A5568"
 COLOR_MUTED = "#7A8794"
 COLOR_GRID_EMPTY = "#E6EBF0"
 COLOR_GRID_FILLED = "#1E6FBA"
+COLOR_SLO_FILLED = "#22C55E"
+
+# Gradient of brand blues used for ranked bars (dark = highest rank).
+PALETTE_BLUES = ["#0B3D6B", "#15579A", "#1E6FBA", "#4A90D9", "#7FB3E5", "#A8C6E5"]
 
 # Each WPBA / activity form maps to one or more SLOs.
 # Conservative mapping — only credit SLOs where the form type genuinely
@@ -195,11 +202,11 @@ def _render(
     weekly = _weekly_buckets(this_month)
     coverage = _coverage_from_history(history_6mo)
 
-    fig = plt.figure(figsize=(8, 8), dpi=100, facecolor="white")
+    fig = plt.figure(figsize=(8, 8), dpi=100, facecolor=COLOR_BG)
+    plt.rcParams["font.family"] = "DejaVu Sans"
 
-    # Header band
+    # ===== Header band =====
     header_ax = fig.add_axes([0, 0.88, 1, 0.12])
-    header_ax.set_facecolor(COLOR_HEADER)
     header_ax.axis("off")
     header_ax.add_patch(
         Rectangle((0, 0), 1, 1, transform=header_ax.transAxes,
@@ -207,72 +214,57 @@ def _render(
     )
     month_label = datetime.now().strftime("%B %Y")
     header_ax.text(
-        0.04, 0.62, "Portfolio Health",
-        fontsize=20, fontweight="bold", color=COLOR_TEXT_LIGHT,
+        0.04, 0.60, "Portfolio Health",
+        fontsize=18, fontweight="bold", color=COLOR_TEXT_LIGHT,
         transform=header_ax.transAxes,
     )
-    level_str = training_level or "Training level not set"
     header_ax.text(
-        0.04, 0.22, f"{month_label}  ·  {level_str}",
+        0.04, 0.22, month_label,
         fontsize=11, color=COLOR_ACCENT_DIM,
         transform=header_ax.transAxes,
     )
 
-    # Usage headline panel
-    usage_ax = fig.add_axes([0.04, 0.74, 0.92, 0.10])
-    usage_ax.axis("off")
-    if limit == -1:
-        usage_text = f"{cases_this_month} cases filed this month"
-        sub_text = f"Plan: {tier} (unlimited)"
-    else:
-        usage_text = f"{cases_this_month} of {limit} cases filed this month"
-        sub_text = f"Plan: {tier}"
-    usage_ax.text(0.0, 0.65, usage_text, fontsize=16, fontweight="bold",
-                  color=COLOR_TEXT_DARK)
-    usage_ax.text(0.0, 0.15, sub_text, fontsize=10, color=COLOR_MUTED)
+    # Panel title positions (figure coords)
+    TITLE_Y_TOP = 0.815
+    TITLE_Y_BOT = 0.395
 
-    # Quota bar (only if there's a finite limit)
-    if limit > 0:
-        frac = min(cases_this_month / limit, 1.0)
-        usage_ax.add_patch(Rectangle((0.55, 0.45), 0.42, 0.18,
-                                     color=COLOR_GRID_EMPTY,
-                                     transform=usage_ax.transAxes))
-        usage_ax.add_patch(Rectangle((0.55, 0.45), 0.42 * frac, 0.18,
-                                     color=COLOR_ACCENT,
-                                     transform=usage_ax.transAxes))
-
-    # Form-type distribution panel (left)
-    forms_ax = fig.add_axes([0.16, 0.40, 0.32, 0.28])
-    forms_ax.set_title("This month by form type", fontsize=11, loc="left",
-                       color=COLOR_TEXT_DARK, pad=8)
+    # ===== Top-left: Form types (horizontal bar) =====
+    fig.text(0.06, TITLE_Y_TOP, "This month by form type",
+             fontsize=12, fontweight="bold", color=COLOR_TEXT_DARK)
+    forms_ax = fig.add_axes([0.20, 0.50, 0.28, 0.28])
+    forms_ax.set_facecolor(COLOR_BG)
     if form_counts:
         items = form_counts.most_common(6)
         labels = [_short_form_name(ft) for ft, _ in items]
         values = [c for _, c in items]
-        y_pos = range(len(items))
-        forms_ax.barh(y_pos, values, color=COLOR_ACCENT, height=0.6)
-        forms_ax.set_yticks(list(y_pos))
-        forms_ax.set_yticklabels(labels, fontsize=9, color=COLOR_TEXT_DARK)
+        n = len(items)
+        colors = [PALETTE_BLUES[min(i, len(PALETTE_BLUES) - 1)] for i in range(n)]
+        y_pos = list(range(n))
+        forms_ax.barh(y_pos, values, color=colors, height=0.62, edgecolor="none")
+        forms_ax.set_yticks(y_pos)
+        forms_ax.set_yticklabels(labels, fontsize=9, color=COLOR_LABEL)
         forms_ax.invert_yaxis()
-        forms_ax.set_xlim(0, max(values) + 1)
-        forms_ax.spines["top"].set_visible(False)
-        forms_ax.spines["right"].set_visible(False)
-        forms_ax.spines["left"].set_color(COLOR_MUTED)
-        forms_ax.spines["bottom"].set_color(COLOR_MUTED)
-        forms_ax.tick_params(axis="x", colors=COLOR_MUTED, labelsize=8)
+        max_v = max(values)
+        forms_ax.set_xlim(0, max_v * 1.18 + 1)
+        forms_ax.set_xticks([])
+        for s in ("top", "right", "bottom"):
+            forms_ax.spines[s].set_visible(False)
+        forms_ax.spines["left"].set_color(COLOR_GRID_EMPTY)
+        forms_ax.tick_params(axis="y", length=0)
         for i, v in enumerate(values):
-            forms_ax.text(v + 0.05, i, str(v), va="center",
-                          fontsize=9, color=COLOR_TEXT_DARK)
+            forms_ax.text(v + max_v * 0.05, i, str(v),
+                          va="center", fontsize=9, fontweight="bold",
+                          color=COLOR_TEXT_DARK)
     else:
         forms_ax.text(0.5, 0.5, "No filings yet this month",
                       ha="center", va="center", fontsize=10,
                       color=COLOR_MUTED, transform=forms_ax.transAxes)
         forms_ax.axis("off")
 
-    # SLO coverage grid (right)
-    slo_ax = fig.add_axes([0.55, 0.40, 0.40, 0.28])
-    slo_ax.set_title("Curriculum coverage (SLO 1–12, last 6mo)",
-                     fontsize=11, loc="left", color=COLOR_TEXT_DARK, pad=8)
+    # ===== Top-right: SLO coverage grid =====
+    fig.text(0.54, TITLE_Y_TOP, "Curriculum coverage (last 6 mo)",
+             fontsize=12, fontweight="bold", color=COLOR_TEXT_DARK)
+    slo_ax = fig.add_axes([0.54, 0.50, 0.42, 0.28])
     slo_ax.set_xlim(0, 4)
     slo_ax.set_ylim(0, 3)
     slo_ax.invert_yaxis()
@@ -281,48 +273,94 @@ def _render(
         row, col = divmod(idx, 4)
         slo_num = idx + 1
         filled = slo_num in coverage
-        x = col + 0.08
-        y = row + 0.18
+        x = col + 0.10
+        y = row + 0.15
         slo_ax.add_patch(Rectangle(
-            (x, y), 0.84, 0.64,
-            color=COLOR_GRID_FILLED if filled else COLOR_GRID_EMPTY,
-            ec="white", lw=1,
+            (x, y), 0.80, 0.70,
+            facecolor=COLOR_SLO_FILLED if filled else COLOR_GRID_EMPTY,
+            edgecolor=COLOR_BG, linewidth=2,
         ))
         slo_ax.text(
-            x + 0.42, y + 0.32, f"SLO{slo_num}",
-            ha="center", va="center", fontsize=9, fontweight="bold",
+            x + 0.40, y + 0.35, str(slo_num),
+            ha="center", va="center",
+            fontsize=14, fontweight="bold",
             color=COLOR_TEXT_LIGHT if filled else COLOR_MUTED,
         )
 
-    # Weekly trend (bottom, full width)
-    trend_ax = fig.add_axes([0.08, 0.08, 0.87, 0.22])
-    trend_ax.set_title("Filings per week (this month)", fontsize=11,
-                       loc="left", color=COLOR_TEXT_DARK, pad=8)
+    # ===== Bottom-left: Weekly trend =====
+    fig.text(0.06, TITLE_Y_BOT, "Filings per week",
+             fontsize=12, fontweight="bold", color=COLOR_TEXT_DARK)
+    trend_ax = fig.add_axes([0.10, 0.08, 0.38, 0.27])
+    trend_ax.set_facecolor(COLOR_BG)
     if weekly:
         labels = [w[0] for w in weekly]
         values = [w[1] for w in weekly]
-        x_pos = range(len(weekly))
-        trend_ax.bar(x_pos, values, color=COLOR_ACCENT, width=0.55)
-        trend_ax.set_xticks(list(x_pos))
-        trend_ax.set_xticklabels(labels, fontsize=9, color=COLOR_TEXT_DARK)
-        trend_ax.spines["top"].set_visible(False)
-        trend_ax.spines["right"].set_visible(False)
-        trend_ax.spines["left"].set_color(COLOR_MUTED)
-        trend_ax.spines["bottom"].set_color(COLOR_MUTED)
-        trend_ax.tick_params(axis="y", colors=COLOR_MUTED, labelsize=8)
-        trend_ax.set_ylim(0, max(values + [1]) + 1)
+        n = len(weekly)
+        x_pos = list(range(n))
+        max_v = max(values + [1])
+        bar_colors = [COLOR_ACCENT_LIGHT if v < max_v else COLOR_ACCENT
+                      for v in values]
+        trend_ax.bar(x_pos, values, color=bar_colors, width=0.58,
+                     edgecolor="none", zorder=2)
+        trend_ax.set_xticks(x_pos)
+        trend_ax.set_xticklabels(labels, fontsize=9, color=COLOR_LABEL)
+        trend_ax.set_ylim(0, max_v * 1.25 + 0.5)
+        trend_ax.set_yticks([])
+        trend_ax.yaxis.grid(True, color=COLOR_GRID_EMPTY,
+                            linewidth=0.7, zorder=0)
+        trend_ax.set_axisbelow(True)
+        for s in ("top", "right", "left"):
+            trend_ax.spines[s].set_visible(False)
+        trend_ax.spines["bottom"].set_color(COLOR_GRID_EMPTY)
+        trend_ax.tick_params(axis="x", length=0)
         for i, v in enumerate(values):
             if v > 0:
-                trend_ax.text(i, v + 0.05, str(v), ha="center",
-                              fontsize=9, color=COLOR_TEXT_DARK)
+                trend_ax.text(i, v + max_v * 0.06, str(v),
+                              ha="center", fontsize=9, fontweight="bold",
+                              color=COLOR_TEXT_DARK)
     else:
         trend_ax.axis("off")
+
+    # ===== Bottom-right: Usage / activity summary card =====
+    fig.text(0.54, TITLE_Y_BOT, "Activity summary",
+             fontsize=12, fontweight="bold", color=COLOR_TEXT_DARK)
+    usage_ax = fig.add_axes([0.54, 0.08, 0.42, 0.27])
+    usage_ax.set_xlim(0, 1)
+    usage_ax.set_ylim(0, 1)
+    usage_ax.axis("off")
+
+    tier_pretty = (tier or "").strip().title() or "Plan"
+    if limit == -1:
+        plan_line = f"{tier_pretty} Plan · unlimited"
+    else:
+        plan_line = f"{tier_pretty} Plan · {cases_this_month}/{limit}"
+    level_line = training_level or "Training level not set"
+
+    usage_ax.text(0.5, 0.74, str(cases_this_month),
+                  fontsize=44, fontweight="bold",
+                  color=COLOR_ACCENT, ha="center", va="center")
+    usage_ax.text(0.5, 0.48, "cases filed this month",
+                  fontsize=10, color=COLOR_MUTED,
+                  ha="center", va="center")
+    usage_ax.text(0.5, 0.30, plan_line,
+                  fontsize=11, fontweight="bold",
+                  color=COLOR_TEXT_DARK, ha="center", va="center")
+    usage_ax.text(0.5, 0.18, level_line,
+                  fontsize=10, color=COLOR_LABEL,
+                  ha="center", va="center")
+
+    if limit > 0:
+        frac = min(cases_this_month / limit, 1.0)
+        usage_ax.add_patch(Rectangle((0.15, 0.04), 0.70, 0.035,
+                                     color=COLOR_GRID_EMPTY))
+        usage_ax.add_patch(Rectangle((0.15, 0.04), 0.70 * frac, 0.035,
+                                     color=COLOR_ACCENT))
 
     # Save to temp file
     fd, path = tempfile.mkstemp(prefix=f"portfolio_health_{user_id}_",
                                 suffix=".png")
     os.close(fd)
-    fig.savefig(path, dpi=100, facecolor="white")
+    fig.savefig(path, dpi=100, facecolor=COLOR_BG)
     plt.close(fig)
     return path
 
