@@ -290,13 +290,20 @@ def _nudge_label(form_type: str) -> str:
 
 
 async def _compute_weekly_stats(user_id: int) -> dict:
-    """Compute cases this week + longest form gap for a user."""
+    """Compute cases this week + longest form gap for a user.
+
+    Also returns top form this month and how many distinct form types the
+    user has filed this month — used by the weekly digest. KC coverage is
+    intentionally not computed here: it lives in case payloads, not the
+    usage table, so a faithful number would require an LLM pass per user.
+    """
     from datetime import datetime, timezone
     import aiosqlite as _aiosqlite
     from usage import DB_PATH, _ensure_db
 
     await _ensure_db()
     cases = await get_cases_this_week(user_id)
+    month_key = datetime.now(timezone.utc).strftime("%Y-%m")
 
     async with _aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
@@ -305,6 +312,13 @@ async def _compute_weekly_stats(user_id: int) -> dict:
             (user_id,),
         ) as cur:
             rows = await cur.fetchall()
+        async with db.execute(
+            "SELECT form_type, COUNT(*) AS n FROM portfolio_usage "
+            "WHERE telegram_user_id = ? AND month_key = ? "
+            "GROUP BY form_type ORDER BY n DESC, form_type ASC",
+            (user_id, month_key),
+        ) as cur:
+            month_rows = await cur.fetchall()
 
     gap = None
     if rows:
@@ -324,7 +338,16 @@ async def _compute_weekly_stats(user_id: int) -> dict:
         if worst_days >= 7 and worst_form:
             gap = (_nudge_label(worst_form), worst_days)
 
-    return {"cases": cases, "gap": gap}
+    top_form = None
+    if month_rows:
+        top_form = (_nudge_label(month_rows[0][0]), month_rows[0][1])
+
+    return {
+        "cases": cases,
+        "gap": gap,
+        "top_form": top_form,
+        "form_types_this_month": len(month_rows),
+    }
 
 
 def _static_nudge_text(stats: dict) -> str:
@@ -362,8 +385,43 @@ async def _build_nudge_message(stats: dict) -> tuple[str, InlineKeyboardMarkup |
     return text, None
 
 
+def _build_weekly_digest_text(stats: dict) -> str:
+    """Compose the weekly digest body (Markdown).
+
+    Mirrors the fields agreed in the digest brief: cases-this-week, top form
+    this month, form-type breadth (used as a faithful proxy for coverage —
+    we don't store KC codes in portfolio_usage so we don't claim KC numbers),
+    and a single nudge line.
+    """
+    cases = stats.get("cases", 0)
+    top_form = stats.get("top_form")
+    form_types = stats.get("form_types_this_month", 0)
+    gap = stats.get("gap")
+
+    lines = ["📊 *Your Weekly Portfolio Digest*", ""]
+    lines.append(f"This week: {cases} case{'s' if cases != 1 else ''} filed.")
+    if top_form:
+        label, count = top_form
+        lines.append(f"Top form this month: {label} ({count})")
+    if form_types:
+        lines.append(f"Form types this month: {form_types}")
+
+    if gap:
+        label, days = gap
+        nudge = f"Longest gap: no {label} in {days} days — worth a quick log."
+    elif cases == 0:
+        nudge = "No cases this week — one takes 2 minutes. Send text, voice, photo, or document."
+    else:
+        nudge = "Keep the momentum going — send me what happened next."
+    lines.append("")
+    lines.append(nudge)
+    lines.append("")
+    lines.append("Tap /health for full analysis.")
+    return "\n".join(lines)
+
+
 async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send weekly gap-detection nudge to all active users.
+    """Send the weekly portfolio digest (chart + summary) to active users.
 
     Guard: file-based dedup (survives bot restarts + persistence flush failures).
     Skips if run within 6 days of last send — keeps a true weekly cadence even
@@ -390,11 +448,33 @@ async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
     for user_id in users:
         try:
             stats = await _compute_weekly_stats(user_id)
-            text, keyboard = await _build_nudge_message(stats)
+            text = _build_weekly_digest_text(stats)
+
+            chart_path = None
+            try:
+                from portfolio_chart import generate_health_chart_async
+                chart_path = await generate_health_chart_async(user_id)
+            except ImportError:
+                logger.info("matplotlib not installed; weekly digest will be text-only for %s", user_id)
+            except Exception as e:
+                logger.warning("weekly_push chart generation failed for %s: %s", user_id, e)
+
+            if chart_path:
+                try:
+                    with open(chart_path, "rb") as fh:
+                        await context.bot.send_photo(chat_id=user_id, photo=fh)
+                except Exception as e:
+                    logger.warning("weekly_push chart send failed for %s: %s", user_id, e)
+                finally:
+                    try:
+                        os.remove(chart_path)
+                    except OSError:
+                        pass
+
             await context.bot.send_message(
                 chat_id=user_id,
                 text=text,
-                reply_markup=keyboard,
+                parse_mode="Markdown",
             )
             sent += 1
         except Exception as e:
@@ -8281,8 +8361,20 @@ def main():
     application = build_application()
     application.add_error_handler(error_handler)
 
-    # Weekly nudge — every 7 days. first=86400 means don't fire on startup.
-    application.job_queue.run_repeating(weekly_push, interval=604800, first=86400)
+    # Weekly portfolio digest — Sunday 20:00 UK time (handles BST/GMT).
+    # JobQueue.run_daily uses ISO weekdays: Monday=0 … Sunday=6.
+    from datetime import time as _dtime
+    try:
+        from zoneinfo import ZoneInfo as _ZoneInfo
+        _uk_tz = _ZoneInfo("Europe/London")
+    except Exception:
+        _uk_tz = None  # fall back to UTC if tzdata is unavailable
+    application.job_queue.run_daily(
+        weekly_push,
+        time=_dtime(hour=20, minute=0, tzinfo=_uk_tz),
+        days=(6,),
+        name="weekly_push",
+    )
 
     # Clinical Supervisor poll — read-only, inert unless there is at least
     # one user with cached kaizen_role=="assessor" AND credentials AND a

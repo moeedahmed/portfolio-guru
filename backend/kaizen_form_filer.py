@@ -30,6 +30,7 @@ import subprocess
 import tempfile
 import urllib.request
 from datetime import datetime, date
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from playwright.async_api import async_playwright, Page, Browser, BrowserContext
@@ -1347,6 +1348,78 @@ async def _connect_cdp() -> tuple:
         return page, pw
 
 
+# ─── Session-state cache ─────────────────────────────────────────────────────
+#
+# After a successful RCEM login we encrypt Playwright's storage_state (cookies
+# + origins) and stash it per Telegram user. Subsequent filings replay the
+# cookies and skip the 5-10s portal hop. Kaizen sessions expire silently; we
+# detect that by navigating to /activities and falling back to a fresh login
+# if the page bounces to a login URL.
+
+_SESSION_DIR = Path.home() / ".openclaw/data/portfolio-guru/sessions"
+
+
+def _session_cache_path(telegram_user_id: int) -> Path:
+    return _SESSION_DIR / f"{telegram_user_id}.encrypted"
+
+
+def _encrypt_session_state(state: dict) -> bytes:
+    from credentials import _fernet
+    return _fernet().encrypt(json.dumps(state).encode())
+
+
+def _decrypt_session_state(blob: bytes) -> Optional[dict]:
+    from credentials import _fernet
+    try:
+        return json.loads(_fernet().decrypt(blob).decode())
+    except Exception:
+        return None
+
+
+async def save_session_state(context: BrowserContext, telegram_user_id: int) -> None:
+    """Encrypt and persist the storage state of a successful login session."""
+    try:
+        state = await context.storage_state()
+        encrypted = _encrypt_session_state(state)
+        _SESSION_DIR.mkdir(parents=True, exist_ok=True)
+        _session_cache_path(telegram_user_id).write_bytes(encrypted)
+        logger.info(f"Saved Kaizen session cache for user {telegram_user_id}")
+    except Exception as e:
+        logger.warning(f"Could not save session cache for user {telegram_user_id}: {e}")
+
+
+def load_session_state(telegram_user_id: int) -> Optional[dict]:
+    """Load and decrypt a saved session state. Returns None if missing or corrupt."""
+    path = _session_cache_path(telegram_user_id)
+    if not path.exists():
+        return None
+    try:
+        return _decrypt_session_state(path.read_bytes())
+    except Exception:
+        return None
+
+
+async def use_cached_session(page: Page, telegram_user_id: int) -> bool:
+    """Try to restore a cached session. Returns True if it lands on Kaizen, False otherwise."""
+    state = load_session_state(telegram_user_id)
+    if not state:
+        return False
+    try:
+        await page.context.add_cookies(state.get("cookies", []))
+    except Exception as e:
+        logger.warning(f"add_cookies failed for cached session (user {telegram_user_id}): {e}")
+        return False
+    try:
+        await page.goto("https://kaizenep.com/activities", wait_until="load", timeout=15000)
+        await asyncio.sleep(2)
+        if "kaizenep.com" in page.url and "/login" not in page.url.lower():
+            logger.info(f"Replayed cached Kaizen session for user {telegram_user_id}")
+            return True
+    except Exception as e:
+        logger.info(f"Cached session navigation failed for user {telegram_user_id}: {e}")
+    return False
+
+
 # ─── Login ────────────────────────────────────────────────────────────────────
 
 async def _login(page: Page, username: str, password: str) -> bool:
@@ -2179,6 +2252,7 @@ async def fill_kaizen_form(
     draft_uuid: str = None,
     save_as_draft: bool = True,
     screenshot_path: str = None,
+    telegram_user_id: Optional[int] = None,
 ) -> dict:
     """
     Fill a Kaizen form via CDP-connected Playwright.
@@ -2210,7 +2284,15 @@ async def fill_kaizen_form(
         # Fresh context is always on about:blank, so authenticate with the
         # caller's credentials. This guarantees the draft saves to their
         # portfolio, not to whoever the persistent profile happens to be.
-        logged_in = await _login(page, username, password)
+        # Try the encrypted cookie cache first to skip the 5-10s portal hop;
+        # fall back to a fresh login and refresh the cache on success.
+        logged_in = False
+        if telegram_user_id is not None:
+            logged_in = await use_cached_session(page, telegram_user_id)
+        if not logged_in:
+            logged_in = await _login(page, username, password)
+            if logged_in and telegram_user_id is not None:
+                await save_session_state(page.context, telegram_user_id)
         if not logged_in:
             return {"status": "failed", "filled": [], "skipped": [], "errors": ["Login failed"], "screenshot": None}
 
@@ -3119,6 +3201,7 @@ async def file_to_kaizen(
     attachment_path: Optional[str] = None,
     attachment_drive_url: Optional[str] = None,
     reuse_draft: bool = False,
+    telegram_user_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     File a form to Kaizen as a draft (legacy API).
@@ -3170,7 +3253,17 @@ async def file_to_kaizen(
         # need to authenticate with the caller's credentials. This guarantees
         # the draft saves to their portfolio, not to whoever the persistent
         # CDP profile happens to be logged in as.
-        if not await _login(page, username, password):
+        # Try replaying a cached storage state first — saves the 5-10s RCEM
+        # portal hop on every filing. Falls back to a fresh login and refreshes
+        # the cache if the cookies are missing, corrupt, or expired.
+        logged_in = False
+        if telegram_user_id is not None:
+            logged_in = await use_cached_session(page, telegram_user_id)
+        if not logged_in:
+            logged_in = await _login(page, username, password)
+            if logged_in and telegram_user_id is not None:
+                await save_session_state(page.context, telegram_user_id)
+        if not logged_in:
             return {
                 "status": "failed", "filled": [], "skipped": [],
                 "error": (
