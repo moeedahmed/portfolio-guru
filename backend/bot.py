@@ -9,6 +9,7 @@ import re
 import tempfile
 import time
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
+from telegram.error import BadRequest
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     filters, ContextTypes, ConversationHandler, PicklePersistence,
@@ -122,7 +123,13 @@ async def _safe_edit_text(target, text: str, **kwargs):
     For the first chunk, passes kwargs (reply_markup, parse_mode) through.
     Subsequent chunks are sent as new messages with no markup."""
     if len(text) <= MAX_TELEGRAM_MSG:
-        return await target.edit_text(text, **kwargs)
+        try:
+            return await target.edit_text(text, **kwargs)
+        except BadRequest as exc:
+            if "can't parse entities" in str(exc).lower() and kwargs.get("parse_mode"):
+                plain_kwargs = {k: v for k, v in kwargs.items() if k != "parse_mode"}
+                return await target.edit_text(text, **plain_kwargs)
+            raise
 
     # Split at last newline before limit
     chunks = []
@@ -139,11 +146,11 @@ async def _safe_edit_text(target, text: str, **kwargs):
 
     # First chunk gets the kwargs (reply_markup etc.)
     if len(chunks) == 1:
-        return await target.edit_text(chunks[0], **kwargs)
+        return await _safe_edit_text(target, chunks[0], **kwargs)
 
     # First chunk edits the existing message (no buttons — they go on last chunk)
     markup = kwargs.pop("reply_markup", None)
-    await target.edit_text(chunks[0], **kwargs)
+    await _safe_edit_text(target, chunks[0], **kwargs)
 
     # Middle chunks as new messages
     chat = target.chat if hasattr(target, "chat") else None
@@ -3846,7 +3853,8 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 pass
 
         async def send_result(text, reply_markup):
-            await query.message.edit_text(
+            await _safe_edit_text(
+                query.message,
                 text,
                 parse_mode="Markdown",
                 reply_markup=reply_markup or back_markup,
@@ -4810,9 +4818,15 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     async def send_result(text, reply_markup):
         msg = progress_holder.get("msg")
         if msg is not None:
-            await msg.edit_text(text, parse_mode="Markdown", reply_markup=reply_markup)
+            await _safe_edit_text(msg, text, parse_mode="Markdown", reply_markup=reply_markup)
         else:
-            await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
+            try:
+                await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
+            except BadRequest as exc:
+                if "can't parse entities" in str(exc).lower():
+                    await update.message.reply_text(text, reply_markup=reply_markup)
+                else:
+                    raise
 
     async def send_photo_fn(fh):
         await update.message.reply_photo(photo=fh)
@@ -8581,7 +8595,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
                 context,
                 update.effective_message.chat_id,
                 "Something went wrong. Use the latest message to start again.",
-                reply_markup=_build_next_step_keyboard(update.effective_user.id, include_reset=True),
+                reply_markup=_build_next_step_keyboard(update.effective_user.id),
             )
 
 

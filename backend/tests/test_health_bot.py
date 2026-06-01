@@ -3,10 +3,31 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from telegram.error import BadRequest
 from telegram.ext import ConversationHandler
 
 from health_models import HealthProfile, Pathway
 from tests.bot_simulator import BotSimulator
+
+
+@pytest.mark.asyncio
+async def test_safe_edit_text_retries_plain_text_when_markdown_is_invalid():
+    import bot
+
+    target = SimpleNamespace(
+        edit_text=AsyncMock(
+            side_effect=[
+                BadRequest("Can't parse entities: can't find end of the entity"),
+                "ok",
+            ]
+        )
+    )
+
+    result = await bot._safe_edit_text(target, "Bad _markdown", parse_mode="Markdown")
+
+    assert result == "ok"
+    assert target.edit_text.await_count == 2
+    assert target.edit_text.await_args_list[1].kwargs == {}
 
 
 @pytest.fixture
