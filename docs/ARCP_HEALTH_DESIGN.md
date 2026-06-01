@@ -1,6 +1,12 @@
 # Portfolio Readiness / ARCP Health Feature Spec
 
-**Status:** Product spec and implementation spine. No build started.
+> **RETIRED 2026-06-01.** Superseded by `docs/PORTFOLIO_HEALTH_SPEC.md`.
+> This spec conflated ARCP readiness with portfolio health, was RCEM/Kaizen-specific,
+> and assumed a training-only audience. The v2 spec separates Portfolio Health
+> (universal evidence tracker) from Pathway Guidance (selectable ARCP/CESR/SAS/
+> trust-grade overlays). Retained for historical reference only.
+
+**Status:** RETIRED
 **Last updated:** 2026-05-21
 
 ## Product Positioning
