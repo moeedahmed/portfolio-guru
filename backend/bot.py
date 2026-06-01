@@ -4496,33 +4496,13 @@ async def _run_health_analysis(
 
     await send_progress()
 
-    chart_path = None
-    try:
-        from portfolio_chart import generate_health_chart_async
-        chart_path = await generate_health_chart_async(user_id)
-    except ImportError:
-        logger.info("matplotlib not installed; skipping portfolio chart image")
-    except Exception as e:
-        logger.warning(f"Portfolio chart generation failed: {e}", exc_info=True)
-
-    if chart_path:
-        try:
-            with open(chart_path, "rb") as fh:
-                await send_photo_fn(fh)
-        except Exception as e:
-            logger.warning(f"Sending portfolio chart failed: {e}", exc_info=True)
-        finally:
-            try:
-                os.remove(chart_path)
-            except OSError:
-                pass
-
     from datetime import datetime as _dt
     month_label = _dt.now().strftime("%B %Y")
 
     if profile.pathway == Pathway.cesr_portfolio:
         msg = _format_cesr_health_message(snapshot, history, month_label)
         await send_result(msg, None)
+        await _send_health_chart(user_id, send_photo_fn)
         return
 
     try:
@@ -4541,6 +4521,7 @@ async def _run_health_analysis(
             ),
             None,
         )
+        await _send_health_chart(user_id, send_photo_fn)
         return
     except Exception as e:
         logger.error(f"Portfolio health analysis failed: {e}", exc_info=True)
@@ -4554,6 +4535,7 @@ async def _run_health_analysis(
             ),
             None,
         )
+        await _send_health_chart(user_id, send_photo_fn)
         return
 
     deterministic_str = _format_deterministic_health_section(snapshot)
@@ -4592,6 +4574,32 @@ async def _run_health_analysis(
         f"{level_note}"
     )
     await send_result(msg, None)
+    await _send_health_chart(user_id, send_photo_fn)
+
+
+async def _send_health_chart(user_id: int, send_photo_fn) -> None:
+    chart_path = None
+    try:
+        from portfolio_chart import generate_health_chart_async
+        chart_path = await generate_health_chart_async(user_id)
+    except ImportError:
+        logger.info("matplotlib not installed; skipping portfolio chart image")
+    except Exception as e:
+        logger.warning(f"Portfolio chart generation failed: {e}", exc_info=True)
+
+    if not chart_path:
+        return
+
+    try:
+        with open(chart_path, "rb") as fh:
+            await send_photo_fn(fh)
+    except Exception as e:
+        logger.warning(f"Sending portfolio chart failed: {e}", exc_info=True)
+    finally:
+        try:
+            os.remove(chart_path)
+        except OSError:
+            pass
 
 
 def _get_or_default_health_profile(user_id: int) -> HealthProfile:

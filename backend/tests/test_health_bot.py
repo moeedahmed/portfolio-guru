@@ -107,6 +107,53 @@ async def test_cesr_health_output_uses_deterministic_engine_without_llm(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_health_sends_verdict_before_chart(monkeypatch, tmp_path):
+    import sys
+    import bot
+
+    user_id = 5152
+    chart_path = tmp_path / "health.png"
+    chart_path.write_bytes(b"fake chart")
+    history = [
+        {"form_type": "CBD", "filed_at": "2026-05-01 09:00:00", "status": "filed", "telegram_user_id": user_id},
+        {"form_type": "DOPS", "filed_at": "2026-05-02 09:00:00", "status": "filed", "telegram_user_id": user_id},
+    ]
+
+    async def generate_health_chart_async(_user_id):
+        return str(chart_path)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "portfolio_chart",
+        SimpleNamespace(generate_health_chart_async=generate_health_chart_async),
+    )
+    monkeypatch.setattr(bot, "get_health_profile", lambda _user_id: _profile(user_id, Pathway.cesr_portfolio))
+    monkeypatch.setattr(bot, "get_training_level", lambda _user_id: "ST6")
+    monkeypatch.setattr(bot, "get_case_history", AsyncMock(return_value=history))
+    monkeypatch.setattr(bot, "analyse_portfolio_health", AsyncMock())
+
+    order: list[str] = []
+
+    async def send_result(_text, _reply_markup):
+        order.append("verdict")
+
+    async def send_photo(_fh):
+        order.append("chart")
+
+    await bot._run_health_analysis(
+        user_id=user_id,
+        chat=SimpleNamespace(send_action=AsyncMock()),
+        send_progress=AsyncMock(),
+        send_result=send_result,
+        send_photo_fn=send_photo,
+        fail_fn=AsyncMock(),
+    )
+
+    assert order == ["verdict", "chart"]
+    assert not chart_path.exists()
+
+
+@pytest.mark.asyncio
 async def test_arcp_health_falls_back_to_deterministic_output_when_llm_fails(monkeypatch):
     import sys
     import bot
