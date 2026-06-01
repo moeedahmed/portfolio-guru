@@ -214,7 +214,13 @@ The point of this sprint is a working substrate, not a documentation exercise. T
 > First live smoke attempt on 2026-06-01 attached to the managed CDP browser
 > and used a temporary local database only, but Kaizen redirected to
 > `auth.kaizenep.com`; result `auth_required`, zero rows read, zero production
-> index changes. Repeat after manual login in the managed browser.
+> index changes. Follow-up smoke with the new trusted login/session wrapper
+> got past sign-in, read one real assessment row
+> (`DOPS - (ST3-ST6 - 2025 update)`), wrote one temporary `evidence_items`
+> row, and recorded the run as `ok`. Production `usage.db` stayed untouched;
+> no Kaizen save/submit/sign/delete/draft action, Telegram traffic, restart,
+> deploy, or push. Next step: expose this behind a guarded user-facing
+> "Refresh portfolio" workflow for Moeed to manually test.
 
 ### Scope
 

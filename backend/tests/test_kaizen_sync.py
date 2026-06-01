@@ -229,3 +229,275 @@ def test_sync_driver_has_no_write_side_browser_actions(sync_modules):
     assert "save_draft" not in source
     assert "delete_all_drafts" not in source
 
+
+# ── Trusted-bootstrap helper coverage ───────────────────────────────────────
+
+
+class FakeContext:
+    def __init__(self):
+        self.closed = False
+
+    async def close(self):
+        self.closed = True
+
+
+class FakePlaywright:
+    def __init__(self):
+        self.stopped = False
+
+    async def stop(self):
+        self.stopped = True
+
+
+def _make_session(*, lists=None, details=None, auth_urls=None):
+    page = FakeKaizenPage(lists=lists, details=details, auth_urls=auth_urls)
+    page.context = FakeContext()
+    pw = FakePlaywright()
+    return page, pw
+
+
+def _install_session_stubs(
+    monkeypatch,
+    kaizen_sync,
+    *,
+    page,
+    pw,
+    cached_result=False,
+    cached_exc=None,
+    credentials=("trainee", "pw"),
+    login_result=True,
+    login_exc=None,
+    save_state_exc=None,
+    creds_calls=None,
+    login_calls=None,
+    save_state_calls=None,
+):
+    creds_calls = creds_calls if creds_calls is not None else []
+    login_calls = login_calls if login_calls is not None else []
+    save_state_calls = save_state_calls if save_state_calls is not None else []
+
+    async def fake_open():
+        return page, pw
+
+    async def fake_cached(arg_page, arg_uid):
+        assert arg_page is page
+        if cached_exc is not None:
+            raise cached_exc
+        return cached_result
+
+    def fake_creds(uid):
+        creds_calls.append(uid)
+        return credentials
+
+    async def fake_login(arg_page, username, password):
+        login_calls.append((username, password))
+        if login_exc is not None:
+            raise login_exc
+        return login_result
+
+    async def fake_save_state(ctx, uid):
+        save_state_calls.append((ctx, uid))
+        if save_state_exc is not None:
+            raise save_state_exc
+
+    monkeypatch.setattr(kaizen_sync, "_open_kaizen_session_page", fake_open)
+    monkeypatch.setattr(kaizen_sync, "_restore_cached_session", fake_cached)
+    monkeypatch.setattr(kaizen_sync, "_load_user_credentials", fake_creds)
+    monkeypatch.setattr(kaizen_sync, "_login_kaizen_page", fake_login)
+    monkeypatch.setattr(kaizen_sync, "_persist_session_state", fake_save_state)
+    return {
+        "creds_calls": creds_calls,
+        "login_calls": login_calls,
+        "save_state_calls": save_state_calls,
+    }
+
+
+def _assessments_url():
+    return "https://kaizenep.com/events/list/Assessments"
+
+
+def _seed_one_event(page):
+    url = _assessments_url()
+    href = "/events/view-section/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    detail_url = f"https://kaizenep.com{href}"
+    page.lists[url] = [{"title": "CBD", "href": href}]
+    page.details[detail_url] = _detail(url=detail_url)
+
+
+@pytest.mark.asyncio
+async def test_sync_for_user_uses_cached_session_without_credentials(sync_modules, monkeypatch):
+    kaizen_index, kaizen_sync = sync_modules
+    page, pw = _make_session()
+    _seed_one_event(page)
+    calls = _install_session_stubs(
+        monkeypatch,
+        kaizen_sync,
+        page=page,
+        pw=pw,
+        cached_result=True,
+        login_exc=AssertionError("login must not run when cache is valid"),
+        credentials=None,
+    )
+
+    result = await kaizen_sync.sync_kaizen_portfolio_index_for_user(
+        42,
+        categories=("Assessments",),
+        include_activities=False,
+    )
+
+    assert result.status == "ok"
+    assert result.rows_written == 1
+    assert calls["creds_calls"] == []
+    assert calls["login_calls"] == []
+    assert calls["save_state_calls"] == []
+    assert page.context.closed
+    assert pw.stopped
+
+
+@pytest.mark.asyncio
+async def test_sync_for_user_logs_in_when_cache_is_stale(sync_modules, monkeypatch):
+    kaizen_index, kaizen_sync = sync_modules
+    page, pw = _make_session()
+    _seed_one_event(page)
+    calls = _install_session_stubs(
+        monkeypatch,
+        kaizen_sync,
+        page=page,
+        pw=pw,
+        cached_result=False,
+        credentials=("trainee@example.com", "secret"),
+        login_result=True,
+    )
+
+    result = await kaizen_sync.sync_kaizen_portfolio_index_for_user(
+        99,
+        categories=("Assessments",),
+        include_activities=False,
+    )
+
+    assert result.status == "ok"
+    assert result.rows_written == 1
+    assert calls["creds_calls"] == [99]
+    assert calls["login_calls"] == [("trainee@example.com", "secret")]
+    assert calls["save_state_calls"] and calls["save_state_calls"][0][1] == 99
+    assert page.context.closed
+    assert pw.stopped
+
+
+@pytest.mark.asyncio
+async def test_sync_for_user_records_auth_required_when_no_credentials(sync_modules, monkeypatch):
+    kaizen_index, kaizen_sync = sync_modules
+    page, pw = _make_session()
+    calls = _install_session_stubs(
+        monkeypatch,
+        kaizen_sync,
+        page=page,
+        pw=pw,
+        cached_result=False,
+        credentials=None,
+        login_exc=AssertionError("login must not run when there are no credentials"),
+    )
+
+    result = await kaizen_sync.sync_kaizen_portfolio_index_for_user(
+        7,
+        categories=("Assessments",),
+        include_activities=False,
+    )
+
+    assert result.status == "auth_required"
+    assert result.rows_written == 0
+    assert calls["login_calls"] == []
+    assert calls["save_state_calls"] == []
+    latest = await kaizen_index.latest_index_run("7")
+    assert latest is not None
+    assert latest.status == "auth_required"
+    assert "credentials" in (latest.notes or "")
+    assert page.context.closed
+    assert pw.stopped
+
+
+@pytest.mark.asyncio
+async def test_sync_for_user_records_auth_required_when_login_fails(sync_modules, monkeypatch):
+    kaizen_index, kaizen_sync = sync_modules
+    page, pw = _make_session()
+    calls = _install_session_stubs(
+        monkeypatch,
+        kaizen_sync,
+        page=page,
+        pw=pw,
+        cached_result=False,
+        credentials=("trainee", "pw"),
+        login_result=False,
+    )
+
+    result = await kaizen_sync.sync_kaizen_portfolio_index_for_user(
+        11,
+        categories=("Assessments",),
+        include_activities=False,
+    )
+
+    assert result.status == "auth_required"
+    assert calls["login_calls"] == [("trainee", "pw")]
+    assert calls["save_state_calls"] == []
+    assert page.context.closed
+    assert pw.stopped
+
+
+@pytest.mark.asyncio
+async def test_sync_for_user_records_failed_when_cdp_unavailable(sync_modules, monkeypatch):
+    kaizen_index, kaizen_sync = sync_modules
+
+    async def fake_open():
+        return None, None
+
+    monkeypatch.setattr(kaizen_sync, "_open_kaizen_session_page", fake_open)
+
+    def _fail_creds(uid):
+        raise AssertionError("credentials must not be requested when CDP is unavailable")
+
+    async def _fail_cached(*_args, **_kwargs):
+        raise AssertionError("cached session must not run when CDP is unavailable")
+
+    monkeypatch.setattr(kaizen_sync, "_load_user_credentials", _fail_creds)
+    monkeypatch.setattr(kaizen_sync, "_restore_cached_session", _fail_cached)
+
+    result = await kaizen_sync.sync_kaizen_portfolio_index_for_user(
+        13,
+        categories=("Assessments",),
+        include_activities=False,
+    )
+
+    assert result.status == "failed"
+    latest = await kaizen_index.latest_index_run("13")
+    assert latest is not None
+    assert latest.status == "failed"
+    assert "CDP" in (latest.notes or "")
+
+
+@pytest.mark.asyncio
+async def test_sync_for_user_closes_session_even_when_sync_raises(sync_modules, monkeypatch):
+    kaizen_index, kaizen_sync = sync_modules
+    page, pw = _make_session()
+    _install_session_stubs(
+        monkeypatch,
+        kaizen_sync,
+        page=page,
+        pw=pw,
+        cached_result=True,
+    )
+
+    async def boom(*_args, **_kwargs):
+        raise RuntimeError("simulated sync failure")
+
+    monkeypatch.setattr(kaizen_sync, "sync_kaizen_portfolio_index", boom)
+
+    with pytest.raises(RuntimeError):
+        await kaizen_sync.sync_kaizen_portfolio_index_for_user(
+            55,
+            categories=("Assessments",),
+            include_activities=False,
+        )
+
+    assert page.context.closed
+    assert pw.stopped
+

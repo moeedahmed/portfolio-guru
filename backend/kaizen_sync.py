@@ -5,6 +5,14 @@ This module turns visible Kaizen timeline/activity/detail pages into
 must provide an already-authenticated page/session, and this module never
 types credentials, clicks write controls, saves, submits, signs, approves, or
 deletes anything.
+
+The high-level helper :func:`sync_kaizen_portfolio_index_for_user` opens an
+isolated CDP page via the existing trusted login/session bootstrap in
+``backend/kaizen_form_filer`` (cached session first, saved credentials second)
+and then hands the resulting page to :func:`sync_kaizen_portfolio_index`. The
+login bootstrap is reused, never reimplemented here, so the write-side
+Playwright actions stay confined to the form filer and this driver remains
+purely read-only.
 """
 
 from __future__ import annotations
@@ -449,4 +457,164 @@ async def sync_kaizen_portfolio_index(
             notes="; ".join(result.notes)[:2000],
         )
         return result
+
+
+# ── Trusted session bootstrap (delegates to backend.kaizen_form_filer) ──────
+#
+# The CDP connect / cached-session / login / persist-session helpers below are
+# intentionally thin wrappers around the existing, deterministic Kaizen login
+# code in ``backend/kaizen_form_filer.py``. Wrapping them as module-level
+# functions keeps this read-only driver free of write-side Playwright actions
+# (clicking, filling, typing) and gives tests an obvious monkeypatch surface
+# without having to substitute the heavyweight form-filer module.
+
+
+async def _open_kaizen_session_page() -> tuple[Any, Any]:
+    """Open an isolated CDP page using the form filer's CDP helper."""
+    from kaizen_form_filer import connect_cdp_browser
+
+    return await connect_cdp_browser()
+
+
+async def _restore_cached_session(page: Any, user_id: str | int) -> bool:
+    """Try to replay a previously saved Kaizen session into ``page``."""
+    from kaizen_form_filer import use_cached_session
+
+    return await use_cached_session(page, int(user_id))
+
+
+async def _login_kaizen_page(page: Any, username: str, password: str) -> bool:
+    """Run the existing RCEM/Kaizen two-step login on ``page``."""
+    from kaizen_form_filer import _login as _kaizen_login
+
+    return await _kaizen_login(page, username, password)
+
+
+async def _persist_session_state(context: Any, user_id: str | int) -> None:
+    """Best-effort save of the freshly-authenticated session cookies."""
+    from kaizen_form_filer import save_session_state
+
+    await save_session_state(context, int(user_id))
+
+
+def _load_user_credentials(user_id: str | int) -> Optional[tuple[str, str]]:
+    """Return (username, password) for ``user_id`` if stored, else None."""
+    from store import get_credentials
+
+    return get_credentials(int(user_id))
+
+
+async def _record_bootstrap_failure(
+    user_id: str | int, status: str, note: str
+) -> KaizenSyncResult:
+    """Open + close an ``index_runs`` row when the sync never reaches Kaizen.
+
+    Used for credential-missing, login-failure, or CDP-unavailable paths so
+    /settings can still surface why the most recent sync attempt did not run.
+    """
+    run_id = await start_index_run(user_id)
+    result = KaizenSyncResult(run_id=run_id, status=status)
+    result.notes.append(note)
+    await finish_index_run(
+        run_id,
+        status,  # type: ignore[arg-type]
+        rows_seen=result.rows_seen,
+        rows_written=result.rows_written,
+        rows_drifted=result.rows_drifted,
+        notes=note[:2000],
+    )
+    return result
+
+
+async def _close_session(context: Any, pw: Any) -> None:
+    if context is not None:
+        try:
+            await context.close()
+        except Exception:
+            pass
+    if pw is not None:
+        try:
+            await pw.stop()
+        except Exception:
+            pass
+
+
+async def sync_kaizen_portfolio_index_for_user(
+    user_id: str | int,
+    *,
+    categories: Iterable[str] = PORTFOLIO_HEALTH_TIMELINE_CATEGORIES,
+    include_activities: bool = True,
+    row_limit_per_category: int | None = None,
+) -> KaizenSyncResult:
+    """Open an authenticated Kaizen page and run the read-only index sync.
+
+    Bootstrap order:
+
+    1. Open an isolated CDP context via ``connect_cdp_browser`` (the same
+       per-user isolation the form filer uses).
+    2. Try to restore a previously saved session with ``use_cached_session``.
+    3. If the cache is missing or stale, look up saved credentials through
+       ``store.get_credentials`` and run the existing RCEM/Kaizen login.
+    4. After a successful fresh login, persist the new session state so the
+       next refresh can skip the password step.
+    5. Hand the authenticated page to :func:`sync_kaizen_portfolio_index`.
+
+    Any bootstrap-stage failure (CDP unavailable, no saved credentials, login
+    refused) still records an ``index_runs`` row so the UI has a status to
+    show. The isolated CDP context and the Playwright handle are always
+    closed in ``finally`` so this helper does not leak browser state.
+    """
+    page, pw = await _open_kaizen_session_page()
+    if page is None:
+        return await _record_bootstrap_failure(
+            user_id,
+            "failed",
+            "Could not open isolated Kaizen CDP context.",
+        )
+    context = getattr(page, "context", None)
+
+    try:
+        try:
+            authed = await _restore_cached_session(page, user_id)
+        except Exception:
+            authed = False
+
+        if not authed:
+            credentials = _load_user_credentials(user_id)
+            if not credentials:
+                return await _record_bootstrap_failure(
+                    user_id,
+                    "auth_required",
+                    "No saved Kaizen credentials; cannot start sync session.",
+                )
+            username, password = credentials
+            try:
+                logged_in = await _login_kaizen_page(page, username, password)
+            except Exception as exc:
+                return await _record_bootstrap_failure(
+                    user_id,
+                    "failed",
+                    f"Kaizen login raised an exception: {exc}",
+                )
+            if not logged_in:
+                return await _record_bootstrap_failure(
+                    user_id,
+                    "auth_required",
+                    "Kaizen login did not land on a portfolio page.",
+                )
+            if context is not None:
+                try:
+                    await _persist_session_state(context, user_id)
+                except Exception:
+                    pass
+
+        return await sync_kaizen_portfolio_index(
+            user_id,
+            page,
+            categories=categories,
+            include_activities=include_activities,
+            row_limit_per_category=row_limit_per_category,
+        )
+    finally:
+        await _close_session(context, pw)
 

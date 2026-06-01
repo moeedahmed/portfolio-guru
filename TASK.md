@@ -1,5 +1,46 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-01 addendum — live read-only login smoke passed.**
+> The new portfolio-index login wrapper has now been exercised against the
+> live managed Kaizen browser using Moeed's saved Portfolio Guru credentials,
+> but with a temporary local SQLite database only. Outcome: the smoke got past
+> the previous sign-in blocker, read one real Kaizen assessment row, wrote one
+> `evidence_items` row into the temporary index, and recorded the run as `ok`.
+> Sample visible title: `DOPS - (ST3-ST6 - 2025 update)`. The production
+> `usage.db` was not populated, no Telegram messages were sent, and there was
+> no restart, deploy, push, Kaizen save, submit, sign, delete, or draft action.
+> This proves the missing connection was the auth/session bootstrap, not the
+> read-only indexer. Next visible build slice: add the guarded user-facing
+> "Refresh portfolio" workflow/button so Moeed can test the wording, button
+> path, and result screen before further Portfolio Health work builds on it.
+
+> **2026-06-01 addendum — index sync now reuses the trusted login bootstrap.**
+> `backend/kaizen_sync.py` gains `sync_kaizen_portfolio_index_for_user`, a
+> high-level helper that opens an isolated CDP page via the existing
+> `connect_cdp_browser`, attempts `use_cached_session`, and falls back to
+> `store.get_credentials` plus the existing `_login` helper from
+> `backend/kaizen_form_filer.py` when the cache is stale. On a fresh login it
+> persists the new session via `save_session_state` so the next refresh skips
+> the password step, then hands the authenticated page to the existing
+> read-only `sync_kaizen_portfolio_index`. Bootstrap-stage failures
+> (no saved credentials, login refused, CDP unavailable) still write an
+> `index_runs` row as `auth_required` / `failed` so `/settings` can surface
+> the outcome. The isolated CDP context and Playwright handle are always
+> closed in `finally`. The read-only driver itself (`sync_kaizen_portfolio_index`)
+> is unchanged — the source guard against write-side browser actions
+> (`.click(`, `.fill(`, `.type(`, `file_to_kaizen`, `save_draft`,
+> `delete_all_drafts`) still passes because the login work lives in the form
+> filer and is only called from the wrapper. Offline coverage in
+> `tests/test_kaizen_sync.py` exercises the cached-session path,
+> stale-cache + credentials path, missing-credentials path, login-failure
+> path, CDP-unavailable path, and that the session is always closed even
+> when the inner sync raises. Verification: focused sync/index gate green at
+> 24 passed. Next step: a controlled foreground live smoke can now try the
+> same login/session bootstrap end-to-end against Moeed's saved credentials,
+> inspect indexed row quality, and only then wire a guarded user-facing
+> "Refresh portfolio" button. No live Kaizen, credentials, restart, deploy,
+> push, or Telegram traffic in this slice.
+
 > **2026-06-01 addendum — first live read-only smoke reached login boundary.**
 > The foreground smoke attached to the managed CDP browser on
 > `localhost:18800` and attempted the read-only Kaizen sync against a temporary

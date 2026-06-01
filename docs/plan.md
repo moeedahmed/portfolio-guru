@@ -212,30 +212,40 @@ Status:
   and goals surfaces for the logged-in user, de-duplicates by event UUID, and
   writes a normalised `evidence_items` + `index_runs` schema (local SQLite
   first; Supabase mirror is a follow-up).
-- Current implementation status: the storage substrate and offline sync
-  driver have landed. `backend/kaizen_sync.py` consumes an
-  already-authenticated page/session, walks timeline categories plus
-  `/activities`, opens detail views read-only, writes through
-  `kaizen_index`, and records `index_runs` drift/auth/failure status. It is
-  not exposed to users yet and has not run against live Kaizen.
-- First live read-only smoke status: attempted 2026-06-01 against the managed
-  CDP browser with a temporary local database only. The browser redirected to
-  Kaizen auth, so no portfolio rows were read and no production index was
-  populated. Manual login in the managed browser is required before repeating
-  the smoke.
+- Current implementation status: the storage substrate, offline sync driver,
+  and the trusted login/session bootstrap wrapper have landed.
+  `backend/kaizen_sync.py` consumes an already-authenticated page/session,
+  walks timeline categories plus `/activities`, opens detail views read-only,
+  writes through `kaizen_index`, and records `index_runs` drift/auth/failure
+  status. A new high-level helper `sync_kaizen_portfolio_index_for_user`
+  opens an isolated CDP page via the existing form-filer
+  `connect_cdp_browser`, tries `use_cached_session`, and falls back to
+  `store.get_credentials` plus the existing `_login` helper when the cache is
+  stale; it persists the fresh session via `save_session_state` and then
+  hands the page to the read-only sync. Bootstrap-stage failures still write
+  an `index_runs` row so `/settings` can surface the outcome. None of this
+  is exposed to users yet (no refresh button).
+- First live read-only smoke status: the initial 2026-06-01 attempt against
+  the managed CDP browser stopped at Kaizen auth and read no rows. The follow-
+  up smoke used `sync_kaizen_portfolio_index_for_user` with the same trusted
+  login/session bootstrap used by the form filer, against a temporary local
+  database only. It got past sign-in, read one real Kaizen assessment row
+  (`DOPS - (ST3-ST6 - 2025 update)`), wrote one temporary `evidence_items`
+  row, and recorded the run as `ok`. Production `usage.db` stayed untouched.
 - The Index becomes the primary auto-populate source for
   `docs/PORTFOLIO_HEALTH_SPEC.md` Phase 2; existing PG filing records remain
   the fallback when no index is present yet.
-- Safety: no write codepath, no credential read, no new browser session. The
-  adapter consumes the existing authenticated CDP session only and refuses to
-  act on `auth.kaizenep.com`. No supervisor surfaces, no assessor surfaces,
-  no `/inbox` in v1.
+- Safety: no write codepath, no Telegram traffic, no production index write,
+  no restart, no deploy, no push. The login wrapper may use the existing saved
+  credential path to restore an authenticated session, then hands the page to
+  the read-only adapter, which refuses to act on `auth.kaizenep.com`. No
+  supervisor surfaces, no assessor surfaces, no `/inbox` in v1.
 - The conversational engine (Phases 2.x) and filing routes (Phase 5) are
   unaffected by this sprint — the adapter is a read-only foundation under
   them, not a replacement.
-- Next step: run a controlled foreground read-only CDP smoke against the
-  logged-in Kaizen session after manual login, inspect indexed row quality,
-  then wire a guarded "Refresh portfolio" trigger only if the data is clean.
+- Next step: wire a guarded user-facing "Refresh portfolio" workflow/button.
+  That is the first slice Moeed should manually test for wording, button path,
+  result screen, and whether the flow matches the product vision.
 
 ### Phase 3 - Safe activation for low-risk intents
 
