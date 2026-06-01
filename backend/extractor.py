@@ -820,7 +820,7 @@ async def classify_menu_intent(text: str) -> str:
 Commands:
 - file_case: user wants to file or draft a clinical case ("file a case", "log a procedure", "draft a CBD")
 - show_stats: user wants to see their filing stats, usage, or how many cases this month/week
-- open_settings: user wants to change settings (curriculum, training level, voice profile, preferences)
+- open_settings: user wants to change settings (curriculum, portfolio profile, voice profile, preferences)
 - manage_credentials: user wants to change/update/reconnect their Kaizen login
 - show_help: user is asking what the bot does, how to use it, what forms are supported
 - chitchat: greeting, thanks, social message ("hi", "thanks", "you there")
@@ -2672,7 +2672,7 @@ Write ONE friendly, concrete sentence under 25 words. Use full assessment names,
 async def analyse_portfolio_health(case_history: list, training_level: str) -> dict:
     """Analyse filed cases against ARCP requirements.
     case_history: list of dicts with form_type, filed_at, status.
-    training_level: e.g. 'ST4', 'ST5', 'ST6'.
+    training_level: Kaizen portfolio profile bucket or legacy grade value.
     Returns structured health analysis.
     """
     from collections import Counter
@@ -2685,7 +2685,7 @@ async def analyse_portfolio_health(case_history: list, training_level: str) -> d
 
     prompt = f"""You are a senior UK Emergency Medicine consultant and ARCP assessor.
 
-A trainee at {training_level} level has filed the following cases via their ePortfolio over the last 6 months:
+A doctor with Kaizen portfolio profile {training_level} has filed the following cases via their ePortfolio over the last 6 months:
 
 FILING HISTORY ({total} entries):
 {history_summary}
@@ -2696,10 +2696,10 @@ FORM DISTRIBUTION:
 RCEM CURRICULUM SLOs (for reference):
 {RCEM_KC_MAP}
 
-Analyse this portfolio against ARCP requirements for a {training_level} trainee. Consider:
+Analyse this portfolio against ARCP requirements for this Kaizen portfolio profile. Consider:
 - Breadth of form types (CBD, DOPS, Mini-CEX, etc.)
 - SLO coverage based on the types of cases filed
-- Whether the volume is sufficient for this stage of training
+- Whether the volume is sufficient for this portfolio profile
 - Any obvious gaps that would concern an ARCP panel
 
 Return ONLY valid JSON:

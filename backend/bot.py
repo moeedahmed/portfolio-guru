@@ -1273,7 +1273,8 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
     return ConversationHandler.END
 
-# Training level → form types available
+# Kaizen portfolio profile → form types available.
+# These are RCEM/Kaizen portfolio buckets, not the user's exact grade/year.
 TRAINING_LEVEL_FORMS = {
     "ST3": [
         "CBD", "DOPS", "MINI_CEX", "ACAT", "MSF", "PROC_LOG", "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH",
@@ -1315,16 +1316,18 @@ TRAINING_LEVEL_FORMS["ACCS"] = TRAINING_LEVEL_FORMS["ST3"]
 TRAINING_LEVEL_FORMS["INTERMEDIATE"] = TRAINING_LEVEL_FORMS["ST3"]
 TRAINING_LEVEL_FORMS["HIGHER"] = TRAINING_LEVEL_FORMS["ST6"]
 
-# Kaizen stage groups. Legacy ST3/ST4/ST5/ST6 values are still accepted for old profiles.
+# Kaizen portfolio profile groups. Legacy ST3/ST4/ST5/ST6 values are still
+# accepted for old profiles, but they should not be treated as exact current
+# training years when auto-detected from Kaizen.
 TRAINING_LEVEL_LABELS = {
-    "ACCS": "ACCS (ST1–2)",
-    "INTERMEDIATE": "Intermediate (ST3)",
-    "HIGHER": "Higher (ST4–6)",
-    "SAS": "SAS / CESR / Non-trainee",
-    "ST3": "Intermediate (ST3)",
-    "ST4": "Higher (ST4–6)",
-    "ST5": "Higher (ST4–6)",
-    "ST6": "Higher (ST4–6)",
+    "ACCS": "ACCS profile",
+    "INTERMEDIATE": "Intermediate profile",
+    "HIGHER": "HST profile",
+    "SAS": "SAS / CESR / non-training profile",
+    "ST3": "Intermediate profile",
+    "ST4": "HST profile",
+    "ST5": "HST profile",
+    "ST6": "HST profile",
 }
 
 
@@ -1333,7 +1336,11 @@ def _training_level_label(level: str | None) -> str:
 
 
 def _stage_value_from_training_level(level: str | None, form_type: str) -> str:
-    """Return the Kaizen stage value implied by the user's saved profile."""
+    """Return the Kaizen stage value implied by the saved portfolio profile.
+
+    This is a best-effort form default from the profile bucket. It is not a
+    substitute for a future explicit user-selected grade/year field.
+    """
     if not level:
         return ""
     normalised = level.upper()
@@ -1571,7 +1578,7 @@ def _settings_view_components(
 
     buttons = [
         [InlineKeyboardButton(voice_cta, callback_data="ACTION|voice")],
-        [InlineKeyboardButton(f"🎓 Training stage: {training_level}", callback_data="ACTION|change_level")],
+        [InlineKeyboardButton(f"🎓 Portfolio profile: {training_level}", callback_data="ACTION|change_level")],
         [InlineKeyboardButton(f"📊 Pathway: {pathway_label}", callback_data="ACTION|change_pathway")],
         [InlineKeyboardButton(f"📚 Curriculum: {curriculum_label}", callback_data="ACTION|change_curriculum")],
         [InlineKeyboardButton(setup_button_label, callback_data="ACTION|setup")],
@@ -1583,7 +1590,7 @@ def _settings_view_components(
         f"{plan_block}"
         f"✍️ Voice profile: {voice_status}\n"
         f"   {voice_hint}\n\n"
-        f"🎓 Training stage: {training_level}\n"
+        f"🎓 Portfolio profile: {training_level}\n"
         f"📊 Pathway: {pathway_label}\n"
         f"📚 Curriculum: {curriculum_label}\n\n"
         f"Pick what you want to change."
@@ -1894,7 +1901,7 @@ def _filter_forms_by_curriculum(form_types, curriculum):
 
 
 def _get_allowed_forms(user_id):
-    """Get the allowed form list for a user (training level + curriculum filtered)."""
+    """Get the allowed form list for a user (portfolio profile + curriculum filtered)."""
     from extractor import FORM_UUIDS
     training_level = get_training_level(user_id)
     curriculum = get_curriculum(user_id)
@@ -2999,10 +3006,11 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data.pop("setup_username", None)
     context.user_data.pop("_setup_state_hint", None)
 
-    # Auto-detect training level from engine
+    # Auto-detect Kaizen portfolio profile from the engine. This is a portfolio
+    # bucket such as ACCS/HST, not an exact user grade/year.
     detected_role = login_ok if isinstance(login_ok, str) else ""
-    # Cache the canonical Kaizen account role separately from training_level
-    # (an assessor has no personal portfolio; training_level falls back to
+    # Cache the canonical Kaizen account role separately from the portfolio
+    # profile (an assessor has no personal portfolio; training_level falls back to
     # HIGHER for UX continuity but the supervisor workflow keys off this).
     # Demotion-safe: a transient "unknown" probe never overwrites an
     # already-cached assessor / trainee.
@@ -3013,7 +3021,7 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # Cache failure must never block the login success path.
         logger.warning("Kaizen role cache update failed", exc_info=True)
     role_map = {"hst": "HIGHER", "accs": "ACCS", "accs_intermediate": "INTERMEDIATE", "sas": "SAS", "assessor": "HIGHER"}
-    label_map = {"hst": "Higher Specialist Trainee", "accs": "ACCS Trainee", "accs_intermediate": "ACCS + Intermediate Trainee", "sas": "SAS / CESR / Non-trainee", "assessor": "Clinical Supervisor"}
+    label_map = {"hst": "HST portfolio profile", "accs": "ACCS portfolio profile", "accs_intermediate": "ACCS + Intermediate portfolio profile", "sas": "SAS / CESR / non-training profile", "assessor": "Clinical Supervisor"}
     
     auto_level = role_map.get(detected_role)
     if auto_level:
@@ -3037,20 +3045,20 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             f"{pathway_line}"
             "Send your first case — text, voice, photo, or document — and I'll get started.\n\n"
             "Use the *Menu* (☰ bottom-left) any time for Settings or Voice profile.\n"
-            f"Use */settings* if your portfolio type is different.",
+            f"Use */settings* if your portfolio profile is different.",
             parse_mode="Markdown",
             flow_key="setup",
         )
     else:
         await _flow_edit(
             update, context,
-            "✅ Kaizen connected! I couldn't auto-detect your portfolio type.\n\nWhat training stage are you in?",
+            "✅ Kaizen connected! I couldn't auto-detect your portfolio profile.\n\nWhich Kaizen portfolio profile applies to you?",
             flow_key="setup",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("ACCS (ST1–2)", callback_data="SETLEVEL|ACCS")],
-                [InlineKeyboardButton("Intermediate (ST3)", callback_data="SETLEVEL|INTERMEDIATE")],
-                [InlineKeyboardButton("Higher (ST4–6)", callback_data="SETLEVEL|HIGHER")],
-                [InlineKeyboardButton("SAS / CESR / Non-trainee", callback_data="SETLEVEL|SAS")],
+                [InlineKeyboardButton("ACCS profile", callback_data="SETLEVEL|ACCS")],
+                [InlineKeyboardButton("Intermediate profile", callback_data="SETLEVEL|INTERMEDIATE")],
+                [InlineKeyboardButton("HST profile", callback_data="SETLEVEL|HIGHER")],
+                [InlineKeyboardButton("SAS / CESR / non-training profile", callback_data="SETLEVEL|SAS")],
             ])
         )
         return AWAIT_TRAINING_LEVEL
@@ -3060,14 +3068,14 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def setup_training_level(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle training level selection during setup — then ask curriculum."""
+    """Handle portfolio profile selection during setup — then ask curriculum."""
     query = update.callback_query
     await query.answer()
     level = query.data.split("|")[1]
     user_id = update.effective_user.id
     store_training_level(user_id, level)
     await query.edit_message_text(
-        f"Training level saved as {level}.\n\nWhich curriculum are you working under? Most trainees starting now are on the 2025 Update. If your deanery still uses the 2021 forms, pick that.",
+        f"Portfolio profile saved as {_training_level_label(level)}.\n\nWhich curriculum are you working under? Most trainees starting now are on the 2025 Update. If your deanery still uses the 2021 forms, pick that.",
         reply_markup=_build_curriculum_keyboard("SETUP_CURRICULUM")
     )
     return AWAIT_CURRICULUM
@@ -3917,14 +3925,14 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
 
     elif action == "change_level":
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("ACCS (ST1–2)", callback_data="SETLEVEL|ACCS")],
-            [InlineKeyboardButton("Intermediate (ST3)", callback_data="SETLEVEL|INTERMEDIATE")],
-            [InlineKeyboardButton("Higher (ST4–6)", callback_data="SETLEVEL|HIGHER")],
-            [InlineKeyboardButton("SAS / CESR / Non-trainee", callback_data="SETLEVEL|SAS")],
+            [InlineKeyboardButton("ACCS profile", callback_data="SETLEVEL|ACCS")],
+            [InlineKeyboardButton("Intermediate profile", callback_data="SETLEVEL|INTERMEDIATE")],
+            [InlineKeyboardButton("HST profile", callback_data="SETLEVEL|HIGHER")],
+            [InlineKeyboardButton("SAS / CESR / non-training profile", callback_data="SETLEVEL|SAS")],
             [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
         ])
         await query.message.edit_text(
-            "🎓 Which Kaizen training stage applies to you?",
+            "🎓 Which Kaizen portfolio profile applies to you?",
             reply_markup=keyboard,
         )
 
@@ -3947,7 +3955,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
     elif action == "delete":
         # Confirm before deleting
         await query.message.edit_text(
-            "⚠️ This wipes your saved Kaizen login, training level, curriculum choice, and voice profile. It does not affect cases already saved in Kaizen. Are you sure?",
+            "⚠️ This wipes your saved Kaizen login, portfolio profile, curriculum choice, and voice profile. It does not affect cases already saved in Kaizen. Are you sure?",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🗑️ Yes, delete", callback_data="CONFIRM|delete"),
                  InlineKeyboardButton("❌ No, keep", callback_data="ACTION|cancel")],
@@ -4098,7 +4106,7 @@ async def delete_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         if profile:
             session.delete(profile)
             session.commit()
-            deleted_items.append("training preferences and voice profile")
+            deleted_items.append("portfolio preferences and voice profile")
 
     if deleted_items:
         await update.message.reply_text(
@@ -4506,8 +4514,8 @@ async def _run_health_analysis(
 
     training_level = get_training_level(user_id)
     if not training_level:
-        training_level = "ST4"
-        level_note = "\n\n_Note: No training level set — analysing as ST4. Use /setup to update._"
+        training_level = "HIGHER"
+        level_note = "\n\n_Note: No portfolio profile set — using HST defaults. Use /settings to update._"
     else:
         level_note = ""
 
@@ -4920,14 +4928,14 @@ async def handle_set_curriculum(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def handle_set_level(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle SETLEVEL| callback from settings → change training level."""
+    """Handle SETLEVEL| callback from settings → change portfolio profile."""
     query = update.callback_query
     await query.answer()
     level = query.data.split("|")[1]
     user_id = update.effective_user.id
     store_training_level(user_id, level)
     await query.edit_message_text(
-        f"✅ Training level set to {_training_level_label(level)}.",
+        f"✅ Portfolio profile set to {_training_level_label(level)}.",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
         ]),
@@ -6049,7 +6057,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 "password", "credential", "login", "kaizen account", "reconnect",
                 "how many", "how much", "what's my", "whats my", "show me", "show my",
                 "this month", "this week", "tier", "upgrade", "plan", "subscription",
-                "voice profile", "curriculum", "training level",
+                "voice profile", "curriculum", "training level", "portfolio profile",
             )
             looks_menu_ish = any(hint in words_lower for hint in _MENU_HINTS)
             nav_intent = None

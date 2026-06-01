@@ -3144,8 +3144,8 @@ class TestOnboardingFrictionPatch:
         store_credentials.assert_called_once()
         store_training_level.assert_called_once_with(sim.user_id, 'HIGHER')
         store_curriculum.assert_called_once_with(sim.user_id, '2025')
-        # Auto-detected role shown in welcome message
-        assert 'higher specialist' in sim.get_last_text().lower()
+        # Auto-detected portfolio profile shown in welcome message
+        assert 'hst portfolio profile' in sim.get_last_text().lower()
 
 
 class TestTrainingStageGroups:
@@ -3157,7 +3157,7 @@ class TestTrainingStageGroups:
              patch('bot.get_voice_profile', return_value=None):
             text, _ = _settings_view_components(123)
 
-        assert 'Training stage: Unknown' in text
+        assert 'Portfolio profile: Unknown' in text
 
     def test_unlimited_settings_labels_cases_as_filed_not_usage(self):
         from bot import _settings_view_components
@@ -3182,9 +3182,9 @@ class TestTrainingStageGroups:
         await handle_action_button(update, context)
 
         buttons = sim.get_last_buttons()
-        assert ('ACCS (ST1–2)', 'SETLEVEL|ACCS') in buttons
-        assert ('Intermediate (ST3)', 'SETLEVEL|INTERMEDIATE') in buttons
-        assert ('Higher (ST4–6)', 'SETLEVEL|HIGHER') in buttons
+        assert ('ACCS profile', 'SETLEVEL|ACCS') in buttons
+        assert ('Intermediate profile', 'SETLEVEL|INTERMEDIATE') in buttons
+        assert ('HST profile', 'SETLEVEL|HIGHER') in buttons
 
     def test_settings_layout_prioritises_voice_profile(self):
         from bot import _settings_view_components

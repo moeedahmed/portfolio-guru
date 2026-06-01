@@ -1,5 +1,5 @@
 """
-User profile store — training level and preferences.
+User profile store — Kaizen portfolio profile and preferences.
 Separate from credentials.py (which is frozen).
 """
 import os
@@ -19,14 +19,16 @@ class UserProfile(SQLModel, table=True):
     __tablename__ = "userprofile"
     id: Optional[int] = Field(default=None, primary_key=True)
     telegram_user_id: int = Field(unique=True, index=True)
+    # Legacy column name. This stores the Kaizen portfolio profile bucket
+    # (ACCS|INTERMEDIATE|HIGHER/HST|SAS), not the user's exact grade/year.
     training_level: str = Field(default="UNKNOWN")   # UNKNOWN|ACCS|INTERMEDIATE|HIGHER|SAS, or legacy ST3/ST4/ST5/ST6
     curriculum: Optional[str] = Field(default=None)  # "2025" or "2021"; None treated as "2025"
     voice_profile: Optional[str] = Field(default=None)  # JSON style profile from user examples
     voice_examples_count: int = Field(default=0)  # how many examples were used to build profile
     # Detected Kaizen account role — "assessor" (pure Clinical Supervisor),
     # "trainee" (own portfolio), or "unknown" (detection failed / no probe yet).
-    # Separate from training_level because an assessor has no personal portfolio
-    # and the current bot maps that to HIGHER as a default. Read-only here;
+    # Separate from the portfolio profile because an assessor has no personal
+    # portfolio and the current bot maps that to HIGHER as a default. Read-only here;
     # mutated only through the demotion-safe `store_kaizen_role` helper.
     kaizen_role: Optional[str] = Field(default=None)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
