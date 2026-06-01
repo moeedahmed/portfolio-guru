@@ -17,8 +17,8 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
       - name: Install dependencies
@@ -40,7 +40,7 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Check E2E secrets
         id: e2e-secrets
         shell: bash
@@ -51,7 +51,7 @@ jobs:
             echo "available=false" >> "$GITHUB_OUTPUT"
             echo "E2E secrets are not configured; skipping E2E tests."
           fi
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         if: steps.e2e-secrets.outputs.available == 'true'
         with:
           python-version: "3.14"
