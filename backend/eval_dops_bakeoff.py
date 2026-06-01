@@ -17,7 +17,7 @@ Usage (live, with creds exported via BWS):
 
     cd ~/projects/portfolio-guru
     python3 backend/eval_dops_bakeoff.py --case 3 \\
-        --providers deepseek-v4,gemini-3-5-flash
+        --providers deepseek-v4-flash
 """
 
 from __future__ import annotations
@@ -186,9 +186,9 @@ PROVIDERS = [
         "env_key": "GOOGLE_API_KEY",
     },
     {
-        "name": "deepseek-v4",
+        "name": "deepseek-v4-flash",
         "caller": "deepseek",
-        "model": lambda: "deepseek-chat",
+        "model": lambda: "deepseek-v4-flash",
         "env_key": "DEEPSEEK_API_KEY",
     },
 ]
@@ -357,7 +357,7 @@ def main():
     parser.add_argument("--case", default="chest-drain", help=f"One of: {sorted(DOPS_CASES)}")
     parser.add_argument(
         "--providers",
-        default="deepseek-v4,gemini-3-5-flash",
+        default="deepseek-v4-flash",
         help="Comma-separated provider names from the PROVIDERS list",
     )
     args = parser.parse_args()

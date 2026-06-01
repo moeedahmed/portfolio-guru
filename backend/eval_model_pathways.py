@@ -7,7 +7,7 @@ Compares extraction quality across providers by calling each one DIRECTLY
 
 Usage:
     cd ~/projects/portfolio-guru
-    python3 backend/eval_model_pathways.py [--all] [--cases 1,3,5] [--providers gemini-fast,deepseek-v4]
+    python3 backend/eval_model_pathways.py [--all] [--cases 1,3,5] [--providers deepseek-v4-flash]
 """
 
 import asyncio
@@ -269,7 +269,7 @@ async def _call_gemini(prompt: str, model: str) -> str:
     return response.text, elapsed
 
 
-async def _call_deepseek(prompt: str, model: str = "deepseek-chat") -> tuple[str, float]:
+async def _call_deepseek(prompt: str, model: str = "deepseek-v4-flash") -> tuple[str, float]:
     """Direct call to DeepSeek API."""
     from openai import OpenAI
     api_key = os.environ.get("DEEPSEEK_API_KEY")
@@ -300,8 +300,8 @@ PROVIDERS = [
      "model": "gemini-3.5-flash",               "env_key": "GOOGLE_API_KEY",       "cost_note": "Google API key (pay-as-you-go)"},
     {"name": "gemini-pro",    "caller": "gemini",
      "model": "gemini-3.1-pro-preview",          "env_key": "GOOGLE_API_KEY",       "cost_note": "Google One AI Premium (subscription)"},
-    {"name": "deepseek-v4",   "caller": "deepseek",
-     "model": "deepseek-chat",                   "env_key": "DEEPSEEK_API_KEY",     "cost_note": "API pay-as-you-go ~$0.14/1M input"},
+    {"name": "deepseek-v4-flash", "caller": "deepseek",
+     "model": "deepseek-v4-flash",               "env_key": "DEEPSEEK_API_KEY",     "cost_note": "DeepSeek console balance"},
 ]
 
 
@@ -571,8 +571,8 @@ async def main():
     parser.add_argument("--all", action="store_true", help="Run all 8 cases")
     parser.add_argument("--cases", type=str, default="1,3,5,8",
                         help="Comma-separated case IDs (default: 1,3,5,8 — diverse sampling)")
-    parser.add_argument("--providers", type=str, default="gemini-fast,gemini-2.5-flash,deepseek-v4",
-                        help="Comma-separated provider names (default: gemini-fast,gemini-2.5-flash,deepseek-v4)")
+    parser.add_argument("--providers", type=str, default="deepseek-v4-flash",
+                        help="Comma-separated provider names (default: deepseek-v4-flash)")
     args = parser.parse_args()
 
     case_ids = [int(x.strip()) for x in args.cases.split(",") if x.strip()]

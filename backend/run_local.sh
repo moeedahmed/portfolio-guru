@@ -47,17 +47,13 @@ TELEGRAM_BOT_TOKEN="$(get_secret af553b7d-5c05-418a-b80e-b405015708ed)"
 export TELEGRAM_BOT_TOKEN
 GOOGLE_API_KEY="$(get_secret af6579a0-2cbe-4cef-94b3-b405017b48fe)"
 export GOOGLE_API_KEY
-echo "Gemini key in use (last4): ${GOOGLE_API_KEY: -4}"
-export GEMINI_FAST_MODEL="${GEMINI_FAST_MODEL:-gemini-3-flash-preview}"
-export GEMINI_STABLE_MODEL="${GEMINI_STABLE_MODEL:-gemini-2.5-flash}"
-export GEMINI_PREMIUM_MODEL="${GEMINI_PREMIUM_MODEL:-gemini-3.1-pro-preview}"
-export GEMINI_3_5_FLASH_MODEL="${GEMINI_3_5_FLASH_MODEL:-gemini-3.5-flash}"
-export PORTFOLIO_GURU_EXTRACTOR_PROVIDER="${PORTFOLIO_GURU_EXTRACTOR_PROVIDER:-deepseek/deepseek-v4-flash}"
+echo "Google key loaded for OCR/voice utilities (last4): ${GOOGLE_API_KEY: -4}"
+export PORTFOLIO_GURU_EXTRACTOR_PROVIDER="deepseek-v4-flash"
 export PG_GATHERING_MODE="${PG_GATHERING_MODE:-1}"
-echo "Models: gemini-fast=$GEMINI_FAST_MODEL gemini-stable=$GEMINI_STABLE_MODEL extractor=$PORTFOLIO_GURU_EXTRACTOR_PROVIDER"
+echo "Model: extractor=$PORTFOLIO_GURU_EXTRACTOR_PROVIDER"
 FERNET_SECRET_KEY="$(get_secret 9e653679-9a33-4c23-a15c-b405015713de)"
 export FERNET_SECRET_KEY
-# OpenAI keys not in use — extractor uses DeepSeek
+# OpenAI keys not in use — extractor uses DeepSeek V4 Flash
 # DEEPSEEK_API_KEY_PORTFOLIO is loaded below
 DEEPSEEK_API_KEY="$(get_secret c5d82503-3d1d-427b-9be1-b44e01564203)"
 export DEEPSEEK_API_KEY

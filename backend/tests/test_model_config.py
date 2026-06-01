@@ -1,6 +1,3 @@
-import os
-
-
 def test_gemini_fallback_models_default_order(monkeypatch):
     monkeypatch.delenv("GEMINI_FAST_MODEL", raising=False)
     monkeypatch.delenv("GEMINI_STABLE_MODEL", raising=False)
@@ -25,18 +22,17 @@ def test_extractor_defaults_to_deepseek(monkeypatch):
     from extractor import _select_providers
 
     providers = _select_providers()
-    assert [p["name"] for p in providers] == ["deepseek-v4"]
+    assert [p["name"] for p in providers] == ["deepseek-v4-flash"]
+    assert providers[0]["model"] == "deepseek-v4-flash"
 
 
-def test_extractor_gemini_pro_override_reads_model_at_runtime(monkeypatch):
+def test_extractor_ignores_legacy_provider_override(monkeypatch):
     monkeypatch.setenv("PORTFOLIO_GURU_EXTRACTOR_PROVIDER", "gemini-pro")
-    monkeypatch.setenv("GEMINI_PREMIUM_MODEL", "gemini-runtime-pro")
 
     from extractor import _select_providers
 
-    provider = _select_providers()[0]
-    assert provider["name"] == "gemini-pro"
-    assert provider["model"]() == "gemini-runtime-pro"
+    providers = _select_providers()
+    assert [p["name"] for p in providers] == ["deepseek-v4-flash"]
 
 
 def test_gemini_three_five_flash_model_default(monkeypatch):
@@ -55,25 +51,14 @@ def test_gemini_three_five_flash_model_honours_env(monkeypatch):
     assert gemini_three_five_flash_model() == "gemini-3-5-flash-runtime"
 
 
-def test_extractor_gemini_3_5_flash_override_reads_model_at_runtime(monkeypatch):
-    # `gemini-3.5-flash` selects a Gemini Flash provider while leaving the
-    # production default untouched. It still keeps fallbacks because the
-    # preview/free-tier Gemini route can exhaust mid-flow.
+def test_extractor_gemini_3_5_flash_override_no_longer_changes_live_model(monkeypatch):
     monkeypatch.setenv("PORTFOLIO_GURU_EXTRACTOR_PROVIDER", "gemini-3.5-flash")
-    monkeypatch.setenv("GEMINI_3_5_FLASH_MODEL", "gemini-3-5-flash-runtime")
-    monkeypatch.setenv("GEMINI_STABLE_MODEL", "gemini-stable-runtime")
 
     from extractor import _select_providers
 
     providers = _select_providers()
-    provider = providers[0]
-    assert provider["name"] == "gemini-3-5-flash"
-    assert provider["type"] == "gemini"
-    assert provider["env_key"] == "GOOGLE_API_KEY"
-    assert provider["model"]() == "gemini-3-5-flash-runtime"
-    assert providers[1]["name"] == "gemini-stable"
-    assert providers[1]["model"]() == "gemini-stable-runtime"
-    assert providers[2]["name"] == "deepseek-v4"
+    assert [p["name"] for p in providers] == ["deepseek-v4-flash"]
+    assert providers[0]["model"] == "deepseek-v4-flash"
 
 
 def test_extractor_default_unaffected_by_3_5_flash_being_available(monkeypatch):
@@ -84,4 +69,4 @@ def test_extractor_default_unaffected_by_3_5_flash_being_available(monkeypatch):
     from extractor import _select_providers
 
     providers = _select_providers()
-    assert [p["name"] for p in providers] == ["deepseek-v4"]
+    assert [p["name"] for p in providers] == ["deepseek-v4-flash"]

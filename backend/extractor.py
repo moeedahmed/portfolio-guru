@@ -6,12 +6,12 @@ import os
 import re
 from datetime import date, datetime, timedelta
 from typing import List
+import httpx
 
 logger = logging.getLogger(__name__)
 from models import CBDData, FormTypeRecommendation, FormDraft
 from form_schemas import FORM_SCHEMAS
 from form_display import public_form_name, sanitize_internal_form_codes
-from model_config import gemini_premium_model, gemini_stable_model, gemini_three_five_flash_model
 
 # RCEM Higher EM Curriculum (2025 Update) — Exact Kaizen checkbox labels
 # Source: Live Kaizen CBD form screenshot (verified 2026-03-08)
@@ -101,64 +101,25 @@ KC_FULL_TEXT = {
 
 _client = None
 
-# Extraction model policy:
-# - DeepSeek is the default for recommendation/extraction/review.
-# - Gemini Pro is reserved for explicit premium override/escalation.
+# Extraction model policy: one live text LLM for recommendation/extraction/review.
 PROVIDERS = [
     {
-        "name": "deepseek-v4",
+        "name": "deepseek-v4-flash",
         "type": "openai_compat",
-        "model": "deepseek-chat",
+        "model": "deepseek-v4-flash",
         "base_url": "https://api.deepseek.com",
         "env_key": "DEEPSEEK_API_KEY",
     },
 ]
 
-PREMIUM_PROVIDERS = [
-    {
-        "name": "gemini-pro",
-        "type": "gemini",
-        "model": gemini_premium_model,
-        "env_key": "GOOGLE_API_KEY",
-    },
-]
-
-# Gemini 3.5 Flash is exposed as an explicit override so the eval can compare
-# it against DeepSeek without changing the production default.
-GEMINI_3_5_FLASH_PROVIDERS = [
-    {
-        "name": "gemini-3-5-flash",
-        "type": "gemini",
-        "model": gemini_three_five_flash_model,
-        "env_key": "GOOGLE_API_KEY",
-    },
-    {
-        "name": "gemini-stable",
-        "type": "gemini",
-        "model": gemini_stable_model,
-        "env_key": "GOOGLE_API_KEY",
-    },
-    *PROVIDERS,
-]
-
 
 def _select_providers(tier: str = ""):
-    requested = (
-        tier
-        or os.environ.get("PORTFOLIO_GURU_EXTRACTOR_PROVIDER")
-        or os.environ.get("EXTRACTOR_PROVIDER")
-        or "deepseek-v4"
-    ).lower().replace("_", "-").replace(".", "-")
-    if requested in {"gemini-pro", "gemini-premium", "premium"}:
-        return PREMIUM_PROVIDERS
-    if requested in {"gemini-3-5-flash", "gemini-flash-3-5", "gemini-flash-35"}:
-        return GEMINI_3_5_FLASH_PROVIDERS
     return PROVIDERS
 
 
 async def _generate(prompt, retries: int = 1, tier: str = ""):
     """Call the configured extractor LLM.
-    Defaults to DeepSeek. Gemini Pro is available only through explicit override.
+    Defaults to DeepSeek V4 Flash.
     Returns the response as a plain string.
     """
     import time as _time
@@ -187,13 +148,9 @@ async def _generate(prompt, retries: int = 1, tier: str = ""):
                     logger.info(f"{provider['name']} ({model_name}) responded in {elapsed:.1f}s")
                     return result.text
                 else:
-                    # openai or openai_compat
-                    from openai import OpenAI
+                    # OpenAI-compatible DeepSeek endpoint. Use httpx directly so
+                    # the live bot does not depend on the optional openai package.
                     model_name = provider["model"]() if callable(provider["model"]) else provider["model"]
-                    oai_client = OpenAI(
-                        api_key=api_key,
-                        base_url=provider.get("base_url"),
-                    )
                     request_kwargs = {
                         "model": model_name,
                         "messages": [{"role": "user", "content": prompt}],
@@ -201,13 +158,20 @@ async def _generate(prompt, retries: int = 1, tier: str = ""):
                     }
                     if "json" in prompt.lower():
                         request_kwargs["response_format"] = {"type": "json_object"}
-                    response = await loop.run_in_executor(
-                        None,
-                        lambda c=oai_client, kwargs=request_kwargs: c.chat.completions.create(**kwargs)
-                    )
+                    async with httpx.AsyncClient(timeout=60.0) as client:
+                        response = await client.post(
+                            f"{provider.get('base_url')}/chat/completions",
+                            headers={
+                                "Authorization": f"Bearer {api_key}",
+                                "Content-Type": "application/json",
+                            },
+                            json=request_kwargs,
+                        )
+                        response.raise_for_status()
+                        response_json = response.json()
                     elapsed = _time.monotonic() - t0
                     logger.info(f"{provider['name']} ({model_name}) responded in {elapsed:.1f}s")
-                    return response.choices[0].message.content
+                    return response_json["choices"][0]["message"]["content"]
             except Exception as e:
                 last_error = e
                 error_msg = str(e).lower()
