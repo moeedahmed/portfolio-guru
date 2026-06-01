@@ -1,6 +1,7 @@
 from datetime import UTC, date, datetime, timedelta
 
 from health_engine import (
+    case_history_to_evidence_items,
     compute_domain_coverage,
     compute_gap_summary,
     compute_health_score,
@@ -127,3 +128,26 @@ def test_compute_snapshot_produces_valid_health_snapshot():
     assert snapshot.pathway_readiness["pathway"] == Pathway.training_arcp.value
     assert snapshot.gap_summary
     assert 3 <= len(snapshot.next_actions) <= 5
+
+
+def test_case_history_to_evidence_items_maps_form_domains_statuses_and_sources():
+    history = [
+        {"form_type": "CBD", "filed_at": "2026-05-20 10:15:00", "status": "filed", "telegram_user_id": 123},
+        {"form_type": "QIAT", "filed_at": "2026-05-19", "status": "failed", "telegram_user_id": 123},
+        {"form_type": "TEACH_OBS", "filed_at": "2026-05-18", "status": "draft", "telegram_user_id": 123},
+        {"form_type": "UNKNOWN_FORM", "filed_at": "2026-05-17", "status": "filed", "telegram_user_id": 123},
+    ]
+
+    items = case_history_to_evidence_items(history)
+
+    assert items[0].domain == HealthDomain.clinical
+    assert items[0].evidence_type == "wpba"
+    assert items[0].status == "filed"
+    assert items[0].source == "kaizen_filed"
+    assert items[1].domain == HealthDomain.qi
+    assert items[1].evidence_type == "audit"
+    assert items[1].status == "needs_work"
+    assert items[1].source == "pg_draft"
+    assert items[2].domain == HealthDomain.teaching
+    assert items[2].source == "pg_draft"
+    assert items[3].domain == HealthDomain.clinical

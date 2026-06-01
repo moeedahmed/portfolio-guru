@@ -25,6 +25,9 @@ from whisper import transcribe_voice
 from vision import extract_from_image
 from documents import extract_from_document, is_supported_document
 from profile_store import init_profile_db, store_training_level, get_training_level, get_voice_profile, store_voice_profile, clear_voice_profile, store_curriculum, get_curriculum
+from health_models import HealthProfile, HealthDomain, Pathway
+from health_engine import case_history_to_evidence_items, compute_snapshot
+from health_profile_store import get_health_profile, save_health_profile
 from bulk_filer import bulk_file
 from kaizen_unsigned_scraper import scrape_unsigned_tickets
 from conversational_case_engine import CaseFact, CaseState, CaseWorkspace, SourceType
@@ -1009,7 +1012,7 @@ def _looks_like_gathering_side_chat(text: str, intent: ConversationalIntent) -> 
  AWAIT_CASE_INPUT, AWAIT_TRAINING_LEVEL,
  AWAIT_VOICE_EXAMPLES, AWAIT_TEMPLATE_REVIEW,
  AWAIT_CURRICULUM, AWAIT_FORM_SEARCH,
- AWAIT_GATHERING) = range(13)
+ AWAIT_GATHERING, AWAIT_PATHWAY) = range(14)
 
 # Common button patterns used across the bot
 _BTN_SETUP = InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")
@@ -4086,6 +4089,7 @@ Suggest the best form, extract all the fields, show you a draft to review and ed
 /setup — Connect or update Kaizen credentials
 /voice — Set up your writing style profile
 /settings — Plan, usage, preferences
+/pathway — Switch Portfolio Health between ARCP and CESR
 /upgrade — View subscription plans
 /help — This message"""
 
@@ -4459,6 +4463,9 @@ async def _run_health_analysis(
     """
     await chat.send_action(constants.ChatAction.TYPING)
 
+    profile = _get_or_default_health_profile(user_id)
+    pathway_label = "CESR" if profile.pathway == Pathway.cesr_portfolio else "ARCP"
+
     training_level = get_training_level(user_id)
     if not training_level:
         training_level = "ST4"
@@ -4469,12 +4476,15 @@ async def _run_health_analysis(
     history = await get_case_history(user_id, months=6)
     if not history:
         await send_result(
-            "📊 *Portfolio Health*\n\n"
-            "No cases filed yet. Start filing cases and come back to check your ARCP readiness.\n\n"
+            f"📊 *Portfolio Health — {pathway_label}*\n\n"
+            f"No cases filed yet. Start filing cases and come back to check your {pathway_label} readiness.\n\n"
             "Tip: Send a clinical case to get started.",
             None,
         )
         return
+
+    evidence_items = case_history_to_evidence_items(history)
+    snapshot = compute_snapshot(profile, evidence_items)
 
     await send_progress()
 
@@ -4499,6 +4509,14 @@ async def _run_health_analysis(
             except OSError:
                 pass
 
+    from datetime import datetime as _dt
+    month_label = _dt.now().strftime("%B %Y")
+
+    if profile.pathway == Pathway.cesr_portfolio:
+        msg = _format_cesr_health_message(snapshot, history, month_label)
+        await send_result(msg, None)
+        return
+
     try:
         analysis = await asyncio.wait_for(
             analyse_portfolio_health(history, training_level), timeout=45
@@ -4512,9 +4530,7 @@ async def _run_health_analysis(
         await fail_fn("❌ Could not analyse portfolio health. Try again later.")
         return
 
-    from datetime import datetime as _dt
-    month_label = _dt.now().strftime("%B %Y")
-
+    deterministic_str = _format_deterministic_health_section(snapshot)
     form_dist = analysis.get("form_distribution", {})
     dist_parts = []
     for ft, count in form_dist.items():
@@ -4538,7 +4554,9 @@ async def _run_health_analysis(
     total = analysis.get("total_cases", len(history))
 
     msg = (
-        f"📊 *Portfolio Health — {month_label}*\n\n"
+        f"📊 *Portfolio Health — ARCP*\n"
+        f"{month_label}\n\n"
+        f"{deterministic_str}\n\n"
         f"Cases filed (last 6 months): {total}\n"
         f"Form types: {dist_str}\n\n"
         f"✅ *Strengths:*\n{strengths_str}\n\n"
@@ -4548,6 +4566,128 @@ async def _run_health_analysis(
         f"{level_note}"
     )
     await send_result(msg, None)
+
+
+def _get_or_default_health_profile(user_id: int) -> HealthProfile:
+    stored = get_health_profile(user_id)
+    if stored:
+        return stored
+    from datetime import UTC, datetime
+    now = datetime.now(UTC)
+    return HealthProfile(
+        user_id=str(user_id),
+        pathway=Pathway.training_arcp,
+        pathway_config={},
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _pathway_label(pathway: Pathway) -> str:
+    return "CESR / Portfolio Pathway" if pathway == Pathway.cesr_portfolio else "Training (ARCP)"
+
+
+def _build_pathway_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Training (ARCP)", callback_data=f"PATHWAY|{Pathway.training_arcp.value}")],
+        [InlineKeyboardButton("CESR / Portfolio Pathway", callback_data=f"PATHWAY|{Pathway.cesr_portfolio.value}")],
+    ])
+
+
+async def pathway_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Standalone /pathway command — choose ARCP or CESR Portfolio Health view."""
+    user_id = update.effective_user.id
+    profile = _get_or_default_health_profile(user_id)
+    await update.message.reply_text(
+        f"Current Portfolio Health pathway: {_pathway_label(profile.pathway)}\n\n"
+        "Which pathway should /health use?",
+        reply_markup=_build_pathway_keyboard(),
+    )
+    return AWAIT_PATHWAY
+
+
+async def handle_pathway_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    raw_pathway = query.data.split("|", 1)[1]
+    try:
+        pathway = Pathway(raw_pathway)
+    except ValueError:
+        await query.edit_message_text("⚠️ Unknown pathway. Use /pathway to try again.")
+        return ConversationHandler.END
+
+    from datetime import UTC, datetime
+    now = datetime.now(UTC)
+    current = get_health_profile(update.effective_user.id)
+    profile = HealthProfile(
+        user_id=str(update.effective_user.id),
+        pathway=pathway,
+        pathway_config=current.pathway_config if current else {},
+        created_at=current.created_at if current else now,
+        updated_at=now,
+    )
+    save_health_profile(profile)
+    await query.edit_message_text(
+        f"✅ Portfolio Health pathway set to {_pathway_label(pathway)}.\n\n"
+        "Run /health to view the updated analysis."
+    )
+    return ConversationHandler.END
+
+
+def _format_deterministic_health_section(snapshot) -> str:
+    return (
+        f"Deterministic health score: {_health_score_label(snapshot.health_score)}\n"
+        f"Domain coverage: {_format_domain_counts(snapshot.domain_counts)}"
+    )
+
+
+def _format_cesr_health_message(snapshot, history: list[dict], month_label: str) -> str:
+    gaps = snapshot.gap_summary or ["No major gaps"]
+    actions = snapshot.next_actions or ["Keep adding recent evidence"]
+    wpba_count = snapshot.pathway_readiness.get("wpba_count", _wpba_count_from_history(history))
+    return (
+        f"📊 *Portfolio Health — CESR*\n"
+        f"{month_label}\n\n"
+        f"Health score: {_health_score_label(snapshot.health_score)}\n"
+        f"WPBA count: {wpba_count}\n"
+        f"Domain coverage: {_format_domain_counts(snapshot.domain_counts)}\n\n"
+        f"⚠️ *Gap summary:*\n{_bullet_list(gaps)}\n\n"
+        f"💡 *Next actions:*\n{_bullet_list(actions)}\n\n"
+        "CESR requires 36 WPBAs minimum (12 DOPS, 12 Mini-CEX, 12 CBD). "
+        "Evidence should be within 5 years."
+    )
+
+
+def _health_score_label(score) -> str:
+    labels = {
+        "green": "🟢 Green",
+        "amber": "🟡 Amber",
+        "red": "🔴 Red",
+        "grey": "⚪ Grey",
+    }
+    value = getattr(score, "value", str(score))
+    return labels.get(value, value.title())
+
+
+def _format_domain_counts(domain_counts: dict) -> str:
+    labels = {
+        HealthDomain.clinical: "clinical",
+        HealthDomain.cpd: "CPD",
+        HealthDomain.qi: "QI",
+        HealthDomain.teaching: "teaching",
+        HealthDomain.leadership: "leadership",
+        HealthDomain.reflection: "reflection",
+    }
+    return " · ".join(f"{labels[domain]} {domain_counts.get(domain, 0)}" for domain in HealthDomain)
+
+
+def _bullet_list(values: list[str]) -> str:
+    return "\n".join(f"• {value}" for value in values)
+
+
+def _wpba_count_from_history(history: list[dict]) -> int:
+    wpba_forms = {"CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "PROC_LOG", "US_CASE", "ESLE", "ESLE_ASSESS", "ESLE_PART1_2"}
+    return sum(1 for record in history if str(record.get("form_type", "")).strip().upper() in wpba_forms)
 
 
 async def _health_gate_check(user_id: int) -> bool:
@@ -8266,8 +8406,18 @@ def build_application() -> Application:
         allow_reentry=True,
     )
 
+    pathway_conv = ConversationHandler(
+        entry_points=[CommandHandler("pathway", pathway_command)],
+        states={
+            AWAIT_PATHWAY: [CallbackQueryHandler(handle_pathway_choice, pattern=r"^PATHWAY\|")],
+        },
+        fallbacks=[CommandHandler("start", start), CommandHandler("cancel", setup_cancel)],
+        allow_reentry=True,
+    )
+
     application.add_handler(setup_conv)
     application.add_handler(voice_conv)
+    application.add_handler(pathway_conv)
     application.add_handler(case_conv)
     # /start is handled by case_conv entry point (when not in a conversation) or
     # case_conv fallback (when in case_conv). Do NOT add a standalone handler at
