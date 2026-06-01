@@ -40,7 +40,6 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
             "I won’t invent clinical detail. Missing fields stay blank, and nothing is filed "
             "until you approve it.\n\n"
             "Your Kaizen login is encrypted and used only to save drafts — never shared.\n\n"
-            "Use /pathway to switch Portfolio Health between ARCP and CESR.\n\n"
             "Tap 🔗 Connect to start."
         ),
         safety_critical=True,
@@ -52,8 +51,7 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
             "🩺 Portfolio Guru is ready.\n\n"
             "Send what happened — text, voice, photo, or document. Add more across messages if you "
             "like, then say \"draft it\" when ready. I’ll only use what you send and won’t invent "
-            "clinical detail.\n\n"
-            "Use /pathway to switch Portfolio Health between ARCP and CESR."
+            "clinical detail."
         ),
         safety_critical=True,
     ),
