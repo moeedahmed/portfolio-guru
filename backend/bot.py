@@ -79,6 +79,19 @@ logger = logging.getLogger(__name__)
 
 MAX_TELEGRAM_MSG = 4096
 
+BOT_COMMANDS = [
+    ("start", "Open Portfolio Guru and get started"),
+    ("setup", "Connect your portfolio account"),
+    ("voice", "Set up your personal writing voice"),
+    ("settings", "View status, usage, and preferences"),
+    ("link", "Link to your EM Gurus Hub web account"),
+    ("health", "Portfolio health chart and ARCP analysis"),
+    ("pathway", "Switch Portfolio Health between ARCP and CESR"),
+    ("cancel", "Cancel whatever is happening"),
+    ("delete", "Delete all your stored data"),
+    ("help", "How to use Portfolio Guru"),
+]
+
 
 async def _log_conversational_router_shadow(
     text: str,
@@ -8667,17 +8680,7 @@ def main():
 
     # Register commands so they appear in Telegram's "/" menu
     async def post_init(app):
-        await app.bot.set_my_commands([
-            ("start", "Open Portfolio Guru and get started"),
-            ("setup", "Connect your portfolio account"),
-            ("voice", "Set up your personal writing voice"),
-            ("settings", "View status, usage, and preferences"),
-            ("link", "Link to your EM Gurus Hub web account"),
-            ("health", "Portfolio health chart and ARCP analysis"),
-            ("cancel", "Cancel whatever is happening"),
-            ("delete", "Delete all your stored data"),
-            ("help", "How to use Portfolio Guru"),
-        ])
+        await app.bot.set_my_commands(BOT_COMMANDS)
         # Set bot description (shown on profile page before starting)
         try:
             await app.bot.set_my_description(render_message("bot_profile_description"))

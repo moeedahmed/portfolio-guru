@@ -10,6 +10,12 @@ from health_models import HealthProfile, Pathway
 from tests.bot_simulator import BotSimulator
 
 
+def test_pathway_is_registered_in_telegram_command_menu():
+    import bot
+
+    assert ("pathway", "Switch Portfolio Health between ARCP and CESR") in bot.BOT_COMMANDS
+
+
 @pytest.mark.asyncio
 async def test_safe_edit_text_retries_plain_text_when_markdown_is_invalid():
     import bot
