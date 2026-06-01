@@ -10,10 +10,11 @@ from health_models import HealthProfile, Pathway
 from tests.bot_simulator import BotSimulator
 
 
-def test_pathway_is_registered_in_telegram_command_menu():
+def test_pathway_is_hidden_from_telegram_command_menu_but_still_typeable():
     import bot
 
-    assert ("pathway", "Switch Portfolio Health between ARCP and CESR") in bot.BOT_COMMANDS
+    assert all(command != "pathway" for command, _ in bot.BOT_COMMANDS)
+    assert callable(bot.pathway_command)
 
 
 @pytest.mark.asyncio
@@ -82,6 +83,63 @@ async def test_pathway_command_saves_selected_pathway(isolated_health_store):
     assert stored is not None
     assert stored.pathway == Pathway.cesr_portfolio
     assert "CESR / Portfolio Pathway" in sim.get_last_text()
+
+
+def test_settings_shows_pathway_change_control(isolated_health_store, monkeypatch):
+    import bot
+
+    monkeypatch.setattr(bot, "get_curriculum", lambda _user_id: "2025")
+    monkeypatch.setattr(bot, "get_training_level", lambda _user_id: "ST5")
+    monkeypatch.setattr(bot, "get_voice_profile", lambda _user_id: None)
+
+    text, keyboard = bot._settings_view_components(
+        4242,
+        tier="pro_plus",
+        used=0,
+        connected=True,
+    )
+
+    buttons = [(button.text, button.callback_data) for row in keyboard.inline_keyboard for button in row]
+    assert "Pathway: Training (ARCP)" in text
+    assert ("📊 Pathway: Training (ARCP)", "ACTION|change_pathway") in buttons
+
+
+@pytest.mark.asyncio
+async def test_settings_pathway_change_saves_and_returns_to_settings(isolated_health_store, monkeypatch):
+    import bot
+    health_profile_store = isolated_health_store
+
+    monkeypatch.setattr(bot, "get_curriculum", lambda _user_id: "2025")
+    monkeypatch.setattr(bot, "get_training_level", lambda _user_id: "ST5")
+    monkeypatch.setattr(bot, "get_voice_profile", lambda _user_id: None)
+    monkeypatch.setattr(bot, "has_credentials", lambda _user_id: True)
+    monkeypatch.setattr(bot, "get_cases_this_month", AsyncMock(return_value=0))
+    monkeypatch.setattr(bot, "get_user_tier", AsyncMock(return_value="pro_plus"))
+    monkeypatch.setattr(bot, "is_beta_tester", AsyncMock(return_value=False))
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|change_pathway"),
+        context,
+    )
+
+    assert ("Training (ARCP)", "PATHWAY_SETTINGS|training_arcp") in sim.get_last_buttons()
+    assert ("CESR / Portfolio Pathway", "PATHWAY_SETTINGS|cesr_portfolio") in sim.get_last_buttons()
+    assert ("🔙 Back to settings", "ACTION|settings") in sim.get_last_buttons()
+
+    result = await bot.handle_pathway_choice(
+        sim._make_callback_update("PATHWAY_SETTINGS|cesr_portfolio"),
+        context,
+    )
+
+    assert result == ConversationHandler.END
+    stored = health_profile_store.get_health_profile(sim.user_id)
+    assert stored is not None
+    assert stored.pathway == Pathway.cesr_portfolio
+    assert "Pathway: CESR / Portfolio Pathway" in sim.get_last_text()
+    assert ("📊 Pathway: CESR / Portfolio Pathway", "ACTION|change_pathway") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio

@@ -86,7 +86,6 @@ BOT_COMMANDS = [
     ("settings", "View status, usage, and preferences"),
     ("link", "Link to your EM Gurus Hub web account"),
     ("health", "Portfolio health chart and ARCP analysis"),
-    ("pathway", "Switch Portfolio Health between ARCP and CESR"),
     ("cancel", "Cancel whatever is happening"),
     ("delete", "Delete all your stored data"),
     ("help", "How to use Portfolio Guru"),
@@ -1544,6 +1543,7 @@ def _settings_view_components(
     curriculum = get_curriculum(user_id) or "2025"
     curriculum_label = "2021 Curriculum" if curriculum == "2021" else "2025 Update"
     training_level = _training_level_label(get_training_level(user_id))
+    pathway_label = _pathway_label(_get_or_default_health_profile(user_id).pathway)
     voice_profile = get_voice_profile(user_id)
     voice_status = "✅ Active" if voice_profile else "⭐ Recommended — not set"
     voice_cta = "⭐ Set up voice profile" if not voice_profile else "✅ Voice profile active / rebuild"
@@ -1572,6 +1572,7 @@ def _settings_view_components(
     buttons = [
         [InlineKeyboardButton(voice_cta, callback_data="ACTION|voice")],
         [InlineKeyboardButton(f"🎓 Training stage: {training_level}", callback_data="ACTION|change_level")],
+        [InlineKeyboardButton(f"📊 Pathway: {pathway_label}", callback_data="ACTION|change_pathway")],
         [InlineKeyboardButton(f"📚 Curriculum: {curriculum_label}", callback_data="ACTION|change_curriculum")],
         [InlineKeyboardButton(setup_button_label, callback_data="ACTION|setup")],
         [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu"),
@@ -1583,6 +1584,7 @@ def _settings_view_components(
         f"✍️ Voice profile: {voice_status}\n"
         f"   {voice_hint}\n\n"
         f"🎓 Training stage: {training_level}\n"
+        f"📊 Pathway: {pathway_label}\n"
         f"📚 Curriculum: {curriculum_label}\n\n"
         f"Pick what you want to change."
     )
@@ -3926,6 +3928,14 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=keyboard,
         )
 
+    elif action == "change_pathway":
+        profile = _get_or_default_health_profile(user_id)
+        await query.message.edit_text(
+            f"📊 Current Portfolio Health pathway: {_pathway_label(profile.pathway)}\n\n"
+            "Which pathway should /health use?",
+            reply_markup=_build_pathway_keyboard(from_settings=True),
+        )
+
     elif action == "back_to_menu":
         connected = has_credentials(user_id)
         msg_text = WELCOME_MSG_CONNECTED if connected else WELCOME_MSG
@@ -4118,7 +4128,6 @@ Suggest the best form, extract all the fields, show you a draft to review and ed
 /setup — Connect or update Kaizen credentials
 /voice — Set up your writing style profile
 /settings — Plan, usage, preferences
-/pathway — Switch Portfolio Health between ARCP and CESR
 /upgrade — View subscription plans
 /help — This message"""
 
@@ -4678,11 +4687,15 @@ def _pathway_label(pathway: Pathway) -> str:
     return "CESR / Portfolio Pathway" if pathway == Pathway.cesr_portfolio else "Training (ARCP)"
 
 
-def _build_pathway_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Training (ARCP)", callback_data=f"PATHWAY|{Pathway.training_arcp.value}")],
-        [InlineKeyboardButton("CESR / Portfolio Pathway", callback_data=f"PATHWAY|{Pathway.cesr_portfolio.value}")],
-    ])
+def _build_pathway_keyboard(*, from_settings: bool = False) -> InlineKeyboardMarkup:
+    prefix = "PATHWAY_SETTINGS" if from_settings else "PATHWAY"
+    rows = [
+        [InlineKeyboardButton("Training (ARCP)", callback_data=f"{prefix}|{Pathway.training_arcp.value}")],
+        [InlineKeyboardButton("CESR / Portfolio Pathway", callback_data=f"{prefix}|{Pathway.cesr_portfolio.value}")],
+    ]
+    if from_settings:
+        rows.append([InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")])
+    return InlineKeyboardMarkup(rows)
 
 
 async def pathway_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -4700,11 +4713,12 @@ async def pathway_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def handle_pathway_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
+    from_settings = query.data.startswith("PATHWAY_SETTINGS|")
     raw_pathway = query.data.split("|", 1)[1]
     try:
         pathway = Pathway(raw_pathway)
     except ValueError:
-        await query.edit_message_text("⚠️ Unknown pathway. Use /pathway to try again.")
+        await query.edit_message_text("⚠️ Unknown pathway. Use /settings to try again.")
         return ConversationHandler.END
 
     from datetime import UTC, datetime
@@ -4718,6 +4732,21 @@ async def handle_pathway_choice(update: Update, context: ContextTypes.DEFAULT_TY
         updated_at=now,
     )
     save_health_profile(profile)
+    if from_settings:
+        try:
+            used = await get_cases_this_month(update.effective_user.id)
+        except Exception:
+            used = 0
+        text, keyboard = _settings_view_components(
+            update.effective_user.id,
+            tier=await get_user_tier(update.effective_user.id),
+            used=used,
+            connected=has_credentials(update.effective_user.id),
+            is_beta=await is_beta_tester(update.effective_user.id),
+        )
+        await query.edit_message_text(text, reply_markup=keyboard)
+        return ConversationHandler.END
+
     await query.edit_message_text(
         f"✅ Portfolio Health pathway set to {_pathway_label(pathway)}.\n\n"
         "Run /health to view the updated analysis."
@@ -8467,6 +8496,7 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(handle_unsigned_range_pick, pattern=r"^UNSIGNED\|"))
     application.add_handler(CallbackQueryHandler(handle_set_curriculum, pattern=r"^SET_CURRICULUM\|"))
     application.add_handler(CallbackQueryHandler(handle_set_level, pattern=r"^SETLEVEL\|"))
+    application.add_handler(CallbackQueryHandler(handle_pathway_choice, pattern=r"^PATHWAY_SETTINGS\|"))
     application.add_handler(CallbackQueryHandler(handle_chase_log, pattern=r"^CHASE_LOG\|"))
     # Top-level handlers that must work regardless of conversation state
     application.add_handler(CallbackQueryHandler(handle_info_button, pattern=r"^INFO\|"))
