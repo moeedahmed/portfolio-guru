@@ -820,7 +820,7 @@ async def classify_menu_intent(text: str) -> str:
 Commands:
 - file_case: user wants to file or draft a clinical case ("file a case", "log a procedure", "draft a CBD")
 - show_stats: user wants to see their filing stats, usage, or how many cases this month/week
-- open_settings: user wants to change settings (curriculum, portfolio profile, voice profile, preferences)
+- open_settings: user wants to change settings (curriculum, portfolio, voice profile, preferences)
 - manage_credentials: user wants to change/update/reconnect their Kaizen login
 - show_help: user is asking what the bot does, how to use it, what forms are supported
 - chitchat: greeting, thanks, social message ("hi", "thanks", "you there")

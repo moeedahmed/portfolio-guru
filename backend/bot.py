@@ -1578,7 +1578,7 @@ def _settings_view_components(
 
     buttons = [
         [InlineKeyboardButton(voice_cta, callback_data="ACTION|voice")],
-        [InlineKeyboardButton(f"🎓 Portfolio profile: {training_level}", callback_data="ACTION|change_level")],
+        [InlineKeyboardButton(f"🎓 Portfolio: {training_level}", callback_data="ACTION|change_level")],
         [InlineKeyboardButton(f"📊 Pathway: {pathway_label}", callback_data="ACTION|change_pathway")],
         [InlineKeyboardButton(f"📚 Curriculum: {curriculum_label}", callback_data="ACTION|change_curriculum")],
         [InlineKeyboardButton(setup_button_label, callback_data="ACTION|setup")],
@@ -1590,7 +1590,7 @@ def _settings_view_components(
         f"{plan_block}"
         f"✍️ Voice profile: {voice_status}\n"
         f"   {voice_hint}\n\n"
-        f"🎓 Portfolio profile: {training_level}\n"
+        f"🎓 Portfolio: {training_level}\n"
         f"📊 Pathway: {pathway_label}\n"
         f"📚 Curriculum: {curriculum_label}\n\n"
         f"Pick what you want to change."
@@ -3045,14 +3045,14 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             f"{pathway_line}"
             "Send your first case — text, voice, photo, or document — and I'll get started.\n\n"
             "Use the *Menu* (☰ bottom-left) any time for Settings or Voice profile.\n"
-            f"Use */settings* if your portfolio profile is different.",
+            f"Use */settings* if your portfolio is different.",
             parse_mode="Markdown",
             flow_key="setup",
         )
     else:
         await _flow_edit(
             update, context,
-            "✅ Kaizen connected! I couldn't auto-detect your portfolio profile.\n\nWhich Kaizen portfolio profile applies to you?",
+            "✅ Kaizen connected! I couldn't auto-detect your portfolio.\n\nWhich Kaizen portfolio applies to you?",
             flow_key="setup",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("ACCS profile", callback_data="SETLEVEL|ACCS")],
@@ -3075,7 +3075,7 @@ async def setup_training_level(update: Update, context: ContextTypes.DEFAULT_TYP
     user_id = update.effective_user.id
     store_training_level(user_id, level)
     await query.edit_message_text(
-        f"Portfolio profile saved as {_training_level_label(level)}.\n\nWhich curriculum are you working under? Most trainees starting now are on the 2025 Update. If your deanery still uses the 2021 forms, pick that.",
+        f"Portfolio saved as {_training_level_label(level)}.\n\nWhich curriculum are you working under? Most trainees starting now are on the 2025 Update. If your deanery still uses the 2021 forms, pick that.",
         reply_markup=_build_curriculum_keyboard("SETUP_CURRICULUM")
     )
     return AWAIT_CURRICULUM
@@ -3932,7 +3932,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
         ])
         await query.message.edit_text(
-            "🎓 Which Kaizen portfolio profile applies to you?",
+            "🎓 Which Kaizen portfolio applies to you?",
             reply_markup=keyboard,
         )
 
@@ -3955,7 +3955,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
     elif action == "delete":
         # Confirm before deleting
         await query.message.edit_text(
-            "⚠️ This wipes your saved Kaizen login, portfolio profile, curriculum choice, and voice profile. It does not affect cases already saved in Kaizen. Are you sure?",
+            "⚠️ This wipes your saved Kaizen login, portfolio, curriculum choice, and voice profile. It does not affect cases already saved in Kaizen. Are you sure?",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🗑️ Yes, delete", callback_data="CONFIRM|delete"),
                  InlineKeyboardButton("❌ No, keep", callback_data="ACTION|cancel")],
@@ -4515,7 +4515,7 @@ async def _run_health_analysis(
     training_level = get_training_level(user_id)
     if not training_level:
         training_level = "HIGHER"
-        level_note = "\n\n_Note: No portfolio profile set — using HST defaults. Use /settings to update._"
+        level_note = "\n\n_Note: No portfolio set — using HST defaults. Use /settings to update._"
     else:
         level_note = ""
 
@@ -4935,7 +4935,7 @@ async def handle_set_level(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     user_id = update.effective_user.id
     store_training_level(user_id, level)
     await query.edit_message_text(
-        f"✅ Portfolio profile set to {_training_level_label(level)}.",
+        f"✅ Portfolio set to {_training_level_label(level)}.",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
         ]),

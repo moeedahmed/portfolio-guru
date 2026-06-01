@@ -349,7 +349,7 @@ def _render(
         plan_line = f"{tier_pretty} Plan · unlimited"
     else:
         plan_line = f"{tier_pretty} Plan · {cases_this_month}/{limit}"
-    level_line = training_level or "Portfolio profile not set"
+    level_line = training_level or "Portfolio not set"
     kc_line = ""
     if kc_stats and kc_stats.get("total_kcs", 0) > 0:
         kc_line = (

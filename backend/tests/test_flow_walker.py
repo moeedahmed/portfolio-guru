@@ -3144,7 +3144,7 @@ class TestOnboardingFrictionPatch:
         store_credentials.assert_called_once()
         store_training_level.assert_called_once_with(sim.user_id, 'HIGHER')
         store_curriculum.assert_called_once_with(sim.user_id, '2025')
-        # Auto-detected portfolio profile shown in welcome message
+        # Auto-detected portfolio shown in welcome message
         assert 'hst portfolio profile' in sim.get_last_text().lower()
 
 
@@ -3157,7 +3157,7 @@ class TestTrainingStageGroups:
              patch('bot.get_voice_profile', return_value=None):
             text, _ = _settings_view_components(123)
 
-        assert 'Portfolio profile: Unknown' in text
+        assert 'Portfolio: Unknown' in text
 
     def test_unlimited_settings_labels_cases_as_filed_not_usage(self):
         from bot import _settings_view_components
