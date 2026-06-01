@@ -49,8 +49,9 @@ GOOGLE_API_KEY="$(get_secret af6579a0-2cbe-4cef-94b3-b405017b48fe)"
 export GOOGLE_API_KEY
 echo "Google key loaded for OCR/voice utilities (last4): ${GOOGLE_API_KEY: -4}"
 export PORTFOLIO_GURU_EXTRACTOR_PROVIDER="deepseek-v4-flash"
+export GEMINI_3_5_FLASH_MODEL="${GEMINI_3_5_FLASH_MODEL:-gemini-3.5-flash}"
 export PG_GATHERING_MODE="${PG_GATHERING_MODE:-1}"
-echo "Model: extractor=$PORTFOLIO_GURU_EXTRACTOR_PROVIDER"
+echo "Model: extractor=$PORTFOLIO_GURU_EXTRACTOR_PROVIDER fallback=$GEMINI_3_5_FLASH_MODEL"
 FERNET_SECRET_KEY="$(get_secret 9e653679-9a33-4c23-a15c-b405015713de)"
 export FERNET_SECRET_KEY
 # OpenAI keys not in use — extractor uses DeepSeek V4 Flash

@@ -22,7 +22,10 @@ def test_extractor_defaults_to_deepseek(monkeypatch):
     from extractor import _select_providers
 
     providers = _select_providers()
-    assert [p["name"] for p in providers] == ["deepseek-v4-flash"]
+    assert [p["name"] for p in providers] == [
+        "deepseek-v4-flash",
+        "gemini-3-5-flash-fallback",
+    ]
     assert providers[0]["model"] == "deepseek-v4-flash"
 
 
@@ -32,7 +35,10 @@ def test_extractor_ignores_legacy_provider_override(monkeypatch):
     from extractor import _select_providers
 
     providers = _select_providers()
-    assert [p["name"] for p in providers] == ["deepseek-v4-flash"]
+    assert [p["name"] for p in providers] == [
+        "deepseek-v4-flash",
+        "gemini-3-5-flash-fallback",
+    ]
 
 
 def test_gemini_three_five_flash_model_default(monkeypatch):
@@ -57,7 +63,10 @@ def test_extractor_gemini_3_5_flash_override_no_longer_changes_live_model(monkey
     from extractor import _select_providers
 
     providers = _select_providers()
-    assert [p["name"] for p in providers] == ["deepseek-v4-flash"]
+    assert [p["name"] for p in providers] == [
+        "deepseek-v4-flash",
+        "gemini-3-5-flash-fallback",
+    ]
     assert providers[0]["model"] == "deepseek-v4-flash"
 
 
@@ -69,4 +78,7 @@ def test_extractor_default_unaffected_by_3_5_flash_being_available(monkeypatch):
     from extractor import _select_providers
 
     providers = _select_providers()
-    assert [p["name"] for p in providers] == ["deepseek-v4-flash"]
+    assert [p["name"] for p in providers] == [
+        "deepseek-v4-flash",
+        "gemini-3-5-flash-fallback",
+    ]

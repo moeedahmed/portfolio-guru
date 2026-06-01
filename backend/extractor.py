@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 from models import CBDData, FormTypeRecommendation, FormDraft
 from form_schemas import FORM_SCHEMAS
 from form_display import public_form_name, sanitize_internal_form_codes
+from model_config import gemini_three_five_flash_model
 
 # RCEM Higher EM Curriculum (2025 Update) — Exact Kaizen checkbox labels
 # Source: Live Kaizen CBD form screenshot (verified 2026-03-08)
@@ -101,7 +102,9 @@ KC_FULL_TEXT = {
 
 _client = None
 
-# Extraction model policy: one live text LLM for recommendation/extraction/review.
+# Extraction model policy:
+# - DeepSeek V4 Flash is the normal text model.
+# - Gemini 3.5 Flash is an emergency fallback only for provider/billing/quota failures.
 PROVIDERS = [
     {
         "name": "deepseek-v4-flash",
@@ -109,6 +112,12 @@ PROVIDERS = [
         "model": "deepseek-v4-flash",
         "base_url": "https://api.deepseek.com",
         "env_key": "DEEPSEEK_API_KEY",
+    },
+    {
+        "name": "gemini-3-5-flash-fallback",
+        "type": "gemini",
+        "model": gemini_three_five_flash_model,
+        "env_key": "GOOGLE_API_KEY",
     },
 ]
 
@@ -176,7 +185,8 @@ async def _generate(prompt, retries: int = 1, tier: str = ""):
                 last_error = e
                 error_msg = str(e).lower()
                 is_retryable = any(term in error_msg for term in [
-                    "429", "rate", "503", "502", "500", "unavailable", "overloaded",
+                    "402", "429", "rate", "quota", "balance", "billing",
+                    "503", "502", "500", "unavailable", "overloaded",
                 ])
                 if is_retryable:
                     if attempt < retries:

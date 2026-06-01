@@ -98,3 +98,35 @@ async def test_plain_text_generation_does_not_force_json_response_format():
     payload = json.loads(route.calls[0].request.content.decode())
     assert "response_format" not in payload
     assert result == "Kaizen could not be reached, so retry once the browser session is back."
+
+
+@pytest.mark.asyncio
+async def test_deepseek_billing_error_falls_back_to_gemini(monkeypatch):
+    import extractor
+
+    class FakeModels:
+        def generate_content(self, model, contents):
+            assert model == "gemini-3.5-flash"
+            return type("Response", (), {"text": "Use Gemini only as emergency fallback."})()
+
+    class FakeGeminiClient:
+        models = FakeModels()
+
+    monkeypatch.setenv("GOOGLE_API_KEY", "test-google-key")
+    monkeypatch.setattr(extractor, "_client", FakeGeminiClient())
+    extractor._RECOVERY_COPY_CACHE.clear()
+
+    with respx.mock(assert_all_called=True) as router:
+        router.post(_deepseek_route()).mock(
+            return_value=httpx.Response(
+                402,
+                json={"error": {"message": "insufficient balance"}},
+            )
+        )
+
+        result = await extractor.compose_filing_recovery_copy(
+            "failed",
+            "DeepSeek balance exhausted",
+        )
+
+    assert result == "Use Gemini only as emergency fallback."
