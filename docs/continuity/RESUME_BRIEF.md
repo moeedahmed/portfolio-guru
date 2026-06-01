@@ -1,13 +1,13 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-05-28T23:48:12+00:00
+Generated: 2026-06-01T03:21:21+00:00
 Status: stale_or_needs_review
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
-- Branch: chore/telegram-bot-qa-discipline
-- Last commit: c642962 2026-05-29 fix: make vNext collect cases conversationally
-- Uncommitted changes: yes
+- Branch: fix/mlx-whisper-transcription
+- Last commit: 842056c 2026-06-01 feat: wire Portfolio Health engine into /health with ARCP/CESR pathway selector
+- Uncommitted changes: no
 
 ## Immediate read before restarting
 1. Product hub Status + Brief in Notion
@@ -16,60 +16,42 @@ Status: stale_or_needs_review
 4. This resume brief for drift warnings and repo state
 
 ## Warnings
-- Repo has uncommitted changes — capture/commit or summarise before switching context
+- AGENTS.md missing practical coding-agent sections: dev/test commands
 
 ## Practical AGENTS.md check
-- Useful for coding-agent/ACP work: yes
-- No missing practical sections
+- Useful for coding-agent/ACP work: no
+- Missing: dev/test commands
 
 ## Recent commits
-- c642962 2026-05-29 fix: make vNext collect cases conversationally
-- db72f89 2026-05-29 feat: add vNext local preview recommendation
-- c8fe80c 2026-05-29 feat: add vNext source-tied clinical extraction
-- 0d04468 2026-05-28 feat: run private vNext Telegram bot
-- 75a9fa5 2026-05-28 feat: add conservative vNext text fact extractor
-- b14c37d 2026-05-28 feat: add vNext Telegram→engine adapter
-- 5d7425b 2026-05-28 feat: scaffold vNext conversational case engine
-- 1c79a36 2026-05-28 fix: keep form choice escape hatch
-
-## Uncommitted change summary
-- ?? .openclaw/
-- ?? HEARTBEAT.md
-- ?? IDENTITY.md
-- ?? SOUL.md
-- ?? TOOLS.md
-- ?? USER.md
+- 842056c 2026-06-01 feat: wire Portfolio Health engine into /health with ARCP/CESR pathway selector
+- f3452d9 2026-06-01 feat: Portfolio Health engine Phase 1 — data models + scoring + tests
+- c05c053 2026-06-01 docs: narrow Portfolio Health scope to RCEM Kaizen only (ARCP + CESR)
+- 12569cb 2026-06-01 docs: add explicit Kaizen independence constraint to Portfolio Health spec
+- b1913e1 2026-06-01 docs: Portfolio Health + Pathway Guidance spec v2
+- 34ba545 2026-06-01 chore: remove dead vNext separate-bot path
+- 2319076 2026-06-01 fix: use MLX Whisper small for local transcription
+- 599914f 2026-05-31 feat: KC coverage tracking — real curriculum data in health chart, persisted per draft
 
 ## Repo context snapshot
-### AGENTS.md — present, 5 days old
+### AGENTS.md — present, 2 days old
 Key headings:
-- # Portfolio Guru — AGENTS.md
-- ## Project
-- ## Current Bot State
-- ## Stack
-- ## Key Constraints
+- # Portfolio Guru — AGENTS.md (Claude Code Project Context)
+- ## Identity
+- ## Current State
 - ## Filing Routing Discipline
-- ## Known Failure Modes
+- ## Key Known Failure Modes
+- ## Safety
 - ## Supported Forms
-- ## Key Files
-- ## Conversation States
-- ## Key Design Decisions
-- ## Continuity Protocol
 
-### CLAUDE.md — present, 5 days old
+### CLAUDE.md — present, 2 days old
 Key headings:
-- # Portfolio Guru — AGENTS.md
-- ## Project
-- ## Current Bot State
-- ## Stack
-- ## Key Constraints
+- # Portfolio Guru — AGENTS.md (Claude Code Project Context)
+- ## Identity
+- ## Current State
 - ## Filing Routing Discipline
-- ## Known Failure Modes
+- ## Key Known Failure Modes
+- ## Safety
 - ## Supported Forms
-- ## Key Files
-- ## Conversation States
-- ## Key Design Decisions
-- ## Continuity Protocol
 
 ### TASK.md — present, 0 days old
 Key headings:
@@ -83,7 +65,7 @@ Key headings:
 - # 539 passed, 22 skipped, 13 deselected, 3 snapshots passed
 - ## Orchestrator Hand-Off
 
-### WORKFLOWS.md — present, 1 days old
+### WORKFLOWS.md — present, 2 days old
 Key headings:
 - # Portfolio Guru — Agent Workflow Reference
 - ## Conversation States

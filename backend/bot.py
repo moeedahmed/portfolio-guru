@@ -2997,14 +2997,22 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if auto_level:
         store_training_level(user_id, auto_level)
 
+    auto_pathway = _autoset_health_pathway_from_role(user_id, detected_role)
+
     if not get_curriculum(user_id):
         store_curriculum(user_id, "2025")
 
     if auto_level:
         role_name = label_map.get(detected_role, detected_role)
+        pathway_line = (
+            f"📊 Portfolio Health pathway: *{_pathway_label(auto_pathway)}* (change with /pathway).\n\n"
+            if auto_pathway is not None
+            else ""
+        )
         await _flow_edit(
             update, context,
             f"✅ Kaizen connected — detected as *{role_name}*.\n\n"
+            f"{pathway_line}"
             "Send your first case — text, voice, photo, or document — and I'll get started.\n\n"
             "Use the *Menu* (☰ bottom-left) any time for Settings or Voice profile.\n"
             f"Use */settings* if your portfolio type is different.",
@@ -4581,6 +4589,42 @@ def _get_or_default_health_profile(user_id: int) -> HealthProfile:
         created_at=now,
         updated_at=now,
     )
+
+
+_TRAINEE_DETECTED_ROLES = frozenset({"hst", "accs", "accs_intermediate", "intermediate"})
+
+
+def _pathway_for_detected_role(detected_role: str) -> Pathway | None:
+    """Map a Kaizen-detected role to a Portfolio Health pathway.
+
+    SAS / CESR / non-trainee accounts → CESR. Trainee accounts → ARCP.
+    Ambiguous probes (``unknown``, ``assessor``, empty) return None so the
+    caller falls back to existing manual selection rather than guessing.
+    """
+    if detected_role == "sas":
+        return Pathway.cesr_portfolio
+    if detected_role in _TRAINEE_DETECTED_ROLES:
+        return Pathway.training_arcp
+    return None
+
+
+def _autoset_health_pathway_from_role(user_id: int, detected_role: str) -> Pathway | None:
+    """Save a HealthProfile derived from ``detected_role``; no-op when ambiguous."""
+    pathway = _pathway_for_detected_role(detected_role)
+    if pathway is None:
+        return None
+    from datetime import UTC, datetime
+    now = datetime.now(UTC)
+    existing = get_health_profile(user_id)
+    profile = HealthProfile(
+        user_id=str(user_id),
+        pathway=pathway,
+        pathway_config=existing.pathway_config if existing else {},
+        created_at=existing.created_at if existing else now,
+        updated_at=now,
+    )
+    save_health_profile(profile)
+    return pathway
 
 
 def _pathway_label(pathway: Pathway) -> str:

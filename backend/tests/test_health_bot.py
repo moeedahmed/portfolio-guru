@@ -9,6 +9,17 @@ from health_models import HealthProfile, Pathway
 from tests.bot_simulator import BotSimulator
 
 
+@pytest.fixture
+def isolated_health_store(tmp_path, monkeypatch):
+    """Point the flat-file health store at a per-test path."""
+    monkeypatch.setenv(
+        "PORTFOLIO_GURU_HEALTH_PROFILE_PATH",
+        str(tmp_path / "health_profiles.json"),
+    )
+    import health_profile_store
+    return health_profile_store
+
+
 def _profile(user_id: int, pathway: Pathway) -> HealthProfile:
     now = datetime.now(UTC)
     return HealthProfile(
@@ -21,11 +32,9 @@ def _profile(user_id: int, pathway: Pathway) -> HealthProfile:
 
 
 @pytest.mark.asyncio
-async def test_pathway_command_saves_selected_pathway(tmp_path, monkeypatch):
-    monkeypatch.setenv("PORTFOLIO_GURU_HEALTH_PROFILE_PATH", str(tmp_path / "health_profiles.json"))
-
+async def test_pathway_command_saves_selected_pathway(isolated_health_store):
     import bot
-    import health_profile_store
+    health_profile_store = isolated_health_store
 
     sim = BotSimulator(user_id=4242)
     context = sim._make_context()
@@ -95,3 +104,171 @@ async def test_cesr_health_output_uses_deterministic_engine_without_llm(monkeypa
     assert "WPBA count: 2" in text
     assert "CESR requires 36 WPBAs minimum" in text
     analysis.assert_not_called()
+
+
+# ── _pathway_for_detected_role / _autoset_health_pathway_from_role ───────────
+
+
+@pytest.mark.parametrize(
+    "detected_role,expected",
+    [
+        ("sas", Pathway.cesr_portfolio),
+        ("hst", Pathway.training_arcp),
+        ("accs", Pathway.training_arcp),
+        ("accs_intermediate", Pathway.training_arcp),
+        ("intermediate", Pathway.training_arcp),
+    ],
+)
+def test_pathway_for_detected_role_maps_confident_roles(detected_role, expected):
+    import bot
+    assert bot._pathway_for_detected_role(detected_role) is expected
+
+
+@pytest.mark.parametrize("detected_role", ["unknown", "assessor", "", "garbage"])
+def test_pathway_for_detected_role_returns_none_for_ambiguous_roles(detected_role):
+    import bot
+    assert bot._pathway_for_detected_role(detected_role) is None
+
+
+def test_autoset_health_pathway_saves_cesr_for_sas(isolated_health_store):
+    import bot
+    pathway = bot._autoset_health_pathway_from_role(7001, "sas")
+    assert pathway is Pathway.cesr_portfolio
+    stored = isolated_health_store.get_health_profile(7001)
+    assert stored is not None
+    assert stored.pathway is Pathway.cesr_portfolio
+
+
+@pytest.mark.parametrize("detected_role", ["hst", "accs", "accs_intermediate", "intermediate"])
+def test_autoset_health_pathway_saves_arcp_for_trainee_roles(isolated_health_store, detected_role):
+    import bot
+    user_id = 7100 + hash(detected_role) % 100
+    pathway = bot._autoset_health_pathway_from_role(user_id, detected_role)
+    assert pathway is Pathway.training_arcp
+    stored = isolated_health_store.get_health_profile(user_id)
+    assert stored is not None
+    assert stored.pathway is Pathway.training_arcp
+
+
+@pytest.mark.parametrize("detected_role", ["unknown", "assessor", ""])
+def test_autoset_health_pathway_does_not_save_for_ambiguous_roles(isolated_health_store, detected_role):
+    import bot
+    pathway = bot._autoset_health_pathway_from_role(7200, detected_role)
+    assert pathway is None
+    assert isolated_health_store.get_health_profile(7200) is None
+
+
+def test_autoset_health_pathway_preserves_existing_created_at_and_config(isolated_health_store):
+    import bot
+    user_id = 7300
+    seed_created = datetime(2026, 1, 1, tzinfo=UTC)
+    seed = HealthProfile(
+        user_id=str(user_id),
+        pathway=Pathway.training_arcp,
+        pathway_config={"custom": "keep"},
+        created_at=seed_created,
+        updated_at=seed_created,
+    )
+    isolated_health_store.save_health_profile(seed)
+
+    pathway = bot._autoset_health_pathway_from_role(user_id, "sas")
+    assert pathway is Pathway.cesr_portfolio
+
+    stored = isolated_health_store.get_health_profile(user_id)
+    assert stored.pathway is Pathway.cesr_portfolio
+    assert stored.pathway_config == {"custom": "keep"}
+    assert stored.created_at == seed_created
+
+
+# ── setup_password integration: Kaizen first-link auto-detection ─────────────
+
+
+def _patch_setup_password_deps(monkeypatch, detected_role: str):
+    """Stub out everything setup_password touches besides health-pathway logic."""
+    import bot
+
+    async def _fake_login(_u, _p):
+        return detected_role
+
+    monkeypatch.setattr(bot, "_test_kaizen_login", _fake_login)
+    monkeypatch.setattr(bot, "store_credentials", lambda *a, **k: None)
+    monkeypatch.setattr(bot, "store_training_level", lambda *a, **k: None)
+    monkeypatch.setattr(bot, "store_curriculum", lambda *a, **k: None)
+    monkeypatch.setattr(bot, "get_curriculum", lambda *_a, **_k: "2025")
+
+    async def _fake_flow_edit(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(bot, "_flow_edit", _fake_flow_edit)
+    monkeypatch.setattr(bot, "_flow_done", lambda *_a, **_k: None)
+
+    # Block any accidental import of supervisor_workflow during the test —
+    # set_role_if_better lives there and exceptions are swallowed by setup_password.
+    import sys
+    monkeypatch.setitem(
+        sys.modules,
+        "supervisor_workflow",
+        SimpleNamespace(set_role_if_better=lambda *_a, **_k: None),
+    )
+
+
+@pytest.mark.asyncio
+async def test_setup_password_autosaves_cesr_pathway_for_sas(isolated_health_store, monkeypatch):
+    import bot
+    _patch_setup_password_deps(monkeypatch, detected_role="sas")
+
+    sim = BotSimulator(user_id=8001)
+    sim.user_data["setup_username"] = "doctor@example.com"
+    update = sim._make_text_update("super-secret")
+    update.message.delete = AsyncMock()
+    context = sim._make_context()
+
+    await bot.setup_password(update, context)
+
+    stored = isolated_health_store.get_health_profile(8001)
+    assert stored is not None
+    assert stored.pathway is Pathway.cesr_portfolio
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("detected_role", ["hst", "accs", "accs_intermediate", "intermediate"])
+async def test_setup_password_autosaves_arcp_for_trainee_roles(
+    isolated_health_store, monkeypatch, detected_role
+):
+    import bot
+    _patch_setup_password_deps(monkeypatch, detected_role=detected_role)
+
+    user_id = 8100 + abs(hash(detected_role)) % 100
+    sim = BotSimulator(user_id=user_id)
+    sim.user_data["setup_username"] = "doctor@example.com"
+    update = sim._make_text_update("super-secret")
+    update.message.delete = AsyncMock()
+    context = sim._make_context()
+
+    await bot.setup_password(update, context)
+
+    stored = isolated_health_store.get_health_profile(user_id)
+    assert stored is not None
+    assert stored.pathway is Pathway.training_arcp
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("detected_role", ["unknown", "assessor"])
+async def test_setup_password_does_not_force_pathway_for_ambiguous_roles(
+    isolated_health_store, monkeypatch, detected_role
+):
+    import bot
+    _patch_setup_password_deps(monkeypatch, detected_role=detected_role)
+
+    sim = BotSimulator(user_id=8200)
+    sim.user_data["setup_username"] = "doctor@example.com"
+    update = sim._make_text_update("super-secret")
+    update.message.delete = AsyncMock()
+    context = sim._make_context()
+
+    await bot.setup_password(update, context)
+
+    # Safest existing behaviour: no health profile is written, so /health
+    # falls back to the default ARCP view and the manual /pathway selector
+    # stays authoritative for the user to choose.
+    assert isolated_health_store.get_health_profile(8200) is None
