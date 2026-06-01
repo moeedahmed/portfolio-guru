@@ -1567,11 +1567,27 @@ def _format_kaizen_sync_row(status: KaizenSyncStatus | None) -> str | None:
         return "🔄 Kaizen sync: not synced yet"
     last_run = status.last_run
     when = (last_run.finished_at or last_run.started_at or "").strip()
-    pretty_when = when.replace("T", " ").split(".")[0] if when else "unknown"
+    pretty_when = _format_user_local_timestamp(when)
     return (
         f"🔄 Kaizen sync: last refresh {pretty_when} ({last_run.status}). "
         f"Items indexed: {status.items_indexed}"
     )
+
+
+def _format_user_local_timestamp(value: str) -> str:
+    if not value:
+        return "unknown"
+    try:
+        from datetime import UTC
+        from zoneinfo import ZoneInfo
+
+        parsed = __import__("datetime").datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        local = parsed.astimezone(ZoneInfo("Europe/London"))
+        return local.strftime("%Y-%m-%d %H:%M %Z")
+    except Exception:
+        return value.replace("T", " ").split(".")[0]
 
 
 def _refresh_portfolio_confirm_text() -> str:
@@ -4025,13 +4041,6 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             )
             return ConversationHandler.END
 
-        if await _health_needs_kaizen_refresh(user_id):
-            await query.message.edit_text(
-                _health_refresh_confirm_text(),
-                reply_markup=_health_refresh_confirm_keyboard(),
-            )
-            return ConversationHandler.END
-
         async def send_progress():
             try:
                 await query.message.edit_text("🔍 Analysing your portfolio…")
@@ -5207,13 +5216,6 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
             ]),
-        )
-        return ConversationHandler.END
-
-    if await _health_needs_kaizen_refresh(user_id):
-        await update.message.reply_text(
-            _health_refresh_confirm_text(),
-            reply_markup=_health_refresh_confirm_keyboard(),
         )
         return ConversationHandler.END
 

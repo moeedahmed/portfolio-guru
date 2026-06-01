@@ -216,6 +216,7 @@ def test_settings_includes_kaizen_sync_row_when_status_provided(
     )
 
     assert "Kaizen sync" in text
+    assert "2026-06-01 12:38 BST" in text
     assert "Items indexed: 412" in text
     assert "(ok)" in text
 
@@ -290,7 +291,7 @@ def test_settings_omits_kaizen_sync_row_when_unavailable(
 
 
 @pytest.mark.asyncio
-async def test_health_command_prompts_refresh_when_kaizen_index_is_missing(monkeypatch):
+async def test_health_command_runs_immediately_when_kaizen_index_is_missing(monkeypatch):
     import bot
 
     monkeypatch.setattr(bot, "has_credentials", lambda _uid: True)
@@ -304,10 +305,7 @@ async def test_health_command_prompts_refresh_when_kaizen_index_is_missing(monke
 
     await bot.health_command(sim._make_text_update("/health"), context)
 
-    text = sim.get_last_text()
-    assert "Portfolio Health needs fresh Kaizen data" in text
-    assert ("✅ Refresh and show health", "ACTION|confirm_refresh_for_health") in sim.get_last_buttons()
-    run_health.assert_not_awaited()
+    run_health.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -503,8 +501,8 @@ def _make_sync_status(finished_at: str, *, run_status: str = "ok", items_indexed
 
 
 @pytest.mark.asyncio
-async def test_health_command_prompts_refresh_when_index_is_stale(monkeypatch):
-    """A successful sync older than 24 hours should still trigger the refresh prompt."""
+async def test_health_command_runs_immediately_when_index_is_stale(monkeypatch):
+    """A stale sync should not block the primary quick /health journey."""
     import bot
 
     stale = (datetime.now(UTC) - __import__("datetime").timedelta(days=3)).isoformat()
@@ -523,9 +521,7 @@ async def test_health_command_prompts_refresh_when_index_is_stale(monkeypatch):
 
     await bot.health_command(sim._make_text_update("/health"), context)
 
-    assert "Portfolio Health needs fresh Kaizen data" in sim.get_last_text()
-    assert ("✅ Refresh and show health", "ACTION|confirm_refresh_for_health") in sim.get_last_buttons()
-    run_health.assert_not_awaited()
+    run_health.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -572,8 +568,8 @@ async def test_health_command_skips_refresh_prompt_when_not_connected(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_inline_health_button_prompts_refresh_when_stale(monkeypatch):
-    """The inline ACTION|health entry point mirrors /health's refresh gate."""
+async def test_inline_health_button_runs_immediately_when_stale(monkeypatch):
+    """The inline ACTION|health entry point mirrors /health's quick path."""
     import bot
 
     monkeypatch.setattr(bot, "has_credentials", lambda _uid: True)
@@ -591,9 +587,7 @@ async def test_inline_health_button_prompts_refresh_when_stale(monkeypatch):
         context,
     )
 
-    assert "Portfolio Health needs fresh Kaizen data" in sim.get_last_text()
-    assert ("✅ Refresh and show health", "ACTION|confirm_refresh_for_health") in sim.get_last_buttons()
-    run_health.assert_not_awaited()
+    run_health.assert_awaited_once()
 
 
 @pytest.mark.asyncio
