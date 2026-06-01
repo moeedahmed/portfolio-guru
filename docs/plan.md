@@ -218,6 +218,11 @@ Status:
   `/activities`, opens detail views read-only, writes through
   `kaizen_index`, and records `index_runs` drift/auth/failure status. It is
   not exposed to users yet and has not run against live Kaizen.
+- First live read-only smoke status: attempted 2026-06-01 against the managed
+  CDP browser with a temporary local database only. The browser redirected to
+  Kaizen auth, so no portfolio rows were read and no production index was
+  populated. Manual login in the managed browser is required before repeating
+  the smoke.
 - The Index becomes the primary auto-populate source for
   `docs/PORTFOLIO_HEALTH_SPEC.md` Phase 2; existing PG filing records remain
   the fallback when no index is present yet.
@@ -229,8 +234,8 @@ Status:
   unaffected by this sprint — the adapter is a read-only foundation under
   them, not a replacement.
 - Next step: run a controlled foreground read-only CDP smoke against the
-  logged-in Kaizen session, inspect indexed row quality, then wire a guarded
-  "Refresh portfolio" trigger only if the data is clean.
+  logged-in Kaizen session after manual login, inspect indexed row quality,
+  then wire a guarded "Refresh portfolio" trigger only if the data is clean.
 
 ### Phase 3 - Safe activation for low-risk intents
 

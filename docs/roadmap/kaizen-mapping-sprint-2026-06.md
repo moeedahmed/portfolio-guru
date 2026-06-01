@@ -211,6 +211,10 @@ The point of this sprint is a working substrate, not a documentation exercise. T
 > 3 snapshots passed, 49 warnings. Next step: controlled foreground
 > read-only smoke against Moeed's logged-in Kaizen/CDP session, inspect row
 > quality, then expose a guarded "Refresh portfolio" trigger only if clean.
+> First live smoke attempt on 2026-06-01 attached to the managed CDP browser
+> and used a temporary local database only, but Kaizen redirected to
+> `auth.kaizenep.com`; result `auth_required`, zero rows read, zero production
+> index changes. Repeat after manual login in the managed browser.
 
 ### Scope
 

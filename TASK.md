@@ -1,5 +1,16 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-01 addendum — first live read-only smoke reached login boundary.**
+> The foreground smoke attached to the managed CDP browser on
+> `localhost:18800` and attempted the read-only Kaizen sync against a temporary
+> local database only. It did not use stored credentials, did not write to
+> Kaizen, did not touch Telegram, and did not populate the production
+> `usage.db`. Outcome: Kaizen redirected to `auth.kaizenep.com`, so the smoke
+> stopped with `auth_required` before reading portfolio rows. Next step:
+> Moeed must log in to Kaizen in the managed browser session, then rerun the
+> same read-only smoke. If rows index cleanly, the following build slice is the
+> guarded user-facing "Refresh portfolio" workflow.
+
 > **2026-06-01 addendum — read-only Kaizen sync driver landed offline.**
 > `backend/kaizen_sync.py` now provides the CDP/page-backed read-only sync
 > driver for Kaizen Portfolio Index v1. It accepts an already-authenticated
