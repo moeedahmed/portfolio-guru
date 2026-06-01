@@ -1556,20 +1556,21 @@ async def _safe_kaizen_sync_status(user_id: int) -> KaizenSyncStatus | None:
 
 
 def _format_kaizen_sync_row(status: KaizenSyncStatus | None) -> str | None:
-    """Read-only one-liner describing Kaizen sync state.
+    """Read-only one-liner describing Kaizen evidence sync state.
 
-    The live refresh workflow is exposed separately as a guarded button. This
-    row stays a compact status summary so /settings remains scannable.
+    The manual sync workflow is exposed separately as a guarded secondary
+    utility. This row stays a compact status summary so /settings remains
+    scannable.
     """
     if status is None:
         return None
     if status.last_run is None:
-        return "🔄 Kaizen sync: not synced yet"
+        return "🔄 Kaizen evidence: not synced yet"
     last_run = status.last_run
     when = (last_run.finished_at or last_run.started_at or "").strip()
     pretty_when = _format_user_local_timestamp(when)
     return (
-        f"🔄 Kaizen sync: last refresh {pretty_when} ({last_run.status}). "
+        f"🔄 Kaizen evidence: last sync {pretty_when} ({last_run.status}). "
         f"Items indexed: {status.items_indexed}"
     )
 
@@ -1592,7 +1593,7 @@ def _format_user_local_timestamp(value: str) -> str:
 
 def _refresh_portfolio_confirm_text() -> str:
     return (
-        "🔄 Refresh portfolio from Kaizen?\n\n"
+        "🔄 Sync Kaizen evidence?\n\n"
         "This will read your Kaizen timeline and saved-draft activity into "
         "Portfolio Guru so /health can use real portfolio evidence.\n\n"
         "Safety boundary:\n"
@@ -1605,7 +1606,7 @@ def _refresh_portfolio_confirm_text() -> str:
 
 def _refresh_portfolio_confirm_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Refresh now", callback_data="ACTION|confirm_refresh_portfolio")],
+        [InlineKeyboardButton("✅ Sync now", callback_data="ACTION|confirm_refresh_portfolio")],
         [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
     ])
 
@@ -1650,7 +1651,7 @@ def _format_refresh_portfolio_result(result, status: KaizenSyncStatus | None = N
 
     if run_status == "ok":
         lines = [
-            "✅ Portfolio refreshed",
+            "✅ Kaizen evidence synced",
             "",
             f"Read from Kaizen: {rows_seen} items",
             f"Added or updated: {rows_written} items",
@@ -1662,7 +1663,7 @@ def _format_refresh_portfolio_result(result, status: KaizenSyncStatus | None = N
 
     if run_status == "partial":
         lines = [
-            "⚠️ Portfolio partly refreshed",
+            "⚠️ Kaizen evidence partly synced",
             "",
             f"Read from Kaizen: {rows_seen} items",
             f"Added or updated: {rows_written} items",
@@ -1678,18 +1679,18 @@ def _format_refresh_portfolio_result(result, status: KaizenSyncStatus | None = N
         return (
             "🔗 Kaizen needs reconnecting\n\n"
             "I could not refresh your portfolio because the Kaizen session needs a fresh login.\n\n"
-            "Next: reconnect Kaizen, then come back to Refresh portfolio."
+            "Next: reconnect Kaizen, then come back to Sync Kaizen evidence."
         )
 
     if run_status == "drift":
         return (
-            "⚠️ Refresh blocked by a Kaizen screen change\n\n"
+            "⚠️ Sync blocked by a Kaizen screen change\n\n"
             "I found a Kaizen page that no longer matches the safe read-only map, so I stopped rather than guessing.\n\n"
             "Next: I need to update the map before this screen can be indexed safely."
         )
 
     return (
-        "⚠️ Refresh did not complete\n\n"
+        "⚠️ Sync did not complete\n\n"
         "Portfolio Guru could not finish the read-only Kaizen refresh. Nothing was changed in Kaizen.\n\n"
         "You can try again from settings."
     )
@@ -1708,8 +1709,9 @@ def _settings_view_components(
 
     This is also the merged "status" view. When tier/used/connected are
     supplied, a plan + usage + connection block is rendered at the top.
-    When ``kaizen_sync`` is supplied, a Kaizen sync status row is appended to
-    that block. Connected users also get a guarded refresh button.
+    When ``kaizen_sync`` is supplied, a Kaizen evidence status row is appended
+    to that block. Connected users get Portfolio Health as the primary action
+    and guarded manual sync as a secondary utility.
     """
     curriculum = get_curriculum(user_id) or "2025"
     curriculum_label = "2021 Curriculum" if curriculum == "2021" else "2025 Update"
@@ -1743,14 +1745,17 @@ def _settings_view_components(
 
     setup_button_label = "🔗 Connect Kaizen" if connected is False else "🔗 Update Kaizen login"
 
-    buttons = [
+    buttons: list[list[InlineKeyboardButton]] = []
+    if connected is True:
+        buttons.append([InlineKeyboardButton("📊 Portfolio health", callback_data="ACTION|health")])
+    buttons.extend([
         [InlineKeyboardButton(voice_cta, callback_data="ACTION|voice")],
         [InlineKeyboardButton(f"🎓 Portfolio: {training_level}", callback_data="ACTION|change_level")],
         [InlineKeyboardButton(f"📊 Pathway: {pathway_label}", callback_data="ACTION|change_pathway")],
         [InlineKeyboardButton(f"📚 Curriculum: {curriculum_label}", callback_data="ACTION|change_curriculum")],
-    ]
+    ])
     if connected is True:
-        buttons.append([InlineKeyboardButton("🔄 Refresh portfolio", callback_data="ACTION|refresh_portfolio")])
+        buttons.append([InlineKeyboardButton("🔄 Sync Kaizen evidence", callback_data="ACTION|refresh_portfolio")])
     buttons.extend([
         [InlineKeyboardButton(setup_button_label, callback_data="ACTION|setup")],
         [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu"),
@@ -4092,7 +4097,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
     elif action == "refresh_portfolio":
         if not has_credentials(user_id):
             await query.message.edit_text(
-                "🔗 Connect your Kaizen account first, then you can refresh your portfolio.",
+                "🔗 Connect your Kaizen account first, then you can sync Kaizen evidence.",
                 reply_markup=InlineKeyboardMarkup([
                     [_BTN_SETUP],
                     [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
@@ -4108,7 +4113,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
     elif action == "confirm_refresh_portfolio":
         if not has_credentials(user_id):
             await query.message.edit_text(
-                "🔗 Connect your Kaizen account first, then you can refresh your portfolio.",
+                "🔗 Connect your Kaizen account first, then you can sync Kaizen evidence.",
                 reply_markup=InlineKeyboardMarkup([
                     [_BTN_SETUP],
                     [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
@@ -4117,7 +4122,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             return ConversationHandler.END
 
         try:
-            await query.message.edit_text("🔄 Refreshing your portfolio from Kaizen…")
+            await query.message.edit_text("🔄 Syncing Kaizen evidence…")
         except Exception:
             pass
 

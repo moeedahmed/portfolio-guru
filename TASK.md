@@ -1,13 +1,34 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-01 addendum — `/settings` promotes Portfolio health to primary CTA.**
+> Product decision: connected users opening `/settings` should see "📊 Portfolio
+> health" as the prominent action, not "🔄 Refresh portfolio". The manual
+> Kaizen refresh remains available as a secondary utility, relabelled
+> "🔄 Sync Kaizen evidence", and still routes to the existing read-only
+> confirmation/result flow (`ACTION|refresh_portfolio` →
+> `_refresh_portfolio_confirm_*` → `ACTION|confirm_refresh_portfolio`). The
+> Portfolio health button reuses the existing `ACTION|health` handler, which
+> already gates on Kaizen credentials, prompts the read-only refresh when the
+> index is missing/stale, and falls through to `_run_health_analysis`. `/health`
+> as a typed command is unchanged and stays fast. New focused coverage in
+> `backend/tests/test_health_index_integration.py`
+> (`test_settings_makes_portfolio_health_primary_and_sync_secondary`,
+> `test_settings_omits_portfolio_health_button_when_not_connected`) pins the
+> rule: health sits above sync in the keyboard, the old "Refresh portfolio"
+> label is gone, and disconnected users see neither button. Verification:
+> `cd backend && venv/bin/python3 -m pytest tests/test_health_index_integration.py tests/test_health_bot.py -v`
+> green at 55 passed, 1 warning. No live Kaizen,
+> Telegram, restart, deploy, or push from this slice — foreground owns
+> activation.
+
 > **2026-06-01 addendum — `/health` is now the primary refresh path.**
 > Product decision: users should not need to think "refresh portfolio" before
 > asking for health. `/health` and the inline Portfolio Health button now
 > check whether the local Kaizen index is usable; when connected users have no
 > fresh index yet, Portfolio Guru asks for explicit read-only consent with
 > `✅ Refresh and show health`, runs the same guarded Kaizen refresh, and then
-> continues straight into Portfolio Health. The `/settings → Refresh
-> portfolio` button stays as a secondary utility for retry, reconnect, support,
+> continues straight into Portfolio Health. The `/settings → Sync Kaizen evidence`
+> button stays as a secondary utility for retry, reconnect, support,
 > and manual data management.
 
 > **2026-06-01 addendum — guarded Refresh portfolio workflow built.**

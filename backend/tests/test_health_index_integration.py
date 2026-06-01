@@ -6,7 +6,7 @@ These tests pin two contracts:
    when the index has rows for the user, and falls back to the existing
    case-history path when it does not (the priority spelled out in
    ``docs/PORTFOLIO_HEALTH_SPEC.md`` Phase 2).
-2. ``/settings`` surfaces a Kaizen sync status row and a guarded refresh
+2. ``/settings`` surfaces a Kaizen evidence status row and a guarded sync
    workflow when the user is connected.
 
 Offline only: no Kaizen, Playwright, CDP, credentials, or network.
@@ -180,7 +180,7 @@ async def test_run_health_analysis_uses_indexed_source_when_history_empty(
     assert "WPBA count: 1" in text
 
 
-# ── /settings Kaizen sync row ───────────────────────────────────────────────
+# ── /settings Kaizen evidence row ───────────────────────────────────────────
 
 
 def test_settings_includes_kaizen_sync_row_when_status_provided(
@@ -215,13 +215,82 @@ def test_settings_includes_kaizen_sync_row_when_status_provided(
         kaizen_sync=status,
     )
 
-    assert "Kaizen sync" in text
+    assert "Kaizen evidence" in text
     assert "2026-06-01 12:38 BST" in text
     assert "Items indexed: 412" in text
     assert "(ok)" in text
 
     buttons = [button.callback_data for row in keyboard.inline_keyboard for button in row]
     assert "ACTION|refresh_portfolio" in buttons
+
+
+def test_settings_makes_portfolio_health_primary_and_sync_secondary(
+    isolated_health_store, monkeypatch
+):
+    """Product rule: connected users see Portfolio health as the primary settings
+    CTA, with manual Kaizen sync demoted to a secondary utility below the main
+    settings controls.
+    """
+    import bot
+
+    monkeypatch.setattr(bot, "get_curriculum", lambda _uid: "2025")
+    monkeypatch.setattr(bot, "get_training_level", lambda _uid: "ST5")
+    monkeypatch.setattr(bot, "get_voice_profile", lambda _uid: None)
+
+    _, keyboard = bot._settings_view_components(
+        4242,
+        tier="pro_plus",
+        used=0,
+        connected=True,
+    )
+
+    rows = [
+        [(button.text, button.callback_data) for button in row]
+        for row in keyboard.inline_keyboard
+    ]
+    flat = [pair for row in rows for pair in row]
+
+    # Portfolio health appears, routes to the existing inline ACTION|health
+    # handler (which itself prompts the read-only refresh when needed).
+    assert ("📊 Portfolio health", "ACTION|health") in flat
+
+    # Manual Kaizen refresh is still available, but relabelled as a secondary
+    # sync utility — the prominent "Refresh portfolio" CTA is gone.
+    assert ("🔄 Sync Kaizen evidence", "ACTION|refresh_portfolio") in flat
+    button_labels = [text for text, _ in flat]
+    assert "🔄 Refresh portfolio" not in button_labels
+
+    # Primary CTA must sit above the secondary sync row.
+    health_row = next(i for i, row in enumerate(rows) if ("📊 Portfolio health", "ACTION|health") in row)
+    sync_row = next(
+        i for i, row in enumerate(rows)
+        if ("🔄 Sync Kaizen evidence", "ACTION|refresh_portfolio") in row
+    )
+    assert health_row < sync_row
+
+
+def test_settings_omits_portfolio_health_button_when_not_connected(
+    isolated_health_store, monkeypatch
+):
+    """Without Kaizen credentials, the primary health CTA is suppressed — the
+    user must connect Kaizen first (the same gate /health already enforces).
+    """
+    import bot
+
+    monkeypatch.setattr(bot, "get_curriculum", lambda _uid: "2025")
+    monkeypatch.setattr(bot, "get_training_level", lambda _uid: "ST5")
+    monkeypatch.setattr(bot, "get_voice_profile", lambda _uid: None)
+
+    _, keyboard = bot._settings_view_components(
+        4242,
+        tier="pro_plus",
+        used=0,
+        connected=False,
+    )
+
+    callbacks = [button.callback_data for row in keyboard.inline_keyboard for button in row]
+    assert "ACTION|health" not in callbacks
+    assert "ACTION|refresh_portfolio" not in callbacks
 
 
 def test_settings_hides_refresh_button_when_kaizen_not_connected(
@@ -267,7 +336,7 @@ def test_settings_shows_not_synced_yet_when_no_run_exists(
         kaizen_sync=status,
     )
 
-    assert "Kaizen sync: not synced yet" in text
+    assert "Kaizen evidence: not synced yet" in text
 
 
 def test_settings_omits_kaizen_sync_row_when_unavailable(
@@ -287,7 +356,7 @@ def test_settings_omits_kaizen_sync_row_when_unavailable(
         connected=True,
     )
 
-    assert "Kaizen sync" not in text
+    assert "Kaizen evidence" not in text
 
 
 @pytest.mark.asyncio
@@ -359,9 +428,9 @@ async def test_refresh_portfolio_shows_read_only_confirmation(monkeypatch):
     )
 
     text = sim.get_last_text()
-    assert "Refresh portfolio from Kaizen" in text
+    assert "Sync Kaizen evidence" in text
     assert "no saving or submitting" in text
-    assert ("✅ Refresh now", "ACTION|confirm_refresh_portfolio") in sim.get_last_buttons()
+    assert ("✅ Sync now", "ACTION|confirm_refresh_portfolio") in sim.get_last_buttons()
     assert ("🔙 Back to settings", "ACTION|settings") in sim.get_last_buttons()
     sync.assert_not_awaited()
 
@@ -415,7 +484,7 @@ async def test_confirm_refresh_portfolio_runs_sync_and_shows_success(monkeypatch
 
     bot.sync_kaizen_portfolio_index_for_user.assert_awaited_once_with(4242)
     text = sim.get_last_text()
-    assert "Portfolio refreshed" in text
+    assert "Kaizen evidence synced" in text
     assert "Read from Kaizen: 12 items" in text
     assert "Portfolio Guru now has: 99 indexed items" in text
     assert ("📊 View portfolio health", "ACTION|health") in sim.get_last_buttons()
@@ -477,7 +546,7 @@ async def test_confirm_refresh_portfolio_handles_failure_without_traceback(monke
     )
 
     text = sim.get_last_text()
-    assert "Refresh did not complete" in text
+    assert "Sync did not complete" in text
     assert "secret low-level failure" not in text
     assert ("🔄 Try again", "ACTION|refresh_portfolio") in sim.get_last_buttons()
 
@@ -655,7 +724,7 @@ async def test_confirm_refresh_for_health_handles_unexpected_failure(monkeypatch
     )
 
     text = sim.get_last_text()
-    assert "Refresh did not complete" in text
+    assert "Sync did not complete" in text
     assert "hidden internal detail" not in text
     run_health.assert_not_awaited()
 
