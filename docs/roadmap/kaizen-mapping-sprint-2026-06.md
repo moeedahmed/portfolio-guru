@@ -185,7 +185,8 @@ A surface that does not meet all seven gates ships as `unsupported` in the adapt
 
 The point of this sprint is a working substrate, not a documentation exercise. The first build slice (after this doc lands) is a thin, read-only sync that proves the adapter end-to-end.
 
-> **Status (2026-06-01):** the storage substrate has landed offline.
+> **Status (2026-06-01):** the storage substrate and offline sync driver have
+> landed.
 > `backend/kaizen_index.py` owns the `evidence_items` + `index_runs` tables
 > (PRIMARY KEY `(user_id, id)`, append-on-miss `last_seen_at`) in the
 > existing `USAGE_DB_PATH` (`usage.db`); typed dataclasses
@@ -196,14 +197,20 @@ The point of this sprint is a working substrate, not a documentation exercise. T
 > indexed rows when present and falling back to `get_case_history`
 > otherwise; `/settings` shows a read-only `🔄 Kaizen sync: …` status row
 > driven by `latest_index_run` + `count_evidence_items`, with no refresh
-> button or live action. The CDP-driven read-only sync (the writer that
-> populates these tables in production) is the next slice and remains
-> foreground-owned; this slice intentionally adds no Playwright / CDP /
-> credential / filer / launchd / deploy path. Verification: focused
+> button or live action. `backend/kaizen_sync.py` is now the read-only
+> CDP/page-backed sync driver: it accepts an already-authenticated page,
+> walks timeline categories plus `/activities`, opens event/detail views
+> read-only, normalises rows to `EvidenceItemRow`, de-duplicates by event
+> UUID, upserts into the index, and records drift/auth/failure status in
+> `index_runs`. This slice intentionally adds no credential read, no filer
+> integration, no refresh trigger, no launchd change, and no deploy path.
+> Verification: focused `tests/test_kaizen_sync.py`,
 > `tests/test_kaizen_index.py`, `tests/test_health_index_integration.py`,
 > `tests/test_health_engine.py`, and `tests/test_health_bot.py` green at
-> 62 passed; full offline backend gate green at 843 passed, 13 deselected,
-> 3 snapshots passed.
+> 67 passed; full offline backend gate green at 848 passed, 13 deselected,
+> 3 snapshots passed, 49 warnings. Next step: controlled foreground
+> read-only smoke against Moeed's logged-in Kaizen/CDP session, inspect row
+> quality, then expose a guarded "Refresh portfolio" trigger only if clean.
 
 ### Scope
 

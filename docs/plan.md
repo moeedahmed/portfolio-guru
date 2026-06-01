@@ -212,6 +212,12 @@ Status:
   and goals surfaces for the logged-in user, de-duplicates by event UUID, and
   writes a normalised `evidence_items` + `index_runs` schema (local SQLite
   first; Supabase mirror is a follow-up).
+- Current implementation status: the storage substrate and offline sync
+  driver have landed. `backend/kaizen_sync.py` consumes an
+  already-authenticated page/session, walks timeline categories plus
+  `/activities`, opens detail views read-only, writes through
+  `kaizen_index`, and records `index_runs` drift/auth/failure status. It is
+  not exposed to users yet and has not run against live Kaizen.
 - The Index becomes the primary auto-populate source for
   `docs/PORTFOLIO_HEALTH_SPEC.md` Phase 2; existing PG filing records remain
   the fallback when no index is present yet.
@@ -222,6 +228,9 @@ Status:
 - The conversational engine (Phases 2.x) and filing routes (Phase 5) are
   unaffected by this sprint — the adapter is a read-only foundation under
   them, not a replacement.
+- Next step: run a controlled foreground read-only CDP smoke against the
+  logged-in Kaizen session, inspect indexed row quality, then wire a guarded
+  "Refresh portfolio" trigger only if the data is clean.
 
 ### Phase 3 - Safe activation for low-risk intents
 

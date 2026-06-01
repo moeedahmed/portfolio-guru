@@ -1,5 +1,24 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-01 addendum — read-only Kaizen sync driver landed offline.**
+> `backend/kaizen_sync.py` now provides the CDP/page-backed read-only sync
+> driver for Kaizen Portfolio Index v1. It accepts an already-authenticated
+> Playwright-like page, navigates only read surfaces, walks selected timeline
+> categories plus `/activities`, opens event/detail pages read-only,
+> normalises each item to `EvidenceItemRow`, upserts through
+> `backend/kaizen_index.py`, de-duplicates repeated event UUIDs, and records
+> `index_runs` as `ok`, `partial`, `drift`, `auth_required`, or `failed`.
+> Offline tests cover timeline ingestion, saved drafts, de-duplication,
+> detail drift, auth redirect handling, and a source guard against write-side
+> browser actions. This slice still does **not** run live Kaizen, read
+> credentials, expose a refresh button, touch the filer, restart launchd,
+> deploy, push, or send Telegram traffic. Verification: focused sync/index/
+> health gate green at 67 passed; full offline backend gate green at
+> 848 passed, 13 deselected, 3 snapshots passed, 49 warnings. Next step:
+> run a controlled read-only live smoke against Moeed's existing logged-in
+> Kaizen/CDP session, inspect indexed row quality, then wire a guarded
+> user-facing "Refresh portfolio" trigger only if the data is clean.
+
 > **2026-06-01 addendum — Kaizen Portfolio Index v1 storage substrate landed.**
 > The first build slice from `docs/roadmap/kaizen-mapping-sprint-2026-06.md`
 > is now wired offline-only. `backend/kaizen_index.py` owns the local SQLite
@@ -348,10 +367,11 @@ ARCP readiness, and the CESR overlay.
 | 2   | Adapter contract reconciles with `domain_skill/README.md` and `portfolio-structure.md` without contradictions | done (audited in sprint doc §"What is already mapped") |
 | 3   | Gap list (1–8 in sprint doc §"Gaps to verify") queued for foreground live verification                        | done (recorded; live work is foreground-owned)         |
 | 4   | Quality gates checklist exists and is referenced by the Index v1 build slice                                  | done (sprint doc §"Quality gates")                     |
-| 5   | Index v1 schema is the contract the next implementing slice will follow                                       | done (sprint doc §"First build slice")                 |
+| 5   | Index v1 schema is the contract the next implementing slice will follow                                       | done (storage substrate landed)                        |
 | 6   | `docs/PORTFOLIO_HEALTH_SPEC.md` Phase 2 auto-populate clause references the Index                             | done (this commit)                                     |
-| 7   | No live Kaizen actions in this sprint's docs work                                                             | met                                                    |
-| 8   | No write codepath added in this sprint's docs work                                                            | met                                                    |
+| 7   | Read-only sync driver populates `evidence_items` from timeline/detail/activity surfaces                       | done offline; live CDP smoke still pending             |
+| 8   | No live Kaizen actions in this sprint's docs work                                                             | met                                                    |
+| 9   | No write codepath added in this sprint's docs work                                                            | met                                                    |
 
 ### Proof gate
 
@@ -366,6 +386,11 @@ ARCP readiness, and the CESR overlay.
   Actions runner config, secrets, tests, or live Kaizen.
 - No push, PR, deploy, restart, or live Kaizen action from this sprint's docs
   work. Orchestrator owns commit and closure.
+- Next step: controlled foreground read-only CDP smoke against the logged-in
+  Kaizen session, then wire a guarded refresh trigger only if indexed row
+  quality is acceptable.
+- Focused sync/index/health gate green at 67 passed. Full offline backend
+  gate green at 848 passed, 13 deselected, 3 snapshots passed, 49 warnings.
 
 ### Out of scope (carried forward)
 

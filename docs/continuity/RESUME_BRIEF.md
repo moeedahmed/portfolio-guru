@@ -1,12 +1,12 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-06-01T12:08:17+00:00
+Generated: 2026-06-01T12:36:31+00:00
 Status: stale_or_needs_review
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
 - Branch: fix/mlx-whisper-transcription
-- Last commit: 7dee776 2026-06-01 docs: add Kaizen mapping sprint plan
+- Last commit: d855af8 2026-06-01 feat: add Kaizen portfolio index substrate
 - Uncommitted changes: no
 
 ## Immediate read before restarting
@@ -23,6 +23,7 @@ Status: stale_or_needs_review
 - Missing: dev/test commands
 
 ## Recent commits
+- d855af8 2026-06-01 feat: add Kaizen portfolio index substrate
 - 7dee776 2026-06-01 docs: add Kaizen mapping sprint plan
 - 6d21f06 2026-06-01 fix: title-case portfolio profile labels
 - bed11ac 2026-06-01 fix: simplify portfolio setting label
@@ -30,7 +31,6 @@ Status: stale_or_needs_review
 - 8d4358d 2026-06-01 fix: relabel Kaizen profile setting
 - 984904d 2026-06-01 fix: rename CESR pathway label
 - 71cf42f 2026-06-01 fix: move pathway control into settings
-- 112a943 2026-06-01 fix: show pathway command in bot menu
 
 ## Repo context snapshot
 ### AGENTS.md — present, 2 days old
