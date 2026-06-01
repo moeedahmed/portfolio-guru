@@ -290,6 +290,61 @@ def test_settings_omits_kaizen_sync_row_when_unavailable(
 
 
 @pytest.mark.asyncio
+async def test_health_command_prompts_refresh_when_kaizen_index_is_missing(monkeypatch):
+    import bot
+
+    monkeypatch.setattr(bot, "has_credentials", lambda _uid: True)
+    monkeypatch.setattr(bot, "get_user_tier", AsyncMock(return_value="pro_plus"))
+    monkeypatch.setattr(bot, "_safe_kaizen_sync_status", AsyncMock(return_value=None))
+    run_health = AsyncMock()
+    monkeypatch.setattr(bot, "_run_health_analysis", run_health)
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.health_command(sim._make_text_update("/health"), context)
+
+    text = sim.get_last_text()
+    assert "Portfolio Health needs fresh Kaizen data" in text
+    assert ("✅ Refresh and show health", "ACTION|confirm_refresh_for_health") in sim.get_last_buttons()
+    run_health.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_confirm_refresh_for_health_runs_sync_then_health(monkeypatch):
+    import bot
+
+    monkeypatch.setattr(bot, "has_credentials", lambda _uid: True)
+    monkeypatch.setattr(bot, "get_user_tier", AsyncMock(return_value="pro_plus"))
+    monkeypatch.setattr(
+        bot,
+        "sync_kaizen_portfolio_index_for_user",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                status="ok",
+                rows_seen=12,
+                rows_written=12,
+                rows_drifted=0,
+                notes=[],
+            )
+        ),
+    )
+    run_health = AsyncMock()
+    monkeypatch.setattr(bot, "_run_health_analysis", run_health)
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|confirm_refresh_for_health"),
+        context,
+    )
+
+    bot.sync_kaizen_portfolio_index_for_user.assert_awaited_once_with(4242)
+    run_health.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_refresh_portfolio_shows_read_only_confirmation(monkeypatch):
     import bot
 
@@ -427,3 +482,206 @@ async def test_confirm_refresh_portfolio_handles_failure_without_traceback(monke
     assert "Refresh did not complete" in text
     assert "secret low-level failure" not in text
     assert ("🔄 Try again", "ACTION|refresh_portfolio") in sim.get_last_buttons()
+
+
+def _make_sync_status(finished_at: str, *, run_status: str = "ok", items_indexed: int = 5):
+    from kaizen_index import IndexRunRow, KaizenSyncStatus
+
+    return KaizenSyncStatus(
+        last_run=IndexRunRow(
+            id=1,
+            user_id="4242",
+            started_at=finished_at,
+            finished_at=finished_at,
+            status=run_status,
+            rows_seen=items_indexed,
+            rows_written=items_indexed,
+            rows_drifted=0,
+        ),
+        items_indexed=items_indexed,
+    )
+
+
+@pytest.mark.asyncio
+async def test_health_command_prompts_refresh_when_index_is_stale(monkeypatch):
+    """A successful sync older than 24 hours should still trigger the refresh prompt."""
+    import bot
+
+    stale = (datetime.now(UTC) - __import__("datetime").timedelta(days=3)).isoformat()
+    monkeypatch.setattr(bot, "has_credentials", lambda _uid: True)
+    monkeypatch.setattr(bot, "get_user_tier", AsyncMock(return_value="pro_plus"))
+    monkeypatch.setattr(
+        bot,
+        "_safe_kaizen_sync_status",
+        AsyncMock(return_value=_make_sync_status(stale, run_status="ok", items_indexed=8)),
+    )
+    run_health = AsyncMock()
+    monkeypatch.setattr(bot, "_run_health_analysis", run_health)
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.health_command(sim._make_text_update("/health"), context)
+
+    assert "Portfolio Health needs fresh Kaizen data" in sim.get_last_text()
+    assert ("✅ Refresh and show health", "ACTION|confirm_refresh_for_health") in sim.get_last_buttons()
+    run_health.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_health_command_skips_refresh_prompt_when_index_is_fresh(monkeypatch):
+    """A recent successful sync should let /health run analysis directly."""
+    import bot
+
+    recent = datetime.now(UTC).isoformat()
+    monkeypatch.setattr(bot, "has_credentials", lambda _uid: True)
+    monkeypatch.setattr(bot, "get_user_tier", AsyncMock(return_value="pro_plus"))
+    monkeypatch.setattr(
+        bot,
+        "_safe_kaizen_sync_status",
+        AsyncMock(return_value=_make_sync_status(recent, run_status="ok", items_indexed=12)),
+    )
+    run_health = AsyncMock()
+    monkeypatch.setattr(bot, "_run_health_analysis", run_health)
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.health_command(sim._make_text_update("/health"), context)
+
+    run_health.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_health_command_skips_refresh_prompt_when_not_connected(monkeypatch):
+    """Users without Kaizen credentials should fall through to the existing analysis path."""
+    import bot
+
+    monkeypatch.setattr(bot, "has_credentials", lambda _uid: False)
+    monkeypatch.setattr(bot, "get_user_tier", AsyncMock(return_value="pro_plus"))
+    monkeypatch.setattr(bot, "_safe_kaizen_sync_status", AsyncMock(return_value=None))
+    run_health = AsyncMock()
+    monkeypatch.setattr(bot, "_run_health_analysis", run_health)
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.health_command(sim._make_text_update("/health"), context)
+
+    run_health.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_inline_health_button_prompts_refresh_when_stale(monkeypatch):
+    """The inline ACTION|health entry point mirrors /health's refresh gate."""
+    import bot
+
+    monkeypatch.setattr(bot, "has_credentials", lambda _uid: True)
+    monkeypatch.setattr(bot, "get_user_tier", AsyncMock(return_value="pro_plus"))
+    monkeypatch.setattr(bot, "is_beta_tester", AsyncMock(return_value=False))
+    monkeypatch.setattr(bot, "_safe_kaizen_sync_status", AsyncMock(return_value=None))
+    run_health = AsyncMock()
+    monkeypatch.setattr(bot, "_run_health_analysis", run_health)
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health"),
+        context,
+    )
+
+    assert "Portfolio Health needs fresh Kaizen data" in sim.get_last_text()
+    assert ("✅ Refresh and show health", "ACTION|confirm_refresh_for_health") in sim.get_last_buttons()
+    run_health.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_confirm_refresh_for_health_handles_auth_required(monkeypatch):
+    """auth_required during the health-triggered refresh must offer reconnect, not run health."""
+    import bot
+
+    monkeypatch.setattr(bot, "has_credentials", lambda _uid: True)
+    monkeypatch.setattr(bot, "get_user_tier", AsyncMock(return_value="pro_plus"))
+    monkeypatch.setattr(bot, "is_beta_tester", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        bot,
+        "sync_kaizen_portfolio_index_for_user",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                status="auth_required",
+                rows_seen=0,
+                rows_written=0,
+                rows_drifted=0,
+                notes=["login needed"],
+            )
+        ),
+    )
+    monkeypatch.setattr(bot, "_safe_kaizen_sync_status", AsyncMock(return_value=None))
+    run_health = AsyncMock()
+    monkeypatch.setattr(bot, "_run_health_analysis", run_health)
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|confirm_refresh_for_health"),
+        context,
+    )
+
+    text = sim.get_last_text()
+    assert "Kaizen needs reconnecting" in text
+    assert ("🔗 Reconnect Kaizen", "ACTION|setup") in sim.get_last_buttons()
+    run_health.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_confirm_refresh_for_health_handles_unexpected_failure(monkeypatch):
+    """Low-level sync exceptions must surface as plain copy without skipping straight to health."""
+    import bot
+
+    monkeypatch.setattr(bot, "has_credentials", lambda _uid: True)
+    monkeypatch.setattr(bot, "get_user_tier", AsyncMock(return_value="pro_plus"))
+    monkeypatch.setattr(bot, "is_beta_tester", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        bot,
+        "sync_kaizen_portfolio_index_for_user",
+        AsyncMock(side_effect=RuntimeError("hidden internal detail")),
+    )
+    monkeypatch.setattr(bot, "_safe_kaizen_sync_status", AsyncMock(return_value=None))
+    run_health = AsyncMock()
+    monkeypatch.setattr(bot, "_run_health_analysis", run_health)
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|confirm_refresh_for_health"),
+        context,
+    )
+
+    text = sim.get_last_text()
+    assert "Refresh did not complete" in text
+    assert "hidden internal detail" not in text
+    run_health.assert_not_awaited()
+
+
+def test_sync_status_freshness_helper_recognises_stale_and_fresh_runs():
+    """Unit-level coverage for the freshness gate that drives the prompt."""
+    import bot
+
+    assert bot._sync_status_is_fresh(None) is False
+
+    fresh = _make_sync_status(datetime.now(UTC).isoformat())
+    assert bot._sync_status_is_fresh(fresh) is True
+
+    stale = _make_sync_status(
+        (datetime.now(UTC) - __import__("datetime").timedelta(days=2)).isoformat()
+    )
+    assert bot._sync_status_is_fresh(stale) is False
+
+    failed = _make_sync_status(datetime.now(UTC).isoformat(), run_status="failed")
+    assert bot._sync_status_is_fresh(failed) is False
+
+    empty = _make_sync_status(datetime.now(UTC).isoformat(), items_indexed=0)
+    assert bot._sync_status_is_fresh(empty) is False

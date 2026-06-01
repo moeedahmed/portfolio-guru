@@ -1,5 +1,15 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-01 addendum — `/health` is now the primary refresh path.**
+> Product decision: users should not need to think "refresh portfolio" before
+> asking for health. `/health` and the inline Portfolio Health button now
+> check whether the local Kaizen index is usable; when connected users have no
+> fresh index yet, Portfolio Guru asks for explicit read-only consent with
+> `✅ Refresh and show health`, runs the same guarded Kaizen refresh, and then
+> continues straight into Portfolio Health. The `/settings → Refresh
+> portfolio` button stays as a secondary utility for retry, reconnect, support,
+> and manual data management.
+
 > **2026-06-01 addendum — guarded Refresh portfolio workflow built.**
 > `/settings` now exposes a user-facing `🔄 Refresh portfolio` button for
 > connected Kaizen users. Tapping it shows a confirmation screen that explains

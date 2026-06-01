@@ -1594,6 +1594,25 @@ def _refresh_portfolio_confirm_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def _health_refresh_confirm_text() -> str:
+    return (
+        "📊 Portfolio Health needs fresh Kaizen data\n\n"
+        "I can refresh your portfolio read-only, then show the health result.\n\n"
+        "Safety boundary:\n"
+        "• no saving or submitting\n"
+        "• no signing or supervisor requests\n"
+        "• no deleting or editing Kaizen\n"
+        "• no new drafts created"
+    )
+
+
+def _health_refresh_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Refresh and show health", callback_data="ACTION|confirm_refresh_for_health")],
+        [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu")],
+    ])
+
+
 def _refresh_portfolio_result_keyboard(status: str) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     if status in {"ok", "partial"}:
@@ -4006,6 +4025,13 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             )
             return ConversationHandler.END
 
+        if await _health_needs_kaizen_refresh(user_id):
+            await query.message.edit_text(
+                _health_refresh_confirm_text(),
+                reply_markup=_health_refresh_confirm_keyboard(),
+            )
+            return ConversationHandler.END
+
         async def send_progress():
             try:
                 await query.message.edit_text("🔍 Analysing your portfolio…")
@@ -4104,6 +4130,86 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             query.message,
             result_text,
             reply_markup=_refresh_portfolio_result_keyboard(getattr(result, "status", "failed")),
+        )
+        return ConversationHandler.END
+
+    elif action == "confirm_refresh_for_health":
+        back_btn = InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu")
+        back_markup = InlineKeyboardMarkup([[back_btn]])
+
+        if not has_credentials(user_id):
+            await query.message.edit_text(
+                "🔗 Connect your Kaizen account first.",
+                reply_markup=InlineKeyboardMarkup([[_BTN_SETUP], [back_btn]]),
+            )
+            return ConversationHandler.END
+
+        if not await _health_gate_check(user_id):
+            await query.message.edit_text(
+                "📊 Portfolio Health is included in Portfolio Guru Unlimited.\n\nUpgrade to get gap analysis and readiness scoring.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
+                    [back_btn],
+                ]),
+            )
+            return ConversationHandler.END
+
+        try:
+            await query.message.edit_text("🔄 Refreshing Kaizen so I can show Portfolio Health…")
+        except Exception:
+            pass
+
+        try:
+            result = await sync_kaizen_portfolio_index_for_user(user_id)
+        except Exception as exc:
+            logger.warning("Kaizen portfolio refresh before health failed: %s", exc, exc_info=True)
+            result = SimpleNamespace(
+                status="failed",
+                rows_seen=0,
+                rows_written=0,
+                rows_drifted=0,
+                notes=[],
+            )
+
+        if getattr(result, "status", "failed") not in {"ok", "partial"}:
+            status = await _safe_kaizen_sync_status(user_id)
+            await _safe_edit_text(
+                query.message,
+                _format_refresh_portfolio_result(result, status),
+                reply_markup=_refresh_portfolio_result_keyboard(getattr(result, "status", "failed")),
+            )
+            return ConversationHandler.END
+
+        async def send_progress():
+            try:
+                await query.message.edit_text("🔍 Analysing your portfolio…")
+            except Exception:
+                pass
+
+        async def send_result(text, reply_markup):
+            await _safe_edit_text(
+                query.message,
+                text,
+                parse_mode="Markdown",
+                reply_markup=reply_markup or back_markup,
+            )
+
+        async def send_photo_fn(fh):
+            try:
+                await query.message.chat.send_photo(photo=fh)
+            except Exception:
+                pass
+
+        async def fail_fn(text):
+            await query.message.edit_text(text, reply_markup=back_markup)
+
+        await _run_health_analysis(
+            user_id=user_id,
+            chat=query.message.chat,
+            send_progress=send_progress,
+            send_result=send_result,
+            send_photo_fn=send_photo_fn,
+            fail_fn=fail_fn,
         )
         return ConversationHandler.END
 
@@ -4704,6 +4810,35 @@ async def _resolve_health_evidence(user_id: int):
     return case_history_to_evidence_items(history), history, "case_history"
 
 
+def _sync_status_is_fresh(status: KaizenSyncStatus | None) -> bool:
+    """Return True when /health can trust the local Kaizen index."""
+    if status is None or status.last_run is None or status.items_indexed <= 0:
+        return False
+    if status.last_run.status not in {"ok", "partial"}:
+        return False
+
+    finished_at = (status.last_run.finished_at or status.last_run.started_at or "").strip()
+    if not finished_at:
+        return False
+
+    try:
+        from datetime import UTC, datetime, timedelta
+
+        parsed = datetime.fromisoformat(finished_at.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return datetime.now(UTC) - parsed <= timedelta(hours=24)
+    except Exception:
+        return False
+
+
+async def _health_needs_kaizen_refresh(user_id: int) -> bool:
+    """Gate the primary /health journey through refresh when data is stale."""
+    if not has_credentials(user_id):
+        return False
+    return not _sync_status_is_fresh(await _safe_kaizen_sync_status(user_id))
+
+
 async def _run_health_analysis(
     user_id: int,
     chat,
@@ -5072,6 +5207,13 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
             ]),
+        )
+        return ConversationHandler.END
+
+    if await _health_needs_kaizen_refresh(user_id):
+        await update.message.reply_text(
+            _health_refresh_confirm_text(),
+            reply_markup=_health_refresh_confirm_keyboard(),
         )
         return ConversationHandler.END
 
