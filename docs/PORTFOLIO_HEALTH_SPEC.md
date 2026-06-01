@@ -64,9 +64,20 @@ Six universal evidence domains (mapped from the pathway research — every UK do
 - **Age of evidence** — recent (<1 year), current (1–3 years), ageing (3–5 years), stale (>5 years)
 - **Source** — Kaizen-filed, Portfolio Guru-drafted (not filed), manually entered, uploaded
 
+### Kaizen Independence (Critical Design Constraint)
+
+Portfolio Health does not require Kaizen. Period.
+
+Many pathways don't use Kaizen at all — SAS doctors, trust grades, CESR candidates, GP trainees, and foundation doctors use different platforms (or no platform at all). The health layer must work standalone with manual evidence entry only.
+
+Kaizen is treated as one optional evidence source, not a prerequisite:
+- If the user has filed WPBA drafts through Portfolio Guru → Kaizen, those auto-populate (nice to have)
+- If the user has never touched Kaizen, they can still use Portfolio Health fully via manual entry
+- No pathway gate requires Kaizen credentials
+
 ### How evidence gets in
 
-Four paths, no Kaizen dependency for the base layer:
+Four paths. Only path 1 touches Kaizen — and it's optional:
 
 1. **Auto-discovered** — Portfolio Guru drafts that were filed to Kaizen are tracked automatically (existing `usage` / `case_archive` data)
 2. **Auto-discovered** — Portfolio Guru drafts that were previewed but not filed
