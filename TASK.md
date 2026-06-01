@@ -1,5 +1,59 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-01 addendum — filing reliability instrumentation + admin report.**
+> Product decision: the next sprint is _not_ a polished user-facing health
+> dashboard. Core filing is the product, so we first need to _know_ whether
+> real users are filing and which failure path is biting. Built a durable
+> per-attempt filing log (`backend/filing_attempt_log.py`) and an internal
+> `/filingreport` admin command that summarises real-user reliability.
+>
+> Mechanics:
+>
+> - Every Kaizen filing attempt from `bot.py` (success, partial, save-failure,
+>   timeout, exception) writes one PHI-free NDJSON record to
+>   `~/.openclaw/data/portfolio-guru/filing-log.ndjson` via the new module.
+>   Path is overridable with `PORTFOLIO_GURU_FILING_LOG_PATH` for tests.
+> - Each record carries: user_id, username, form_type, status, derived error
+>   category (SAVE_SUCCESS / PARTIAL_SAVE / SAVE_UNVERIFIED / SAVE_FAILURE /
+>   LOGIN_FAILED / TIMEOUT / EXCEPTION / FILL_FAILURE / UNKNOWN), filer error
+>   string, filled count, skipped field keys, method (deterministic /
+>   browser-use), post-save verification flag, and a `synthetic` boolean.
+> - `is_synthetic_user` flags test traffic — Telegram user id 99999999 (the
+>   pytest fixture) and any extra ids from
+>   `PORTFOLIO_GURU_SYNTHETIC_USER_IDS` — and the summary excludes synthetic
+>   attempts from headline counts by default while still reporting how many
+>   were suppressed.
+> - `/filingreport` is admin-only (gated on `ADMIN_USER_ID`); typing
+>   `/filingreport all` includes synthetic traffic for debugging. The output
+>   is a Telegram-safe text report: attempts / unique users / saved rate /
+>   top categories / top forms / recent failures.
+> - Existing per-fix `filing_results.ndjson` (consumed by `auto_fix_form_map`)
+>   is untouched — this is a separate user-attempt log, not a replacement.
+> - No new dependencies, no live testing, no deploy, no restart, no push.
+>   Foreground owns activation; the bot picks up the new module on its next
+>   restart.
+>
+> Verification:
+>
+> - Focused: `cd backend && venv/bin/python -m pytest tests/test_filing_attempt_log.py tests/test_filing_reliability.py tests/test_smoke.py -v` →
+>   52 passed.
+> - Offline gate: `cd backend && venv/bin/python -m pytest tests/ --ignore=tests/test_e2e.py --ignore=tests/test_e2e_live.py` →
+>   900 passed, 13 deselected.
+>
+> Files: `backend/filing_attempt_log.py` (new),
+> `backend/tests/test_filing_attempt_log.py` (new — 29 tests covering
+> success/partial/failure recording, synthetic exclusion, categorisation,
+> report rendering, and the admin command itself), `backend/bot.py`
+> (`_log_filing_attempt` delegates to the new module, completion-path call
+> now passes `filled`, `method`, `verified`; new `filingreport_command` and
+> handler registration).
+>
+> Known follow-ups (not in this slice): timeout / exception sites in bot.py
+> don't yet pass `filled`/`method` because those values aren't bound when we
+> bail — the category falls back to TIMEOUT / EXCEPTION which is what the
+> report needs anyway. If we later want per-method timeout breakdown we can
+> thread `method` through `_filing_progress`.
+
 > **2026-06-01 addendum — normal settings hides manual Kaizen sync.**
 > Product decision: users should not have to understand or maintain a Kaizen
 > evidence sync. `/settings` keeps "📊 Portfolio health" as the visible
