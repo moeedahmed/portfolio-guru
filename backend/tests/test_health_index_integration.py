@@ -218,10 +218,80 @@ def test_settings_includes_kaizen_sync_status_when_status_provided(
     assert "Kaizen evidence" in text
     assert "2026-06-01 12:38 BST" in text
     assert "Items indexed: 412" in text
-    assert "(ok)" in text
+    assert "synced" in text
+    assert "(ok)" not in text
 
     buttons = [button.callback_data for row in keyboard.inline_keyboard for button in row]
     assert "ACTION|refresh_portfolio" not in buttons
+
+
+def test_settings_shows_running_sync_as_temporary_in_progress(
+    isolated_health_store, monkeypatch
+):
+    import bot
+    from datetime import UTC, datetime
+    from kaizen_index import IndexRunRow, KaizenSyncStatus
+
+    monkeypatch.setattr(bot, "get_curriculum", lambda _uid: "2025")
+    monkeypatch.setattr(bot, "get_training_level", lambda _uid: "ST5")
+    monkeypatch.setattr(bot, "get_voice_profile", lambda _uid: None)
+
+    started_at = datetime.now(UTC).isoformat()
+    status = KaizenSyncStatus(
+        last_run=IndexRunRow(
+            id=1,
+            user_id="4242",
+            started_at=started_at,
+            finished_at=None,
+            status="running",
+        ),
+        items_indexed=12,
+    )
+
+    text, _ = bot._settings_view_components(
+        4242,
+        tier="pro_plus",
+        used=0,
+        connected=True,
+        kaizen_sync=status,
+    )
+
+    assert "Kaizen evidence: syncing now" in text
+    assert "Items indexed: 12" in text
+
+
+def test_settings_shows_stale_running_sync_as_timed_out(
+    isolated_health_store, monkeypatch
+):
+    import bot
+    from kaizen_index import IndexRunRow, KaizenSyncStatus
+
+    monkeypatch.setattr(bot, "get_curriculum", lambda _uid: "2025")
+    monkeypatch.setattr(bot, "get_training_level", lambda _uid: "ST5")
+    monkeypatch.setattr(bot, "get_voice_profile", lambda _uid: None)
+
+    status = KaizenSyncStatus(
+        last_run=IndexRunRow(
+            id=1,
+            user_id="4242",
+            started_at="2000-01-01T00:00:00+00:00",
+            finished_at=None,
+            status="running",
+        ),
+        items_indexed=12,
+    )
+
+    text, _ = bot._settings_view_components(
+        4242,
+        tier="pro_plus",
+        used=0,
+        connected=True,
+        kaizen_sync=status,
+    )
+
+    assert "Kaizen evidence: sync timed out" in text
+    assert "running" not in text
+    assert "Items indexed: 12" in text
 
 
 def test_settings_makes_portfolio_health_primary_and_hides_manual_sync(

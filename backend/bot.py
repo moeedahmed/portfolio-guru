@@ -8,6 +8,7 @@ import os
 import re
 import tempfile
 import time
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
 from telegram.error import BadRequest
@@ -1555,6 +1556,28 @@ async def _safe_kaizen_sync_status(user_id: int) -> KaizenSyncStatus | None:
         return None
 
 
+_KAIZEN_SYNC_RUNNING_STALE_AFTER = timedelta(minutes=30)
+_KAIZEN_SYNC_STATUS_LABELS = {
+    "ok": "synced",
+    "partial": "partly synced",
+    "drift": "needs mapping check",
+    "auth_required": "needs reconnecting",
+    "failed": "last sync failed",
+}
+
+
+def _parse_sync_timestamp(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC)
+    except Exception:
+        return None
+
+
 def _format_kaizen_sync_row(status: KaizenSyncStatus | None) -> str | None:
     """Read-only one-liner describing Kaizen evidence sync state.
 
@@ -1567,10 +1590,24 @@ def _format_kaizen_sync_row(status: KaizenSyncStatus | None) -> str | None:
     if status.last_run is None:
         return "🔄 Kaizen evidence: not synced yet"
     last_run = status.last_run
+    if last_run.status == "running":
+        started_at = (last_run.started_at or "").strip()
+        pretty_started = _format_user_local_timestamp(started_at)
+        started_dt = _parse_sync_timestamp(started_at)
+        if started_dt and datetime.now(UTC) - started_dt > _KAIZEN_SYNC_RUNNING_STALE_AFTER:
+            return (
+                f"🔄 Kaizen evidence: sync timed out after starting {pretty_started}. "
+                f"Items indexed: {status.items_indexed}"
+            )
+        return (
+            f"🔄 Kaizen evidence: syncing now, started {pretty_started}. "
+            f"Items indexed: {status.items_indexed}"
+        )
     when = (last_run.finished_at or last_run.started_at or "").strip()
     pretty_when = _format_user_local_timestamp(when)
+    status_label = _KAIZEN_SYNC_STATUS_LABELS.get(last_run.status, last_run.status)
     return (
-        f"🔄 Kaizen evidence: last sync {pretty_when} ({last_run.status}). "
+        f"🔄 Kaizen evidence: {status_label} {pretty_when}. "
         f"Items indexed: {status.items_indexed}"
     )
 
@@ -1718,9 +1755,9 @@ def _settings_view_components(
     training_level = _training_level_label(get_training_level(user_id))
     pathway_label = _pathway_label(_get_or_default_health_profile(user_id).pathway)
     voice_profile = get_voice_profile(user_id)
-    voice_status = "✅ Active" if voice_profile else "⭐ Recommended — not set"
-    voice_cta = "⭐ Set up voice profile" if not voice_profile else "✅ Voice profile active / rebuild"
-    voice_hint = "Set this once so drafts sound like you." if not voice_profile else "Drafts are already styled to your voice."
+    voice_status = "Active" if voice_profile else "Not set"
+    voice_cta = f"✍️ Writing style: {voice_status}"
+    voice_hint = "Helps drafts sound like you." if not voice_profile else "Drafts are already styled to your voice."
 
     plan_lines = []
     if connected is False:
@@ -1762,7 +1799,7 @@ def _settings_view_components(
     text = (
         f"⚙️ Your settings\n\n"
         f"{plan_block}"
-        f"✍️ Voice profile: {voice_status}\n"
+        f"✍️ Writing style: {voice_status}\n"
         f"   {voice_hint}\n\n"
         f"🎓 Portfolio: {training_level}\n"
         f"📊 Pathway: {pathway_label}\n"

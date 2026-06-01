@@ -1,5 +1,19 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-01 addendum — settings wording and stale sync status.**
+> Product decision: `/settings` should read like a product surface, not an
+> internal maintenance panel. Updated the voice-profile wording to
+> `Writing style` so it aligns with the other settings rows, and changed the
+> Kaizen evidence row so a fresh `running` sync says `syncing now` while a
+> stale run older than 30 minutes says `sync timed out` instead of pretending
+> it is still running. Manual sync remains hidden from normal settings.
+>
+> Verification:
+>
+> - Focused settings/status gate:
+>   `cd backend && venv/bin/python -m pytest tests/test_health_index_integration.py tests/test_health_bot.py tests/test_kaizen_index.py tests/test_kaizen_sync.py -q`
+>   → 82 passed.
+
 > **2026-06-01 addendum — filing reliability instrumentation + admin report.**
 > Product decision: the next sprint is _not_ a polished user-facing health
 > dashboard. Core filing is the product, so we first need to _know_ whether

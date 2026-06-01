@@ -3195,9 +3195,9 @@ class TestTrainingStageGroups:
             text, keyboard = _settings_view_components(123)
 
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
-        assert buttons[0] == ('⭐ Set up voice profile', 'ACTION|voice')
+        assert buttons[0] == ('✍️ Writing style: Not set', 'ACTION|voice')
         assert ('📚 Curriculum: 2025 Update', 'ACTION|change_curriculum') in buttons
-        assert 'Set this once so drafts sound like you' in text
+        assert 'Helps drafts sound like you' in text
 
 
 class TestImageOCRProgress:
