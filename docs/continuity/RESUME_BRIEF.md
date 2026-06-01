@@ -1,12 +1,12 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-06-01T03:21:21+00:00
+Generated: 2026-06-01T11:39:07+00:00
 Status: stale_or_needs_review
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
 - Branch: fix/mlx-whisper-transcription
-- Last commit: 842056c 2026-06-01 feat: wire Portfolio Health engine into /health with ARCP/CESR pathway selector
+- Last commit: 6d21f06 2026-06-01 fix: title-case portfolio profile labels
 - Uncommitted changes: no
 
 ## Immediate read before restarting
@@ -23,14 +23,14 @@ Status: stale_or_needs_review
 - Missing: dev/test commands
 
 ## Recent commits
-- 842056c 2026-06-01 feat: wire Portfolio Health engine into /health with ARCP/CESR pathway selector
-- f3452d9 2026-06-01 feat: Portfolio Health engine Phase 1 — data models + scoring + tests
-- c05c053 2026-06-01 docs: narrow Portfolio Health scope to RCEM Kaizen only (ARCP + CESR)
-- 12569cb 2026-06-01 docs: add explicit Kaizen independence constraint to Portfolio Health spec
-- b1913e1 2026-06-01 docs: Portfolio Health + Pathway Guidance spec v2
-- 34ba545 2026-06-01 chore: remove dead vNext separate-bot path
-- 2319076 2026-06-01 fix: use MLX Whisper small for local transcription
-- 599914f 2026-05-31 feat: KC coverage tracking — real curriculum data in health chart, persisted per draft
+- 6d21f06 2026-06-01 fix: title-case portfolio profile labels
+- bed11ac 2026-06-01 fix: simplify portfolio setting label
+- 99eab4c 2026-06-01 fix: simplify welcome prompt
+- 8d4358d 2026-06-01 fix: relabel Kaizen profile setting
+- 984904d 2026-06-01 fix: rename CESR pathway label
+- 71cf42f 2026-06-01 fix: move pathway control into settings
+- 112a943 2026-06-01 fix: show pathway command in bot menu
+- 44b6264 2026-06-01 fix: keep health output from hanging on markdown errors
 
 ## Repo context snapshot
 ### AGENTS.md — present, 2 days old

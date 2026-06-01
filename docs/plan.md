@@ -197,6 +197,32 @@ Status:
 - Safety contract: readiness is a planning aid only; it must not claim ARCP success or invent requirements, dates, evidence, supervisors, or clinical details.
 - Next build slice is data contracts plus a pure readiness engine with offline tests only. Leave live Telegram filing, Kaizen flows, browser actions, deployment, and service runtime unchanged.
 
+### Phase 2.10 - Kaizen Mapping Sprint (read-only adapter foundation)
+
+Status:
+
+- Added 2026-06-01 to formalise the Kaizen platform map as a reusable adapter
+  rather than another stack of per-form, per-user scrapes.
+- Plan and scorecard live in `docs/roadmap/kaizen-mapping-sprint-2026-06.md`.
+- The adapter defines routes, entity shapes, source priority, extraction
+  methods, the page-render contract, gotchas, and a versioning + drift signal
+  shared across all users.
+- The first build slice is **Kaizen Portfolio Index v1**: a read-only refresh
+  that walks the timeline, event detail, activities/drafts, files, profile,
+  and goals surfaces for the logged-in user, de-duplicates by event UUID, and
+  writes a normalised `evidence_items` + `index_runs` schema (local SQLite
+  first; Supabase mirror is a follow-up).
+- The Index becomes the primary auto-populate source for
+  `docs/PORTFOLIO_HEALTH_SPEC.md` Phase 2; existing PG filing records remain
+  the fallback when no index is present yet.
+- Safety: no write codepath, no credential read, no new browser session. The
+  adapter consumes the existing authenticated CDP session only and refuses to
+  act on `auth.kaizenep.com`. No supervisor surfaces, no assessor surfaces,
+  no `/inbox` in v1.
+- The conversational engine (Phases 2.x) and filing routes (Phase 5) are
+  unaffected by this sprint — the adapter is a read-only foundation under
+  them, not a replacement.
+
 ### Phase 3 - Safe activation for low-risk intents
 
 Activate router for:

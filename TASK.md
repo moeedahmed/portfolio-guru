@@ -1,4 +1,15 @@
-# Active Task — Private Beta Launch Cut
+# Active Task — Kaizen Mapping Sprint
+
+> **2026-06-01 addendum — Kaizen Mapping Sprint as public-product foundation.**
+> The next sprint is read-only Kaizen mapping, scoped as a reusable platform
+> adapter rather than another per-form per-user scrape. Plan and scorecard live
+> in `docs/roadmap/kaizen-mapping-sprint-2026-06.md`. The sprint's first build
+> slice is Kaizen Portfolio Index v1 — a read-only refresh that produces a
+> normalised `evidence_items` table the existing `/health` and the planned
+> ARCP/CESR overlays consume. This addendum is docs/planning only: no filer,
+> credential, deploy, launchd, Telegram, push, or live Kaizen actions in this
+> sprint's docs work. See `## Active Sprint — Kaizen Mapping (2026-06-01)`
+> below for the in-line scorecard and proof gate.
 
 > **2026-05-29 addendum — main-bot opt-in gathering mode slice.**
 > The vNext conversational collector has now been promoted into the main bot
@@ -293,6 +304,51 @@ on` and `End date` header fields were still blank. The current slice routes
 > and form-selection flows. Verification: full offline gate green at
 > 612 passed, 13 deselected, 43 warnings; focused flow/filer/harness/smoke gate
 > green at 179 passed, 6 warnings. No live Telegram, Kaizen, deploy, push, or restart.
+
+## Active Sprint — Kaizen Mapping (2026-06-01)
+
+Read-only Kaizen mapping promoted from per-form skill code into a reusable
+**platform adapter**, plus the first build slice (Kaizen Portfolio Index v1).
+Full plan: `docs/roadmap/kaizen-mapping-sprint-2026-06.md`. The private-beta
+launch cut below remains the operational objective for the live bot;
+this sprint runs in parallel as the foundation for Portfolio Health,
+ARCP readiness, and the CESR overlay.
+
+### Scorecard (definition of done)
+
+| #   | Deliverable                                                                                                   | Status                                                 |
+| --- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| 1   | Sprint plan doc landed and linked from `docs/plan.md` and this file                                           | done (this commit)                                     |
+| 2   | Adapter contract reconciles with `domain_skill/README.md` and `portfolio-structure.md` without contradictions | done (audited in sprint doc §"What is already mapped") |
+| 3   | Gap list (1–8 in sprint doc §"Gaps to verify") queued for foreground live verification                        | done (recorded; live work is foreground-owned)         |
+| 4   | Quality gates checklist exists and is referenced by the Index v1 build slice                                  | done (sprint doc §"Quality gates")                     |
+| 5   | Index v1 schema is the contract the next implementing slice will follow                                       | done (sprint doc §"First build slice")                 |
+| 6   | `docs/PORTFOLIO_HEALTH_SPEC.md` Phase 2 auto-populate clause references the Index                             | done (this commit)                                     |
+| 7   | No live Kaizen actions in this sprint's docs work                                                             | met                                                    |
+| 8   | No write codepath added in this sprint's docs work                                                            | met                                                    |
+
+### Proof gate
+
+- `git diff --check` clean.
+- `docs/roadmap/kaizen-mapping-sprint-2026-06.md` exists and is the single
+  restartable artefact for this sprint.
+- `TASK.md` (this file), `docs/plan.md`, and `docs/PORTFOLIO_HEALTH_SPEC.md`
+  all reference the sprint doc; existing history is preserved.
+- No edits in this sprint to: bot runtime, filer (`filer.py`,
+  `browser_filer.py`, `filer_router.py`, `kaizen_form_filer.py`),
+  credential storage, `assessor_writeback.py`, deployment, launchd, GitHub
+  Actions runner config, secrets, tests, or live Kaizen.
+- No push, PR, deploy, restart, or live Kaizen action from this sprint's docs
+  work. Orchestrator owns commit and closure.
+
+### Out of scope (carried forward)
+
+- All carried-forward guardrails in `## Guardrails (Carried Forward)` below
+  remain unchanged. Filing stays draft-only; assessor save-draft stays
+  CBD-only and confirm-gated.
+- No new Kaizen surfaces are written to as part of this sprint.
+
+---
 
 ## Objective
 

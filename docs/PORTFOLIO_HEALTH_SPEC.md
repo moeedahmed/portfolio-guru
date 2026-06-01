@@ -28,6 +28,7 @@ Portfolio Health and Pathway Readiness are two layers:
 **Portfolio Health** = the universal evidence tracker. It answers: "What evidence do I have? What's missing? What domains are thin?"
 
 **Pathway Guidance** = two RCEM views on the same Kaizen data:
+
 - **ARCP view** — training-stage-specific, SLO/KC-level mapping, annual counts, ARCP date countdown
 - **CESR view** — SLO/CiP-level mapping, 36-WPBA tracker, 5-year evidence window, equivalence signal
 
@@ -61,14 +62,14 @@ Same RCEM Kaizen evidence, two different readiness views. Switching between ARCP
 
 Six universal evidence domains (mapped from the pathway research — every UK doctor needs these regardless of stage):
 
-| Domain | What counts | Evidence types |
-|---|---|---|
-| **Clinical** | Direct patient care evidence | WPBAs (CBD, DOPS, Mini-CEX, etc.), procedure log, clinical cases, ESLEs, reflections on cases |
-| **CPD & Learning** | Continuing professional development | Courses, conferences, e-learning, journal club, formal study, exams (FRCEM, MRCP, etc.) |
-| **Quality Improvement** | Audit, QI projects, service improvement | Audit cycles, QIAT, QIP, guideline development, pathway redesign |
-| **Teaching** | Teaching and training others | Formal teaching sessions, course delivery, bedside teaching, feedback received, course organisation |
+| Domain                      | What counts                                   | Evidence types                                                                                       |
+| --------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| **Clinical**                | Direct patient care evidence                  | WPBAs (CBD, DOPS, Mini-CEX, etc.), procedure log, clinical cases, ESLEs, reflections on cases        |
+| **CPD & Learning**          | Continuing professional development           | Courses, conferences, e-learning, journal club, formal study, exams (FRCEM, MRCP, etc.)              |
+| **Quality Improvement**     | Audit, QI projects, service improvement       | Audit cycles, QIAT, QIP, guideline development, pathway redesign                                     |
+| **Teaching**                | Teaching and training others                  | Formal teaching sessions, course delivery, bedside teaching, feedback received, course organisation  |
 | **Leadership & Management** | Leadership, governance, management activities | Rota management, committee membership, complaint handling, risk/governance work, management projects |
-| **Reflection** | Reflective practice | Reflective logs, case reflections, incident reflections, feedback reflections, career reflections |
+| **Reflection**              | Reflective practice                           | Reflective logs, case reflections, incident reflections, feedback reflections, career reflections    |
 
 ### What it shows
 
@@ -127,6 +128,7 @@ Switching pathways re-interprets the same evidence. No data loss.
 **Framework:** RCEM 2025 curriculum — 12 SLOs with KCs, plus ARCP minimum-count rules
 
 **Overlay shows:**
+
 - SLO coverage map (which KCs have evidence)
 - ARCP minimums tracker (ESLEs: 3/yr, MSF: 1/yr, CSR: 1/placement, QIAT: 1/yr, etc.)
 - Stage-specific requirements (intermediate vs higher)
@@ -145,6 +147,7 @@ Switching pathways re-interprets the same evidence. No data loss.
 **Framework:** GMC Specialty Specific Guidance (SSG) for Emergency Medicine, mapped to RCEM curriculum high-level outcomes (CiPs/SLOs), plus RCEM's specific evidence requirements.
 
 **Specific requirements (RCEM, from research):**
+
 - Minimum 36 WPBAs: 12 DOPS + 12 Mini-CEX + 12 CBDs
 - ESLEs across core specialties
 - CPD + reflections
@@ -155,6 +158,7 @@ Switching pathways re-interprets the same evidence. No data loss.
 - 24-month window once GMC application opened
 
 **Overlay shows:**
+
 - Evidence coverage against RCEM SLOs/CiPs (not individual KCs — CESR is assessed at higher level)
 - WPBA count tracker (toward 36 minimum)
 - Domain balance (are they heavy on CBDs but light on DOPS?)
@@ -321,8 +325,15 @@ next_actions              3–5 concrete suggested actions
 - [ ] Add pathway selector: Training (ARCP) / CESR / Portfolio Pathway
 - [ ] ARCP view: existing KC radar + minimum-count trackers
 - [ ] CESR view: SLO/CiP-level coverage (not KC-level), 36-WPBA tracker, 5-year evidence age warnings
-- [ ] Auto-populate from existing PG filing activity
-- [ ] No Kaizen scrape, no new data sources
+- [ ] Auto-populate from the Kaizen Portfolio Index (read-only sync) as the
+      primary source; fall back to existing PG filing activity
+      (`usage` / `case_archive`) when no index run is present yet, and to
+      manual entry as today. Index contract and schema live in
+      `docs/roadmap/kaizen-mapping-sprint-2026-06.md` → "First build slice —
+      Kaizen Portfolio Index v1".
+- [ ] No write to Kaizen. The Index is read-only; ingestion stays consent-
+      and session-scoped per `docs/roadmap/kaizen-mapping-sprint-2026-06.md`
+      → "Safety boundaries (slice)".
 
 ### Phase 3 — Manual evidence entry
 
