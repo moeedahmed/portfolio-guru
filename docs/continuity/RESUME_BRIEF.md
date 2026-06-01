@@ -1,12 +1,12 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-06-01T14:03:26+00:00
+Generated: 2026-06-01T15:50:00+00:00
 Status: stale_or_needs_review
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
 - Branch: fix/mlx-whisper-transcription
-- Last commit: ffc2e23 2026-06-01 docs: record Kaizen live smoke auth boundary
+- Last commit: 3dd87c0 2026-06-01 chore: add .codegraph/ to gitignore
 - Uncommitted changes: no
 
 ## Immediate read before restarting
@@ -23,14 +23,14 @@ Status: stale_or_needs_review
 - Missing: dev/test commands
 
 ## Recent commits
+- 3dd87c0 2026-06-01 chore: add .codegraph/ to gitignore
+- cd17c50 2026-06-01 feat: reuse Kaizen login for portfolio sync
 - ffc2e23 2026-06-01 docs: record Kaizen live smoke auth boundary
 - 95accf5 2026-06-01 feat: add read-only Kaizen sync driver
 - d855af8 2026-06-01 feat: add Kaizen portfolio index substrate
 - 7dee776 2026-06-01 docs: add Kaizen mapping sprint plan
 - 6d21f06 2026-06-01 fix: title-case portfolio profile labels
 - bed11ac 2026-06-01 fix: simplify portfolio setting label
-- 99eab4c 2026-06-01 fix: simplify welcome prompt
-- 8d4358d 2026-06-01 fix: relabel Kaizen profile setting
 
 ## Repo context snapshot
 ### AGENTS.md — present, 2 days old

@@ -195,9 +195,10 @@ The point of this sprint is a working substrate, not a documentation exercise. T
 > pathway-agnostic `health_models.EvidenceItem`; `/health` now resolves
 > evidence through `_resolve_health_evidence` in `bot.py`, preferring
 > indexed rows when present and falling back to `get_case_history`
-> otherwise; `/settings` shows a read-only `🔄 Kaizen sync: …` status row
-> driven by `latest_index_run` + `count_evidence_items`, with no refresh
-> button or live action. `backend/kaizen_sync.py` is now the read-only
+> otherwise; `/settings` shows a `🔄 Kaizen sync: …` status row driven by
+> `latest_index_run` + `count_evidence_items`, plus a guarded
+> `🔄 Refresh portfolio` button for connected users. `backend/kaizen_sync.py`
+> is now the read-only
 > CDP/page-backed sync driver: it accepts an already-authenticated page,
 > walks timeline categories plus `/activities`, opens event/detail views
 > read-only, normalises rows to `EvidenceItemRow`, de-duplicates by event
@@ -219,8 +220,10 @@ The point of this sprint is a working substrate, not a documentation exercise. T
 > (`DOPS - (ST3-ST6 - 2025 update)`), wrote one temporary `evidence_items`
 > row, and recorded the run as `ok`. Production `usage.db` stayed untouched;
 > no Kaizen save/submit/sign/delete/draft action, Telegram traffic, restart,
-> deploy, or push. Next step: expose this behind a guarded user-facing
-> "Refresh portfolio" workflow for Moeed to manually test.
+> deploy, or push. The guarded user-facing workflow is now exposed behind
+> `/settings -> Refresh portfolio -> Refresh now`, with an explicit read-only
+> confirmation screen and plain-English result states. Next step: Moeed's
+> manual Telegram test of wording, button path, and result screen.
 
 ### Scope
 

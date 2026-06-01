@@ -213,7 +213,8 @@ Status:
   writes a normalised `evidence_items` + `index_runs` schema (local SQLite
   first; Supabase mirror is a follow-up).
 - Current implementation status: the storage substrate, offline sync driver,
-  and the trusted login/session bootstrap wrapper have landed.
+  trusted login/session bootstrap wrapper, and guarded user-facing refresh
+  workflow have landed.
   `backend/kaizen_sync.py` consumes an already-authenticated page/session,
   walks timeline categories plus `/activities`, opens detail views read-only,
   writes through `kaizen_index`, and records `index_runs` drift/auth/failure
@@ -224,7 +225,10 @@ Status:
   stale; it persists the fresh session via `save_session_state` and then
   hands the page to the read-only sync. Bootstrap-stage failures still write
   an `index_runs` row so `/settings` can surface the outcome. None of this
-  is exposed to users yet (no refresh button).
+  is exposed to users through `/settings -> Refresh portfolio -> Refresh now`.
+  The confirmation screen states that this is read-only and does not save,
+  submit, sign, delete, edit Kaizen, create drafts, or send supervisor
+  requests.
 - First live read-only smoke status: the initial 2026-06-01 attempt against
   the managed CDP browser stopped at Kaizen auth and read no rows. The follow-
   up smoke used `sync_kaizen_portfolio_index_for_user` with the same trusted
@@ -243,9 +247,11 @@ Status:
 - The conversational engine (Phases 2.x) and filing routes (Phase 5) are
   unaffected by this sprint — the adapter is a read-only foundation under
   them, not a replacement.
-- Next step: wire a guarded user-facing "Refresh portfolio" workflow/button.
-  That is the first slice Moeed should manually test for wording, button path,
-  result screen, and whether the flow matches the product vision.
+- Next step: manually test the visible Telegram workflow in Portfolio Guru:
+  `/settings -> Refresh portfolio -> Refresh now`. Moeed should check the
+  wording, button path, progress/result screen, and whether the refreshed
+  Portfolio Health entry point feels like the right product flow before more
+  Portfolio Health behaviour builds on top.
 
 ### Phase 3 - Safe activation for low-risk intents
 

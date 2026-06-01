@@ -6,8 +6,8 @@ These tests pin two contracts:
    when the index has rows for the user, and falls back to the existing
    case-history path when it does not (the priority spelled out in
    ``docs/PORTFOLIO_HEALTH_SPEC.md`` Phase 2).
-2. ``/settings`` surfaces a read-only Kaizen sync status row when the
-   caller supplies a status, with no refresh button or live action.
+2. ``/settings`` surfaces a Kaizen sync status row and a guarded refresh
+   workflow when the user is connected.
 
 Offline only: no Kaizen, Playwright, CDP, credentials, or network.
 """
@@ -22,6 +22,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from health_models import HealthProfile, Pathway
+from tests.bot_simulator import BotSimulator
 
 
 @pytest.fixture
@@ -218,10 +219,31 @@ def test_settings_includes_kaizen_sync_row_when_status_provided(
     assert "Items indexed: 412" in text
     assert "(ok)" in text
 
-    # Read-only: no refresh button anywhere in the keyboard.
     buttons = [button.callback_data for row in keyboard.inline_keyboard for button in row]
-    assert all("kaizen_sync" not in (cb or "") for cb in buttons)
-    assert all("refresh" not in (cb or "").lower() for cb in buttons)
+    assert "ACTION|refresh_portfolio" in buttons
+
+
+def test_settings_hides_refresh_button_when_kaizen_not_connected(
+    isolated_health_store, monkeypatch
+):
+    import bot
+    from kaizen_index import KaizenSyncStatus
+
+    monkeypatch.setattr(bot, "get_curriculum", lambda _uid: "2025")
+    monkeypatch.setattr(bot, "get_training_level", lambda _uid: "ST5")
+    monkeypatch.setattr(bot, "get_voice_profile", lambda _uid: None)
+
+    text, keyboard = bot._settings_view_components(
+        4242,
+        tier="pro_plus",
+        used=0,
+        connected=False,
+        kaizen_sync=KaizenSyncStatus(last_run=None, items_indexed=0),
+    )
+
+    buttons = [button.callback_data for row in keyboard.inline_keyboard for button in row]
+    assert "Kaizen: not connected" in text
+    assert "ACTION|refresh_portfolio" not in buttons
 
 
 def test_settings_shows_not_synced_yet_when_no_run_exists(
@@ -265,3 +287,143 @@ def test_settings_omits_kaizen_sync_row_when_unavailable(
     )
 
     assert "Kaizen sync" not in text
+
+
+@pytest.mark.asyncio
+async def test_refresh_portfolio_shows_read_only_confirmation(monkeypatch):
+    import bot
+
+    monkeypatch.setattr(bot, "has_credentials", lambda _uid: True)
+    sync = AsyncMock()
+    monkeypatch.setattr(bot, "sync_kaizen_portfolio_index_for_user", sync)
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|refresh_portfolio"),
+        context,
+    )
+
+    text = sim.get_last_text()
+    assert "Refresh portfolio from Kaizen" in text
+    assert "no saving or submitting" in text
+    assert ("✅ Refresh now", "ACTION|confirm_refresh_portfolio") in sim.get_last_buttons()
+    assert ("🔙 Back to settings", "ACTION|settings") in sim.get_last_buttons()
+    sync.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_confirm_refresh_portfolio_runs_sync_and_shows_success(monkeypatch):
+    import bot
+    from kaizen_index import IndexRunRow, KaizenSyncStatus
+
+    monkeypatch.setattr(bot, "has_credentials", lambda _uid: True)
+    monkeypatch.setattr(
+        bot,
+        "sync_kaizen_portfolio_index_for_user",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                status="ok",
+                rows_seen=12,
+                rows_written=10,
+                rows_drifted=0,
+                notes=[],
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        bot,
+        "_safe_kaizen_sync_status",
+        AsyncMock(
+            return_value=KaizenSyncStatus(
+                last_run=IndexRunRow(
+                    id=1,
+                    user_id="4242",
+                    started_at="2026-06-01T12:00:00",
+                    finished_at="2026-06-01T12:01:00",
+                    status="ok",
+                    rows_seen=12,
+                    rows_written=10,
+                    rows_drifted=0,
+                ),
+                items_indexed=99,
+            )
+        ),
+    )
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|confirm_refresh_portfolio"),
+        context,
+    )
+
+    bot.sync_kaizen_portfolio_index_for_user.assert_awaited_once_with(4242)
+    text = sim.get_last_text()
+    assert "Portfolio refreshed" in text
+    assert "Read from Kaizen: 12 items" in text
+    assert "Portfolio Guru now has: 99 indexed items" in text
+    assert ("📊 View portfolio health", "ACTION|health") in sim.get_last_buttons()
+    assert ("🔙 Back to settings", "ACTION|settings") in sim.get_last_buttons()
+
+
+@pytest.mark.asyncio
+async def test_confirm_refresh_portfolio_handles_auth_required(monkeypatch):
+    import bot
+
+    monkeypatch.setattr(bot, "has_credentials", lambda _uid: True)
+    monkeypatch.setattr(
+        bot,
+        "sync_kaizen_portfolio_index_for_user",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                status="auth_required",
+                rows_seen=0,
+                rows_written=0,
+                rows_drifted=0,
+                notes=["login needed"],
+            )
+        ),
+    )
+    monkeypatch.setattr(bot, "_safe_kaizen_sync_status", AsyncMock(return_value=None))
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|confirm_refresh_portfolio"),
+        context,
+    )
+
+    text = sim.get_last_text()
+    assert "Kaizen needs reconnecting" in text
+    assert ("🔗 Reconnect Kaizen", "ACTION|setup") in sim.get_last_buttons()
+    assert ("🔙 Back to settings", "ACTION|settings") in sim.get_last_buttons()
+
+
+@pytest.mark.asyncio
+async def test_confirm_refresh_portfolio_handles_failure_without_traceback(monkeypatch):
+    import bot
+
+    monkeypatch.setattr(bot, "has_credentials", lambda _uid: True)
+    monkeypatch.setattr(
+        bot,
+        "sync_kaizen_portfolio_index_for_user",
+        AsyncMock(side_effect=RuntimeError("secret low-level failure")),
+    )
+    monkeypatch.setattr(bot, "_safe_kaizen_sync_status", AsyncMock(return_value=None))
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|confirm_refresh_portfolio"),
+        context,
+    )
+
+    text = sim.get_last_text()
+    assert "Refresh did not complete" in text
+    assert "secret low-level failure" not in text
+    assert ("🔄 Try again", "ACTION|refresh_portfolio") in sim.get_last_buttons()

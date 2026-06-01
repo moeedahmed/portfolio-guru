@@ -1,5 +1,21 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-01 addendum — guarded Refresh portfolio workflow built.**
+> `/settings` now exposes a user-facing `🔄 Refresh portfolio` button for
+> connected Kaizen users. Tapping it shows a confirmation screen that explains
+> the safety boundary in plain language: the refresh reads Kaizen timeline and
+> saved-draft activity, but does not save, submit, sign, delete, edit Kaizen,
+> create drafts, or send supervisor requests. Only the explicit `✅ Refresh now`
+> confirmation runs `sync_kaizen_portfolio_index_for_user`; the result screen
+> reports success, partial refresh, reconnect-needed, screen-drift, or generic
+> failure without exposing traceback detail. Successful or partial refreshes
+> offer `📊 View portfolio health`; auth failures offer `🔗 Reconnect Kaizen`;
+> all outcomes offer a return to settings. Tests mock the sync call and prove
+> the refresh does not run before confirmation. Next step: run a controlled
+> manual Telegram test of `/settings → Refresh portfolio → Refresh now` so
+> Moeed can judge the wording, button path, and result screen before we build
+> more Portfolio Health behaviour on top.
+
 > **2026-06-01 addendum — live read-only login smoke passed.**
 > The new portfolio-index login wrapper has now been exercised against the
 > live managed Kaizen browser using Moeed's saved Portfolio Guru credentials,
