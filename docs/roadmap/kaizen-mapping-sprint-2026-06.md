@@ -185,6 +185,26 @@ A surface that does not meet all seven gates ships as `unsupported` in the adapt
 
 The point of this sprint is a working substrate, not a documentation exercise. The first build slice (after this doc lands) is a thin, read-only sync that proves the adapter end-to-end.
 
+> **Status (2026-06-01):** the storage substrate has landed offline.
+> `backend/kaizen_index.py` owns the `evidence_items` + `index_runs` tables
+> (PRIMARY KEY `(user_id, id)`, append-on-miss `last_seen_at`) in the
+> existing `USAGE_DB_PATH` (`usage.db`); typed dataclasses
+> (`EvidenceItemRow`, `IndexRunRow`, `KaizenSyncStatus`) gate every read /
+> write; pure `evidence_row_to_health_item` converts stored rows to the
+> pathway-agnostic `health_models.EvidenceItem`; `/health` now resolves
+> evidence through `_resolve_health_evidence` in `bot.py`, preferring
+> indexed rows when present and falling back to `get_case_history`
+> otherwise; `/settings` shows a read-only `🔄 Kaizen sync: …` status row
+> driven by `latest_index_run` + `count_evidence_items`, with no refresh
+> button or live action. The CDP-driven read-only sync (the writer that
+> populates these tables in production) is the next slice and remains
+> foreground-owned; this slice intentionally adds no Playwright / CDP /
+> credential / filer / launchd / deploy path. Verification: focused
+> `tests/test_kaizen_index.py`, `tests/test_health_index_integration.py`,
+> `tests/test_health_engine.py`, and `tests/test_health_bot.py` green at
+> 62 passed; full offline backend gate green at 843 passed, 13 deselected,
+> 3 snapshots passed.
+
 ### Scope
 
 A `kaizen_index` module that, given an authenticated Chrome session for the current user:

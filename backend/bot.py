@@ -29,6 +29,12 @@ from profile_store import init_profile_db, store_training_level, get_training_le
 from health_models import HealthProfile, HealthDomain, Pathway
 from health_engine import case_history_to_evidence_items, compute_snapshot
 from health_profile_store import get_health_profile, save_health_profile
+from kaizen_index import (
+    KaizenSyncStatus,
+    evidence_rows_to_health_items,
+    get_kaizen_sync_status,
+    list_evidence_items,
+)
 from bulk_filer import bulk_file
 from kaizen_unsigned_scraper import scrape_unsigned_tickets
 from conversational_case_engine import CaseFact, CaseState, CaseWorkspace, SourceType
@@ -1534,6 +1540,40 @@ def _format_failed_filing_summary(
 
 
 
+async def _safe_kaizen_sync_status(user_id: int) -> KaizenSyncStatus | None:
+    """Fetch the Kaizen sync snapshot, swallowing any storage error.
+
+    /settings must keep rendering even if the index DB is unreachable. The
+    row is omitted in that case rather than failing the whole dashboard.
+    """
+    try:
+        return await get_kaizen_sync_status(user_id)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning(f"Kaizen sync status unavailable: {exc}")
+        return None
+
+
+def _format_kaizen_sync_row(status: KaizenSyncStatus | None) -> str | None:
+    """Read-only one-liner describing Kaizen sync state.
+
+    No refresh button, no live action — purely a status surface. The
+    implementing sync slice will populate ``index_runs``; until a first run
+    lands we surface "not synced yet" so the row is honest about what we
+    know.
+    """
+    if status is None:
+        return None
+    if status.last_run is None:
+        return "🔄 Kaizen sync: not synced yet"
+    last_run = status.last_run
+    when = (last_run.finished_at or last_run.started_at or "").strip()
+    pretty_when = when.replace("T", " ").split(".")[0] if when else "unknown"
+    return (
+        f"🔄 Kaizen sync: last refresh {pretty_when} ({last_run.status}). "
+        f"Items indexed: {status.items_indexed}"
+    )
+
+
 def _settings_view_components(
     user_id: int,
     *,
@@ -1541,11 +1581,14 @@ def _settings_view_components(
     used: int | None = None,
     connected: bool | None = None,
     is_beta: bool = False,
+    kaizen_sync: KaizenSyncStatus | None = None,
 ) -> tuple[str, InlineKeyboardMarkup]:
     """Render the settings page text + keyboard.
 
     This is also the merged "status" view. When tier/used/connected are
     supplied, a plan + usage + connection block is rendered at the top.
+    When ``kaizen_sync`` is supplied, a read-only Kaizen sync status row is
+    appended to that block (no refresh button, no live action).
     """
     curriculum = get_curriculum(user_id) or "2025"
     curriculum_label = "2021 Curriculum" if curriculum == "2021" else "2025 Update"
@@ -1572,6 +1615,9 @@ def _settings_view_components(
                 plan_lines.append(f"📋 Cases filed: {used} this month")
             else:
                 plan_lines.append(f"📋 Usage: {used}/{limit} cases this month")
+    kaizen_row = _format_kaizen_sync_row(kaizen_sync)
+    if kaizen_row:
+        plan_lines.append(kaizen_row)
     plan_block = ("\n".join(plan_lines) + "\n\n") if plan_lines else ""
 
     setup_button_label = "🔗 Connect Kaizen" if connected is False else "🔗 Update Kaizen login"
@@ -3222,6 +3268,7 @@ async def _voice_show_settings_screen(update: Update, context: ContextTypes.DEFA
         used=used,
         connected=has_credentials(user_id),
         is_beta=await is_beta_tester(user_id),
+        kaizen_sync=await _safe_kaizen_sync_status(user_id),
     )
     await _flow_edit(update, context, text, reply_markup=keyboard, flow_key="voice")
     _flow_done(context, "voice")
@@ -3909,7 +3956,11 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         except Exception:
             used = 0
         text, keyboard = _settings_view_components(
-            user_id, tier=tier, used=used, connected=has_credentials(user_id)
+            user_id,
+            tier=tier,
+            used=used,
+            connected=has_credentials(user_id),
+            kaizen_sync=await _safe_kaizen_sync_status(user_id),
         )
         await query.message.edit_text(text, reply_markup=keyboard)
 
@@ -4197,6 +4248,7 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         used=used,
         connected=has_credentials(user_id),
         is_beta=await is_beta_tester(user_id),
+        kaizen_sync=await _safe_kaizen_sync_status(user_id),
     )
     await update.message.reply_text(text, reply_markup=keyboard)
     return ConversationHandler.END
@@ -4489,6 +4541,26 @@ async def assignbeta_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ConversationHandler.END
 
 
+async def _resolve_health_evidence(user_id: int):
+    """Return (evidence_items, history_records, source) for /health.
+
+    Source priority follows ``docs/PORTFOLIO_HEALTH_SPEC.md`` Phase 2: indexed
+    Kaizen evidence wins when present, otherwise we fall back to the existing
+    PG case history. ``history_records`` is the raw ``get_case_history``
+    output, still required by the LLM ARCP narrative path.
+    """
+    try:
+        indexed_rows = await list_evidence_items(user_id)
+    except Exception as exc:  # pragma: no cover - defensive: never break /health
+        logger.warning(f"Kaizen index unavailable, falling back to case history: {exc}")
+        indexed_rows = []
+
+    history = await get_case_history(user_id, months=6)
+    if indexed_rows:
+        return evidence_rows_to_health_items(indexed_rows), history, "kaizen_index"
+    return case_history_to_evidence_items(history), history, "case_history"
+
+
 async def _run_health_analysis(
     user_id: int,
     chat,
@@ -4519,8 +4591,8 @@ async def _run_health_analysis(
     else:
         level_note = ""
 
-    history = await get_case_history(user_id, months=6)
-    if not history:
+    evidence_items, history, _ = await _resolve_health_evidence(user_id)
+    if not evidence_items:
         await send_result(
             f"📊 *Portfolio Health — {pathway_label}*\n\n"
             f"No cases filed yet. Start filing cases and come back to check your {pathway_label} readiness.\n\n"
@@ -4529,7 +4601,6 @@ async def _run_health_analysis(
         )
         return
 
-    evidence_items = case_history_to_evidence_items(history)
     snapshot = compute_snapshot(profile, evidence_items)
 
     await send_progress()
@@ -4751,6 +4822,7 @@ async def handle_pathway_choice(update: Update, context: ContextTypes.DEFAULT_TY
             used=used,
             connected=has_credentials(update.effective_user.id),
             is_beta=await is_beta_tester(update.effective_user.id),
+            kaizen_sync=await _safe_kaizen_sync_status(update.effective_user.id),
         )
         await query.edit_message_text(text, reply_markup=keyboard)
         return ConversationHandler.END
@@ -6081,6 +6153,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     used=used,
                     connected=has_credentials(user_id),
                     is_beta=await is_beta_tester(user_id),
+                    kaizen_sync=await _safe_kaizen_sync_status(user_id),
                 )
                 await update.message.reply_text(stats_text, reply_markup=stats_kb)
                 return ConversationHandler.END
@@ -6100,6 +6173,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     used=used,
                     connected=has_credentials(user_id),
                     is_beta=await is_beta_tester(user_id),
+                    kaizen_sync=await _safe_kaizen_sync_status(user_id),
                 )
                 await update.message.reply_text(settings_text, reply_markup=settings_kb)
                 return ConversationHandler.END

@@ -1,12 +1,12 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-06-01T11:39:07+00:00
+Generated: 2026-06-01T12:08:17+00:00
 Status: stale_or_needs_review
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
 - Branch: fix/mlx-whisper-transcription
-- Last commit: 6d21f06 2026-06-01 fix: title-case portfolio profile labels
+- Last commit: 7dee776 2026-06-01 docs: add Kaizen mapping sprint plan
 - Uncommitted changes: no
 
 ## Immediate read before restarting
@@ -23,6 +23,7 @@ Status: stale_or_needs_review
 - Missing: dev/test commands
 
 ## Recent commits
+- 7dee776 2026-06-01 docs: add Kaizen mapping sprint plan
 - 6d21f06 2026-06-01 fix: title-case portfolio profile labels
 - bed11ac 2026-06-01 fix: simplify portfolio setting label
 - 99eab4c 2026-06-01 fix: simplify welcome prompt
@@ -30,7 +31,6 @@ Status: stale_or_needs_review
 - 984904d 2026-06-01 fix: rename CESR pathway label
 - 71cf42f 2026-06-01 fix: move pathway control into settings
 - 112a943 2026-06-01 fix: show pathway command in bot menu
-- 44b6264 2026-06-01 fix: keep health output from hanging on markdown errors
 
 ## Repo context snapshot
 ### AGENTS.md — present, 2 days old
@@ -55,7 +55,11 @@ Key headings:
 
 ### TASK.md — present, 0 days old
 Key headings:
-- # Active Task — Private Beta Launch Cut
+- # Active Task — Kaizen Mapping Sprint
+- ## Active Sprint — Kaizen Mapping (2026-06-01)
+- ### Scorecard (definition of done)
+- ### Proof gate
+- ### Out of scope (carried forward)
 - ## Objective
 - ## Current Slice
 - ## Done
@@ -63,7 +67,6 @@ Key headings:
 - ## Guardrails (Carried Forward)
 - ## UX Polish Slice — Post-Filed Buttons (2026-05-26)
 - # 539 passed, 22 skipped, 13 deselected, 3 snapshots passed
-- ## Orchestrator Hand-Off
 
 ### WORKFLOWS.md — present, 2 days old
 Key headings:

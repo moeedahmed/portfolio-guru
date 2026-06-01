@@ -1,5 +1,31 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-01 addendum — Kaizen Portfolio Index v1 storage substrate landed.**
+> The first build slice from `docs/roadmap/kaizen-mapping-sprint-2026-06.md`
+> is now wired offline-only. `backend/kaizen_index.py` owns the local SQLite
+> tables (`evidence_items`, `index_runs`) inside the existing
+> `USAGE_DB_PATH` / `usage.db`, with typed dataclasses
+> (`EvidenceItemRow`, `IndexRunRow`, `KaizenSyncStatus`), upsert / list /
+> count / start-run / finish-run / latest-run helpers, and a pure
+> `evidence_row_to_health_item` conversion onto `health_models.EvidenceItem`.
+> `backend/bot.py` `_run_health_analysis` now resolves evidence through
+> `_resolve_health_evidence`, which prefers indexed rows when they exist for
+> the user and falls back to the existing `get_case_history` path otherwise;
+> `case_history_to_evidence_items` is still the fallback path so the AI
+> ARCP narrative keeps the same case-history input. `/settings` gains a
+> read-only `🔄 Kaizen sync: ...` status row (no refresh button, no live
+> action) populated by `_safe_kaizen_sync_status` from the latest
+> `index_runs` row plus `evidence_items` count. The actual read-only sync
+> driver (CDP adapter that writes rows via these helpers) is still the next
+> slice and remains owned by the foreground; nothing in this commit
+> navigates Kaizen, touches Playwright/CDP, reads credentials, or changes
+> the filer / deploy / launchd path. Verification: focused
+> `tests/test_kaizen_index.py`, `tests/test_health_index_integration.py`,
+> `tests/test_health_engine.py`, and `tests/test_health_bot.py` green at
+> 62 passed; full offline backend gate green at 843 passed, 13 deselected,
+> 3 snapshots passed, 49 warnings (pre-existing deprecation warnings).
+> No live Kaizen, no Telegram traffic, no restart, no deploy, no push.
+
 > **2026-06-01 addendum — Kaizen Mapping Sprint as public-product foundation.**
 > The next sprint is read-only Kaizen mapping, scoped as a reusable platform
 > adapter rather than another per-form per-user scrape. Plan and scorecard live
