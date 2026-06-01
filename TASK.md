@@ -761,3 +761,35 @@ The orchestrator owns:
 
 Until the orchestrator pushes and deploys, nothing this branch added is
 live on the Mac Mini bot.
+
+## 2026-06-01 — Portfolio Health as Action Plan
+
+Product decision: Portfolio Health should not lead with an audit-style dump
+of counts, grids, and form types. It should tell the doctor the ARCP risk,
+why, and the next three highest-value filing actions.
+
+Implemented:
+
+- ARCP health output now starts with `ARCP risk`, a plain-English `Why`, and
+  `Next 3 actions`.
+- The old leading `Deterministic health score`, `Domain coverage`, and
+  `Form types` dump is removed from the ARCP result surface.
+- The result still shows useful context: strong domains, missing domains, and
+  total Portfolio Guru filings in the last 6 months.
+- Health result buttons now offer `File missing evidence` and `Back to
+  settings`.
+- Health refresh and inline health Back buttons now return to settings, not
+  the generic filing welcome/menu.
+
+Verification:
+
+- Focused health tests: `backend/venv/bin/python -m pytest
+  backend/tests/test_health_bot.py backend/tests/test_health_index_integration.py
+  -q` → 59 passed.
+- Health + callback flow shard: `backend/venv/bin/python -m pytest
+  backend/tests/test_health_bot.py backend/tests/test_health_index_integration.py
+  backend/tests/test_flow_walker.py -q` → 201 passed.
+
+Runtime state:
+
+- Code is not live until the Mac Mini bot is restarted/deployed.

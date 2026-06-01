@@ -281,11 +281,66 @@ async def test_arcp_health_falls_back_to_deterministic_output_when_llm_fails(mon
     text = sent["text"]
     assert "*Portfolio Health — ARCP*" in text
     assert "AI ARCP narrative is temporarily unavailable" in text
-    assert "Health score:" in text
-    assert "Domain coverage:" in text
-    assert "Gap summary:" in text
-    assert "Next actions:" in text
+    assert "ARCP risk:" in text
+    assert "Why:" in text
+    assert "Next 3 actions" in text
+    assert "Already strong" in text
+    assert "Missing domains" in text
+    assert "Domain coverage:" not in text
     fail_fn.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_arcp_health_output_prioritises_action_plan_when_llm_succeeds(monkeypatch):
+    import sys
+    import bot
+
+    user_id = 5253
+    history = [
+        {"form_type": "CBD", "filed_at": "2026-05-01 09:00:00", "status": "filed", "telegram_user_id": user_id},
+        {"form_type": "DOPS", "filed_at": "2026-05-02 09:00:00", "status": "filed", "telegram_user_id": user_id},
+        {"form_type": "REFLECT_LOG", "filed_at": "2026-05-03 09:00:00", "status": "filed", "telegram_user_id": user_id},
+    ]
+
+    async def generate_health_chart_async(_user_id):
+        return None
+
+    monkeypatch.setitem(
+        sys.modules,
+        "portfolio_chart",
+        SimpleNamespace(generate_health_chart_async=generate_health_chart_async),
+    )
+    monkeypatch.setattr(bot, "get_health_profile", lambda _user_id: _profile(user_id, Pathway.training_arcp))
+    monkeypatch.setattr(bot, "get_training_level", lambda _user_id: "ST6")
+    monkeypatch.setattr(bot, "get_case_history", AsyncMock(return_value=history))
+    monkeypatch.setattr(
+        bot,
+        "analyse_portfolio_health",
+        AsyncMock(return_value={"suggestions": ["Book a supervisor review"]}),
+    )
+
+    sent: dict[str, str] = {}
+
+    await bot._run_health_analysis(
+        user_id=user_id,
+        chat=SimpleNamespace(send_action=AsyncMock()),
+        send_progress=AsyncMock(),
+        send_result=AsyncMock(side_effect=lambda text, reply_markup: sent.setdefault("text", text)),
+        send_photo_fn=AsyncMock(),
+        fail_fn=AsyncMock(),
+    )
+
+    text = sent["text"]
+    assert "*Portfolio Health — ARCP*" in text
+    assert "ARCP risk:" in text
+    assert "Why:" in text
+    assert "Next 3 actions" in text
+    assert "Already strong" in text
+    assert "Missing domains" in text
+    assert "CPD" in text
+    assert "QI" in text
+    assert "Form types:" not in text
+    assert "Domain coverage:" not in text
 
 
 # ── _pathway_for_detected_role / _autoset_health_pathway_from_role ───────────

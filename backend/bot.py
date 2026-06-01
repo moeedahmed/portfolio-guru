@@ -1663,7 +1663,14 @@ def _health_refresh_confirm_text() -> str:
 def _health_refresh_confirm_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Refresh and show health", callback_data="ACTION|confirm_refresh_for_health")],
-        [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu")],
+        [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
+    ])
+
+
+def _health_result_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✍️ File missing evidence", callback_data="ACTION|file")],
+        [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
     ])
 
 
@@ -4058,9 +4065,9 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         await _show_unsigned_range_picker(query.message, context)
 
     elif action == "health":
-        # Inline ARCP health check — morphs the menu in place rather than
-        # popping a new message, with a Back button to return to the welcome.
-        back_btn = InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu")
+        # Inline ARCP health check — morphs the settings screen in place and
+        # returns there, not to the generic filing menu.
+        back_btn = InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")
         back_markup = InlineKeyboardMarkup([[back_btn]])
 
         if not has_credentials(user_id):
@@ -4182,7 +4189,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
 
     elif action == "confirm_refresh_for_health":
-        back_btn = InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu")
+        back_btn = InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")
         back_markup = InlineKeyboardMarkup([[back_btn]])
 
         if not has_credentials(user_id):
@@ -4963,7 +4970,7 @@ async def _run_health_analysis(
 
     if profile.pathway == Pathway.cesr_portfolio:
         msg = _format_cesr_health_message(snapshot, history, month_label)
-        await send_result(msg, None)
+        await send_result(msg, _health_result_keyboard())
         await _send_health_chart(user_id, send_photo_fn)
         return
 
@@ -4981,7 +4988,7 @@ async def _run_health_analysis(
                 level_note,
                 "AI ARCP narrative timed out; deterministic health is shown below.",
             ),
-            None,
+            _health_result_keyboard(),
         )
         await _send_health_chart(user_id, send_photo_fn)
         return
@@ -4995,47 +5002,19 @@ async def _run_health_analysis(
                 level_note,
                 "AI ARCP narrative is temporarily unavailable; deterministic health is shown below.",
             ),
-            None,
+            _health_result_keyboard(),
         )
         await _send_health_chart(user_id, send_photo_fn)
         return
 
-    deterministic_str = _format_deterministic_health_section(snapshot)
-    form_dist = analysis.get("form_distribution", {})
-    dist_parts = []
-    for ft, count in form_dist.items():
-        name = FORM_SCHEMAS.get(ft, {}).get("name", ft)
-        dist_parts.append(f"{name} ({count})")
-    dist_str = " · ".join(dist_parts) if dist_parts else "None"
-
-    strengths = analysis.get("strengths", [])
-    strengths_str = "\n".join(f"• {s}" for s in strengths) if strengths else "• None identified yet"
-    gaps = analysis.get("gaps", [])
-    gaps_str = "\n".join(f"• {g}" for g in gaps) if gaps else "• No major gaps"
-    suggestions = analysis.get("suggestions", [])
-    suggestions_str = "\n".join(f"• {s}" for s in suggestions) if suggestions else "• Keep filing cases"
-
-    readiness = analysis.get("arcp_readiness", "needs_attention")
-    readiness_str = {
-        "on_track": "🟢 On track",
-        "needs_attention": "🟡 Needs attention",
-        "at_risk": "🔴 At risk",
-    }.get(readiness, readiness)
-    total = analysis.get("total_cases", len(history))
-
-    msg = (
-        f"📊 *Portfolio Health — ARCP*\n"
-        f"{month_label}\n\n"
-        f"{deterministic_str}\n\n"
-        f"Cases filed (last 6 months): {total}\n"
-        f"Form types: {dist_str}\n\n"
-        f"✅ *Strengths:*\n{strengths_str}\n\n"
-        f"⚠️ *Gaps:*\n{gaps_str}\n\n"
-        f"💡 *Suggestions:*\n{suggestions_str}\n\n"
-        f"ARCP readiness: {readiness_str}"
-        f"{level_note}"
+    msg = _format_arcp_action_plan_message(
+        snapshot=snapshot,
+        history=history,
+        month_label=month_label,
+        level_note=level_note,
+        analysis=analysis,
     )
-    await send_result(msg, None)
+    await send_result(msg, _health_result_keyboard())
     await _send_health_chart(user_id, send_photo_fn)
 
 
@@ -5194,6 +5173,133 @@ def _format_deterministic_health_section(snapshot) -> str:
     )
 
 
+_HEALTH_DOMAIN_LABELS = {
+    HealthDomain.clinical: "clinical",
+    HealthDomain.cpd: "CPD",
+    HealthDomain.qi: "QI",
+    HealthDomain.teaching: "teaching",
+    HealthDomain.leadership: "leadership",
+    HealthDomain.reflection: "reflection",
+}
+
+
+def _format_arcp_action_plan_message(
+    *,
+    snapshot,
+    history: list[dict],
+    month_label: str,
+    level_note: str = "",
+    fallback_note: str = "",
+    analysis: dict | None = None,
+) -> str:
+    risk = _health_score_label(snapshot.health_score)
+    reason = _format_arcp_risk_reason(snapshot)
+    actions = _top_health_actions(snapshot, analysis)
+    strong = _strong_domain_lines(snapshot)
+    missing = _missing_domain_labels(snapshot)
+
+    lines = [
+        "📊 *Portfolio Health — ARCP*",
+        month_label,
+        "",
+    ]
+    if fallback_note:
+        lines.extend([f"_{fallback_note}_", ""])
+
+    lines.extend([
+        f"*ARCP risk:* {risk}",
+        f"*Why:* {reason}",
+        "",
+        "*Next 3 actions*",
+        _numbered_list(actions),
+        "",
+        "*Already strong*",
+        _bullet_list(strong) if strong else "• Not enough evidence yet",
+        "",
+        "*Missing domains*",
+        " · ".join(missing) if missing else "None obvious from current evidence",
+        "",
+        f"Cases filed in Portfolio Guru: {len(history)} in the last 6 months",
+    ])
+    if level_note:
+        lines.append(level_note)
+    return "\n".join(lines)
+
+
+def _format_arcp_risk_reason(snapshot) -> str:
+    risk = _health_score_label(snapshot.health_score).replace("🔴 ", "").replace("🟡 ", "").replace("🟢 ", "").replace("⚪ ", "")
+    missing = _missing_domain_labels(snapshot)
+    strong = _strong_domain_labels(snapshot)
+
+    if missing and strong:
+        return (
+            f"{risk} because {_plain_join(missing)} evidence is missing, "
+            f"despite evidence in {_plain_join(strong)}."
+        )
+    if missing:
+        return f"{risk} because {_plain_join(missing)} evidence is missing."
+    if strong:
+        return f"{risk} because the main evidence domains are covered; keep them recent before ARCP."
+    return "No portfolio evidence is visible yet, so ARCP readiness cannot be judged."
+
+
+def _top_health_actions(snapshot, analysis: dict | None = None) -> list[str]:
+    values: list[str] = []
+    values.extend(snapshot.next_actions or [])
+    if analysis:
+        values.extend(analysis.get("suggestions", []) or [])
+    if not values:
+        values.append("Add evidence before your next ARCP review")
+    return _dedupe_text(values)[:3]
+
+
+def _strong_domain_lines(snapshot) -> list[str]:
+    return [
+        f"{_HEALTH_DOMAIN_LABELS[domain]}: {count}"
+        for domain, count in snapshot.domain_counts.items()
+        if count > 0
+    ]
+
+
+def _strong_domain_labels(snapshot) -> list[str]:
+    return [
+        _HEALTH_DOMAIN_LABELS[domain]
+        for domain, count in snapshot.domain_counts.items()
+        if count > 0
+    ]
+
+
+def _missing_domain_labels(snapshot) -> list[str]:
+    return [
+        _HEALTH_DOMAIN_LABELS[domain]
+        for domain in HealthDomain
+        if snapshot.domain_counts.get(domain, 0) == 0
+    ]
+
+
+def _numbered_list(values: list[str]) -> str:
+    return "\n".join(f"{index}. {value}" for index, value in enumerate(values, start=1))
+
+
+def _plain_join(values: list[str]) -> str:
+    if len(values) <= 1:
+        return "".join(values)
+    if len(values) == 2:
+        return f"{values[0]} and {values[1]}"
+    return f"{', '.join(values[:-1])} and {values[-1]}"
+
+
+def _dedupe_text(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        text = str(value).strip()
+        if text and text not in seen:
+            deduped.append(text)
+            seen.add(text)
+    return deduped
+
+
 def _format_cesr_health_message(snapshot, history: list[dict], month_label: str) -> str:
     gaps = snapshot.gap_summary or ["No major gaps"]
     actions = snapshot.next_actions or ["Keep adding recent evidence"]
@@ -5218,18 +5324,12 @@ def _format_arcp_deterministic_health_message(
     level_note: str,
     fallback_note: str,
 ) -> str:
-    gaps = snapshot.gap_summary or ["No major gaps"]
-    actions = snapshot.next_actions or ["Keep filing recent portfolio evidence"]
-    return (
-        f"📊 *Portfolio Health — ARCP*\n"
-        f"{month_label}\n\n"
-        f"_{fallback_note}_\n\n"
-        f"Health score: {_health_score_label(snapshot.health_score)}\n"
-        f"Cases filed (last 6 months): {len(history)}\n"
-        f"Domain coverage: {_format_domain_counts(snapshot.domain_counts)}\n\n"
-        f"⚠️ *Gap summary:*\n{_bullet_list(gaps)}\n\n"
-        f"💡 *Next actions:*\n{_bullet_list(actions)}"
-        f"{level_note}"
+    return _format_arcp_action_plan_message(
+        snapshot=snapshot,
+        history=history,
+        month_label=month_label,
+        level_note=level_note,
+        fallback_note=fallback_note,
     )
 
 
@@ -5245,15 +5345,7 @@ def _health_score_label(score) -> str:
 
 
 def _format_domain_counts(domain_counts: dict) -> str:
-    labels = {
-        HealthDomain.clinical: "clinical",
-        HealthDomain.cpd: "CPD",
-        HealthDomain.qi: "QI",
-        HealthDomain.teaching: "teaching",
-        HealthDomain.leadership: "leadership",
-        HealthDomain.reflection: "reflection",
-    }
-    return " · ".join(f"{labels[domain]} {domain_counts.get(domain, 0)}" for domain in HealthDomain)
+    return " · ".join(f"{_HEALTH_DOMAIN_LABELS[domain]} {domain_counts.get(domain, 0)}" for domain in HealthDomain)
 
 
 def _bullet_list(values: list[str]) -> str:

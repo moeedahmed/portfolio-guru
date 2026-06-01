@@ -723,6 +723,23 @@ async def test_inline_health_button_runs_immediately_when_stale(monkeypatch):
 
     run_health.assert_awaited_once()
 
+    send_result = run_health.await_args.kwargs["send_result"]
+    await send_result("Health result", None)
+    assert ("🔙 Back to settings", "ACTION|settings") in sim.get_last_buttons()
+    assert ("🔙 Back", "ACTION|back_to_menu") not in sim.get_last_buttons()
+
+
+def test_health_refresh_confirm_back_returns_to_settings():
+    import bot
+
+    buttons = [
+        (button.text, button.callback_data)
+        for row in bot._health_refresh_confirm_keyboard().inline_keyboard
+        for button in row
+    ]
+    assert ("🔙 Back to settings", "ACTION|settings") in buttons
+    assert ("🔙 Back", "ACTION|back_to_menu") not in buttons
+
 
 @pytest.mark.asyncio
 async def test_confirm_refresh_for_health_handles_auth_required(monkeypatch):
