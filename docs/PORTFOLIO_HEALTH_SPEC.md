@@ -6,37 +6,52 @@
 
 ---
 
+## Scope (Corrected 2026-06-01)
+
+Portfolio Guru today serves **one platform (RCEM Kaizen) with two user groups**:
+
+1. **EM Trainees** — on a training programme, annual ARCP, SLO/KC curriculum, stage-specific minimum counts
+2. **CESR / Portfolio Pathway candidates** — non-training EM doctors using the same RCEM Kaizen platform to build evidence toward GMC specialist registration
+
+Both groups file WPBAs into the same Kaizen. Both use RCEM's SLO/curriculum framework. What differs is: review cadence, evidence standard (KCs vs CiPs), and minimum requirements (annual counts vs 36-WPBA total).
+
+Other pathways (GP, IMT, CST, SAS, foundation) are explicitly **out of scope for v1**. They will be added later when Portfolio Guru supports those platforms.
+
+Full pathway research (including out-of-scope pathways for reference): `docs/roadmap/portfolio-pathways-research-2026-06.md`.
+
+---
+
 ## Product Decision
 
-Portfolio Health and ARCP Readiness are two separate products that were conflated in the original spec. This spec separates them and adds a universal Pathway Guidance layer.
+Portfolio Health and Pathway Readiness are two layers:
 
 **Portfolio Health** = the universal evidence tracker. It answers: "What evidence do I have? What's missing? What domains are thin?"
 
-**Pathway Guidance** = the interpretation layer on top. Same evidence, different lens depending on what you're building toward: ARCP, CESR, SAS appraisal, or specialty training application.
+**Pathway Guidance** = two RCEM views on the same Kaizen data:
+- **ARCP view** — training-stage-specific, SLO/KC-level mapping, annual counts, ARCP date countdown
+- **CESR view** — SLO/CiP-level mapping, 36-WPBA tracker, 5-year evidence window, equivalence signal
 
-The original `/health` feature shipped a hardcoded RCEM SLO/KC radar chart. That was the wrong abstraction — it baked a single pathway into the base layer. This spec corrects that.
-
-Full pathway research backing this spec: `docs/roadmap/portfolio-pathways-research-2026-06.md`.
+The original `/health` feature shipped a hardcoded RCEM SLO/KC radar chart for trainees. This spec adds the CESR view and separates health tracking from pathway interpretation.
 
 ---
 
 ## Architecture
 
 ```
-                    ┌──────────────────────┐
-                    │   Pathway Guidance    │  ← selectable overlay
-                    │ ARCP │ CESR │ SAS │.. │
-                    └──────────┬───────────┘
+                    ┌──────────────────────────┐
+                    │    Pathway Guidance       │  ← RCEM-specific views
+                    │  ARCP (trainee) │ CESR    │
+                    └──────────┬───────────────┘
                                │ interprets same evidence
-                    ┌──────────▼───────────┐
-                    │   Portfolio Health    │  ← universal base
-                    │  evidence inventory,  │
-                    │  domain coverage,     │
-                    │  status tracking      │
-                    └──────────────────────┘
+                    ┌──────────▼───────────────┐
+                    │    Portfolio Health       │  ← universal base
+                    │  evidence inventory,      │
+                    │  domain coverage,         │
+                    │  status tracking          │
+                    └──────────────────────────┘
 ```
 
-One user, same evidence inventory, different readiness view depending on selected pathway. Switching pathways does not re-enter evidence — it re-interprets it.
+Same RCEM Kaizen evidence, two different readiness views. Switching between ARCP and CESR re-interprets the same inventory.
 
 ---
 
@@ -64,20 +79,9 @@ Six universal evidence domains (mapped from the pathway research — every UK do
 - **Age of evidence** — recent (<1 year), current (1–3 years), ageing (3–5 years), stale (>5 years)
 - **Source** — Kaizen-filed, Portfolio Guru-drafted (not filed), manually entered, uploaded
 
-### Kaizen Independence (Critical Design Constraint)
-
-Portfolio Health does not require Kaizen. Period.
-
-Many pathways don't use Kaizen at all — SAS doctors, trust grades, CESR candidates, GP trainees, and foundation doctors use different platforms (or no platform at all). The health layer must work standalone with manual evidence entry only.
-
-Kaizen is treated as one optional evidence source, not a prerequisite:
-- If the user has filed WPBA drafts through Portfolio Guru → Kaizen, those auto-populate (nice to have)
-- If the user has never touched Kaizen, they can still use Portfolio Health fully via manual entry
-- No pathway gate requires Kaizen credentials
-
 ### How evidence gets in
 
-Four paths. Only path 1 touches Kaizen — and it's optional:
+Both RCEM pathways use the same Kaizen platform. Evidence comes from:
 
 1. **Auto-discovered** — Portfolio Guru drafts that were filed to Kaizen are tracked automatically (existing `usage` / `case_archive` data)
 2. **Auto-discovered** — Portfolio Guru drafts that were previewed but not filed
@@ -163,41 +167,9 @@ Switching pathways re-interprets the same evidence. No data loss.
 
 **Non-goal:** No GMC application submission, no guarantee of CESR success, no claim that the evidence is complete without reviewer input.
 
-### Pathway 3 — SAS / Career Grade
+### Future Pathways (v2+)
 
-**Who:** SAS doctors (Specialty Doctor, Associate Specialist, Staff Grade) on NHS contracts. Annual appraisal + 5-year revalidation cycle.
-
-**Framework:** GMC 6-domain revalidation framework + NHS SAS development guidance
-
-**Overlay shows:**
-- GMC domain coverage (CPD, QI, significant events, patient feedback, colleague feedback, complaints/compliments)
-- Appraisal readiness — is the portfolio ready for annual appraisal?
-- Revalidation cycle tracking
-- SAS-specific: clinical leadership evidence, service development, management contributions
-- Specialist Doctor grade progression — additional evidence needed beyond revalidation
-
-**Non-goal:** No appraisal submission, no guarantee of revalidation.
-
-### Pathway 4 — Trust Grade / Application Prep
-
-**Who:** Clinical fellows, trust grades, FY3+, locum doctors building toward specialty training applications. No fixed curriculum.
-
-**Framework:** Person specification scoring domains for EM specialty training applications (publications, teaching, QI, additional degrees, commitment to specialty, etc.)
-
-**Overlay shows:**
-- Domain coverage against EM ST1/ST3 application scoring criteria
-- What's missing for maximum points
-- Evidence gaps that could be filled with current clinical work
-- Timeline: application windows, evidence deadlines
-- "Application competitiveness" signal (conservative, clearly caveated)
-
-**Non-goal:** No guarantee of shortlisting or interview, no claim to predict scoring.
-
-### Future Pathways (post-PMF)
-
-- **GP trainees** — RCGP curriculum + WPBA requirements. Lower priority — FourteenFish dominates GP.
-- **Foundation** — FPCs + Horus/Turas. Low priority — Foundation portfolio is simpler, existing tools adequate.
-- **IMT/CST/other specialties** — Extension beyond EM. Requires per-specialty curriculum mapping.
+Other pathways (GP, IMT, CST, SAS, foundation) will be added when Portfolio Guru supports those platforms. Currently out of scope.
 
 ---
 
@@ -206,10 +178,10 @@ Switching pathways re-interprets the same evidence. No data loss.
 ### First-time setup
 
 1. User opens Portfolio Health (`/health` or button)
-2. If no profile exists: "Welcome to Portfolio Health. I'll help you track your evidence and understand what's missing. First — what are you working towards?"
-3. Pathway selector appears: Training (ARCP) / CESR / Portfolio Pathway / SAS / Career grade / Trust grade / Application prep / Just track my evidence (no pathway)
-4. User selects pathway → optional details appear (training stage, ARCP date, etc.)
-5. Initial scan of existing Portfolio Guru activity populates evidence inventory
+2. If no profile exists: "Welcome to Portfolio Health. I'll help you track your evidence and understand what's missing. Are you on a training programme or working toward CESR?"
+3. Pathway selector: Training (ARCP) / CESR / Portfolio Pathway
+4. User selects pathway → optional details (training stage + ARCP date for trainees; target application window for CESR)
+5. Initial scan of existing PG activity populates evidence inventory
 6. Health summary shows: domain coverage, recent activity, pathway-specific readiness
 
 ### Ongoing use
@@ -222,8 +194,8 @@ Switching pathways re-interprets the same evidence. No data loss.
 
 ### Pathway switching
 
-- `/pathway` → select or change pathway
-- Switching pathways does not delete evidence — it re-interprets it
+- `/pathway` → select or change between ARCP and CESR views
+- Switching re-interprets the same evidence, no data loss
 - A CESR candidate who later enters training can switch to ARCP view
 
 ---
@@ -272,7 +244,7 @@ Links evidence to pathway framework items. Different mapping sets per pathway.
 ```text
 id
 evidence_item_id
-pathway                   training_arcp | cesr_portfolio | sas_career | trust_grade_app
+pathway                   training_arcp | cesr_portfolio
 framework_item            e.g. "SLO3 KC1", "GMC_CPD", "PUBLICATION_DOMAIN"
 mapping_source            auto | user_confirmed
 confidence                high | medium | low | needs_confirmation
@@ -346,9 +318,9 @@ next_actions              3–5 concrete suggested actions
 ### Phase 2 — Refactor existing `/health`
 
 - [ ] Extract the current hardcoded RCEM SLO/KC chart behind a pathway gate
-- [ ] Add pathway selector (Training / CESR / SAS / Trust grade / Generic)
-- [ ] For non-training pathways, show domain-based health summary instead of SLO chart
-- [ ] Keep the existing KC radar for Training/ARCP path
+- [ ] Add pathway selector: Training (ARCP) / CESR / Portfolio Pathway
+- [ ] ARCP view: existing KC radar + minimum-count trackers
+- [ ] CESR view: SLO/CiP-level coverage (not KC-level), 36-WPBA tracker, 5-year evidence age warnings
 - [ ] Auto-populate from existing PG filing activity
 - [ ] No Kaizen scrape, no new data sources
 
@@ -361,10 +333,8 @@ next_actions              3–5 concrete suggested actions
 
 ### Phase 4 — Pathway-specific readiness
 
-- [ ] ARCP: minimum-count trackers, SLO coverage %, ARCP date countdown
-- [ ] CESR: WPBA count tracker (toward 36), 5-year evidence age warnings, evidence-equivalence signal
-- [ ] SAS: GMC domain coverage, appraisal readiness
-- [ ] Trust grade: application scoring domain coverage
+- [ ] ARCP: minimum-count trackers, training-stage-specific requirements, ARCP date countdown
+- [ ] CESR: WPBA count toward 36, SLO/CiP evidence-equivalence signal, structured report coverage
 
 ### Phase 5 — Web dashboard (post-PMF)
 
@@ -384,4 +354,4 @@ Build Phase 1 only:
 
 ## Supersedes
 
-`docs/ARCP_HEALTH_DESIGN.md` — the original ARCP Health / Portfolio Readiness spec. That spec conflated ARCP readiness with portfolio health, was RCEM/Kaizen-specific, and assumed a training-only audience. This v2 spec replaces it. The original is retained for historical reference.
+`docs/ARCP_HEALTH_DESIGN.md` — the original ARCP Health / Portfolio Readiness spec. That spec conflated ARCP readiness with portfolio health and assumed a training-only audience. This v2 spec separates Portfolio Health from Pathway Guidance and adds the CESR view for RCEM non-training doctors.
