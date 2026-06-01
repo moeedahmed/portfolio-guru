@@ -1,20 +1,23 @@
-"""
-Voice transcription using OpenAI Whisper.
-Tries local whisper CLI first, falls back to OpenAI API.
-"""
 import asyncio
+import logging
 import os
 import shutil
 import tempfile
 from model_config import gemini_fallback_models
 
-# Check for local whisper CLI
+logger = logging.getLogger(__name__)
+
+_MLX_WHISPER_CLI = shutil.which("mlx_whisper")
 _WHISPER_CLI = shutil.which("whisper")
+_MLX_WHISPER_MODEL = os.environ.get(
+    "PORTFOLIO_GURU_MLX_WHISPER_MODEL",
+    "mlx-community/whisper-small-mlx",
+)
 
 
 async def transcribe_voice(file_path: str) -> str:
-    """Transcribe voice note using Gemini (primary), OpenAI Whisper as fallback."""
-    if _WHISPER_CLI:
+    """Transcribe voice note locally first, then use hosted fallbacks."""
+    if _MLX_WHISPER_CLI or _WHISPER_CLI:
         try:
             return await _transcribe_local(file_path)
         except Exception:
@@ -30,17 +33,29 @@ async def transcribe_voice(file_path: str) -> str:
 
 
 async def _transcribe_local(file_path: str) -> str:
-    """Transcribe using local whisper CLI."""
+    """Transcribe using local MLX Whisper, falling back to classic Whisper."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        # whisper outputs to current directory by default
-        cmd = [
-            _WHISPER_CLI,
-            file_path,
-            "--model", "base",
-            "--output_format", "txt",
-            "--output_dir", tmpdir,
-            "--language", "en",
-        ]
+        if _MLX_WHISPER_CLI:
+            cmd = [
+                _MLX_WHISPER_CLI,
+                file_path,
+                "--model", _MLX_WHISPER_MODEL,
+                "--output-format", "txt",
+                "--output-dir", tmpdir,
+                "--language", "en",
+                "--verbose", "False",
+            ]
+        elif _WHISPER_CLI:
+            cmd = [
+                _WHISPER_CLI,
+                file_path,
+                "--model", "base",
+                "--output_format", "txt",
+                "--output_dir", tmpdir,
+                "--language", "en",
+            ]
+        else:
+            raise RuntimeError("No local Whisper CLI available")
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
