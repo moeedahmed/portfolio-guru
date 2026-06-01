@@ -1320,14 +1320,14 @@ TRAINING_LEVEL_FORMS["HIGHER"] = TRAINING_LEVEL_FORMS["ST6"]
 # accepted for old profiles, but they should not be treated as exact current
 # training years when auto-detected from Kaizen.
 TRAINING_LEVEL_LABELS = {
-    "ACCS": "ACCS profile",
-    "INTERMEDIATE": "Intermediate profile",
-    "HIGHER": "HST profile",
-    "SAS": "SAS / CESR / non-training profile",
-    "ST3": "Intermediate profile",
-    "ST4": "HST profile",
-    "ST5": "HST profile",
-    "ST6": "HST profile",
+    "ACCS": "ACCS Profile",
+    "INTERMEDIATE": "Intermediate Profile",
+    "HIGHER": "HST Profile",
+    "SAS": "SAS / CESR / Non-training Profile",
+    "ST3": "Intermediate Profile",
+    "ST4": "HST Profile",
+    "ST5": "HST Profile",
+    "ST6": "HST Profile",
 }
 
 
@@ -3021,7 +3021,7 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # Cache failure must never block the login success path.
         logger.warning("Kaizen role cache update failed", exc_info=True)
     role_map = {"hst": "HIGHER", "accs": "ACCS", "accs_intermediate": "INTERMEDIATE", "sas": "SAS", "assessor": "HIGHER"}
-    label_map = {"hst": "HST portfolio profile", "accs": "ACCS portfolio profile", "accs_intermediate": "ACCS + Intermediate portfolio profile", "sas": "SAS / CESR / non-training profile", "assessor": "Clinical Supervisor"}
+    label_map = {"hst": "HST Portfolio Profile", "accs": "ACCS Portfolio Profile", "accs_intermediate": "ACCS + Intermediate Portfolio Profile", "sas": "SAS / CESR / Non-training Profile", "assessor": "Clinical Supervisor"}
     
     auto_level = role_map.get(detected_role)
     if auto_level:
@@ -3055,10 +3055,10 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "✅ Kaizen connected! I couldn't auto-detect your portfolio.\n\nWhich Kaizen portfolio applies to you?",
             flow_key="setup",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("ACCS profile", callback_data="SETLEVEL|ACCS")],
-                [InlineKeyboardButton("Intermediate profile", callback_data="SETLEVEL|INTERMEDIATE")],
-                [InlineKeyboardButton("HST profile", callback_data="SETLEVEL|HIGHER")],
-                [InlineKeyboardButton("SAS / CESR / non-training profile", callback_data="SETLEVEL|SAS")],
+                [InlineKeyboardButton("ACCS Profile", callback_data="SETLEVEL|ACCS")],
+                [InlineKeyboardButton("Intermediate Profile", callback_data="SETLEVEL|INTERMEDIATE")],
+                [InlineKeyboardButton("HST Profile", callback_data="SETLEVEL|HIGHER")],
+                [InlineKeyboardButton("SAS / CESR / Non-training Profile", callback_data="SETLEVEL|SAS")],
             ])
         )
         return AWAIT_TRAINING_LEVEL
@@ -3925,10 +3925,10 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
 
     elif action == "change_level":
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("ACCS profile", callback_data="SETLEVEL|ACCS")],
-            [InlineKeyboardButton("Intermediate profile", callback_data="SETLEVEL|INTERMEDIATE")],
-            [InlineKeyboardButton("HST profile", callback_data="SETLEVEL|HIGHER")],
-            [InlineKeyboardButton("SAS / CESR / non-training profile", callback_data="SETLEVEL|SAS")],
+            [InlineKeyboardButton("ACCS Profile", callback_data="SETLEVEL|ACCS")],
+            [InlineKeyboardButton("Intermediate Profile", callback_data="SETLEVEL|INTERMEDIATE")],
+            [InlineKeyboardButton("HST Profile", callback_data="SETLEVEL|HIGHER")],
+            [InlineKeyboardButton("SAS / CESR / Non-training Profile", callback_data="SETLEVEL|SAS")],
             [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
         ])
         await query.message.edit_text(

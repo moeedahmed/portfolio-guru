@@ -3182,9 +3182,9 @@ class TestTrainingStageGroups:
         await handle_action_button(update, context)
 
         buttons = sim.get_last_buttons()
-        assert ('ACCS profile', 'SETLEVEL|ACCS') in buttons
-        assert ('Intermediate profile', 'SETLEVEL|INTERMEDIATE') in buttons
-        assert ('HST profile', 'SETLEVEL|HIGHER') in buttons
+        assert ('ACCS Profile', 'SETLEVEL|ACCS') in buttons
+        assert ('Intermediate Profile', 'SETLEVEL|INTERMEDIATE') in buttons
+        assert ('HST Profile', 'SETLEVEL|HIGHER') in buttons
 
     def test_settings_layout_prioritises_voice_profile(self):
         from bot import _settings_view_components
