@@ -243,6 +243,39 @@ async def _raise_if_auth(page: Any) -> None:
         raise KaizenAuthRequired("Kaizen authentication required")
 
 
+async def _expand_readonly_listing(page: Any) -> None:
+    """Scroll a read-only listing so lazy-loaded rows enter the DOM."""
+    evaluate = getattr(page, "evaluate", None)
+    if not evaluate:
+        return
+    try:
+        await evaluate(
+            """async () => {
+              const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+              let previous = -1;
+              let stable = 0;
+              for (let i = 0; i < 16; i += 1) {
+                const rows = document.querySelectorAll('.row.event-inner, .activity, li').length;
+                window.scrollTo(0, document.body.scrollHeight);
+                await sleep(250);
+                const nextRows = document.querySelectorAll('.row.event-inner, .activity, li').length;
+                if (nextRows <= previous || nextRows === rows) {
+                  stable += 1;
+                } else {
+                  stable = 0;
+                }
+                previous = nextRows;
+                if (stable >= 3) break;
+              }
+              window.scrollTo(0, 0);
+            }"""
+        )
+    except Exception:
+        # Scrolling is a best-effort expansion step. The following DOM read still
+        # determines whether the page shape is usable.
+        return
+
+
 async def extract_timeline_rows(
     page: Any,
     category: str,
@@ -251,6 +284,7 @@ async def extract_timeline_rows(
 ) -> list[KaizenTimelineRow]:
     """Read visible timeline rows for one category without opening details."""
     await _raise_if_auth(page)
+    await _expand_readonly_listing(page)
     payload = await page.evaluate(
         """(limit) => {
           const text = el => (el && el.textContent ? el.textContent.trim().replace(/\\s+/g, ' ') : null);
@@ -279,6 +313,7 @@ async def extract_timeline_rows(
 async def extract_activity_drafts(page: Any, *, limit: int | None = None) -> list[KaizenTimelineRow]:
     """Read visible saved-draft/activity rows as draft evidence candidates."""
     await _raise_if_auth(page)
+    await _expand_readonly_listing(page)
     payload = await page.evaluate(
         """(limit) => {
           const text = el => (el && el.textContent ? el.textContent.trim().replace(/\\s+/g, ' ') : null);
@@ -617,4 +652,3 @@ async def sync_kaizen_portfolio_index_for_user(
         )
     finally:
         await _close_session(context, pw)
-

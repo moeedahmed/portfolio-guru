@@ -40,6 +40,25 @@ class FakeKaizenPage:
         return []
 
 
+class FakeLazyKaizenPage(FakeKaizenPage):
+    """Mimics Kaizen rows that only appear after read-only scrolling."""
+
+    def __init__(self, *, initial_lists=None, expanded_lists=None, details=None):
+        super().__init__(lists=initial_lists or {}, details=details or {})
+        self.initial_lists = initial_lists or {}
+        self.expanded_lists = expanded_lists or {}
+        self.did_scroll_expand = False
+
+    async def evaluate(self, script, *args):
+        if "window.scrollTo" in script:
+            self.did_scroll_expand = True
+            return None
+        if "/events/list/" in self.url or self.url == "https://kaizenep.com/activities":
+            lists = self.expanded_lists if self.did_scroll_expand else self.initial_lists
+            return lists.get(self.url, [])
+        return await super().evaluate(script, *args)
+
+
 @pytest.fixture
 def sync_modules(tmp_path, monkeypatch):
     monkeypatch.setenv("USAGE_DB_PATH", str(tmp_path / "kaizen_sync_test.db"))
@@ -139,6 +158,62 @@ async def test_sync_writes_timeline_detail_and_activity_draft(sync_modules):
     assert latest is not None
     assert latest.status == "ok"
     assert latest.rows_written == 2
+
+
+@pytest.mark.asyncio
+async def test_sync_expands_lazy_loaded_timeline_before_reading_rows(sync_modules):
+    kaizen_index, kaizen_sync = sync_modules
+    assessment_url = "https://kaizenep.com/events/list/Assessments"
+    initially_visible_count = 100
+    total_available_count = initially_visible_count * 4
+
+    initial_rows = [
+        {
+            "title": f"CBD {idx}",
+            "href": f"/events/view-section/00000000-0000-0000-0000-{idx:012d}",
+            "state": "Complete",
+            "date_text": "20 May, 2026",
+        }
+        for idx in range(1, initially_visible_count + 1)
+    ]
+    expanded_rows = [
+        {
+            "title": f"CBD {idx}",
+            "href": f"/events/view-section/00000000-0000-0000-0000-{idx:012d}",
+            "state": "Complete",
+            "date_text": "20 May, 2026",
+        }
+        for idx in range(1, total_available_count + 1)
+    ]
+    details = {
+        f"https://kaizenep.com/events/view-section/00000000-0000-0000-0000-{idx:012d}": _detail(
+            event_type=f"CBD {idx}",
+            url=f"https://kaizenep.com/events/view-section/00000000-0000-0000-0000-{idx:012d}",
+        )
+        for idx in range(1, total_available_count + 1)
+    }
+    page = FakeLazyKaizenPage(
+        initial_lists={assessment_url: initial_rows},
+        expanded_lists={assessment_url: expanded_rows},
+        details=details,
+    )
+
+    result = await kaizen_sync.sync_kaizen_portfolio_index(
+        42,
+        page,
+        categories=("Assessments",),
+        include_activities=False,
+    )
+
+    assert page.did_scroll_expand
+    assert result.status == "ok"
+    assert result.rows_seen == total_available_count
+    assert result.rows_written == total_available_count
+    rows = await kaizen_index.list_evidence_items("42")
+    assert len(rows) == total_available_count
+    latest = await kaizen_index.latest_index_run("42")
+    assert latest is not None
+    assert latest.rows_written == total_available_count
 
 
 @pytest.mark.asyncio
@@ -500,4 +575,3 @@ async def test_sync_for_user_closes_session_even_when_sync_raises(sync_modules, 
 
     assert page.context.closed
     assert pw.stopped
-
