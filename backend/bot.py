@@ -4531,11 +4531,29 @@ async def _run_health_analysis(
         )
     except asyncio.TimeoutError:
         logger.warning("Portfolio health analysis timed out (45s)")
-        await fail_fn("⚠️ Analysis took too long — please try again.")
+        await send_result(
+            _format_arcp_deterministic_health_message(
+                snapshot,
+                history,
+                month_label,
+                level_note,
+                "AI ARCP narrative timed out; deterministic health is shown below.",
+            ),
+            None,
+        )
         return
     except Exception as e:
         logger.error(f"Portfolio health analysis failed: {e}", exc_info=True)
-        await fail_fn("❌ Could not analyse portfolio health. Try again later.")
+        await send_result(
+            _format_arcp_deterministic_health_message(
+                snapshot,
+                history,
+                month_label,
+                level_note,
+                "AI ARCP narrative is temporarily unavailable; deterministic health is shown below.",
+            ),
+            None,
+        )
         return
 
     deterministic_str = _format_deterministic_health_section(snapshot)
@@ -4699,6 +4717,28 @@ def _format_cesr_health_message(snapshot, history: list[dict], month_label: str)
         f"💡 *Next actions:*\n{_bullet_list(actions)}\n\n"
         "CESR requires 36 WPBAs minimum (12 DOPS, 12 Mini-CEX, 12 CBD). "
         "Evidence should be within 5 years."
+    )
+
+
+def _format_arcp_deterministic_health_message(
+    snapshot,
+    history: list[dict],
+    month_label: str,
+    level_note: str,
+    fallback_note: str,
+) -> str:
+    gaps = snapshot.gap_summary or ["No major gaps"]
+    actions = snapshot.next_actions or ["Keep filing recent portfolio evidence"]
+    return (
+        f"📊 *Portfolio Health — ARCP*\n"
+        f"{month_label}\n\n"
+        f"_{fallback_note}_\n\n"
+        f"Health score: {_health_score_label(snapshot.health_score)}\n"
+        f"Cases filed (last 6 months): {len(history)}\n"
+        f"Domain coverage: {_format_domain_counts(snapshot.domain_counts)}\n\n"
+        f"⚠️ *Gap summary:*\n{_bullet_list(gaps)}\n\n"
+        f"💡 *Next actions:*\n{_bullet_list(actions)}"
+        f"{level_note}"
     )
 
 

@@ -106,6 +106,56 @@ async def test_cesr_health_output_uses_deterministic_engine_without_llm(monkeypa
     analysis.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_arcp_health_falls_back_to_deterministic_output_when_llm_fails(monkeypatch):
+    import sys
+    import bot
+
+    user_id = 5252
+    history = [
+        {"form_type": "CBD", "filed_at": "2026-05-01 09:00:00", "status": "filed", "telegram_user_id": user_id},
+        {"form_type": "DOPS", "filed_at": "2026-05-02 09:00:00", "status": "filed", "telegram_user_id": user_id},
+        {"form_type": "QIAT", "filed_at": "2026-05-03 09:00:00", "status": "filed", "telegram_user_id": user_id},
+    ]
+
+    async def generate_health_chart_async(_user_id):
+        return None
+
+    async def fail_analysis(*_args, **_kwargs):
+        raise RuntimeError("provider 402")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "portfolio_chart",
+        SimpleNamespace(generate_health_chart_async=generate_health_chart_async),
+    )
+    monkeypatch.setattr(bot, "get_health_profile", lambda _user_id: _profile(user_id, Pathway.training_arcp))
+    monkeypatch.setattr(bot, "get_training_level", lambda _user_id: "ST6")
+    monkeypatch.setattr(bot, "get_case_history", AsyncMock(return_value=history))
+    monkeypatch.setattr(bot, "analyse_portfolio_health", fail_analysis)
+
+    sent: dict[str, str] = {}
+    fail_fn = AsyncMock()
+
+    await bot._run_health_analysis(
+        user_id=user_id,
+        chat=SimpleNamespace(send_action=AsyncMock()),
+        send_progress=AsyncMock(),
+        send_result=AsyncMock(side_effect=lambda text, reply_markup: sent.setdefault("text", text)),
+        send_photo_fn=AsyncMock(),
+        fail_fn=fail_fn,
+    )
+
+    text = sent["text"]
+    assert "*Portfolio Health — ARCP*" in text
+    assert "AI ARCP narrative is temporarily unavailable" in text
+    assert "Health score:" in text
+    assert "Domain coverage:" in text
+    assert "Gap summary:" in text
+    assert "Next actions:" in text
+    fail_fn.assert_not_called()
+
+
 # ── _pathway_for_detected_role / _autoset_health_pathway_from_role ───────────
 
 
