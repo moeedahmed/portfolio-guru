@@ -13,6 +13,17 @@ Portfolio Guru automates e-portfolio filing for UK EM trainees. A doctor sends a
 - Output: Kaizen draft save only. No supervisor submission.
 - Disabled code: `/bulk`, `/unsigned`, `/chase` return early with "coming soon" — code below the return is not live.
 
+## Dev / Test Commands
+
+- Install/runtime: use the existing backend virtualenvs (`backend/.venv` or `backend/venv`). Do not create a new dependency manager unless the repo is deliberately migrated.
+- Local bot: `bash start-bot.sh` from the repo root. This calls `backend/run_local.sh`, loads secrets from BWS, starts the Stripe webhook server on port `8099`, ensures CDP Chrome is available, then runs `backend/bot.py`.
+- Preflight before commit or handoff: `bash scripts/preflight.sh`.
+- Main offline gate: `cd backend && venv/bin/python3 -m pytest tests/ -v --ignore=tests/test_e2e.py --ignore=tests/test_e2e_live.py`.
+- Offline E2E only: `cd backend && venv/bin/python3 -m pytest tests/ -v -m e2e`.
+- Live Telegram smoke: `cd backend && venv/bin/python3 -m pytest tests/ -v -m live` only when explicitly approved and `TELETHON_SESSION` is set. Never run live Telegram tests as routine CI or autonomous loops.
+- Snapshot updates: `cd backend && venv/bin/python3 -m pytest tests/ -v --snapshot-update` only after intentional bot-message changes.
+- CI/deploy: pushes to `main` run GitHub Actions tests and the Mac Mini deploy workflow; local feature branches do not automatically deploy.
+
 ## Filing Routing Discipline
 
 Single source: `backend/filer_router.py` selects the method per form type.
