@@ -70,8 +70,8 @@ async def test_pathway_command_saves_selected_pathway(isolated_health_store):
     result = await bot.pathway_command(sim._make_text_update("/pathway"), context)
 
     assert result == bot.AWAIT_PATHWAY
-    assert ("Training (ARCP)", "PATHWAY|training_arcp") in sim.get_last_buttons()
-    assert ("CESR / Portfolio Pathway", "PATHWAY|cesr_portfolio") in sim.get_last_buttons()
+    assert ("Training (CCT)", "PATHWAY|training_arcp") in sim.get_last_buttons()
+    assert ("Portfolio (CESR)", "PATHWAY|cesr_portfolio") in sim.get_last_buttons()
 
     result = await bot.handle_pathway_choice(
         sim._make_callback_update("PATHWAY|cesr_portfolio"),
@@ -82,7 +82,7 @@ async def test_pathway_command_saves_selected_pathway(isolated_health_store):
     stored = health_profile_store.get_health_profile(sim.user_id)
     assert stored is not None
     assert stored.pathway == Pathway.cesr_portfolio
-    assert "CESR / Portfolio Pathway" in sim.get_last_text()
+    assert "Portfolio (CESR)" in sim.get_last_text()
 
 
 def test_settings_shows_pathway_change_control(isolated_health_store, monkeypatch):
@@ -100,8 +100,8 @@ def test_settings_shows_pathway_change_control(isolated_health_store, monkeypatc
     )
 
     buttons = [(button.text, button.callback_data) for row in keyboard.inline_keyboard for button in row]
-    assert "Pathway: Training (ARCP)" in text
-    assert ("📊 Pathway: Training (ARCP)", "ACTION|change_pathway") in buttons
+    assert "Pathway: Training (CCT)" in text
+    assert ("📊 Pathway: Training (CCT)", "ACTION|change_pathway") in buttons
 
 
 @pytest.mark.asyncio
@@ -125,8 +125,8 @@ async def test_settings_pathway_change_saves_and_returns_to_settings(isolated_he
         context,
     )
 
-    assert ("Training (ARCP)", "PATHWAY_SETTINGS|training_arcp") in sim.get_last_buttons()
-    assert ("CESR / Portfolio Pathway", "PATHWAY_SETTINGS|cesr_portfolio") in sim.get_last_buttons()
+    assert ("Training (CCT)", "PATHWAY_SETTINGS|training_arcp") in sim.get_last_buttons()
+    assert ("Portfolio (CESR)", "PATHWAY_SETTINGS|cesr_portfolio") in sim.get_last_buttons()
     assert ("🔙 Back to settings", "ACTION|settings") in sim.get_last_buttons()
 
     result = await bot.handle_pathway_choice(
@@ -138,8 +138,8 @@ async def test_settings_pathway_change_saves_and_returns_to_settings(isolated_he
     stored = health_profile_store.get_health_profile(sim.user_id)
     assert stored is not None
     assert stored.pathway == Pathway.cesr_portfolio
-    assert "Pathway: CESR / Portfolio Pathway" in sim.get_last_text()
-    assert ("📊 Pathway: CESR / Portfolio Pathway", "ACTION|change_pathway") in sim.get_last_buttons()
+    assert "Pathway: Portfolio (CESR)" in sim.get_last_text()
+    assert ("📊 Pathway: Portfolio (CESR)", "ACTION|change_pathway") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio

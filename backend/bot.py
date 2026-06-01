@@ -4684,14 +4684,14 @@ def _autoset_health_pathway_from_role(user_id: int, detected_role: str) -> Pathw
 
 
 def _pathway_label(pathway: Pathway) -> str:
-    return "CESR / Portfolio Pathway" if pathway == Pathway.cesr_portfolio else "Training (ARCP)"
+    return "Portfolio (CESR)" if pathway == Pathway.cesr_portfolio else "Training (CCT)"
 
 
 def _build_pathway_keyboard(*, from_settings: bool = False) -> InlineKeyboardMarkup:
     prefix = "PATHWAY_SETTINGS" if from_settings else "PATHWAY"
     rows = [
-        [InlineKeyboardButton("Training (ARCP)", callback_data=f"{prefix}|{Pathway.training_arcp.value}")],
-        [InlineKeyboardButton("CESR / Portfolio Pathway", callback_data=f"{prefix}|{Pathway.cesr_portfolio.value}")],
+        [InlineKeyboardButton("Training (CCT)", callback_data=f"{prefix}|{Pathway.training_arcp.value}")],
+        [InlineKeyboardButton("Portfolio (CESR)", callback_data=f"{prefix}|{Pathway.cesr_portfolio.value}")],
     ]
     if from_settings:
         rows.append([InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")])
