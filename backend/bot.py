@@ -1754,8 +1754,6 @@ def _settings_view_components(
         [InlineKeyboardButton(f"📊 Pathway: {pathway_label}", callback_data="ACTION|change_pathway")],
         [InlineKeyboardButton(f"📚 Curriculum: {curriculum_label}", callback_data="ACTION|change_curriculum")],
     ])
-    if connected is True:
-        buttons.append([InlineKeyboardButton("🔄 Sync Kaizen evidence", callback_data="ACTION|refresh_portfolio")])
     buttons.extend([
         [InlineKeyboardButton(setup_button_label, callback_data="ACTION|setup")],
         [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu"),

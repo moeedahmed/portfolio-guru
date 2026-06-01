@@ -183,7 +183,7 @@ async def test_run_health_analysis_uses_indexed_source_when_history_empty(
 # ── /settings Kaizen evidence row ───────────────────────────────────────────
 
 
-def test_settings_includes_kaizen_sync_row_when_status_provided(
+def test_settings_includes_kaizen_sync_status_when_status_provided(
     isolated_health_store, monkeypatch
 ):
     import bot
@@ -221,15 +221,15 @@ def test_settings_includes_kaizen_sync_row_when_status_provided(
     assert "(ok)" in text
 
     buttons = [button.callback_data for row in keyboard.inline_keyboard for button in row]
-    assert "ACTION|refresh_portfolio" in buttons
+    assert "ACTION|refresh_portfolio" not in buttons
 
 
-def test_settings_makes_portfolio_health_primary_and_sync_secondary(
+def test_settings_makes_portfolio_health_primary_and_hides_manual_sync(
     isolated_health_store, monkeypatch
 ):
     """Product rule: connected users see Portfolio health as the primary settings
-    CTA, with manual Kaizen sync demoted to a secondary utility below the main
-    settings controls.
+    CTA. Manual Kaizen sync remains a hidden troubleshooting action, not a
+    normal settings button users have to understand.
     """
     import bot
 
@@ -254,19 +254,14 @@ def test_settings_makes_portfolio_health_primary_and_sync_secondary(
     # handler (which itself prompts the read-only refresh when needed).
     assert ("📊 Portfolio health", "ACTION|health") in flat
 
-    # Manual Kaizen refresh is still available, but relabelled as a secondary
-    # sync utility — the prominent "Refresh portfolio" CTA is gone.
-    assert ("🔄 Sync Kaizen evidence", "ACTION|refresh_portfolio") in flat
+    # Manual Kaizen refresh is hidden from the normal settings surface. The
+    # callback flow remains covered separately for troubleshooting/support use.
     button_labels = [text for text, _ in flat]
     assert "🔄 Refresh portfolio" not in button_labels
-
-    # Primary CTA must sit above the secondary sync row.
-    health_row = next(i for i, row in enumerate(rows) if ("📊 Portfolio health", "ACTION|health") in row)
-    sync_row = next(
-        i for i, row in enumerate(rows)
-        if ("🔄 Sync Kaizen evidence", "ACTION|refresh_portfolio") in row
-    )
-    assert health_row < sync_row
+    assert "🔄 Sync Kaizen evidence" not in button_labels
+    assert "ACTION|refresh_portfolio" not in [
+        callback for _, callback in flat
+    ]
 
 
 def test_settings_omits_portfolio_health_button_when_not_connected(

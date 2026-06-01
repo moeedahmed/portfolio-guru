@@ -1,5 +1,15 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-01 addendum — normal settings hides manual Kaizen sync.**
+> Product decision: users should not have to understand or maintain a Kaizen
+> evidence sync. `/settings` keeps "📊 Portfolio health" as the visible
+> connected-user action, while the manual `ACTION|refresh_portfolio` flow stays
+> available as a hidden troubleshooting/support route. Evidence refresh should
+> happen automatically after login, inside `/health` when data is missing/stale,
+> and after successful filing where needed. Focused coverage now pins that
+> normal settings contains no "Refresh portfolio", no "Sync Kaizen evidence",
+> and no visible `ACTION|refresh_portfolio` button.
+
 > **2026-06-01 addendum — `/settings` promotes Portfolio health to primary CTA.**
 > Product decision: connected users opening `/settings` should see "📊 Portfolio
 > health" as the prominent action, not "🔄 Refresh portfolio". The manual
