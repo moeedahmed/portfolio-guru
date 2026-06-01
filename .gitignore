@@ -64,3 +64,6 @@ backend/logs/
 backend/dump_ticket.py
 backend/tick_kcs_only.py
 backend/ensure_chrome.sh
+
+# Codex codegraph database
+.codegraph/
