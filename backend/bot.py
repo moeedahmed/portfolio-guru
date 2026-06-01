@@ -1958,7 +1958,10 @@ def _log_filing_attempt(
     form_type: str,
     status: str,
     error: str | None = None,
+    filled: list | None = None,
     skipped: list | None = None,
+    method: str | None = None,
+    verified: bool | None = None,
 ) -> None:
     """Append a per-user filing-attempt record to filing-log.ndjson.
 
@@ -1966,27 +1969,23 @@ def _log_filing_attempt(
     this week" without grepping the main bot log. PHI-free: records form
     type, status, and the error string from the filer (which is a generic
     message, not case content).
+
+    Thin wrapper around :mod:`filing_attempt_log`; the heavy lifting (error
+    categorisation, synthetic-user flagging, durable path) lives there so it
+    can be tested without booting the bot.
     """
-    import json as _json
-    import pathlib
-    from datetime import datetime, timezone
-    try:
-        log_dir = pathlib.Path.home() / ".openclaw/data/portfolio-guru"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        record = {
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "user_id": user_id,
-            "username": str(username) if username is not None else None,
-            "form_type": form_type,
-            "status": status,
-            "error": str(error) if error is not None else None,
-            "skipped": [str(s) for s in (skipped or [])],
-            "version": 1,
-        }
-        with open(log_dir / "filing-log.ndjson", "a") as f:
-            f.write(_json.dumps(record) + "\n")
-    except Exception:
-        logger.warning("Filing-log append failed", exc_info=True)
+    from filing_attempt_log import log_attempt
+    log_attempt(
+        user_id=user_id,
+        username=username,
+        form_type=form_type,
+        status=status,
+        error=error,
+        filled=filled,
+        skipped=skipped,
+        method=method,
+        verified=verified,
+    )
 
 
 _2021_CURRICULUM_FORM_ALIASES = {
@@ -4736,6 +4735,33 @@ async def listusers_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return ConversationHandler.END
 
 
+async def filingreport_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Admin-only — render the filing-reliability report from the durable
+    NDJSON log. Use ``/filingreport all`` to include synthetic test traffic.
+    """
+    if update.effective_user.id != ADMIN_USER_ID:
+        await update.message.reply_text("🚫 Admin only.")
+        return ConversationHandler.END
+
+    args = [arg.strip().lower() for arg in (context.args or [])]
+    include_synthetic = bool(args) and args[0] in {"all", "synthetic", "full"}
+
+    try:
+        from filing_attempt_log import build_report
+        report = build_report(include_synthetic=include_synthetic)
+    except Exception as exc:
+        logger.error("filingreport failed: %s", exc, exc_info=True)
+        await update.message.reply_text(f"⚠️ Could not build filing report: {exc}")
+        return ConversationHandler.END
+
+    # Telegram message cap is 4096 chars. The report is bounded by category
+    # and recent-failure counts, but truncate as a belt-and-braces guard.
+    if len(report) > 3900:
+        report = report[:3900] + "\n…(truncated)"
+    await update.message.reply_text(report)
+    return ConversationHandler.END
+
+
 async def gather_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Toggle multi-message gathering for the current user. Default is on."""
     args = [arg.strip().lower() for arg in (context.args or [])]
@@ -7408,7 +7434,10 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         form_type=form_type,
         status=status,
         error=error,
+        filled=filled,
         skipped=[str(s) for s in skipped],
+        method=result.get("method"),
+        verified=result.get("verified"),
     )
     proof_report = _format_proof_report(
         status,
@@ -8862,6 +8891,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("setbeta", setbeta_command))
     application.add_handler(CommandHandler("beta", beta_command))
     application.add_handler(CommandHandler("listusers", listusers_command))
+    application.add_handler(CommandHandler("filingreport", filingreport_command))
     application.add_handler(CommandHandler("gather", gather_command))
     application.add_handler(CommandHandler("assignbeta", assignbeta_command))
     application.add_handler(CallbackQueryHandler(handle_upgrade_button, pattern=r"^UPGRADE\|"))
