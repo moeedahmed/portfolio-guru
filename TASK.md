@@ -1,5 +1,83 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-02 addendum — consolidated Kaizen filing E2E test plan landed (docs + one offline pin).**
+> Orchestrator-commissioned: a single restartable end-to-end testing plan for
+> Kaizen filing across the approved four-account fixture matrix (Moeed/HST,
+> Haris-Harris/ACCS+Intermediate dual access, Sana/SAS-CESR, Ahmed/consultant).
+> The plan composes the existing Filing Reliability Readiness Sprint and the
+> three-account validation doc into ordered phases (offline matrix → read-only
+> mapping → draft-preview flow → controlled draft-only live smoke → Moeed
+> manual checklist → fix-loop and promotion criteria) and pins the exact
+> per-fixture stop-go gates plus the Moeed manual checklist that fires only
+> after the next live gate.
+>
+> Files changed in this slice:
+>
+> - `docs/roadmap/kaizen-filing-e2e-test-plan-2026-06.md` (new) — the
+>   consolidated plan + per-fixture P3/P4/P5 procedure + promotion criteria
+>   roll-forward.
+> - `backend/tests/test_detected_role_training_level_mapping.py` — two new
+>   offline pins for Ahmed's consultant fixture: `assessor` detected role
+>   maps to the `HIGHER` `training_level` bucket (UX continuity fallback),
+>   and the raw `assessor` role / `HIGHER` bucket stay decoupled so the
+>   supervisor workflow keys off the raw role, not the bucket. Closes the
+>   only offline gap noticed during reconciliation; the other Ahmed-shape
+>   contracts (`_pathway_for_detected_role("assessor") -> None`, role
+>   detector body-text classification) were already pinned in
+>   `test_health_bot.py` and `test_role_detector.py`.
+>
+> Boundary:
+>
+> - Offline-only. No live Kaizen, no Telegram, no BWS read, no CDP,
+>   no deploy, no restart, no push. No filer / credential / supervisor
+>   source files touched.
+>
+> Verification (no live action):
+>
+> - Focused new pins:
+>   `cd backend && venv/bin/python -m pytest tests/test_detected_role_training_level_mapping.py -v`
+>   → 21 passed, 30 warnings (pre-existing deprecation warnings only). Up
+>   from 19 pre-this-slice; the delta is the two new Ahmed/consultant pins,
+>   no regressions.
+> - `git diff --check` clean.
+>
+> Next executable gate: P3 controlled draft-only live Kaizen smoke, one
+> fixture at a time (Moeed/HST → Harris/ACCS → Harris/Intermediate → Sana
+> → Ahmed supervisor confirmation-boundary). Foreground/operator-owned and
+> approval-gated; worker does not run it. Plan: `docs/roadmap/kaizen-filing-e2e-test-plan-2026-06.md` §8.
+
+> **2026-06-02 addendum — browser-agent architecture decision.**
+> Browser-agent tooling should shape Portfolio Guru as a guarded fallback and
+> mapping aid, not as the product's primary filing architecture. The product
+> promise remains: API/document-first where available, deterministic
+> portfolio adapters for supported forms, transparent browser automation only
+> where Kaizen or another portfolio portal forces it, and draft-only saves
+> behind explicit doctor approval.
+>
+> Decision:
+>
+> - Browser-agent-first is rejected for the core Kaizen filing path because it
+>   would make a reliability product depend on opaque, non-deterministic UI
+>   judgement at the exact moment users are paying for dependable filing.
+> - Deterministic adapter/browser automation behind guardrails remains valid
+>   for Kaizen today: DOM-mapped Playwright/CDP, form coverage tests, explicit
+>   skipped-field reporting, attempt logging, retry semantics, and no
+>   credentials or patient details in LLM prompts.
+> - API/document-first with browser fallback is the strategic direction for
+>   Portfolio Guru. Browser Use / Browser Harness / Browser Use Terminal can
+>   support discovery, read-only mapping, emergency unsupported-form bridges,
+>   and future non-Kaizen forced-portal adapters, but they must not replace
+>   source-backed drafts, user preview, approval gates, or deterministic
+>   filing tests.
+>
+> Sprint implication: the controlled P5 Kaizen smoke stays draft-only and
+> deterministic. It should prove the current guarded adapter path across HST,
+> ACCS/Intermediate, SAS/CESR, and consultant/supervisor-shaped surfaces. It
+> should not introduce browser-agent-first filing, cloud browser credentials,
+> or autonomous live portal exploration. Any Browser Harness domain-skill
+> evidence can inform selectors and platform maps, but promotion still depends
+> on offline gates plus the controlled draft-only smoke evidence.
+
 > **2026-06-02 addendum — approved Kaizen fixture credentials recorded privately.**
 > Moeed clarified the intended testing context for the shared Kaizen details:
 > they are representative Portfolio Guru user fixtures for mapping the product
@@ -135,8 +213,8 @@
 >   submission.
 >
 > Next executable slice: P1.d (partial-save / outcome categorisation by
->   shape) — still offline-only unless the sprint gate explicitly reaches
->   a live-smoke phase.
+> shape) — still offline-only unless the sprint gate explicitly reaches
+> a live-smoke phase.
 
 > **2026-06-02 addendum — P1.b slice landed (offline).**
 > Filing Reliability Readiness Sprint §4 P1.b: per-shape detected-role →

@@ -150,6 +150,45 @@ def test_unknown_role_maps_to_none_so_setup_falls_through_to_picker():
     assert detected_role_to_training_level(None) is None
 
 
+# ─── Consultant / supervisor (Ahmed) UX continuity fallback ─────────────────
+
+
+def test_assessor_role_maps_to_higher_bucket_for_ux_continuity_only():
+    """Ahmed's consultant/supervisor account has no personal trainee portfolio.
+
+    The bot's role detector returns ``"assessor"`` when MyTimeline shows the
+    ``"You cannot create any events!"`` barrier. The setup/login path then
+    maps that to the ``HIGHER`` ``training_level`` bucket so the UI keeps a
+    coherent profile label rather than rendering ``Unknown``. The supervisor
+    workflow keys off the raw ``"assessor"`` role string in ``profile_store``,
+    **not** off the ``HIGHER`` bucket — keeping the two surfaces decoupled is
+    what lets a future split surface a dedicated supervisor profile without
+    leaking HST forms to a consultant.
+
+    Pin both halves of that contract: the bucket is ``HIGHER`` today, but the
+    raw role stays ``assessor``. A regression that lets ``store_kaizen_role``
+    overwrite the bucket, or that silently drops the assessor fallback to
+    ``None``, would be loud here.
+    """
+    from bot import detected_role_to_training_level
+
+    assert detected_role_to_training_level("assessor") == "HIGHER"
+
+
+def test_assessor_role_and_training_level_stay_decoupled(profile_store_module):
+    """Storing the raw ``assessor`` role must not mutate ``training_level``,
+    and storing ``HIGHER`` must not mutate the raw role. The supervisor
+    workflow depends on the raw role staying ``assessor``.
+    """
+    ahmed_user_id = 9200006
+
+    profile_store_module.store_training_level(ahmed_user_id, "HIGHER")
+    profile_store_module.store_kaizen_role(ahmed_user_id, "assessor")
+
+    assert profile_store_module.get_kaizen_role(ahmed_user_id) == "assessor"
+    assert profile_store_module.get_training_level(ahmed_user_id) == "HIGHER"
+
+
 # ─── store_kaizen_role preserves raw role per shape ─────────────────────────
 
 
