@@ -253,6 +253,47 @@ Status:
   Portfolio Health entry point feels like the right product flow before more
   Portfolio Health behaviour builds on top.
 
+### Phase 2.11 - Browser automation architecture and control-plane UX
+
+Product direction:
+
+- Portfolio Guru stays **API/document-first and deterministic-first**. Use
+  direct APIs, local documents, structured extraction, and DOM-mapped
+  Playwright/CDP workflows whenever they can solve the job reliably.
+- Browser automation is not the core product identity. It is the adapter used
+  when portfolio systems force logged-in browser work.
+- For Kaizen and other mapped systems, prefer the existing deterministic
+  browser adapter: known routes, known fields, verified selectors, and
+  draft-only save boundaries.
+- For logged-in hard workflows that are not yet mapped, use Browser Harness as
+  the local/cheap baseline before considering hosted browser services.
+- Browser Use Cloud is a later scale/stealth/proxy/captcha option, not an MVP
+  dependency.
+- Browser Use Terminal is not the engine, but its control-plane pattern is
+  useful: watch, steer, stop, resume, review artefacts, inspect history, and
+  approve risky steps.
+
+UX contract:
+
+- Avoid the bad black-box version: `Portfolio Guru updated your portfolio`.
+- Show what the agent opened, read, changed, skipped, and could not verify.
+- Preserve proof artefacts where useful: screenshots, field summaries,
+  before/after status, run history, and assumptions.
+- Stop before risky actions: supervisor submission, signing, approval, deletion,
+  credential changes, payment changes, or anything that alters the doctor or
+  assessor's professional record beyond a reviewed draft.
+- When browser automation fails, report the exact failure class in product
+  language: auth needed, selector drift, page unavailable, missing field,
+  ambiguous match, unsupported form, or user approval required.
+
+Status:
+
+- This is a product architecture decision, not a tooling install request.
+- No Operator browser-tooling change is needed now.
+- The next build implication is to make read-only sync and filing flows expose
+  clearer proof/history/assumption surfaces before expanding to more portfolio
+  systems.
+
 ### Phase 3 - Safe activation for low-risk intents
 
 Activate router for:
