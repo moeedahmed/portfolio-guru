@@ -71,6 +71,13 @@ def default_log_path() -> pathlib.Path:
     return pathlib.Path.home() / ".openclaw" / "data" / "portfolio-guru" / "filing-log.ndjson"
 
 
+def _normalise_portfolio_shape(portfolio_shape: Optional[str]) -> Optional[str]:
+    if portfolio_shape is None:
+        return None
+    value = str(portfolio_shape).strip().lower()
+    return value or None
+
+
 def categorise_outcome(
     status: str,
     error: Optional[str],
@@ -144,6 +151,7 @@ def log_attempt(
     skipped: Optional[Iterable[Any]] = None,
     method: Optional[str] = None,
     verified: Optional[bool] = None,
+    portfolio_shape: Optional[str] = None,
     log_path: Optional[pathlib.Path] = None,
 ) -> Optional[Dict[str, Any]]:
     """Append one filing attempt record. Returns the record (or None on I/O error).
@@ -163,6 +171,7 @@ def log_attempt(
         "form_type": form_type,
         "status": status,
         "category": categorise_outcome(status, error, skipped_list, filled_list),
+        "portfolio_shape": _normalise_portfolio_shape(portfolio_shape),
         "error": str(error) if error is not None else None,
         "filled_count": len(filled_list),
         "skipped": skipped_list,
@@ -223,6 +232,7 @@ def summarise(
     by_status: Dict[str, int] = {}
     by_category: Dict[str, int] = {}
     by_form: Dict[str, int] = {}
+    by_shape: Dict[str, Dict[str, Any]] = {}
     users: set[Any] = set()
     failures: List[Dict[str, Any]] = []
 
@@ -238,6 +248,34 @@ def summarise(
         by_status[status] = by_status.get(status, 0) + 1
         by_category[category] = by_category.get(category, 0) + 1
         by_form[form_type] = by_form.get(form_type, 0) + 1
+        shape = record.get("portfolio_shape") or "unknown"
+        shape_summary = by_shape.setdefault(
+            shape,
+            {
+                "total": 0,
+                "successes": 0,
+                "partials": 0,
+                "failures": 0,
+                "saved": 0,
+                "by_category": {},
+                "skipped": {},
+            },
+        )
+        shape_summary["total"] += 1
+        if status == "success":
+            shape_summary["successes"] += 1
+        elif status == "partial":
+            shape_summary["partials"] += 1
+        else:
+            shape_summary["failures"] += 1
+        if status in ("success", "partial"):
+            shape_summary["saved"] += 1
+        shape_summary["by_category"][category] = (
+            shape_summary["by_category"].get(category, 0) + 1
+        )
+        for skipped_field in record.get("skipped") or []:
+            key = str(skipped_field)
+            shape_summary["skipped"][key] = shape_summary["skipped"].get(key, 0) + 1
         if record.get("user_id") is not None:
             users.add(record["user_id"])
         if status not in ("success",):
@@ -259,6 +297,7 @@ def summarise(
         "by_status": by_status,
         "by_category": by_category,
         "by_form": by_form,
+        "by_shape": by_shape,
         "recent_failures": failures[:recent_failure_limit],
         "synthetic_excluded": synthetic_count if not include_synthetic else 0,
         "synthetic_total": synthetic_count,
@@ -299,6 +338,35 @@ def format_admin_report(summary: Dict[str, Any]) -> str:
         ordered = sorted(summary["by_form"].items(), key=lambda kv: kv[1], reverse=True)
         for form_type, count in ordered[:6]:
             lines.append(f"  • {form_type}: {count}")
+
+    if summary.get("by_shape"):
+        lines.append("")
+        lines.append("Shape outcomes:")
+        ordered = sorted(
+            summary["by_shape"].items(),
+            key=lambda kv: kv[1]["total"],
+            reverse=True,
+        )
+        for shape, shape_summary in ordered[:8]:
+            categories = sorted(
+                shape_summary["by_category"].items(),
+                key=lambda kv: kv[1],
+                reverse=True,
+            )
+            top_category = categories[0][0] if categories else "UNKNOWN"
+            skipped = sorted(
+                shape_summary["skipped"].items(),
+                key=lambda kv: kv[1],
+                reverse=True,
+            )
+            skipped_suffix = f"; skipped: {skipped[0][0]}" if skipped else ""
+            lines.append(
+                f"  • {shape}: {shape_summary['total']} attempt(s), "
+                f"success {shape_summary['successes']}, "
+                f"partial {shape_summary['partials']}, "
+                f"failures {shape_summary['failures']}; top {top_category}"
+                f"{skipped_suffix}"
+            )
 
     if summary["recent_failures"]:
         lines.append("")

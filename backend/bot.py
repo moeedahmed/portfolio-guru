@@ -27,7 +27,7 @@ from models import FormDraft, CBDData
 from whisper import transcribe_voice
 from vision import extract_from_image
 from documents import extract_from_document, is_supported_document
-from profile_store import init_profile_db, store_training_level, get_training_level, get_voice_profile, store_voice_profile, clear_voice_profile, store_curriculum, get_curriculum
+from profile_store import init_profile_db, store_training_level, get_training_level, get_voice_profile, store_voice_profile, clear_voice_profile, store_curriculum, get_curriculum, get_kaizen_role
 from health_models import HealthProfile, HealthDomain, Pathway
 from health_engine import case_history_to_evidence_items, compute_snapshot
 from health_profile_store import get_health_profile, save_health_profile
@@ -2066,6 +2066,11 @@ def _log_filing_attempt(
     can be tested without booting the bot.
     """
     from filing_attempt_log import log_attempt
+    try:
+        portfolio_shape = get_kaizen_role(user_id) or get_training_level(user_id)
+    except Exception:
+        logger.debug("Could not resolve portfolio shape for filing-attempt log", exc_info=True)
+        portfolio_shape = None
     log_attempt(
         user_id=user_id,
         username=username,
@@ -2076,6 +2081,7 @@ def _log_filing_attempt(
         skipped=skipped,
         method=method,
         verified=verified,
+        portfolio_shape=portfolio_shape,
     )
 
 

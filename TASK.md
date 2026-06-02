@@ -1,5 +1,35 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-02 addendum — P1.d slice landed (offline).**
+> Filing Reliability Readiness Sprint §4 P1.d: filing-attempt outcomes are
+> now grouped by internal portfolio shape so the admin report can expose
+> shape-specific partial saves without putting Moeed / Harris / Sana into
+> the product surface. Tester accounts remain fixtures only.
+>
+> Files changed:
+>
+> - `backend/filing_attempt_log.py` — records a PHI-free
+>   `portfolio_shape`, normalised to lowercase, and adds `by_shape` summary
+>   buckets for success, partial, failure, category, and skipped-field
+>   counts. The admin report now includes a `Shape outcomes` section.
+> - `backend/bot.py` — `_log_filing_attempt(...)` resolves the raw Kaizen
+>   role first and falls back to local `training_level`, so Harris's
+>   dual-access fixture can be distinguished from an Intermediate-only user
+>   in internal reliability reporting.
+> - `backend/tests/test_filing_attempt_log.py` — pins SAS stage partial-save
+>   reporting, ACCS / Intermediate / Harris dual-access / HST success
+>   outcomes, portfolio-shape normalisation, and bot wrapper shape capture.
+>
+> Boundary:
+>
+> - Offline-only. No BWS, live Kaizen, CDP/browser session, Telegram
+>   automation, production DB write, deploy, restart, push, or real
+>   submission.
+>
+> Next executable slice: P4.a/P4.b concurrency and idempotency offline
+> proof. P2/P3/P5 remain live/credential-gated and should only run from the
+> foreground operator path.
+
 > **2026-06-02 addendum — P1.c slice landed (offline).**
 > Filing Reliability Readiness Sprint §4 P1.c: recommended-form fallback
 > is now pinned per portfolio shape and no longer falls through to the

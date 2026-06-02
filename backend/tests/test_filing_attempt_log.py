@@ -112,6 +112,7 @@ def test_log_attempt_writes_record_with_expected_shape(log_path):
         skipped=[],
         method="deterministic",
         verified=True,
+        portfolio_shape="hst",
     )
 
     assert record is not None
@@ -124,6 +125,7 @@ def test_log_attempt_writes_record_with_expected_shape(log_path):
     assert parsed["form_type"] == "CBD"
     assert parsed["status"] == "success"
     assert parsed["category"] == "SAVE_SUCCESS"
+    assert parsed["portfolio_shape"] == "hst"
     assert parsed["filled_count"] == 2
     assert parsed["skipped"] == []
     assert parsed["method"] == "deterministic"
@@ -141,6 +143,19 @@ def test_log_attempt_flags_synthetic_user(log_path):
     )
     parsed = json.loads(log_path.read_text().splitlines()[0])
     assert parsed["synthetic"] is True
+
+
+def test_log_attempt_normalises_portfolio_shape(log_path):
+    fal.log_attempt(
+        user_id=12345,
+        username="real_doc",
+        form_type="CBD",
+        status="success",
+        filled=["reflection"],
+        portfolio_shape=" SAS ",
+    )
+    parsed = json.loads(log_path.read_text().splitlines()[0])
+    assert parsed["portfolio_shape"] == "sas"
 
 
 def test_log_attempt_partial_records_skipped_keys(log_path):
@@ -271,6 +286,63 @@ def test_summarise_categories_capture_top_failure_modes(log_path):
     assert categories.get("LOGIN_FAILED") == 1
 
 
+def test_summarise_groups_outcomes_by_portfolio_shape(log_path):
+    fal.log_attempt(
+        user_id=101,
+        username="sas_fixture",
+        form_type="CBD",
+        status="partial",
+        filled=["reflection", "clinical_reasoning"],
+        skipped=["stage"],
+        portfolio_shape="sas",
+    )
+    fal.log_attempt(
+        user_id=102,
+        username="accs_fixture",
+        form_type="CBD",
+        status="success",
+        filled=["stage_of_training", "reflection"],
+        skipped=[],
+        portfolio_shape="accs",
+    )
+    fal.log_attempt(
+        user_id=103,
+        username="intermediate_fixture",
+        form_type="CBD",
+        status="success",
+        filled=["stage_of_training", "reflection"],
+        skipped=[],
+        portfolio_shape="intermediate",
+    )
+    fal.log_attempt(
+        user_id=104,
+        username="dual_access_fixture",
+        form_type="CBD",
+        status="success",
+        filled=["stage_of_training", "reflection"],
+        skipped=[],
+        portfolio_shape="accs_intermediate",
+    )
+    fal.log_attempt(
+        user_id=105,
+        username="hst_fixture",
+        form_type="CBD",
+        status="success",
+        filled=["stage_of_training", "reflection", "management"],
+        skipped=[],
+        portfolio_shape="hst",
+    )
+
+    summary = fal.summarise(fal.iter_records())
+    assert summary["by_shape"]["sas"]["partials"] == 1
+    assert summary["by_shape"]["sas"]["by_category"]["PARTIAL_SAVE"] == 1
+    assert summary["by_shape"]["sas"]["skipped"] == {"stage": 1}
+    assert summary["by_shape"]["accs"]["successes"] == 1
+    assert summary["by_shape"]["intermediate"]["successes"] == 1
+    assert summary["by_shape"]["accs_intermediate"]["successes"] == 1
+    assert summary["by_shape"]["hst"]["successes"] == 1
+
+
 def test_summarise_recent_failures_are_newest_first_and_capped(log_path):
     # Write seven failures in order; expect at most 5 in recent_failures,
     # newest first.
@@ -319,6 +391,83 @@ def test_format_admin_report_includes_counts_categories_and_recent(log_path):
     assert "CBD" in report
     assert "Recent failures:" in report
     assert "Excluded 2 synthetic" in report
+
+
+def test_format_admin_report_surfaces_shape_specific_partial_stage(log_path):
+    fal.log_attempt(
+        user_id=101,
+        username="sas_fixture",
+        form_type="CBD",
+        status="partial",
+        filled=["reflection", "clinical_reasoning"],
+        skipped=["stage"],
+        portfolio_shape="sas",
+    )
+    fal.log_attempt(
+        user_id=102,
+        username="accs_fixture",
+        form_type="CBD",
+        status="success",
+        filled=["stage_of_training", "reflection"],
+        skipped=[],
+        portfolio_shape="accs",
+    )
+
+    report = fal.format_admin_report(fal.summarise(fal.iter_records()))
+    assert "Shape outcomes:" in report
+    assert "sas:" in report
+    assert "top PARTIAL_SAVE" in report
+    assert "skipped: stage" in report
+    assert "accs:" in report
+    assert "top SAVE_SUCCESS" in report
+
+
+def test_bot_log_wrapper_uses_raw_kaizen_role_for_portfolio_shape(monkeypatch):
+    import bot as bot_module
+
+    captured = {}
+
+    def fake_log_attempt(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(bot_module, "get_kaizen_role", lambda user_id: "accs_intermediate")
+    monkeypatch.setattr(bot_module, "get_training_level", lambda user_id: "INTERMEDIATE")
+    monkeypatch.setattr("filing_attempt_log.log_attempt", fake_log_attempt)
+
+    bot_module._log_filing_attempt(
+        user_id=123,
+        username="dual_access_fixture",
+        form_type="CBD",
+        status="success",
+        filled=["stage_of_training"],
+        skipped=[],
+    )
+
+    assert captured["portfolio_shape"] == "accs_intermediate"
+
+
+def test_bot_log_wrapper_falls_back_to_training_level_when_raw_role_missing(monkeypatch):
+    import bot as bot_module
+
+    captured = {}
+
+    def fake_log_attempt(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(bot_module, "get_kaizen_role", lambda user_id: None)
+    monkeypatch.setattr(bot_module, "get_training_level", lambda user_id: "SAS")
+    monkeypatch.setattr("filing_attempt_log.log_attempt", fake_log_attempt)
+
+    bot_module._log_filing_attempt(
+        user_id=124,
+        username="sas_fixture",
+        form_type="CBD",
+        status="partial",
+        filled=["reflection"],
+        skipped=["stage"],
+    )
+
+    assert captured["portfolio_shape"] == "SAS"
 
 
 def test_build_report_reads_default_log_path(log_path):
