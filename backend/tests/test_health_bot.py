@@ -181,13 +181,17 @@ async def test_cesr_health_output_uses_deterministic_engine_without_llm(monkeypa
     )
 
     text = sent["text"]
-    assert "*Portfolio Health — CESR*" in text
-    assert "Health score:" in text
-    assert "Domain coverage:" in text
-    assert "Gap summary:" in text
-    assert "Next actions:" in text
-    assert "WPBA count: 2" in text
-    assert "CESR requires 36 WPBAs minimum" in text
+    assert "*Portfolio Health — CESR / Portfolio Pathway*" in text
+    assert "Long-term CESR readiness:" in text
+    assert "WPBA progress toward 36" in text
+    assert "2/36" in text
+    assert "DOPS 1/12" in text
+    assert "Mini-CEX 0/12" in text
+    assert "CBD 1/12" in text
+    assert "This year's evidence plan" in text
+    assert "5-year evidence window" in text
+    assert "Evidence window:" in text
+    assert "ARCP" not in text
     analysis.assert_not_called()
 
 
@@ -279,11 +283,11 @@ async def test_arcp_health_falls_back_to_deterministic_output_when_llm_fails(mon
     )
 
     text = sent["text"]
-    assert "*Portfolio Health — ARCP*" in text
+    assert "*Portfolio Health — Training (CCT) ARCP readiness*" in text
     assert "AI ARCP narrative is temporarily unavailable" in text
     assert "ARCP risk:" in text
     assert "Why:" in text
-    assert "Next 3 actions" in text
+    assert "Next 3 urgent filing actions before ARCP" in text
     assert "Already strong" in text
     assert "Missing domains" in text
     assert "Domain coverage:" not in text
@@ -331,16 +335,18 @@ async def test_arcp_health_output_prioritises_action_plan_when_llm_succeeds(monk
     )
 
     text = sent["text"]
-    assert "*Portfolio Health — ARCP*" in text
+    assert "*Portfolio Health — Training (CCT) ARCP readiness*" in text
     assert "ARCP risk:" in text
     assert "Why:" in text
-    assert "Next 3 actions" in text
+    assert "Next 3 urgent filing actions before ARCP" in text
     assert "Already strong" in text
     assert "Missing domains" in text
     assert "CPD" in text
     assert "QI" in text
     assert "Form types:" not in text
     assert "Domain coverage:" not in text
+    assert "CESR" not in text
+    assert "yearly" not in text.lower()
 
 
 # ── _pathway_for_detected_role / _autoset_health_pathway_from_role ───────────
@@ -509,3 +515,105 @@ async def test_setup_password_does_not_force_pathway_for_ambiguous_roles(
     # falls back to the default ARCP view and the manual /pathway selector
     # stays authoritative for the user to choose.
     assert isolated_health_store.get_health_profile(8200) is None
+
+
+# ── ARCP vs CESR pathway-aware output divergence ─────────────────────────────
+
+
+def _history_for_user(user_id: int) -> list[dict]:
+    return [
+        {"form_type": "CBD", "filed_at": "2026-05-01 09:00:00", "status": "filed", "telegram_user_id": user_id},
+        {"form_type": "DOPS", "filed_at": "2026-05-02 09:00:00", "status": "filed", "telegram_user_id": user_id},
+        {"form_type": "MINI_CEX", "filed_at": "2026-05-03 09:00:00", "status": "filed", "telegram_user_id": user_id},
+    ]
+
+
+async def _run_health_capture(monkeypatch, user_id: int, pathway: Pathway) -> str:
+    import sys
+    import bot
+
+    history = _history_for_user(user_id)
+
+    async def generate_health_chart_async(_user_id):
+        return None
+
+    monkeypatch.setitem(
+        sys.modules,
+        "portfolio_chart",
+        SimpleNamespace(generate_health_chart_async=generate_health_chart_async),
+    )
+    monkeypatch.setattr(bot, "get_health_profile", lambda _user_id: _profile(user_id, pathway))
+    monkeypatch.setattr(bot, "get_training_level", lambda _user_id: "ST6")
+    monkeypatch.setattr(bot, "get_case_history", AsyncMock(return_value=history))
+    monkeypatch.setattr(
+        bot,
+        "analyse_portfolio_health",
+        AsyncMock(return_value={"suggestions": ["Book a supervisor review"]}),
+    )
+
+    sent: dict[str, str] = {}
+
+    await bot._run_health_analysis(
+        user_id=user_id,
+        chat=SimpleNamespace(send_action=AsyncMock()),
+        send_progress=AsyncMock(),
+        send_result=AsyncMock(side_effect=lambda text, reply_markup: sent.setdefault("text", text)),
+        send_photo_fn=AsyncMock(),
+        fail_fn=AsyncMock(),
+    )
+    return sent["text"]
+
+
+@pytest.mark.asyncio
+async def test_arcp_and_cesr_pathway_outputs_diverge_in_lead_framing(monkeypatch):
+    """Same evidence, different pathway. The lead framing must diverge:
+    ARCP leads with ARCP risk and the next 3 urgent filing actions; CESR
+    leads with long-term readiness and a yearly evidence plan.
+    """
+    arcp_text = await _run_health_capture(monkeypatch, 6001, Pathway.training_arcp)
+    cesr_text = await _run_health_capture(monkeypatch, 6002, Pathway.cesr_portfolio)
+
+    # ARCP framing
+    assert "Training (CCT) ARCP readiness" in arcp_text
+    assert "ARCP risk:" in arcp_text
+    assert "Next 3 urgent filing actions before ARCP" in arcp_text
+    # ARCP must NOT carry CESR / yearly-plan framing
+    assert "CESR" not in arcp_text
+    assert "this year" not in arcp_text.lower()
+    assert "5-year" not in arcp_text.lower()
+    assert "yearly" not in arcp_text.lower()
+
+    # CESR framing
+    assert "CESR / Portfolio Pathway" in cesr_text
+    assert "Long-term CESR readiness:" in cesr_text
+    assert "This year's evidence plan" in cesr_text
+    assert "WPBA progress toward 36" in cesr_text
+    assert "5-year evidence window" in cesr_text
+    # CESR must NOT carry ARCP-deadline framing
+    assert "ARCP risk" not in cesr_text
+    assert "next ARCP" not in cesr_text.lower()
+    assert "before ARCP" not in cesr_text
+    assert "ARCP" not in cesr_text
+
+
+@pytest.mark.asyncio
+async def test_cesr_message_contains_long_term_and_domain_balance(monkeypatch):
+    cesr_text = await _run_health_capture(monkeypatch, 6003, Pathway.cesr_portfolio)
+
+    assert "Domain balance" in cesr_text
+    assert "Missing domains" in cesr_text
+    assert "consultant report" in cesr_text.lower()
+    # Long-term framing wording
+    assert "multi-year" in cesr_text or "long-term" in cesr_text.lower()
+    # Evidence-window framing present
+    assert "Evidence window:" in cesr_text
+
+
+def test_health_paywall_copy_is_pathway_neutral():
+    """The /health paywall must not promise ARCP-only analysis."""
+    import inspect
+    import bot
+
+    src = inspect.getsource(bot.health_command)
+    assert "monthly ARCP readiness analysis" not in src
+    assert ("CESR" in src) or ("portfolio readiness" in src.lower())

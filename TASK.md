@@ -1,5 +1,31 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-02 addendum — pathway-aware Portfolio Health output.**
+> Product decision: `/health` must clearly diverge by pathway. CCT/Training
+> users see a Training (CCT) ARCP readiness brief with risk, why, and the
+> next 3 urgent filing actions before ARCP. CESR / Portfolio Pathway users
+> see a long-term evidence plan: 36-WPBA progress with DOPS/Mini-CEX/CBD
+> breakdown, this year's 3–12 month evidence actions, domain balance,
+> missing domains, and a 5-year evidence-window framing — no ARCP-deadline
+> language. The chart image stays secondary. The /health paywall is now
+> pathway-neutral instead of promising only ARCP analysis.
+>
+> Verification:
+>
+> - Focused: `cd backend && venv/bin/python -m pytest tests/test_health_bot.py tests/test_health_index_integration.py tests/test_health_engine.py -q`
+>   → 72 passed.
+> - Offline gate: `cd backend && venv/bin/python -m pytest tests/ -q --ignore=tests/test_e2e.py --ignore=tests/test_e2e_live.py`
+>   → 907 passed, 13 deselected.
+>
+> Files: `backend/bot.py` (ARCP/CESR formatters + paywall copy),
+> `backend/health_engine.py` (CESR pathway_readiness now carries the
+> DOPS/Mini-CEX/CBD breakdown; CESR next_actions reframed as a yearly /
+> 3–12 month plan), `backend/tests/test_health_bot.py` (new
+> ARCP-vs-CESR divergence tests + paywall copy guard), and
+> `backend/tests/test_health_index_integration.py` (title and progress
+> assertions updated for the new copy). No live bot restart, deploy, or
+> push.
+
 > **2026-06-01 addendum — settings wording and stale sync status.**
 > Product decision: `/settings` should read like a product surface, not an
 > internal maintenance panel. Updated the voice-profile wording to

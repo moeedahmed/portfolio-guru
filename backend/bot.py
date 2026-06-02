@@ -4942,7 +4942,9 @@ async def _run_health_analysis(
     await chat.send_action(constants.ChatAction.TYPING)
 
     profile = _get_or_default_health_profile(user_id)
-    pathway_label = "CESR" if profile.pathway == Pathway.cesr_portfolio else "ARCP"
+    is_cesr = profile.pathway == Pathway.cesr_portfolio
+    pathway_label = "CESR / Portfolio Pathway" if is_cesr else "Training (CCT) ARCP readiness"
+    empty_state_label = "CESR / Portfolio Pathway" if is_cesr else "ARCP"
 
     training_level = get_training_level(user_id)
     if not training_level:
@@ -4955,7 +4957,7 @@ async def _run_health_analysis(
     if not evidence_items:
         await send_result(
             f"📊 *Portfolio Health — {pathway_label}*\n\n"
-            f"No cases filed yet. Start filing cases and come back to check your {pathway_label} readiness.\n\n"
+            f"No cases filed yet. Start filing cases and come back to check your {empty_state_label} readiness.\n\n"
             "Tip: Send a clinical case to get started.",
             None,
         )
@@ -5199,7 +5201,7 @@ def _format_arcp_action_plan_message(
     missing = _missing_domain_labels(snapshot)
 
     lines = [
-        "📊 *Portfolio Health — ARCP*",
+        "📊 *Portfolio Health — Training (CCT) ARCP readiness*",
         month_label,
         "",
     ]
@@ -5210,7 +5212,7 @@ def _format_arcp_action_plan_message(
         f"*ARCP risk:* {risk}",
         f"*Why:* {reason}",
         "",
-        "*Next 3 actions*",
+        "*Next 3 urgent filing actions before ARCP*",
         _numbered_list(actions),
         "",
         "*Already strong*",
@@ -5301,20 +5303,102 @@ def _dedupe_text(values: list[str]) -> list[str]:
 
 
 def _format_cesr_health_message(snapshot, history: list[dict], month_label: str) -> str:
-    gaps = snapshot.gap_summary or ["No major gaps"]
+    gaps = snapshot.gap_summary or ["No major gaps yet"]
     actions = snapshot.next_actions or ["Keep adding recent evidence"]
-    wpba_count = snapshot.pathway_readiness.get("wpba_count", _wpba_count_from_history(history))
-    return (
-        f"📊 *Portfolio Health — CESR*\n"
-        f"{month_label}\n\n"
-        f"Health score: {_health_score_label(snapshot.health_score)}\n"
-        f"WPBA count: {wpba_count}\n"
-        f"Domain coverage: {_format_domain_counts(snapshot.domain_counts)}\n\n"
-        f"⚠️ *Gap summary:*\n{_bullet_list(gaps)}\n\n"
-        f"💡 *Next actions:*\n{_bullet_list(actions)}\n\n"
-        "CESR requires 36 WPBAs minimum (12 DOPS, 12 Mini-CEX, 12 CBD). "
-        "Evidence should be within 5 years."
-    )
+    readiness_label = _cesr_readiness_label(snapshot.health_score)
+    readiness_reason = _cesr_readiness_reason(snapshot)
+    history_breakdown = _cesr_wpba_breakdown(history)
+    snapshot_breakdown = snapshot.pathway_readiness.get("wpba_breakdown") or {}
+    wpba_breakdown = {
+        "dops": snapshot_breakdown.get("dops", history_breakdown["dops"]),
+        "mini_cex": snapshot_breakdown.get("mini_cex", history_breakdown["mini_cex"]),
+        "cbd": snapshot_breakdown.get("cbd", history_breakdown["cbd"]),
+    }
+    wpba_count = snapshot.pathway_readiness.get("wpba_count", history_breakdown["total"])
+    recent_count = snapshot.pathway_readiness.get("recent_evidence_count", 0)
+    missing = _missing_domain_labels(snapshot)
+
+    lines = [
+        "📊 *Portfolio Health — CESR / Portfolio Pathway*",
+        month_label,
+        "",
+        f"*Long-term CESR readiness:* {readiness_label}",
+        f"*Why:* {readiness_reason}",
+        "",
+        f"*WPBA progress toward 36:* {wpba_count}/36 "
+        f"(DOPS {wpba_breakdown['dops']}/12 · "
+        f"Mini-CEX {wpba_breakdown['mini_cex']}/12 · "
+        f"CBD {wpba_breakdown['cbd']}/12)",
+        f"*Evidence window:* {recent_count} item(s) within the last year; "
+        "CESR weighs evidence from the last 5 years.",
+        "",
+        "*This year's evidence plan (next 3–12 months)*",
+        _numbered_list(actions[:5]),
+        "",
+        "*Domain balance*",
+        _format_domain_counts(snapshot.domain_counts),
+        "",
+        "*Missing domains*",
+        " · ".join(missing) if missing else "None obvious from current evidence",
+        "",
+        "*Evidence gaps to close before applying*",
+        _bullet_list(gaps),
+        "",
+        "Target: 36 WPBAs (12 DOPS · 12 Mini-CEX · 12 CBD) plus structured "
+        "consultant reports, CPD, and SLO/CiP-level coverage within the 5-year "
+        "evidence window. Build this as a multi-year portfolio, not an annual deadline.",
+    ]
+    return "\n".join(lines)
+
+
+def _cesr_readiness_label(score) -> str:
+    value = getattr(score, "value", str(score))
+    labels = {
+        "green": "🟢 On track for application",
+        "amber": "🟡 Building toward application",
+        "red": "🔴 Early — significant evidence still to gather",
+        "grey": "⚪ Not enough evidence yet to judge readiness",
+    }
+    return labels.get(value, value.title())
+
+
+def _cesr_readiness_reason(snapshot) -> str:
+    missing = _missing_domain_labels(snapshot)
+    strong = _strong_domain_labels(snapshot)
+    if missing and strong:
+        return (
+            f"evidence is present in {_plain_join(strong)}, but "
+            f"{_plain_join(missing)} still need to be built up over the "
+            "next 12 months."
+        )
+    if missing:
+        return (
+            f"{_plain_join(missing)} evidence is missing — plan to build "
+            "these domains across the year."
+        )
+    if strong:
+        return (
+            f"evidence covers {_plain_join(strong)}; keep it current within "
+            "the 5-year window and add structured consultant reports."
+        )
+    return "no portfolio evidence is visible yet — start a long-term evidence plan."
+
+
+_WPBA_BREAKDOWN_FORMS = {
+    "dops": {"DOPS"},
+    "mini_cex": {"MINI_CEX"},
+    "cbd": {"CBD"},
+}
+
+
+def _cesr_wpba_breakdown(history: list[dict]) -> dict[str, int]:
+    counts = {"total": _wpba_count_from_history(history), "dops": 0, "mini_cex": 0, "cbd": 0}
+    for record in history:
+        form_type = str(record.get("form_type", "")).strip().upper()
+        for key, members in _WPBA_BREAKDOWN_FORMS.items():
+            if form_type in members:
+                counts[key] += 1
+    return counts
 
 
 def _format_arcp_deterministic_health_message(
@@ -5370,7 +5454,8 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not await _health_gate_check(user_id):
         await update.message.reply_text(
             "📊 Portfolio Health is included in Portfolio Guru Unlimited.\n\n"
-            "Upgrade to get monthly ARCP readiness analysis.",
+            "Upgrade to get monthly portfolio readiness analysis tailored to "
+            "your training (ARCP) or CESR / Portfolio Pathway view.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
             ]),

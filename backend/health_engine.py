@@ -167,8 +167,9 @@ def compute_next_actions(items: list[EvidenceItem], pathway: Pathway) -> list[st
         actions.append("File a CBD from a recent supervised case")
         actions.append("Add evidence before your next ARCP review")
     else:
-        actions.append("Add recent DOPS, Mini-CEX, and CBD evidence toward the 36-WPBA CESR target")
-        actions.append("Upload recent CPD or consultant report evidence for CESR review")
+        actions.append("This year: build toward 12 DOPS, 12 Mini-CEX, and 12 CBD entries for CESR")
+        actions.append("Over the next 3–12 months: add structured consultant reports and CPD for CESR")
+        actions.append("Plan teaching, audit, and reflection evidence across the year to balance CESR domains")
 
     return _dedupe(actions)[:5]
 
@@ -260,9 +261,18 @@ def _compute_pathway_readiness(items: list[EvidenceItem], pathway: Pathway) -> d
             "recent_evidence_count": len(recent_items),
         }
 
+    dops_count = sum(1 for item in wpba_items if item.form_type == "DOPS")
+    mini_cex_count = sum(1 for item in wpba_items if item.form_type == "MINI_CEX")
+    cbd_count = sum(1 for item in wpba_items if item.form_type == "CBD")
+
     return {
         "pathway": pathway.value,
         "wpba_count": len(wpba_items),
         "wpba_target": 36,
+        "wpba_breakdown": {
+            "dops": dops_count,
+            "mini_cex": mini_cex_count,
+            "cbd": cbd_count,
+        },
         "recent_evidence_count": len(recent_items),
     }

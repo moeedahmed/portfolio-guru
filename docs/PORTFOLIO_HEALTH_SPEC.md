@@ -1,7 +1,7 @@
 # Portfolio Health + Pathway Guidance — Product Spec v2
 
 **Status:** Product spec. Replaces the narrower ARCP Health design (now superseded).
-**Last updated:** 2026-06-01
+**Last updated:** 2026-06-02
 **Supersedes:** `docs/ARCP_HEALTH_DESIGN.md` — retained as historical design artefact.
 
 ---
@@ -322,9 +322,14 @@ next_actions              3–5 concrete suggested actions
 ### Phase 2 — Refactor existing `/health`
 
 - [ ] Extract the current hardcoded RCEM SLO/KC chart behind a pathway gate
-- [ ] Add pathway selector: Training (ARCP) / CESR / Portfolio Pathway
-- [ ] ARCP view: existing KC radar + minimum-count trackers
-- [ ] CESR view: SLO/CiP-level coverage (not KC-level), 36-WPBA tracker, 5-year evidence age warnings
+- [x] Add pathway selector: Training (ARCP) / CESR / Portfolio Pathway
+- [x] ARCP view: Training (CCT) ARCP readiness brief — ARCP risk, why, next
+      3 urgent filing actions, strong/missing domains (KC radar + counts
+      still pending)
+- [x] CESR view: long-term Portfolio Pathway evidence plan — 36-WPBA
+      tracker with DOPS/Mini-CEX/CBD breakdown, 3–12 month yearly action
+      plan, domain balance, 5-year evidence-window framing (full SLO/CiP
+      mapping still pending)
 - [ ] Auto-populate from the Kaizen Portfolio Index (read-only sync) as the
       primary source; fall back to existing PG filing activity
       (`usage` / `case_archive`) when no index run is present yet, and to

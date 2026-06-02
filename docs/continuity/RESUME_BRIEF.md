@@ -1,12 +1,12 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-06-01T15:50:00+00:00
-Status: stale_or_needs_review
+Generated: 2026-06-02T04:02:16+00:00
+Status: ready
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
-- Branch: fix/mlx-whisper-transcription
-- Last commit: 3dd87c0 2026-06-01 chore: add .codegraph/ to gitignore
+- Branch: main
+- Last commit: 84fed67 2026-06-01 fix: make portfolio health actionable
 - Uncommitted changes: no
 
 ## Immediate read before restarting
@@ -15,39 +15,38 @@ Status: stale_or_needs_review
 3. `TASK.md` for active sprint state, if present
 4. This resume brief for drift warnings and repo state
 
-## Warnings
-- AGENTS.md missing practical coding-agent sections: dev/test commands
-
 ## Practical AGENTS.md check
-- Useful for coding-agent/ACP work: no
-- Missing: dev/test commands
+- Useful for coding-agent/ACP work: yes
+- No missing practical sections
 
 ## Recent commits
-- 3dd87c0 2026-06-01 chore: add .codegraph/ to gitignore
-- cd17c50 2026-06-01 feat: reuse Kaizen login for portfolio sync
-- ffc2e23 2026-06-01 docs: record Kaizen live smoke auth boundary
-- 95accf5 2026-06-01 feat: add read-only Kaizen sync driver
-- d855af8 2026-06-01 feat: add Kaizen portfolio index substrate
-- 7dee776 2026-06-01 docs: add Kaizen mapping sprint plan
-- 6d21f06 2026-06-01 fix: title-case portfolio profile labels
-- bed11ac 2026-06-01 fix: simplify portfolio setting label
+- 84fed67 2026-06-01 fix: make portfolio health actionable
+- ad1865d 2026-06-01 fix: polish settings sync status
+- 70640ec 2026-06-01 docs: record filing reliability report context
+- f12e5d1 2026-06-01 feat: add filing reliability report
+- b2f2be4 2026-06-01 fix: hide manual Kaizen sync from settings
+- 006ad0d 2026-06-01 ci: update GitHub actions for Node 24
+- 070307c 2026-06-01 feat: make portfolio health the primary settings action
+- fd91bb9 2026-06-01 fix: keep portfolio health fast
 
 ## Repo context snapshot
-### AGENTS.md — present, 2 days old
+### AGENTS.md — present, 0 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
 - ## Current State
+- ## Dev / Test Commands
 - ## Filing Routing Discipline
 - ## Key Known Failure Modes
 - ## Safety
 - ## Supported Forms
 
-### CLAUDE.md — present, 2 days old
+### CLAUDE.md — present, 0 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
 - ## Current State
+- ## Dev / Test Commands
 - ## Filing Routing Discipline
 - ## Key Known Failure Modes
 - ## Safety
@@ -68,7 +67,7 @@ Key headings:
 - ## UX Polish Slice — Post-Filed Buttons (2026-05-26)
 - # 539 passed, 22 skipped, 13 deselected, 3 snapshots passed
 
-### WORKFLOWS.md — present, 2 days old
+### WORKFLOWS.md — present, 3 days old
 Key headings:
 - # Portfolio Guru — Agent Workflow Reference
 - ## Conversation States
@@ -84,6 +83,6 @@ Key headings:
 - ## Data Flow
 
 ## Recommended restart path
-Refresh the product hub/Brief and repo context before a new build sprint.
+Continuity context looks sufficient; proceed with normal product-docs workflow.
 
 If this product has been idle for weeks, do not start implementation from memory. Refresh the product hub Status/Brief first, then create or update `TASK.md` for the next sprint.
