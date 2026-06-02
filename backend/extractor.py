@@ -1134,6 +1134,62 @@ Rules for image-derived input:
 """
 
 
+def _has_qi_project_signal(case_description: str) -> bool:
+    """Detect QI/audit project descriptions that should prefer QIAT.
+
+    Teaching can be one intervention inside a QI project. In that case the
+    portfolio evidence is the audit/QI cycle, not the act of teaching.
+    """
+    text = f" {case_description or ''} ".lower()
+    qi_anchors = (
+        "quality improvement", "qi project", "qip", "audit", "re-audit",
+        "reaudit", "pdsa", "plan-do-study-act", "service improvement",
+    )
+    measurement_signals = (
+        "baseline", "baseline audit", "data collection", "collected data",
+        "measured", "measurement", "compliance", "adherence", "run chart",
+        "re-audit", "reaudit", "post-intervention", "post intervention",
+    )
+    change_signals = (
+        "intervention", "implemented", "introduced", "improved", "change cycle",
+        "education intervention", "teaching intervention", "checklist",
+        "pathway", "guideline", "poster", "feedback cycle",
+    )
+    antibiotic_qi_signals = (
+        "antibiotic use", "antibiotic prescribing", "antibiotic stewardship",
+        "antimicrobial stewardship",
+    )
+    has_anchor = any(term in text for term in qi_anchors)
+    has_measurement = any(term in text for term in measurement_signals)
+    has_change = any(term in text for term in change_signals)
+    has_antibiotic_qi = any(term in text for term in antibiotic_qi_signals)
+    return (has_anchor and (has_measurement or has_change)) or (
+        has_antibiotic_qi and has_measurement and has_change
+    )
+
+
+def _prefer_qiat_for_qi_project(
+    recommendations: list[FormTypeRecommendation],
+    case_description: str,
+) -> list[FormTypeRecommendation]:
+    if not _has_qi_project_signal(case_description):
+        return recommendations
+
+    qiat_rationale = (
+        "QI/audit project with baseline measurement, intervention and review; "
+        "teaching is an intervention rather than the primary portfolio event."
+    )
+    qiat = next((rec for rec in recommendations if rec.form_type == "QIAT"), None)
+    if qiat is None:
+        qiat = FormTypeRecommendation(
+            form_type="QIAT",
+            rationale=qiat_rationale,
+            uuid=FORM_UUIDS.get("QIAT"),
+        )
+    remaining = [rec for rec in recommendations if rec.form_type != "QIAT"]
+    return [qiat] + remaining[:2]
+
+
 async def recommend_form_types(case_description: str, input_source: str = "text") -> List[FormTypeRecommendation]:
     """Recommend applicable WPBA form types based on case description.
 
@@ -1369,6 +1425,9 @@ MGMT_* (Management Portfolio forms — Rota, Complaint, Critical Incident, Risk,
 
 6. For teaching: distinguish between STAT (formal, observed, assessor evaluating teaching),
    TEACH (informal/bedside, no formal observation needed), and EDU_ACT (trainee was the learner).
+   Teaching forms should only win when the main event is delivering a teaching session with
+   learner/observer feedback. If teaching was an intervention inside an audit/QI project
+   (baseline measurement, change, re-measurement), QIAT is the primary form.
 
 7. Reflection signals — if the description contains ANY of these, include REFLECT_LOG in suggestions:
    - "I learned", "I realise", "I now know", "I would do differently", "fixation bias", "cognitive bias",
@@ -1414,6 +1473,7 @@ MGMT_* (Management Portfolio forms — Rota, Complaint, Critical Incident, Risk,
         recommendations = enforce_image_recommendation_grounding(
             recommendations, case_description
         )
+    recommendations = _prefer_qiat_for_qi_project(recommendations, case_description)
 
     return recommendations
 

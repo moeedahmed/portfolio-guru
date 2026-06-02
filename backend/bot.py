@@ -2200,7 +2200,6 @@ def _build_category_picker_keyboard(user_id):
             row = []
     if row:
         rows.append(row)
-    rows.append([InlineKeyboardButton("🔍 Search by name", callback_data="FORM|search")])
     rows.append([InlineKeyboardButton("⬅️ Back", callback_data="FORM|back")])
     return InlineKeyboardMarkup(rows)
 
