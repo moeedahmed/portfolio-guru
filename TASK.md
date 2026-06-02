@@ -1,5 +1,33 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-02 addendum — P1.c slice landed (offline).**
+> Filing Reliability Readiness Sprint §4 P1.c: recommended-form fallback
+> is now pinned per portfolio shape and no longer falls through to the
+> legacy `ST5` / HST superset for SAS, CESR, unknown, or empty profile
+> buckets. Moeed / Harris / Sana remain trusted test fixtures only; these
+> names and special account shapes are not product-facing app concepts.
+>
+> Files changed:
+>
+> - `backend/bot.py` — added `_allowed_forms_for_training_level(...)` as the
+>   single helper for saved-profile → allowed-form catalogue. The three
+>   recommender call sites plus the "See all forms" allowed-list path now
+>   use this helper instead of inline fallbacks.
+> - `backend/tests/test_form_recommender_per_shape.py` (new) — offline pins
+>   for HST, ACCS-only, Intermediate-only, Harris dual-access storage alias,
+>   SAS / CESR, and unknown/empty training levels. ACCS and Intermediate
+>   stay distinct test ids even though they currently share the ST3 catalogue.
+>
+> Boundary:
+>
+> - Offline-only. No BWS, live Kaizen, CDP/browser session, Telegram
+>   automation, production DB write, deploy, restart, push, or real
+>   submission.
+>
+> Next executable slice: P1.d (partial-save / outcome categorisation by
+>   shape) — still offline-only unless the sprint gate explicitly reaches
+>   a live-smoke phase.
+
 > **2026-06-02 addendum — P1.b slice landed (offline).**
 > Filing Reliability Readiness Sprint §4 P1.b: per-shape detected-role →
 > `training_level` mapping. Offline-only, no live Kaizen, no CDP, no BWS,

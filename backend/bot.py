@@ -1238,7 +1238,7 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
         if not recommendations:
             try:
                 training_level = get_training_level(user_id)
-                allowed_forms = TRAINING_LEVEL_FORMS.get(training_level, TRAINING_LEVEL_FORMS["ST5"]) if training_level else TRAINING_LEVEL_FORMS["ST5"]
+                allowed_forms = _allowed_forms_for_training_level(training_level)
                 recommendations = await asyncio.wait_for(
                     recommend_form_types(
                         case_text,
@@ -1463,6 +1463,22 @@ def _default_allowed_forms_for_unknown_training() -> list[str]:
                 seen.add(form)
                 forms.append(form)
     return forms
+
+
+def _allowed_forms_for_training_level(training_level: str | None) -> list[str]:
+    """Return the allowed-form catalogue for a saved ``training_level``.
+
+    SAS / CESR and unknown levels fall through to the union of every level's
+    catalogue (``_default_allowed_forms_for_unknown_training``), not to the
+    ST5/HST superset. This is the SAS-safe contract pinned by
+    ``tests/test_form_recommender_per_shape.py``.
+    """
+    if not training_level:
+        return _default_allowed_forms_for_unknown_training()
+    forms = TRAINING_LEVEL_FORMS.get(training_level)
+    if forms is None:
+        return _default_allowed_forms_for_unknown_training()
+    return list(forms)
 
 # Category groupings for "See all forms" navigation
 FORM_CATEGORIES = {
@@ -2153,10 +2169,7 @@ def _get_allowed_forms(user_id):
     from extractor import FORM_UUIDS
     training_level = get_training_level(user_id)
     curriculum = get_curriculum(user_id)
-    if training_level:
-        allowed = TRAINING_LEVEL_FORMS.get(training_level, _default_allowed_forms_for_unknown_training())
-    else:
-        allowed = _default_allowed_forms_for_unknown_training()
+    allowed = _allowed_forms_for_training_level(training_level)
     allowed = _filter_forms_by_curriculum(allowed, curriculum)
     # Only include forms that have UUIDs
     return [ft for ft in allowed if FORM_UUIDS.get(ft)]
@@ -5735,7 +5748,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
         return AWAIT_FORM_CHOICE
 
     training_level = get_training_level(user_id)
-    allowed_forms = TRAINING_LEVEL_FORMS.get(training_level, TRAINING_LEVEL_FORMS["ST5"]) if training_level else TRAINING_LEVEL_FORMS["ST5"]
+    allowed_forms = _allowed_forms_for_training_level(training_level)
 
     await message.chat.send_action(constants.ChatAction.TYPING)
     try:
@@ -6411,7 +6424,7 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
 
         try:
             training_level = get_training_level(update.effective_user.id)
-            allowed_forms = TRAINING_LEVEL_FORMS.get(training_level, TRAINING_LEVEL_FORMS["ST5"]) if training_level else TRAINING_LEVEL_FORMS["ST5"]
+            allowed_forms = _allowed_forms_for_training_level(training_level)
             recommendations = await asyncio.wait_for(
                 recommend_form_types(
                     case_text,
