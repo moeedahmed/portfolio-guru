@@ -1019,11 +1019,11 @@ def _gathering_workspace(context) -> CaseWorkspace:
 
 
 def _gathering_done_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[InlineKeyboardButton("✅ Done", callback_data="GATHER|done")]])
+    return InlineKeyboardMarkup([[InlineKeyboardButton("✅ Draft now", callback_data="GATHER|done")]])
 
 
 def _gathering_reply(context) -> tuple[str, InlineKeyboardMarkup]:
-    text = "📥 Captured. Want to add a photo, voice note, or more detail?"
+    text = "📥 Captured. Add anything else before I draft this?"
     return text, _gathering_done_keyboard()
 
 

@@ -113,7 +113,8 @@ async def test_gathering_reply_offers_done_button(monkeypatch):
          patch("bot._process_case_text", new=AsyncMock(return_value=AWAIT_FORM_CHOICE)):
         await handle_case_input(update, context)
 
-    assert ("✅ Done", "GATHER|done") in sim.get_last_buttons()
+    assert sim.messages_sent[-1][1] == "📥 Captured. Add anything else before I draft this?"
+    assert sim.get_last_buttons() == [("✅ Draft now", "GATHER|done")]
 
 
 @pytest.mark.asyncio

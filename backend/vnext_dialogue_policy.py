@@ -99,7 +99,7 @@ def next_missing_prompt(workspace: CaseWorkspace) -> str:
 
 def collecting_reply(workspace: CaseWorkspace) -> str:
     """Brief acknowledgement while the user is still sharing information."""
-    return "📥 Captured. Add more or tap Done when ready."
+    return "📥 Captured. Add anything else before I draft this?"
 
 
 def not_ready_reply(workspace: CaseWorkspace) -> str:

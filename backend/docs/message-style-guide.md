@@ -41,21 +41,19 @@
 First capture:
 
 ```
-📥 Captured.
-
-Want to add a photo, voice note, or more detail?
+📥 Captured. Add anything else before I draft this?
 ```
 
-When user taps ✅ Done, this message is edited in place to the full CAPTURED_ACK
+Button: `✅ Draft now`
+
+When user taps ✅ Draft now, this message is edited in place to the full CAPTURED_ACK
 ("📥 Captured. I'll turn this into portfolio evidence…") and the keyboard is
 removed; the form recommendation arrives as a new message.
 
 After subsequent messages:
 
 ```
-📥 Noted.
-
-Add more or tap Done when ready.
+📥 Noted. Add anything else before I draft this?
 ```
 
 Completion prompt (when user says "done" or taps button):
