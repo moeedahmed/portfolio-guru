@@ -1,5 +1,30 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-02 addendum — P3 Moeed/HST Telegram bot-path smoke passed and cleaned up.**
+> Scope: real user-flow smoke after the stale-session fix: Moeed manually
+> resent the synthetic HST CBD case to Portfolio Guru, reviewed the CBD draft
+> preview, and tapped Save as draft. No Telegram automation was used.
+>
+> Result:
+>
+> - Bot-path save succeeded: Telegram showed the Kaizen draft saved state with
+>   7 completed fields.
+> - Kaizen verification found exactly one saved CBD draft dated 2 Jun 2026.
+> - Opened event `8f801d70-e409-47fb-95f1-e171b35179fc` was `DRAFT PRIVATE`
+>   and contained the synthetic STEMI/PPCI/closed-loop communication case.
+> - Cleanup deleted only that event ID after the private-draft and case-marker
+>   checks passed.
+> - Post-cleanup Kaizen activities check showed Saved drafts empty: "There are
+>   no items available."
+>
+> Boundary: no submit, sign, send, approve, reject, deploy, push, production
+> DB write, or automated Telegram drive-by. Local bot restart was performed
+> only to load the already-tested stale-session fix.
+>
+> Production-readiness interpretation: Moeed/HST now has both required proofs:
+> direct deterministic Kaizen CBD filing and actual Telegram bot-path draft
+> save, each verified in Kaizen and cleaned up.
+>
 > **2026-06-02 addendum — P3 Moeed/HST Telegram bot-path save failure fixed locally.**
 > Scope: first real user-flow smoke after the direct Kaizen draft smoke:
 > Moeed manually sent the synthetic HST CBD case to Portfolio Guru, selected
@@ -34,12 +59,10 @@
 > - Filing-focused suites: `73 passed, 1 warning` and `22 passed, 1 warning`.
 > - Full offline backend gate: `998 passed, 13 deselected, 3 snapshots passed`.
 >
-> Boundary: local source fix only. No submit, sign, send, approve, reject,
-> deploy, restart, push, production DB write, Telegram automation, or live
-> retry after the fix yet.
->
-> Next executable gate: restart the local Portfolio Guru bot only after explicit
-> runtime approval, then repeat the same Moeed/HST bot-path smoke once.
+> Boundary at the time of the fix: local source fix only. No submit, sign,
+> send, approve, reject, deploy, restart, push, production DB write, Telegram
+> automation, or live retry had happened yet. Superseded by the later passed
+> bot-path smoke above.
 
 > **2026-06-02 addendum — P3 Moeed/HST direct Kaizen draft smoke passed and cleaned up.**
 > Scope: first controlled live smoke for the approved Moeed/HST fixture, CBD
