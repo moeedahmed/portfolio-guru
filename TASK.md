@@ -1,5 +1,30 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-02 addendum — P3 Moeed/HST direct Kaizen draft smoke passed and cleaned up.**
+> Scope: first controlled live smoke for the approved Moeed/HST fixture, CBD
+> form only, direct deterministic Kaizen filing path only. This was not the
+> Telegram bot-path smoke.
+>
+> Result:
+>
+> - Local smoke branch: `smoke/moeed-hst-draft-only-20260602`.
+> - Preflight gate: `995 passed, 9 deselected, 3 snapshots passed`.
+> - Live direct filing: one synthetic CBD draft saved to Kaizen with a unique
+>   `INTEGRATION TEST — DO NOT USE` run marker.
+> - Cleanup: the default marker cleanup helper initially refused because the
+>   persistent CDP profile was at the Kaizen auth screen and could not see the
+>   draft marker. Cleanup then re-authenticated with the same Moeed fixture,
+>   verified the exact run marker, event id, private-draft state, and visible
+>   delete control, then deleted that single draft.
+> - No submit, sign, send, approve, reject, deploy, restart, push, production
+>   DB write, or Telegram automation.
+>
+> Production-readiness interpretation: this proves the deterministic Kaizen
+> CBD filer can create and clean up a real HST draft, but it does **not** yet
+> prove the end-user Telegram path. Next gate is Moeed/HST bot-path smoke via
+> manual Telegram taps against the dev bot: synthetic text case → CBD preview
+> → Save as draft → verify in Kaizen → delete by hand.
+>
 > **2026-06-02 addendum — consolidated Kaizen filing E2E test plan landed (docs + one offline pin).**
 > Orchestrator-commissioned: a single restartable end-to-end testing plan for
 > Kaizen filing across the approved four-account fixture matrix (Moeed/HST,
