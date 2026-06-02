@@ -1288,7 +1288,7 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
 # These are RCEM/Kaizen portfolio buckets, not the user's exact grade/year.
 TRAINING_LEVEL_FORMS = {
     "ST3": [
-        "CBD", "DOPS", "MINI_CEX", "ACAT", "MSF", "PROC_LOG", "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH",
+        "CBD", "DOPS", "MINI_CEX", "ACAT", "MSF", "QIAT", "PROC_LOG", "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH",
         "COMPLAINT", "SERIOUS_INC",
         "REFLECT_LOG", "TEACH_OBS", "ESLE_ASSESS", "TEACH_CONFID", "APPRAISAL", "CLIN_GOV",
         "CRIT_INCIDENT", "AUDIT", "RESEARCH", "EDU_MEETING", "EDU_MEETING_SUPP", "PDP",
@@ -1492,9 +1492,9 @@ def _filter_recommendations_for_allowed_forms(
 ):
     """Filter recommendations and keep QI/audit work from falling into Teaching.
 
-    Intermediate/ST3 portfolios do not expose QIAT. When the extractor has
-    correctly identified a QIAT-style project, prefer the closest allowed
-    audit/governance form before Teaching.
+    Every supported portfolio shape exposes QIAT, so when the extractor has
+    surfaced a QI/audit project but only returned Teaching, promote QIAT to
+    the top of the list.
     """
     excluded = _normalise_form_type(excluded_form)
     allowed = set(allowed_forms)
@@ -1502,38 +1502,25 @@ def _filter_recommendations_for_allowed_forms(
         r for r in recommendations
         if r.form_type in allowed and _normalise_form_type(r.form_type) != excluded
     ]
-    qiat_recommended = any(r.form_type == "QIAT" for r in recommendations)
-    qiat_unavailable = "QIAT" not in allowed
+    qiat_available = "QIAT" in allowed and excluded != "QIAT"
     first_available = filtered[0].form_type if filtered else ""
-    if not (
-        qiat_unavailable
+    if (
+        qiat_available
+        and first_available == "TEACH"
         and _has_qi_project_signal(case_text)
-        and (qiat_recommended or first_available == "TEACH")
+        and not any(r.form_type == "QIAT" for r in filtered)
     ):
-        return filtered
-
-    for fallback in ("AUDIT", "CLIN_GOV"):
-        if fallback not in allowed or _normalise_form_type(fallback) == excluded:
-            continue
-        existing = next((r for r in filtered if r.form_type == fallback), None)
-        if existing:
-            return [
-                existing,
-                *[r for r in filtered if r.form_type != fallback],
-            ]
-        else:
-            return [
-                FormTypeRecommendation(
-                    form_type=fallback,
-                    rationale=(
-                        "QIAT is not available on this portfolio shape; this "
-                        "quality improvement project is better captured as "
-                        f"{_form_display_name(fallback)} than Teaching."
-                    ),
-                    uuid=FORM_UUIDS.get(fallback),
+        return [
+            FormTypeRecommendation(
+                form_type="QIAT",
+                rationale=(
+                    "This is a quality improvement project with audit/re-audit "
+                    "signals; teaching is only an intervention detail."
                 ),
-                *filtered,
-            ]
+                uuid=FORM_UUIDS.get("QIAT"),
+            ),
+            *filtered,
+        ]
     return filtered
 
 # Category groupings for "See all forms" navigation

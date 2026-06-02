@@ -138,7 +138,7 @@ def test_unknown_training_level_uses_fallback_union(level):
     assert allowed != list(TRAINING_LEVEL_FORMS["ST5"])
 
 
-# ─── QIAT fallback must not become Teaching ───────────────────────────────
+# ─── QI/audit projects must not become Teaching ───────────────────────────
 
 
 def _recommendation(form_type: str, rationale: str = "fits"):
@@ -152,9 +152,9 @@ def _recommendation(form_type: str, rationale: str = "fits"):
     )
 
 
-def test_intermediate_qi_audit_project_falls_back_to_audit_not_teaching():
-    """Exact regression: QIAT is unavailable for Intermediate/ST3, but the
-    remaining Teaching recommendation is only an intervention detail.
+def test_intermediate_qi_audit_project_keeps_qiat_as_best_fit():
+    """Exact regression: Intermediate/ST3 exposes QIAT, so do not fall through
+    to Teaching or an Audit workaround.
     """
     from bot import (
         _allowed_forms_for_training_level,
@@ -174,14 +174,14 @@ def test_intermediate_qi_audit_project_falls_back_to_audit_not_teaching():
         QI_AUDIT_SCREENSHOT_TEXT,
     )
 
-    assert filtered[0].form_type == "AUDIT"
+    assert filtered[0].form_type == "QIAT"
     assert filtered[0].uuid
     assert filtered[1].form_type == "TEACH"
 
     keyboard = _build_form_choice_keyboard(filtered)
     best_button = keyboard.inline_keyboard[0][0]
     assert best_button.callback_data == "FORM|best"
-    assert "Use best fit: Audit" in best_button.text
+    assert "Use best fit: QIAT" in best_button.text
     assert "Teaching" not in best_button.text
 
 
@@ -205,7 +205,7 @@ def test_hst_qi_audit_project_keeps_qiat_as_best_fit():
     assert [rec.form_type for rec in filtered[:2]] == ["QIAT", "TEACH"]
 
 
-def test_intermediate_qi_audit_project_with_teaching_only_recommendation_gets_audit():
+def test_intermediate_qi_audit_project_with_teaching_only_recommendation_gets_qiat():
     from bot import (
         _allowed_forms_for_training_level,
         _filter_recommendations_for_allowed_forms,
@@ -217,7 +217,7 @@ def test_intermediate_qi_audit_project_with_teaching_only_recommendation_gets_au
         QI_AUDIT_SCREENSHOT_TEXT,
     )
 
-    assert [rec.form_type for rec in filtered[:2]] == ["AUDIT", "TEACH"]
+    assert [rec.form_type for rec in filtered[:2]] == ["QIAT", "TEACH"]
 
 
 def test_genuine_teaching_session_stays_teaching_for_intermediate():

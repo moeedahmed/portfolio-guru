@@ -237,6 +237,7 @@ def test_harris_junior_catalogue_contains_core_wpbas(level):
         f"{level} catalogue must still offer CBD/DOPS/MINI_CEX — "
         f"missing: {CORE_WPBAS - forms}"
     )
+    assert "QIAT" in forms, f"{level} catalogue must offer QIAT for junior QI/audit work"
 
 
 def test_harris_accs_and_intermediate_use_the_current_st3_catalogue():
