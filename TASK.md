@@ -1,5 +1,34 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-02 addendum — P3 Harris/ACCS bot-handler draft smoke passed and cleaned up.**
+> Scope: second controlled fixture after Moeed/HST. The smoke used Harris's
+> stored Portfolio Guru user id and credentials, temporarily scoped the local
+> profile to `ACCS`, drove the same bot draft/approval handlers locally, saved
+> one synthetic CBD draft in Kaizen, verified it, deleted it, then restored the
+> original Harris profile row.
+>
+> Result:
+>
+> - Bot-handler path produced a CBD draft and called the real save-as-draft
+>   approval flow for Harris's stored fixture user.
+> - Kaizen deterministic filer set the stage to `ACCS - ST1 - ST2/ CT1 -CT2`.
+> - Filing QA was GREEN: 7 fields filled, 0 expected-empty gaps.
+> - Filing log row: `CBD`, deterministic, `success`, 7 fields, no error.
+> - Opened draft `34e6cdaa-e14a-4bc6-ade7-d94baff393dd` was `DRAFT PRIVATE`
+>   and contained the synthetic septic shock / sepsis six case.
+> - Cleanup deleted only that document id after private-draft and case-marker
+>   checks passed. Post-cleanup Saved drafts no longer contained that document
+>   or a CBD saved draft.
+> - Harris profile restored to its original local row:
+>   `training_level=INTERMEDIATE`, `curriculum=None`, `kaizen_role=unknown`.
+>
+> Boundary: this did **not** impersonate Harris on live Telegram. It proved
+> Harris/ACCS credentials, profile scoping, bot approval handler, deterministic
+> Kaizen CBD save, verification, and cleanup. No submit, sign, send, approve,
+> reject, deploy, push, production rollout, or live Telegram message was sent.
+>
+> Next executable gate: Harris/Intermediate controlled draft-only smoke.
+>
 > **2026-06-02 addendum — P3 Moeed/HST Telegram bot-path smoke passed and cleaned up.**
 > Scope: real user-flow smoke after the stale-session fix: Moeed manually
 > resent the synthetic HST CBD case to Portfolio Guru, reviewed the CBD draft
