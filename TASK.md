@@ -1,5 +1,37 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-02 addendum — local Kaizen form catalogue audit/fix landed offline.**
+> Scope: follow-up after the Intermediate QIAT regression. The issue was local
+> catalogue drift, not Kaizen: ACCS and Intermediate were distinct in role
+> detection but collapsed back to the same `ST3` form-list object at the picker
+> surface.
+>
+> Result:
+>
+> - `TRAINING_LEVEL_FORMS["ACCS"]` and `TRAINING_LEVEL_FORMS["INTERMEDIATE"]`
+>   are now distinct list objects, so future portfolio-specific drift cannot
+>   silently alias `ST3`.
+> - Intermediate still exposes `QIAT`, and QI/audit projects continue to show
+>   `Use best fit: QIAT`; genuine teaching remains `Teaching`.
+> - Kaizen-visible but not fully wired ACCS/Intermediate forms are now recorded
+>   in `KAIZEN_CATALOGUE_STATUS` instead of becoming broken buttons:
+>   `ASAT`, `EPA1`, `EPA2`, `DOPS_ACCS`, `PROCEDURAL_LOG_ACCS`,
+>   `ACCS_PROGRESS`, `INTERMEDIATE_PROGRESS`, `MCR_MTR_ACCS`, `HALO_ICM`,
+>   `HALO_PROCEDURAL_SEDATION`, `IAC`, and `EDUCATIONAL_AGREEMENT`.
+> - Hidden utility/admin surfaces remain non-clickable:
+>   `ADD_POST`, `ADD_SUPERVISOR`, `FILE_UPLOAD`, `OOP`, `HIGHER_PROG`,
+>   `ABSENCE`, and `CCT`.
+>
+> Verification:
+>
+> - Focused catalogue/recommender/wiring tests: `60 passed`.
+> - QIAT / teaching conversation-path regressions: `5 passed`.
+> - Full preflight on branch `fix/catalogue-audit-mappings`:
+>   `1018 passed, 9 deselected, 88 warnings`; 3 snapshots passed.
+>
+> Boundary: no live Kaizen, Telegram, BWS, CDP, deploy, restart, push, or
+> external action in this offline slice.
+>
 > **2026-06-02 addendum — P3 Ahmed/consultant assessor-boundary read-only smoke passed; supervisor write path parked.**
 > Scope: final fixture in the filing-phase matrix after CESR 2021. Per
 > Moeed's direction, this did not enter the full assessor/supervisor pathway:

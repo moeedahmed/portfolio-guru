@@ -1323,8 +1323,130 @@ TRAINING_LEVEL_FORMS = {
 }
 
 
-TRAINING_LEVEL_FORMS["ACCS"] = TRAINING_LEVEL_FORMS["ST3"]
-TRAINING_LEVEL_FORMS["INTERMEDIATE"] = TRAINING_LEVEL_FORMS["ST3"]
+# Kaizen catalogue drift ledger. This is intentionally separate from
+# TRAINING_LEVEL_FORMS: only fully wired, user-selectable forms go in the
+# profile catalogues and category picker. Entries here are visible in Kaizen
+# evidence/admin lists but are hidden until UUID + schema + deterministic filer
+# plumbing exists, or because they are utility/admin surfaces rather than WPBAs.
+KAIZEN_CATALOGUE_STATUS = {
+    "ASAT": {
+        "label": "ACCS Simulation Assessment Tool",
+        "profiles": ["ACCS"],
+        "status": "unsupported-pending-schema",
+        "reason": "ACCS selector UUID known; no FORM_SCHEMAS/FORM_FIELD_MAP user-facing support.",
+    },
+    "EPA1": {
+        "label": "Entrustable Professional Activity 1",
+        "profiles": ["ACCS"],
+        "status": "unsupported-pending-schema",
+        "reason": "ACCS selector UUID known; no FORM_SCHEMAS/FORM_FIELD_MAP user-facing support.",
+    },
+    "EPA2": {
+        "label": "Entrustable Professional Activity 2",
+        "profiles": ["ACCS"],
+        "status": "unsupported-pending-schema",
+        "reason": "ACCS selector UUID known; no FORM_SCHEMAS/FORM_FIELD_MAP user-facing support.",
+    },
+    "DOPS_ACCS": {
+        "label": "ACCS DOPS 2025",
+        "profiles": ["ACCS"],
+        "status": "unsupported-pending-schema",
+        "reason": "ACCS-specific selector UUID known; deterministic schema/field map not built.",
+    },
+    "PROCEDURAL_LOG_ACCS": {
+        "label": "ACCS Procedural Log 2025",
+        "profiles": ["ACCS"],
+        "status": "unsupported-pending-schema",
+        "reason": "ACCS-specific selector UUID known; deterministic schema/field map not built.",
+    },
+    "ACCS_PROGRESS": {
+        "label": "ACCS Progression",
+        "profiles": ["ACCS"],
+        "status": "unsupported-pending-schema",
+        "reason": "Kaizen-visible progression form without complete user-facing filing plumbing.",
+    },
+    "INTERMEDIATE_PROGRESS": {
+        "label": "Intermediate Progression",
+        "profiles": ["INTERMEDIATE"],
+        "status": "unsupported-pending-schema",
+        "reason": "Kaizen-visible progression form without complete user-facing filing plumbing.",
+    },
+    "MCR_MTR_ACCS": {
+        "label": "MCR/MTR ACCS",
+        "profiles": ["ACCS"],
+        "status": "unsupported-pending-schema",
+        "reason": "Kaizen-visible ACCS review form without complete user-facing filing plumbing.",
+    },
+    "HALO_ICM": {
+        "label": "HALO ICM",
+        "profiles": ["ACCS"],
+        "status": "unsupported-pending-schema",
+        "reason": "ACCS selector UUID known; no FORM_SCHEMAS/FORM_FIELD_MAP user-facing support.",
+    },
+    "HALO_PROCEDURAL_SEDATION": {
+        "label": "HALO Procedural Sedation",
+        "profiles": ["ACCS"],
+        "status": "unsupported-pending-schema",
+        "reason": "Kaizen-visible HALO form without complete user-facing filing plumbing.",
+    },
+    "IAC": {
+        "label": "Initial Assessment of Competence",
+        "profiles": ["ACCS"],
+        "status": "unsupported-pending-schema",
+        "reason": "ACCS selector UUID known; no FORM_SCHEMAS/FORM_FIELD_MAP user-facing support.",
+    },
+    "EDUCATIONAL_AGREEMENT": {
+        "label": "Educational Agreement",
+        "profiles": ["ACCS", "INTERMEDIATE", "HIGHER"],
+        "status": "unsupported-pending-schema",
+        "reason": "Kaizen-visible meeting/agreement variant without complete filing plumbing.",
+    },
+    "ADD_POST": {
+        "label": "Add a Post",
+        "profiles": ["ACCS", "INTERMEDIATE", "HIGHER"],
+        "status": "supported-hidden-utility",
+        "reason": "Administrative route-recognised form; not portfolio evidence.",
+    },
+    "ADD_SUPERVISOR": {
+        "label": "Add a Supervisor",
+        "profiles": ["ACCS", "INTERMEDIATE", "HIGHER"],
+        "status": "supported-hidden-utility",
+        "reason": "Administrative route-recognised form; not portfolio evidence.",
+    },
+    "FILE_UPLOAD": {
+        "label": "File Upload",
+        "profiles": ["ACCS", "INTERMEDIATE", "HIGHER"],
+        "status": "supported-hidden-utility",
+        "reason": "Administrative/document upload route; not a WPBA picker entry.",
+    },
+    "OOP": {
+        "label": "Out of Programme",
+        "profiles": ["ACCS", "INTERMEDIATE", "HIGHER"],
+        "status": "supported-hidden-utility",
+        "reason": "Administrative route-recognised form; not portfolio evidence.",
+    },
+    "HIGHER_PROG": {
+        "label": "Higher Progression",
+        "profiles": ["HIGHER"],
+        "status": "supported-hidden-utility",
+        "reason": "Progression/admin route-recognised form; not a draft WPBA button.",
+    },
+    "ABSENCE": {
+        "label": "Absence",
+        "profiles": ["ACCS", "INTERMEDIATE", "HIGHER"],
+        "status": "supported-hidden-utility",
+        "reason": "Administrative route-recognised form; not portfolio evidence.",
+    },
+    "CCT": {
+        "label": "CCT Application",
+        "profiles": ["HIGHER"],
+        "status": "unsupported-out-of-scope",
+        "reason": "Credential/admin application workflow, not a draft WPBA filing target.",
+    },
+}
+
+TRAINING_LEVEL_FORMS["ACCS"] = list(TRAINING_LEVEL_FORMS["ST3"])
+TRAINING_LEVEL_FORMS["INTERMEDIATE"] = list(TRAINING_LEVEL_FORMS["ST3"])
 TRAINING_LEVEL_FORMS["HIGHER"] = TRAINING_LEVEL_FORMS["ST6"]
 
 # Kaizen portfolio profile groups. Legacy ST3/ST4/ST5/ST6 values are still
