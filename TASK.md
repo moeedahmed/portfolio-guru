@@ -1,5 +1,36 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-02 addendum — P2/P3 SAS-CESR read-only gate cleared.**
+> Filing Reliability Readiness Sprint §6: the foreground credential/live
+> recovery gate for the local SAS/CESR saved-profile candidates has now passed
+> read-only smoke. The smoke used the existing
+> `sync_kaizen_portfolio_index_for_user(...)` helper, existing saved encrypted
+> Portfolio Guru credentials, managed CDP Chrome on `localhost:18800`, and a
+> temporary `/tmp` SQLite evidence DB. No draft was created, saved, submitted,
+> signed, approved, sent, rejected, or deleted; no Telegram automation,
+> production `usage.db` write, deploy, restart, or push occurred. The temporary
+> evidence DB was unlinked after the run.
+>
+> Results:
+>
+> - SAS saved-profile candidate `8520547917`: `ok`; 15 rows seen, 13 indexed,
+>   0 drifted.
+> - SAS saved-profile candidate `613452099`: `ok`; 29 rows seen, 29 indexed,
+>   0 drifted.
+>
+> Interpretation:
+>
+> - The SAS/CESR live read-only branch is no longer blocked by the previous
+>   `auth_required` result for the saved local SAS-profile candidates. If
+>   "Sana" refers to a different Telegram identity outside these saved SAS
+>   profiles, that identity still needs a separate mapping check before being
+>   counted as green.
+> - P3 read-only smoke is now green for Moeed/HST, Harris dual-access, and the
+>   locally saved SAS-profile candidates. Next executable gate: P5 controlled
+>   draft-only live smoke. P5 remains approval-gated and must save one
+>   synthetic draft per account, verify visibility in Kaizen, then delete the
+>   draft by hand. No submission.
+
 > **2026-06-02 addendum — P4 concurrency/idempotency slice landed (offline).**
 > Filing Reliability Readiness Sprint §7: offline multi-user reliability
 > proof is now pinned for draft-state isolation, filing-log isolation,

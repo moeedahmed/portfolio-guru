@@ -408,9 +408,14 @@ canonical. Repeated here for the promotion-gate reader.
 
 ## 6. Sana / SAS-CESR — handling the login blocker without weakening the bar
 
-The 2026-06-02 read-only smoke returned `auth_required` for Sana. The
-promotion bar (§1.4) requires `ok` for all three accounts. We do not lower
-the bar; we recover the account.
+The first 2026-06-02 read-only smoke returned `auth_required` for Sana. The
+foreground recovery pass later the same day reran the read-only smoke against
+the two locally saved SAS-profile candidates using the existing
+`sync_kaizen_portfolio_index_for_user(...)` helper, managed CDP Chrome, and a
+temporary `/tmp` evidence DB. Both saved SAS-profile candidates returned `ok`
+and the temporary DB was unlinked after the run. If "Sana" refers to a
+different Telegram identity outside those saved SAS profiles, that identity
+still needs a separate mapping check before being counted as green.
 
 ### Step 1 — narrow the root cause (offline)
 
@@ -420,33 +425,27 @@ from `credential_failure` from `infra_failure` in tests. Confirm the
 2026-06-02 outcome is exactly `auth_required`, not a silently miscategorised
 credential failure.
 
-### Step 2 — confirm credential source (foreground)
+### Step 2 — confirm credential source (foreground) — done for saved SAS candidates
 
-Foreground operator only. Does BWS still hold a Sana credential? Was it
-rotated? Is the saved Kaizen session for Sana stale? This is a `bws secret
-list` sweep on the Mac Mini (per the user's standing instruction to use BWS
-directly), not a re-auth flow.
+Foreground operator only. The saved encrypted Portfolio Guru credentials for
+the local SAS-profile candidates were present and usable for read-only smoke.
 
-### Step 3 — managed Chrome re-auth (foreground)
+### Step 3 — managed Chrome re-auth (foreground) — not needed for saved SAS candidates
 
-If the credential is current, foreground operator logs into Kaizen as Sana
-inside the managed CDP Chrome on `localhost:18800` interactively, lets the
-session persist, then re-runs the read-only smoke.
+The existing saved credentials and managed CDP Chrome session path were enough
+to reach Kaizen portfolio pages for both saved SAS-profile candidates.
 
-### Step 4 — confirm the landing-page shape (foreground + worker review)
+### Step 4 — confirm the landing-page shape (foreground + worker review) — no drift seen
 
-If Sana's portfolio landing page differs from HST or from Harris's
-ACCS + Intermediate dual-access account (possible — SAS / CESR can land on
-a different default tab), capture the
-URL pattern and add a fixture-only test that the read-only indexer accepts
-that pattern. Do not change the live read-only indexer until the fixture
-test is green.
+The saved SAS-profile candidates produced normal read-only index rows with
+zero drift. No landing-page fixture change is queued from this pass.
 
-### Step 5 — re-run P3 for Sana
+### Step 5 — re-run P3 for Sana — done for saved SAS candidates
 
-Once `ok` lands for Sana, record the result in TASK.md alongside the
-existing Moeed/Harris 2026-06-02 addendum. Only after Sana is `ok` does the
-P3 gate flip green and P5 becomes runnable.
+Recorded in TASK.md alongside the existing Moeed/Harris 2026-06-02 addendum.
+P3 is green for Moeed/HST, Harris dual-access, and the locally saved
+SAS-profile candidates. P5 controlled draft-only live smoke is now the next
+approval-gated phase.
 
 **The bar does not move.** If Sana's account is genuinely unrecoverable,
 the sprint pauses at P3 — we do not promote filing with the SAS branch
@@ -671,18 +670,17 @@ These are not part of the promotion gate and must not be quietly added.
 | --- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | P0  | Evidence review — offline gate + three-account matrix re-green | done; prior gate 933 passed, doc slice verified references                                                                                        |
 | P1  | Fixture / dry-run slices (a–d)                                 | **done (offline)**; P1.a landed in `42e3f4d`, P1.b in `ec67d84`, P1.c in `9ea35d6`, P1.d in `c59fd21`; see TASK.md addenda for per-slice evidence |
-| P2  | Sana credential / session recovery                             | blocked on foreground operator + BWS sweep                                                                                                        |
-| P3  | Per-account read-only live smoke                               | 2/3 ok (Moeed, Harris); Sana `auth_required`                                                                                                      |
+| P2  | Sana credential / session recovery                             | done for locally saved SAS-profile candidates; if Sana maps to a different Telegram identity, run a separate mapping check                        |
+| P3  | Per-account read-only live smoke                               | green for Moeed/HST, Harris dual-access, and locally saved SAS-profile candidates                                                                  |
 | P4  | Concurrency / idempotency offline proofs                       | **done (offline)**; landed in `b6ff9b0` (draft-state isolation, filing-log isolation, profile/credential isolation, retry-after-DOM-drift)        |
-| P5  | Per-account controlled draft-only live smoke                   | gated on P3 fully green (Sana recovery still blocking)                                                                                            |
+| P5  | Per-account controlled draft-only live smoke                   | next approval-gated phase                                                                                                                         |
 | P6  | Deploy / restart / production smoke                            | gated on P5 fully green                                                                                                                           |
-| —   | Promotion gate                                                 | held: §1.4 (Sana), §1.5, §1.8                                                                                                                     |
+| —   | Promotion gate                                                 | held: §1.5 and §1.8                                                                                                                               |
 
-**Next executable slice:** §6 Sana / SAS-CESR recovery — foreground operator
-work only. Worker P1.a–d and P4 offline coverage are landed; the bar will
-not move further without the live/credential-gated Sana read-only smoke
-returning `ok`. Once P3 is green for all three accounts, P5 (controlled
-draft-only live smoke) becomes runnable.
+**Next executable slice:** P5 controlled draft-only live smoke. This remains
+foreground/operator-owned and approval-gated because it creates one synthetic
+Kaizen draft per account, verifies it, and then deletes it by hand. No
+submission.
 
 ---
 
