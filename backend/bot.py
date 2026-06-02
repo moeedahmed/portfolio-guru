@@ -1344,6 +1344,37 @@ def _training_level_label(level: str | None) -> str:
     return TRAINING_LEVEL_LABELS.get(level or "", "Unknown")
 
 
+# Setup/login path: detected Kaizen role → local portfolio-profile bucket.
+# ACCS and Intermediate are separate Kaizen portfolio types and stay
+# separate here. ``accs_intermediate`` is Harris's dual-access storage
+# alias (one trainee with access to both ACCS and Intermediate); it
+# collapses to the ``INTERMEDIATE`` bucket today and is **not** a
+# standalone Kaizen portfolio type. ``assessor`` has no personal
+# portfolio and falls back to ``HIGHER`` for UX continuity — the
+# supervisor workflow keys off the raw role, not this bucket.
+_DETECTED_ROLE_TO_TRAINING_LEVEL = {
+    "hst": "HIGHER",
+    "accs": "ACCS",
+    "intermediate": "INTERMEDIATE",
+    "accs_intermediate": "INTERMEDIATE",
+    "sas": "SAS",
+    "assessor": "HIGHER",
+}
+
+
+def detected_role_to_training_level(detected_role: str | None) -> str | None:
+    """Map a detected Kaizen role string to the local ``training_level`` bucket.
+
+    Returns ``None`` for unknown/empty roles so the setup flow falls through
+    to the manual portfolio-profile picker instead of guessing a bucket.
+    Pure helper — raw-role storage (``profile_store.store_kaizen_role``) and
+    the bucket map are deliberately decoupled.
+    """
+    if not detected_role:
+        return None
+    return _DETECTED_ROLE_TO_TRAINING_LEVEL.get(detected_role)
+
+
 def _stage_value_from_training_level(level: str | None, form_type: str) -> str:
     """Return the Kaizen stage value implied by the saved portfolio profile.
 
@@ -3237,10 +3268,16 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     except Exception:
         # Cache failure must never block the login success path.
         logger.warning("Kaizen role cache update failed", exc_info=True)
-    role_map = {"hst": "HIGHER", "accs": "ACCS", "accs_intermediate": "INTERMEDIATE", "sas": "SAS", "assessor": "HIGHER"}
-    label_map = {"hst": "HST Portfolio Profile", "accs": "ACCS Portfolio Profile", "accs_intermediate": "ACCS + Intermediate Portfolio Profile", "sas": "SAS / CESR / Non-training Profile", "assessor": "Clinical Supervisor"}
-    
-    auto_level = role_map.get(detected_role)
+    label_map = {
+        "hst": "HST Portfolio Profile",
+        "accs": "ACCS Portfolio Profile",
+        "intermediate": "Intermediate Portfolio Profile",
+        "accs_intermediate": "ACCS + Intermediate Portfolio Profile",
+        "sas": "SAS / CESR / Non-training Profile",
+        "assessor": "Clinical Supervisor",
+    }
+
+    auto_level = detected_role_to_training_level(detected_role)
     if auto_level:
         store_training_level(user_id, auto_level)
 

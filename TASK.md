@@ -1,5 +1,54 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-02 addendum — P1.b slice landed (offline).**
+> Filing Reliability Readiness Sprint §4 P1.b: per-shape detected-role →
+> `training_level` mapping. Offline-only, no live Kaizen, no CDP, no BWS,
+> no Telegram, no deploy/restart/push.
+>
+> Files changed:
+>
+> - `backend/tests/test_detected_role_training_level_mapping.py` (new) — 19
+>   tests covering the five P1 shapes (`hst` / `accs` / `intermediate` /
+>   `accs_intermediate_dual_access` / `sas_cesr`):
+>   - Five parametrised pins on the setup/login bucket map: `hst -> HIGHER`,
+>     `accs -> ACCS`, `intermediate -> INTERMEDIATE`, `sas -> SAS`, and
+>     Harris's dual-access `accs_intermediate -> INTERMEDIATE` storage
+>     alias.
+>   - Explicit ACCS-vs-Intermediate distinctness guard so a silent collapse
+>     is loud, not silent.
+>   - Explicit pin that `accs_intermediate` is the dual-access storage
+>     alias, not a standalone Kaizen portfolio type.
+>   - Unknown / empty / `None` roles return `None` so setup falls through
+>     to the manual portfolio-profile picker.
+>   - Per-shape pins that `profile_store.store_kaizen_role(...)` preserves
+>     the raw role verbatim and does **not** mutate `training_level`.
+>   - Multi-user round-trip across all five shapes in a single in-memory
+>     profile-store engine — raw role and `training_level` stay isolated;
+>     no last-write-wins, no shared-row collisions; explicit ACCS vs
+>     Intermediate row distinctness check on the persisted state.
+> - `backend/bot.py` — exposes a tiny pure helper:
+>   `detected_role_to_training_level(detected_role)`, backed by
+>   `_DETECTED_ROLE_TO_TRAINING_LEVEL`. The setup-flow call site at
+>   `setup_password` now uses the helper instead of an inline dict, and
+>   the `label_map` gains an `intermediate` entry so an Intermediate-only
+>   detected role gets the right label. No other bot behaviour changed;
+>   `profile_store.store_kaizen_role` is untouched.
+>
+> Verification (no live action):
+>
+> - `cd backend && venv/bin/python -m pytest tests/test_detected_role_training_level_mapping.py tests/test_profile_store_kaizen_role.py tests/test_login_classification_per_shape.py tests/test_three_account_filing_matrix.py -q`
+>   → 69 passed, 42 warnings (pre-existing deprecation warnings only).
+> - Full offline gate: `cd backend && venv/bin/python -m pytest tests/ -q --ignore=tests/test_e2e.py --ignore=tests/test_e2e_live.py`
+>   → 972 passed, 13 deselected, 74 warnings. Up from 953 pre-P1.b; the
+>   delta is the 19 new P1.b tests, no regressions.
+> - `git diff --check` clean.
+>
+> No commit made — orchestrator reviews and runs the full offline gate
+> before committing. Next executable slice: P1.c (recommended-form
+> fallback does not leak HST-only forms to SAS) — see Filing Reliability
+> Readiness Sprint plan §4. P1.c stays offline-only and follows the same
+> boundary as P1.a/P1.b.
+
 > **2026-06-02 addendum — portfolio-type correction + P1.a slice landed (offline).**
 > Moeed corrected the portfolio-type model used by the Filing Reliability
 > Readiness Sprint: ACCS and Intermediate are **separate portfolio types** on
@@ -104,7 +153,7 @@
 > was a pathway label. Corrected user-visible surfaces:
 >
 > - `/health` trainee header is now `Portfolio Health — Training (CCT)
->   pathway · ARCP readiness check` (was `Training (CCT) ARCP readiness`).
+pathway · ARCP readiness check` (was `Training (CCT) ARCP readiness`).
 > - `/pathway` selector copy now explicitly names the two pathways and
 >   calls out ARCP as the yearly review checkpoint inside Training (CCT).
 > - `/health` paywall now says "Training (CCT) pathway (ARCP readiness
