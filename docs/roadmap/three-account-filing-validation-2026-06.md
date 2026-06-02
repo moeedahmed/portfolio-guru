@@ -4,6 +4,13 @@
 **Owner:** Foreground (orchestrator-delivered work) for any live phase.
 **Branch:** `main` (local commits ahead of `origin/main`).
 
+> **Rolled up into:**
+> `docs/roadmap/filing-reliability-readiness-sprint-2026-06.md`.
+> The three-account matrix below is the P0/P3 input of the broader Filing
+> Reliability Readiness Sprint (promotion gate, concurrency, instrumentation,
+> deploy/restart smoke). Read this doc for the per-shape detail; read the
+> sprint doc for the promotion bar and phase ordering.
+
 ---
 
 ## Why this exists
@@ -168,13 +175,13 @@ This is the same offline gate the launch runbook uses
 
 ## Status snapshot
 
-| #   | Deliverable                                                                    | Status                                  |
-| --- | ------------------------------------------------------------------------------ | --------------------------------------- |
-| 1   | Three-account matrix codified in this doc                                      | done (this commit)                      |
-| 2   | Offline test pinning per-shape stage defaulter + filer lookup + form catalogue | done (this commit)                      |
-| 3   | Known SAS / `accs_intermediate` gaps pinned with visible assertions            | done (this commit)                      |
-| 4   | Phase 2 dry-run/fixture tests scoped                                           | scoped here; implementation queued      |
+| #   | Deliverable                                                                    | Status                                         |
+| --- | ------------------------------------------------------------------------------ | ---------------------------------------------- |
+| 1   | Three-account matrix codified in this doc                                      | done (this commit)                             |
+| 2   | Offline test pinning per-shape stage defaulter + filer lookup + form catalogue | done (this commit)                             |
+| 3   | Known SAS / `accs_intermediate` gaps pinned with visible assertions            | done (this commit)                             |
+| 4   | Phase 2 dry-run/fixture tests scoped                                           | scoped here; implementation queued             |
 | 5   | Phase 3 live read-only smoke per account                                       | partial: Moeed + Harris ok; Sana auth_required |
-| 6   | Phase 4 real submission                                                        | **out of scope** — draft-only is policy |
-| 7   | TASK.md 2026-06-02 addendum                                                    | done (this commit)                      |
-| 8   | No live Kaizen / credentials / browser / Telegram / deploy / push              | met                                     |
+| 6   | Phase 4 real submission                                                        | **out of scope** — draft-only is policy        |
+| 7   | TASK.md 2026-06-02 addendum                                                    | done (this commit)                             |
+| 8   | No live Kaizen / credentials / browser / Telegram / deploy / push              | met                                            |

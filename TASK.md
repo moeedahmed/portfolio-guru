@@ -1,5 +1,33 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-02 addendum — Filing Reliability Readiness Sprint planned.**
+> Filing is the USP and must clear a promotion-grade bar before the
+> trusted-tester pool widens. Plan landed at
+> `docs/roadmap/filing-reliability-readiness-sprint-2026-06.md` with six
+> ordered phases (P0 evidence review → P1 fixture/dry-run → P2 Sana
+> credential/session recovery → P3 per-account read-only live smoke → P4
+> concurrency/idempotency offline proofs → P5 per-account controlled
+> draft-only live smoke → P6 deploy/restart/production smoke) and an
+> explicit §1 promotion gate.
+>
+> Snapshot at plan landing: full offline gate 933 passed; three-account
+> matrix codified; P3 read-only smoke ok for Moeed/HST and
+> Harris/ACCS+Intermediate; Sana/SAS-CESR blocked at `auth_required` and is
+> the critical-path blocker for promotion. The plan is doc-only; no live
+> Kaizen, no Telegram, no BWS read, no push, no deploy, no restart.
+>
+> **Next executable slice:** Plan §4 P1.a —
+> `backend/tests/test_login_classification_per_shape.py` covering
+> credential-failure / infra-failure / auth-required classification for
+> each of `hst`, `accs_intermediate`, `sas`. Followed by P1.b, P1.c, P1.d
+> in order. Each is offline, fixture-driven, lands on its own task branch
+> after `bash scripts/preflight.sh`. The full offline gate must stay green
+> at the new test count.
+>
+> No source files outside docs were touched in this slice. The plan
+> cross-references `docs/roadmap/three-account-filing-validation-2026-06.md`
+> (P0 / P3 input) and `docs/PRIVATE_BETA_LAUNCH.md` (P6 deploy gate).
+
 > **2026-06-02 addendum — Portfolio Health pathway model correction.**
 > Moeed corrected the product model: the two pathways are **Training / CCT**
 > and **CESR / Portfolio Pathway**. ARCP is a _yearly review checkpoint_
@@ -930,18 +958,18 @@ Implemented:
 - The result still shows useful context: strong domains, missing domains, and
   total Portfolio Guru filings in the last 6 months.
 - Health result buttons now offer `File missing evidence` and `Back to
-  settings`.
+settings`.
 - Health refresh and inline health Back buttons now return to settings, not
   the generic filing welcome/menu.
 
 Verification:
 
 - Focused health tests: `backend/venv/bin/python -m pytest
-  backend/tests/test_health_bot.py backend/tests/test_health_index_integration.py
-  -q` → 59 passed.
+backend/tests/test_health_bot.py backend/tests/test_health_index_integration.py
+-q` → 59 passed.
 - Health + callback flow shard: `backend/venv/bin/python -m pytest
-  backend/tests/test_health_bot.py backend/tests/test_health_index_integration.py
-  backend/tests/test_flow_walker.py -q` → 201 passed.
+backend/tests/test_health_bot.py backend/tests/test_health_index_integration.py
+backend/tests/test_flow_walker.py -q` → 201 passed.
 
 Runtime state:
 
