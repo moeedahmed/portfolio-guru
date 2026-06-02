@@ -32,14 +32,25 @@ exists, and the live phases that still need explicit approval.
 
 ## The three-account matrix
 
-Each account exercises a different portfolio shape. Live credentials live in
+Each account exercises a different portfolio type. Live credentials live in
 BWS and are **not** read by this validation work — see "Safe / live boundary"
 below.
+
+> **Portfolio-type vocabulary — do not collapse.**
+> ACCS and Intermediate are **separate portfolio types** on Kaizen. Harris
+> is the dual-access edge case: one trainee who has access to **both** ACCS
+> and the Intermediate Portfolio. The bot currently stores dual access as
+> a single `accs_intermediate` Kaizen role / `INTERMEDIATE` `training_level`
+> bucket — that is an implementation/storage behaviour worth testing, not a
+> product truth. Several Kaizen differences between HST (Moeed) and
+> SAS / CESR Portfolio Pathway (Sana) are also still unconfirmed; the
+> matrix below should be read as a working hypothesis, not a complete
+> Kaizen spec.
 
 | #   | Doctor | Portfolio shape                                                   | `training_level` value(s)     | Why this account matters                                                                                                                  |
 | --- | ------ | ----------------------------------------------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | Moeed  | Senior / HST (CCT pathway, ST4–ST6)                               | `HIGHER` (legacy `ST4`–`ST6`) | Default development shape. Forms catalogue is the ST6 superset; stage defaults to `Higher/ST4-ST6` on every WPBA schema that has a stage. |
-| 2   | Harris | DREAM Pathway junior — ACCS **and** Intermediate Portfolio access | `ACCS` and/or `INTERMEDIATE`  | Only account that can hit both junior stages. Exposes the `accs_intermediate` collapse where dual access is stored as a single profile.   |
+| 2   | Harris | DREAM Pathway junior — unusual dual access to ACCS **and** Intermediate Portfolio | `ACCS`, `INTERMEDIATE`, plus current `accs_intermediate` dual-access alias | Only current account that can exercise both junior portfolio types. Tests must treat ACCS-only and Intermediate-only as separate product shapes, then separately pin Harris's dual-access storage alias. |
 | 3   | Sana   | SAS doctor planning CESR / Portfolio Pathway                      | `SAS`                         | Only non-training portfolio. Hits the empty-stage path on every WPBA stage select, and has no `TRAINING_LEVEL_FORMS["SAS"]` entry.        |
 
 ### What each shape touches in the codebase
@@ -50,9 +61,10 @@ below.
   `handle_form_selection`, `_run_form_recommender`, and similar entry points.
 - `backend/kaizen_form_filer.py` `STAGE_SELECT_VALUES` / `QIAT_STAGE_VALUES` —
   the deterministic Playwright stage UUIDs the filer types into Kaizen.
-- `backend/profile_store.store_kaizen_role` and `kaizen_role` column — role
-  detection ("trainee" / "assessor" / "accs_intermediate" → bucketed back into
-  `training_level`).
+- `backend/profile_store.store_kaizen_role` and `kaizen_role` column — raw
+  role detection storage. The setup/login path then maps detected roles to
+  local `training_level` buckets (`accs` → `ACCS`, `intermediate` →
+  `INTERMEDIATE`, `accs_intermediate` → current Harris dual-access alias).
 
 If any of these regress on Harris's or Sana's shape, the user-facing failure
 is silent (wrong default stage, missing form button, blank Kaizen stage
@@ -92,10 +104,12 @@ inside a worker session unless the phase says so.
   fake `_run_file` URLs, no real CDP, no live Kaizen.
 - Cover, per shape:
   - Login classification (credential failure vs infra failure) when the
-    detected role is `accs_intermediate` vs `hst` vs `sas`.
-  - `kaizen_role` round-trip (`store_kaizen_role(... "accs_intermediate")` →
-    `_apply_kaizen_role_to_profile` sets `training_level` to `INTERMEDIATE`,
-    not `HIGHER`).
+    detected role is `hst` vs `accs` vs `intermediate` vs
+    `accs_intermediate` dual access vs `sas`.
+  - Detected-role mapping round-trip: `accs` stays `ACCS`, `intermediate`
+    stays `INTERMEDIATE`, `accs_intermediate` maps to the current Harris
+    dual-access `INTERMEDIATE` bucket, and none of these silently collapse
+    to `HIGHER`.
   - The recommended-form fallback for `SAS` does not collapse to the legacy
     `ST5` superset and does not silently leak HST-only forms.
 - These belong alongside the Phase 1 tests; this doc names them as the next
@@ -179,7 +193,7 @@ This is the same offline gate the launch runbook uses
 | --- | ------------------------------------------------------------------------------ | ---------------------------------------------- |
 | 1   | Three-account matrix codified in this doc                                      | done (this commit)                             |
 | 2   | Offline test pinning per-shape stage defaulter + filer lookup + form catalogue | done (this commit)                             |
-| 3   | Known SAS / `accs_intermediate` gaps pinned with visible assertions            | done (this commit)                             |
+| 3   | Known SAS / ACCS / Intermediate / `accs_intermediate` gaps pinned visibly      | done (this commit)                             |
 | 4   | Phase 2 dry-run/fixture tests scoped                                           | scoped here; implementation queued             |
 | 5   | Phase 3 live read-only smoke per account                                       | partial: Moeed + Harris ok; Sana auth_required |
 | 6   | Phase 4 real submission                                                        | **out of scope** — draft-only is policy        |

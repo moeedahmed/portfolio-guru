@@ -17,16 +17,30 @@ Related plans:
 ## Executive summary (for the orchestrator to relay to Moeed)
 
 Filing is the USP. Before promotion, the sprint must prove — with evidence,
-not vibes — that the bot files cleanly across the three real portfolio shapes
-(HST, ACCS+Intermediate, SAS/CESR), recovers credibly from the failure modes
-we already know about (login lapse, partial save, Kaizen DOM drift), and does
-not corrupt state when two trusted-tester accounts file at the same time.
+not vibes — that the bot files cleanly across the portfolio types our
+trusted-tester pool covers (HST, ACCS, Intermediate, SAS / CESR Portfolio
+Pathway, plus the ACCS + Intermediate dual-access edge case that Harris
+exercises), recovers credibly from the failure modes we already know about
+(login lapse, partial save, Kaizen DOM drift), and does not corrupt state
+when two trusted-tester accounts file at the same time.
+
+> **Portfolio-type terminology — read this before reading the rest of the plan.**
+> ACCS and Intermediate are **separate portfolio types** on Kaizen, not a
+> single collapsed shape. Harris is the dual-access edge case: one trainee
+> with access to both ACCS _and_ the Intermediate Portfolio. The bot's
+> current storage collapses dual access into a single `accs_intermediate`
+> Kaizen role / `INTERMEDIATE` `training_level` bucket — that is an
+> implementation/storage behaviour that must be tested, **not** a product
+> truth. HST (Moeed) and SAS / CESR Portfolio Pathway (Sana) are further
+> distinct types. Several Kaizen differences between these types are still
+> unconfirmed; the plan and its tests must avoid asserting more than the
+> evidence proves.
 
 Today the offline gate is green (933 tests passing on the last full run), the
 three-account matrix is codified, and the live read-only smoke is green for
-Moeed/HST and Harris/ACCS+Intermediate. Sana/SAS-CESR is blocked at
-`auth_required` — that is the single biggest unproven branch and is the
-critical-path blocker for the promotion gate.
+Moeed/HST and for Harris's ACCS + Intermediate dual-access account.
+Sana / SAS-CESR is blocked at `auth_required` — that is the single biggest
+unproven branch and is the critical-path blocker for the promotion gate.
 
 The promotion gate is **draft-only by policy** for trainees. Real submission
 is explicitly out of scope. Promotion means the bot is safe enough to widen
@@ -60,10 +74,11 @@ tests/test_kaizen_login_reliability.py -v` returns exit 0 on the candidate
    slices). The slice covers: stage defaulter → filer lookup → form catalogue
    round-trip per shape, login classification per detected role, `kaizen_role`
    ↔ `training_level` round-trip, and the recommended-form fallback for SAS.
-4. **Per-account read-only live smoke is green.** Moeed/HST and
-   Harris/ACCS+Intermediate are already recorded as `ok` (2026-06-02 TASK.md
-   addendum). Sana/SAS-CESR must also be `ok` — `auth_required` is not
-   acceptable for promotion. Recovery path documented in §6.
+4. **Per-account read-only live smoke is green.** Moeed (HST) and Harris
+   (ACCS + Intermediate dual access) are already recorded as `ok`
+   (2026-06-02 TASK.md addendum). Sana (SAS / CESR Portfolio Pathway) must
+   also be `ok` — `auth_required` is not acceptable for promotion. Recovery
+   path documented in §6.
 5. **Per-account controlled draft-only live smoke is green** for the three
    accounts. One synthetic case per account, one form per account, one draft
    saved, draft visible in Kaizen, draft deleted by hand. No submission.
@@ -117,9 +132,10 @@ only one who flips P6.
   attempts with outcome categories, separates synthetic user 99999999 from
   real-user counts, and exposes an admin report. Backed by
   `tests/test_filing_attempt_log.py`.
-- **Read-only live smoke landed for two of three accounts.** Moeed/HST and
-  Harris/ACCS+Intermediate: `ok`, indexed rows in a `/tmp` evidence DB
-  (overwritten and unlinked after the run). Recorded in TASK.md 2026-06-02.
+- **Read-only live smoke landed for two of three accounts.** Moeed (HST) and
+  Harris (ACCS + Intermediate dual access): `ok`, indexed rows in a `/tmp`
+  evidence DB (overwritten and unlinked after the run). Recorded in TASK.md
+  2026-06-02.
 - **Portfolio Health pathway-aware** (orthogonal but adjacent): trainee
   header now correctly frames ARCP as a checkpoint inside Training (CCT),
   not a pathway. Four new guards reject regression to "Training (ARCP)" /
@@ -197,15 +213,40 @@ detected Kaizen role.
 
 **Acceptance criteria.**
 
-- For each of `hst`, `accs_intermediate`, `sas`:
-  - A simulated 401-on-login is classified as `credential_failure`, not
-    `infra_failure`.
-  - A simulated network timeout is classified as `infra_failure`, not
-    `credential_failure`.
+- For each of the following portfolio shapes — kept **separate** so a
+  silent collapse is loud, not silent:
+  - `hst` (Moeed)
+  - `accs` (ACCS-only Kaizen role)
+  - `intermediate` (Intermediate-only Kaizen role)
+  - `accs_intermediate_dual_access` (Harris; one trainee whose Kaizen
+    profile carries **both** ACCS and Intermediate access — stored today
+    as the single `accs_intermediate` role / `INTERMEDIATE` `training_level`
+    bucket; the test pins that storage behaviour, it does **not** assert
+    `accs_intermediate` is a standalone portfolio type)
+  - `sas_cesr` (Sana; SAS / CESR Portfolio Pathway — provider returns the
+    `sas` portfolio_type today)
+- For each shape:
+  - A simulated 401-on-login (provider `connect()` returns `False`) is
+    classified as `credential_failure` (the bot wrapper returns `False`),
+    not `infra_failure`.
+  - A simulated browser-harness / CDP failure (provider raises
+    `KaizenInfrastructureError`) propagates as the same error type, not
+    silently downgraded to a `False` return.
   - A simulated landing on a non-portfolio page (the Sana shape we hit on
-    2026-06-02) is classified as `auth_required`, not `success`.
-- Each assertion names the shape in the test ID so a future regression
-  surfaces the shape, not just a generic failure.
+    2026-06-02; bootstrap `_login_kaizen_page` returns `False` after a
+    valid-looking attempt) is classified as `auth_required` by
+    `sync_kaizen_portfolio_index_for_user`, not `ok` and not `failed`.
+  - A simulated dashboard landing classifies as `success` and the
+    provider's `portfolio_type` binds to the role string that shape produces
+    (`hst`, `accs`, `intermediate`, `accs_intermediate`, `sas`).
+- Each assertion names the shape in the test ID (via `pytest.mark.parametrize`
+  `ids=...`) so a future regression surfaces the shape, not just a generic
+  failure.
+- The test file uses the same offline-stub style as
+  `test_kaizen_login_reliability.py` and the bootstrap stub style used in
+  `test_kaizen_sync.py` (`_open_kaizen_session_page`,
+  `_restore_cached_session`, `_load_user_credentials`, `_login_kaizen_page`).
+  No live Kaizen, CDP, BWS, Telegram, or network.
 
 **Run.**
 
@@ -214,28 +255,38 @@ cd backend && venv/bin/python3 -m pytest \
   tests/test_login_classification_per_shape.py -v
 ```
 
-### Slice P1.b — `kaizen_role` ↔ `training_level` round-trip per shape
+### Slice P1.b — detected-role → `training_level` mapping per shape
 
-**Goal.** Lock in that `store_kaizen_role("accs_intermediate")` →
-`_apply_kaizen_role_to_profile` sets `training_level` to `INTERMEDIATE`,
-not `HIGHER`, and that the SAS role does not collapse into the HST bucket.
+**Goal.** Lock in that detected Kaizen roles map to the right local
+portfolio-profile bucket without pretending that the bucket is the portfolio
+truth. `store_kaizen_role(...)` stores the raw detected role only; the
+Telegram setup/login path applies the detected-role → `training_level` map.
+That distinction matters because ACCS and Intermediate are separate Kaizen
+portfolio types, while Harris's dual-access account currently surfaces as
+the `accs_intermediate` role and is stored in the `INTERMEDIATE` bucket.
 
 **Files.**
 
-- Create: `backend/tests/test_kaizen_role_training_level_round_trip.py`
-- Reuse: `backend/tests/test_profile_store_kaizen_role.py` helpers.
+- Create: `backend/tests/test_detected_role_training_level_mapping.py`
+- Reuse: `backend/tests/test_profile_store_kaizen_role.py` helpers and the
+  setup/login-path role-map surface in `backend/bot.py`.
 
 **Acceptance criteria.**
 
-- `store_kaizen_role(user_id, "accs_intermediate")` followed by a profile
-  load returns `training_level == "INTERMEDIATE"` (and the
-  `kaizen_role == "accs_intermediate"` flag is preserved on the row).
-- `store_kaizen_role(user_id, "trainee_sas")` (or whatever the SAS role
-  string is on the row — confirm against `profile_store.py` before writing)
-  returns `training_level == "SAS"`.
-- The HST round-trip stays at `training_level == "HIGHER"`.
-- A round-trip across all three shapes in a single test database does not
-  cross-contaminate (each `user_id` keeps its own role and level).
+- `store_kaizen_role(user_id, role)` preserves raw roles for `hst`, `accs`,
+  `intermediate`, `accs_intermediate`, and `sas` without mutating
+  `training_level`; this keeps role detection and portfolio profile storage
+  separate.
+- The setup/login role map keeps ACCS-only and Intermediate-only distinct:
+  `accs -> ACCS`, `intermediate -> INTERMEDIATE`, `hst -> HIGHER`,
+  `sas -> SAS`.
+- Harris's dual-access role is explicitly pinned as current implementation
+  behaviour: `accs_intermediate -> INTERMEDIATE`, with a test/doc comment
+  saying this is the dual-access storage alias, not a standalone portfolio
+  type.
+- A round-trip across all shapes in a single test database does not
+  cross-contaminate (each `user_id` keeps its own raw role and profile
+  level).
 
 ### Slice P1.c — recommended-form fallback does not leak HST-only forms to SAS
 
@@ -260,16 +311,19 @@ shape cannot stage.
   (confirm list against `TRAINING_LEVEL_FORMS["SAS"]` and the unknown-default
   union; if `TRAINING_LEVEL_FORMS["SAS"]` is empty, this test pins the
   fallback union behaviour as the contract).
-- The output for HST and ACCS+Intermediate stays as the existing pinned
-  contract (`tests/test_three_account_filing_matrix.py` is the canonical
-  pin; this test cross-checks the recommender, not the catalogue itself).
+- The output for HST, ACCS-only, Intermediate-only, and Harris's
+  `accs_intermediate` storage bucket stays as the existing pinned contract
+  (`tests/test_three_account_filing_matrix.py` is the canonical pin; this
+  test cross-checks the recommender, not the catalogue itself).
 
 ### Slice P1.d — partial-save outcome categorisation per shape
 
 **Goal.** Prove that the `filing_attempt_log` outcome categories
 (`SAVE_SUCCESS`, `PARTIAL_SAVE`, the failure shapes) bucket correctly for
-each shape's typical partial pattern: SAS has no stage option, ACCS has the
-`accs_intermediate` collapse, HST has the full superset.
+each shape's typical partial pattern: SAS / CESR has no stage option,
+ACCS-only auto-populates the ACCS band, Intermediate-only auto-populates the
+Intermediate band, Harris's dual-access storage alias auto-populates the
+Intermediate band today, and HST has the full superset.
 
 **Files.**
 
@@ -282,8 +336,13 @@ each shape's typical partial pattern: SAS has no stage option, ACCS has the
 - A SAS-shape filing where the stage field was deliberately skipped is
   categorised `PARTIAL_SAVE` with `skipped == ["stage"]`, not
   `SAVE_SUCCESS`.
-- An ACCS+Intermediate filing where the stage field auto-populated to
+- An ACCS-only filing where the stage field auto-populated to
+  `ACCS ST1-ST2/CT1-CT2` is categorised `SAVE_SUCCESS` with `skipped == []`.
+- An Intermediate-only filing where the stage field auto-populated to
   `Intermediate` is categorised `SAVE_SUCCESS` with `skipped == []`.
+- An `accs_intermediate` dual-access filing where the stage field
+  auto-populated to `Intermediate` is categorised `SAVE_SUCCESS` with
+  `skipped == []`.
 - An HST filing with the full superset filled is `SAVE_SUCCESS`.
 - The admin report formatter (`format_admin_report`) surfaces the per-shape
   outcomes in a way that lets the operator see "SAS is partial-saving stage"
@@ -373,8 +432,9 @@ session persist, then re-runs the read-only smoke.
 
 ### Step 4 — confirm the landing-page shape (foreground + worker review)
 
-If Sana's portfolio landing page differs from HST / ACCS+Intermediate
-(possible — SAS / CESR can land on a different default tab), capture the
+If Sana's portfolio landing page differs from HST or from Harris's
+ACCS + Intermediate dual-access account (possible — SAS / CESR can land on
+a different default tab), capture the
 URL pattern and add a fixture-only test that the read-only indexer accepts
 that pattern. Do not change the live read-only indexer until the fixture
 test is green.
@@ -521,8 +581,9 @@ The reader of last resort during beta is `filing_attempt_log` and
 
 ### Nice-to-have for this sprint (do not block promotion)
 
-- A per-shape rolling success rate in the admin report (HST / ACCS+Int /
-  SAS columns). Useful but not load-bearing for promotion.
+- A per-shape rolling success rate in the admin report (HST / ACCS /
+  Intermediate / `accs_intermediate` dual-access / SAS columns). Useful but
+  not load-bearing for promotion.
 - A separate counter for "filing succeeded but user immediately retried" —
   signals a UI confusion bug that the success rate alone hides.
 
@@ -603,16 +664,16 @@ These are not part of the promotion gate and must not be quietly added.
 
 ## 11. Status snapshot (this commit)
 
-| #   | Phase                                                          | Status                                       |
-| --- | -------------------------------------------------------------- | -------------------------------------------- |
+| #   | Phase                                                          | Status                                                     |
+| --- | -------------------------------------------------------------- | ---------------------------------------------------------- |
 | P0  | Evidence review — offline gate + three-account matrix re-green | done; prior gate 933 passed, doc slice verified references |
-| P1  | Fixture / dry-run slices (a–d)                                 | scoped here; queued for next worker session  |
-| P2  | Sana credential / session recovery                             | blocked on foreground operator + BWS sweep   |
-| P3  | Per-account read-only live smoke                               | 2/3 ok (Moeed, Harris); Sana `auth_required` |
-| P4  | Concurrency / idempotency offline proofs                       | scoped here; queued                          |
-| P5  | Per-account controlled draft-only live smoke                   | gated on P3 fully green                      |
-| P6  | Deploy / restart / production smoke                            | gated on P5 fully green                      |
-| —   | Promotion gate                                                 | held: §1.3, §1.4 (Sana), §1.5, §1.6, §1.8    |
+| P1  | Fixture / dry-run slices (a–d)                                 | scoped here; queued for next worker session                |
+| P2  | Sana credential / session recovery                             | blocked on foreground operator + BWS sweep                 |
+| P3  | Per-account read-only live smoke                               | 2/3 ok (Moeed, Harris); Sana `auth_required`               |
+| P4  | Concurrency / idempotency offline proofs                       | scoped here; queued                                        |
+| P5  | Per-account controlled draft-only live smoke                   | gated on P3 fully green                                    |
+| P6  | Deploy / restart / production smoke                            | gated on P5 fully green                                    |
+| —   | Promotion gate                                                 | held: §1.3, §1.4 (Sana), §1.5, §1.6, §1.8                  |
 
 **Next executable slice:** P1.a (per-shape login classification
 round-trip), followed by P1.b, P1.c, P1.d in order. Each lands as a

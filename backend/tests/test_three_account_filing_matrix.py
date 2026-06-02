@@ -34,9 +34,10 @@ Known live-impact gaps (pinned here so a future silent change is visible):
   Sana, which unions every level's catalogue. That is intentional — an
   SAS doctor can credibly file most forms — but the union must continue
   to include the core WPBAs (CBD/DOPS/MINI_CEX) we know matter for CESR.
-- The Kaizen-role ``accs_intermediate`` (Harris) collapses to a single
-  ``INTERMEDIATE`` bucket. The collapse is documented in ``bot.py``; this
-  file pins it so a refactor that drops ACCS-only forms for Harris is
+- The Kaizen-role ``accs_intermediate`` (Harris) maps to the current
+  ``INTERMEDIATE`` storage bucket. That is Harris's dual-access alias, not a
+  claim that ACCS and Intermediate are normally one portfolio type. This
+  file pins the alias so a refactor that drops ACCS or Intermediate forms is
   loud.
 """
 
@@ -238,13 +239,14 @@ def test_harris_junior_catalogue_contains_core_wpbas(level):
     )
 
 
-def test_harris_accs_and_intermediate_share_the_st3_catalogue():
-    """ACCS and INTERMEDIATE both collapse to ST3 today.
+def test_harris_accs_and_intermediate_use_the_current_st3_catalogue():
+    """ACCS and INTERMEDIATE are separate product shapes using the same current catalogue.
 
-    Harris has DREAM Pathway access to both portfolios but the bot stores
-    a single profile bucket. Pin the collapse so a refactor that breaks
-    this aliasing is visible — and any future split into per-portfolio
-    catalogues comes with intent.
+    Harris has DREAM Pathway access to both portfolios. Most trainees will
+    have only ACCS or only Intermediate, so the tests keep those labels
+    separate even though the current form catalogue points both at ST3.
+    A future split into per-portfolio catalogues should update this pin
+    deliberately, not by accident.
     """
     from bot import TRAINING_LEVEL_FORMS
 
@@ -277,11 +279,11 @@ def test_sana_sas_catalogue_falls_through_to_unknown_default():
 
 
 def test_profile_labels_distinguish_the_three_shapes():
-    """The settings UI must show three distinct labels for the three shapes.
+    """The settings UI must show distinct labels for the supported shapes.
 
     If two of these collapse to the same label, users can't tell which bucket
     they're in. This is the cheapest UI-side guard against the
-    accs_intermediate collapse leaking into copy.
+    dual-access alias leaking into product copy.
     """
     from bot import TRAINING_LEVEL_LABELS
 

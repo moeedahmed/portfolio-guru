@@ -1,5 +1,72 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-02 addendum — portfolio-type correction + P1.a slice landed (offline).**
+> Moeed corrected the portfolio-type model used by the Filing Reliability
+> Readiness Sprint: ACCS and Intermediate are **separate portfolio types** on
+> Kaizen, not a single collapsed shape. Harris is the dual-access edge case —
+> one trainee with access to both ACCS and the Intermediate Portfolio. The
+> bot's current storage collapses dual access into a single
+> `accs_intermediate` Kaizen role / `INTERMEDIATE` `training_level` bucket,
+> which is an implementation/storage behaviour worth testing, not a product
+> truth. HST (Moeed), SAS / CESR Portfolio Pathway (Sana), and the trainee
+> portfolio types are also distinct; several Kaizen differences are still
+> unconfirmed, so the plan and its tests should not pretend to know more than
+> the evidence proves.
+>
+> Doc corrections (no runtime behaviour changed):
+>
+> - `docs/roadmap/filing-reliability-readiness-sprint-2026-06.md` — executive
+>   summary lists HST / ACCS / Intermediate / SAS / CESR as separate types
+>   with Harris as the dual-access edge case; adds a portfolio-type
+>   terminology callout; P1.a acceptance criteria now enumerate five
+>   shapes (`hst`, `accs`, `intermediate`, `accs_intermediate_dual_access`,
+>   `sas_cesr`) and four outcomes (`credential_failure`, `infra_failure`,
+>   `auth_required`, `success`); P1.c / P1.d wording reframes
+>   `accs_intermediate` as Harris's storage bucket rather than a portfolio
+>   type; §6 Sana recovery and §9 nice-to-have admin columns updated to
+>   match.
+> - `docs/roadmap/three-account-filing-validation-2026-06.md` — matrix
+>   intro adds the same "do not collapse" callout, explicit that Harris
+>   exercises both ACCS and Intermediate, and that the SAS / CESR vs HST
+>   differences are a working hypothesis until evidence lands.
+>
+> P1.a slice landed (offline only, no live Kaizen, no CDP, no BWS, no
+> Telegram, no deploy/restart/push):
+>
+> - New file `backend/tests/test_login_classification_per_shape.py` — 20
+>   parametrised tests = 5 shapes × 4 outcomes, ids visible as
+>   `hst` / `accs` / `intermediate` / `accs_intermediate_dual_access` /
+>   `sas_cesr` so a future regression surfaces the exact shape, not just a
+>   generic failure. Reuses the offline stub style from
+>   `test_kaizen_login_reliability.py` (`_test_kaizen_login` wrapper) and
+>   `test_kaizen_sync.py` (`_open_kaizen_session_page`,
+>   `_restore_cached_session`, `_load_user_credentials`,
+>   `_login_kaizen_page`). The `accs_intermediate_dual_access` test is the
+>   only one whose expected provider role string differs from its shape id
+>   (`accs_intermediate`) — that delta documents the storage collapse,
+>   not a product claim.
+>
+> Verification (no live action):
+>
+> - `cd backend && venv/bin/python -m pytest tests/test_login_classification_per_shape.py tests/test_kaizen_login_reliability.py tests/test_three_account_filing_matrix.py tests/test_profile_store_kaizen_role.py -q`
+>   → 65 passed, 17 warnings
+>   (pre-existing deprecation warnings only).
+> - `cd backend && venv/bin/python -m pytest tests/test_login_classification_per_shape.py tests/test_kaizen_sync.py tests/test_kaizen_index.py -q`
+>   → 45 passed (sibling sync/index paths
+>   not regressed by the new file's `USAGE_DB_PATH` reload fixture).
+> - `git diff --check` clean.
+>
+> Files changed in this slice: `docs/roadmap/filing-reliability-readiness-sprint-2026-06.md`,
+> `docs/roadmap/three-account-filing-validation-2026-06.md`,
+> `backend/tests/test_login_classification_per_shape.py` (new), `TASK.md`
+> (this addendum). No source files outside docs/tests touched. No commit
+> made — orchestrator reviews and runs the full offline gate before
+> committing.
+>
+> Next executable slice: P1.b (detected-role → `training_level` mapping per
+> shape) — see Filing Reliability Readiness Sprint plan §4. P1.b is still
+> offline-only and follows the same boundary as this slice.
+
 > **2026-06-02 addendum — Filing Reliability Readiness Sprint planned.**
 > Filing is the USP and must clear a promotion-grade bar before the
 > trusted-tester pool widens. Plan landed at
@@ -11,15 +78,16 @@
 > explicit §1 promotion gate.
 >
 > Snapshot at plan landing: full offline gate 933 passed; three-account
-> matrix codified; P3 read-only smoke ok for Moeed/HST and
-> Harris/ACCS+Intermediate; Sana/SAS-CESR blocked at `auth_required` and is
+> matrix codified; P3 read-only smoke ok for Moeed/HST and Harris's
+> ACCS + Intermediate dual-access account; Sana/SAS-CESR blocked at `auth_required` and is
 > the critical-path blocker for promotion. The plan is doc-only; no live
 > Kaizen, no Telegram, no BWS read, no push, no deploy, no restart.
 >
 > **Next executable slice:** Plan §4 P1.a —
 > `backend/tests/test_login_classification_per_shape.py` covering
 > credential-failure / infra-failure / auth-required classification for
-> each of `hst`, `accs_intermediate`, `sas`. Followed by P1.b, P1.c, P1.d
+> `hst`, `accs`, `intermediate`, Harris's `accs_intermediate` dual-access
+> alias, and `sas_cesr`. Followed by P1.b, P1.c, P1.d
 > in order. Each is offline, fixture-driven, lands on its own task branch
 > after `bash scripts/preflight.sh`. The full offline gate must stay green
 > at the new test count.
@@ -81,13 +149,13 @@
 > Results:
 >
 > - **Moeed / senior-HST:** `ok`; 22 rows seen, 21 indexed in the temporary DB.
-> - **Harris / ACCS+Intermediate:** `ok`; 21 rows seen, 21 indexed in the
+> - **Harris / ACCS + Intermediate dual access:** `ok`; 21 rows seen, 21 indexed in the
 >   temporary DB.
 > - **Sana / SAS-CESR candidate:** `auth_required`; RCEM/Kaizen login did not
 >   land on a portfolio page within the read-only smoke window. No rows indexed.
 >
 > Interpretation: the read-only indexer and CDP session bootstrap work for the
-> senior-HST and junior/intermediate portfolio shapes. Sana's account still
+> senior-HST account and Harris's dual-access junior account. Sana's account still
 > needs manual credential/session recovery or confirmation of the correct saved
 > account before we can validate the SAS/CESR shape live.
 
@@ -99,8 +167,8 @@
 >
 > 1. **Moeed** — senior / HST (CCT pathway, ST4–ST6). `training_level=HIGHER`.
 > 2. **Harris** — DREAM Pathway junior with ACCS _and_ Intermediate Portfolio
->    access. `training_level` is stored as `ACCS` or `INTERMEDIATE`; the
->    `accs_intermediate` Kaizen role collapses to a single profile bucket.
+>    access. ACCS and Intermediate are separate portfolio types; Harris's
+>    `accs_intermediate` Kaizen role is the dual-access storage alias.
 > 3. **Sana** — SAS doctor planning CESR / Portfolio Pathway. `training_level=SAS`.
 >    No matching grouped-band stage option on standard WPBAs.
 >
@@ -119,7 +187,7 @@
 >   pins covering, per shape: stage defaulter on grouped-band WPBAs
 >   (CBD/DOPS/MINI_CEX/LAT), stage defaulter on QIAT's individual-year select,
 >   filer-side `STAGE_SELECT_VALUES` alignment, the `TRAINING_LEVEL_FORMS`
->   catalogue (HST superset, ACCS/INTERMEDIATE ST3 collapse, SAS fall-through to
+>   catalogue (HST superset, current ACCS/INTERMEDIATE shared ST3 catalogue, SAS fall-through to
 >   the unknown-default union including CESR core WPBAs), and the
 >   `TRAINING_LEVEL_LABELS` distinctness guard so the three shapes never
 >   collapse into the same UI label.
@@ -135,9 +203,10 @@
 >   - QIAT exposes a `Portfolio pathway (CESR)` option that today's defaulter
 >     does not use for `SAS`. Pinned so any future mapping is intentional and
 >     paired with user-visible copy in the draft preview.
->   - `accs_intermediate` Kaizen role collapses to a single `INTERMEDIATE`
->     bucket. Pinned (`ACCS` and `INTERMEDIATE` aliases share `ST3`'s form
->     catalogue) so a refactor that breaks the alias is loud.
+>   - `accs_intermediate` Kaizen role maps to the current `INTERMEDIATE`
+>     bucket as Harris's dual-access alias. Pinned (`ACCS` and
+>     `INTERMEDIATE` currently share `ST3`'s form catalogue) so a refactor
+>     that breaks either separate type or the alias is loud.
 >
 > Verification:
 >
