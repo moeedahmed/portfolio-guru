@@ -1,6 +1,6 @@
-# Three-Account Basic Filing Validation — 2026-06-02
+# Multi-Account Basic Filing Validation — 2026-06-02
 
-**Status:** Plan + offline coverage landed; Phase 3 read-only smoke partially run.
+**Status:** Plan + offline coverage landed; Phase 3 read-only smoke partially run; four approved Kaizen credential fixtures recorded privately.
 **Owner:** Foreground (orchestrator-delivered work) for any live phase.
 **Branch:** `main` (local commits ahead of `origin/main`).
 
@@ -17,7 +17,7 @@
 
 The last few sprints focused on Portfolio Health pathway-awareness and Kaizen
 indexer reliability. During that work an earlier instruction was missed:
-Portfolio Guru's _basic filing_ path must be validated against the three real
+Portfolio Guru's _basic filing_ path must be validated against the real
 portfolio shapes our trusted-tester pool covers, not just the HST shape we
 build against by default. Filing routing, stage defaulting, and form-catalogue
 gating all branch on `profile_store.training_level` and the inferred Kaizen
@@ -25,16 +25,18 @@ role; if any branch silently degrades on a non-HST shape, real users feel it
 on their first draft.
 
 This document is the restartable record of the missed requirement, the
-three-account matrix, the safe/live boundary, the offline gate that already
+multi-account matrix, the safe/live boundary, the offline gate that already
 exists, and the live phases that still need explicit approval.
 
 ---
 
-## The three-account matrix
+## The approved Kaizen fixture matrix
 
-Each account exercises a different portfolio type. Live credentials live in
-BWS and are **not** read by this validation work — see "Safe / live boundary"
-below.
+Each account exercises a different portfolio surface that real Portfolio Guru
+users may bring to the bot. Live credential IDs live only in the private
+OpenClaw/BWS credential map, not in repo docs. These accounts are for
+read-only mapping, deeper product analysis, offline fixture design, and
+explicitly approved gated smoke work — see "Safe / live boundary" below.
 
 > **Portfolio-type vocabulary — do not collapse.**
 > ACCS and Intermediate are **separate portfolio types** on Kaizen. Harris
@@ -42,16 +44,19 @@ below.
 > and the Intermediate Portfolio. The bot currently stores dual access as
 > a single `accs_intermediate` Kaizen role / `INTERMEDIATE` `training_level`
 > bucket — that is an implementation/storage behaviour worth testing, not a
-> product truth. Several Kaizen differences between HST (Moeed) and
-> SAS / CESR Portfolio Pathway (Sana) are also still unconfirmed; the
-> matrix below should be read as a working hypothesis, not a complete
-> Kaizen spec.
+> product truth. Consultant/supervisor access (Ahmed) is a separate surface
+> because it exercises assessor/supervisor views rather than a trainee-only
+> workflow. Several Kaizen differences between HST (Moeed), SAS / CESR
+> Portfolio Pathway (Sana), and supervisor-facing access are still
+> unconfirmed; the matrix below should be read as a working hypothesis, not
+> a complete Kaizen spec.
 
 | #   | Doctor | Portfolio shape                                                   | `training_level` value(s)     | Why this account matters                                                                                                                  |
 | --- | ------ | ----------------------------------------------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | Moeed  | Senior / HST (CCT pathway, ST4–ST6)                               | `HIGHER` (legacy `ST4`–`ST6`) | Default development shape. Forms catalogue is the ST6 superset; stage defaults to `Higher/ST4-ST6` on every WPBA schema that has a stage. |
-| 2   | Harris | DREAM Pathway junior — unusual dual access to ACCS **and** Intermediate Portfolio | `ACCS`, `INTERMEDIATE`, plus current `accs_intermediate` dual-access alias | Only current account that can exercise both junior portfolio types. Tests must treat ACCS-only and Intermediate-only as separate product shapes, then separately pin Harris's dual-access storage alias. |
+| 2   | Haris / Harris | DREAM Pathway junior — unusual dual access to ACCS **and** Intermediate Portfolio | `ACCS`, `INTERMEDIATE`, plus current `accs_intermediate` dual-access alias | Only current account that can exercise both junior portfolio types. Tests must treat ACCS-only and Intermediate-only as separate product shapes, then separately pin the dual-access storage alias. |
 | 3   | Sana   | SAS doctor planning CESR / Portfolio Pathway                      | `SAS`                         | Only non-training portfolio. Hits the empty-stage path on every WPBA stage select, and has no `TRAINING_LEVEL_FORMS["SAS"]` entry.        |
+| 4   | Ahmed  | Consultant / supervisor portfolio access                          | supervisor / assessor surface | Exercises supervisor-facing portfolio views and assessor workflows. Useful for deeper product analysis and future features that support supervisors or consultant users. |
 
 ### What each shape touches in the codebase
 

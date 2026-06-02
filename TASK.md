@@ -1,5 +1,24 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-02 addendum — approved Kaizen fixture credentials recorded privately.**
+> Moeed clarified the intended testing context for the shared Kaizen details:
+> they are representative Portfolio Guru user fixtures for mapping the product
+> across real portfolio surfaces and for extending bot features through deeper
+> analysis of those portfolio types. The exact BWS credential IDs are now
+> recorded only in the private OpenClaw secret registry as Portfolio Guru
+> aliases; do not duplicate them in repo docs, prompts, tickets, or chat.
+>
+> Approved fixture coverage:
+>
+> 1. **Moeed** — HST portfolio.
+> 2. **Haris / Harris** — ACCS and Intermediate portfolio access.
+> 3. **Sana** — SAS / non-trainee / CESR portfolio.
+> 4. **Ahmed** — consultant / supervisor portfolio access.
+>
+> Default use remains read-only mapping and analysis. Draft creation, Kaizen
+> save/submit/delete, deploy, restart, push, spending, or any privacy-sensitive
+> expansion still needs the specific gate approved before execution.
+
 > **2026-06-02 addendum — P2/P3 SAS-CESR read-only gate cleared.**
 > Filing Reliability Readiness Sprint §6: the foreground credential/live
 > recovery gate for the local SAS/CESR saved-profile candidates has now passed
