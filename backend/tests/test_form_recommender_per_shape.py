@@ -28,6 +28,14 @@ import pytest
 
 CORE_WPBAS = {"CBD", "DOPS", "MINI_CEX"}
 CESR_CORE = CORE_WPBAS | {"REFLECT_LOG"}
+QI_AUDIT_SCREENSHOT_TEXT = (
+    "Please create the best-fit kaizen draft for an intermediate portfolio account.\n"
+    "Quality improvement project in ED: improving time-to-antibiotics for adult sepsis alerts. "
+    "Baseline audit showed delays from triage recognition to first antibiotic dose. "
+    "Intervention included a sepsis prompt sticker on triage notes, short teaching for nurses "
+    "and junior doctors, and a resus-room antibiotic grab-list. Re-audit after two weeks "
+    "showed improved time to antibiotics and better documentation of lactate and blood cultures."
+)
 
 
 # ─── Helper exists and is pure ───────────────────────────────────────────
@@ -128,3 +136,105 @@ def test_unknown_training_level_uses_fallback_union(level):
     allowed = _allowed_forms_for_training_level(level)
     assert allowed == _default_allowed_forms_for_unknown_training()
     assert allowed != list(TRAINING_LEVEL_FORMS["ST5"])
+
+
+# ─── QIAT fallback must not become Teaching ───────────────────────────────
+
+
+def _recommendation(form_type: str, rationale: str = "fits"):
+    from extractor import FORM_UUIDS
+    from models import FormTypeRecommendation
+
+    return FormTypeRecommendation(
+        form_type=form_type,
+        rationale=rationale,
+        uuid=FORM_UUIDS.get(form_type),
+    )
+
+
+def test_intermediate_qi_audit_project_falls_back_to_audit_not_teaching():
+    """Exact regression: QIAT is unavailable for Intermediate/ST3, but the
+    remaining Teaching recommendation is only an intervention detail.
+    """
+    from bot import (
+        _allowed_forms_for_training_level,
+        _build_form_choice_keyboard,
+        _filter_recommendations_for_allowed_forms,
+    )
+
+    assert "time-to-antibiotics" in QI_AUDIT_SCREENSHOT_TEXT
+    recommendations = [
+        _recommendation("QIAT", "Baseline audit, intervention, and re-audit."),
+        _recommendation("TEACH", "Teaching was part of the intervention."),
+    ]
+
+    filtered = _filter_recommendations_for_allowed_forms(
+        recommendations,
+        _allowed_forms_for_training_level("INTERMEDIATE"),
+        QI_AUDIT_SCREENSHOT_TEXT,
+    )
+
+    assert filtered[0].form_type == "AUDIT"
+    assert filtered[0].uuid
+    assert filtered[1].form_type == "TEACH"
+
+    keyboard = _build_form_choice_keyboard(filtered)
+    best_button = keyboard.inline_keyboard[0][0]
+    assert best_button.callback_data == "FORM|best"
+    assert "Use best fit: Audit" in best_button.text
+    assert "Teaching" not in best_button.text
+
+
+def test_hst_qi_audit_project_keeps_qiat_as_best_fit():
+    from bot import (
+        _allowed_forms_for_training_level,
+        _filter_recommendations_for_allowed_forms,
+    )
+
+    recommendations = [
+        _recommendation("QIAT", "Baseline audit, intervention, and re-audit."),
+        _recommendation("TEACH", "Teaching was part of the intervention."),
+    ]
+
+    filtered = _filter_recommendations_for_allowed_forms(
+        recommendations,
+        _allowed_forms_for_training_level("ST5"),
+        QI_AUDIT_SCREENSHOT_TEXT,
+    )
+
+    assert [rec.form_type for rec in filtered[:2]] == ["QIAT", "TEACH"]
+
+
+def test_intermediate_qi_audit_project_with_teaching_only_recommendation_gets_audit():
+    from bot import (
+        _allowed_forms_for_training_level,
+        _filter_recommendations_for_allowed_forms,
+    )
+
+    filtered = _filter_recommendations_for_allowed_forms(
+        [_recommendation("TEACH", "Teaching was part of the intervention.")],
+        _allowed_forms_for_training_level("INTERMEDIATE"),
+        QI_AUDIT_SCREENSHOT_TEXT,
+    )
+
+    assert [rec.form_type for rec in filtered[:2]] == ["AUDIT", "TEACH"]
+
+
+def test_genuine_teaching_session_stays_teaching_for_intermediate():
+    from bot import (
+        _allowed_forms_for_training_level,
+        _filter_recommendations_for_allowed_forms,
+    )
+
+    recommendations = [
+        _recommendation("TEACH", "Delivered a structured teaching session."),
+        _recommendation("EDU_ACT", "Educational activity also fits."),
+    ]
+
+    filtered = _filter_recommendations_for_allowed_forms(
+        recommendations,
+        _allowed_forms_for_training_level("INTERMEDIATE"),
+        "Delivered a structured teaching session for junior doctors on adult sepsis alerts.",
+    )
+
+    assert [rec.form_type for rec in filtered[:2]] == ["TEACH", "EDU_ACT"]
