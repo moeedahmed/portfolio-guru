@@ -343,6 +343,70 @@ def test_summarise_groups_outcomes_by_portfolio_shape(log_path):
     assert summary["by_shape"]["hst"]["successes"] == 1
 
 
+def test_two_user_attempts_append_distinct_rows_without_double_counting(log_path):
+    fal.log_attempt(
+        user_id=201,
+        username="first_doc",
+        form_type="CBD",
+        status="success",
+        filled=["reflection"],
+        skipped=[],
+        portfolio_shape="hst",
+    )
+    fal.log_attempt(
+        user_id=202,
+        username="second_doc",
+        form_type="CBD",
+        status="partial",
+        filled=["reflection"],
+        skipped=["stage"],
+        portfolio_shape="sas",
+    )
+
+    rows = list(fal.iter_records())
+    assert len(rows) == 2
+    assert {row["user_id"] for row in rows} == {201, 202}
+
+    summary = fal.summarise(rows)
+    assert summary["total"] == 2
+    assert summary["unique_users"] == 2
+    assert summary["saved"] == 2
+    assert summary["by_shape"]["hst"]["successes"] == 1
+    assert summary["by_shape"]["sas"]["partials"] == 1
+
+
+def test_two_user_attempts_preserve_synthetic_exclusion_per_user(log_path):
+    fal.log_attempt(
+        user_id=99999999,
+        username="synthetic_fixture",
+        form_type="CBD",
+        status="success",
+        filled=["reflection"],
+        skipped=[],
+        portfolio_shape="hst",
+    )
+    fal.log_attempt(
+        user_id=202,
+        username="real_doc",
+        form_type="CBD",
+        status="success",
+        filled=["reflection"],
+        skipped=[],
+        portfolio_shape="intermediate",
+    )
+
+    rows = list(fal.iter_records())
+    assert len(rows) == 2
+    assert sum(1 for row in rows if row["synthetic"]) == 1
+
+    summary = fal.summarise(rows)
+    assert summary["total"] == 1
+    assert summary["unique_users"] == 1
+    assert summary["synthetic_excluded"] == 1
+    assert "hst" not in summary["by_shape"]
+    assert summary["by_shape"]["intermediate"]["successes"] == 1
+
+
 def test_summarise_recent_failures_are_newest_first_and_capped(log_path):
     # Write seven failures in order; expect at most 5 in recent_failures,
     # newest first.

@@ -7,7 +7,9 @@ an in-memory one, same pattern as ``test_smoke.test_profile_store_roundtrip_succ
 from __future__ import annotations
 
 import pytest
+from cryptography.fernet import Fernet
 from sqlalchemy.pool import StaticPool
+from sqlmodel import Session, select
 from sqlmodel import SQLModel, create_engine
 
 
@@ -59,6 +61,55 @@ def test_store_kaizen_role_does_not_clobber_training_level(profile_store_module)
 
     assert profile_store_module.get_training_level(404) == "HIGHER"
     assert profile_store_module.get_kaizen_role(404) == "assessor"
+
+
+def test_interleaved_profile_writes_keep_users_isolated(profile_store_module):
+    profile_store_module.store_kaizen_role(901, "accs_intermediate")
+    profile_store_module.store_training_level(902, "HIGHER")
+    profile_store_module.store_training_level(901, "INTERMEDIATE")
+    profile_store_module.store_kaizen_role(902, "hst")
+
+    assert profile_store_module.get_kaizen_role(901) == "accs_intermediate"
+    assert profile_store_module.get_training_level(901) == "INTERMEDIATE"
+    assert profile_store_module.get_kaizen_role(902) == "hst"
+    assert profile_store_module.get_training_level(902) == "HIGHER"
+
+
+def test_profile_and_credential_rows_do_not_cross_user_boundaries(monkeypatch, profile_store_module):
+    import credentials
+
+    credentials_engine = _memory_engine()
+    monkeypatch.setattr(credentials, "engine", credentials_engine)
+    monkeypatch.setattr(credentials, "FERNET_KEY", Fernet.generate_key())
+    SQLModel.metadata.create_all(credentials_engine)
+
+    profile_store_module.store_kaizen_role(1001, "accs_intermediate")
+    profile_store_module.store_training_level(1001, "INTERMEDIATE")
+    profile_store_module.store_kaizen_role(1002, "hst")
+    profile_store_module.store_training_level(1002, "HIGHER")
+    credentials.store_credentials(1001, "first@example.com", "first-secret")
+    credentials.store_credentials(1002, "second@example.com", "second-secret")
+
+    assert credentials.get_credentials(1001) == ("first@example.com", "first-secret")
+    assert credentials.get_credentials(1002) == ("second@example.com", "second-secret")
+    assert profile_store_module.get_training_level(1001) == "INTERMEDIATE"
+    assert profile_store_module.get_training_level(1002) == "HIGHER"
+
+    with Session(credentials.engine) as session:
+        first = session.exec(
+            select(credentials.UserCredential).where(
+                credentials.UserCredential.telegram_user_id == 1001
+            )
+        ).first()
+        second = session.exec(
+            select(credentials.UserCredential).where(
+                credentials.UserCredential.telegram_user_id == 1002
+            )
+        ).first()
+
+    assert first is not None
+    assert second is not None
+    assert first.kaizen_username_enc != second.kaizen_username_enc
 
 
 # ── list_users_by_kaizen_role ───────────────────────────────────────────────

@@ -1,5 +1,35 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-02 addendum — P4 concurrency/idempotency slice landed (offline).**
+> Filing Reliability Readiness Sprint §7: offline multi-user reliability
+> proof is now pinned for draft-state isolation, filing-log isolation,
+> profile/credential row isolation, and retry-after-DOM-drift behaviour.
+>
+> Files changed:
+>
+> - `backend/tests/test_concurrent_user_isolation.py` (new) — proves active
+>   draft and retryable last-filed-case state stay isolated between two
+>   simulated Telegram user contexts.
+> - `backend/tests/test_filing_attempt_log.py` — proves two user attempts
+>   append distinct filing-log rows, real users are not treated as synthetic,
+>   and synthetic fixture traffic is excluded from real-user shape outcomes.
+> - `backend/tests/test_profile_store_kaizen_role.py` — proves interleaved
+>   `kaizen_role` / `training_level` writes do not collide and credential rows
+>   remain user-scoped.
+> - `backend/tests/test_filing_reliability.py` — proves an explicit retry
+>   after simulated DOM drift reuses the original saved-draft URL and surfaces
+>   the drifted field as skipped instead of creating a new draft path.
+>
+> Boundary:
+>
+> - Offline-only. No BWS, live Kaizen, CDP/browser session, Telegram
+>   automation, production DB write, deploy, restart, push, or real
+>   submission.
+>
+> Next executable gate: foreground live/credential path for P2/P3
+> Sana/SAS-CESR recovery + read-only smoke, then P5 draft-only smoke only
+> after P3 is green.
+
 > **2026-06-02 addendum — P1.d slice landed (offline).**
 > Filing Reliability Readiness Sprint §4 P1.d: filing-attempt outcomes are
 > now grouped by internal portfolio shape so the admin report can expose

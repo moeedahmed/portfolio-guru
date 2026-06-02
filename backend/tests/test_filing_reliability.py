@@ -234,6 +234,85 @@ async def test_route_filing_reuses_drafts_when_explicitly_requested():
     assert deterministic.await_args.kwargs["reuse_draft"] is True
 
 
+@pytest.mark.asyncio
+async def test_retry_after_dom_drift_reuses_draft_and_surfaces_changed_field():
+    from filer_router import route_filing
+
+    draft_url = "https://kaizenep.com/events/fillin/draft-doc-id?autosave=auto-1"
+    calls = []
+
+    async def deterministic(
+        platform,
+        form_type,
+        fields,
+        credentials,
+        curriculum_links,
+        **kwargs,
+    ):
+        calls.append({
+            "fields": dict(fields),
+            "reuse_draft": kwargs["reuse_draft"],
+        })
+        if kwargs["reuse_draft"]:
+            return {
+                "status": "partial",
+                "filled": ["reflection"],
+                "skipped": ["clinical_reasoning_renamed"],
+                "error": None,
+                "saved_url": draft_url,
+            }
+        return {
+            "status": "success",
+            "filled": ["reflection", "clinical_reasoning"],
+            "skipped": [],
+            "error": None,
+            "saved_url": draft_url,
+        }
+
+    with patch("filer_router._route_deterministic", new=deterministic):
+        first = await route_filing(
+            platform="kaizen",
+            form_type="CBD",
+            fields={
+                "reflection": "Initial reflection",
+                "clinical_reasoning": "Initial reasoning",
+            },
+            credentials={"username": "u", "password": "p"},
+        )
+        retry = await route_filing(
+            platform="kaizen",
+            form_type="CBD",
+            fields={
+                "reflection": "Initial reflection",
+                "clinical_reasoning_renamed": "DOM drifted field",
+            },
+            credentials={"username": "u", "password": "p"},
+            reuse_draft=True,
+        )
+
+    assert calls == [
+        {
+            "fields": {
+                "reflection": "Initial reflection",
+                "clinical_reasoning": "Initial reasoning",
+            },
+            "reuse_draft": False,
+        },
+        {
+            "fields": {
+                "reflection": "Initial reflection",
+                "clinical_reasoning_renamed": "DOM drifted field",
+            },
+            "reuse_draft": True,
+        },
+    ]
+    assert first["saved_url"] == draft_url
+    assert retry["status"] == "partial"
+    assert retry["saved_url"] == draft_url
+    assert retry["skipped"] == ["clinical_reasoning_renamed"]
+    assert "new-section" not in retry["saved_url"]
+
+
 # ─── Alias routing safeguards (ESLE / Mini-CEX style) ────────────────────
 
 
