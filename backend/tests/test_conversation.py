@@ -209,7 +209,7 @@ class TestExplicitFormRouting:
         assert "names, NHS numbers, DOBs or addresses" in sent_text
 
     @pytest.mark.asyncio
-    async def test_intermediate_qi_audit_falls_back_to_audit_not_teaching(self, monkeypatch):
+    async def test_intermediate_qi_audit_prefers_qiat_not_teaching(self, monkeypatch):
         import bot
         from extractor import FORM_UUIDS
         from models import FormTypeRecommendation
@@ -251,11 +251,11 @@ class TestExplicitFormRouting:
         )
 
         assert state == bot.AWAIT_FORM_CHOICE
-        assert context.user_data["form_recommendations"][0].form_type == "AUDIT"
+        assert context.user_data["form_recommendations"][0].form_type == "QIAT"
         sent_keyboard = message.reply_text.await_args.kwargs["reply_markup"]
         first_button = sent_keyboard.inline_keyboard[0][0]
         assert first_button.callback_data == "FORM|best"
-        assert "Use best fit: Audit" in first_button.text
+        assert "Use best fit: QIAT" in first_button.text
         assert "Teaching Session" not in first_button.text
 
     @pytest.mark.asyncio
