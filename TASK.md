@@ -1,5 +1,42 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-02 addendum — P3 saved CESR 2021 bot-handler draft smoke passed and cleaned up; Sana identity not pinned.**
+> Scope: next controlled SAS/CESR fixture after Harris/Intermediate. The first
+> step pinned the two locally saved SAS/CESR candidates before counting either
+> as Sana. Live dashboard checks showed neither saved candidate is Sana:
+> candidate `8520547917` is `Non-Trainee Higher`; candidate `613452099` is a
+> `CESR (2021 Curriculum)` portfolio. The smoke therefore counts as saved
+> CESR-shape coverage, not as Sana proof.
+>
+> Result:
+>
+> - Candidate `613452099` was used for the controlled CESR 2021 smoke because
+>   it is the true `CESR (2021 Curriculum)` account.
+> - The natural bot path (`Use best fit`) resolved the case to `CBD_2021`.
+> - A forced `FORM|CBD` callback was deliberately not counted: Kaizen
+>   redirected the 2025 CBD form URL to `/events/list`, no fields were filled,
+>   and the activities check found no synthetic test draft or markers.
+> - Bot-handler path then saved one synthetic `CBD - Case Based Discussion
+>   (2021)` draft using the real save-as-draft approval handler.
+> - Filing QA was GREEN for the 2021 CBD surface: 6 fields filled, stage
+>   intentionally skipped / acceptable-empty for the CESR account.
+> - Opened draft `8bfa7f9a-019c-4b38-aa3a-ebfd90710a10` was `DRAFT PRIVATE`
+>   and contained the synthetic perforated-viscus / urgent-CT / CESR portfolio
+>   evidence case.
+> - Cleanup deleted only that document id after private-draft and case-marker
+>   checks passed. Post-cleanup Saved drafts no longer contained that document
+>   or the synthetic case markers.
+> - Candidate profiles restored to their original local rows:
+>   `training_level=SAS`, `curriculum=2021`, `kaizen_role=None`.
+>
+> Boundary: this did **not** prove Sana's personal account, and did not
+> impersonate any user on live Telegram. No submit, sign, send, approve,
+> reject, deploy, push, production rollout, or live Telegram message was sent.
+>
+> Next executable gate: either obtain/confirm the actual Sana identity if she
+> must be counted specifically, or proceed to Ahmed/consultant supervisor
+> boundary using the existing controlled-smoke approach.
+>
 > **2026-06-02 addendum — P3 Harris/Intermediate bot-handler draft smoke passed and cleaned up.**
 > Scope: third controlled fixture after Moeed/HST and Harris/ACCS. The smoke
 > used Harris's stored Portfolio Guru user id and credentials, temporarily
