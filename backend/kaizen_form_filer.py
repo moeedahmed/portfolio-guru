@@ -28,6 +28,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import urllib.parse
 import urllib.request
 from datetime import datetime, date
 from pathlib import Path
@@ -135,6 +136,30 @@ KAIZEN_URL_PATTERNS = {
     "doc_id_query": "doc",         # query param name in the saved URL
     "autosave_query": "autosave",  # query param name in the saved URL
 }
+
+
+def _is_kaizen_app_url(url: str) -> bool:
+    """True only for the real Kaizen app host, not auth.kaizenep.com."""
+    try:
+        parsed = urllib.parse.urlparse(url or "")
+    except Exception:
+        return False
+    return parsed.netloc.lower() == "kaizenep.com"
+
+
+def _is_kaizen_auth_url(url: str) -> bool:
+    """Detect RCEM/Kaizen auth redirects that mean the session is not usable."""
+    try:
+        parsed = urllib.parse.urlparse(url or "")
+    except Exception:
+        return False
+    host = parsed.netloc.lower()
+    path = parsed.path.lower()
+    return (
+        host == "auth.kaizenep.com"
+        or "login" in path
+        or "interaction" in path
+    )
 
 
 # ─── Kaizen quirks observed in live forms ────────────────────────────────────
@@ -1412,9 +1437,14 @@ async def use_cached_session(page: Page, telegram_user_id: int) -> bool:
     try:
         await page.goto("https://kaizenep.com/activities", wait_until="load", timeout=15000)
         await asyncio.sleep(2)
-        if "kaizenep.com" in page.url and "/login" not in page.url.lower():
+        if _is_kaizen_app_url(page.url) and not _is_kaizen_auth_url(page.url):
             logger.info(f"Replayed cached Kaizen session for user {telegram_user_id}")
             return True
+        logger.info(
+            "Cached Kaizen session for user %s redirected to auth/non-app URL: %s",
+            telegram_user_id,
+            page.url,
+        )
     except Exception as e:
         logger.info(f"Cached session navigation failed for user {telegram_user_id}: {e}")
     return False
@@ -2287,8 +2317,10 @@ async def fill_kaizen_form(
         # Try the encrypted cookie cache first to skip the 5-10s portal hop;
         # fall back to a fresh login and refresh the cache on success.
         logged_in = False
+        used_cached_session = False
         if telegram_user_id is not None:
             logged_in = await use_cached_session(page, telegram_user_id)
+            used_cached_session = logged_in
         if not logged_in:
             logged_in = await _login(page, username, password)
             if logged_in and telegram_user_id is not None:
@@ -2306,6 +2338,23 @@ async def fill_kaizen_form(
             url = f"https://kaizenep.com/events/new-section/{form_uuid}"
 
         await page.goto(url, wait_until="networkidle", timeout=30000)
+        if used_cached_session and _is_kaizen_auth_url(page.url):
+            logger.info(
+                "Cached Kaizen session expired during %s form navigation; re-authenticating",
+                form_type,
+            )
+            logged_in = await _login(page, username, password)
+            if logged_in and telegram_user_id is not None:
+                await save_session_state(page.context, telegram_user_id)
+            if not logged_in:
+                return {
+                    "status": "failed",
+                    "filled": [],
+                    "skipped": [],
+                    "errors": ["Login failed after cached session expired"],
+                    "screenshot": None,
+                }
+            await page.goto(url, wait_until="networkidle", timeout=30000)
         await asyncio.sleep(4)  # Wait for Angular rendering
 
         # Get field map for this form type
@@ -3257,8 +3306,10 @@ async def file_to_kaizen(
         # portal hop on every filing. Falls back to a fresh login and refreshes
         # the cache if the cookies are missing, corrupt, or expired.
         logged_in = False
+        used_cached_session = False
         if telegram_user_id is not None:
             logged_in = await use_cached_session(page, telegram_user_id)
+            used_cached_session = logged_in
         if not logged_in:
             logged_in = await _login(page, username, password)
             if logged_in and telegram_user_id is not None:
@@ -3281,6 +3332,23 @@ async def file_to_kaizen(
         if not reused_draft:
             form_url = f"https://kaizenep.com/events/new-section/{uuid}"
             await page.goto(form_url, wait_until="networkidle", timeout=30000)
+            if used_cached_session and _is_kaizen_auth_url(page.url):
+                logger.info(
+                    "Cached Kaizen session expired during %s form navigation; re-authenticating",
+                    form_type,
+                )
+                logged_in = await _login(page, username, password)
+                if logged_in and telegram_user_id is not None:
+                    await save_session_state(page.context, telegram_user_id)
+                if not logged_in:
+                    return {
+                        "status": "failed", "filled": [], "skipped": [],
+                        "error": (
+                            "Login failed after cached session expired. "
+                            "Use /settings to reconnect."
+                        ),
+                    }
+                await page.goto(form_url, wait_until="networkidle", timeout=30000)
             await asyncio.sleep(5)
 
             if "new-section" not in page.url:

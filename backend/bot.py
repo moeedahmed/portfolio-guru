@@ -7394,7 +7394,8 @@ def _classify_filing_failure(
     """
     err = (error or "").lower()
     if any(token in err for token in (
-        "login failed", "could not log in", "log in to kaizen"
+        "login failed", "could not log in", "log in to kaizen",
+        "session expired", "auth.kaizenep.com", "redirected to https://auth",
     )):
         return "LOGIN_FAILED"
     save_markers = (

@@ -17,8 +17,10 @@ from kaizen_form_filer import (
     FORM_UUIDS,
     STAGE_SELECT_VALUES,
     _attach_file,
+    _is_kaizen_app_url,
     _strip_emojis,
     _to_uk_date,
+    use_cached_session,
 )
 
 
@@ -184,6 +186,53 @@ async def test_login_success_proceeds_to_form(mock_playwright_ctx):
             result = await file_to_kaizen("CBD", {"clinical_reasoning": "test"}, "user", "pass")
             assert result["status"] != "failed" or "Login" not in (result["error"] or "")
             mock_page.goto.assert_called()
+
+
+def test_auth_subdomain_is_not_kaizen_app_url():
+    assert _is_kaizen_app_url("https://kaizenep.com/activities") is True
+    assert _is_kaizen_app_url("https://auth.kaizenep.com/interaction/abc") is False
+
+
+@pytest.mark.asyncio
+async def test_cached_session_rejects_auth_redirect(mock_playwright_ctx):
+    mock_page = mock_playwright_ctx
+    mock_page.url = "https://auth.kaizenep.com/interaction/abc"
+
+    with patch("kaizen_form_filer.load_session_state", return_value={"cookies": []}):
+        assert await use_cached_session(mock_page, 12345) is False
+
+
+@pytest.mark.asyncio
+async def test_cached_session_auth_redirect_reauthenticates_before_form_fill(mock_playwright_ctx):
+    mock_page = mock_playwright_ctx
+    urls = [
+        "https://auth.kaizenep.com/interaction/abc",
+        "https://kaizenep.com/events/new-section/some-uuid",
+    ]
+
+    async def _goto(url, *args, **kwargs):
+        if "new-section" in url:
+            mock_page.url = urls.pop(0)
+        else:
+            mock_page.url = url
+
+    mock_page.goto = AsyncMock(side_effect=_goto)
+
+    with patch("kaizen_form_filer.use_cached_session", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._login", AsyncMock(return_value=True)) as login:
+            with patch("kaizen_form_filer.save_session_state", AsyncMock()) as save_state:
+                with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
+                    result = await file_to_kaizen(
+                        "CBD",
+                        {"clinical_reasoning": "test"},
+                        "user",
+                        "pass",
+                        telegram_user_id=12345,
+                    )
+
+    assert result["status"] != "failed" or "Form page didn't load" not in (result["error"] or "")
+    login.assert_awaited_once()
+    save_state.assert_awaited_once()
 
 
 # ─── Section C: Form page navigation ────────────────────────────────────────────

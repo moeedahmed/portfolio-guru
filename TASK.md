@@ -1,5 +1,46 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-02 addendum — P3 Moeed/HST Telegram bot-path save failure fixed locally.**
+> Scope: first real user-flow smoke after the direct Kaizen draft smoke:
+> Moeed manually sent the synthetic HST CBD case to Portfolio Guru, selected
+> CBD, previewed the draft, and tapped save. No Telegram automation was used.
+>
+> Result:
+>
+> - Draft generation worked: the bot produced the expected CBD preview for the
+>   synthetic STEMI case.
+> - Save failed before any field fill: filing log shows the Kaizen form load
+>   redirected to `auth.kaizenep.com`, with `filled_count=0`.
+> - Root cause: cached Kaizen session validation accepted the auth subdomain as
+>   a valid Kaizen app page because the host still contained `kaizenep.com`.
+> - Safety check: read-only Kaizen activities inspection found Saved drafts
+>   empty and zero hits for the synthetic test terms; no cleanup draft was left
+>   behind.
+>
+> Fix:
+>
+> - `backend/kaizen_form_filer.py` now treats only the exact `kaizenep.com`
+>   app host as a valid cached session, rejects `auth.kaizenep.com` /
+>   interaction/login redirects, and re-authenticates once if a previously
+>   accepted cache expires during form navigation.
+> - `backend/bot.py` now classifies auth redirects/session expiry as a
+>   login/session failure rather than a vague filling failure.
+> - `backend/tests/test_kaizen_filer.py` adds regression pins for auth-subdomain
+>   rejection and re-authentication before filling.
+>
+> Verification:
+>
+> - Focused stale-session pins: `3 passed`.
+> - Filing-focused suites: `73 passed, 1 warning` and `22 passed, 1 warning`.
+> - Full offline backend gate: `998 passed, 13 deselected, 3 snapshots passed`.
+>
+> Boundary: local source fix only. No submit, sign, send, approve, reject,
+> deploy, restart, push, production DB write, Telegram automation, or live
+> retry after the fix yet.
+>
+> Next executable gate: restart the local Portfolio Guru bot only after explicit
+> runtime approval, then repeat the same Moeed/HST bot-path smoke once.
+
 > **2026-06-02 addendum — P3 Moeed/HST direct Kaizen draft smoke passed and cleaned up.**
 > Scope: first controlled live smoke for the approved Moeed/HST fixture, CBD
 > form only, direct deterministic Kaizen filing path only. This was not the
