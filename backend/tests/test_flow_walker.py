@@ -2468,10 +2468,10 @@ class TestRecentPortfolioFixes:
         keyboard = _build_post_filing_keyboard('CBD', 'success', same_case_available=True)
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
 
-        assert ('💾 Save as new WBA', 'ACTION|same_case_another') in buttons
+        assert ('💾 Save as another WBA', 'ACTION|same_case_another') in buttons
         assert ('📋 File another case', 'ACTION|file') in buttons
         assert [
-            ('💾 Save as new WBA', 'ACTION|same_case_another'),
+            ('💾 Save as another WBA', 'ACTION|same_case_another'),
             ('📋 File another case', 'ACTION|file'),
         ] in [
             [(b.text, b.callback_data) for b in row]
@@ -2487,7 +2487,7 @@ class TestRecentPortfolioFixes:
         keyboard = _build_post_filing_keyboard('CBD', 'partial', same_case_available=True)
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
 
-        assert ('💾 Save as new WBA', 'ACTION|same_case_another') in buttons
+        assert ('💾 Save as another WBA', 'ACTION|same_case_another') in buttons
 
     def test_post_filing_keyboard_no_same_case_for_uncertain_partial(self):
         """Uncertain partial (partial + error) must NOT offer Same case
@@ -2497,7 +2497,7 @@ class TestRecentPortfolioFixes:
         keyboard = _build_post_filing_keyboard('CBD', 'partial', uncertain=True, same_case_available=True)
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
 
-        assert ('💾 Save as new WBA', 'ACTION|same_case_another') not in buttons
+        assert ('💾 Save as another WBA', 'ACTION|same_case_another') not in buttons
         assert ('🔄 Try again', 'ACTION|retry_filing') in buttons
 
     def test_post_filing_keyboard_links_to_saved_draft_url_when_present(self):
@@ -2681,8 +2681,8 @@ class TestRecentPortfolioFixes:
     @pytest.mark.asyncio
     async def test_approval_partial_includes_same_case_another(self, thin_draft):
         """When handle_approval_approve processes a clean partial (no error),
-        the post-filing keyboard must include 'Same case, new WPBA' so the
-        user can get a different WPBA from the same case."""
+        the post-filing keyboard must include the same-case another-WBA action
+        so the user can get a different WPBA from the same case."""
         from bot import handle_approval_approve
 
         sim = BotSimulator()
@@ -2713,14 +2713,14 @@ class TestRecentPortfolioFixes:
             for row in sim.messages_sent[-1][2].inline_keyboard
             if row
         ]
-        assert ('💾 Save as new WBA', 'ACTION|same_case_another') in buttons, (
+        assert ('💾 Save as another WBA', 'ACTION|same_case_another') in buttons, (
             f"Clean partial should surface 'Same case' button. Got: {buttons!r}"
         )
 
     @pytest.mark.asyncio
     async def test_approval_success_includes_same_case_another(self):
         """When handle_approval_approve processes a success, the post-filing
-        keyboard must also include 'Same case, new WPBA'."""
+        keyboard must also include the same-case another-WBA action."""
         from bot import _DRAFT_DIVIDER, handle_approval_approve
         from models import FormDraft
 
@@ -2766,7 +2766,7 @@ class TestRecentPortfolioFixes:
             for row in sim.messages_sent[-1][2].inline_keyboard
             if row
         ]
-        assert ('💾 Save as new WBA', 'ACTION|same_case_another') in buttons, (
+        assert ('💾 Save as another WBA', 'ACTION|same_case_another') in buttons, (
             f"Success should surface 'Same case' button. Got: {buttons!r}"
         )
         """Successful save also reads as a new step: 'Kaizen draft saved' on top, then
