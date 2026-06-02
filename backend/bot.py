@@ -4511,6 +4511,11 @@ async def delete_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             session.delete(cred)
             session.commit()
             deleted_items.append("Kaizen credentials")
+            try:
+                from kaizen_form_filer import invalidate_session_cache
+                invalidate_session_cache(user_id)
+            except Exception:
+                logger.warning("Could not clear Kaizen session cache during data deletion", exc_info=True)
 
     with Session(prof_engine) as session:
         profile = session.exec(select(UserProfile).where(UserProfile.telegram_user_id == user_id)).first()

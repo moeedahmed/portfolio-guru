@@ -17,9 +17,13 @@ from kaizen_form_filer import (
     FORM_UUIDS,
     STAGE_SELECT_VALUES,
     _attach_file,
+    _session_cache_path,
     _is_kaizen_app_url,
     _strip_emojis,
     _to_uk_date,
+    invalidate_session_cache,
+    load_session_state,
+    save_session_state,
     use_cached_session,
 )
 
@@ -200,6 +204,63 @@ async def test_cached_session_rejects_auth_redirect(mock_playwright_ctx):
 
     with patch("kaizen_form_filer.load_session_state", return_value={"cookies": []}):
         assert await use_cached_session(mock_page, 12345) is False
+
+
+def test_session_cache_is_scoped_to_kaizen_username(monkeypatch, tmp_path):
+    import kaizen_form_filer
+
+    monkeypatch.setattr(kaizen_form_filer, "_SESSION_DIR", tmp_path)
+
+    legacy = _session_cache_path(12345)
+    moeed = _session_cache_path(12345, "moeed@example.com")
+    haris = _session_cache_path(12345, "haris@example.com")
+
+    assert legacy.name == "12345.encrypted"
+    assert moeed != haris
+    assert moeed.name.startswith("12345-")
+    assert haris.name.startswith("12345-")
+
+
+@pytest.mark.asyncio
+async def test_cached_session_for_previous_kaizen_user_is_not_loaded(monkeypatch, tmp_path):
+    import kaizen_form_filer
+    import credentials
+    from cryptography.fernet import Fernet
+
+    monkeypatch.setattr(kaizen_form_filer, "_SESSION_DIR", tmp_path)
+    monkeypatch.setattr(credentials, "FERNET_KEY", Fernet.generate_key())
+
+    class FakeContext:
+        async def storage_state(self):
+            return {"cookies": [{"name": "sid", "value": "moeed", "domain": "kaizenep.com", "path": "/"}]}
+
+    await save_session_state(FakeContext(), 12345, "moeed@example.com")
+
+    assert load_session_state(12345, "moeed@example.com") is not None
+    assert load_session_state(12345, "haris@example.com") is None
+
+
+def test_invalidate_session_cache_removes_legacy_and_account_scoped_files(monkeypatch, tmp_path):
+    import kaizen_form_filer
+
+    monkeypatch.setattr(kaizen_form_filer, "_SESSION_DIR", tmp_path)
+
+    paths = [
+        _session_cache_path(12345),
+        _session_cache_path(12345, "moeed@example.com"),
+        _session_cache_path(12345, "haris@example.com"),
+        _session_cache_path(67890, "other@example.com"),
+    ]
+    for path in paths:
+        path.write_bytes(b"cached")
+
+    removed = invalidate_session_cache(12345)
+
+    assert removed == 3
+    assert not _session_cache_path(12345).exists()
+    assert not _session_cache_path(12345, "moeed@example.com").exists()
+    assert not _session_cache_path(12345, "haris@example.com").exists()
+    assert _session_cache_path(67890, "other@example.com").exists()
 
 
 @pytest.mark.asyncio

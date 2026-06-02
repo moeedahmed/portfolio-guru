@@ -43,6 +43,15 @@ def _fernet() -> Fernet:
     return Fernet(FERNET_KEY)
 
 
+def _invalidate_cached_kaizen_session(telegram_user_id: int) -> None:
+    """Clear any cached Kaizen browser session for this Telegram user."""
+    try:
+        from kaizen_form_filer import invalidate_session_cache
+        invalidate_session_cache(telegram_user_id)
+    except Exception:
+        pass
+
+
 def store_credentials(telegram_user_id: int, username: str, password: str) -> None:
     """Encrypt and store credentials for a user. Upsert."""
     f = _fernet()
@@ -65,6 +74,8 @@ def store_credentials(telegram_user_id: int, username: str, password: str) -> No
             )
             session.add(cred)
         session.commit()
+
+    _invalidate_cached_kaizen_session(telegram_user_id)
 
     try:
         from supabase_sync import mirror_credentials

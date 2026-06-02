@@ -21,11 +21,31 @@ def test_fernet_roundtrip_succeeds(monkeypatch):
     engine = _memory_engine()
     monkeypatch.setattr(credentials, "engine", engine)
     monkeypatch.setattr(credentials, "FERNET_KEY", Fernet.generate_key())
+    invalidated = []
+    monkeypatch.setattr(credentials, "_invalidate_cached_kaizen_session", invalidated.append)
     SQLModel.metadata.create_all(engine)
 
     credentials.store_credentials(123, "doctor@example.com", "secret-pass")
 
     assert credentials.get_credentials(123) == ("doctor@example.com", "secret-pass")
+    assert invalidated == [123]
+
+
+def test_store_credentials_invalidates_cache_on_account_rotation(monkeypatch):
+    import credentials
+
+    engine = _memory_engine()
+    monkeypatch.setattr(credentials, "engine", engine)
+    monkeypatch.setattr(credentials, "FERNET_KEY", Fernet.generate_key())
+    invalidated = []
+    monkeypatch.setattr(credentials, "_invalidate_cached_kaizen_session", invalidated.append)
+    SQLModel.metadata.create_all(engine)
+
+    credentials.store_credentials(123, "moeed@example.com", "first-pass")
+    credentials.store_credentials(123, "haris@example.com", "second-pass")
+
+    assert credentials.get_credentials(123) == ("haris@example.com", "second-pass")
+    assert invalidated == [123, 123]
 
 
 def test_bot_import_with_env_succeeds(monkeypatch):

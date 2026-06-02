@@ -21,6 +21,7 @@ Usage:
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -1384,8 +1385,52 @@ async def _connect_cdp() -> tuple:
 _SESSION_DIR = Path.home() / ".openclaw/data/portfolio-guru/sessions"
 
 
-def _session_cache_path(telegram_user_id: int) -> Path:
+def _normalise_session_username(username: Optional[str]) -> Optional[str]:
+    if not username:
+        return None
+    normalised = username.strip().lower()
+    return normalised or None
+
+
+def _session_username_fingerprint(username: Optional[str]) -> Optional[str]:
+    normalised = _normalise_session_username(username)
+    if not normalised:
+        return None
+    return hashlib.sha256(normalised.encode()).hexdigest()[:16]
+
+
+def _session_cache_path(telegram_user_id: int, username: Optional[str] = None) -> Path:
+    fingerprint = _session_username_fingerprint(username)
+    if fingerprint:
+        return _SESSION_DIR / f"{telegram_user_id}-{fingerprint}.encrypted"
     return _SESSION_DIR / f"{telegram_user_id}.encrypted"
+
+
+def invalidate_session_cache(telegram_user_id: int, username: Optional[str] = None) -> int:
+    """Remove encrypted Kaizen session caches for a Telegram user.
+
+    When a user reconnects with different Kaizen credentials, any old cookie
+    cache is unsafe: it may still be authenticated to the previous Kaizen
+    account. If username is omitted, remove both legacy and account-scoped
+    cache files for the Telegram user.
+    """
+    if username:
+        candidates = [_session_cache_path(telegram_user_id, username)]
+    else:
+        candidates = [_session_cache_path(telegram_user_id)]
+        if _SESSION_DIR.exists():
+            candidates.extend(_SESSION_DIR.glob(f"{telegram_user_id}-*.encrypted"))
+
+    removed = 0
+    for path in candidates:
+        try:
+            path.unlink()
+            removed += 1
+        except FileNotFoundError:
+            continue
+        except Exception as exc:
+            logger.warning("Could not remove Kaizen session cache for user %s: %s", telegram_user_id, exc)
+    return removed
 
 
 def _encrypt_session_state(state: dict) -> bytes:
@@ -1401,21 +1446,25 @@ def _decrypt_session_state(blob: bytes) -> Optional[dict]:
         return None
 
 
-async def save_session_state(context: BrowserContext, telegram_user_id: int) -> None:
+async def save_session_state(
+    context: BrowserContext,
+    telegram_user_id: int,
+    username: Optional[str] = None,
+) -> None:
     """Encrypt and persist the storage state of a successful login session."""
     try:
         state = await context.storage_state()
         encrypted = _encrypt_session_state(state)
         _SESSION_DIR.mkdir(parents=True, exist_ok=True)
-        _session_cache_path(telegram_user_id).write_bytes(encrypted)
+        _session_cache_path(telegram_user_id, username).write_bytes(encrypted)
         logger.info(f"Saved Kaizen session cache for user {telegram_user_id}")
     except Exception as e:
         logger.warning(f"Could not save session cache for user {telegram_user_id}: {e}")
 
 
-def load_session_state(telegram_user_id: int) -> Optional[dict]:
+def load_session_state(telegram_user_id: int, username: Optional[str] = None) -> Optional[dict]:
     """Load and decrypt a saved session state. Returns None if missing or corrupt."""
-    path = _session_cache_path(telegram_user_id)
+    path = _session_cache_path(telegram_user_id, username)
     if not path.exists():
         return None
     try:
@@ -1424,9 +1473,9 @@ def load_session_state(telegram_user_id: int) -> Optional[dict]:
         return None
 
 
-async def use_cached_session(page: Page, telegram_user_id: int) -> bool:
+async def use_cached_session(page: Page, telegram_user_id: int, username: Optional[str] = None) -> bool:
     """Try to restore a cached session. Returns True if it lands on Kaizen, False otherwise."""
-    state = load_session_state(telegram_user_id)
+    state = load_session_state(telegram_user_id, username)
     if not state:
         return False
     try:
@@ -2357,12 +2406,12 @@ async def fill_kaizen_form(
         logged_in = False
         used_cached_session = False
         if telegram_user_id is not None:
-            logged_in = await use_cached_session(page, telegram_user_id)
+            logged_in = await use_cached_session(page, telegram_user_id, username)
             used_cached_session = logged_in
         if not logged_in:
             logged_in = await _login(page, username, password)
             if logged_in and telegram_user_id is not None:
-                await save_session_state(page.context, telegram_user_id)
+                await save_session_state(page.context, telegram_user_id, username)
         if not logged_in:
             return {"status": "failed", "filled": [], "skipped": [], "errors": ["Login failed"], "screenshot": None}
 
@@ -2383,7 +2432,7 @@ async def fill_kaizen_form(
             )
             logged_in = await _login(page, username, password)
             if logged_in and telegram_user_id is not None:
-                await save_session_state(page.context, telegram_user_id)
+                await save_session_state(page.context, telegram_user_id, username)
             if not logged_in:
                 return {
                     "status": "failed",
@@ -3346,12 +3395,12 @@ async def file_to_kaizen(
         logged_in = False
         used_cached_session = False
         if telegram_user_id is not None:
-            logged_in = await use_cached_session(page, telegram_user_id)
+            logged_in = await use_cached_session(page, telegram_user_id, username)
             used_cached_session = logged_in
         if not logged_in:
             logged_in = await _login(page, username, password)
             if logged_in and telegram_user_id is not None:
-                await save_session_state(page.context, telegram_user_id)
+                await save_session_state(page.context, telegram_user_id, username)
         if not logged_in:
             return {
                 "status": "failed", "filled": [], "skipped": [],
@@ -3377,7 +3426,7 @@ async def file_to_kaizen(
                 )
                 logged_in = await _login(page, username, password)
                 if logged_in and telegram_user_id is not None:
-                    await save_session_state(page.context, telegram_user_id)
+                    await save_session_state(page.context, telegram_user_id, username)
                 if not logged_in:
                     return {
                         "status": "failed", "filled": [], "skipped": [],
