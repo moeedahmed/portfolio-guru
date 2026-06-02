@@ -1,5 +1,25 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-02 addendum — Phase 3 read-only Kaizen smoke run.**
+> Moeed approved the gated live read-only smoke after the offline three-account
+> matrix landed. Boundary held: no draft creation, no Kaizen save/submit, no
+> Telegram automation, no production `usage.db` write, no deploy, no restart,
+> no push. The temporary `/tmp` evidence DB was overwritten and unlinked after
+> the run so real portfolio rows were not retained for debugging.
+>
+> Results:
+>
+> - **Moeed / senior-HST:** `ok`; 22 rows seen, 21 indexed in the temporary DB.
+> - **Harris / ACCS+Intermediate:** `ok`; 21 rows seen, 21 indexed in the
+>   temporary DB.
+> - **Sana / SAS-CESR candidate:** `auth_required`; RCEM/Kaizen login did not
+>   land on a portfolio page within the read-only smoke window. No rows indexed.
+>
+> Interpretation: the read-only indexer and CDP session bootstrap work for the
+> senior-HST and junior/intermediate portfolio shapes. Sana's account still
+> needs manual credential/session recovery or confirmation of the correct saved
+> account before we can validate the SAS/CESR shape live.
+
 > **2026-06-02 addendum — three-account basic-filing validation matrix codified (offline only).**
 > Earlier instruction missed: basic filing must be validated against the three
 > portfolio shapes our trusted-tester pool actually covers, not just the HST

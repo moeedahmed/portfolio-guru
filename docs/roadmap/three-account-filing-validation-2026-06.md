@@ -1,6 +1,6 @@
 # Three-Account Basic Filing Validation — 2026-06-02
 
-**Status:** Plan + offline coverage landed; live phases gated and unstarted.
+**Status:** Plan + offline coverage landed; Phase 3 read-only smoke partially run.
 **Owner:** Foreground (orchestrator-delivered work) for any live phase.
 **Branch:** `main` (local commits ahead of `origin/main`).
 
@@ -174,7 +174,7 @@ This is the same offline gate the launch runbook uses
 | 2   | Offline test pinning per-shape stage defaulter + filer lookup + form catalogue | done (this commit)                      |
 | 3   | Known SAS / `accs_intermediate` gaps pinned with visible assertions            | done (this commit)                      |
 | 4   | Phase 2 dry-run/fixture tests scoped                                           | scoped here; implementation queued      |
-| 5   | Phase 3 live read-only smoke per account                                       | gated on explicit per-account approval  |
+| 5   | Phase 3 live read-only smoke per account                                       | partial: Moeed + Harris ok; Sana auth_required |
 | 6   | Phase 4 real submission                                                        | **out of scope** — draft-only is policy |
 | 7   | TASK.md 2026-06-02 addendum                                                    | done (this commit)                      |
 | 8   | No live Kaizen / credentials / browser / Telegram / deploy / push              | met                                     |
