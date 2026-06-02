@@ -1,5 +1,69 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-02 addendum — three-account basic-filing validation matrix codified (offline only).**
+> Earlier instruction missed: basic filing must be validated against the three
+> portfolio shapes our trusted-tester pool actually covers, not just the HST
+> shape we build against by default. The three accounts (credentials live in
+> BWS — **not read here**):
+>
+> 1. **Moeed** — senior / HST (CCT pathway, ST4–ST6). `training_level=HIGHER`.
+> 2. **Harris** — DREAM Pathway junior with ACCS _and_ Intermediate Portfolio
+>    access. `training_level` is stored as `ACCS` or `INTERMEDIATE`; the
+>    `accs_intermediate` Kaizen role collapses to a single profile bucket.
+> 3. **Sana** — SAS doctor planning CESR / Portfolio Pathway. `training_level=SAS`.
+>    No matching grouped-band stage option on standard WPBAs.
+>
+> Safe / live boundary made explicit in
+> `docs/roadmap/three-account-filing-validation-2026-06.md`:
+> Phase 1 offline portfolio-shape pinning (this commit), Phase 2 dry-run /
+> fixture checks (scoped, queued), Phase 3 live read-only Kaizen smoke per
+> account (gated on explicit Moeed approval per account; foreground-owned
+> per-account secret export to managed CDP), Phase 4 real submission (**out
+> of scope** — draft-only is policy).
+>
+> Codified:
+>
+> - New plan / checklist: `docs/roadmap/three-account-filing-validation-2026-06.md`.
+> - New offline test: `backend/tests/test_three_account_filing_matrix.py` — 22
+>   pins covering, per shape: stage defaulter on grouped-band WPBAs
+>   (CBD/DOPS/MINI_CEX/LAT), stage defaulter on QIAT's individual-year select,
+>   filer-side `STAGE_SELECT_VALUES` alignment, the `TRAINING_LEVEL_FORMS`
+>   catalogue (HST superset, ACCS/INTERMEDIATE ST3 collapse, SAS fall-through to
+>   the unknown-default union including CESR core WPBAs), and the
+>   `TRAINING_LEVEL_LABELS` distinctness guard so the three shapes never
+>   collapse into the same UI label.
+> - Known live-impact gaps pinned visibly rather than fixed in this slice:
+>   - `training_level == "SAS"` returns an empty stage string on every WPBA;
+>     intentional (we refuse to invent a training year for a non-training
+>     doctor) but a future silent flip to `Higher/ST4-ST6` would be a real
+>     trust break.
+>   - `TRAINING_LEVEL_FORMS` has no `SAS` key; Sana hits
+>     `_default_allowed_forms_for_unknown_training`. Pinned that the fallback
+>     union must continue to offer CBD / DOPS / MINI_CEX / REFLECT_LOG (CESR
+>     core evidence).
+>   - QIAT exposes a `Portfolio pathway (CESR)` option that today's defaulter
+>     does not use for `SAS`. Pinned so any future mapping is intentional and
+>     paired with user-visible copy in the draft preview.
+>   - `accs_intermediate` Kaizen role collapses to a single `INTERMEDIATE`
+>     bucket. Pinned (`ACCS` and `INTERMEDIATE` aliases share `ST3`'s form
+>     catalogue) so a refactor that breaks the alias is loud.
+>
+> Verification:
+>
+> - Focused new pins: `cd backend && venv/bin/python -m pytest tests/test_three_account_filing_matrix.py -v` → 22 passed.
+> - Sibling pinning gate (same code paths):
+>   `cd backend && venv/bin/python -m pytest tests/test_three_account_filing_matrix.py tests/test_profile_store_kaizen_role.py tests/test_kaizen_login_reliability.py -q` → 45 passed.
+>
+> Not run from this slice: full offline backend gate, live Kaizen, live
+> Telegram, browser-harness, BWS reads, launchd restart, deploy, push. The
+> three live accounts are documented for Phase 3 but require explicit
+> per-account Moeed approval before any read-only smoke; foreground operator
+> owns the secret hand-off into the managed CDP session, not the worker.
+>
+> Still requiring Moeed approval: Phase 3 read-only Kaizen smoke against each
+> of the three accounts (Moeed/Harris/Sana). Phase 4 real submission stays out
+> of scope by Portfolio Guru policy.
+
 > **2026-06-02 addendum — pathway-aware Portfolio Health output.**
 > Product decision: `/health` must clearly diverge by pathway. CCT/Training
 > users see a Training (CCT) ARCP readiness brief with risk, why, and the
