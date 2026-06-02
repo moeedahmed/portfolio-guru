@@ -151,6 +151,17 @@ class TestMessagePolicy:
         assert "Reflective Practice Log:" in text
 
 class TestExplicitFormRouting:
+    QI_AUDIT_SCREENSHOT_TEXT = (
+        "Please create the best-fit kaizen draft for an intermediate portfolio account.\n"
+        "Quality improvement project in ED: improving time-to-antibiotics for "
+        "adult sepsis alerts. Baseline audit showed delays from triage "
+        "recognition to first antibiotic dose. Intervention included a sepsis "
+        "prompt sticker on triage notes, short teaching for nurses and junior "
+        "doctors, and a resus-room antibiotic grab-list. Re-audit after two "
+        "weeks showed improved time to antibiotics and better documentation "
+        "of lactate and blood cultures."
+    )
+
     @pytest.mark.asyncio
     async def test_photo_recommendation_copy_is_plain_and_includes_privacy_nudge(self, monkeypatch):
         import bot
@@ -196,6 +207,103 @@ class TestExplicitFormRouting:
         assert "ED case" in sent_text
         assert "Privacy check" in sent_text
         assert "names, NHS numbers, DOBs or addresses" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_intermediate_qi_audit_falls_back_to_audit_not_teaching(self, monkeypatch):
+        import bot
+        from extractor import FORM_UUIDS
+        from models import FormTypeRecommendation
+
+        message = MagicMock()
+        message.chat.send_action = AsyncMock()
+        sent_message = MagicMock()
+        sent_message.message_id = 123
+        sent_message.chat_id = 456
+        message.reply_text = AsyncMock(return_value=sent_message)
+
+        context = MagicMock()
+        context.user_data = {}
+        context.bot = MagicMock()
+
+        recommendations = [
+            FormTypeRecommendation(
+                form_type="QIAT",
+                rationale="QI project with baseline, intervention and re-audit.",
+                uuid=FORM_UUIDS.get("QIAT"),
+            ),
+            FormTypeRecommendation(
+                form_type="TEACH",
+                rationale="Teaching was delivered as part of the intervention.",
+                uuid=FORM_UUIDS.get("TEACH"),
+            ),
+        ]
+
+        monkeypatch.setattr(bot, "recommend_form_types", AsyncMock(return_value=recommendations))
+        monkeypatch.setattr(bot, "get_training_level", lambda _user_id: "INTERMEDIATE")
+        monkeypatch.setattr(bot, "get_curriculum", lambda _user_id: "2025")
+
+        state = await bot._process_case_text(
+            message,
+            context,
+            99999,
+            self.QI_AUDIT_SCREENSHOT_TEXT,
+            "photo",
+        )
+
+        assert state == bot.AWAIT_FORM_CHOICE
+        assert context.user_data["form_recommendations"][0].form_type == "AUDIT"
+        sent_keyboard = message.reply_text.await_args.kwargs["reply_markup"]
+        first_button = sent_keyboard.inline_keyboard[0][0]
+        assert first_button.callback_data == "FORM|best"
+        assert "Use best fit: Audit" in first_button.text
+        assert "Teaching Session" not in first_button.text
+
+    @pytest.mark.asyncio
+    async def test_hst_qi_audit_still_prefers_qiat(self, monkeypatch):
+        import bot
+        from extractor import FORM_UUIDS
+        from models import FormTypeRecommendation
+
+        message = MagicMock()
+        message.chat.send_action = AsyncMock()
+        sent_message = MagicMock()
+        sent_message.message_id = 123
+        sent_message.chat_id = 456
+        message.reply_text = AsyncMock(return_value=sent_message)
+
+        context = MagicMock()
+        context.user_data = {}
+        context.bot = MagicMock()
+
+        recommendations = [
+            FormTypeRecommendation(
+                form_type="QIAT",
+                rationale="QI project with baseline, intervention and re-audit.",
+                uuid=FORM_UUIDS.get("QIAT"),
+            ),
+            FormTypeRecommendation(
+                form_type="TEACH",
+                rationale="Teaching was delivered as part of the intervention.",
+                uuid=FORM_UUIDS.get("TEACH"),
+            ),
+        ]
+
+        monkeypatch.setattr(bot, "recommend_form_types", AsyncMock(return_value=recommendations))
+        monkeypatch.setattr(bot, "get_training_level", lambda _user_id: "ST5")
+        monkeypatch.setattr(bot, "get_curriculum", lambda _user_id: "2025")
+
+        state = await bot._process_case_text(
+            message,
+            context,
+            99999,
+            self.QI_AUDIT_SCREENSHOT_TEXT,
+            "photo",
+        )
+
+        assert state == bot.AWAIT_FORM_CHOICE
+        assert context.user_data["form_recommendations"][0].form_type == "QIAT"
+        sent_keyboard = message.reply_text.await_args.kwargs["reply_markup"]
+        assert "Use best fit: QIAT" in sent_keyboard.inline_keyboard[0][0].text
 
     @pytest.mark.asyncio
     async def test_question_about_case_recommendation_uses_same_plain_photo_copy(self, monkeypatch):

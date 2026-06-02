@@ -17,13 +17,13 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler, PicklePersistence,
 )
 from store import store_credentials, get_credentials, has_credentials, init
-from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, is_reuse_request, review_draft, analyse_portfolio_health, summarise_recent_activity, generate_nudge_copy, extract_field_updates, compose_filing_recovery_copy, combine_case_inputs
+from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, is_reuse_request, review_draft, analyse_portfolio_health, summarise_recent_activity, generate_nudge_copy, extract_field_updates, compose_filing_recovery_copy, combine_case_inputs, _has_qi_project_signal
 from usage import record_case_filed, get_cases_this_month, check_can_file, get_user_tier, set_user_tier, get_case_history, TIER_LIMITS, get_all_active_users, get_cases_this_week, is_beta_tester, set_beta_tester, save_kc_coverage
 from filer_router import route_filing
 from kaizen_form_filer import FORM_UUIDS
 from form_schemas import FORM_SCHEMAS
 from form_display import public_form_name, sanitize_internal_form_codes
-from models import FormDraft, CBDData
+from models import FormDraft, CBDData, FormTypeRecommendation
 from whisper import transcribe_voice
 from vision import extract_from_image
 from documents import extract_from_document, is_supported_document
@@ -1247,10 +1247,12 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
                     timeout=30,
                 )
                 excluded_form = _normalise_form_type(context.user_data.get("excluded_form_type", ""))
-                recommendations = [
-                    r for r in recommendations
-                    if r.form_type in allowed_forms and _normalise_form_type(r.form_type) != excluded_form
-                ]
+                recommendations = _filter_recommendations_for_allowed_forms(
+                    recommendations,
+                    allowed_forms,
+                    case_text,
+                    excluded_form=excluded_form,
+                )
                 context.user_data["form_recommendations"] = recommendations
             except Exception as exc:
                 logger.error("Paused flow recommendation rebuild failed: %s", exc, exc_info=True)
@@ -1479,6 +1481,60 @@ def _allowed_forms_for_training_level(training_level: str | None) -> list[str]:
     if forms is None:
         return _default_allowed_forms_for_unknown_training()
     return list(forms)
+
+
+def _filter_recommendations_for_allowed_forms(
+    recommendations,
+    allowed_forms,
+    case_text: str = "",
+    *,
+    excluded_form: str = "",
+):
+    """Filter recommendations and keep QI/audit work from falling into Teaching.
+
+    Intermediate/ST3 portfolios do not expose QIAT. When the extractor has
+    correctly identified a QIAT-style project, prefer the closest allowed
+    audit/governance form before Teaching.
+    """
+    excluded = _normalise_form_type(excluded_form)
+    allowed = set(allowed_forms)
+    filtered = [
+        r for r in recommendations
+        if r.form_type in allowed and _normalise_form_type(r.form_type) != excluded
+    ]
+    qiat_recommended = any(r.form_type == "QIAT" for r in recommendations)
+    qiat_unavailable = "QIAT" not in allowed
+    first_available = filtered[0].form_type if filtered else ""
+    if not (
+        qiat_unavailable
+        and _has_qi_project_signal(case_text)
+        and (qiat_recommended or first_available == "TEACH")
+    ):
+        return filtered
+
+    for fallback in ("AUDIT", "CLIN_GOV"):
+        if fallback not in allowed or _normalise_form_type(fallback) == excluded:
+            continue
+        existing = next((r for r in filtered if r.form_type == fallback), None)
+        if existing:
+            return [
+                existing,
+                *[r for r in filtered if r.form_type != fallback],
+            ]
+        else:
+            return [
+                FormTypeRecommendation(
+                    form_type=fallback,
+                    rationale=(
+                        "QIAT is not available on this portfolio shape; this "
+                        "quality improvement project is better captured as "
+                        f"{_form_display_name(fallback)} than Teaching."
+                    ),
+                    uuid=FORM_UUIDS.get(fallback),
+                ),
+                *filtered,
+            ]
+    return filtered
 
 # Category groupings for "See all forms" navigation
 FORM_CATEGORIES = {
@@ -5767,10 +5823,12 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
             timeout=30,
         )
         excluded_form = _normalise_form_type(context.user_data.get("excluded_form_type", ""))
-        recommendations = [
-            r for r in recommendations
-            if r.form_type in allowed_forms and _normalise_form_type(r.form_type) != excluded_form
-        ]
+        recommendations = _filter_recommendations_for_allowed_forms(
+            recommendations,
+            allowed_forms,
+            case_text,
+            excluded_form=excluded_form,
+        )
         if not recommendations:
             _track_funnel_event(context, "recommendation_empty", source=input_source)
             await _send_latest_message(
@@ -6443,10 +6501,12 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
                 timeout=30,
             )
             excluded_form = _normalise_form_type(context.user_data.get("excluded_form_type", ""))
-            recommendations = [
-                r for r in recommendations
-                if r.form_type in allowed_forms and _normalise_form_type(r.form_type) != excluded_form
-            ]
+            recommendations = _filter_recommendations_for_allowed_forms(
+                recommendations,
+                allowed_forms,
+                case_text,
+                excluded_form=excluded_form,
+            )
 
             if recommendations:
                 prompt_text = _build_form_recommendation_text(
