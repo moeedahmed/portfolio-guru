@@ -1,6 +1,9 @@
 # Filing Reliability Readiness Sprint — 2026-06-02
 
-**Status:** Plan landed; P0 evidence review complete; P1 fixture/dry-run slice queued.
+**Status:** Plan landed; P0 evidence review complete; P1 fixture/dry-run
+slices (P1.a → P1.d) landed offline; P4 concurrency / idempotency offline
+proofs landed; P2/P3 Sana credential recovery + read-only smoke is the next
+live/credential-gated step (foreground operator); P5/P6 remain gated.
 **Owner:** Foreground orchestrator owns all live, push, deploy, restart phases.
 Workers (Claude / Codex) own P0 review, P1 fixture/dry-run code, P4 offline
 concurrency proofs, instrumentation code, and doc updates.
@@ -664,20 +667,22 @@ These are not part of the promotion gate and must not be quietly added.
 
 ## 11. Status snapshot (this commit)
 
-| #   | Phase                                                          | Status                                                     |
-| --- | -------------------------------------------------------------- | ---------------------------------------------------------- |
-| P0  | Evidence review — offline gate + three-account matrix re-green | done; prior gate 933 passed, doc slice verified references |
-| P1  | Fixture / dry-run slices (a–d)                                 | scoped here; queued for next worker session                |
-| P2  | Sana credential / session recovery                             | blocked on foreground operator + BWS sweep                 |
-| P3  | Per-account read-only live smoke                               | 2/3 ok (Moeed, Harris); Sana `auth_required`               |
-| P4  | Concurrency / idempotency offline proofs                       | scoped here; queued                                        |
-| P5  | Per-account controlled draft-only live smoke                   | gated on P3 fully green                                    |
-| P6  | Deploy / restart / production smoke                            | gated on P5 fully green                                    |
-| —   | Promotion gate                                                 | held: §1.3, §1.4 (Sana), §1.5, §1.6, §1.8                  |
+| #   | Phase                                                          | Status                                                                                                                                            |
+| --- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P0  | Evidence review — offline gate + three-account matrix re-green | done; prior gate 933 passed, doc slice verified references                                                                                        |
+| P1  | Fixture / dry-run slices (a–d)                                 | **done (offline)**; P1.a landed in `42e3f4d`, P1.b in `ec67d84`, P1.c in `9ea35d6`, P1.d in `c59fd21`; see TASK.md addenda for per-slice evidence |
+| P2  | Sana credential / session recovery                             | blocked on foreground operator + BWS sweep                                                                                                        |
+| P3  | Per-account read-only live smoke                               | 2/3 ok (Moeed, Harris); Sana `auth_required`                                                                                                      |
+| P4  | Concurrency / idempotency offline proofs                       | **done (offline)**; landed in `b6ff9b0` (draft-state isolation, filing-log isolation, profile/credential isolation, retry-after-DOM-drift)        |
+| P5  | Per-account controlled draft-only live smoke                   | gated on P3 fully green (Sana recovery still blocking)                                                                                            |
+| P6  | Deploy / restart / production smoke                            | gated on P5 fully green                                                                                                                           |
+| —   | Promotion gate                                                 | held: §1.4 (Sana), §1.5, §1.8                                                                                                                     |
 
-**Next executable slice:** P1.a (per-shape login classification
-round-trip), followed by P1.b, P1.c, P1.d in order. Each lands as a
-separate offline test file, preflight-clean, full offline gate still green.
+**Next executable slice:** §6 Sana / SAS-CESR recovery — foreground operator
+work only. Worker P1.a–d and P4 offline coverage are landed; the bar will
+not move further without the live/credential-gated Sana read-only smoke
+returning `ok`. Once P3 is green for all three accounts, P5 (controlled
+draft-only live smoke) becomes runnable.
 
 ---
 
