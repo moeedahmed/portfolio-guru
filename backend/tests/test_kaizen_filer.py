@@ -742,6 +742,32 @@ async def test_verify_filing_qa_handles_select_via_selected_index():
 
 
 @pytest.mark.asyncio
+async def test_verify_filing_qa_accepts_saved_summary_stage_text():
+    """Saved Kaizen summaries can show the stage after the select reads blank."""
+    from kaizen_form_filer import _verify_filing_qa
+
+    async def evaluate_mock(js, dom_id=None):
+        if dom_id == "uuid-stage":
+            return {"tag": "SELECT", "selectedIndex": 0, "value": ""}
+        if "document.body" in js:
+            return "Stage of training Intermediate / ST3"
+        return {"tag": "INPUT", "value": ""}
+
+    page = AsyncMock()
+    page.evaluate = AsyncMock(side_effect=evaluate_mock)
+    page.url = "https://kaizenep.com/events/view-section/doc-id"
+
+    field_map = {"stage_of_training": "uuid-stage"}
+    expected_fields = {"stage_of_training": "Intermediate"}
+
+    result = await _verify_filing_qa(page, "CBD", expected_fields, field_map)
+
+    assert "stage_of_training" in result["filled"]
+    assert "stage_of_training" not in result["empty_expected"]
+    assert result["gaps"] == []
+
+
+@pytest.mark.asyncio
 async def test_verify_filing_qa_missing_dom_element_is_empty():
     """A missing DOM element logs WARNING and counts as empty."""
     from kaizen_form_filer import _verify_filing_qa

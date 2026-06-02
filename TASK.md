@@ -1,5 +1,47 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-02 addendum — P3 Harris/Intermediate bot-handler draft smoke passed and cleaned up.**
+> Scope: third controlled fixture after Moeed/HST and Harris/ACCS. The smoke
+> used Harris's stored Portfolio Guru user id and credentials, temporarily
+> scoped the local profile to `INTERMEDIATE` with the 2025 trainee curriculum,
+> drove the same bot draft/approval handlers locally, saved one synthetic CBD
+> draft in Kaizen, verified it, deleted it, then restored the original Harris
+> profile row.
+>
+> Result:
+>
+> - Bot-handler path produced a CBD draft and called the real save-as-draft
+>   approval flow for Harris's stored fixture user.
+> - Kaizen deterministic filer set the stage to `Intermediate`.
+> - Saved draft `6742b8c4-537a-49fb-8a29-b73cb0bc1f90` opened as
+>   `DRAFT PRIVATE` and showed `Stage of training Intermediate / ST3`.
+> - The opened draft contained the synthetic severe asthma case, including
+>   magnesium, NIV/intubation planning, and clearer role allocation.
+> - Cleanup deleted only that document id after private-draft and case-marker
+>   checks passed. Post-cleanup Saved drafts no longer contained that document
+>   or the severe-asthma markers.
+> - Filing log row: `CBD`, deterministic, `success`, 7 fields, no error.
+> - Harris profile restored to its original local row:
+>   `training_level=INTERMEDIATE`, `curriculum=None`, `kaizen_role=unknown`.
+>
+> Follow-up fixed in the same slice:
+>
+> - Live verification proved the stage persisted, but the non-blocking QA pass
+>   initially reported a false `stage_of_training(value_not_persisted)` gap
+>   because Kaizen's saved summary view can replace the select element with
+>   read-only text.
+> - `backend/kaizen_form_filer.py` now counts saved summary text such as
+>   `Stage of training Intermediate / ST3` as persisted stage evidence.
+> - Regression pin added in `backend/tests/test_kaizen_filer.py`.
+> - Focused QA check: 5 passed, 33 deselected.
+>
+> Boundary: this did **not** impersonate Harris on live Telegram. No submit,
+> sign, send, approve, reject, deploy, push, production rollout, or live
+> Telegram message was sent.
+>
+> Next executable gate: Sana/SAS-CESR controlled draft-only smoke, with the
+> saved SAS profile identity confirmed before counting it as Sana.
+>
 > **2026-06-02 addendum — P3 Harris/ACCS bot-handler draft smoke passed and cleaned up.**
 > Scope: second controlled fixture after Moeed/HST. The smoke used Harris's
 > stored Portfolio Guru user id and credentials, temporarily scoped the local

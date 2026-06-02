@@ -2144,6 +2144,36 @@ async def _verify_filing_qa(
             return "textarea"
         return "text"
 
+    def _normalise_text(text: Any) -> str:
+        return re.sub(r"\s+", " ", str(text or "").lower()).strip()
+
+    async def _stage_is_visible_in_saved_summary(expected_value: Any) -> bool:
+        """Kaizen's saved draft summary may show stage text after the select
+        has been replaced by a read-only view. Count that as persisted.
+        """
+        expected = _normalise_text(expected_value)
+        if not expected:
+            return False
+
+        aliases = {
+            "accs": ("stage of training accs",),
+            "intermediate": ("stage of training intermediate",),
+            "intermediate/st3": ("stage of training intermediate",),
+            "higher": ("stage of training higher",),
+            "higher/st4-st6": ("stage of training higher",),
+            "pem": ("stage of training pem",),
+        }
+        checks = aliases.get(expected, (f"stage of training {expected}",))
+        try:
+            body_text = await page.evaluate(
+                "() => document.body ? document.body.innerText : ''"
+            )
+        except Exception as exc:
+            logger.warning(f"QA[{form_type}]: error reading saved stage summary: {exc}")
+            return False
+        body = _normalise_text(body_text)
+        return any(check in body for check in checks)
+
     for key, dom_id in field_map.items():
         try:
             state = await page.evaluate(_QA_READ_FIELD_JS, dom_id)
@@ -2170,6 +2200,14 @@ async def _verify_filing_qa(
 
         expected_value = expected_fields.get(key)
         was_drafted = _is_meaningful(expected_value)
+
+        if (
+            not is_filled
+            and was_drafted
+            and key in ("stage", "stage_of_training")
+            and await _stage_is_visible_in_saved_summary(expected_value)
+        ):
+            is_filled = True
 
         if is_filled:
             filled.append(key)
