@@ -2077,7 +2077,7 @@ FORM_BUTTON_LABELS = {
     "TEACH": "Teaching Session",
     "EDU_ACT": "Educational Activity",
     "FORMAL_COURSE": "Formal Course",
-    "SDL": "SDL",
+    "SDL": "Self-directed Learning",
 
     # Procedures & Clinical
     "DOPS_PROC": "DOPS Procedure",
@@ -2972,8 +2972,21 @@ async def _show_draft_review(
     return AWAIT_APPROVAL
 
 
-async def _ask_for_more_detail_before_draft(message, context: ContextTypes.DEFAULT_TYPE, *, edit: bool = True) -> int:
-    text = render_message("thin_case_detail_request")
+def _detail_request_message_key(form_type: str | None) -> str:
+    base_form = _normalise_form_type(form_type or "")
+    if base_form == "SDL":
+        return "thin_sdl_detail_request"
+    return "thin_case_detail_request"
+
+
+async def _ask_for_more_detail_before_draft(
+    message,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    form_type: str | None = None,
+    edit: bool = True,
+) -> int:
+    text = render_message(_detail_request_message_key(form_type))
     if edit:
         await _safe_edit_text(message, text, reply_markup=_KB_CANCEL)
     else:
@@ -5901,12 +5914,6 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
     # the field extractor. The LLM is instructed not to fabricate, but with no
     # content to ground against it can still hallucinate plausible-sounding
     # clinical details. Better to ask the user for more.
-    if not _looks_like_clinical_case(case_text):
-        await message.reply_text(
-            render_message("thin_case_detail_request")
-        )
-        return ConversationHandler.END
-
     context.user_data["case_text"] = case_text
     context.user_data["case_input_source"] = input_source
 
@@ -5921,6 +5928,12 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
             parse_mode="Markdown",
         )
         return AWAIT_FORM_CHOICE
+
+    if not _looks_like_clinical_case(case_text):
+        await message.reply_text(
+            render_message("thin_case_detail_request")
+        )
+        return ConversationHandler.END
 
     training_level = get_training_level(user_id)
     allowed_forms = _allowed_forms_for_training_level(training_level)
@@ -7512,7 +7525,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return ConversationHandler.END
 
     if not _draft_has_useful_content(draft, form_type):
-        return await _ask_for_more_detail_before_draft(query.message, context)
+        return await _ask_for_more_detail_before_draft(query.message, context, form_type=form_type)
 
     return await _show_draft_review(query.message, context, draft, form_type)
 

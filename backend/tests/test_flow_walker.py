@@ -326,6 +326,49 @@ class TestFlowWalker:
         assert 'APPROVE|draft' not in {data for _, data in sim.get_last_buttons()}
 
     @pytest.mark.asyncio
+    async def test_short_self_directed_learning_request_opens_sdl_choice(self):
+        from bot import AWAIT_FORM_CHOICE, _process_case_text
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        update = sim._make_text_update('self directed learning')
+
+        result = await _process_case_text(
+            update.message,
+            context,
+            update.effective_user.id,
+            update.message.text,
+            'text',
+        )
+
+        assert result == AWAIT_FORM_CHOICE
+        text = sim.get_last_text()
+        assert 'Self-directed Learning' in text
+        assert 'clinical detail' not in text.lower()
+        assert ('✅ Draft Self-directed Learning Reflection', 'FORM|SDL') in sim.get_last_buttons()
+
+    @pytest.mark.asyncio
+    async def test_sdl_thin_draft_asks_for_learning_notes_not_patient_details(self):
+        from bot import AWAIT_CASE_INPUT, handle_form_choice
+        from models import FormDraft
+
+        empty_draft = FormDraft(form_type='SDL', uuid='uuid-sdl', fields={})
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['case_text'] = 'self directed learning'
+
+        update = sim._make_callback_update('FORM|SDL')
+        with patch('bot._analyse_selected_form', new_callable=AsyncMock, return_value=empty_draft):
+            result = await handle_form_choice(update, context)
+
+        assert result == AWAIT_CASE_INPUT
+        text = sim.get_last_text()
+        assert 'self-directed learning reflection' in text.lower()
+        assert 'patient/presentation' not in text.lower()
+        assert 'clinical detail' not in text.lower()
+        assert 'e-learning module details' not in text.lower()
+
+    @pytest.mark.asyncio
     async def test_form_choice_transient_template_failure_keeps_retry_button(self):
         from bot import AWAIT_FORM_CHOICE, handle_form_choice
 
@@ -694,6 +737,23 @@ class TestFlowWalker:
         # Should contain form buttons and back-to-categories
         assert 'FORM|show_all' in button_data  # back to categories
         assert any(d.startswith('FORM|') and d != 'FORM|show_all' for d in button_data)
+
+    @pytest.mark.asyncio
+    async def test_teaching_category_names_self_directed_learning(self):
+        from bot import AWAIT_FORM_CHOICE, handle_form_choice
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('FORM|cat_TEACHING')
+        context = sim._make_context()
+
+        with patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_curriculum', return_value='2025'):
+            result = await handle_form_choice(update, context)
+
+        assert result == AWAIT_FORM_CHOICE
+        buttons = sim.get_last_buttons()
+        assert ('📖 Self-directed Learning', 'FORM|SDL') in buttons
+        assert all(label != '📖 SDL' for label, _ in buttons)
 
     @pytest.mark.asyncio
     async def test_search_returns_to_form_choice(self):

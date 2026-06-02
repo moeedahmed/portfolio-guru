@@ -110,6 +110,15 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         ),
         safety_critical=True,
     ),
+    "thin_sdl_detail_request": MessageTemplate(
+        key="thin_sdl_detail_request",
+        message_class=MessageClass.FIXED,
+        text=(
+            "📖 Send rough notes for the self-directed learning reflection.\n\n"
+            "Include what you read/watched/listened to, the main learning points, and how it will change your practice."
+        ),
+        safety_critical=True,
+    ),
     "ai_temporarily_unavailable": MessageTemplate(
         key="ai_temporarily_unavailable",
         message_class=MessageClass.FIXED,
