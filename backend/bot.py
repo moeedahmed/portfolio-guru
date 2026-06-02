@@ -1320,6 +1320,18 @@ TRAINING_LEVEL_FORMS = {
         "MGMT_RECRUIT", "MGMT_RISK_PROC", "MGMT_TRAINING_EVT", "MGMT_GUIDELINE", "MGMT_INFO",
         "MGMT_INDUCTION", "MGMT_EXPERIENCE", "MGMT_REPORT", "MGMT_COMPLAINT",
     ],
+    "SAS": [
+        "CBD", "ACAF", "MSF", "LAT", "QIAT", "AUDIT", "REFLECT_LOG", "SDL",
+        "EDU_ACT", "FORMAL_COURSE", "TEACH", "STAT", "TEACH_OBS", "TEACH_CONFID",
+        "COMPLAINT", "SERIOUS_INC", "APPRAISAL", "CLIN_GOV", "CRIT_INCIDENT",
+        "US_CASE", "RESEARCH", "PDP", "EDU_MEETING", "EDU_MEETING_SUPP",
+        "BUSINESS_CASE", "COST_IMPROVE", "EQUIP_SERVICE",
+        "MGMT_ROTA", "MGMT_RISK", "MGMT_PROJECT",
+        "MGMT_RECRUIT", "MGMT_RISK_PROC", "MGMT_TRAINING_EVT", "MGMT_GUIDELINE",
+        "MGMT_INFO", "MGMT_INDUCTION", "MGMT_EXPERIENCE", "MGMT_REPORT",
+        "MGMT_COMPLAINT",
+        "JCF_2021", "LAT_2021", "QIAT_2021", "REFLECT_LOG_2021", "AUDIT_2021",
+    ],
 }
 
 
@@ -1592,10 +1604,11 @@ def _default_allowed_forms_for_unknown_training() -> list[str]:
 def _allowed_forms_for_training_level(training_level: str | None) -> list[str]:
     """Return the allowed-form catalogue for a saved ``training_level``.
 
-    SAS / CESR and unknown levels fall through to the union of every level's
-    catalogue (``_default_allowed_forms_for_unknown_training``), not to the
-    ST5/HST superset. This is the SAS-safe contract pinned by
-    ``tests/test_form_recommender_per_shape.py``.
+    Known portfolio buckets use explicit catalogues. SAS / CESR has a
+    purpose-built non-trainee catalogue rather than inheriting trainee SLEs
+    from HST/ST5. Unknown levels still fall through to the union of every
+    explicit level's catalogue (``_default_allowed_forms_for_unknown_training``),
+    not to the ST5/HST superset.
     """
     if not training_level:
         return _default_allowed_forms_for_unknown_training()
@@ -1647,8 +1660,8 @@ def _filter_recommendations_for_allowed_forms(
 
 # Category groupings for "See all forms" navigation
 FORM_CATEGORIES = {
-    "🩺 Clinical": ["CBD", "DOPS", "MINI_CEX", "ACAT", "LAT", "ACAF", "STAT", "MSF", "QIAT", "JCF", "ESLE_ASSESS", "AUDIT"],
-    "📝 Reflective": ["REFLECT_LOG", "COMPLAINT", "SERIOUS_INC", "CRIT_INCIDENT", "PDP", "APPRAISAL"],
+    "🩺 Clinical": ["CBD", "DOPS", "MINI_CEX", "ACAT", "LAT", "LAT_2021", "ACAF", "STAT", "MSF", "QIAT", "QIAT_2021", "JCF", "JCF_2021", "ESLE_ASSESS", "AUDIT", "AUDIT_2021"],
+    "📝 Reflective": ["REFLECT_LOG", "REFLECT_LOG_2021", "COMPLAINT", "SERIOUS_INC", "CRIT_INCIDENT", "PDP", "APPRAISAL"],
     "👨‍🏫 Teaching": ["TEACH", "TEACH_OBS", "TEACH_CONFID", "SDL", "EDU_ACT", "EDU_MEETING", "EDU_MEETING_SUPP", "FORMAL_COURSE"],
     "🔬 Procedural": ["PROC_LOG", "US_CASE"],
     "🔍 Quality": ["RESEARCH", "CLIN_GOV", "COST_IMPROVE", "EQUIP_SERVICE", "BUSINESS_CASE"],

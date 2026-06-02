@@ -45,7 +45,7 @@ class TestTrainingLevelForms:
     def test_all_grades_defined(self):
         """All expected grades must exist."""
         from bot import TRAINING_LEVEL_FORMS
-        for grade in ["ST3", "ST4", "ST5", "ST6", "ACCS", "INTERMEDIATE", "HIGHER"]:
+        for grade in ["ST3", "ST4", "ST5", "ST6", "ACCS", "INTERMEDIATE", "HIGHER", "SAS"]:
             assert grade in TRAINING_LEVEL_FORMS, f"Grade {grade} missing"
 
 class TestCurriculumFilter:
@@ -65,5 +65,5 @@ class TestCurriculumFilter:
         result = _filter_forms_by_curriculum(["CBD", "LAT"], "2021")
         # CBD has a 2021 variant — gets swapped to CBD_2021
         assert "CBD_2021" in result or "CBD" in result
-        # LAT should remain (no _2021 variant or kept as-is)
-        assert "LAT" in result
+        # LAT has a live-verified 2021 variant for Sana's SAS/non-trainee portfolio.
+        assert "LAT_2021" in result

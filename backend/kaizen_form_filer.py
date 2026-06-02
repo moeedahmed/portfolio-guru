@@ -1173,8 +1173,10 @@ FORM_UUIDS = {
     "ACAT_2021":          "2a8a02fe-c085-4cd7-a78e-b024a359011a",
     "ACAF_2021":          "37978f7b-1770-40ed-8bf1-53a96ae13c25",
     "STAT_2021":          "262e7e37-9f74-414f-bc88-fb6ff5ce2239",
+    "LAT_2021":           "2556f1bc-9815-4923-9b23-a7f8a1239d10",
     "MINI_CEX_2021":      "26978104-5583-46c4-9799-07555a18b3d4",
     "JCF_2021":           "efb238d0-66f7-487d-b18a-cfda78c8e733",
+    "QIAT_2021":          "03408a02-9cc4-44a6-aa3d-60d2888971a0",
     "ESLE_2021":          "e4417335-969c-4a4e-a04f-cc272afc1ab8",
     "TEACH_2021":         "98c35142-6b8d-4958-86c5-4dfd06f22143",
     "PROC_LOG_2021":      "25527933-81e6-484f-b4dd-7ea23c2e3919",
@@ -1184,8 +1186,10 @@ FORM_UUIDS = {
     "SERIOUS_INC_2021":   "e2df1663-1b94-403a-91fa-37f568161ed5",
     "EDU_ACT_2021":       "7a40ed0e-0280-4e16-b3dc-468022d84575",
     "FORMAL_COURSE_2021": "1889dfd7-4267-4b77-a062-357740c2ed4d",
+    "REFLECT_LOG_2021":   "a95f525e-b89e-4204-b2f5-9f53eefb34ad",
     "TEACH_OBS_2021":     "e43a8b88-2bea-4bdb-a5aa-02e0cd388698",
     "TEACH_CONFID_2021":  "563d2c82-46b5-41d7-b601-58a45b347a3a",
+    "AUDIT_2021":         "f11fc48c-20bc-48d9-b8de-8f28b1296742",
 }
 
 # ─── Per-form field normalisers ──────────────────────────────────────────────
@@ -1204,8 +1208,10 @@ _FORM_FIELD_MAP_VARIANT_BASES = {
     "ACAT_2021": "ACAT",
     "ACAF_2021": "ACAF",
     "STAT_2021": "STAT",
+    "LAT_2021": "LAT",
     "MINI_CEX_2021": "MINI_CEX",
     "JCF_2021": "JCF",
+    "QIAT_2021": "QIAT",
     "ESLE_2021": "ESLE_PART1_2",
     "TEACH_2021": "TEACH",
     "PROC_LOG_2021": "PROC_LOG",
@@ -1215,8 +1221,10 @@ _FORM_FIELD_MAP_VARIANT_BASES = {
     "SERIOUS_INC_2021": "SERIOUS_INC",
     "EDU_ACT_2021": "EDU_ACT",
     "FORMAL_COURSE_2021": "FORMAL_COURSE",
+    "REFLECT_LOG_2021": "REFLECT_LOG",
     "TEACH_OBS_2021": "TEACH_OBS",
     "TEACH_CONFID_2021": "TEACH_CONFID",
+    "AUDIT_2021": "AUDIT",
 }
 
 for _variant, _base in _FORM_FIELD_MAP_VARIANT_BASES.items():

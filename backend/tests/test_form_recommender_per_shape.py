@@ -26,7 +26,15 @@ import pytest
 
 
 CORE_WPBAS = {"CBD", "DOPS", "MINI_CEX"}
-CESR_CORE = CORE_WPBAS | {"REFLECT_LOG"}
+SAS_BLOCKED_TRAINEE_SLES = {"DOPS", "ACAT", "MINI_CEX"}
+SAS_CORE = {
+    "CBD", "ACAF", "MSF", "LAT", "QIAT", "AUDIT", "REFLECT_LOG", "SDL",
+    "EDU_ACT", "FORMAL_COURSE", "TEACH", "STAT", "TEACH_OBS",
+    "TEACH_CONFID", "COMPLAINT", "SERIOUS_INC", "APPRAISAL", "CLIN_GOV",
+    "CRIT_INCIDENT", "US_CASE", "RESEARCH", "PDP", "EDU_MEETING",
+    "EDU_MEETING_SUPP",
+}
+SANA_2021_FORMS = {"JCF_2021", "LAT_2021", "QIAT_2021", "REFLECT_LOG_2021", "AUDIT_2021"}
 QI_AUDIT_SCREENSHOT_TEXT = (
     "Please create the best-fit kaizen draft for an intermediate portfolio account.\n"
     "Quality improvement project in ED: improving time-to-antibiotics for adult sepsis alerts. "
@@ -89,37 +97,28 @@ def test_accs_intermediate_catalogues_are_not_st3_aliases():
     assert "QIAT" in TRAINING_LEVEL_FORMS["INTERMEDIATE"]
 
 
-def test_sas_does_not_leak_the_st5_superset():
-    """SAS must go through the unknown-default fallback, not ``ST5``.
-
-    The inline recommender call sites historically used
-    ``TRAINING_LEVEL_FORMS.get(level, TRAINING_LEVEL_FORMS["ST5"])`` which
-    silently maps SAS → ST5 (an HST-only superset). This pin makes the
-    SAS-safe fallback the documented contract.
-    """
+def test_sas_uses_purpose_built_non_trainee_catalogue():
+    """SAS / CESR must not borrow the HST/ST5 trainee SLE catalogue."""
     from bot import (
         TRAINING_LEVEL_FORMS,
         _allowed_forms_for_training_level,
-        _default_allowed_forms_for_unknown_training,
     )
 
-    assert "SAS" not in TRAINING_LEVEL_FORMS, (
-        "If SAS gets its own catalogue, update this pin alongside the "
-        "user-visible copy in the draft preview."
-    )
+    assert "SAS" in TRAINING_LEVEL_FORMS
     sas_allowed = _allowed_forms_for_training_level("SAS")
-    assert sas_allowed == _default_allowed_forms_for_unknown_training()
+    assert sas_allowed == list(TRAINING_LEVEL_FORMS["SAS"])
     assert sas_allowed != list(TRAINING_LEVEL_FORMS["ST5"])
+    assert SAS_BLOCKED_TRAINEE_SLES.isdisjoint(sas_allowed)
 
 
-def test_sas_fallback_includes_cesr_core_wpbas():
-    """SAS / CESR depends on CBD/DOPS/MINI_CEX/REFLECT_LOG being offered."""
+def test_sana_sas_catalogue_contains_supported_cesr_forms_and_2021_pins():
+    """Sana is SAS/non-trainee on the 2021 curriculum."""
     from bot import _allowed_forms_for_training_level
 
     sas_allowed = set(_allowed_forms_for_training_level("SAS"))
-    missing = CESR_CORE - sas_allowed
+    missing = (SAS_CORE | SANA_2021_FORMS) - sas_allowed
     assert not missing, (
-        f"SAS fallback catalogue must offer CESR core evidence; missing: {missing}"
+        f"SAS catalogue must offer supported CESR/Sana evidence; missing: {missing}"
     )
 
 

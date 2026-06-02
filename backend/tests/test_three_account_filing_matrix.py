@@ -29,11 +29,10 @@ Known live-impact gaps (pinned here so a future silent change is visible):
   Stage-of-training dropdown is left blank. This is the right behaviour
   today (we refuse to invent a training year for an SAS doctor) but it
   must not flip to a default of "Higher" silently.
-- ``TRAINING_LEVEL_FORMS`` has no ``"SAS"`` key. The recommender therefore
-  falls through to ``_default_allowed_forms_for_unknown_training`` for
-  Sana, which unions every level's catalogue. That is intentional — an
-  SAS doctor can credibly file most forms — but the union must continue
-  to include the core WPBAs (CBD/DOPS/MINI_CEX) we know matter for CESR.
+- ``TRAINING_LEVEL_FORMS["SAS"]`` is explicit and smaller than the HST/ST5
+  catalogue. Sana must not inherit trainee-only SLEs such as DOPS, ACAT, or
+  Mini-CEX, while still seeing the supported CESR/non-trainee evidence forms
+  verified from her Kaizen create-list.
 - The Kaizen-role ``accs_intermediate`` (Harris) maps to the
   ``INTERMEDIATE`` storage bucket. That is Harris's dual-access alias, not a
   claim that ACCS and Intermediate are normally one portfolio type. Local
@@ -289,25 +288,29 @@ def test_intermediate_progression_is_recorded_but_not_clickable():
     assert "INTERMEDIATE_PROGRESS" not in clickable
 
 
-def test_sana_sas_catalogue_falls_through_to_unknown_default():
-    """No ``SAS`` key in ``TRAINING_LEVEL_FORMS``.
+def test_sana_sas_catalogue_is_explicit_and_non_trainee():
+    """Sana's SAS bucket must not leak trainee-only SLEs from HST/ST5."""
+    from bot import TRAINING_LEVEL_FORMS
 
-    The recommender therefore goes through
-    ``_default_allowed_forms_for_unknown_training`` for Sana, which unions
-    every level's catalogue. The union must continue to include the core
-    WPBAs (CBD/DOPS/MINI_CEX/REFLECT_LOG) that matter for CESR evidence.
-    """
-    from bot import TRAINING_LEVEL_FORMS, _default_allowed_forms_for_unknown_training
+    assert "SAS" in TRAINING_LEVEL_FORMS
 
-    assert "SAS" not in TRAINING_LEVEL_FORMS
-
-    fallback = set(_default_allowed_forms_for_unknown_training())
-    cesr_core = CORE_WPBAS | {"REFLECT_LOG"}
-    missing = cesr_core - fallback
+    forms = set(TRAINING_LEVEL_FORMS["SAS"])
+    blocked_trainee_sles = {"DOPS", "ACAT", "MINI_CEX"}
+    cesr_core = {
+        "CBD", "ACAF", "MSF", "LAT", "QIAT", "AUDIT", "REFLECT_LOG",
+        "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH", "STAT", "TEACH_OBS",
+        "TEACH_CONFID", "COMPLAINT", "SERIOUS_INC", "APPRAISAL",
+        "CLIN_GOV", "CRIT_INCIDENT", "US_CASE", "RESEARCH", "PDP",
+        "EDU_MEETING", "EDU_MEETING_SUPP",
+    }
+    sana_2021 = {"JCF_2021", "LAT_2021", "QIAT_2021", "REFLECT_LOG_2021", "AUDIT_2021"}
+    missing = (cesr_core | sana_2021) - forms
     assert not missing, (
-        f"SAS fallback catalogue must offer CESR core evidence; "
+        f"SAS catalogue must offer supported CESR/Sana evidence; "
         f"missing: {missing}"
     )
+    assert blocked_trainee_sles.isdisjoint(forms)
+    assert forms != set(TRAINING_LEVEL_FORMS["ST5"])
 
 
 # ─── Labels users see in the profile picker ──────────────────────────────
