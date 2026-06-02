@@ -1,12 +1,12 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-06-02T04:02:16+00:00
+Generated: 2026-06-02T22:23:08+00:00
 Status: ready
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
 - Branch: main
-- Last commit: 84fed67 2026-06-01 fix: make portfolio health actionable
+- Last commit: 6a26c6a 2026-06-02 fix: expose qiat for intermediate portfolios (#4)
 - Uncommitted changes: no
 
 ## Immediate read before restarting
@@ -20,17 +20,17 @@ Status: ready
 - No missing practical sections
 
 ## Recent commits
-- 84fed67 2026-06-01 fix: make portfolio health actionable
-- ad1865d 2026-06-01 fix: polish settings sync status
-- 70640ec 2026-06-01 docs: record filing reliability report context
-- f12e5d1 2026-06-01 feat: add filing reliability report
-- b2f2be4 2026-06-01 fix: hide manual Kaizen sync from settings
-- 006ad0d 2026-06-01 ci: update GitHub actions for Node 24
-- 070307c 2026-06-01 feat: make portfolio health the primary settings action
-- fd91bb9 2026-06-01 fix: keep portfolio health fast
+- 6a26c6a 2026-06-02 fix: expose qiat for intermediate portfolios (#4)
+- bca3d68 2026-06-02 fix: prefer audit for intermediate qi projects (#3)
+- 351603e 2026-06-02 fix: prefer qiat for qi projects (#2)
+- 73bd30f 2026-06-02 fix: clarify same-case WBA save label (#1)
+- 33e7d36 2026-06-02 fix: isolate kaizen session cache by account
+- d42796d 2026-06-02 fix: clarify gathering draft action
+- 7154d64 2026-06-02 fix: detect clinical supervisor role marker
+- 7cf7e35 2026-06-02 docs: record saved cesr smoke pass
 
 ## Repo context snapshot
-### AGENTS.md — present, 0 days old
+### AGENTS.md — present, 1 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
@@ -41,7 +41,7 @@ Key headings:
 - ## Safety
 - ## Supported Forms
 
-### CLAUDE.md — present, 0 days old
+### CLAUDE.md — present, 1 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
@@ -67,7 +67,7 @@ Key headings:
 - ## UX Polish Slice — Post-Filed Buttons (2026-05-26)
 - # 539 passed, 22 skipped, 13 deselected, 3 snapshots passed
 
-### WORKFLOWS.md — present, 3 days old
+### WORKFLOWS.md — present, 4 days old
 Key headings:
 - # Portfolio Guru — Agent Workflow Reference
 - ## Conversation States

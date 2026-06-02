@@ -34,11 +34,11 @@ Known live-impact gaps (pinned here so a future silent change is visible):
   Sana, which unions every level's catalogue. That is intentional — an
   SAS doctor can credibly file most forms — but the union must continue
   to include the core WPBAs (CBD/DOPS/MINI_CEX) we know matter for CESR.
-- The Kaizen-role ``accs_intermediate`` (Harris) maps to the current
+- The Kaizen-role ``accs_intermediate`` (Harris) maps to the
   ``INTERMEDIATE`` storage bucket. That is Harris's dual-access alias, not a
-  claim that ACCS and Intermediate are normally one portfolio type. This
-  file pins the alias so a refactor that drops ACCS or Intermediate forms is
-  loud.
+  claim that ACCS and Intermediate are normally one portfolio type. Local
+  catalogues for ACCS and Intermediate must stay distinct objects, with
+  Kaizen-visible unsupported forms recorded rather than exposed as buttons.
 """
 
 from __future__ import annotations
@@ -240,19 +240,53 @@ def test_harris_junior_catalogue_contains_core_wpbas(level):
     assert "QIAT" in forms, f"{level} catalogue must offer QIAT for junior QI/audit work"
 
 
-def test_harris_accs_and_intermediate_use_the_current_st3_catalogue():
-    """ACCS and INTERMEDIATE are separate product shapes using the same current catalogue.
-
-    Harris has DREAM Pathway access to both portfolios. Most trainees will
-    have only ACCS or only Intermediate, so the tests keep those labels
-    separate even though the current form catalogue points both at ST3.
-    A future split into per-portfolio catalogues should update this pin
-    deliberately, not by accident.
-    """
+def test_harris_accs_and_intermediate_catalogues_do_not_alias_st3():
+    """ACCS and INTERMEDIATE are separate product shapes, not ST3 aliases."""
     from bot import TRAINING_LEVEL_FORMS
 
-    assert TRAINING_LEVEL_FORMS["ACCS"] is TRAINING_LEVEL_FORMS["ST3"]
-    assert TRAINING_LEVEL_FORMS["INTERMEDIATE"] is TRAINING_LEVEL_FORMS["ST3"]
+    assert TRAINING_LEVEL_FORMS["ACCS"] is not TRAINING_LEVEL_FORMS["ST3"]
+    assert TRAINING_LEVEL_FORMS["INTERMEDIATE"] is not TRAINING_LEVEL_FORMS["ST3"]
+    assert TRAINING_LEVEL_FORMS["ACCS"] is not TRAINING_LEVEL_FORMS["INTERMEDIATE"]
+
+
+def test_accs_specific_visible_forms_are_recorded_but_not_clickable():
+    from bot import FORM_CATEGORIES, KAIZEN_CATALOGUE_STATUS, TRAINING_LEVEL_FORMS
+
+    accs_pending = {
+        "ASAT",
+        "EPA1",
+        "EPA2",
+        "DOPS_ACCS",
+        "PROCEDURAL_LOG_ACCS",
+        "ACCS_PROGRESS",
+        "MCR_MTR_ACCS",
+        "HALO_ICM",
+        "HALO_PROCEDURAL_SEDATION",
+        "IAC",
+    }
+    clickable = (
+        set(TRAINING_LEVEL_FORMS["ACCS"])
+        | {form for forms in FORM_CATEGORIES.values() for form in forms}
+    )
+
+    assert accs_pending <= set(KAIZEN_CATALOGUE_STATUS)
+    assert {
+        form for form in accs_pending
+        if KAIZEN_CATALOGUE_STATUS[form]["status"] != "unsupported-pending-schema"
+    } == set()
+    assert accs_pending.isdisjoint(clickable)
+
+
+def test_intermediate_progression_is_recorded_but_not_clickable():
+    from bot import FORM_CATEGORIES, KAIZEN_CATALOGUE_STATUS, TRAINING_LEVEL_FORMS
+
+    clickable = (
+        set(TRAINING_LEVEL_FORMS["INTERMEDIATE"])
+        | {form for forms in FORM_CATEGORIES.values() for form in forms}
+    )
+
+    assert KAIZEN_CATALOGUE_STATUS["INTERMEDIATE_PROGRESS"]["status"] == "unsupported-pending-schema"
+    assert "INTERMEDIATE_PROGRESS" not in clickable
 
 
 def test_sana_sas_catalogue_falls_through_to_unknown_default():

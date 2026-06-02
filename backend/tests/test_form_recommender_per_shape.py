@@ -15,8 +15,7 @@ Per the plan's portfolio-type terminology: ACCS and Intermediate are separate
 Kaizen portfolio types. ``accs_intermediate`` is Harris's dual-access storage
 alias (one trainee with access to both portfolios), not a standalone product
 shape. The test ids keep ACCS-only and Intermediate-only distinct from the
-dual-access alias even though all three currently share the ST3 catalogue, so
-a future per-portfolio split is intentional, not silent.
+dual-access alias, and the local catalogues must not silently alias ST3.
 
 Offline-only: no Kaizen, no credentials, no BWS, no Playwright, no Telegram.
 """
@@ -72,14 +71,22 @@ def test_hst_uses_the_higher_catalogue():
 )
 def test_accs_intermediate_buckets_use_pinned_catalogue(level):
     """ACCS-only, Intermediate-only, and Harris's dual-access storage bucket
-    all surface the current ST3 catalogue today. They are pinned per shape so
-    a future per-portfolio split is deliberate.
+    are pinned per shape so portfolio-specific catalogue drift is deliberate.
     """
     from bot import _allowed_forms_for_training_level, TRAINING_LEVEL_FORMS
 
     assert _allowed_forms_for_training_level(level) == list(
         TRAINING_LEVEL_FORMS[level]
     )
+
+
+def test_accs_intermediate_catalogues_are_not_st3_aliases():
+    from bot import TRAINING_LEVEL_FORMS
+
+    assert TRAINING_LEVEL_FORMS["ACCS"] is not TRAINING_LEVEL_FORMS["ST3"]
+    assert TRAINING_LEVEL_FORMS["INTERMEDIATE"] is not TRAINING_LEVEL_FORMS["ST3"]
+    assert TRAINING_LEVEL_FORMS["ACCS"] is not TRAINING_LEVEL_FORMS["INTERMEDIATE"]
+    assert "QIAT" in TRAINING_LEVEL_FORMS["INTERMEDIATE"]
 
 
 def test_sas_does_not_leak_the_st5_superset():

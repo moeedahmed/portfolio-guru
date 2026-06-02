@@ -51,6 +51,77 @@ def test_user_selectable_forms_have_schema_uuid_and_route():
     assert deterministic_selectable <= set(FORM_FIELD_MAP)
 
 
+def test_profile_catalogue_forms_have_category_and_complete_wiring_or_status():
+    from extractor import FORM_UUIDS
+    from extractor import schema_form_type
+    from filer_router import PLATFORM_REGISTRY
+    from form_schemas import FORM_SCHEMAS
+    from kaizen_form_filer import FORM_FIELD_MAP, FORM_UUIDS as KAIZEN_FORM_UUIDS
+    from bot import FORM_CATEGORIES, KAIZEN_CATALOGUE_STATUS, TRAINING_LEVEL_FORMS
+
+    category_forms = {form for forms in FORM_CATEGORIES.values() for form in forms}
+    profile_forms = {form for forms in TRAINING_LEVEL_FORMS.values() for form in forms}
+    supported_forms = set(PLATFORM_REGISTRY["kaizen"]["supported_forms"])
+
+    gaps = []
+    for form in sorted(profile_forms | category_forms):
+        if form in KAIZEN_CATALOGUE_STATUS:
+            continue
+        if form not in category_forms:
+            gaps.append(f"{form}:missing category")
+        if form not in FORM_UUIDS:
+            gaps.append(f"{form}:missing extractor UUID")
+        if form not in KAIZEN_FORM_UUIDS:
+            gaps.append(f"{form}:missing Kaizen UUID")
+        if form not in supported_forms:
+            gaps.append(f"{form}:missing deterministic route")
+        if schema_form_type(form) not in FORM_SCHEMAS:
+            gaps.append(f"{form}:missing schema")
+        if form in supported_forms and form not in FORM_FIELD_MAP:
+            gaps.append(f"{form}:missing FORM_FIELD_MAP")
+
+    assert gaps == []
+
+
+def test_suppressed_and_unsupported_catalogue_entries_are_not_user_selectable():
+    from bot import FORM_CATEGORIES, KAIZEN_CATALOGUE_STATUS, TRAINING_LEVEL_FORMS
+
+    selectable = (
+        {form for forms in FORM_CATEGORIES.values() for form in forms}
+        | {form for forms in TRAINING_LEVEL_FORMS.values() for form in forms}
+    )
+    statuses = {entry["status"] for entry in KAIZEN_CATALOGUE_STATUS.values()}
+    hidden_statuses = {
+        "supported-hidden-utility",
+        "unsupported-pending-schema",
+        "unsupported-out-of-scope",
+    }
+
+    assert {
+        "ASAT",
+        "EPA1",
+        "EPA2",
+        "DOPS_ACCS",
+        "PROCEDURAL_LOG_ACCS",
+        "ACCS_PROGRESS",
+        "INTERMEDIATE_PROGRESS",
+        "MCR_MTR_ACCS",
+        "HALO_ICM",
+        "HALO_PROCEDURAL_SEDATION",
+        "IAC",
+        "EDUCATIONAL_AGREEMENT",
+        "ADD_POST",
+        "ADD_SUPERVISOR",
+        "FILE_UPLOAD",
+        "OOP",
+        "HIGHER_PROG",
+        "ABSENCE",
+        "CCT",
+    } <= set(KAIZEN_CATALOGUE_STATUS)
+    assert statuses <= hidden_statuses
+    assert selectable.isdisjoint(KAIZEN_CATALOGUE_STATUS)
+
+
 def test_esle_user_facing_aliases_route_to_assessed_kaizen_form():
     from extractor import canonical_form_type as canonical_extractor_form_type
     from kaizen_form_filer import FORM_FIELD_MAP, FORM_UUIDS, canonical_form_type as canonical_kaizen_form_type
