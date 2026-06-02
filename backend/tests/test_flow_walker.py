@@ -670,10 +670,11 @@ class TestFlowWalker:
 
         assert result == AWAIT_FORM_CHOICE
         button_data = [data for _, data in sim.get_last_buttons()]
-        # Should show category buttons, search, and back
+        # Should show category buttons and back. Search by name is intentionally
+        # not offered from the all-forms/category picker.
         for cat_name, slug in _CAT_SLUGS.items():
             assert f'FORM|cat_{slug}' in button_data, f"Missing category button for {cat_name}"
-        assert 'FORM|search' in button_data
+        assert 'FORM|search' not in button_data
         assert 'FORM|back' in button_data
 
     @pytest.mark.asyncio

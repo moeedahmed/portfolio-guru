@@ -176,6 +176,57 @@ class TestRecommenderHonoursImageSource:
         # No image-specific guard should be in a text-source prompt
         assert "image-derived" not in prompt and "this case was extracted from a photo" not in prompt
 
+    @pytest.mark.asyncio
+    async def test_qi_audit_project_prefers_qiat_over_teaching_intervention(self):
+        """Teaching used as a QI intervention must not make Teaching the best fit."""
+        from extractor import recommend_form_types
+
+        async def fake_generate(prompt, retries=1, tier=""):
+            return json.dumps([
+                {
+                    "form_type": "TEACH",
+                    "rationale": "Education session delivered to ED clinicians.",
+                },
+                {
+                    "form_type": "QIAT",
+                    "rationale": "Audit with intervention and re-measurement.",
+                },
+            ])
+
+        case_text = (
+            "I completed a quality improvement audit project on antibiotic use "
+            "in the ED. I performed a baseline audit of prescribing compliance, "
+            "introduced a teaching intervention for doctors and nurses, then "
+            "collected post-intervention data to assess improvement."
+        )
+        with patch("extractor._generate", new=AsyncMock(side_effect=fake_generate)):
+            recommendations = await recommend_form_types(case_text, input_source="text")
+
+        assert [rec.form_type for rec in recommendations][:2] == ["QIAT", "TEACH"]
+
+    @pytest.mark.asyncio
+    async def test_qi_project_rescues_qiat_when_model_only_returns_teaching(self):
+        from extractor import recommend_form_types
+
+        async def fake_generate(prompt, retries=1, tier=""):
+            return json.dumps([
+                {
+                    "form_type": "TEACH",
+                    "rationale": "Teaching session on antibiotic prescribing.",
+                }
+            ])
+
+        case_text = (
+            "Baseline audit of antibiotic prescribing in ED showed poor guideline "
+            "adherence. I implemented an education intervention and checklist, "
+            "then re-audited compliance after the change cycle."
+        )
+        with patch("extractor._generate", new=AsyncMock(side_effect=fake_generate)):
+            recommendations = await recommend_form_types(case_text, input_source="text")
+
+        assert recommendations[0].form_type == "QIAT"
+        assert recommendations[0].uuid
+
 
 class TestExtractorHonoursImageSource:
     @pytest.mark.asyncio
