@@ -36,6 +36,17 @@ def test_classify_role_is_case_insensitive_for_barrier():
     assert role_detector.classify_role_from_timeline_text(body) == "assessor"
 
 
+def test_classify_role_returns_assessor_on_current_clinical_supervisor_marker():
+    body = (
+        "Skip to content\n"
+        "My risr/advance\n"
+        "Dashboard\n"
+        "Timeline (All Events)\n"
+        "Clinical Supervisor"
+    )
+    assert role_detector.classify_role_from_timeline_text(body) == "assessor"
+
+
 def test_classify_role_returns_trainee_when_marker_present_without_barrier():
     body = "My Timeline\nCreate new event\nFilter by event type"
     assert role_detector.classify_role_from_timeline_text(body) == "trainee"
@@ -79,6 +90,25 @@ async def test_detect_role_returns_unknown_when_navigation_fails():
 
     assert await role_detector.detect_role(page) == "unknown"
     page.evaluate.assert_not_awaited()
+
+
+async def test_detect_role_falls_back_to_dashboard_when_timeline_is_inconclusive():
+    page = AsyncMock()
+    page.goto = AsyncMock(return_value=None)
+    page.evaluate = AsyncMock(
+        side_effect=[
+            "risr/advance - Timeline\nSkip to content",
+            "risr/advance - Clinical Supervisor\nDashboard",
+        ]
+    )
+
+    assert await role_detector.detect_role(page) == "assessor"
+    assert page.goto.await_args_list[0].args == (
+        role_detector.MY_TIMELINE_URL,
+    )
+    assert page.goto.await_args_list[1].args == (
+        role_detector.DASHBOARD_URL,
+    )
 
 
 async def test_detect_role_returns_unknown_when_body_read_fails():

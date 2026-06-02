@@ -1,6 +1,7 @@
 """Detect a Kaizen account's role (trainee vs supervisor/assessor).
 
-Pure-supervisor accounts render ``"You cannot create any events!"`` on the
+Pure-supervisor accounts render either the historic ``"You cannot create any
+events!"`` barrier or a ``Clinical Supervisor`` chrome/title marker on the
 MyTimeline surface because the account has no personal portfolio. Trainee
 accounts render the normal timeline / "new event" affordances. We classify
 the role from that evidence.
@@ -12,8 +13,8 @@ live browser:
   text and returns one of ``"assessor"`` / ``"trainee"`` / ``"unknown"``.
 * :func:`detect_role` is the thin async wrapper that drives Playwright.
 
-Strict safety contract: the detector only navigates to MyTimeline and reads
-``document.body.innerText``. It never clicks ``Fill in``, ``Save``,
+Strict safety contract: the detector only navigates to read-only landing pages
+and reads ``document.title`` / ``document.body.innerText``. It never clicks ``Fill in``, ``Save``,
 ``Submit``, ``Sign``, ``Approve``, ``Delete`` or ``Send``.
 """
 
@@ -29,10 +30,12 @@ logger = logging.getLogger(__name__)
 Role = Literal["assessor", "trainee", "unknown"]
 
 MY_TIMELINE_URL = "https://kaizenep.com/events/list/MyTimeline"
+DASHBOARD_URL = "https://kaizenep.com/dashboard"
 
 # Evidence patterns. Matched case-insensitively on the rendered body text.
 ASSESSOR_BARRIER_PATTERNS: tuple[str, ...] = (
     "you cannot create any events",  # Ahmed Mahdi's MyTimeline surface.
+    "clinical supervisor",  # Current assessor chrome/title marker.
 )
 
 # Positive trainee markers. Only consulted when the assessor barrier is absent;
@@ -74,16 +77,23 @@ async def detect_role(page: Page, *, timeline_url: str = MY_TIMELINE_URL) -> Rol
     (CDP connection, login) is owned by the caller, mirroring the
     supervisor poller's contract.
     """
+    role = await _classify_readonly_page(page, timeline_url, label="timeline")
+    if role != "unknown":
+        return role
+    return await _classify_readonly_page(page, DASHBOARD_URL, label="dashboard")
+
+
+async def _classify_readonly_page(page: Page, url: str, *, label: str) -> Role:
     try:
-        await page.goto(timeline_url, wait_until="domcontentloaded")
+        await page.goto(url, wait_until="domcontentloaded")
     except Exception as exc:
-        logger.warning("Role detector navigation failed: %s", exc)
+        logger.warning("Role detector %s navigation failed: %s", label, exc)
         return "unknown"
     try:
-        body_text = await page.evaluate(
-            "() => (document.body && document.body.innerText) ? document.body.innerText : ''"
+        page_text = await page.evaluate(
+            "() => [document.title || '', (document.body && document.body.innerText) ? document.body.innerText : ''].join('\\n')"
         )
     except Exception as exc:
-        logger.warning("Role detector body read failed: %s", exc)
+        logger.warning("Role detector %s body read failed: %s", label, exc)
         return "unknown"
-    return classify_role_from_timeline_text(body_text)
+    return classify_role_from_timeline_text(page_text)

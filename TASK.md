@@ -1,5 +1,39 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-02 addendum — P3 Ahmed/consultant assessor-boundary read-only smoke passed; supervisor write path parked.**
+> Scope: final fixture in the filing-phase matrix after CESR 2021. Per
+> Moeed's direction, this did not enter the full assessor/supervisor pathway:
+> no ticket was opened, no feedback was drafted, no save/sign/submit/approve
+> path was exercised, and no Telegram supervisor workflow was driven.
+>
+> Result:
+>
+> - Used the private BWS assessor credential aliases for Ahmed/consultant
+>   access. No credential values were printed or stored in repo docs.
+> - Kaizen login succeeded and the provider classified the account as
+>   `assessor`.
+> - Read-only navigation confirmed the account has a Clinical Supervisor
+>   surface and no trainee `Create event` affordance on the checked pages.
+> - Live drift found: the historical MyTimeline assessor barrier text
+>   (`You cannot create any events!`) was not present on the current surface,
+>   so a strict barrier-only role detector would return `unknown`.
+> - `backend/role_detector.py` now keeps the historical barrier marker and
+>   also recognises the current `Clinical Supervisor` marker, with a read-only
+>   dashboard fallback when MyTimeline is inconclusive.
+> - Regression pins added in `backend/tests/test_role_detector.py`.
+>
+> Verification:
+>
+> - Focused supervisor/role gate:
+>   `54 passed, 23 warnings` in `test_role_detector.py`,
+>   `test_supervisor_workflow.py`, and `test_supervisor_scheduler.py`.
+>
+> Boundary: no live Telegram impersonation, no trainee filing attempt, no
+> supervisor ticket open, no Fill in, no Kaizen write, no save, no submit, no
+> sign, no send, no approve, no reject, no delete, no deploy, no push, and no
+> production rollout. The assessor/supervisor product pathway remains a next
+> phase after filing coverage.
+>
 > **2026-06-02 addendum — P3 saved CESR 2021 bot-handler draft smoke passed and cleaned up; Sana identity not pinned.**
 > Scope: next controlled SAS/CESR fixture after Harris/Intermediate. The first
 > step pinned the two locally saved SAS/CESR candidates before counting either
