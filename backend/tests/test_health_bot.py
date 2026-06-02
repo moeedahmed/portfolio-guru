@@ -283,7 +283,8 @@ async def test_arcp_health_falls_back_to_deterministic_output_when_llm_fails(mon
     )
 
     text = sent["text"]
-    assert "*Portfolio Health — Training (CCT) ARCP readiness*" in text
+    assert "*Portfolio Health — Training (CCT) pathway · ARCP readiness check*" in text
+    assert "Training (ARCP)" not in text
     assert "AI ARCP narrative is temporarily unavailable" in text
     assert "ARCP risk:" in text
     assert "Why:" in text
@@ -335,7 +336,8 @@ async def test_arcp_health_output_prioritises_action_plan_when_llm_succeeds(monk
     )
 
     text = sent["text"]
-    assert "*Portfolio Health — Training (CCT) ARCP readiness*" in text
+    assert "*Portfolio Health — Training (CCT) pathway · ARCP readiness check*" in text
+    assert "Training (ARCP)" not in text
     assert "ARCP risk:" in text
     assert "Why:" in text
     assert "Next 3 urgent filing actions before ARCP" in text
@@ -573,8 +575,11 @@ async def test_arcp_and_cesr_pathway_outputs_diverge_in_lead_framing(monkeypatch
     arcp_text = await _run_health_capture(monkeypatch, 6001, Pathway.training_arcp)
     cesr_text = await _run_health_capture(monkeypatch, 6002, Pathway.cesr_portfolio)
 
-    # ARCP framing
-    assert "Training (CCT) ARCP readiness" in arcp_text
+    # Training (CCT) pathway framing — ARCP is a checkpoint inside this pathway,
+    # not a standalone pathway label.
+    assert "Training (CCT) pathway" in arcp_text
+    assert "ARCP readiness check" in arcp_text
+    assert "Training (ARCP)" not in arcp_text
     assert "ARCP risk:" in arcp_text
     assert "Next 3 urgent filing actions before ARCP" in arcp_text
     # ARCP must NOT carry CESR / yearly-plan framing
@@ -610,10 +615,93 @@ async def test_cesr_message_contains_long_term_and_domain_balance(monkeypatch):
 
 
 def test_health_paywall_copy_is_pathway_neutral():
-    """The /health paywall must not promise ARCP-only analysis."""
+    """The /health paywall must not promise ARCP-only analysis, and must not
+    label ARCP as a pathway. ARCP is a checkpoint inside the Training (CCT)
+    pathway."""
     import inspect
     import bot
 
     src = inspect.getsource(bot.health_command)
     assert "monthly ARCP readiness analysis" not in src
+    # "training (ARCP)" frames ARCP as the pathway label — corrected model
+    # is Training (CCT) with ARCP as a checkpoint.
+    assert "training (ARCP)" not in src.lower()
     assert ("CESR" in src) or ("portfolio readiness" in src.lower())
+
+
+@pytest.mark.asyncio
+async def test_pathway_command_describes_arcp_as_checkpoint_not_pathway(isolated_health_store):
+    """The /pathway selector must present Training (CCT) and CESR / Portfolio
+    Pathway as the two pathways. ARCP, if mentioned, must read as a
+    checkpoint/review/readiness check inside Training (CCT), never as a
+    pathway label such as "Training (ARCP)" or "choose ARCP"."""
+    import bot
+
+    sim = BotSimulator(user_id=4243)
+    context = sim._make_context()
+
+    await bot.pathway_command(sim._make_text_update("/pathway"), context)
+
+    text = sim.get_last_text()
+    buttons = sim.get_last_buttons()
+
+    # Pathways: Training (CCT) and Portfolio (CESR)
+    assert "Training (CCT)" in text
+    assert ("CESR" in text) or ("Portfolio Pathway" in text)
+    assert ("Training (CCT)", "PATHWAY|training_arcp") in buttons
+    assert ("Portfolio (CESR)", "PATHWAY|cesr_portfolio") in buttons
+
+    # Forbidden framings — ARCP as a pathway label
+    assert "Training (ARCP)" not in text
+    assert "ARCP pathway" not in text
+    assert "ARCP path" not in text
+    assert "choose ARCP" not in text.lower()
+
+    # If ARCP is mentioned at all, it must be described as a checkpoint /
+    # review / readiness check, i.e. as something that sits *inside* the
+    # Training (CCT) pathway.
+    if "ARCP" in text:
+        assert any(
+            word in text.lower()
+            for word in ("checkpoint", "review", "readiness check")
+        ), f"ARCP must read as a checkpoint inside Training (CCT); got: {text!r}"
+
+
+def test_bot_commands_health_description_is_not_arcp_only():
+    """The /health command description in the Telegram menu must not present
+    the feature as ARCP-only — Portfolio Health is pathway-aware."""
+    import bot
+
+    health_desc = next(
+        (description for command, description in bot.BOT_COMMANDS if command == "health"),
+        None,
+    )
+    assert health_desc is not None
+    assert "ARCP analysis" not in health_desc
+    assert "ARCP" not in health_desc or "checkpoint" in health_desc.lower()
+
+
+def test_upgrade_copy_calls_feature_portfolio_health_not_arcp_health():
+    """The upgrade / paywall copy must list the feature as Portfolio Health
+    (pathway-aware), not as "ARCP Health" — which would imply the feature is
+    only for the ARCP checkpoint."""
+    import inspect
+    import bot
+
+    src = inspect.getsource(bot.upgrade_command)
+    assert "ARCP Health" not in src
+    assert "ARCP health" not in src
+    assert "Portfolio Health" in src
+
+
+def test_pathway_for_detected_role_docstring_uses_training_cct_not_arcp():
+    """The role→pathway mapping docstring must describe the trainee pathway
+    as Training (CCT), not as ARCP. ARCP is a checkpoint inside that
+    pathway, not the pathway itself."""
+    import bot
+
+    doc = bot._pathway_for_detected_role.__doc__ or ""
+    assert "Training (CCT)" in doc
+    # Forbid framings that present ARCP as a pathway / destination label
+    assert "→ ARCP" not in doc
+    assert "ARCP pathway" not in doc

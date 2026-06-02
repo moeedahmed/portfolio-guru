@@ -183,7 +183,9 @@ Other pathways (GP, IMT, CST, SAS, foundation) will be added when Portfolio Guru
 
 1. User opens Portfolio Health (`/health` or button)
 2. If no profile exists: "Welcome to Portfolio Health. I'll help you track your evidence and understand what's missing. Are you on a training programme or working toward CESR?"
-3. Pathway selector: Training (ARCP) / CESR / Portfolio Pathway
+3. Pathway selector: Training (CCT) / CESR / Portfolio Pathway. ARCP is a
+   yearly review checkpoint inside the Training (CCT) pathway, not a
+   pathway in its own right.
 4. User selects pathway → optional details (training stage + ARCP date for trainees; target application window for CESR)
 5. Initial scan of existing PG activity populates evidence inventory
 6. Health summary shows: domain coverage, recent activity, pathway-specific readiness
@@ -322,8 +324,9 @@ next_actions              3–5 concrete suggested actions
 ### Phase 2 — Refactor existing `/health`
 
 - [ ] Extract the current hardcoded RCEM SLO/KC chart behind a pathway gate
-- [x] Add pathway selector: Training (ARCP) / CESR / Portfolio Pathway
-- [x] ARCP view: Training (CCT) ARCP readiness brief — ARCP risk, why, next
+- [x] Add pathway selector: Training (CCT) / CESR / Portfolio Pathway
+      (ARCP is a checkpoint inside Training/CCT, not a standalone pathway)
+- [x] Training (CCT) view: ARCP readiness check — ARCP risk, why, next
       3 urgent filing actions, strong/missing domains (KC radar + counts
       still pending)
 - [x] CESR view: long-term Portfolio Pathway evidence plan — 36-WPBA

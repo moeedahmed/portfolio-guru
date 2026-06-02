@@ -1,5 +1,48 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-02 addendum — Portfolio Health pathway model correction.**
+> Moeed corrected the product model: the two pathways are **Training / CCT**
+> and **CESR / Portfolio Pathway**. ARCP is a _yearly review checkpoint_
+> inside Training/CCT, not a pathway in its own right. Earlier copy and
+> tests leaked "Training (ARCP)" / "ARCP path" framings that implied ARCP
+> was a pathway label. Corrected user-visible surfaces:
+>
+> - `/health` trainee header is now `Portfolio Health — Training (CCT)
+>   pathway · ARCP readiness check` (was `Training (CCT) ARCP readiness`).
+> - `/pathway` selector copy now explicitly names the two pathways and
+>   calls out ARCP as the yearly review checkpoint inside Training (CCT).
+> - `/health` paywall now says "Training (CCT) pathway (ARCP readiness
+>   check) or CESR / Portfolio Pathway view" instead of "training (ARCP)
+>   or CESR".
+> - Upgrade screen calls the feature "Portfolio Health" (pathway-aware),
+>   not "ARCP Health"; BOT_COMMANDS description is no longer ARCP-only.
+> - `_pathway_for_detected_role` docstring documents the trainee
+>   destination as "Training (CCT)", with ARCP as a checkpoint inside it.
+> - `docs/PORTFOLIO_HEALTH_SPEC.md` user-journey + Phase 2 checklist no
+>   longer describe a "Training (ARCP)" pathway.
+>
+> Tests now pin the corrected model: header and pathway-divergence asserts
+> use the new wording, plus four new guards
+> (`test_pathway_command_describes_arcp_as_checkpoint_not_pathway`,
+> `test_bot_commands_health_description_is_not_arcp_only`,
+> `test_upgrade_copy_calls_feature_portfolio_health_not_arcp_health`,
+> `test_pathway_for_detected_role_docstring_uses_training_cct_not_arcp`)
+> reject any future drift back to "Training (ARCP)" / "ARCP pathway" /
+> "ARCP Health" framings.
+>
+> Verification:
+>
+> - Focused: `cd backend && venv/bin/python -m pytest tests/test_health_bot.py tests/test_health_index_integration.py tests/test_health_engine.py -q`
+>   → 76 passed.
+> - Offline gate: `cd backend && venv/bin/python -m pytest tests/ -q --ignore=tests/test_e2e.py --ignore=tests/test_e2e_live.py`
+>   → 933 passed, 13 deselected.
+>
+> No live bot restart, deploy, push, Kaizen, or Telegram. Files changed:
+> `backend/bot.py` (header, pathway selector copy, paywall, upgrade
+> bullet, docstrings, two comments), `backend/tests/test_health_bot.py`
+> (header asserts updated + 4 new guards), `docs/PORTFOLIO_HEALTH_SPEC.md`
+> (user journey + Phase 2 checklist), `TASK.md` (this addendum).
+
 > **2026-06-02 addendum — Phase 3 read-only Kaizen smoke run.**
 > Moeed approved the gated live read-only smoke after the offline three-account
 > matrix landed. Boundary held: no draft creation, no Kaizen save/submit, no

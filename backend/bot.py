@@ -94,7 +94,7 @@ BOT_COMMANDS = [
     ("voice", "Set up your personal writing voice"),
     ("settings", "View status, usage, and preferences"),
     ("link", "Link to your EM Gurus Hub web account"),
-    ("health", "Portfolio health chart and ARCP analysis"),
+    ("health", "Portfolio health chart and pathway-aware analysis"),
     ("cancel", "Cancel whatever is happening"),
     ("delete", "Delete all your stored data"),
     ("help", "How to use Portfolio Guru"),
@@ -4065,8 +4065,8 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         await _show_unsigned_range_picker(query.message, context)
 
     elif action == "health":
-        # Inline ARCP health check — morphs the settings screen in place and
-        # returns there, not to the generic filing menu.
+        # Inline pathway-aware health check — morphs the settings screen in
+        # place and returns there, not to the generic filing menu.
         back_btn = InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")
         back_markup = InlineKeyboardMarkup([[back_btn]])
 
@@ -4589,7 +4589,7 @@ async def upgrade_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if tier == "pro_plus":
         await _flow_msg(
             update, context,
-            "You're on the top plan! 🎉\n\nPortfolio Guru Unlimited — unlimited Kaizen WPBA filing, AI extraction, draft review, auto-filing, ARCP health, and unsigned-ticket scanning.",
+            "You're on the top plan! 🎉\n\nPortfolio Guru Unlimited — unlimited Kaizen WPBA filing, AI extraction, draft review, auto-filing, Portfolio Health, and unsigned-ticket scanning.",
             flow_key="upgrade",
         )
         _flow_done(context, "upgrade")
@@ -4600,7 +4600,7 @@ async def upgrade_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         "⭐⭐ *Portfolio Guru Unlimited* — £9.99/month\n"
         "• Unlimited Kaizen WPBA filing\n"
         "• Draft Review (AI critique before filing)\n"
-        "• ARCP Health — gap analysis & readiness scoring\n"
+        "• Portfolio Health — pathway-aware analysis (Training/CCT ARCP readiness check or CESR / Portfolio Pathway evidence plan)\n"
         "• Unsigned ticket scanning with chase guardrails\n"
         "• Bulk filing\n"
     )
@@ -4932,8 +4932,8 @@ async def _run_health_analysis(
     """Shared portfolio health pipeline.
 
     Callers supply message-sending callbacks so the same logic powers both
-    the /health command (new progress message) and the inline ARCP Health
-    button (morph the menu in place):
+    the /health command (new progress message) and the inline Portfolio
+    Health button (morph the menu in place):
       - send_progress(): show the "analysing" status
       - send_result(text, reply_markup): render the final analysis text
       - send_photo_fn(file_handle): send the chart image
@@ -4943,8 +4943,16 @@ async def _run_health_analysis(
 
     profile = _get_or_default_health_profile(user_id)
     is_cesr = profile.pathway == Pathway.cesr_portfolio
-    pathway_label = "CESR / Portfolio Pathway" if is_cesr else "Training (CCT) ARCP readiness"
-    empty_state_label = "CESR / Portfolio Pathway" if is_cesr else "ARCP"
+    pathway_label = (
+        "CESR / Portfolio Pathway"
+        if is_cesr
+        else "Training (CCT) pathway · ARCP readiness check"
+    )
+    empty_state_label = (
+        "CESR / Portfolio Pathway"
+        if is_cesr
+        else "ARCP readiness within the Training (CCT) pathway"
+    )
 
     training_level = get_training_level(user_id)
     if not training_level:
@@ -5066,7 +5074,9 @@ _TRAINEE_DETECTED_ROLES = frozenset({"hst", "accs", "accs_intermediate", "interm
 def _pathway_for_detected_role(detected_role: str) -> Pathway | None:
     """Map a Kaizen-detected role to a Portfolio Health pathway.
 
-    SAS / CESR / non-trainee accounts → CESR. Trainee accounts → ARCP.
+    SAS / CESR / non-trainee accounts → CESR / Portfolio Pathway.
+    Trainee accounts → Training (CCT); ARCP is a yearly review checkpoint
+    inside that pathway, not the pathway itself.
     Ambiguous probes (``unknown``, ``assessor``, empty) return None so the
     caller falls back to existing manual selection rather than guessing.
     """
@@ -5112,12 +5122,20 @@ def _build_pathway_keyboard(*, from_settings: bool = False) -> InlineKeyboardMar
 
 
 async def pathway_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Standalone /pathway command — choose ARCP or CESR Portfolio Health view."""
+    """Standalone /pathway command — choose Training (CCT) or CESR / Portfolio Pathway.
+
+    ARCP is a yearly review checkpoint inside the Training (CCT) pathway,
+    not a pathway in its own right.
+    """
     user_id = update.effective_user.id
     profile = _get_or_default_health_profile(user_id)
     await update.message.reply_text(
         f"Current Portfolio Health pathway: {_pathway_label(profile.pathway)}\n\n"
-        "Which pathway should /health use?",
+        "Pick the pathway /health should follow:\n"
+        "• Training (CCT) — the training programme; ARCP is the yearly review "
+        "checkpoint inside it.\n"
+        "• Portfolio (CESR) — the long-term Portfolio Pathway to specialist "
+        "registration; yearly evidence plan, no ARCP deadline.",
         reply_markup=_build_pathway_keyboard(),
     )
     return AWAIT_PATHWAY
@@ -5201,7 +5219,7 @@ def _format_arcp_action_plan_message(
     missing = _missing_domain_labels(snapshot)
 
     lines = [
-        "📊 *Portfolio Health — Training (CCT) ARCP readiness*",
+        "📊 *Portfolio Health — Training (CCT) pathway · ARCP readiness check*",
         month_label,
         "",
     ]
@@ -5448,14 +5466,17 @@ async def _health_gate_check(user_id: int) -> bool:
 
 
 async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle /health — analyse portfolio health against ARCP requirements."""
+    """Handle /health — analyse portfolio health against the user's selected
+    pathway (Training/CCT, with ARCP as a checkpoint inside it, or CESR /
+    Portfolio Pathway)."""
     user_id = update.effective_user.id
 
     if not await _health_gate_check(user_id):
         await update.message.reply_text(
             "📊 Portfolio Health is included in Portfolio Guru Unlimited.\n\n"
             "Upgrade to get monthly portfolio readiness analysis tailored to "
-            "your training (ARCP) or CESR / Portfolio Pathway view.",
+            "your Training (CCT) pathway (ARCP readiness check) or "
+            "CESR / Portfolio Pathway view.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
             ]),
