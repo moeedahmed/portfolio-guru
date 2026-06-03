@@ -8,11 +8,11 @@ historically used ``TRAINING_LEVEL_FORMS.get(level, TRAINING_LEVEL_FORMS["ST5"])
 as the fallback, silently leaking the HST/ST5 superset to SAS / CESR shapes
 and to unknown levels. This file pins the SAS-safe contract via a thin pure
 helper, ``_allowed_forms_for_training_level``, so a regression on any of the
-three trusted-tester account shapes (HST, ACCS-only, Intermediate-only,
-Harris's ``accs_intermediate`` storage bucket, SAS) is loud.
+three representative account shapes (HST, ACCS-only, Intermediate-only,
+the ``accs_intermediate`` storage bucket, SAS) is loud.
 
 Per the plan's portfolio-type terminology: ACCS and Intermediate are separate
-Kaizen portfolio types. ``accs_intermediate`` is Harris's dual-access storage
+Kaizen portfolio types. ``accs_intermediate`` is a dual-access storage
 alias (one trainee with access to both portfolios), not a standalone product
 shape. The test ids keep ACCS-only and Intermediate-only distinct from the
 dual-access alias, and the local catalogues must not silently alias ST3.
@@ -34,7 +34,7 @@ SAS_CORE = {
     "CRIT_INCIDENT", "US_CASE", "RESEARCH", "PDP", "EDU_MEETING",
     "EDU_MEETING_SUPP",
 }
-SANA_2021_FORMS = {"JCF_2021", "LAT_2021", "QIAT_2021", "REFLECT_LOG_2021", "AUDIT_2021"}
+SAS_2021_FORMS = {"JCF_2021", "LAT_2021", "QIAT_2021", "REFLECT_LOG_2021", "AUDIT_2021"}
 QI_AUDIT_SCREENSHOT_TEXT = (
     "Please create the best-fit kaizen draft for an intermediate portfolio account.\n"
     "Quality improvement project in ED: improving time-to-antibiotics for adult sepsis alerts. "
@@ -78,7 +78,7 @@ def test_hst_uses_the_higher_catalogue():
     ],
 )
 def test_accs_intermediate_buckets_use_pinned_catalogue(level):
-    """ACCS-only, Intermediate-only, and Harris's dual-access storage bucket
+    """ACCS-only, Intermediate-only, and dual-access storage buckets
     are pinned per shape so portfolio-specific catalogue drift is deliberate.
     """
     from bot import _allowed_forms_for_training_level, TRAINING_LEVEL_FORMS
@@ -111,14 +111,14 @@ def test_sas_uses_purpose_built_non_trainee_catalogue():
     assert SAS_BLOCKED_TRAINEE_SLES.isdisjoint(sas_allowed)
 
 
-def test_sana_sas_catalogue_contains_supported_cesr_forms_and_2021_pins():
-    """Sana is SAS/non-trainee on the 2021 curriculum."""
+def test_sas_catalogue_contains_supported_cesr_forms_and_2021_pins():
+    """SAS/non-trainee profiles can use the 2021 curriculum catalogue."""
     from bot import _allowed_forms_for_training_level
 
     sas_allowed = set(_allowed_forms_for_training_level("SAS"))
-    missing = (SAS_CORE | SANA_2021_FORMS) - sas_allowed
+    missing = (SAS_CORE | SAS_2021_FORMS) - sas_allowed
     assert not missing, (
-        f"SAS catalogue must offer supported CESR/Sana evidence; missing: {missing}"
+        f"SAS catalogue must offer supported CESR evidence; missing: {missing}"
     )
 
 
@@ -244,3 +244,162 @@ def test_genuine_teaching_session_stays_teaching_for_intermediate():
     )
 
     assert [rec.form_type for rec in filtered[:2]] == ["TEACH", "EDU_ACT"]
+
+
+# ─── Profile-blocked recommender fallback ─────────────────────────────────
+#
+# Regression: a SAS / Non-Training profile sent a directly-observed procedural
+# sedation case and the bot replied "Nothing left to recommend for this case
+# — browse all types below." The SAS catalogue correctly excludes the
+# trainee-only SLEs DOPS / ACAT / Mini-CEX (and PROC_LOG is not wired for
+# SAS today), but the profile-agnostic LLM recommender still returns those
+# forms for procedural cases. Filtering then empties the list with no
+# fallback. The contract below pins the fallback so SAS users never hit the
+# dead-end state, while leaving the trainee-only-SLE exclusion intact.
+
+NON_TRAINING_OBSERVED_PROCEDURE_CASE = (
+    "I was directly observed performing procedural sedation and closed "
+    "reduction of a displaced ankle fracture in ED resus. Adult patient, "
+    "anonymised. I assessed neurovascular status, confirmed indication for "
+    "reduction, discussed risks/benefits, gained consent, prepared "
+    "monitoring and airway/resus equipment, used ketamine sedation with "
+    "senior supervision, performed reduction and plaster backslab, "
+    "arranged post-reduction X-ray, documented capacity/consent/sedation "
+    "observations, and safety-netted for compartment syndrome and "
+    "neurovascular compromise.\n\nFeedback received: good preparation, "
+    "clear consent, safe monitoring and structured post-procedure review. "
+    "Learning point: verbalise sedation contingency plans earlier and "
+    "delegate documentation roles before starting."
+)
+
+
+def test_sas_blocks_trainee_only_sles_in_catalogue():
+    """AC#5: SAS catalogue must still exclude DOPS / ACAT / MINI_CEX."""
+    from bot import _allowed_forms_for_training_level
+
+    sas_allowed = set(_allowed_forms_for_training_level("SAS"))
+    assert "DOPS" not in sas_allowed
+    assert "ACAT" not in sas_allowed
+    assert "MINI_CEX" not in sas_allowed
+    assert "PROC_LOG" not in sas_allowed
+
+
+def test_sas_procedural_case_falls_back_when_llm_only_picks_blocked_forms():
+    """A procedural-sedation case under SAS must yield ≥1 sensible
+    recommendation rather than the "Nothing left to recommend" dead-end.
+
+    Reproduces the bug from dogfood: the LLM picked DOPS +
+    PROC_LOG (correct for the case, wrong for SAS); the filter emptied the
+    list; the bot showed the empty-state UI. The fallback must substitute
+    REFLECT_LOG (procedural learning → reflective log) as the lead option.
+    """
+    from bot import (
+        _allowed_forms_for_training_level,
+        _filter_recommendations_for_allowed_forms,
+    )
+
+    llm_picks = [
+        _recommendation("DOPS", "Directly observed procedural skill."),
+        _recommendation("PROC_LOG", "Procedure logged in ED."),
+    ]
+    filtered = _filter_recommendations_for_allowed_forms(
+        llm_picks,
+        _allowed_forms_for_training_level("SAS"),
+        NON_TRAINING_OBSERVED_PROCEDURE_CASE,
+    )
+
+    form_types = [rec.form_type for rec in filtered]
+    assert form_types, (
+        "SAS procedural case must not produce an empty recommendation list "
+        "— fallback substitution required."
+    )
+    assert form_types[0] == "REFLECT_LOG"
+    assert "CBD" in form_types
+    assert filtered[0].uuid, "Fallback recommendations must carry a real UUID."
+    # The rationale must be explicit about why we substituted, so the user
+    # understands the recommender's first pick wasn't ignored.
+    assert "doesn't accept" in filtered[0].rationale.lower() or \
+        "does not accept" in filtered[0].rationale.lower()
+
+
+def test_sas_observation_case_falls_back_to_cbd_first():
+    """Bedside-observation / acute-take blockers prefer CBD as the lead
+    fallback — the case is about clinical management, not a procedure.
+    """
+    from bot import (
+        _allowed_forms_for_training_level,
+        _filter_recommendations_for_allowed_forms,
+    )
+
+    llm_picks = [
+        _recommendation("MINI_CEX", "Bedside observation of trainee."),
+        _recommendation("ACAT", "Busy resus session with multiple patients."),
+    ]
+    filtered = _filter_recommendations_for_allowed_forms(
+        llm_picks,
+        _allowed_forms_for_training_level("SAS"),
+        "Consultant watched me manage a complex acute take.",
+    )
+
+    form_types = [rec.form_type for rec in filtered]
+    assert form_types[0] == "CBD"
+    assert "REFLECT_LOG" in form_types
+
+
+def test_sas_fallback_offers_cbd_when_reflect_log_already_filed():
+    """Reuse-case flow: if the user already filed REFLECT_LOG for this
+    case and is now choosing another form, the fallback must still produce
+    a non-empty list (CBD) so the user never hits the dead-end.
+    """
+    from bot import (
+        _allowed_forms_for_training_level,
+        _filter_recommendations_for_allowed_forms,
+    )
+
+    filtered = _filter_recommendations_for_allowed_forms(
+        [_recommendation("DOPS"), _recommendation("PROC_LOG")],
+        _allowed_forms_for_training_level("SAS"),
+        NON_TRAINING_OBSERVED_PROCEDURE_CASE,
+        excluded_form="REFLECT_LOG",
+    )
+
+    assert [rec.form_type for rec in filtered] == ["CBD"]
+
+
+def test_hst_passthrough_when_recommendations_are_allowed():
+    """The fallback must NOT trigger for trainee profiles whose catalogue
+    accepts the LLM's first picks. HST has DOPS and PROC_LOG; both pass
+    through untouched.
+    """
+    from bot import (
+        _allowed_forms_for_training_level,
+        _filter_recommendations_for_allowed_forms,
+    )
+
+    filtered = _filter_recommendations_for_allowed_forms(
+        [_recommendation("DOPS"), _recommendation("PROC_LOG")],
+        _allowed_forms_for_training_level("HIGHER"),
+        NON_TRAINING_OBSERVED_PROCEDURE_CASE,
+    )
+
+    assert [rec.form_type for rec in filtered] == ["DOPS", "PROC_LOG"]
+
+
+def test_empty_llm_recommendations_do_not_trigger_fallback():
+    """If the LLM returned nothing at all (parse failure, timeout proxy),
+    the filter must not synthesise a recommendation — we have no signal
+    that any form would have fit and the upstream caller already shows
+    its own AI-unavailable copy.
+    """
+    from bot import (
+        _allowed_forms_for_training_level,
+        _filter_recommendations_for_allowed_forms,
+    )
+
+    filtered = _filter_recommendations_for_allowed_forms(
+        [],
+        _allowed_forms_for_training_level("SAS"),
+        NON_TRAINING_OBSERVED_PROCEDURE_CASE,
+    )
+
+    assert filtered == []

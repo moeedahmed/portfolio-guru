@@ -1662,6 +1662,13 @@ def _filter_recommendations_for_allowed_forms(
     Every supported portfolio shape exposes QIAT, so when the extractor has
     surfaced a QI/audit project but only returned Teaching, promote QIAT to
     the top of the list.
+
+    When the LLM's picks are all blocked by the profile catalogue (e.g. SAS /
+    CESR has no DOPS / Mini-CEX / ACAT / PROC_LOG), fall back to the closest
+    profile-allowed equivalents — REFLECT_LOG for procedural blockers, CBD
+    for bedside-observation / acute-take blockers. Both are in every
+    catalogue today, so this turns the previous "Nothing left to recommend"
+    dead-end into a sensible default rather than a guess.
     """
     excluded = _normalise_form_type(excluded_form)
     allowed = set(allowed_forms)
@@ -1688,7 +1695,79 @@ def _filter_recommendations_for_allowed_forms(
             ),
             *filtered,
         ]
+    if recommendations and not filtered:
+        return _profile_blocked_fallback_recommendations(
+            recommendations, allowed, excluded
+        )
     return filtered
+
+
+# Trainee-only SLEs that map to a reflective fallback on non-training
+# portfolios (procedural skills carry their learning into a reflective log).
+_PROCEDURAL_BLOCKED_FORMS = frozenset({"DOPS", "PROC_LOG", "US_CASE"})
+
+# Observation / acute-take SLEs that map to a case-based-discussion fallback
+# on non-training portfolios (bedside encounters become a CBD write-up).
+_OBSERVATION_BLOCKED_FORMS = frozenset({"MINI_CEX", "ACAT", "ESLE", "ESLE_ASSESS"})
+
+
+def _profile_blocked_fallback_recommendations(original_recs, allowed, excluded):
+    """Return profile-allowed substitutions when every LLM pick is blocked.
+
+    The recommender is profile-agnostic — it returns the best-fit forms for
+    the *case*, not the user's saved portfolio. For non-training accounts
+    that means a procedural or bedside-observation case can produce an
+    all-blocked recommendation list (DOPS / PROC_LOG / MINI_CEX / ACAT are
+    trainee-only SLEs in the SAS / CESR catalogue). Without a fallback the
+    user sees a dead "Nothing left to recommend" state; with it they get
+    REFLECT_LOG / CBD — both present in every supported profile catalogue —
+    with a rationale that names what was blocked.
+    """
+    blocked_types = [r.form_type for r in original_recs]
+    blocked_pretty = ", ".join(_form_display_name(ft) for ft in blocked_types)
+
+    procedural_first = any(ft in _PROCEDURAL_BLOCKED_FORMS for ft in blocked_types)
+    observation_first = (
+        any(ft in _OBSERVATION_BLOCKED_FORMS for ft in blocked_types)
+        and not procedural_first
+    )
+
+    reflect_candidate = (
+        "REFLECT_LOG",
+        f"Your saved portfolio profile doesn't accept {blocked_pretty}; "
+        "a reflective log captures the learning from this event.",
+    )
+    cbd_candidate = (
+        "CBD",
+        f"Your saved portfolio profile doesn't accept {blocked_pretty}; "
+        "a case-based discussion is the closest fit available on this profile.",
+    )
+    # Always offer both fallbacks so an excluded primary (e.g. user
+    # already filed REFLECT_LOG and is now reusing the case) still
+    # leaves CBD on the table. Order by case type so the better fit
+    # leads.
+    candidates = (
+        [cbd_candidate, reflect_candidate]
+        if observation_first
+        else [reflect_candidate, cbd_candidate]
+    )
+
+    fallbacks = []
+    seen: set[str] = set()
+    for form_type, rationale in candidates:
+        if form_type in seen:
+            continue
+        if form_type not in allowed:
+            continue
+        if _normalise_form_type(form_type) == excluded:
+            continue
+        seen.add(form_type)
+        fallbacks.append(FormTypeRecommendation(
+            form_type=form_type,
+            rationale=rationale,
+            uuid=FORM_UUIDS.get(form_type),
+        ))
+    return fallbacks
 
 # Category groupings for "See all forms" navigation
 FORM_CATEGORIES = {
