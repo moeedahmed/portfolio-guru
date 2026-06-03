@@ -555,6 +555,20 @@ async def test_curriculum_links_trigger_tick_attempt(mock_playwright_ctx):
 
 
 @pytest.mark.asyncio
+async def test_key_capabilities_without_curriculum_links_triggers_tick(mock_playwright_ctx):
+    with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
+            with patch("kaizen_form_filer._fill_curriculum_links", AsyncMock(return_value=([], []))) as mock_fill:
+                kcs = ["SLO1 KC1: Assess and stabilise the patient"]
+                fields = {"stage_of_training": "Higher", "key_capabilities": kcs}
+                result = await file_to_kaizen("CBD", fields, "user", "pass")
+                mock_fill.assert_called_once()
+                args = mock_fill.call_args[0]
+                assert args[1] == []
+                assert args[2] == kcs
+
+
+@pytest.mark.asyncio
 async def test_no_curriculum_links_skips_tick(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
         with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):

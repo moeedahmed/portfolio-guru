@@ -3543,9 +3543,9 @@ async def file_to_kaizen(
                 pass
 
         # Curriculum links
-        if curriculum_links:
-            slo_codes = curriculum_links
-            kc_targets = fields.get("key_capabilities", []) or curriculum_links
+        kc_targets = fields.get("key_capabilities", []) or curriculum_links or []
+        if curriculum_links or kc_targets:
+            slo_codes = curriculum_links or []
             ticked, kc_errors = await _fill_curriculum_links(
                 page, slo_codes, kc_targets, fields.get("stage_of_training", "Higher")
             )
