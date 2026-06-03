@@ -1210,6 +1210,91 @@ def _prefer_qiat_for_qi_project(
     return [qiat] + remaining[:2]
 
 
+_OBSERVED_PROCEDURE_TERMS = (
+    "procedural sedation",
+    "closed reduction",
+    "fracture reduction",
+    "reduction and plaster",
+    "reduction and backslab",
+    "performed reduction",
+    "plaster backslab",
+    "ketamine sedation",
+    "intubation",
+    "rsi",
+    "central line",
+    "arterial line",
+    "chest drain",
+    "lumbar puncture",
+    "cardioversion",
+)
+
+_DIRECT_OBSERVER_TERMS = (
+    "directly observed",
+    "observed performing",
+    "senior supervision",
+    "supervised",
+    "consultant observed",
+    "registrar observed",
+    "assessor watched",
+)
+
+
+def _has_directly_observed_procedure_signal(case_description: str) -> bool:
+    text = f" {case_description or ''} ".lower()
+    if not any(term in text for term in _OBSERVED_PROCEDURE_TERMS):
+        return False
+    if not any(term in text for term in _DIRECT_OBSERVER_TERMS):
+        return False
+    return bool(
+        re.search(r"\b(i|trainee)\s+(was\s+)?(directly\s+)?observed\b", text)
+        or re.search(r"\b(i|trainee)\s+.*\b(performed|administered|inserted|reduced)\b", text)
+        or "used ketamine sedation with senior supervision" in text
+    )
+
+
+def _prefer_dops_for_observed_procedure(
+    recommendations: list[FormTypeRecommendation],
+    case_description: str,
+) -> list[FormTypeRecommendation]:
+    """Observed hands-on procedures must not be demoted by reflection wording.
+
+    Users often include feedback and learning points in the same message. That
+    should keep REFLECT_LOG available, but it must not outrank DOPS when the
+    source text explicitly says the trainee performed a procedure under direct
+    observation or senior supervision.
+    """
+    if not _has_directly_observed_procedure_signal(case_description):
+        return recommendations
+
+    dops = next((rec for rec in recommendations if rec.form_type == "DOPS"), None)
+    if dops is None:
+        dops = FormTypeRecommendation(
+            form_type="DOPS",
+            rationale=(
+                "Directly observed hands-on procedure with senior supervision; "
+                "DOPS is the specific assessed-procedure form."
+            ),
+            uuid=FORM_UUIDS.get("DOPS"),
+        )
+
+    proc_log = next((rec for rec in recommendations if rec.form_type == "PROC_LOG"), None)
+    if proc_log is None:
+        proc_log = FormTypeRecommendation(
+            form_type="PROC_LOG",
+            rationale=(
+                "The same procedural sedation/reduction can also be logged as a "
+                "procedural record."
+            ),
+            uuid=FORM_UUIDS.get("PROC_LOG"),
+        )
+
+    remaining = [
+        rec for rec in recommendations
+        if rec.form_type not in {"DOPS", "PROC_LOG"}
+    ]
+    return _dedupe_recommendations([dops, proc_log, *remaining])[:3]
+
+
 async def recommend_form_types(case_description: str, input_source: str = "text") -> List[FormTypeRecommendation]:
     """Recommend applicable WPBA form types based on case description.
 
@@ -1493,6 +1578,7 @@ MGMT_* (Management Portfolio forms — Rota, Complaint, Critical Incident, Risk,
         recommendations = enforce_image_recommendation_grounding(
             recommendations, case_description
         )
+    recommendations = _prefer_dops_for_observed_procedure(recommendations, case_description)
     recommendations = _prefer_qiat_for_qi_project(recommendations, case_description)
 
     return recommendations

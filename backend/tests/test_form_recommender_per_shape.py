@@ -348,6 +348,30 @@ def test_sas_procedural_case_keeps_dops_when_risr_profile_exposes_it():
     assert filtered[0].uuid, "Recommendations must carry a real UUID."
 
 
+@pytest.mark.asyncio
+async def test_observed_procedure_recommender_promotes_dops_over_reflection(monkeypatch):
+    """Feedback/learning wording must not turn an observed procedure into a
+    reflective-log first recommendation.
+    """
+    import extractor
+    from extractor import recommend_form_types
+
+    async def fake_generate(_prompt: str, retries: int = 1, tier: str = "") -> str:
+        return (
+            '[{"form_type":"REFLECT_LOG","rationale":"Feedback and learning point included."},'
+            '{"form_type":"CBD","rationale":"Clinical case with decision-making."}]'
+        )
+
+    monkeypatch.setattr(extractor, "_generate", fake_generate)
+
+    recommendations = await recommend_form_types(NON_TRAINING_OBSERVED_PROCEDURE_CASE)
+
+    form_types = [rec.form_type for rec in recommendations]
+    assert form_types[:2] == ["DOPS", "PROC_LOG"]
+    assert "REFLECT_LOG" in form_types
+    assert recommendations[0].uuid
+
+
 def test_sas_observation_case_keeps_visible_assessment_forms():
     """Mini-CEX / ACAT are visible in Sanaz's RISR Advance form list."""
     from bot import (
