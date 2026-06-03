@@ -687,7 +687,7 @@ class TestOfflineE2E:
         assert collector.texts == [expected]
         assert "No stored data found" not in collector.texts[0]
         buttons = [btn.callback_data for row in collector.sent[0]["reply_markup"].inline_keyboard for btn in row]
-        assert buttons == ["ACTION|setup", "INFO|what"]
+        assert buttons == ["ACTION|setup", "INFO|stored_after_delete"]
         assert invalidated == [TEST_USER.id]
 
         with Session(cred_engine) as session:
@@ -707,7 +707,36 @@ class TestOfflineE2E:
         assert collector.texts == [expected]
         assert "No stored data found" not in collector.texts[0]
         buttons = [btn.callback_data for row in collector.sent[0]["reply_markup"].inline_keyboard for btn in row]
-        assert buttons == ["ACTION|setup", "INFO|what"]
+        assert buttons == ["ACTION|setup", "INFO|stored_after_delete"]
+
+        collector.sent.clear()
+        update = make_callback_update("INFO|stored_after_delete", message_text=expected)
+        _prepare_update(update, app.bot)
+        await app.process_update(update)
+
+        assert collector.texts == [
+            (
+                "🔒 After deleting, nothing is stored for you:\n\n"
+                "• No Kaizen login credentials\n"
+                "• No portfolio or curriculum preferences\n"
+                "• No voice profile\n"
+                "• No saved or in-progress drafts\n\n"
+                "Cases you already saved in Kaizen are unaffected. To use Portfolio Guru again, reconnect Kaizen."
+            )
+        ]
+        assert "turns clinical notes into RCEM portfolio drafts" not in collector.texts[0]
+        stored_details_text = collector.texts[0]
+        buttons = [btn.callback_data for row in collector.sent[0]["reply_markup"].inline_keyboard for btn in row]
+        assert buttons == ["ACTION|back_to_delete_clear"]
+
+        collector.sent.clear()
+        update = make_callback_update("ACTION|back_to_delete_clear", message_text=stored_details_text)
+        _prepare_update(update, app.bot)
+        await app.process_update(update)
+
+        assert collector.texts == [expected]
+        buttons = [btn.callback_data for row in collector.sent[0]["reply_markup"].inline_keyboard for btn in row]
+        assert buttons == ["ACTION|setup", "INFO|stored_after_delete"]
 
     async def test_setup_flow_stores_credentials(self, offline_app, monkeypatch):
         """Walk through full setup flow → credentials stored."""

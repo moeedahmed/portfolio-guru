@@ -1055,6 +1055,18 @@ _DATA_CLEAR_TEXT = (
     "To use Portfolio Guru again, reconnect Kaizen."
 )
 
+# Storage explainer specific to the post-delete state. The generic
+# "what is this" product explainer is wrong here — after /delete the honest
+# answer is that nothing is retained, so this details view states exactly that.
+_DATA_CLEAR_DETAILS_TEXT = (
+    "🔒 After deleting, nothing is stored for you:\n\n"
+    "• No Kaizen login credentials\n"
+    "• No portfolio or curriculum preferences\n"
+    "• No voice profile\n"
+    "• No saved or in-progress drafts\n\n"
+    "Cases you already saved in Kaizen are unaffected. To use Portfolio Guru again, reconnect Kaizen."
+)
+
 
 def _nav_row(
     back_text: str,
@@ -1141,7 +1153,7 @@ def _build_next_step_keyboard(user_id: int) -> InlineKeyboardMarkup | None:
 def _build_data_clear_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [_BTN_SETUP],
-        [InlineKeyboardButton("What is stored?", callback_data="INFO|what")],
+        [InlineKeyboardButton("What is stored?", callback_data="INFO|stored_after_delete")],
     ])
 
 
@@ -4365,9 +4377,22 @@ async def _build_voice_profile(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def handle_info_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle INFO|what button from any message, regardless of conversation state."""
+    """Handle INFO| buttons from any message, regardless of conversation state."""
     query = update.callback_query
     await query.answer()
+
+    # Post-delete state is stable and idempotent: the storage explainer here
+    # must describe what is not retained after /delete, and Back must return
+    # to the exact same all-clear card rather than the generic product explainer.
+    if query.data == "INFO|stored_after_delete":
+        await query.message.edit_text(
+            _DATA_CLEAR_DETAILS_TEXT,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_delete_clear")],
+            ]),
+        )
+        return
+
     user_id = update.effective_user.id
     primary = [_BTN_SETUP] if not has_credentials(user_id) else []
     rows = []
@@ -4758,6 +4783,12 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             f"📊 Current Portfolio Health pathway: {_pathway_label(profile.pathway)}\n\n"
             "Which pathway should /health use?",
             reply_markup=_build_pathway_keyboard(from_settings=True),
+        )
+
+    elif action == "back_to_delete_clear":
+        await query.message.edit_text(
+            _DATA_CLEAR_TEXT,
+            reply_markup=_build_data_clear_keyboard(),
         )
 
     elif action == "back_to_menu":
