@@ -4973,14 +4973,14 @@ async def beta_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     from supabase_sync import get_beta_request_by_username
     existing = get_beta_request_by_username(username) if username else None
     if existing:
-        await update.message.reply_text("Your beta request is already pending! Tell Dr Ahmed your @username.")
+        await update.message.reply_text("Your beta request is already pending. Share your @username with the Portfolio Guru team.")
         return ConversationHandler.END
 
     # Store the request
     from supabase_sync import store_beta_request
     store_beta_request(user_id, username)
 
-    # Notify Moeed directly
+    # Notify the configured admin account directly.
     try:
         name = (update.effective_user.first_name or "") + " " + (update.effective_user.last_name or "")
         name = name.strip() or "Unknown"
@@ -4998,7 +4998,7 @@ async def beta_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     except Exception:
         pass
 
-    reply = "✅ Beta request submitted! Dr Ahmed will upgrade you shortly."
+    reply = "✅ Beta request submitted. The Portfolio Guru team will upgrade you shortly."
     await update.message.reply_text(reply)
     return ConversationHandler.END
 
