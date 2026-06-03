@@ -26,15 +26,17 @@ import pytest
 
 
 CORE_WPBAS = {"CBD", "DOPS", "MINI_CEX"}
-SAS_BLOCKED_TRAINEE_SLES = {"DOPS", "ACAT", "MINI_CEX"}
 SAS_CORE = {
-    "CBD", "ACAF", "MSF", "LAT", "QIAT", "AUDIT", "REFLECT_LOG", "SDL",
-    "EDU_ACT", "FORMAL_COURSE", "TEACH", "STAT", "TEACH_OBS",
-    "TEACH_CONFID", "COMPLAINT", "SERIOUS_INC", "APPRAISAL", "CLIN_GOV",
-    "CRIT_INCIDENT", "US_CASE", "RESEARCH", "PDP", "EDU_MEETING",
+    "CBD", "DOPS", "MINI_CEX", "ACAT", "ACAF", "MSF", "LAT", "QIAT",
+    "JCF", "PROC_LOG", "AUDIT", "REFLECT_LOG", "SDL", "EDU_ACT",
+    "FORMAL_COURSE", "TEACH", "STAT", "TEACH_OBS", "TEACH_CONFID",
+    "COMPLAINT", "SERIOUS_INC", "APPRAISAL", "CLIN_GOV", "CRIT_INCIDENT",
+    "US_CASE", "ESLE_ASSESS", "RESEARCH", "PDP", "EDU_MEETING",
     "EDU_MEETING_SUPP",
 }
-SAS_2021_FORMS = {"JCF_2021", "LAT_2021", "QIAT_2021", "REFLECT_LOG_2021", "AUDIT_2021"}
+SAS_2021_FORMS = {
+    "JCF_2021", "LAT_2021", "QIAT_2021", "REFLECT_LOG_2021", "AUDIT_2021",
+}
 QI_AUDIT_SCREENSHOT_TEXT = (
     "Please create the best-fit kaizen draft for an intermediate portfolio account.\n"
     "Quality improvement project in ED: improving time-to-antibiotics for adult sepsis alerts. "
@@ -98,7 +100,7 @@ def test_accs_intermediate_catalogues_are_not_st3_aliases():
 
 
 def test_sas_uses_purpose_built_non_trainee_catalogue():
-    """SAS / CESR must not borrow the HST/ST5 trainee SLE catalogue."""
+    """SAS / non-training uses its own catalogue rather than the HST/ST5 list."""
     from bot import (
         TRAINING_LEVEL_FORMS,
         _allowed_forms_for_training_level,
@@ -108,7 +110,6 @@ def test_sas_uses_purpose_built_non_trainee_catalogue():
     sas_allowed = _allowed_forms_for_training_level("SAS")
     assert sas_allowed == list(TRAINING_LEVEL_FORMS["SAS"])
     assert sas_allowed != list(TRAINING_LEVEL_FORMS["ST5"])
-    assert SAS_BLOCKED_TRAINEE_SLES.isdisjoint(sas_allowed)
 
 
 def test_sas_catalogue_contains_supported_cesr_forms_and_2021_pins():
@@ -273,25 +274,22 @@ NON_TRAINING_OBSERVED_PROCEDURE_CASE = (
 )
 
 
-def test_sas_blocks_trainee_only_sles_in_catalogue():
-    """AC#5: SAS catalogue must still exclude DOPS / ACAT / MINI_CEX."""
+def test_sas_catalogue_includes_risr_advance_visible_assessments():
+    """Sanaz's RISR Advance create-event PDF exposes these assessment forms."""
     from bot import _allowed_forms_for_training_level
 
     sas_allowed = set(_allowed_forms_for_training_level("SAS"))
-    assert "DOPS" not in sas_allowed
-    assert "ACAT" not in sas_allowed
-    assert "MINI_CEX" not in sas_allowed
-    assert "PROC_LOG" not in sas_allowed
+    assert {"DOPS", "ACAT", "MINI_CEX", "PROC_LOG", "ESLE_ASSESS"} <= sas_allowed
 
 
-def test_sas_procedural_case_falls_back_when_llm_only_picks_blocked_forms():
+def test_sas_procedural_case_keeps_dops_when_risr_profile_exposes_it():
     """A procedural-sedation case under SAS must yield ≥1 sensible
     recommendation rather than the "Nothing left to recommend" dead-end.
 
-    Reproduces the bug from dogfood: the LLM picked DOPS +
-    PROC_LOG (correct for the case, wrong for SAS); the filter emptied the
-    list; the bot showed the empty-state UI. The fallback must substitute
-    REFLECT_LOG (procedural learning → reflective log) as the lead option.
+    Reproduces the dogfood mismatch: the LLM picked DOPS + PROC_LOG, which is
+    appropriate for the case and visible in Sanaz's RISR Advance create-event
+    PDF. The profile filter must therefore keep DOPS instead of substituting a
+    reflective fallback.
     """
     from bot import (
         _allowed_forms_for_training_level,
@@ -311,21 +309,15 @@ def test_sas_procedural_case_falls_back_when_llm_only_picks_blocked_forms():
     form_types = [rec.form_type for rec in filtered]
     assert form_types, (
         "SAS procedural case must not produce an empty recommendation list "
-        "— fallback substitution required."
+        "— DOPS / Procedural Log are visible in this RISR profile."
     )
-    assert form_types[0] == "REFLECT_LOG"
-    assert "CBD" in form_types
-    assert filtered[0].uuid, "Fallback recommendations must carry a real UUID."
-    # The rationale must be explicit about why we substituted, so the user
-    # understands the recommender's first pick wasn't ignored.
-    assert "doesn't accept" in filtered[0].rationale.lower() or \
-        "does not accept" in filtered[0].rationale.lower()
+    assert form_types[0] == "DOPS"
+    assert "PROC_LOG" in form_types
+    assert filtered[0].uuid, "Recommendations must carry a real UUID."
 
 
-def test_sas_observation_case_falls_back_to_cbd_first():
-    """Bedside-observation / acute-take blockers prefer CBD as the lead
-    fallback — the case is about clinical management, not a procedure.
-    """
+def test_sas_observation_case_keeps_visible_assessment_forms():
+    """Mini-CEX / ACAT are visible in Sanaz's RISR Advance form list."""
     from bot import (
         _allowed_forms_for_training_level,
         _filter_recommendations_for_allowed_forms,
@@ -342,15 +334,11 @@ def test_sas_observation_case_falls_back_to_cbd_first():
     )
 
     form_types = [rec.form_type for rec in filtered]
-    assert form_types[0] == "CBD"
-    assert "REFLECT_LOG" in form_types
+    assert form_types == ["MINI_CEX", "ACAT"]
 
 
-def test_sas_fallback_offers_cbd_when_reflect_log_already_filed():
-    """Reuse-case flow: if the user already filed REFLECT_LOG for this
-    case and is now choosing another form, the fallback must still produce
-    a non-empty list (CBD) so the user never hits the dead-end.
-    """
+def test_sas_reuse_flow_keeps_dops_even_when_reflect_log_already_filed():
+    """Reuse-case flow must not substitute away from PDF-visible DOPS."""
     from bot import (
         _allowed_forms_for_training_level,
         _filter_recommendations_for_allowed_forms,
@@ -363,7 +351,7 @@ def test_sas_fallback_offers_cbd_when_reflect_log_already_filed():
         excluded_form="REFLECT_LOG",
     )
 
-    assert [rec.form_type for rec in filtered] == ["CBD"]
+    assert [rec.form_type for rec in filtered] == ["DOPS", "PROC_LOG"]
 
 
 def test_hst_passthrough_when_recommendations_are_allowed():

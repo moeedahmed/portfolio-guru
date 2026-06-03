@@ -289,19 +289,19 @@ def test_intermediate_progression_is_recorded_but_not_clickable():
 
 
 def test_sana_sas_catalogue_is_explicit_and_non_trainee():
-    """Sana's SAS bucket must not leak trainee-only SLEs from HST/ST5."""
+    """Sana's RISR Advance profile exposes observed-assessment forms."""
     from bot import TRAINING_LEVEL_FORMS
 
     assert "SAS" in TRAINING_LEVEL_FORMS
 
     forms = set(TRAINING_LEVEL_FORMS["SAS"])
-    blocked_trainee_sles = {"DOPS", "ACAT", "MINI_CEX"}
     cesr_core = {
-        "CBD", "ACAF", "MSF", "LAT", "QIAT", "AUDIT", "REFLECT_LOG",
-        "SDL", "EDU_ACT", "FORMAL_COURSE", "TEACH", "STAT", "TEACH_OBS",
-        "TEACH_CONFID", "COMPLAINT", "SERIOUS_INC", "APPRAISAL",
-        "CLIN_GOV", "CRIT_INCIDENT", "US_CASE", "RESEARCH", "PDP",
-        "EDU_MEETING", "EDU_MEETING_SUPP",
+        "CBD", "DOPS", "MINI_CEX", "ACAT", "ACAF", "MSF", "LAT", "QIAT",
+        "JCF", "PROC_LOG", "AUDIT", "REFLECT_LOG", "SDL", "EDU_ACT",
+        "FORMAL_COURSE", "TEACH", "STAT", "TEACH_OBS", "TEACH_CONFID",
+        "COMPLAINT", "SERIOUS_INC", "APPRAISAL", "CLIN_GOV", "CRIT_INCIDENT",
+        "US_CASE", "ESLE_ASSESS", "RESEARCH", "PDP", "EDU_MEETING",
+        "EDU_MEETING_SUPP",
     }
     sana_2021 = {"JCF_2021", "LAT_2021", "QIAT_2021", "REFLECT_LOG_2021", "AUDIT_2021"}
     missing = (cesr_core | sana_2021) - forms
@@ -309,7 +309,6 @@ def test_sana_sas_catalogue_is_explicit_and_non_trainee():
         f"SAS catalogue must offer supported CESR/Sana evidence; "
         f"missing: {missing}"
     )
-    assert blocked_trainee_sles.isdisjoint(forms)
     assert forms != set(TRAINING_LEVEL_FORMS["ST5"])
 
 
