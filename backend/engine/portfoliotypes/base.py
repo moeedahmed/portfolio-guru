@@ -111,18 +111,31 @@ def detect_portfolio_profile(dashboard_title: str, page_text: str) -> PortfolioP
     combined = f"{title}\n{body}"
     evidence: list[str] = []
 
-    if any(signal in combined for signal in _ASSESSOR_SIGNALS):
-        evidence.extend(_matches(combined, _ASSESSOR_SIGNALS))
+    non_training_hits = list(_matches(combined, _NON_TRAINING_SIGNALS))
+    if _SAS_TOKEN.search(combined):
+        non_training_hits.append("sas")
+
+    accs_hits = _matches(combined, _ACCS_SIGNALS)
+    intermediate_hits = _matches(combined, _INTERMEDIATE_SIGNALS)
+    higher_hits = _matches(combined, _HIGHER_SIGNALS)
+
+    assessor_hits = _matches(combined, _ASSESSOR_SIGNALS)
+    title_assessor_hits = _matches(title, _ASSESSOR_SIGNALS)
+    personal_portfolio_hits = bool(
+        non_training_hits or accs_hits or intermediate_hits or higher_hits
+    )
+    explicit_body_assessor_hint = "you cannot create any events" in combined
+    if assessor_hits and (
+        title_assessor_hits
+        or (explicit_body_assessor_hint and not personal_portfolio_hits)
+    ):
+        evidence.extend(assessor_hits)
         return PortfolioProfile(
             category="assessor",
             stage="unknown",
             portfolio_type="assessor",
             evidence=tuple(evidence),
         )
-
-    non_training_hits = list(_matches(combined, _NON_TRAINING_SIGNALS))
-    if _SAS_TOKEN.search(combined):
-        non_training_hits.append("sas")
 
     if non_training_hits:
         evidence.extend(non_training_hits)
@@ -143,10 +156,6 @@ def detect_portfolio_profile(dashboard_title: str, page_text: str) -> PortfolioP
             portfolio_type="non_training_unknown",
             evidence=tuple(evidence),
         )
-
-    accs_hits = _matches(combined, _ACCS_SIGNALS)
-    intermediate_hits = _matches(combined, _INTERMEDIATE_SIGNALS)
-    higher_hits = _matches(combined, _HIGHER_SIGNALS)
 
     if accs_hits and intermediate_hits:
         evidence.extend(accs_hits + intermediate_hits)

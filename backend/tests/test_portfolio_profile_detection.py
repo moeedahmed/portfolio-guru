@@ -69,6 +69,24 @@ def test_accs_plus_intermediate_combines_to_accs_intermediate():
     assert profile.portfolio_type == "accs_intermediate"
 
 
+def test_higher_trainee_supervisor_copy_does_not_become_assessor():
+    """A trainee dashboard can mention the assigned Clinical Supervisor.
+
+    That is not the same as the logged-in user being a Clinical
+    Supervisor / assessor. Personal portfolio signals must win over this
+    weak body-copy signal.
+    """
+    body = (
+        "Welcome to your Higher Trainee portfolio. "
+        "Your assigned Clinical Supervisor is listed below. "
+        "Supervisor feedback and meeting forms are available."
+    )
+    profile = detect_portfolio_profile("Higher Trainee Dashboard", body)
+    assert profile.category == "training"
+    assert profile.stage == "higher"
+    assert profile.portfolio_type == "hst"
+
+
 # ─── non-training: known higher stage ───────────────────────────────────────
 
 
@@ -93,6 +111,19 @@ def test_non_trainee_higher_without_title_still_detected_from_body():
     profile = detect_portfolio_profile(
         "Dashboard",
         "This is a Non-Trainee Higher portfolio for an SAS doctor.",
+    )
+    assert profile.category == "non_training"
+    assert profile.stage == "higher"
+    assert profile.portfolio_type == "non_training_higher"
+
+
+def test_non_trainee_supervisor_copy_does_not_become_assessor():
+    profile = detect_portfolio_profile(
+        "Higher Trainee Dashboard",
+        (
+            "Non-Trainee Higher portfolio for an SAS doctor. "
+            "Your Clinical Supervisor has not yet completed feedback."
+        ),
     )
     assert profile.category == "non_training"
     assert profile.stage == "higher"
@@ -147,6 +178,16 @@ def test_clinical_supervisor_classifies_as_assessor():
     profile = detect_portfolio_profile(
         "Clinical Supervisor — Dashboard",
         "You cannot create any events!",
+    )
+    assert profile.category == "assessor"
+    assert profile.stage == "unknown"
+    assert profile.portfolio_type == "assessor"
+
+
+def test_body_only_assessor_signal_requires_no_personal_portfolio_signal():
+    profile = detect_portfolio_profile(
+        "Dashboard",
+        "Clinical Supervisor dashboard. You cannot create any events!",
     )
     assert profile.category == "assessor"
     assert profile.stage == "unknown"
