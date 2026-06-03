@@ -86,7 +86,7 @@ Connected welcome:
 
 Send the case details in whatever format is easiest: text, voice, photo, or document.
 
-I'll read what you send, show the best-fit portfolio options, then guide you with buttons. Send extra messages only if you want to add or correct case detail.
+I'll read what you send, suggest the best-fit portfolio options, then show buttons for what to do next. Send extra messages only if you want to add or correct case detail.
 
 I won't invent clinical detail, and nothing goes to Kaizen until you approve it.
 ```

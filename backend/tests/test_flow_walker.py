@@ -942,7 +942,7 @@ class TestFlowWalker:
 
         assert result == AWAIT_CASE_INPUT
         assert sim.get_last_text() == WELCOME_MSG_CONNECTED
-        assert "guide you with buttons" in sim.get_last_text()
+        assert "show buttons for what to do next" in sim.get_last_text()
         assert "draft it" not in sim.get_last_text()
 
     @pytest.mark.asyncio
