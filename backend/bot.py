@@ -4452,7 +4452,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             )
         else:
             context.user_data.clear()
-            await query.message.reply_text(FILE_CASE_PROMPT)
+            await query.message.reply_text(WELCOME_MSG_CONNECTED)
         return AWAIT_CASE_INPUT
 
     elif action == "same_case_another":
@@ -6244,8 +6244,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "ACTION|file":
         await query.answer()
-        # Disarm button immediately — prevents multiple taps sending multiple prompts
-        await query.edit_message_reply_markup(reply_markup=None)
         user_id = update.effective_user.id
         if not has_credentials(user_id):
             await query.message.reply_text(
@@ -6257,7 +6255,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return ConversationHandler.END
         else:
             context.user_data.clear()
-            await query.message.reply_text(FILE_CASE_PROMPT)
+            await query.message.reply_text(WELCOME_MSG_CONNECTED)
             return AWAIT_CASE_INPUT
 
     elif data == "ACTION|add_detail":

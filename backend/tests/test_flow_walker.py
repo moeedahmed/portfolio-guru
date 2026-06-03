@@ -914,7 +914,34 @@ class TestFlowWalker:
 
         assert result == AWAIT_CASE_INPUT
         assert context.user_data == {}
-        assert 'send' in sim.get_last_text().lower()
+        # Must use the standard "Portfolio Guru is ready" intake copy, not the
+        # shorter FILE_CASE_PROMPT, so the UX matches a normal /start.
+        assert 'Portfolio Guru is ready' in sim.get_last_text()
+        # The post-filing report keyboard must NOT be stripped — the saved-draft
+        # report should remain intact after clicking "File another case".
+        stripped_keyboard_events = [
+            m for m in sim.messages_sent if m[0] == 'markup' and m[2] is None
+        ]
+        assert stripped_keyboard_events == [], (
+            "handle_callback ACTION|file must not edit_message_reply_markup(None) "
+            "because that strips the post-filing report keyboard"
+        )
+
+    @pytest.mark.asyncio
+    async def test_file_another_case_global_handler_uses_standard_intake_copy(self):
+        """handle_action_button ACTION|file (global, post-ConversationHandler.END) must
+        send WELCOME_MSG_CONNECTED and not FILE_CASE_PROMPT."""
+        from bot import AWAIT_CASE_INPUT, WELCOME_MSG_CONNECTED, handle_action_button
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('ACTION|file')
+        context = sim._make_context()
+
+        with patch('bot.has_credentials', return_value=True):
+            result = await handle_action_button(update, context)
+
+        assert result == AWAIT_CASE_INPUT
+        assert sim.get_last_text() == WELCOME_MSG_CONNECTED
 
     @pytest.mark.asyncio
     async def test_cancel_path_uses_setup_button_when_setup_incomplete(self):
