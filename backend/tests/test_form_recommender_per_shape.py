@@ -112,15 +112,47 @@ def test_sas_uses_purpose_built_non_trainee_catalogue():
     assert sas_allowed != list(TRAINING_LEVEL_FORMS["ST5"])
 
 
-def test_sas_catalogue_contains_supported_cesr_forms_and_2021_pins():
-    """SAS/non-trainee profiles can use the 2021 curriculum catalogue."""
-    from bot import _allowed_forms_for_training_level
+def test_sas_catalogue_is_base_family_and_resolves_to_2021_variants():
+    """SAS / non-trainee draws the shared base form family; under its pinned
+    2021 curriculum the base codes resolve to their 2021 variants.
+
+    The raw catalogue carries no hand-pinned ``_2021`` entries — keeping the
+    non-training catalogue identical in shape to the trainee catalogues (one
+    shared family). The 2021 variants are produced by curriculum resolution,
+    not by a duplicate pin in the profile list.
+    """
+    from bot import (
+        _allowed_forms_for_training_level,
+        _filter_forms_by_curriculum,
+    )
 
     sas_allowed = set(_allowed_forms_for_training_level("SAS"))
-    missing = (SAS_CORE | SAS_2021_FORMS) - sas_allowed
-    assert not missing, (
-        f"SAS catalogue must offer supported CESR evidence; missing: {missing}"
+    missing_core = SAS_CORE - sas_allowed
+    assert not missing_core, (
+        f"SAS catalogue must offer supported CESR evidence; missing: {missing_core}"
     )
+    assert not any(ft.endswith("_2021") for ft in sas_allowed), (
+        "Raw SAS catalogue must be base codes only; 2021 variants come from "
+        "curriculum resolution, not pins."
+    )
+
+    resolved = set(_filter_forms_by_curriculum(sas_allowed, "2021"))
+    missing_2021 = SAS_2021_FORMS - resolved
+    assert not missing_2021, (
+        f"SAS 2021 curriculum must resolve base codes to 2021 variants; "
+        f"missing: {missing_2021}"
+    )
+
+
+def test_sas_curriculum_is_pinned_to_2021():
+    """Non-training portfolios are pinned to the 2021 family regardless of any
+    stored toggle — Kaizen only surfaces 2021 forms for them."""
+    from bot import _default_curriculum_for_training_level
+
+    assert _default_curriculum_for_training_level("SAS") == "2021"
+    assert _default_curriculum_for_training_level("HIGHER") == "2025"
+    assert _default_curriculum_for_training_level("ACCS") == "2025"
+    assert _default_curriculum_for_training_level(None) == "2025"
 
 
 @pytest.mark.parametrize(

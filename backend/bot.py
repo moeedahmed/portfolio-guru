@@ -1271,7 +1271,7 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
                 message,
                 context,
                 prompt_text,
-                reply_markup=_build_form_choice_keyboard(recommendations, curriculum=get_curriculum(user_id)),
+                reply_markup=_build_form_choice_keyboard(recommendations, curriculum=_effective_curriculum(user_id)),
             )
             return AWAIT_FORM_CHOICE
 
@@ -1320,6 +1320,12 @@ TRAINING_LEVEL_FORMS = {
         "MGMT_RECRUIT", "MGMT_RISK_PROC", "MGMT_TRAINING_EVT", "MGMT_GUIDELINE", "MGMT_INFO",
         "MGMT_INDUCTION", "MGMT_EXPERIENCE", "MGMT_REPORT", "MGMT_COMPLAINT",
     ],
+    # Non-training (SAS / CESR) draws from the same shared form family as the
+    # trainee profiles — the difference is curriculum visibility, not a separate
+    # catalogue. SAS is pinned to the 2021 curriculum (see
+    # ``_effective_curriculum``), so these base codes resolve to their _2021
+    # variants at display/filing time where a variant exists and stay base
+    # (shared 2021/2025) where it does not.
     "SAS": [
         "CBD", "DOPS", "MINI_CEX", "ACAT", "ACAF", "MSF", "LAT", "QIAT",
         "JCF", "PROC_LOG", "AUDIT", "REFLECT_LOG", "SDL", "EDU_ACT",
@@ -1331,7 +1337,6 @@ TRAINING_LEVEL_FORMS = {
         "MGMT_RECRUIT", "MGMT_RISK_PROC", "MGMT_TRAINING_EVT", "MGMT_GUIDELINE",
         "MGMT_INFO", "MGMT_INDUCTION", "MGMT_EXPERIENCE", "MGMT_REPORT",
         "MGMT_COMPLAINT",
-        "JCF_2021", "LAT_2021", "QIAT_2021", "REFLECT_LOG_2021", "AUDIT_2021",
     ],
 }
 
@@ -1664,12 +1669,13 @@ def _filter_recommendations_for_allowed_forms(
     surfaced a QI/audit project but only returned Teaching, promote QIAT to
     the top of the list.
 
-    When the LLM's picks are all blocked by the profile catalogue (e.g. SAS /
-    CESR has no DOPS / Mini-CEX / ACAT / PROC_LOG), fall back to the closest
-    profile-allowed equivalents — REFLECT_LOG for procedural blockers, CBD
-    for bedside-observation / acute-take blockers. Both are in every
-    catalogue today, so this turns the previous "Nothing left to recommend"
-    dead-end into a sensible default rather than a guess.
+    When the LLM's picks are all blocked by the profile catalogue (e.g. the
+    user already filed the recommended form and excluded it, leaving nothing
+    allowed), fall back to the closest profile-allowed equivalents —
+    REFLECT_LOG for procedural blockers, CBD for bedside-observation /
+    acute-take blockers. Both are in every catalogue today, so this turns the
+    previous "Nothing left to recommend" dead-end into a sensible default
+    rather than a guess.
     """
     excluded = _normalise_form_type(excluded_form)
     allowed = set(allowed_forms)
@@ -1703,12 +1709,12 @@ def _filter_recommendations_for_allowed_forms(
     return filtered
 
 
-# Trainee-only SLEs that map to a reflective fallback on non-training
-# portfolios (procedural skills carry their learning into a reflective log).
+# Procedural SLEs that map to a reflective fallback when every recommended
+# form is blocked (procedural skills carry their learning into a reflective log).
 _PROCEDURAL_BLOCKED_FORMS = frozenset({"DOPS", "PROC_LOG", "US_CASE"})
 
 # Observation / acute-take SLEs that map to a case-based-discussion fallback
-# on non-training portfolios (bedside encounters become a CBD write-up).
+# when every recommended form is blocked (bedside encounters become a CBD write-up).
 _OBSERVATION_BLOCKED_FORMS = frozenset({"MINI_CEX", "ACAT", "ESLE", "ESLE_ASSESS"})
 
 
@@ -1716,13 +1722,12 @@ def _profile_blocked_fallback_recommendations(original_recs, allowed, excluded):
     """Return profile-allowed substitutions when every LLM pick is blocked.
 
     The recommender is profile-agnostic — it returns the best-fit forms for
-    the *case*, not the user's saved portfolio. For non-training accounts
-    that means a procedural or bedside-observation case can produce an
-    all-blocked recommendation list (DOPS / PROC_LOG / MINI_CEX / ACAT are
-    trainee-only SLEs in the SAS / CESR catalogue). Without a fallback the
-    user sees a dead "Nothing left to recommend" state; with it they get
-    REFLECT_LOG / CBD — both present in every supported profile catalogue —
-    with a rationale that names what was blocked.
+    the *case*, not the user's saved portfolio. If a profile genuinely lacks
+    every recommended form, or the user has excluded the only fit, the list
+    can come back all-blocked. Without a fallback the user sees a dead
+    "Nothing left to recommend" state; with it they get REFLECT_LOG / CBD —
+    both present in every supported profile catalogue — with a rationale that
+    names what was blocked.
     """
     blocked_types = [r.form_type for r in original_recs]
     blocked_pretty = ", ".join(_form_display_name(ft) for ft in blocked_types)
@@ -2384,6 +2389,27 @@ _2021_CURRICULUM_FORM_ALIASES = {
 }
 
 
+def _default_curriculum_for_training_level(training_level: str | None) -> str:
+    """Profile default curriculum. Non-training (SAS / CESR) portfolios only
+    expose the 2021 family in Kaizen, so they default to 2021; every trainee
+    profile defaults to the 2025 update."""
+    return "2021" if training_level == "SAS" else "2025"
+
+
+def _effective_curriculum(user_id) -> str:
+    """Curriculum to use for form visibility and filing for a given user.
+
+    SAS / non-training portfolios are pinned to the 2021 family because Kaizen
+    only surfaces 2021 forms for them — so the stored toggle is ignored and we
+    always resolve to 2021. Trainee profiles honour the user's stored choice,
+    falling back to 2025 when unset.
+    """
+    training_level = get_training_level(user_id)
+    if training_level == "SAS":
+        return "2021"
+    return get_curriculum(user_id) or "2025"
+
+
 def _form_type_for_curriculum(form_type: str, curriculum: str = "2025") -> str:
     from extractor import FORM_UUIDS
 
@@ -2466,7 +2492,7 @@ def _get_allowed_forms(user_id):
     """Get the allowed form list for a user (portfolio profile + curriculum filtered)."""
     from extractor import FORM_UUIDS
     training_level = get_training_level(user_id)
-    curriculum = get_curriculum(user_id)
+    curriculum = _effective_curriculum(user_id)
     allowed = _allowed_forms_for_training_level(training_level)
     allowed = _filter_forms_by_curriculum(allowed, curriculum)
     # Only include forms that have UUIDs
@@ -2476,7 +2502,7 @@ def _get_allowed_forms(user_id):
 def _build_category_picker_keyboard(user_id):
     """Build the level-1 category picker keyboard, hiding empty categories."""
     allowed = set(_get_allowed_forms(user_id))
-    curriculum = get_curriculum(user_id)
+    curriculum = _effective_curriculum(user_id)
     rows = []
     row = []
     for cat_name, cat_forms in FORM_CATEGORIES.items():
@@ -2502,7 +2528,7 @@ def _build_category_forms_keyboard(user_id, cat_slug):
     cat_name = _SLUG_TO_CAT[cat_slug]
     cat_forms = FORM_CATEGORIES[cat_name]
     allowed = set(_get_allowed_forms(user_id))
-    curriculum = get_curriculum(user_id)
+    curriculum = _effective_curriculum(user_id)
     buttons = []
     for ft in cat_forms:
         # Check if this form (or its curriculum-specific variant) is in the allowed set
@@ -3637,7 +3663,7 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     auto_pathway = _autoset_health_pathway_from_role(user_id, detected_role)
 
     if not get_curriculum(user_id):
-        store_curriculum(user_id, "2025")
+        store_curriculum(user_id, _default_curriculum_for_training_level(auto_level))
 
     if auto_level:
         role_name = label_map.get(detected_role, detected_role)
@@ -3678,8 +3704,9 @@ async def setup_training_level(update: Update, context: ContextTypes.DEFAULT_TYP
     """Manual portfolio-profile pick after auto-detect couldn't classify the
     Kaizen role. Mirror the auto-detect success path: confirm Kaizen
     connected, accept the chosen profile, end the conversation. Curriculum
-    was already defaulted to 2025 in setup_password, so no follow-up
-    question. Do NOT emit the settings-handler "Back to settings" copy —
+    is defaulted per profile (2021 for non-training, 2025 for trainees) here
+    and in setup_password, so no follow-up question. Do NOT emit the
+    settings-handler "Back to settings" copy —
     this is mid-setup, not a /settings round-trip."""
     query = update.callback_query
     await query.answer()
@@ -3687,7 +3714,7 @@ async def setup_training_level(update: Update, context: ContextTypes.DEFAULT_TYP
     user_id = update.effective_user.id
     store_training_level(user_id, level)
     if not get_curriculum(user_id):
-        store_curriculum(user_id, "2025")
+        store_curriculum(user_id, _default_curriculum_for_training_level(level))
     context.user_data.pop("_setup_state_hint", None)
     await _safe_edit_text(
         query.message,
@@ -6152,7 +6179,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
     prompt_text = _build_form_recommendation_text(
         recommendations,
         input_source=input_source,
-        curriculum=get_curriculum(user_id),
+        curriculum=_effective_curriculum(user_id),
     )
     context.user_data["form_recommendations_text"] = prompt_text
     _track_funnel_event(
@@ -6168,7 +6195,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
                 chat_id=status_chat,
                 message_id=status_msg,
                 text=prompt_text,
-                reply_markup=_build_form_choice_keyboard(recommendations, curriculum=get_curriculum(user_id)),
+                reply_markup=_build_form_choice_keyboard(recommendations, curriculum=_effective_curriculum(user_id)),
             )
             context.user_data["last_bot_msg_id"] = status_msg
             context.user_data["last_bot_chat_id"] = status_chat
@@ -6177,13 +6204,13 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
         except Exception:
             msg = await message.reply_text(
                 prompt_text,
-                reply_markup=_build_form_choice_keyboard(recommendations, curriculum=get_curriculum(user_id)),
+                reply_markup=_build_form_choice_keyboard(recommendations, curriculum=_effective_curriculum(user_id)),
             )
             _track_latest_message(context, msg)
     else:
         msg = await message.reply_text(
             prompt_text,
-            reply_markup=_build_form_choice_keyboard(recommendations, curriculum=get_curriculum(user_id)),
+            reply_markup=_build_form_choice_keyboard(recommendations, curriculum=_effective_curriculum(user_id)),
         )
         _track_latest_message(context, msg)
     return AWAIT_FORM_CHOICE
@@ -6804,7 +6831,7 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
                 prompt_text = _build_form_recommendation_text(
                     recommendations,
                     input_source=context.user_data.get("case_input_source"),
-                    curriculum=get_curriculum(update.effective_user.id),
+                    curriculum=_effective_curriculum(update.effective_user.id),
                     opening="📋 Other options that fit:",
                     closing=f"Pick one to switch, or keep going with {form_name}.",
                 )
@@ -6812,7 +6839,7 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
                 context.user_data["form_recommendations_text"] = prompt_text
                 await update.message.reply_text(
                     prompt_text,
-                    reply_markup=_build_form_choice_keyboard(recommendations, curriculum=get_curriculum(update.effective_user.id)),
+                    reply_markup=_build_form_choice_keyboard(recommendations, curriculum=_effective_curriculum(update.effective_user.id)),
                 )
                 return AWAIT_FORM_CHOICE
             else:
@@ -7580,7 +7607,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if data == "FORM|show_all":
         # Level 1 — category picker
         user_id = update.effective_user.id
-        curriculum = get_curriculum(user_id)
+        curriculum = _effective_curriculum(user_id)
         cur_label = "2025 curriculum" if curriculum == "2025" else "2021 curriculum"
         await query.edit_message_text(
             f"Pick a category ({cur_label}):",
@@ -7615,7 +7642,8 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         current = get_curriculum(user_id)
         new_cur = "2021" if current == "2025" else "2025"
         store_curriculum(user_id, new_cur)
-        cur_label = "2025 curriculum" if new_cur == "2025" else "2021 curriculum"
+        effective = _effective_curriculum(user_id)
+        cur_label = "2025 curriculum" if effective == "2025" else "2021 curriculum"
         await query.edit_message_text(
             f"Pick a category ({cur_label}):",
             reply_markup=_build_category_picker_keyboard(user_id),
@@ -7628,7 +7656,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         saved_text = context.user_data.get("form_recommendations_text", "Which form would you like to create?")
         await query.edit_message_text(
             saved_text,
-            reply_markup=_build_form_choice_keyboard(recommendations, curriculum=get_curriculum(update.effective_user.id))
+            reply_markup=_build_form_choice_keyboard(recommendations, curriculum=_effective_curriculum(update.effective_user.id))
         )
         return AWAIT_FORM_CHOICE
 
@@ -7636,7 +7664,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         recommendations = context.user_data.get("form_recommendations", [])
         filtered = _filtered_recommendations_for_curriculum(
             recommendations,
-            curriculum=get_curriculum(update.effective_user.id),
+            curriculum=_effective_curriculum(update.effective_user.id),
         )
         best = filtered[0] if filtered else None
         if not best:

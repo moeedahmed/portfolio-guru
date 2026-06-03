@@ -289,8 +289,17 @@ def test_intermediate_progression_is_recorded_but_not_clickable():
 
 
 def test_sana_sas_catalogue_is_explicit_and_non_trainee():
-    """Sana's RISR Advance profile exposes observed-assessment forms."""
-    from bot import TRAINING_LEVEL_FORMS
+    """Sana's RISR Advance profile exposes observed-assessment forms.
+
+    The non-training catalogue is the shared base form family (no hand-pinned
+    2021 entries); under its pinned 2021 curriculum those base codes resolve to
+    the 2021 variants Kaizen actually shows her.
+    """
+    from bot import (
+        TRAINING_LEVEL_FORMS,
+        _filter_forms_by_curriculum,
+        _default_curriculum_for_training_level,
+    )
 
     assert "SAS" in TRAINING_LEVEL_FORMS
 
@@ -303,13 +312,31 @@ def test_sana_sas_catalogue_is_explicit_and_non_trainee():
         "US_CASE", "ESLE_ASSESS", "RESEARCH", "PDP", "EDU_MEETING",
         "EDU_MEETING_SUPP",
     }
-    sana_2021 = {"JCF_2021", "LAT_2021", "QIAT_2021", "REFLECT_LOG_2021", "AUDIT_2021"}
-    missing = (cesr_core | sana_2021) - forms
+    missing = cesr_core - forms
     assert not missing, (
         f"SAS catalogue must offer supported CESR/Sana evidence; "
         f"missing: {missing}"
     )
-    assert forms != set(TRAINING_LEVEL_FORMS["ST5"])
+    assert not any(ft.endswith("_2021") for ft in forms), (
+        "Raw SAS catalogue must be base codes only; 2021 variants come from "
+        "curriculum resolution, not pins."
+    )
+
+    assert _default_curriculum_for_training_level("SAS") == "2021"
+    sana_2021 = {"JCF_2021", "LAT_2021", "QIAT_2021", "REFLECT_LOG_2021", "AUDIT_2021"}
+    resolved = set(_filter_forms_by_curriculum(forms, "2021"))
+    missing_2021 = sana_2021 - resolved
+    assert not missing_2021, (
+        f"SAS 2021 curriculum must resolve base codes to 2021 variants; "
+        f"missing: {missing_2021}"
+    )
+    # One shared base family: SAS and the trainee profiles draw the same base
+    # codes. The visible catalogue differs through curriculum resolution — SAS
+    # surfaces the 2021 variants where the trainee ST5 surface stays on 2025.
+    st5_visible = set(_filter_forms_by_curriculum(TRAINING_LEVEL_FORMS["ST5"], "2025"))
+    assert resolved != st5_visible, (
+        "SAS must surface a 2021 catalogue, not the trainee 2025 surface"
+    )
 
 
 # ─── Labels users see in the profile picker ──────────────────────────────
