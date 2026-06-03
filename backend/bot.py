@@ -3465,7 +3465,11 @@ async def setup_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if "@" not in text or "." not in text:
         await _flow_msg(update, context, "⚠️ That doesn't look like an email. What's your Kaizen username?", flow_key="setup")
         return AWAIT_USERNAME
-    context.user_data["setup_username"] = text
+    return await _prompt_kaizen_password(update, context, text)
+
+
+async def _prompt_kaizen_password(update: Update, context: ContextTypes.DEFAULT_TYPE, username: str) -> int:
+    context.user_data["setup_username"] = username
     context.user_data["_setup_state_hint"] = "password"
     await _flow_msg(
         update, context,
@@ -3475,6 +3479,30 @@ async def setup_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         flow_key="setup",
     )
     return AWAIT_PASSWORD
+
+
+_EMAIL_PATTERN = re.compile(r"(?<![A-Z0-9._%+-])([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})(?![A-Z0-9._%+-])", re.IGNORECASE)
+
+
+def _extract_setup_email_candidate(text: str) -> str | None:
+    """Return a Kaizen email candidate from disconnected free text.
+
+    This is intentionally narrow: a disconnected user who sends an email-like
+    message is almost certainly trying to reconnect Kaizen, but clinical case
+    text must still fall through to the normal "Connect Kaizen first" guard.
+    """
+    stripped = (text or "").strip()
+    if not stripped or len(stripped) > 240:
+        return None
+    matches = _EMAIL_PATTERN.findall(stripped)
+    if len(matches) != 1:
+        return None
+    email = matches[0]
+    lowered = stripped.lower()
+    credential_words = {"kaizen", "login", "username", "email", "connect", "reconnect"}
+    if stripped == email or any(word in lowered for word in credential_words):
+        return email
+    return None
 
 
 async def _test_kaizen_login(username: str, password: str) -> bool | str:
@@ -6925,6 +6953,12 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     # Check credentials
     if not has_credentials(user_id):
+        if update.message and update.message.text:
+            email = _extract_setup_email_candidate(update.message.text)
+            if email:
+                context.user_data.clear()
+                context.user_data["kaizen_reconnect_hint"] = True
+                return await _prompt_kaizen_password(update, context, email)
         context.user_data.clear()
         await update.message.reply_text(
             "Connect your Kaizen account first.",
