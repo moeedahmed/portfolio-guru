@@ -3570,12 +3570,26 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     try:
         await update.message.delete()
     except Exception:
-        # Can't delete in groups without admin rights — warn user
-        if update.effective_chat.type != "private":
-            await update.effective_chat.send_message(
-                "⚠️ I couldn't delete your password message — I need admin rights in groups. "
-                "Please delete it manually for security."
-            )
+        # Deletion failed — could be missing admin rights (groups) or a Telegram
+        # API error (private chat). Warn the user in ALL chat types: a plaintext
+        # password sitting visible in a private chat is still a privacy risk.
+        # Clear the flow anchor so the Testing status arrives as a fresh bottom
+        # message rather than a silent edit above the still-visible password.
+        _flow_done(context, "setup")
+        try:
+            if update.effective_chat.type != "private":
+                _warn = (
+                    "⚠️ I couldn't delete your password message — I need admin rights in groups. "
+                    "Please delete it manually for security."
+                )
+            else:
+                _warn = (
+                    "⚠️ I couldn't delete your password message from the chat — "
+                    "please delete it manually."
+                )
+            await update.effective_chat.send_message(text=_warn)
+        except Exception:
+            pass
 
     # User has submitted password (now deleted). From here until done, no more
     # typed input is expected — only progress updates and a final result. Edit

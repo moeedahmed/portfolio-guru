@@ -286,3 +286,72 @@ async def test_test_kaizen_login_returns_false_on_credential_rejection(monkeypat
     monkeypatch.setattr("engine.providers.kaizen.KaizenProvider", FakeProvider)
     result = await _test_kaizen_login("u", "bad")
     assert result is False
+
+
+# ─── password-message delete + visible testing feedback ──────────────────────
+
+
+@pytest.mark.asyncio
+async def test_setup_password_warns_when_delete_fails_in_private_chat():
+    """When message deletion fails in a private chat the user must see a
+    privacy warning. Before the fix the exception was swallowed silently so
+    the password stayed visible with zero feedback."""
+    from bot import setup_password
+
+    sim, update, context = _make_setup_password_harness()
+    update.message.delete = AsyncMock(side_effect=Exception("Telegram API error"))
+    update.effective_chat.type = "private"
+
+    with patch("bot._test_kaizen_login", new=AsyncMock(return_value=False)), \
+         patch("bot.store_credentials"):
+        await setup_password(update, context)
+
+    texts = [t for _, t, _ in sim.messages_sent if t]
+    assert any("couldn't delete" in t.lower() for t in texts), (
+        "No deletion-failure warning in private chat — password exposed silently"
+    )
+
+
+@pytest.mark.asyncio
+async def test_setup_password_delete_failure_clears_anchor_so_testing_is_visible():
+    """When delete fails the flow anchor must be cleared so _flow_edit sends a
+    fresh bottom message for 'Testing...' rather than editing an older message
+    above the user's still-visible password."""
+    from bot import setup_password
+
+    sim, update, context = _make_setup_password_harness()
+    update.message.delete = AsyncMock(side_effect=Exception("Telegram API error"))
+    update.effective_chat.type = "private"
+    # Seed an anchor to prove it gets cleared on delete failure.
+    context.user_data["_flow_anchor_setup"] = (99999999, 42)
+
+    with patch("bot._test_kaizen_login", new=AsyncMock(return_value=False)), \
+         patch("bot.store_credentials"):
+        await setup_password(update, context)
+
+    assert any(
+        kind == "send" and text and "testing your kaizen login" in text.lower()
+        for kind, text, _ in sim.messages_sent
+    ), (
+        "Testing feedback was not sent as a fresh bottom message after delete failure"
+    )
+
+
+@pytest.mark.asyncio
+async def test_setup_password_shows_testing_feedback_after_submission():
+    """After password submission the bot must emit a visible 'Testing...'
+    status so the user knows validation is in progress."""
+    from bot import setup_password
+
+    sim, update, context = _make_setup_password_harness()
+    # Successful delete — normal happy path.
+    update.message.delete = AsyncMock()
+
+    with patch("bot._test_kaizen_login", new=AsyncMock(return_value=False)), \
+         patch("bot.store_credentials"):
+        await setup_password(update, context)
+
+    texts = [t for _, t, _ in sim.messages_sent if t]
+    assert any("🔄" in t or "testing" in t.lower() for t in texts), (
+        "No 'Testing...' feedback emitted after password submission"
+    )
