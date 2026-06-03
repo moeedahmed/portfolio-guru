@@ -58,11 +58,18 @@ def public_form_name(form_type: str) -> str:
 def sanitize_internal_form_codes(text: str) -> str:
     """Replace internal form keys in user-visible text with public names."""
     clean = str(text or "")
+    public_codes: dict[str, str] = {}
     for code in sorted(FORM_SCHEMAS, key=len, reverse=True):
         name = public_form_name(code)
         if not name:
             continue
-        clean = re.sub(rf"\b{re.escape(code)}\b", name, clean)
+        public_codes[code] = name
+        public_codes[f"{code}_2021"] = public_form_name(f"{code}_2021")
     for code, name in sorted(PUBLIC_FORM_NAME_OVERRIDES.items(), key=lambda item: len(item[0]), reverse=True):
+        public_codes[code] = name
+        public_codes[f"{code}_2021"] = public_form_name(f"{code}_2021")
+    for code, name in sorted(public_codes.items(), key=lambda item: len(item[0]), reverse=True):
+        if not name:
+            continue
         clean = re.sub(rf"\b{re.escape(code)}\b", name, clean)
     return clean

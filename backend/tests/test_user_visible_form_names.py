@@ -2,12 +2,17 @@ import pytest
 
 
 FORBIDDEN_INTERNAL_FORM_CODES = (
+    "DOPS_2021",
     "PROC_LOG",
+    "PROC_LOG_2021",
     "MINI_CEX",
+    "MINI_CEX_2021",
     "REFLECT_LOG",
+    "REFLECT_LOG_2021",
     "US_CASE",
     "ESLE_ASSESS",
     "SERIOUS_INC",
+    "SERIOUS_INC_2021",
     "EDU_ACT",
     "FORMAL_COURSE",
     "TEACH_OBS",
@@ -27,15 +32,47 @@ def test_public_form_name_replaces_internal_form_keys():
     assert public_form_name("PROC_LOG") == "Procedural Log"
     assert public_form_name("MINI_CEX") == "Mini-Clinical Evaluation Exercise"
     assert public_form_name("SERIOUS_INC_2021") == "Serious Incident Reflection"
+    assert public_form_name("DOPS_2021") == "Direct Observation of Procedural Skills"
 
     text = sanitize_internal_form_codes(
-        "Consider DOPS, PROC_LOG, MINI_CEX, ESLE_ASSESS, SERIOUS_INC and FORMAL_COURSE."
+        "DOPS_2021 draft ready. Consider DOPS, PROC_LOG_2021, MINI_CEX, ESLE_ASSESS, SERIOUS_INC_2021 and FORMAL_COURSE."
     )
 
     assert_no_internal_form_codes(text)
+    assert "Direct Observation of Procedural Skills draft ready" in text
     assert "Procedural Log" in text
     assert "Mini-Clinical Evaluation Exercise" in text
     assert "Formal Course" in text
+
+
+def test_variant_draft_preview_uses_public_name_and_base_schema():
+    from bot import _format_generic_draft, _universal_pre_file_gate
+    from models import FormDraft
+
+    draft = FormDraft(
+        form_type="DOPS_2021",
+        fields={
+            "date_of_encounter": "2026-06-03",
+            "procedure_name": "Fracture / Dislocation manipulation",
+            "clinical_setting": "ED resus",
+            "stage_of_training": "Higher/ST4-ST6",
+            "procedural_skill": "Adult sedation",
+            "indication": "Displaced ankle fracture requiring closed reduction.",
+            "trainee_performance": "Prepared monitoring, consented, sedated, reduced and reviewed safely.",
+            "reflection": "I will verbalise sedation contingency plans earlier.",
+        },
+    )
+
+    preview = _format_generic_draft(draft)
+
+    assert "Direct Observation of Procedural Skills draft ready" in preview
+    assert "DOPS_2021" not in preview
+    assert "Procedure" in preview
+    assert "Trainee Performance" in preview
+
+    missing = _universal_pre_file_gate("DOPS_2021", {})
+    assert "Procedure / procedural skill" in missing
+    assert "Trainee Performance" in missing
 
 
 def test_bot_form_display_and_recommendation_copy_are_public():

@@ -1599,7 +1599,7 @@ def _apply_default_dates(draft, form_type: str) -> None:
     """
     from datetime import date as _date
 
-    schema_fields = FORM_SCHEMAS.get(form_type, {}).get("fields", [])
+    schema_fields = FORM_SCHEMAS.get(schema_form_type(form_type), {}).get("fields", [])
     if not schema_fields:
         return
     today_iso = _date.today().isoformat()
@@ -2744,7 +2744,7 @@ def _build_post_filing_keyboard(
 def _build_edit_field_keyboard(draft=None):
     """Build edit field keyboard. For FormDraft, generates buttons dynamically from schema."""
     if draft and isinstance(draft, FormDraft):
-        schema = FORM_SCHEMAS.get(draft.form_type, {})
+        schema = FORM_SCHEMAS.get(schema_form_type(draft.form_type), {})
         fields = schema.get("fields", [])
         # Only editable fields (text/date, skip kc_tick)
         editable = [f for f in fields if f["type"] in ("text", "date", "dropdown")][:6]
@@ -3162,7 +3162,7 @@ def _universal_pre_file_gate(form_type: str, fields: dict) -> list[str]:
         from dops_filing import normalise_dops_fields
         adapted_fields = normalise_dops_fields(adapted_fields)
 
-    schema = FORM_SCHEMAS.get(form_type, {})
+    schema = FORM_SCHEMAS.get(schema_form_type(form_type), {})
     missing: list[str] = []
     for field in schema.get("fields", []):
         if field.get("type") == "kc_tick" or field.get("key") == "key_capabilities":
@@ -3171,13 +3171,13 @@ def _universal_pre_file_gate(form_type: str, fields: dict) -> list[str]:
             val = adapted_fields.get(field["key"])
             if _is_missing_field_value(val):
                 label = field["label"]
-                if form_type == "DOPS" and field["key"] in ("procedure_name", "procedural_skill"):
+                if base_form == "DOPS" and field["key"] in ("procedure_name", "procedural_skill"):
                     label = "Procedure / procedural skill"
-                elif form_type == "DOPS" and field["key"] == "trainee_performance":
+                elif base_form == "DOPS" and field["key"] == "trainee_performance":
                     label = "Trainee Performance"
-                elif form_type == "DOPS" and field["key"] == "clinical_setting":
+                elif base_form == "DOPS" and field["key"] == "clinical_setting":
                     label = "Clinical Setting"
-                elif form_type == "DOPS" and field["key"] == "date_of_encounter":
+                elif base_form == "DOPS" and field["key"] == "date_of_encounter":
                     label = "Date"
 
                 if label not in missing:
@@ -3336,9 +3336,10 @@ def _format_cbd_draft(cbd_data) -> str:
 
 def _format_generic_draft(draft: FormDraft) -> str:
     """Format a generic FormDraft as a preview message."""
-    schema = FORM_SCHEMAS.get(draft.form_type, {})
-    form_name = schema.get("name", draft.form_type)
-    emoji = FORM_EMOJIS.get(draft.form_type, "📋")
+    schema_key = schema_form_type(draft.form_type)
+    schema = FORM_SCHEMAS.get(schema_key, {})
+    form_name = public_form_name(draft.form_type) or schema.get("name", draft.form_type)
+    emoji = FORM_EMOJIS.get(schema_key, FORM_EMOJIS.get(_normalise_form_type(draft.form_type), "📋"))
 
     lines = _draft_header(f"{form_name} draft")
     lines[0] = f"{emoji} *{form_name} draft ready*"
@@ -7886,8 +7887,8 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         curriculum_links = draft.curriculum_links or []
 
     schema = FORM_SCHEMAS.get(schema_form_type(form_type), {})
-    form_name = schema.get("name", form_type)
-    form_emoji = FORM_EMOJIS.get(form_type, "📋")
+    form_name = public_form_name(form_type) or schema.get("name", form_type)
+    form_emoji = FORM_EMOJIS.get(schema_form_type(form_type), FORM_EMOJIS.get(_normalise_form_type(form_type), "📋"))
 
 
 
@@ -8535,8 +8536,8 @@ async def handle_review_draft(update: Update, context: ContextTypes.DEFAULT_TYPE
             fields["key_capabilities"] = draft.key_capabilities
 
     case_text = context.user_data.get("case_text", "")
-    schema = FORM_SCHEMAS.get(form_type, {})
-    form_name = schema.get("name", form_type)
+    schema = FORM_SCHEMAS.get(schema_form_type(form_type), {})
+    form_name = public_form_name(form_type) or schema.get("name", form_type)
 
     # Show typing while reviewing
     await context.bot.send_chat_action(
