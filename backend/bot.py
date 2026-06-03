@@ -8168,18 +8168,6 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         saved_url=saved_url,
     )
 
-    # FIELD_FAILURE: surface "Edit [field]" buttons for the specific fields
-    # that didn't fill, so the user can correct them in place without
-    # re-entering the whole case. Only on partial-with-no-save-error — when
-    # save itself is uncertain (uncertain_save) the issue is the draft, not
-    # the fields, so editing a field wouldn't help until the save is sorted.
-    if status == "partial" and not uncertain_save and skipped:
-        edit_rows = _build_field_edit_buttons(skipped)
-        if edit_rows:
-            end_keyboard = InlineKeyboardMarkup(
-                edit_rows + list(end_keyboard.inline_keyboard)
-            )
-
     # Track usage for successful filings
     usage_line = ""
     observation_line = ""

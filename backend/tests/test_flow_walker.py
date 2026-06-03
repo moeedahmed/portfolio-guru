@@ -1420,6 +1420,7 @@ class TestFlowWalker:
         assert 'AMEND|amend' not in callbacks
         assert 'ACTION|file' in callbacks
         assert 'ACTION|post_file_more|DOPS|partial' not in callbacks
+        assert not any(callback.startswith('FIELD|') for callback in callbacks)
 
         markup = sim.messages_sent[-1][2]
         url_buttons = [
@@ -1433,6 +1434,82 @@ class TestFlowWalker:
         # would open a blank form instead of the saved draft).
         assert any(url == 'https://kaizenep.com/activities' for url in url_buttons)
         assert not any('events/new-section/' in url for url in url_buttons)
+
+    @pytest.mark.asyncio
+    async def test_saved_partial_dops_2021_does_not_surface_field_edit_buttons(self):
+        """Saved partial results should stay at high-level post-filing actions.
+
+        Field-level edit buttons belong to explicit amend/edit flows or true
+        failed-filing recovery, not to a Kaizen draft that was already saved.
+        """
+        from bot import handle_approval_approve
+        from models import FormDraft
+
+        dops_draft = FormDraft(
+            form_type='DOPS_2021',
+            uuid='uuid-dops-2021',
+            fields={
+                'date_of_encounter': '2026-06-02',
+                'stage_of_training': 'SAS',
+                'clinical_setting': 'Emergency Department',
+                'placement': 'Emergency Department',
+                'procedure_name': 'Closed ankle fracture reduction under procedural sedation',
+                'procedural_skill': 'Closed ankle fracture reduction under procedural sedation',
+                'indication': 'Displaced ankle fracture requiring reduction in ED.',
+                'clinical_reasoning': 'I assessed suitability for ED reduction and procedural sedation.',
+                'trainee_performance': 'I directly observed the sedation and reduction workflow.',
+                'reflection': 'I will keep practising sedation team briefing and reduction planning.',
+                'curriculum_links': ['SLO6'],
+                'key_capabilities': ['Safely performs practical procedures'],
+            },
+        )
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('APPROVE|draft')
+        context = sim._make_context()
+        context.user_data['case_text'] = 'Observed procedural sedation and ankle fracture reduction.'
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': dops_draft.form_type,
+            'fields': dops_draft.fields,
+            'uuid': dops_draft.uuid,
+        }
+
+        with patch('bot.get_training_level', return_value='SAS'), \
+             patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.record_case_filed', new=AsyncMock()), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 6, -1, 'pro_plus'))), \
+             patch('bot.route_filing', new_callable=AsyncMock, return_value={
+                 'status': 'partial',
+                 'filled': [
+                     'date_of_encounter',
+                     'end_date',
+                     'event_description',
+                     'clinical_reasoning',
+                     'reflection',
+                     'key_capabilities',
+                 ],
+                 'skipped': ['stage_of_training', 'placement', 'procedure_name', 'procedural_skill'],
+                 'method': 'deterministic',
+                 'saved_url': 'https://kaizenep.com/events/fillin/dops-draft?autosave=1',
+             }):
+            result = await handle_approval_approve(update, context)
+
+        assert result == ConversationHandler.END
+        text = sim.get_last_text()
+        assert '📥 Draft saved in Kaizen' in text
+        assert 'Direct Observation of Procedural Skills' in text
+        assert 'DOPS_2021' not in text
+
+        callbacks = {callback for _, callback in sim.get_last_buttons()}
+        assert 'FIELD|stage_of_training' not in callbacks
+        assert 'FIELD|placement' not in callbacks
+        assert 'FIELD|procedure_name' not in callbacks
+        assert 'FIELD|procedural_skill' not in callbacks
+        assert not any(callback.startswith('FIELD|') for callback in callbacks)
+        assert 'ACTION|same_case_another' in callbacks
+        assert 'ACTION|file' in callbacks
+        assert 'ACTION|retry_filing' not in callbacks
 
     @pytest.mark.asyncio
     async def test_stale_post_filing_more_rebuilds_compact_actions(self, thin_draft):
