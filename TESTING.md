@@ -24,7 +24,7 @@ Portfolio Guru uses five testing layers, and every change must preserve all of t
 
 ## Layer 5A — Offline Golden Transcript
 
-`backend/tests/test_telegram_qa_offline_transcript.py` runs the anonymised Haris/Sana golden case pack through the same offline PTB lane and writes JSON + Markdown transcripts under `.artifacts/telegram-qa-transcript/` by default. Use it when you need to review bot suggestions, draft previews, inline buttons, selected form, and workflow failures without asking Moeed for screenshots or sending live Telegram messages.
+`backend/tests/test_telegram_qa_offline_transcript.py` runs the anonymised Haris/Sana golden case pack through the same offline PTB lane and writes JSON + Markdown transcripts under `.artifacts/telegram-qa-transcript/` by default. The pack now covers text plus synthetic photo, voice, document/PDF, and mixed photo+text inputs. Use it when you need to review bot suggestions, draft previews, inline buttons, selected form, source handling, and workflow failures without asking Moeed for screenshots or sending live Telegram messages.
 
 ## Layer 6 — Live Telegram
 

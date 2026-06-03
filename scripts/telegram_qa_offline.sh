@@ -2,8 +2,8 @@
 # Offline Telegram QA transcript — no live Telegram, no network.
 #
 # Drives the real PTB handler stack with OfflineRequest blocking outbound
-# calls, runs the six Haris/Sana golden cases, and writes JSON + Markdown
-# transcripts under .artifacts/telegram-qa-transcript/<utc-stamp>/.
+# calls, runs the Haris/Sana text + multimodal golden cases, and writes
+# JSON + Markdown transcripts under .artifacts/telegram-qa-transcript/<utc-stamp>/.
 #
 # Usage:
 #   bash scripts/telegram_qa_offline.sh

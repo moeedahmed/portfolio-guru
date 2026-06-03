@@ -53,9 +53,13 @@ TELEGRAM_QA_TRANSCRIPT_DIR=/tmp/pg-qa venv/bin/python3 -m pytest tests/test_tele
 ```
 
 Default output: `.artifacts/telegram-qa-transcript/<utc-stamp>/transcript.{json,md}`.
-Cases live in `backend/tests/fixtures/telegram_qa_cases.py` — six anonymised
-Haris (ACCS/Intermediate) and Sana (SAS/CESR) golden cases. This lane never
-calls Telegram and does not need `TELEGRAM_LIVE_APPROVED`.
+Cases live in `backend/tests/fixtures/telegram_qa_cases.py` — ten anonymised
+Haris (ACCS/Intermediate) and Sana (SAS/CESR) golden cases covering text,
+synthetic handwritten-note photo, voice note, PDF/document evidence, and mixed
+photo+text input. Media cases use local synthetic Telegram attachments plus
+patched extractors, so this lane proves handler/source/draft behaviour without
+testing real Telegram media transfer. It never calls Telegram and does not need
+`TELEGRAM_LIVE_APPROVED`.
 
 ## Portfolio Guru Command
 

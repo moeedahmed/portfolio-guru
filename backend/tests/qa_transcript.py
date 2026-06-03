@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from telegram import Message
+from telegram import Document, Message, PhotoSize, Update, Voice
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -57,12 +57,20 @@ FORBIDDEN_MARKERS = (
 class Step:
     """A single synthetic action sent to the bot.
 
-    Exactly one of ``text``, ``command``, or ``callback`` must be set.
+    Exactly one of ``text``, ``command``, ``callback``, or ``media_type`` must
+    be set. Media steps use synthetic Telegram attachments and patched
+    extractors; they exercise the bot's media handler path without contacting
+    Telegram.
     """
     label: str
     text: str | None = None
     command: str | None = None
     callback: str | None = None
+    media_type: str | None = None  # "photo", "voice", or "document"
+    extracted_text: str | None = None
+    file_name: str | None = None
+    mime_type: str | None = None
+    caption: str | None = None
     expect_text_any: tuple[str, ...] = ()
     expect_button_any: tuple[str, ...] = ()
     forbid_text_any: tuple[str, ...] = FORBIDDEN_MARKERS
@@ -143,6 +151,15 @@ class _ResponseCollector:
         out = self.sent[:]
         self.sent.clear()
         return out
+
+
+class _OfflineTelegramFile:
+    """Small stand-in for Telegram ``File`` objects used by media handlers."""
+
+    async def download_to_drive(self, custom_path=None, *args, **kwargs):
+        if custom_path:
+            Path(custom_path).write_bytes(b"offline telegram qa fixture")
+        return custom_path
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +249,9 @@ async def offline_application():
     async def _send_action(_self, chat_id=None, action=None, **kwargs):
         return True
 
+    async def _get_file(_self, **kwargs):
+        return _OfflineTelegramFile()
+
     patches.enter_context(patch.object(bot_cls, "send_message", _send))
     patches.enter_context(patch.object(bot_cls, "edit_message_text", _edit))
     patches.enter_context(patch.object(bot_cls, "answer_callback_query", _answer_cq))
@@ -240,6 +260,9 @@ async def offline_application():
     patches.enter_context(patch.object(bot_cls, "delete_webhook", AsyncMock(return_value=True)))
     patches.enter_context(patch.object(bot_cls, "send_chat_action", _send_action))
     patches.enter_context(patch.object(bot_cls, "edit_message_reply_markup", AsyncMock(return_value=True)))
+    patches.enter_context(patch.object(PhotoSize, "get_file", _get_file))
+    patches.enter_context(patch.object(Voice, "get_file", _get_file))
+    patches.enter_context(patch.object(Document, "get_file", _get_file))
 
     case_conv = ConversationHandler(
         entry_points=[
@@ -367,11 +390,48 @@ def _patch_extraction(monkeypatch_obj, case: CaseDefinition) -> None:
     async def fake_extract(*args, **kwargs):
         return draft
 
+    media_texts: dict[str, list[str]] = {
+        "photo": [
+            step.extracted_text
+            for step in case.steps
+            if step.media_type == "photo" and step.extracted_text
+        ],
+        "voice": [
+            step.extracted_text
+            for step in case.steps
+            if step.media_type == "voice" and step.extracted_text
+        ],
+        "document": [
+            step.extracted_text
+            for step in case.steps
+            if step.media_type == "document" and step.extracted_text
+        ],
+    }
+
+    def _pop_media_text(source: str) -> str:
+        queue = media_texts.get(source) or []
+        if queue:
+            return queue.pop(0)
+        return case.steps[0].text or case.steps[0].extracted_text or ""
+
+    async def fake_image_extract(*args, **kwargs):
+        return _pop_media_text("photo")
+
+    async def fake_voice_transcribe(*args, **kwargs):
+        return _pop_media_text("voice")
+
+    async def fake_document_extract(*args, **kwargs):
+        return _pop_media_text("document")
+
     monkeypatch_obj.setattr("bot.recommend_form_types", fake_recommend)
     monkeypatch_obj.setattr("bot.classify_intent", AsyncMock(return_value="case"))
     monkeypatch_obj.setattr("bot.extract_explicit_form_type", lambda text: None)
     monkeypatch_obj.setattr("bot.extract_form_data", fake_extract)
     monkeypatch_obj.setattr("bot.extract_cbd_data", fake_extract)
+    monkeypatch_obj.setattr("bot.extract_from_image", fake_image_extract)
+    monkeypatch_obj.setattr("bot.transcribe_voice", fake_voice_transcribe)
+    monkeypatch_obj.setattr("bot.extract_from_document", fake_document_extract)
+    monkeypatch_obj.setattr("bot.is_supported_document", lambda file_name: True)
 
 
 def _build_update_for_step(step: Step):
@@ -381,7 +441,77 @@ def _build_update_for_step(step: Step):
         return {"command": step.command}, make_command_update(step.command)
     if step.callback is not None:
         return {"callback": step.callback}, make_callback_update(step.callback)
+    if step.media_type is not None:
+        return _build_media_update_for_step(step)
     raise ValueError(f"Step {step.label!r} must define text, command, or callback")
+
+
+def _build_media_update_for_step(step: Step):
+    from tests.helpers import TEST_CHAT, TEST_USER, _next_msg_id, _next_update_id
+
+    media_type = step.media_type
+    file_name = step.file_name or {
+        "photo": "handwritten-note.jpg",
+        "voice": "voice-note.ogg",
+        "document": "certificate.pdf",
+    }.get(media_type, "attachment.bin")
+    mime_type = step.mime_type or {
+        "photo": "image/jpeg",
+        "voice": "audio/ogg",
+        "document": "application/pdf",
+    }.get(media_type)
+
+    kwargs: dict[str, Any] = {}
+    if media_type == "photo":
+        kwargs["photo"] = (
+            PhotoSize(
+                file_id=f"offline-photo-{_next_msg_id()}",
+                file_unique_id=f"offline-photo-unique-{_next_msg_id()}",
+                width=1200,
+                height=900,
+                file_size=4096,
+            ),
+        )
+        if step.caption:
+            kwargs["caption"] = step.caption
+    elif media_type == "voice":
+        kwargs["voice"] = Voice(
+            file_id=f"offline-voice-{_next_msg_id()}",
+            file_unique_id=f"offline-voice-unique-{_next_msg_id()}",
+            duration=42,
+            mime_type=mime_type,
+            file_size=4096,
+        )
+    elif media_type == "document":
+        kwargs["document"] = Document(
+            file_id=f"offline-doc-{_next_msg_id()}",
+            file_unique_id=f"offline-doc-unique-{_next_msg_id()}",
+            file_name=file_name,
+            mime_type=mime_type,
+            file_size=8192,
+        )
+        if step.caption:
+            kwargs["caption"] = step.caption
+    else:
+        raise ValueError(f"Unsupported media_type {media_type!r} for {step.label!r}")
+
+    message = Message(
+        message_id=_next_msg_id(),
+        date=dt.datetime.now(tz=dt.timezone.utc),
+        chat=TEST_CHAT,
+        from_user=TEST_USER,
+        **kwargs,
+    )
+    action = {
+        "media_type": media_type,
+        "file_name": file_name,
+        "mime_type": mime_type,
+    }
+    if step.caption:
+        action["caption"] = step.caption
+    if step.extracted_text:
+        action["extracted_text"] = step.extracted_text
+    return action, Update(update_id=_next_update_id(), message=message)
 
 
 def _observe_user_data(app, user_id: int = 99999) -> tuple[str | None, dict[str, Any] | None, list[str]]:
@@ -453,6 +583,14 @@ async def _run_step(app, collector, step: Step, user_id: int = 99999) -> StepObs
         obs.failures.append("no bot messages produced")
     if step.expect_text_any and not any(t.lower() in combined_text for t in step.expect_text_any):
         obs.failures.append(f"expected one of {step.expect_text_any!r}")
+    if step.media_type is not None:
+        expected_source = "document" if step.media_type == "document" else step.media_type
+        case_source = (app.user_data.get(user_id) or {}).get("case_input_source")
+        allowed_sources = {expected_source, "mixed"}
+        if case_source and case_source not in allowed_sources:
+            obs.failures.append(
+                f"expected case_input_source {expected_source!r}, observed {case_source!r}"
+            )
     if step.expect_button_any:
         labels = " ".join(b["callback_data"] + " " + b["text"] for b in obs.buttons).lower()
         if not any(t.lower() in labels for t in step.expect_button_any):
@@ -516,7 +654,8 @@ def write_reports(transcripts: list[CaseTranscript], out_dir: Path) -> tuple[Pat
         lines.append(f"\n## {case.case_id} — {case.persona} — {verdict}\n")
         lines.append(f"- Profile: {case.profile}\n")
         for step in case.steps:
-            head = f"step **{step.label}** ({list(step.action)[0]}={list(step.action.values())[0]!r})"
+            action_key = "media_type" if "media_type" in step.action else list(step.action)[0]
+            head = f"step **{step.label}** ({action_key}={step.action[action_key]!r})"
             if step.timed_out:
                 head += " — TIMEOUT"
             elif step.error:
