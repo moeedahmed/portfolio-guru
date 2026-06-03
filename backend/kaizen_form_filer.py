@@ -920,6 +920,52 @@ SCHEMA_REQUIRED_FIELD_HANDLING = {
     },
 }
 
+# ─── Profile / admin field guard ─────────────────────────────────────────────
+# These DOM fields represent the trainee's own profile data (grade, current
+# post, hospital). They must never be populated by guessing from clinical case
+# text — only from the user's saved profile or explicit user-provided input.
+PROFILE_ADMIN_DOM_FIELDS: frozenset[str] = frozenset({
+    "trainee_post",   # LAT/LAT_2021: grade + hospital, e.g. "ST5 Higher EM, City ED"
+})
+
+# Kaizen clinical-setting / placement dropdown values. None of these are valid
+# as a trainee's current post ("Emergency Department" is a venue, not a grade
+# + hospital string). If any PROFILE_ADMIN_DOM_FIELD contains one of these it
+# was backfilled from the wrong source and must be cleared.
+_CLINICAL_SETTING_OPTION_VALUES: frozenset[str] = frozenset({
+    "Emergency Department",
+    "Acute Medical Ward",
+    "Paediatric Emergency Department",
+    "Intensive Care Unit",
+    "Emergency Department Observation Unit",
+    "Minor Injury Unit",
+    "Emergency Medicine",
+    "Anaesthetics",
+    "Critical Care",
+    "Internal Medicine",
+    "Paediatric",
+    "PEM Sub Spec - Paediatric Emergency",
+    "PEM Sub Spec - General Paediatrics",
+    "PEM Sub Spec - Paediatric Critical Care",
+    "Other",
+})
+
+
+def _guard_profile_admin_backfill(fields: dict) -> dict:
+    """Strip PROFILE_ADMIN_DOM_FIELDS whose value was backfilled from clinical context.
+
+    If trainee_post (or any future profile-admin field) contains a
+    clinical-setting/placement option value (e.g. 'Emergency Department'), the
+    value is wrong and must be removed so the field stays blank for the user to
+    fill with their actual grade + hospital.
+    """
+    out = dict(fields)
+    for key in PROFILE_ADMIN_DOM_FIELDS:
+        val = str(out.get(key) or "").strip()
+        if val and val in _CLINICAL_SETTING_OPTION_VALUES:
+            out.pop(key, None)
+    return out
+
 
 def required_field_handling(form_type: str, field_key: str) -> str | None:
     form_type = canonical_form_type(form_type)
@@ -988,7 +1034,7 @@ def normalise_fields_for_deterministic_filing(form_type: str, fields: dict) -> d
         out["resource_details"] = _append_section(out.get("resource_details"), "Learning activity type", value)
         out.pop("learning_activity_type", None)
 
-    return out
+    return _guard_profile_admin_backfill(out)
 
 
 def _first_present_value(fields: dict, keys: tuple[str, ...]) -> str:

@@ -518,3 +518,64 @@ async def test_lat_ed_shift_leadership_context_extracted():
     assert "ED" in draft.fields["leadership_context"] or "resus" in draft.fields["leadership_context"].lower()
     assert "clinical_setting" not in draft.fields or draft.fields["clinical_setting"] in ("Emergency Department", "")
     assert draft.fields.get("clinical_reasoning")
+
+
+# ─── Profile / admin field guard regression tests ─────────────────────────────
+
+
+def test_profile_admin_guard_strips_clinical_setting_from_trainee_post():
+    """trainee_post must be cleared when it contains a clinical-setting value.
+
+    Regression: LAT_2021 filings were filling trainee_post with 'Emergency
+    Department' (a clinical-setting dropdown value). That field expects
+    grade + hospital (e.g. 'ST5 Higher EM, City ED'), never a venue name.
+    """
+    from kaizen_form_filer import normalise_fields_for_deterministic_filing
+
+    fields_in = {
+        "trainee_post": "Emergency Department",
+        "leadership_context": "Coordinated multi-team response during high-acuity ED shift.",
+        "clinical_reasoning": "I allocated roles and escalated bed-state risk.",
+    }
+    result = normalise_fields_for_deterministic_filing("LAT", fields_in)
+
+    assert "trainee_post" not in result, (
+        "trainee_post must be stripped when it contains a clinical-setting value"
+    )
+    assert result.get("leadership_context") == fields_in["leadership_context"]
+
+
+def test_profile_admin_guard_preserves_explicit_grade_hospital():
+    """A correctly formatted trainee_post value must survive normalisation.
+
+    When the user explicitly supplies a grade + hospital string (e.g. from
+    their saved profile), normalisation must not discard it.
+    """
+    from kaizen_form_filer import normalise_fields_for_deterministic_filing
+
+    fields_in = {
+        "trainee_post": "ST5 Higher EM trainee, Kingston Hospital ED",
+        "leadership_context": "Shift leadership during a complex trauma call.",
+        "clinical_reasoning": "I led the trauma team and escalated to the on-call consultant.",
+    }
+    result = normalise_fields_for_deterministic_filing("LAT", fields_in)
+
+    assert result.get("trainee_post") == fields_in["trainee_post"], (
+        "A valid grade+hospital trainee_post must not be stripped"
+    )
+
+
+def test_profile_admin_guard_applies_to_lat_2021():
+    """The guard must fire for the LAT_2021 curriculum variant as well."""
+    from kaizen_form_filer import normalise_fields_for_deterministic_filing
+
+    fields_in = {
+        "trainee_post": "Acute Medical Ward",
+        "leadership_context": "Ward-based quality improvement leadership.",
+        "clinical_reasoning": "I coordinated a morning safety brief and handover.",
+    }
+    result = normalise_fields_for_deterministic_filing("LAT_2021", fields_in)
+
+    assert "trainee_post" not in result, (
+        "LAT_2021 must also strip clinical-setting values from trainee_post"
+    )
