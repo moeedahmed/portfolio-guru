@@ -22,6 +22,10 @@ Portfolio Guru uses five testing layers, and every change must preserve all of t
 
 `backend/tests/test_e2e_offline.py` runs full conversation paths through PTB's real `Application.process_update()`. Uses `OfflineRequest` to block any accidental network calls — if the bot tries to reach Telegram, the test fails immediately. All Gemini and store interactions are monkeypatched. Runs in CI without API keys.
 
+## Layer 5A — Offline Golden Transcript
+
+`backend/tests/test_telegram_qa_offline_transcript.py` runs the anonymised Haris/Sana golden case pack through the same offline PTB lane and writes JSON + Markdown transcripts under `.artifacts/telegram-qa-transcript/` by default. Use it when you need to review bot suggestions, draft previews, inline buttons, selected form, and workflow failures without asking Moeed for screenshots or sending live Telegram messages.
+
 ## Layer 6 — Live Telegram
 
 `backend/tests/test_e2e_live.py` sends real messages to the real bot via Telethon personal account. Marked `@pytest.mark.live` and skipped unless `TELETHON_SESSION` is set. Manual trigger only, never in CI: `pytest -m live`.
@@ -39,6 +43,8 @@ The autonomous pre-launch wrapper is `scripts/telegram_bot_qa.sh`; the disciplin
 Run `cd backend && venv/bin/python3 -m pytest tests/ -v --ignore=tests/test_e2e.py --ignore=tests/test_e2e_live.py` before every commit and before any Claude Code session reports completion.
 
 Run `cd backend && venv/bin/python3 -m pytest tests/ -v -m e2e` for offline E2E tests only.
+
+Run `cd backend && venv/bin/python3 -m pytest tests/test_telegram_qa_offline_transcript.py -q` to generate the reusable Haris/Sana offline transcript.
 
 Run `cd backend && venv/bin/python3 -m pytest tests/ -v -m live` for live Telegram tests (manual only, requires `TELETHON_SESSION`).
 

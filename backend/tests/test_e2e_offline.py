@@ -655,8 +655,8 @@ class TestOfflineE2E:
         # Proves that the setup callback was handled by setup flow:
         # 1. Training level saved as SAS
         assert stored.get("training_level") == "SAS"
-        # 2. Default curriculum saved as 2025
-        assert stored.get("curriculum") == "2025"
+        # 2. SAS/non-training portfolios use the 2021 portfolio-form set
+        assert stored.get("curriculum") == "2021"
         # 3. Setup completion message displayed
         assert any("Kaizen connected" in t for t in collector.texts)
         assert any("Non-Training Profile" in t for t in collector.texts)

@@ -38,6 +38,25 @@ Live Telethon QA uses a real user session, so the harness treats it as a control
 
 The live test path should never browse Telegram chats, message groups, test unrelated bots, or use Telethon as a general-purpose Telegram client.
 
+## Offline Transcript Lane
+
+For workflow review without a live Telethon session, the offline transcript
+runner drives the real PTB handler stack through `OfflineRequest` (any
+outbound network call fails the test immediately) and writes a structured
+JSON + Markdown transcript covering bot messages, inline buttons, observed
+form recommendations, captured draft state, and per-step pass/fail flags.
+
+```bash
+cd backend && venv/bin/python3 -m pytest tests/test_telegram_qa_offline_transcript.py -v
+# or, with a chosen output dir:
+TELEGRAM_QA_TRANSCRIPT_DIR=/tmp/pg-qa venv/bin/python3 -m pytest tests/test_telegram_qa_offline_transcript.py -v
+```
+
+Default output: `.artifacts/telegram-qa-transcript/<utc-stamp>/transcript.{json,md}`.
+Cases live in `backend/tests/fixtures/telegram_qa_cases.py` — six anonymised
+Haris (ACCS/Intermediate) and Sana (SAS/CESR) golden cases. This lane never
+calls Telegram and does not need `TELEGRAM_LIVE_APPROVED`.
+
 ## Portfolio Guru Command
 
 ```bash

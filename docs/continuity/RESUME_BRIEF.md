@@ -1,13 +1,13 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-06-02T22:23:08+00:00
-Status: ready
+Generated: 2026-06-03T17:12:26+00:00
+Status: stale_or_needs_review
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
-- Branch: main
-- Last commit: 6a26c6a 2026-06-02 fix: expose qiat for intermediate portfolios (#4)
-- Uncommitted changes: no
+- Branch: fix/sana-sas-catalogue
+- Last commit: 7280c08 2026-06-03 fix(filing): guard profile admin fields from clinical backfill
+- Uncommitted changes: yes
 
 ## Immediate read before restarting
 1. Product hub Status + Brief in Notion
@@ -15,22 +15,29 @@ Status: ready
 3. `TASK.md` for active sprint state, if present
 4. This resume brief for drift warnings and repo state
 
+## Warnings
+- Repo has uncommitted changes — capture/commit or summarise before switching context
+
 ## Practical AGENTS.md check
 - Useful for coding-agent/ACP work: yes
 - No missing practical sections
 
 ## Recent commits
-- 6a26c6a 2026-06-02 fix: expose qiat for intermediate portfolios (#4)
-- bca3d68 2026-06-02 fix: prefer audit for intermediate qi projects (#3)
-- 351603e 2026-06-02 fix: prefer qiat for qi projects (#2)
-- 73bd30f 2026-06-02 fix: clarify same-case WBA save label (#1)
-- 33e7d36 2026-06-02 fix: isolate kaizen session cache by account
-- d42796d 2026-06-02 fix: clarify gathering draft action
-- 7154d64 2026-06-02 fix: detect clinical supervisor role marker
-- 7cf7e35 2026-06-02 docs: record saved cesr smoke pass
+- 7280c08 2026-06-03 fix(filing): guard profile admin fields from clinical backfill
+- ed1d39f 2026-06-03 fix(filing): improve leadership assessment extraction
+- 260dde9 2026-06-03 fix(bot): preserve draft report when filing another case
+- 4e2bb55 2026-06-03 fix(filing): tick key capabilities without curriculum links
+- 1df1227 2026-06-03 fix(bot): remove post-save field edit buttons
+- c7b5a6a 2026-06-03 fix(ui): hide curriculum variant codes in drafts
+- 6904958 2026-06-03 fix(filing): resolve stale drafts to curriculum variants
+- 815b2ef 2026-06-03 fix(recommender): keep observed procedures on DOPS
+
+## Uncommitted change summary
+- ?? cache/
+- ?? tmp/
 
 ## Repo context snapshot
-### AGENTS.md — present, 1 days old
+### AGENTS.md — present, 0 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
@@ -41,7 +48,7 @@ Key headings:
 - ## Safety
 - ## Supported Forms
 
-### CLAUDE.md — present, 1 days old
+### CLAUDE.md — present, 0 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
@@ -83,6 +90,6 @@ Key headings:
 - ## Data Flow
 
 ## Recommended restart path
-Continuity context looks sufficient; proceed with normal product-docs workflow.
+Refresh the product hub/Brief and repo context before a new build sprint.
 
 If this product has been idle for weeks, do not start implementation from memory. Refresh the product hub Status/Brief first, then create or update `TASK.md` for the next sprint.
