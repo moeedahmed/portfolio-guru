@@ -49,9 +49,10 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         message_class=MessageClass.FIXED,
         text=(
             "🩺 Portfolio Guru is ready.\n\n"
-            "Send what happened — text, voice, photo, or document. Add more across messages if you "
-            "like, then say \"draft it\" when ready. I’ll only use what you send and won’t invent "
-            "clinical detail."
+            "Send the case details in whatever format is easiest: text, voice, photo, or document.\n\n"
+            "I’ll read what you send, show the best-fit portfolio options, then guide you with buttons. "
+            "Send extra messages only if you want to add or correct case detail.\n\n"
+            "I won’t invent clinical detail, and nothing goes to Kaizen until you approve it."
         ),
         safety_critical=True,
     ),

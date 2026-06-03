@@ -1136,7 +1136,7 @@ def _build_next_step_keyboard(user_id: int) -> InlineKeyboardMarkup | None:
 def _cancelled_next_step_text(user_id: int, scope: str = "Cancelled") -> str:
     if _setup_needs_finishing(user_id):
         return f"❌ {scope}. Connect Kaizen to start filing."
-    return f"↩️ {scope}. Just send your next case when ready."
+    return f"↩️ {scope}.\n\n{render_message('welcome_connected')}"
 
 
 def _expired_prompt_text(user_id: int) -> str:
@@ -3681,7 +3681,7 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             update, context,
             f"✅ Kaizen connected — detected as *{role_name}*.\n\n"
             f"{pathway_line}"
-            "Send your first case — text, voice, photo, or document — and I'll get started.\n\n"
+            f"{render_message('welcome_connected')}\n\n"
             "Use the *Menu* (☰ bottom-left) any time for Settings or Voice profile.\n"
             f"Use */settings* if your portfolio is different.",
             parse_mode="Markdown",
@@ -3724,7 +3724,7 @@ async def setup_training_level(update: Update, context: ContextTypes.DEFAULT_TYP
     await _safe_edit_text(
         query.message,
         f"✅ Kaizen connected — *{_training_level_label(level)}*.\n\n"
-        "Send your first case — text, voice, photo, or document — and I'll get started.\n\n"
+        f"{render_message('welcome_connected')}\n\n"
         "Use the *Menu* (☰ bottom-left) any time for Settings or Voice profile.\n"
         "Use */settings* if your portfolio is different.",
         parse_mode="Markdown",
@@ -3744,7 +3744,7 @@ async def setup_curriculum(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     context.user_data.pop("_setup_state_hint", None)
     await query.edit_message_text(
         f"✅ Setup complete. You're on {label}.\n\n"
-        f"Send your first case when ready — text, voice note, photo, or document.\n\n"
+        f"{render_message('welcome_connected')}\n\n"
         f"Use the *Menu* (☰ bottom-left) any time for Settings or Voice profile.",
         parse_mode="Markdown",
     )

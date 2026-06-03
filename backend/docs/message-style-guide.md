@@ -84,8 +84,11 @@ Connected welcome:
 ```
 🩺 Portfolio Guru is ready.
 
-Send what happened — text, voice, photo, or document. Rough notes are enough;
-I'll only use what you send and won't invent clinical detail.
+Send the case details in whatever format is easiest: text, voice, photo, or document.
+
+I'll read what you send, show the best-fit portfolio options, then guide you with buttons. Send extra messages only if you want to add or correct case detail.
+
+I won't invent clinical detail, and nothing goes to Kaizen until you approve it.
 ```
 
 Draft saved:

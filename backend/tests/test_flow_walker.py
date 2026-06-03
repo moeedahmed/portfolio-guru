@@ -942,6 +942,8 @@ class TestFlowWalker:
 
         assert result == AWAIT_CASE_INPUT
         assert sim.get_last_text() == WELCOME_MSG_CONNECTED
+        assert "guide you with buttons" in sim.get_last_text()
+        assert "draft it" not in sim.get_last_text()
 
     @pytest.mark.asyncio
     async def test_cancel_path_uses_setup_button_when_setup_incomplete(self):
@@ -959,6 +961,23 @@ class TestFlowWalker:
         assert result == ConversationHandler.END
         assert 'cancelled' in sim.get_last_text().lower()
         assert any(data == 'ACTION|setup' for _, data in sim.get_last_buttons())
+
+    @pytest.mark.asyncio
+    async def test_cancel_path_uses_standard_connected_intake_copy(self):
+        from bot import WELCOME_MSG_CONNECTED, handle_callback
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('CANCEL|draft')
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+
+        with patch('bot.has_credentials', return_value=True):
+            result = await handle_callback(update, context)
+
+        assert result == ConversationHandler.END
+        assert "Cancelled" in sim.get_last_text()
+        assert WELCOME_MSG_CONNECTED in sim.get_last_text()
+        assert "draft it" not in sim.get_last_text()
 
     @pytest.mark.asyncio
     async def test_stale_button_redirects_to_fresh_next_step(self):
@@ -2549,7 +2568,7 @@ class TestFlowWalker:
 class TestRecentPortfolioFixes:
     @pytest.mark.asyncio
     async def test_setup_curriculum_completion_offers_file_first_case(self):
-        from bot import setup_curriculum
+        from bot import WELCOME_MSG_CONNECTED, setup_curriculum
 
         sim = BotSimulator()
         update = sim._make_callback_update('SETUP_CURRICULUM|2025')
@@ -2561,8 +2580,9 @@ class TestRecentPortfolioFixes:
         assert result == ConversationHandler.END
         assert 'setup complete' in sim.get_last_text().lower()
         # Post-setup completion no longer has a "File first case" button —
-        # the user is invited to send their case directly.
-        assert 'send your first case' in sim.get_last_text().lower()
+        # the user is invited to send their case directly using the same
+        # canonical intake message as /start, /cancel, and "File another case".
+        assert WELCOME_MSG_CONNECTED in sim.get_last_text()
 
     def test_quick_improve_keyboard_can_be_locked_after_one_use(self):
         from bot import _build_approval_keyboard
