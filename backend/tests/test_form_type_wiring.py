@@ -187,6 +187,25 @@ def test_2021_manual_category_picker_shows_esle_2021_callback():
     assert "FORM|ESLE_ASSESS" not in callbacks
 
 
+def test_sas_filing_resolves_stale_base_draft_to_2021_variant():
+    from bot import _filing_form_type_for_user, _template_requirements
+
+    with patch("bot.get_training_level", return_value="SAS"), patch("bot.get_curriculum", return_value="2025"):
+        assert _filing_form_type_for_user(123, "REFLECT_LOG") == "REFLECT_LOG_2021"
+        assert _filing_form_type_for_user(123, "DOPS") == "DOPS_2021"
+        assert _filing_form_type_for_user(123, "PROC_LOG") == "PROC_LOG_2021"
+
+    required, optional = _template_requirements("REFLECT_LOG_2021")
+    assert required or optional
+
+
+def test_higher_filing_keeps_current_curriculum_form_code():
+    from bot import _filing_form_type_for_user
+
+    with patch("bot.get_training_level", return_value="HIGHER"), patch("bot.get_curriculum", return_value="2025"):
+        assert _filing_form_type_for_user(123, "REFLECT_LOG") == "REFLECT_LOG"
+
+
 def test_generic_higher_profile_does_not_fill_qiat_exact_training_year():
     from bot import _format_curriculum_hierarchy, _stage_value_from_training_level
 

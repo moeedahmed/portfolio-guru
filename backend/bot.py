@@ -17,7 +17,7 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler, PicklePersistence,
 )
 from store import store_credentials, get_credentials, has_credentials, init
-from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, is_reuse_request, review_draft, analyse_portfolio_health, summarise_recent_activity, generate_nudge_copy, extract_field_updates, compose_filing_recovery_copy, combine_case_inputs, _has_qi_project_signal
+from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, is_reuse_request, review_draft, analyse_portfolio_health, summarise_recent_activity, generate_nudge_copy, extract_field_updates, compose_filing_recovery_copy, combine_case_inputs, _has_qi_project_signal, schema_form_type
 from usage import record_case_filed, get_cases_this_month, check_can_file, get_user_tier, set_user_tier, get_case_history, TIER_LIMITS, get_all_active_users, get_cases_this_week, is_beta_tester, set_beta_tester, save_kc_coverage
 from filer_router import route_filing
 from kaizen_form_filer import FORM_UUIDS
@@ -1547,7 +1547,7 @@ def _stage_value_from_training_level(level: str | None, form_type: str) -> str:
     if not level:
         return ""
     normalised = level.upper()
-    schema_fields = FORM_SCHEMAS.get(form_type, {}).get("fields", [])
+    schema_fields = FORM_SCHEMAS.get(schema_form_type(form_type), {}).get("fields", [])
     stage_field = next((field for field in schema_fields if field.get("key") == "stage_of_training"), {})
     options = set(stage_field.get("options") or [])
 
@@ -1573,7 +1573,7 @@ def _stage_value_from_training_level(level: str | None, form_type: str) -> str:
 
 
 def _apply_profile_training_stage(draft, user_id: int, form_type: str) -> None:
-    schema_fields = FORM_SCHEMAS.get(form_type, {}).get("fields", [])
+    schema_fields = FORM_SCHEMAS.get(schema_form_type(form_type), {}).get("fields", [])
     if not any(field.get("key") == "stage_of_training" for field in schema_fields):
         return
     stage_value = _stage_value_from_training_level(get_training_level(user_id), form_type)
@@ -2355,7 +2355,8 @@ def _log_filing_attempt(
     """
     from filing_attempt_log import log_attempt
     try:
-        portfolio_shape = get_kaizen_role(user_id) or get_training_level(user_id)
+        training_level = get_training_level(user_id)
+        portfolio_shape = training_level if training_level == "SAS" else (get_kaizen_role(user_id) or training_level)
     except Exception:
         logger.debug("Could not resolve portfolio shape for filing-attempt log", exc_info=True)
         portfolio_shape = None
@@ -2412,6 +2413,16 @@ def _form_type_for_curriculum(form_type: str, curriculum: str = "2025") -> str:
         return _2021_CURRICULUM_FORM_ALIASES[form_type]
     variant = f"{form_type}_2021"
     return variant if variant in FORM_UUIDS else form_type
+
+
+def _filing_form_type_for_user(user_id: int, form_type: str) -> str:
+    """Resolve stale draft form codes to the active user's Kaizen curriculum.
+
+    Drafts can outlive a recommendation/catalogue fix. Re-resolving at filing
+    time keeps old base codes such as REFLECT_LOG from opening an inaccessible
+    2025 UUID for SAS/non-training accounts that only expose 2021 forms.
+    """
+    return _form_type_for_curriculum(form_type, _effective_curriculum(user_id))
 
 
 def _filtered_recommendations_for_curriculum(recommendations, curriculum="2025"):
@@ -3031,7 +3042,7 @@ def _format_preview_text_value(key: str, value) -> str:
 
 
 def _template_requirements(form_type: str):
-    schema = FORM_SCHEMAS.get(form_type, {})
+    schema = FORM_SCHEMAS.get(schema_form_type(form_type), {})
     required = []
     optional = []
     for field in schema.get("fields", []):
@@ -7852,7 +7863,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     # Handle FormDraft (non-CBD forms)
     # Unified filing for ALL forms (CBD and non-CBD)
     if isinstance(draft, FormDraft):
-        form_type = draft.form_type
+        form_type = _filing_form_type_for_user(user_id, draft.form_type)
         fields = draft.fields
         curriculum_links = draft.fields.get("curriculum_links", [])
     else:
@@ -7860,7 +7871,10 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         # variant via the category picker, chosen_form preserves that — route
         # the filing there so the right Kaizen UUID is used.
         chosen_form = context.user_data.get("chosen_form") or "CBD"
-        form_type = chosen_form if chosen_form in ("CBD", "CBD_2021") else "CBD"
+        form_type = _filing_form_type_for_user(
+            user_id,
+            chosen_form if chosen_form in ("CBD", "CBD_2021") else "CBD",
+        )
         fields = {
             "date_of_encounter": draft.date_of_encounter,
             "end_date": draft.date_of_encounter,
@@ -7871,7 +7885,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         }
         curriculum_links = draft.curriculum_links or []
 
-    schema = FORM_SCHEMAS.get(form_type, {})
+    schema = FORM_SCHEMAS.get(schema_form_type(form_type), {})
     form_name = schema.get("name", form_type)
     form_emoji = FORM_EMOJIS.get(form_type, "📋")
 
