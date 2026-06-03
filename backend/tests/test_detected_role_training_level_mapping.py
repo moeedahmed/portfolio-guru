@@ -8,19 +8,20 @@ separate. ACCS and Intermediate are distinct Kaizen portfolio types —
 collapsing them silently into one bucket would route Intermediate trainees
 to ACCS-only forms, or vice versa, with no test surface to catch it.
 
-Harris is the dual-access edge case: one trainee with access to **both**
-ACCS and the Intermediate Portfolio. The bot's current storage collapses
-that dual access into a single ``accs_intermediate`` Kaizen role string and
-maps it to the ``INTERMEDIATE`` ``training_level`` bucket. This file pins
-that storage-alias behaviour. It does **not** assert that
+The dual-access edge case: one trainee with access to **both** ACCS and
+the Intermediate Portfolio. The bot's current storage collapses that
+dual access into a single ``accs_intermediate`` Kaizen role string and
+maps it to the ``INTERMEDIATE`` ``training_level`` bucket. This file
+pins that storage-alias behaviour. It does **not** assert that
 ``accs_intermediate`` is a standalone Kaizen portfolio type.
 
 Separately, ``profile_store.store_kaizen_role`` preserves the raw detected
 role verbatim. The detected-role → ``training_level`` map lives on the
 setup/login path in ``backend/bot.py`` and is applied via
 ``store_training_level``. The two surfaces must stay decoupled so a future
-split (e.g. surfacing both ACCS and Intermediate access for Harris) only
-needs to update the map, not the raw-role storage.
+split (e.g. surfacing both ACCS and Intermediate access for the
+dual-access shape separately) only needs to update the map, not the
+raw-role storage.
 
 Boundary: offline-only. No live Kaizen, no CDP, no BWS, no Telegram, no
 network. Reuses the in-memory ``profile_store`` engine pattern from
@@ -48,6 +49,14 @@ SHAPE_TO_ROLE_AND_LEVEL = {
     "intermediate": ("intermediate", "INTERMEDIATE"),
     "accs_intermediate_dual_access": ("accs_intermediate", "INTERMEDIATE"),
     "sas_cesr": ("sas", "SAS"),
+    # Non-training Higher shares the SAS catalogue bucket but keeps its
+    # own raw-role string so the settings label can render the explicit
+    # Higher stage.
+    "non_training_higher": ("non_training_higher", "SAS"),
+    # Non-training shape whose stage cannot be read from the Kaizen
+    # dashboard: still mapped to the purpose-built SAS catalogue, never
+    # silently routed to HST / ACCS / Intermediate.
+    "non_training_unknown": ("non_training_unknown", "SAS"),
 }
 
 SHAPES = tuple(SHAPE_TO_ROLE_AND_LEVEL)
@@ -64,6 +73,8 @@ SHAPE_TO_USER_ID = {
     "intermediate": 9200003,
     "accs_intermediate_dual_access": 9200004,
     "sas_cesr": 9200005,
+    "non_training_higher": 9200007,
+    "non_training_unknown": 9200008,
 }
 
 
@@ -94,7 +105,7 @@ def test_detected_role_maps_to_expected_training_level_per_shape(shape):
 
     ACCS-only and Intermediate-only are separate Kaizen portfolio types.
     The dual-access ``accs_intermediate`` row pins current storage
-    behaviour (Harris): both accesses collapse to the ``INTERMEDIATE``
+    behaviour: both accesses collapse to the ``INTERMEDIATE``
     bucket. A future split would need to update this test alongside the
     storage change.
     """
@@ -125,14 +136,13 @@ def test_accs_and_intermediate_levels_are_distinct_not_collapsed():
 
 
 def test_accs_intermediate_dual_access_pins_intermediate_bucket():
-    """Harris's dual access surfaces today as the single
+    """The dual-access shape surfaces today as the single
     ``accs_intermediate`` role string and stores into ``INTERMEDIATE``.
 
     This is the current storage alias for dual access. It is **not** an
     assertion that ``accs_intermediate`` is a standalone Kaizen portfolio
     type. A future change that surfaces ACCS and Intermediate access
-    separately for Harris will need to update this pin alongside the
-    storage change.
+    separately will need to update this pin alongside the storage change.
     """
     from bot import detected_role_to_training_level
 
@@ -150,11 +160,11 @@ def test_unknown_role_maps_to_none_so_setup_falls_through_to_picker():
     assert detected_role_to_training_level(None) is None
 
 
-# ─── Consultant / supervisor (Ahmed) UX continuity fallback ─────────────────
+# ─── Consultant / supervisor UX continuity fallback ────────────────────────
 
 
 def test_assessor_role_maps_to_higher_bucket_for_ux_continuity_only():
-    """Ahmed's consultant/supervisor account has no personal trainee portfolio.
+    """A consultant / supervisor account has no personal trainee portfolio.
 
     The bot's role detector returns ``"assessor"`` when MyTimeline shows the
     ``"You cannot create any events!"`` barrier. The setup/login path then
@@ -180,13 +190,13 @@ def test_assessor_role_and_training_level_stay_decoupled(profile_store_module):
     and storing ``HIGHER`` must not mutate the raw role. The supervisor
     workflow depends on the raw role staying ``assessor``.
     """
-    ahmed_user_id = 9200006
+    assessor_user_id = 9200006
 
-    profile_store_module.store_training_level(ahmed_user_id, "HIGHER")
-    profile_store_module.store_kaizen_role(ahmed_user_id, "assessor")
+    profile_store_module.store_training_level(assessor_user_id, "HIGHER")
+    profile_store_module.store_kaizen_role(assessor_user_id, "assessor")
 
-    assert profile_store_module.get_kaizen_role(ahmed_user_id) == "assessor"
-    assert profile_store_module.get_training_level(ahmed_user_id) == "HIGHER"
+    assert profile_store_module.get_kaizen_role(assessor_user_id) == "assessor"
+    assert profile_store_module.get_training_level(assessor_user_id) == "HIGHER"
 
 
 # ─── store_kaizen_role preserves raw role per shape ─────────────────────────

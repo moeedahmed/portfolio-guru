@@ -12,24 +12,32 @@ silent.
 
 Shapes covered — kept **separate** on purpose:
 
-- ``hst``                            — Moeed; HST / CCT pathway.
+- ``hst``                            — HST / CCT pathway shape.
 - ``accs``                           — DREAM Pathway ACCS-only Kaizen role.
 - ``intermediate``                   — DREAM Pathway Intermediate-only role.
-- ``accs_intermediate_dual_access``  — Harris; one trainee with **both**
-                                       ACCS and Intermediate Portfolio
-                                       access. The provider returns the
+- ``accs_intermediate_dual_access``  — one trainee with **both** ACCS and
+                                       Intermediate Portfolio access. The
+                                       provider returns the
                                        ``accs_intermediate`` portfolio_type
-                                       for this user today, which collapses
+                                       for this shape today, which collapses
                                        dual access into a single storage
                                        bucket. This test pins that
                                        implementation/storage behaviour;
                                        it does **not** assert that
                                        ``accs_intermediate`` is a standalone
                                        Kaizen portfolio type.
-- ``sas_cesr``                       — Sana; SAS / CESR Portfolio Pathway.
+- ``sas_cesr``                       — SAS / CESR Portfolio Pathway shape.
                                        The provider returns ``"sas"`` for
-                                       both SAS and CESR/non-trainee
-                                       landings today.
+                                       SAS / CESR / Non-trainee landings
+                                       where no stage signal is visible.
+- ``non_training_higher``            — Non-training shape whose Kaizen
+                                       surface labels the portfolio
+                                       ``Non-Trainee Higher``. The provider
+                                       returns the explicit
+                                       ``non_training_higher`` string so
+                                       the user-visible label retains the
+                                       Higher stage rather than collapsing
+                                       to the generic SAS bucket.
 
 Boundary: no live Kaizen, no CDP, no BWS, no Telegram, no network. Same
 stub style as ``test_kaizen_login_reliability.py`` for the provider-level
@@ -57,6 +65,7 @@ SHAPE_TO_PROVIDER_ROLE = {
     "intermediate": "intermediate",
     "accs_intermediate_dual_access": "accs_intermediate",
     "sas_cesr": "sas",
+    "non_training_higher": "non_training_higher",
 }
 
 SHAPES = tuple(SHAPE_TO_PROVIDER_ROLE)
@@ -72,6 +81,7 @@ SHAPE_TO_USER_ID = {
     "intermediate": 9100003,
     "accs_intermediate_dual_access": 9100004,
     "sas_cesr": 9100005,
+    "non_training_higher": 9100006,
 }
 
 
@@ -148,7 +158,7 @@ async def test_dashboard_landing_classifies_as_success_per_shape(
     detected role string to the role that shape produces today.
 
     For ``accs_intermediate_dual_access`` this pins the storage collapse:
-    Harris's dual access surfaces as the single ``accs_intermediate`` role
+    the dual-access shape's dual access surfaces as the single ``accs_intermediate`` role
     string. A future split into per-portfolio roles will need to update this
     test alongside the storage change.
     """
@@ -176,7 +186,7 @@ async def test_dashboard_landing_classifies_as_success_per_shape(
     )
 
 
-# ─── auth_required per shape (the Sana 2026-06-02 reproducer) ───────────────
+# ─── auth_required per shape (the SAS / CESR 2026-06-02 reproducer) ────────
 
 
 @pytest.fixture
@@ -211,7 +221,7 @@ class _FakePlaywright:
 
 
 class _FakeAuthPage:
-    """Stub Kaizen page that mimics the 2026-06-02 Sana outcome: every
+    """Stub Kaizen page that mimics the 2026-06-02 SAS / CESR outcome: every
     navigation lands on the auth host, no portfolio rows ever materialise."""
 
     def __init__(self):
@@ -234,7 +244,7 @@ async def test_non_portfolio_landing_is_auth_required_per_shape(
     sync_modules, monkeypatch, shape
 ):
     """Bootstrap that ends on a non-portfolio page (the exact 2026-06-02
-    Sana outcome) must classify as ``auth_required`` for every shape —
+    SAS / CESR outcome) must classify as ``auth_required`` for every shape —
     never as ``ok`` and never as ``failed``.
 
     A future regression that maps the SAS landing to ``ok`` (because the
@@ -254,7 +264,7 @@ async def test_non_portfolio_landing_is_auth_required_per_shape(
         return ("doctor@example.com", "pw")
 
     async def fake_login(arg_page, username, password):
-        # Mirror the 2026-06-02 Sana shape: login ran, Kaizen redirected
+        # Mirror the 2026-06-02 SAS / CESR shape: login ran, Kaizen redirected
         # back to /auth instead of /portfolio, so the helper returns False
         # and the bootstrap turns that into auth_required.
         return False

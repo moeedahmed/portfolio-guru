@@ -57,6 +57,13 @@ _RAW_ROLE_TO_CANONICAL: dict[str, CanonicalRole] = {
     "intermediate": "trainee",
     "accs_intermediate": "trainee",
     "sas": "trainee",
+    # Non-training shapes (SAS / CESR / Portfolio Pathway) still own a
+    # personal portfolio, so they live in the trainee bucket for
+    # notification gating. The split between ``non_training_*`` and ``sas``
+    # only affects the user-facing settings label and form-catalogue
+    # picker, not the canonical role surface.
+    "non_training_higher": "trainee",
+    "non_training_unknown": "trainee",
     "unknown": "unknown",
     "": "unknown",
 }

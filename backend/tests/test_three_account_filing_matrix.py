@@ -334,6 +334,11 @@ def test_profile_labels_distinguish_the_three_shapes():
     assert len(labels) == 4, (
         f"Each portfolio shape must have a distinct label; got: {labels}"
     )
-    # Sana's label must read as non-training. Otherwise an SAS doctor sees
+    # The non-training fixture label must read as non-training. Otherwise an SAS doctor sees
     # "HST Profile" or similar and loses trust in the recommender.
-    assert "SAS" in sana_label or "CESR" in sana_label or "Non-training" in sana_label
+    assert (
+        "SAS" in sana_label
+        or "CESR" in sana_label
+        or "Non-training" in sana_label
+        or "Non-Training" in sana_label
+    )

@@ -192,8 +192,8 @@ async def offline_app(monkeypatch, tmp_path):
         states={
             bot.AWAIT_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, bot.setup_username)],
             bot.AWAIT_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, bot.setup_password)],
-            bot.AWAIT_TRAINING_LEVEL: [CallbackQueryHandler(bot.setup_training_level, pattern=r"^LEVEL\|")],
-            bot.AWAIT_CURRICULUM: [CallbackQueryHandler(bot.setup_curriculum, pattern=r"^SET_CURRICULUM\|")],
+            bot.AWAIT_TRAINING_LEVEL: [CallbackQueryHandler(bot.setup_training_level, pattern=r"^SETLEVEL\|")],
+            bot.AWAIT_CURRICULUM: [CallbackQueryHandler(bot.setup_curriculum, pattern=r"^SETUP_CURRICULUM\|")],
         },
         fallbacks=[CommandHandler("cancel", bot.setup_cancel)],
         allow_reentry=True,
@@ -238,6 +238,7 @@ async def offline_app(monkeypatch, tmp_path):
 
     # Conversation handlers (order matters)
     app.add_handler(setup_conv)
+    app.add_handler(CallbackQueryHandler(bot.handle_set_level, pattern=r"^SETLEVEL\|"))
     app.add_handler(voice_conv)
     app.add_handler(case_conv)
 
@@ -539,6 +540,7 @@ class TestOfflineE2E:
         app, collector = offline_app
         monkeypatch.setattr("bot.has_credentials", lambda uid: False)
         monkeypatch.setattr("bot.get_training_level", lambda uid: None)
+        monkeypatch.setattr("bot.get_curriculum", lambda uid: None)
 
         stored = {}
 
@@ -547,9 +549,14 @@ class TestOfflineE2E:
             stored["username"] = username
             stored["password"] = password
 
+        def fake_store_training_level(uid, level):
+            stored["training_level"] = level
+        def fake_store_curriculum(uid, cur):
+            stored["curriculum"] = cur
+
         monkeypatch.setattr("bot.store_credentials", fake_store_credentials)
-        monkeypatch.setattr("bot.store_training_level", lambda uid, level: None)
-        monkeypatch.setattr("bot.store_curriculum", lambda uid, cur: None)
+        monkeypatch.setattr("bot.store_training_level", fake_store_training_level)
+        monkeypatch.setattr("bot.store_curriculum", fake_store_curriculum)
 
         # Mock credential validation — always passes in tests
         async def fake_login_test(u, p):
@@ -581,15 +588,101 @@ class TestOfflineE2E:
 
         # Step 4: select training level
         collector.sent.clear()
-        update4 = make_callback_update("LEVEL|ST5")
+        update4 = make_callback_update("SETLEVEL|HIGHER")
         _prepare_update(update4, app.bot)
         await app.process_update(update4)
 
-        # Step 5: select curriculum
+        assert stored.get("training_level") == "HIGHER"
+        assert stored.get("curriculum") == "2025"
+
+    async def test_setup_fallback_retains_setup_flow_and_ends(self, offline_app, monkeypatch):
+        """Prove setup fallback SETLEVEL|SAS is caught by setup_training_level/setup conversation
+
+        and does not trigger the global settings-handler Back to settings text/keyboard."""
+        app, collector = offline_app
+        monkeypatch.setattr("bot.has_credentials", lambda uid: False)
+        monkeypatch.setattr("bot.get_training_level", lambda uid: None)
+        monkeypatch.setattr("bot.get_curriculum", lambda uid: None)
+
+        stored = {}
+        def fake_store_credentials(uid, username, password):
+            stored["credentials"] = (username, password)
+        def fake_store_training_level(uid, level):
+            stored["training_level"] = level
+        def fake_store_curriculum(uid, cur):
+            stored["curriculum"] = cur
+
+        monkeypatch.setattr("bot.store_credentials", fake_store_credentials)
+        monkeypatch.setattr("bot.store_training_level", fake_store_training_level)
+        monkeypatch.setattr("bot.store_curriculum", fake_store_curriculum)
+
+        # Mock Kaizen login to succeed but return no detected role (forces manual picker)
+        async def fake_login_test(u, p):
+            return True
+        monkeypatch.setattr("bot._test_kaizen_login", fake_login_test)
+
+        # Step 1: Start setup
+        update1 = make_command_update("setup")
+        _prepare_update(update1, app.bot)
+        await app.process_update(update1)
+
+        # Step 2: send username
+        update2 = make_text_update("doctor@hospital.nhs.uk")
+        _prepare_update(update2, app.bot)
+        await app.process_update(update2)
+
+        # Step 3: send password (verifies login, prompts for level manually)
         collector.sent.clear()
-        update5 = make_callback_update("SET_CURRICULUM|2025")
+        update3 = make_text_update("s3cret!")
+        _prepare_update(update3, app.bot)
+        await app.process_update(update3)
+
+        # Verify we got the manual level buttons
+        assert any("couldn't auto-detect your portfolio" in t for t in collector.texts)
+        last_sent = collector.sent[-1]
+        keyboard = last_sent.get("reply_markup")
+        assert keyboard is not None
+        # Verify callback button for Non-Training SAS is present
+        flat_buttons = [btn.callback_data for row in keyboard.inline_keyboard for btn in row]
+        assert "SETLEVEL|SAS" in flat_buttons
+
+        # Step 4: Click manual level button SETLEVEL|SAS
+        collector.sent.clear()
+        update4 = make_callback_update("SETLEVEL|SAS")
+        _prepare_update(update4, app.bot)
+        await app.process_update(update4)
+
+        # Proves that the setup callback was handled by setup flow:
+        # 1. Training level saved as SAS
+        assert stored.get("training_level") == "SAS"
+        # 2. Default curriculum saved as 2025
+        assert stored.get("curriculum") == "2025"
+        # 3. Setup completion message displayed
+        assert any("Kaizen connected" in t for t in collector.texts)
+        assert any("Non-Training Profile" in t for t in collector.texts)
+        # 4. Success message must NOT use settings-handler Back to settings text/keyboard
+        for sent in collector.sent:
+            markup = sent.get("reply_markup")
+            if markup:
+                flat_buttons = [btn.callback_data for row in markup.inline_keyboard for btn in row]
+                assert "ACTION|settings" not in flat_buttons
+            if sent.get("text"):
+                assert "Back to settings" not in sent["text"]
+
+        # Step 5: Outside setup conversation, clicking SETLEVEL|SAS
+        # should hit the global handle_set_level and show "Back to settings".
+        collector.sent.clear()
+        update5 = make_callback_update("SETLEVEL|SAS")
         _prepare_update(update5, app.bot)
         await app.process_update(update5)
+
+        assert any("Portfolio set to" in t for t in collector.texts)
+        # Verify it has "Back to settings" button
+        last_sent = collector.sent[-1]
+        keyboard = last_sent.get("reply_markup")
+        assert keyboard is not None
+        flat_buttons = [btn.callback_data for row in keyboard.inline_keyboard for btn in row]
+        assert "ACTION|settings" in flat_buttons
 
     async def test_stale_button_handled_gracefully(self, offline_app, monkeypatch):
         """Tap a button from an old conversation → bot handles without crashing."""

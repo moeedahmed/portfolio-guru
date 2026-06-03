@@ -15,6 +15,14 @@ BROWSER_HARNESS = shutil.which("browser-harness") or os.path.expanduser("~/.loca
 # Chrome on 9222 would silently shadow the managed profile.
 DEFAULT_KAIZEN_CDP_URL = "http://localhost:18800"
 
+# Body preview size handed to ``detect_portfolio_type``. The legacy 200-char
+# window was too small to surface SAS / CESR / Non-Trainee signals — Kaizen
+# renders the chrome (nav, header, breadcrumbs) before the portfolio-type
+# label, so the marker words land well after byte 200 on a real dashboard.
+# Pin to 3000 (matches the ``substring(0,3000)`` snip we already take from
+# ``document.body.innerText``) and assert via the offline detection tests.
+KAIZEN_DASHBOARD_BODY_PREVIEW_CHARS = 3000
+
 
 class KaizenInfrastructureError(RuntimeError):
     """Browser-harness, CDP, or subprocess failure — *not* a credentials problem.
@@ -144,13 +152,13 @@ print("ok")
 
     def detect_role(self) -> str:
         """Detect portfolio type from dashboard title."""
-        code = """
+        code = f"""
 import json
 title = cdp("Runtime.evaluate", expression="document.title", returnByValue=True, awaitPromise=False)
-text = cdp("Runtime.evaluate", expression="document.body.innerText.substring(0,3000)", returnByValue=True, awaitPromise=False)
-t = title.get("result",{}).get("value","")
-b = text.get("result",{}).get("value","")
-print(json.dumps({"title": t, "body_preview": b[:200]}))
+text = cdp("Runtime.evaluate", expression="document.body.innerText.substring(0,{KAIZEN_DASHBOARD_BODY_PREVIEW_CHARS})", returnByValue=True, awaitPromise=False)
+t = title.get("result",{{}}).get("value","")
+b = text.get("result",{{}}).get("value","")
+print(json.dumps({{"title": t, "body_preview": b[:{KAIZEN_DASHBOARD_BODY_PREVIEW_CHARS}]}}))
 """
         try:
             output = self._run_file(code, timeout=15)

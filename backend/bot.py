@@ -1468,7 +1468,7 @@ TRAINING_LEVEL_LABELS = {
     "ACCS": "ACCS Profile",
     "INTERMEDIATE": "Intermediate Profile",
     "HIGHER": "HST Profile",
-    "SAS": "SAS / CESR / Non-training Profile",
+    "SAS": "Non-Training Profile",
     "ST3": "Intermediate Profile",
     "ST4": "HST Profile",
     "ST5": "HST Profile",
@@ -1480,20 +1480,52 @@ def _training_level_label(level: str | None) -> str:
     return TRAINING_LEVEL_LABELS.get(level or "", "Unknown")
 
 
+# Raw Kaizen role string → granular settings label. Only the non-training
+# variants override the bucket-derived label today; trainee roles fall back
+# to ``_training_level_label`` for the saved bucket.
+_KAIZEN_ROLE_GRANULAR_LABELS = {
+    "non_training_higher": "Non-Training Profile (Higher level)",
+    "non_training_unknown": "Non-Training Profile (level unknown)",
+}
+
+
+def _portfolio_settings_label(
+    training_level: str | None, kaizen_role: str | None
+) -> str:
+    """Return the user-facing portfolio label shown in /settings.
+
+    For non-training shapes the raw ``kaizen_role`` carries the verified
+    stage signal (``non_training_higher`` when Kaizen labels the surface
+    Non-Trainee Higher; ``non_training_unknown`` otherwise). For every
+    other shape we fall back to the bucket label so ACCS / Intermediate
+    / HST trainees see the same string they've always seen.
+    """
+    if kaizen_role and kaizen_role in _KAIZEN_ROLE_GRANULAR_LABELS:
+        return _KAIZEN_ROLE_GRANULAR_LABELS[kaizen_role]
+    return _training_level_label(training_level)
+
+
 # Setup/login path: detected Kaizen role → local portfolio-profile bucket.
 # ACCS and Intermediate are separate Kaizen portfolio types and stay
-# separate here. ``accs_intermediate`` is Harris's dual-access storage
-# alias (one trainee with access to both ACCS and Intermediate); it
-# collapses to the ``INTERMEDIATE`` bucket today and is **not** a
-# standalone Kaizen portfolio type. ``assessor`` has no personal
-# portfolio and falls back to ``HIGHER`` for UX continuity — the
-# supervisor workflow keys off the raw role, not this bucket.
+# separate here. ``accs_intermediate`` is the dual-access storage alias
+# (one trainee with access to both ACCS and Intermediate); it collapses
+# to the ``INTERMEDIATE`` bucket today and is **not** a standalone Kaizen
+# portfolio type. ``assessor`` has no personal portfolio and falls back
+# to ``HIGHER`` for UX continuity — the supervisor workflow keys off the
+# raw role, not this bucket.
 _DETECTED_ROLE_TO_TRAINING_LEVEL = {
     "hst": "HIGHER",
     "accs": "ACCS",
     "intermediate": "INTERMEDIATE",
     "accs_intermediate": "INTERMEDIATE",
     "sas": "SAS",
+    # Non-training Higher and Non-training Unknown share the purpose-built
+    # non-trainee form catalogue under the ``SAS`` bucket. Splitting them
+    # at the detection surface (not at the catalogue) preserves the user-
+    # visible Non-training Higher label while avoiding any silent mapping
+    # into HST / ACCS / Intermediate when the stage is unknown.
+    "non_training_higher": "SAS",
+    "non_training_unknown": "SAS",
     "assessor": "HIGHER",
 }
 
@@ -1984,7 +2016,9 @@ def _settings_view_components(
     """
     curriculum = get_curriculum(user_id) or "2025"
     curriculum_label = "2021 Curriculum" if curriculum == "2021" else "2025 Update"
-    training_level = _training_level_label(get_training_level(user_id))
+    training_level = _portfolio_settings_label(
+        get_training_level(user_id), get_kaizen_role(user_id)
+    )
     pathway_label = _pathway_label(_get_or_default_health_profile(user_id).pathway)
     voice_profile = get_voice_profile(user_id)
     voice_status = "Active" if voice_profile else "Not set"
@@ -3482,7 +3516,9 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "accs": "ACCS Portfolio Profile",
         "intermediate": "Intermediate Portfolio Profile",
         "accs_intermediate": "ACCS + Intermediate Portfolio Profile",
-        "sas": "SAS / CESR / Non-training Profile",
+        "sas": "Non-Training Profile",
+        "non_training_higher": "Non-Training Profile (Higher level)",
+        "non_training_unknown": "Non-Training Profile (level unknown)",
         "assessor": "Clinical Supervisor",
     }
 
@@ -3521,7 +3557,7 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 [InlineKeyboardButton("ACCS Profile", callback_data="SETLEVEL|ACCS")],
                 [InlineKeyboardButton("Intermediate Profile", callback_data="SETLEVEL|INTERMEDIATE")],
                 [InlineKeyboardButton("HST Profile", callback_data="SETLEVEL|HIGHER")],
-                [InlineKeyboardButton("SAS / CESR / Non-training Profile", callback_data="SETLEVEL|SAS")],
+                [InlineKeyboardButton("Non-Training Profile", callback_data="SETLEVEL|SAS")],
             ])
         )
         return AWAIT_TRAINING_LEVEL
@@ -3531,17 +3567,30 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def setup_training_level(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle portfolio profile selection during setup — then ask curriculum."""
+    """Manual portfolio-profile pick after auto-detect couldn't classify the
+    Kaizen role. Mirror the auto-detect success path: confirm Kaizen
+    connected, accept the chosen profile, end the conversation. Curriculum
+    was already defaulted to 2025 in setup_password, so no follow-up
+    question. Do NOT emit the settings-handler "Back to settings" copy —
+    this is mid-setup, not a /settings round-trip."""
     query = update.callback_query
     await query.answer()
     level = query.data.split("|")[1]
     user_id = update.effective_user.id
     store_training_level(user_id, level)
-    await query.edit_message_text(
-        f"Portfolio saved as {_training_level_label(level)}.\n\nWhich curriculum are you working under? Most trainees starting now are on the 2025 Update. If your deanery still uses the 2021 forms, pick that.",
-        reply_markup=_build_curriculum_keyboard("SETUP_CURRICULUM")
+    if not get_curriculum(user_id):
+        store_curriculum(user_id, "2025")
+    context.user_data.pop("_setup_state_hint", None)
+    await _safe_edit_text(
+        query.message,
+        f"✅ Kaizen connected — *{_training_level_label(level)}*.\n\n"
+        "Send your first case — text, voice, photo, or document — and I'll get started.\n\n"
+        "Use the *Menu* (☰ bottom-left) any time for Settings or Voice profile.\n"
+        "Use */settings* if your portfolio is different.",
+        parse_mode="Markdown",
     )
-    return AWAIT_CURRICULUM
+    _flow_done(context, "setup")
+    return ConversationHandler.END
 
 
 async def setup_curriculum(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -4529,7 +4578,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             [InlineKeyboardButton("ACCS Profile", callback_data="SETLEVEL|ACCS")],
             [InlineKeyboardButton("Intermediate Profile", callback_data="SETLEVEL|INTERMEDIATE")],
             [InlineKeyboardButton("HST Profile", callback_data="SETLEVEL|HIGHER")],
-            [InlineKeyboardButton("SAS / CESR / Non-training Profile", callback_data="SETLEVEL|SAS")],
+            [InlineKeyboardButton("Non-Training Profile", callback_data="SETLEVEL|SAS")],
             [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
         ])
         await query.message.edit_text(
@@ -9358,7 +9407,7 @@ def build_application() -> Application:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, setup_password),
                 MessageHandler(~filters.TEXT & ~filters.COMMAND, _setup_wrong_input),
             ],
-            AWAIT_TRAINING_LEVEL: [CallbackQueryHandler(setup_training_level, pattern=r"^LEVEL\|")],
+            AWAIT_TRAINING_LEVEL: [CallbackQueryHandler(setup_training_level, pattern=r"^SETLEVEL\|")],
             AWAIT_CURRICULUM: [CallbackQueryHandler(setup_curriculum, pattern=r"^SETUP_CURRICULUM\|")],
         },
         fallbacks=[CommandHandler("start", start), CommandHandler("cancel", setup_cancel)],
@@ -9388,7 +9437,13 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(handle_upgrade_button, pattern=r"^UPGRADE\|"))
     application.add_handler(CallbackQueryHandler(handle_unsigned_range_pick, pattern=r"^UNSIGNED\|"))
     application.add_handler(CallbackQueryHandler(handle_set_curriculum, pattern=r"^SET_CURRICULUM\|"))
-    application.add_handler(CallbackQueryHandler(handle_set_level, pattern=r"^SETLEVEL\|"))
+    # NOTE: handle_set_level (global SETLEVEL handler for /settings → change
+    # portfolio) is registered AFTER setup_conv below. setup_password's manual
+    # fallback uses the same SETLEVEL|* callback prefix; if the global handler
+    # is checked first PTB picks it before the conv handler and the user
+    # silently exits setup with "Back to settings". setup_conv only matches
+    # when the user is in AWAIT_TRAINING_LEVEL, so when no conv is active the
+    # global handler still services the /settings flow.
     application.add_handler(CallbackQueryHandler(handle_pathway_choice, pattern=r"^PATHWAY_SETTINGS\|"))
     application.add_handler(CallbackQueryHandler(handle_chase_log, pattern=r"^CHASE_LOG\|"))
     # Top-level handlers that must work regardless of conversation state
@@ -9458,6 +9513,12 @@ def build_application() -> Application:
     )
 
     application.add_handler(setup_conv)
+    # Register the global SETLEVEL handler AFTER setup_conv so the conv
+    # handler gets first crack at SETLEVEL|* clicks while the user is in
+    # AWAIT_TRAINING_LEVEL. Outside the conv state the conv handler returns
+    # None and PTB falls through to handle_set_level, preserving the
+    # /settings → change portfolio flow.
+    application.add_handler(CallbackQueryHandler(handle_set_level, pattern=r"^SETLEVEL\|"))
     application.add_handler(voice_conv)
     application.add_handler(pathway_conv)
     application.add_handler(case_conv)
