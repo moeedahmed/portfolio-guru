@@ -1049,6 +1049,11 @@ _BTN_HELP = InlineKeyboardButton("ℹ️ Help", callback_data="INFO|what")
 _BTN_VOICE = InlineKeyboardButton("✍️ Voice Profile", callback_data="ACTION|voice")
 _BTN_CONTINUE_THIN = InlineKeyboardButton("✅ Show me the draft", callback_data="ACTION|continue_thin")
 _BTN_BACK_TO_MISSING = InlineKeyboardButton("⬅️ Back to missing details", callback_data="ACTION|back_to_missing")
+_DATA_CLEAR_TEXT = (
+    "✅ Your Portfolio Guru data is clear.\n\n"
+    "I don’t have any Kaizen credentials, portfolio preferences, or voice profile stored for you now.\n\n"
+    "To use Portfolio Guru again, reconnect Kaizen."
+)
 
 
 def _nav_row(
@@ -1131,6 +1136,13 @@ def _build_next_step_keyboard(user_id: int) -> InlineKeyboardMarkup | None:
             [InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")],
         ])
     return None
+
+
+def _build_data_clear_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [_BTN_SETUP],
+        [InlineKeyboardButton("What is stored?", callback_data="INFO|what")],
+    ])
 
 
 def _cancelled_next_step_text(user_id: int, scope: str = "Cancelled") -> str:
@@ -4883,13 +4895,11 @@ async def delete_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     from profile_store import engine as prof_engine, UserProfile
     from sqlmodel import Session, select
 
-    deleted_items = []
     with Session(cred_engine) as session:
         cred = session.exec(select(UserCredential).where(UserCredential.telegram_user_id == user_id)).first()
         if cred:
             session.delete(cred)
             session.commit()
-            deleted_items.append("Kaizen credentials")
             try:
                 from kaizen_form_filer import invalidate_session_cache
                 invalidate_session_cache(user_id)
@@ -4901,15 +4911,11 @@ async def delete_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         if profile:
             session.delete(profile)
             session.commit()
-            deleted_items.append("portfolio preferences and voice profile")
 
-    if deleted_items:
-        await update.message.reply_text(
-            f"🗑️ Deleted: {', '.join(deleted_items)}.\n\nYour data has been erased.",
-            reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]])
-        )
-    else:
-        await update.message.reply_text("ℹ️ No stored data found for your account.")
+    await update.message.reply_text(
+        _DATA_CLEAR_TEXT,
+        reply_markup=_build_data_clear_keyboard(),
+    )
     return ConversationHandler.END
 
 

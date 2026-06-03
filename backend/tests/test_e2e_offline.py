@@ -537,6 +537,79 @@ class TestOfflineE2E:
         text = collector.texts[0]
         assert "Cancel" in text or "cancel" in text or "❌" in text
 
+    async def test_delete_is_idempotent_and_shows_clear_state(self, offline_app, monkeypatch, tmp_path):
+        """First and repeated /delete both reassure the user that data is clear."""
+        app, collector = offline_app
+
+        import credentials
+        import profile_store
+        from sqlmodel import Session, SQLModel, create_engine, select
+
+        cred_engine = create_engine(f"sqlite:///{tmp_path / 'credentials.db'}")
+        prof_engine = create_engine(
+            f"sqlite:///{tmp_path / 'profile.db'}",
+            connect_args={"check_same_thread": False},
+        )
+        SQLModel.metadata.create_all(cred_engine)
+        SQLModel.metadata.create_all(prof_engine)
+        monkeypatch.setattr(credentials, "engine", cred_engine)
+        monkeypatch.setattr(profile_store, "engine", prof_engine)
+
+        invalidated = []
+        monkeypatch.setattr("kaizen_form_filer.invalidate_session_cache", lambda uid: invalidated.append(uid))
+
+        with Session(cred_engine) as session:
+            session.add(credentials.UserCredential(
+                telegram_user_id=TEST_USER.id,
+                kaizen_username_enc=b"user",
+                kaizen_password_enc=b"pass",
+            ))
+            session.commit()
+        with Session(prof_engine) as session:
+            session.add(profile_store.UserProfile(
+                telegram_user_id=TEST_USER.id,
+                training_level="HIGHER",
+                curriculum="2025",
+                voice_profile="{}",
+                voice_examples_count=1,
+            ))
+            session.commit()
+
+        expected = (
+            "✅ Your Portfolio Guru data is clear.\n\n"
+            "I don’t have any Kaizen credentials, portfolio preferences, or voice profile stored for you now.\n\n"
+            "To use Portfolio Guru again, reconnect Kaizen."
+        )
+
+        update = make_command_update("delete")
+        _prepare_update(update, app.bot)
+        await app.process_update(update)
+
+        assert collector.texts == [expected]
+        assert "No stored data found" not in collector.texts[0]
+        buttons = [btn.callback_data for row in collector.sent[0]["reply_markup"].inline_keyboard for btn in row]
+        assert buttons == ["ACTION|setup", "INFO|what"]
+        assert invalidated == [TEST_USER.id]
+
+        with Session(cred_engine) as session:
+            assert session.exec(
+                select(credentials.UserCredential).where(credentials.UserCredential.telegram_user_id == TEST_USER.id)
+            ).first() is None
+        with Session(prof_engine) as session:
+            assert session.exec(
+                select(profile_store.UserProfile).where(profile_store.UserProfile.telegram_user_id == TEST_USER.id)
+            ).first() is None
+
+        collector.sent.clear()
+        update = make_command_update("delete")
+        _prepare_update(update, app.bot)
+        await app.process_update(update)
+
+        assert collector.texts == [expected]
+        assert "No stored data found" not in collector.texts[0]
+        buttons = [btn.callback_data for row in collector.sent[0]["reply_markup"].inline_keyboard for btn in row]
+        assert buttons == ["ACTION|setup", "INFO|what"]
+
     async def test_setup_flow_stores_credentials(self, offline_app, monkeypatch):
         """Walk through full setup flow → credentials stored."""
         app, collector = offline_app
