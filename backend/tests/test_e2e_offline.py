@@ -502,6 +502,105 @@ class TestOfflineE2E:
         # Bot should have responded with filing result
         assert len(collector.sent) >= 1
 
+    async def test_failed_filing_allows_retry(self, offline_app, monkeypatch):
+        """A filing that fails must release the in-progress guard so the
+        'Try Again' button can actually re-file. Regression: the guard used to
+        stay set on every failure path, permanently deadlocking retry."""
+        app, collector = offline_app
+        monkeypatch.setattr("bot.has_credentials", lambda uid: True)
+        monkeypatch.setattr("bot.get_training_level", lambda uid: "ST5")
+        monkeypatch.setattr("bot.get_curriculum", lambda uid: "2025")
+        monkeypatch.setattr("bot.get_voice_profile", lambda uid: None)
+        monkeypatch.setattr("bot.get_credentials", lambda uid: ("test@test.com", "pass"))
+
+        from models import FormDraft, CBDData, FormTypeRecommendation
+        from kaizen_form_filer import FORM_UUIDS
+
+        mock_recs = [
+            FormTypeRecommendation(form_type="CBD", rationale="Reflective case", uuid=FORM_UUIDS.get("CBD")),
+        ]
+        cbd_draft = CBDData(
+            date_of_encounter="17/3/2026",
+            clinical_setting="ED",
+            patient_presentation="Chest pain, troponin positive",
+            clinical_reasoning="Managed as ACS with dual antiplatelet",
+            reflection="Need faster ECG review and escalation",
+            curriculum_links=["SLO1"],
+            key_capabilities=["SLO1 KC1: Assess and stabilise"],
+        )
+        form_draft = FormDraft(
+            form_type="CBD",
+            uuid=FORM_UUIDS.get("CBD"),
+            fields={
+                "date_of_encounter": "17/3/2026",
+                "clinical_setting": "ED",
+                "patient_presentation": "Chest pain",
+                "clinical_reasoning": "Managed as ACS",
+                "reflection": "Need faster ECG review",
+                "curriculum_links": ["SLO1"],
+                "key_capabilities": ["SLO1 KC1: Assess and stabilise"],
+            },
+        )
+
+        async def fake_recommend(*args, **kwargs):
+            return mock_recs
+
+        async def fake_extract_cbd(*args, **kwargs):
+            return cbd_draft
+
+        async def fake_extract_form(*args, **kwargs):
+            return form_draft
+
+        # First filing attempt raises; the retry succeeds. The guard must be
+        # released after the failure for the second call to reach route_filing.
+        calls = {"n": 0}
+
+        async def fake_route_filing(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("Kaizen filer blew up")
+            return {"status": "success", "filled": ["clinical_reasoning"], "skipped": []}
+
+        monkeypatch.setattr("bot.recommend_form_types", fake_recommend)
+        monkeypatch.setattr("bot.classify_intent", AsyncMock(return_value="case"))
+        monkeypatch.setattr("bot.extract_explicit_form_type", lambda text: None)
+        monkeypatch.setattr("bot.extract_form_data", fake_extract_form)
+        monkeypatch.setattr("bot.extract_cbd_data", fake_extract_cbd)
+        monkeypatch.setattr("bot.route_filing", fake_route_filing)
+        monkeypatch.setattr("bot.record_case_filed", AsyncMock(return_value=None))
+        monkeypatch.setattr("bot.check_can_file", AsyncMock(return_value=(True, 1, 10, "free")))
+        monkeypatch.setattr("bot.save_kc_coverage", AsyncMock(return_value=None))
+        monkeypatch.setattr("bot.get_case_history", AsyncMock(return_value=[]))
+
+        update1 = make_text_update("45M chest pain, troponin positive, managed ACS")
+        _prepare_update(update1, app.bot)
+        await app.process_update(update1)
+
+        update2 = make_callback_update("FORM|CBD")
+        _prepare_update(update2, app.bot)
+        await app.process_update(update2)
+
+        # First approve → route_filing raises → failure report, guard released.
+        collector.sent.clear()
+        update3 = make_callback_update("APPROVE|draft")
+        _prepare_update(update3, app.bot)
+        await app.process_update(update3)
+
+        assert calls["n"] == 1
+        assert not app.user_data[TEST_USER.id].get("filing_in_progress")
+
+        # Retry → must reach route_filing a second time (not blocked by guard).
+        collector.sent.clear()
+        update4 = make_callback_update("ACTION|retry_filing")
+        _prepare_update(update4, app.bot)
+        await app.process_update(update4)
+
+        # route_filing ran a second time → the guard was released, not stuck.
+        assert calls["n"] == 2
+        # Successful retry clears the flow and records the filed case.
+        assert not app.user_data[TEST_USER.id].get("filing_in_progress")
+        assert "CBD" in (app.user_data[TEST_USER.id].get("last_filed_form_type") or "")
+
     async def test_gibberish_input_handled(self, offline_app, monkeypatch):
         """Send random text → bot responds gracefully, doesn't crash."""
         app, collector = offline_app

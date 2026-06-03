@@ -7835,6 +7835,20 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     """Handle 'File this draft' approval."""
     query = update.callback_query
     is_callback = query is not None
+
+    # Idempotency guard for a one-shot external effect: saving a Kaizen draft.
+    # Re-entry happens via double-taps and stale retry/save buttons still sitting
+    # in older chat messages. The check-and-set is synchronous — no await between
+    # the read and the write — so two near-simultaneous callbacks cannot both
+    # pass it and start duplicate Kaizen filings. Released in the finally around
+    # route_filing (and by user_data.clear() on success) so a deliberate retry
+    # after a failure isn't blocked forever.
+    if context.user_data.get("filing_in_progress"):
+        if query:
+            await query.answer("⏳ Already saving your draft — give it a moment.")
+        return None
+    context.user_data["filing_in_progress"] = True
+
     if query:
         await query.answer()
 
@@ -7858,6 +7872,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     username, password = creds
     draft = _load_draft(context)
     if not draft:
+        context.user_data.pop("filing_in_progress", None)
         return await _resume_paused_flow(
             update,
             context,
@@ -8042,6 +8057,13 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             )
         return AWAIT_APPROVAL  # Stay in approval state so retry can pick up draft
     finally:
+        # route_filing has returned or raised — the one-shot effect is no
+        # longer in flight, so release the guard. Every failure path below
+        # (timeout, exception, login failure, uncertain partial, classified
+        # failure) returns AWAIT_APPROVAL with a "Try Again" button; leaving
+        # the flag set would make that retry hit the in-progress short-circuit
+        # forever. The success path clears all of user_data anyway.
+        context.user_data.pop("filing_in_progress", None)
         typing_stop.set()
         typing_task.cancel()
         progress_task.cancel()
@@ -8072,6 +8094,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         retry_typing_task = asyncio.create_task(
             _typing_until(update.effective_chat, retry_typing_stop)
         )
+        context.user_data["filing_in_progress"] = True
         try:
             retry_result = await asyncio.wait_for(
                 route_filing(
@@ -8102,6 +8125,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 "Save-rescue retry for %s failed: %s", form_type, retry_exc
             )
         finally:
+            context.user_data.pop("filing_in_progress", None)
             retry_typing_stop.set()
             retry_typing_task.cancel()
 
