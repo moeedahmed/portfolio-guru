@@ -415,3 +415,106 @@ async def test_2021_user_selectable_variant_routes_deterministically():
 
     assert result["status"] == "success"
     assert deterministic.await_args.args[1] == "MINI_CEX_2021"
+
+
+_LAT_ED_SHIFT_CASE = (
+    "Leadership episode during a crowded ED evening shift: I coordinated resus flow while "
+    "managing a simultaneous STEMI transfer, a trauma call pre-alert, and ambulance offload "
+    "pressure. I allocated roles, prioritised time-critical cases, escalated bed-state risk to "
+    "site team, supported a junior doctor managing a deteriorating patient, and led a brief safety "
+    "huddle. Feedback: calm prioritisation and clear escalation; improvement point was to close "
+    "the loop earlier with nursing coordinator after bed-state escalation."
+)
+
+
+def test_lat_normalise_drops_clinical_setting_without_populating_trainee_post():
+    """clinical_setting must be silently dropped for LAT, not moved to trainee_post.
+
+    Kaizen's trainee_post field expects grade + hospital (e.g. 'ST5 Higher EM, City ED'),
+    not a clinical-setting dropdown value like 'Emergency Department'.
+    """
+    from kaizen_form_filer import normalise_fields_for_deterministic_filing
+
+    fields_in = {
+        "clinical_setting": "Emergency Department",
+        "leadership_context": "Coordinated multi-team response during high-acuity ED shift.",
+        "clinical_reasoning": "I allocated roles and escalated bed-state risk to site team.",
+        "reflection": "I would close the loop earlier with the nursing coordinator.",
+    }
+    result = normalise_fields_for_deterministic_filing("LAT", fields_in)
+
+    assert "clinical_setting" not in result
+    assert "trainee_post" not in result
+    assert result["leadership_context"] == fields_in["leadership_context"]
+    assert "Reflection:" in result["clinical_reasoning"]
+    assert "reflection" not in result
+
+
+@pytest.mark.asyncio
+async def test_lat_leadership_context_guidance_appears_in_extraction_prompt():
+    """The schema description for leadership_context must reach the LLM prompt."""
+    captured_prompts = []
+
+    async def capture_generate(prompt, retries=1, tier=""):
+        captured_prompts.append(prompt)
+        return json.dumps({
+            "form_type": "LAT",
+            "date_of_encounter": "2026-06-03",
+            "clinical_setting": "Emergency Department",
+            "leadership_context": "Crowded ED evening shift with simultaneous STEMI transfer, trauma pre-alert, and ambulance offload pressure. Senior EM registrar role coordinating resus and junior support.",
+            "stage_of_training": "Higher/ST4-ST6",
+            "clinical_reasoning": "I allocated resus roles and escalated bed-state risk.",
+            "reflection": "I would close the loop with the nursing coordinator earlier.",
+            "curriculum_links": ["SLO8"],
+            "key_capabilities": [
+                "SLO8 KC1: will provide support to ED staff at all levels (2025 Update)"
+            ],
+        })
+
+    with patch("extractor._generate", new=AsyncMock(side_effect=capture_generate)):
+        from extractor import extract_form_data
+        await extract_form_data(_LAT_ED_SHIFT_CASE, "LAT")
+
+    assert captured_prompts, "No prompt was captured"
+    prompt = captured_prompts[0]
+    assert "guidance:" in prompt
+    assert "clinical environment" in prompt or "leadership scenario" in prompt or "pressures" in prompt
+
+
+@pytest.mark.asyncio
+async def test_lat_ed_shift_leadership_context_extracted():
+    """For the standard ED-shift LAT case, leadership_context must be non-blank after extraction."""
+    from extractor import extract_form_data
+
+    llm_response = json.dumps({
+        "form_type": "LAT",
+        "date_of_encounter": "2026-06-03",
+        "clinical_setting": "Emergency Department",
+        "leadership_context": (
+            "Crowded ED evening shift with simultaneous STEMI transfer, trauma pre-alert, and "
+            "ambulance offload pressure; role as senior EM registrar coordinating resus team and "
+            "supporting junior colleagues."
+        ),
+        "stage_of_training": "Higher/ST4-ST6",
+        "clinical_reasoning": (
+            "I coordinated resus flow, allocated team roles, escalated bed-state risk to the site "
+            "team, and supported a junior doctor with a deteriorating patient. I led a brief safety "
+            "huddle to maintain situational awareness across the department."
+        ),
+        "reflection": (
+            "Feedback noted calm prioritisation and clear escalation. I would close the loop "
+            "earlier with the nursing coordinator after bed-state escalation."
+        ),
+        "curriculum_links": ["SLO8"],
+        "key_capabilities": [
+            "SLO8 KC1: will provide support to ED staff at all levels (2025 Update)"
+        ],
+    })
+
+    with patch("extractor._generate", new=AsyncMock(return_value=llm_response)):
+        draft = await extract_form_data(_LAT_ED_SHIFT_CASE, "LAT")
+
+    assert draft.fields.get("leadership_context"), "leadership_context must not be blank for this case"
+    assert "ED" in draft.fields["leadership_context"] or "resus" in draft.fields["leadership_context"].lower()
+    assert "clinical_setting" not in draft.fields or draft.fields["clinical_setting"] in ("Emergency Department", "")
+    assert draft.fields.get("clinical_reasoning")

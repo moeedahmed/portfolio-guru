@@ -2322,6 +2322,8 @@ async def extract_form_data(
         line = f"- {field['key']} | {field['label']} | type: {field['type']} | required: {req}"
         if "options" in field:
             line += f"\n  options: {', '.join(field['options'])}"
+        if "description" in field:
+            line += f"\n  guidance: {field['description']}"
         field_defs.append(line)
 
     field_keys = [f['key'] for f in schema["fields"]]

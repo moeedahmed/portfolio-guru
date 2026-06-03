@@ -893,7 +893,7 @@ SCHEMA_REQUIRED_FIELD_HANDLING = {
         "trainee_performance": "merge:case_observed",
     },
     "LAT": {
-        "clinical_setting": "merge:trainee_post",
+        "clinical_setting": "safe_skip:lat_clinical_setting_no_dom_field",
         "stage_of_training": "safe_skip:no_verified_dom_field",
         "reflection": "merge:clinical_reasoning",
     },
@@ -976,9 +976,7 @@ def normalise_fields_for_deterministic_filing(form_type: str, fields: dict) -> d
         out.pop("clinical_reasoning", None)
 
     elif handling_key == "LAT":
-        if out.get("clinical_setting") and not out.get("trainee_post"):
-            out["trainee_post"] = out["clinical_setting"]
-            out.pop("clinical_setting", None)
+        out.pop("clinical_setting", None)
         if out.get("reflection"):
             out["clinical_reasoning"] = _append_section(out.get("clinical_reasoning"), "Reflection", out["reflection"])
             out.pop("reflection", None)
