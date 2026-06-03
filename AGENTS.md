@@ -50,4 +50,4 @@ Single source: `backend/filer_router.py` selects the method per form type.
 
 ## Supported Forms
 
-Full form catalogue and DOM coverage status: `docs/form-coverage.md`. Currently 46 verified forms with DOM mappings, covering CBD, DOPS, Mini-CEX, ACAT, reflections, teaching, procedurals, management, US cases, and more.
+Full form catalogue and DOM coverage status: `docs/form-coverage.md`. The coverage doc is the source for which forms are deterministic, which are UUID-known but hidden, and which are admin/utility surfaces rather than fileable portfolio evidence.

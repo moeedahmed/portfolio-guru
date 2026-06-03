@@ -161,10 +161,16 @@ def normalise_dops_fields(fields: dict) -> dict:
 
     procedure_name = _str(out.get("procedure_name"))
     procedural_skill = _str(out.get("procedural_skill"))
+    accs_procedural_skill = _str(out.get("accs_procedural_skill"))
     if procedure_name and not procedural_skill:
         out["procedural_skill"] = procedure_name
     elif procedural_skill and not procedure_name:
         out["procedure_name"] = procedural_skill
+    if not accs_procedural_skill:
+        if procedure_name:
+            out["accs_procedural_skill"] = procedure_name
+        elif procedural_skill:
+            out["accs_procedural_skill"] = procedural_skill
 
     case_observed = _str(out.get("case_observed"))
     narrative = _build_case_observed_narrative(out)
@@ -195,7 +201,11 @@ def _build_case_observed_narrative(fields: dict) -> str:
     indication = _str(fields.get("indication"))
     clinical_reasoning = _str(fields.get("clinical_reasoning"))
     trainee_performance = _str(fields.get("trainee_performance"))
-    procedure = _str(fields.get("procedure_name")) or _str(fields.get("procedural_skill"))
+    procedure = (
+        _str(fields.get("procedure_name"))
+        or _str(fields.get("procedural_skill"))
+        or _str(fields.get("accs_procedural_skill"))
+    )
     clinical_setting = _str(fields.get("clinical_setting"))
 
     if procedure or clinical_setting:

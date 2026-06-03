@@ -421,6 +421,24 @@ FORM_FIELD_MAP = {
         "procedural_skill": "8def931e-3a00-43ac-8529-44cdaf34be2d",
         "reflection": "610b5c60-99ac-4902-9407-22974d6a5799",
     },
+    "DOPS_ACCS": {
+        "date_of_encounter": "startDate",
+        "end_date": "endDate",
+        "placement": "286d64f5-2aa0-41eb-aba6-a7bc523f133c",
+        "date_of_event": "5391f8de-de63-4db3-9e08-baaa2a380cfe",
+        "case_observed": "60772a97-92eb-4dbe-a813-6a5293be82f9",
+        "accs_procedural_skill": "eed0e8dc-075d-4661-aea5-2c3238af4c5b",
+        "reflection": "610b5c60-99ac-4902-9407-22974d6a5799",
+    },
+    "DOPS_ACCS_2021": {
+        "date_of_encounter": "startDate",
+        "end_date": "endDate",
+        "placement": "286d64f5-2aa0-41eb-aba6-a7bc523f133c",
+        "date_of_event": "5391f8de-de63-4db3-9e08-baaa2a380cfe",
+        "case_observed": "60772a97-92eb-4dbe-a813-6a5293be82f9",
+        "accs_procedural_skill": "797b9ed6-59e0-4900-9e0c-237b5d3d2925",
+        "reflection": "610b5c60-99ac-4902-9407-22974d6a5799",
+    },
     "MINI_CEX": {
         "date_of_encounter": "startDate",
         "end_date": "endDate",
@@ -515,6 +533,22 @@ FORM_FIELD_MAP = {
         "intermediate_procedural_skill": "31bd55b7-0e32-4918-8cc0-4ba33af83772",
         "accs_procedural_skill": "eed0e8dc-075d-4661-aea5-2c3238af4c5b",
         "age_of_patient": "ca4f531c-ea4b-4587-a964-ee471abf1193",
+        "reflective_comments": "f4557928-23fa-40b0-9f14-9357f5e7e1f3",
+    },
+    "PROCEDURAL_LOG_ACCS": {
+        "date_occurred_on": "startDate",
+        "date_of_activity": "8f76bc6b-68b7-4654-9116-75e421fceccd",
+        "end_date": "endDate",
+        "accs_procedural_skill": "eed0e8dc-075d-4661-aea5-2c3238af4c5b",
+        "brief_description": "b05a93fc-f9cd-42ea-aec4-e70060ec3b9c",
+        "reflective_comments": "f4557928-23fa-40b0-9f14-9357f5e7e1f3",
+    },
+    "PROCEDURAL_LOG_ACCS_2021": {
+        "date_occurred_on": "startDate",
+        "date_of_activity": "8f76bc6b-68b7-4654-9116-75e421fceccd",
+        "end_date": "endDate",
+        "accs_procedural_skill": "797b9ed6-59e0-4900-9e0c-237b5d3d2925",
+        "brief_description": "b05a93fc-f9cd-42ea-aec4-e70060ec3b9c",
         "reflective_comments": "f4557928-23fa-40b0-9f14-9357f5e7e1f3",
     },
     "SDL": {
@@ -1162,6 +1196,20 @@ FORM_UUIDS = {
     # ─── Utility form types (not portfolio evidence) ─────────────────────────
     "ADD_POST":           "c8049d8b-11f7-4bad-ac6c-c0b3c9ded1bb",
     "ADD_SUPERVISOR":     "87205ea8-ee22-4555-8e30-3a5ffc8b0bd2",
+    # ─── ACCS / Intermediate specialist forms (live read-only scrape 2026-06-03)
+    "DOPS_ACCS":              "fea13c0a-4027-410a-a8cd-f66f526cfde6",
+    "DOPS_ACCS_2021":         "7b475751-1e7d-47e2-bd72-9bee4b99d7bb",
+    "PROCEDURAL_LOG_ACCS":    "d13ccff4-4aac-495c-ae2f-aca1056c5d15",
+    "PROCEDURAL_LOG_ACCS_2021": "da35b64b-951c-47de-9d93-f3ca26097963",
+    "ASAT":                   "ed5c4835-644c-45d9-b714-b133e951f0f7",
+    "EPA1":                   "eabcb525-f333-4a4e-888f-28bef609785f",
+    "EPA2":                   "b385d12b-9dcb-4ff1-8d6f-91e68f46ee0c",
+    "HALO_ICM":               "21c38d4f-d3ca-4888-975f-0493ed55268d",
+    "HALO_PROCEDURAL_SEDATION": "bfe89344-f6ec-4314-af63-ea00a4609a67",
+    "IAC":                    "67c11970-9683-47f6-aa40-10970277c46a",
+    "MCR_MTR_ACCS":           "ecb9954b-6c21-4b19-8fe9-9d57102a2fd5",
+    "ACCS_PROGRESS":          "9c09af89-18a8-4424-87ce-d7335e31f788",
+    "INTERMEDIATE_PROGRESS":  "b703a117-0513-4de2-adea-4e05aebed2d6",
     "HIGHER_PROG":        "c19ca7c4-54ba-4816-b292-8bce1af4a62f",
     "ABSENCE":            "9feb8df3-1c70-4237-bf77-c6520e43c9c2",
     "CCT":                "9425aea9-1fb9-4230-b2a3-ec1712599caa",
@@ -1199,6 +1247,8 @@ from dops_filing import normalise_dops_fields
 
 FORM_FIELD_NORMALISERS = {
     "DOPS": normalise_dops_fields,
+    "DOPS_ACCS": normalise_dops_fields,
+    "DOPS_ACCS_2021": normalise_dops_fields,
 }
 
 

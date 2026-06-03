@@ -80,6 +80,25 @@ FORM_SCHEMAS = {
         ]
     },
 
+    "DOPS_ACCS": {
+        "name": "Direct Observation of Procedural Skills - ACCS",
+        "filer_available": True,
+        "fields": [
+            {"key": "date_of_encounter",    "label": "Date",                    "type": "date",     "required": True},
+            {"key": "placement",            "label": "Placement",               "type": "dropdown", "required": True,
+             "options": ["Emergency Medicine", "Anaesthetics", "Critical Care", "Internal Medicine", "Paediatric"]},
+            {"key": "date_of_event",        "label": "Date of event",           "type": "date",     "required": True},
+            {"key": "case_observed",        "label": "Case observed",           "type": "text",     "required": True},
+            {"key": "accs_procedural_skill", "label": "ACCS Procedural Skill",  "type": "dropdown", "required": True,
+             "options": ["Pleural aspiration of air or fluid", "Chest drain: Seldinger technique",
+                         "Chest drain: open technique", "Vascular access in emergency",
+                         "Lumbar puncture", "Procedural sedation", "Other"]},
+            {"key": "reflection",           "label": "Reflection of event",     "type": "text",     "required": False},
+            {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)", "type": "kc_tick",  "required": False},
+            {"key": "key_capabilities",     "label": "Key Capabilities",        "type": "kc_tick",  "required": False},
+        ]
+    },
+
     "MINI_CEX": {
         "name": "Mini-Clinical Evaluation Exercise",
         "filer_available": True,
@@ -316,6 +335,22 @@ FORM_SCHEMAS = {
             "Resuscitative hysterotomy", "Fracture/dislocation manipulation",
             "Large joint aspiration", "PoCUS-ELS", "PoCUS-Shock", "PoCUS-AAA",
             "PoCUS-eFAST/FAFF", "Other",
+        ],
+    },
+
+    "PROCEDURAL_LOG_ACCS": {
+        "name": "Procedural Log - ACCS",
+        "filer_available": True,
+        "fields": [
+            {"key": "date_of_activity",     "label": "Date of Activity",            "type": "date",     "required": True},
+            {"key": "accs_procedural_skill", "label": "ACCS Procedural Skill",       "type": "dropdown", "required": True,
+             "options": ["Pleural aspiration of air or fluid", "Chest drain: Seldinger technique",
+                         "Chest drain: open technique", "Vascular access in emergency",
+                         "Lumbar puncture", "Procedural sedation", "Other"]},
+            {"key": "brief_description",    "label": "Brief description of Procedure", "type": "text",  "required": True},
+            {"key": "reflective_comments",  "label": "Reflective comments on procedure", "type": "text", "required": True},
+            {"key": "curriculum_links",     "label": "Curriculum Links (SLOs)",     "type": "kc_tick",  "required": False},
+            {"key": "key_capabilities",     "label": "Key Capabilities",            "type": "kc_tick",  "required": False},
         ],
     },
 

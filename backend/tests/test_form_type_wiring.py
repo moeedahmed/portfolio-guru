@@ -101,8 +101,6 @@ def test_suppressed_and_unsupported_catalogue_entries_are_not_user_selectable():
         "ASAT",
         "EPA1",
         "EPA2",
-        "DOPS_ACCS",
-        "PROCEDURAL_LOG_ACCS",
         "ACCS_PROGRESS",
         "INTERMEDIATE_PROGRESS",
         "MCR_MTR_ACCS",
@@ -120,6 +118,32 @@ def test_suppressed_and_unsupported_catalogue_entries_are_not_user_selectable():
     } <= set(KAIZEN_CATALOGUE_STATUS)
     assert statuses <= hidden_statuses
     assert selectable.isdisjoint(KAIZEN_CATALOGUE_STATUS)
+
+
+def test_accs_dops_and_procedural_log_are_user_selectable_with_2021_variants():
+    from bot import TRAINING_LEVEL_FORMS, _filter_forms_by_curriculum
+    from extractor import FORM_UUIDS, schema_form_type
+    from filer_router import PLATFORM_REGISTRY
+    from form_schemas import FORM_SCHEMAS
+    from kaizen_form_filer import FORM_FIELD_MAP
+
+    accs_forms = set(TRAINING_LEVEL_FORMS["ACCS"])
+    assert {"DOPS_ACCS", "PROCEDURAL_LOG_ACCS"} <= accs_forms
+
+    accs_2021 = set(_filter_forms_by_curriculum(accs_forms, "2021"))
+    assert {"DOPS_ACCS_2021", "PROCEDURAL_LOG_ACCS_2021"} <= accs_2021
+
+    supported = set(PLATFORM_REGISTRY["kaizen"]["supported_forms"])
+    for form_type in {
+        "DOPS_ACCS",
+        "DOPS_ACCS_2021",
+        "PROCEDURAL_LOG_ACCS",
+        "PROCEDURAL_LOG_ACCS_2021",
+    }:
+        assert form_type in FORM_UUIDS
+        assert form_type in FORM_FIELD_MAP
+        assert form_type in supported
+        assert schema_form_type(form_type) in FORM_SCHEMAS
 
 
 def test_esle_user_facing_aliases_route_to_assessed_kaizen_form():

@@ -43,6 +43,9 @@ PLATFORM_REGISTRY = {
             "US_CASE_2021", "COMPLAINT_2021", "SERIOUS_INC_2021",
             "EDU_ACT_2021", "FORMAL_COURSE_2021", "REFLECT_LOG_2021",
             "TEACH_OBS_2021", "TEACH_CONFID_2021", "AUDIT_2021",
+            # ACCS-specific deterministic forms
+            "DOPS_ACCS", "DOPS_ACCS_2021",
+            "PROCEDURAL_LOG_ACCS", "PROCEDURAL_LOG_ACCS_2021",
             # Management section
             "MGMT_ROTA", "MGMT_RISK", "MGMT_RECRUIT", "MGMT_PROJECT",
             "MGMT_RISK_PROC", "MGMT_TRAINING_EVT", "MGMT_GUIDELINE",

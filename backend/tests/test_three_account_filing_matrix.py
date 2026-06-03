@@ -255,8 +255,6 @@ def test_accs_specific_visible_forms_are_recorded_but_not_clickable():
         "ASAT",
         "EPA1",
         "EPA2",
-        "DOPS_ACCS",
-        "PROCEDURAL_LOG_ACCS",
         "ACCS_PROGRESS",
         "MCR_MTR_ACCS",
         "HALO_ICM",
@@ -274,6 +272,9 @@ def test_accs_specific_visible_forms_are_recorded_but_not_clickable():
         if KAIZEN_CATALOGUE_STATUS[form]["status"] != "unsupported-pending-schema"
     } == set()
     assert accs_pending.isdisjoint(clickable)
+
+    assert {"DOPS_ACCS", "PROCEDURAL_LOG_ACCS"} <= clickable
+    assert {"DOPS_ACCS", "PROCEDURAL_LOG_ACCS"}.isdisjoint(KAIZEN_CATALOGUE_STATUS)
 
 
 def test_intermediate_progression_is_recorded_but_not_clickable():

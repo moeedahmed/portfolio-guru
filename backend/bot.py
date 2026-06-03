@@ -1365,18 +1365,6 @@ KAIZEN_CATALOGUE_STATUS = {
         "status": "unsupported-pending-schema",
         "reason": "ACCS selector UUID known; no FORM_SCHEMAS/FORM_FIELD_MAP user-facing support.",
     },
-    "DOPS_ACCS": {
-        "label": "ACCS DOPS 2025",
-        "profiles": ["ACCS"],
-        "status": "unsupported-pending-schema",
-        "reason": "ACCS-specific selector UUID known; deterministic schema/field map not built.",
-    },
-    "PROCEDURAL_LOG_ACCS": {
-        "label": "ACCS Procedural Log 2025",
-        "profiles": ["ACCS"],
-        "status": "unsupported-pending-schema",
-        "reason": "ACCS-specific selector UUID known; deterministic schema/field map not built.",
-    },
     "ACCS_PROGRESS": {
         "label": "ACCS Progression",
         "profiles": ["ACCS"],
@@ -1464,6 +1452,7 @@ KAIZEN_CATALOGUE_STATUS = {
 }
 
 TRAINING_LEVEL_FORMS["ACCS"] = list(TRAINING_LEVEL_FORMS["ST3"])
+TRAINING_LEVEL_FORMS["ACCS"].extend(["DOPS_ACCS", "PROCEDURAL_LOG_ACCS"])
 TRAINING_LEVEL_FORMS["INTERMEDIATE"] = list(TRAINING_LEVEL_FORMS["ST3"])
 TRAINING_LEVEL_FORMS["HIGHER"] = TRAINING_LEVEL_FORMS["ST6"]
 
@@ -1777,10 +1766,10 @@ def _profile_blocked_fallback_recommendations(original_recs, allowed, excluded):
 
 # Category groupings for "See all forms" navigation
 FORM_CATEGORIES = {
-    "🩺 Clinical": ["CBD", "DOPS", "MINI_CEX", "ACAT", "LAT", "LAT_2021", "ACAF", "STAT", "MSF", "QIAT", "QIAT_2021", "JCF", "JCF_2021", "ESLE_ASSESS", "AUDIT", "AUDIT_2021"],
+    "🩺 Clinical": ["CBD", "DOPS", "DOPS_ACCS", "MINI_CEX", "ACAT", "LAT", "LAT_2021", "ACAF", "STAT", "MSF", "QIAT", "QIAT_2021", "JCF", "JCF_2021", "ESLE_ASSESS", "AUDIT", "AUDIT_2021"],
     "📝 Reflective": ["REFLECT_LOG", "REFLECT_LOG_2021", "COMPLAINT", "SERIOUS_INC", "CRIT_INCIDENT", "PDP", "APPRAISAL"],
     "👨‍🏫 Teaching": ["TEACH", "TEACH_OBS", "TEACH_CONFID", "SDL", "EDU_ACT", "EDU_MEETING", "EDU_MEETING_SUPP", "FORMAL_COURSE"],
-    "🔬 Procedural": ["PROC_LOG", "US_CASE"],
+    "🔬 Procedural": ["PROC_LOG", "PROCEDURAL_LOG_ACCS", "US_CASE"],
     "🔍 Quality": ["RESEARCH", "CLIN_GOV", "COST_IMPROVE", "EQUIP_SERVICE", "BUSINESS_CASE"],
     "🏛️ Management": ["MGMT_ROTA", "MGMT_RISK", "MGMT_RECRUIT", "MGMT_PROJECT", "MGMT_RISK_PROC", "MGMT_TRAINING_EVT", "MGMT_GUIDELINE", "MGMT_INFO", "MGMT_INDUCTION", "MGMT_EXPERIENCE", "MGMT_REPORT", "MGMT_COMPLAINT"],
 }
@@ -2176,10 +2165,10 @@ def _build_welcome_keyboard(connected: bool = False):
 
 
 FORM_EMOJIS = {
-    "CBD": "🩺", "DOPS": "🔪", "MINI_CEX": "🏥", "ACAT": "📋",
+    "CBD": "🩺", "DOPS": "🔪", "DOPS_ACCS": "🔪", "MINI_CEX": "🏥", "ACAT": "📋",
     "MSF": "👥", "QIAT": "🎓", "LAT": "📖", "JCF": "💼",
     "ACAF": "✅", "STAT": "📊",
-    "TEACH": "👨‍🏫", "PROC_LOG": "🔬", "SDL": "📖", "US_CASE": "🔊",
+    "TEACH": "👨‍🏫", "PROC_LOG": "🔬", "PROCEDURAL_LOG_ACCS": "🔬", "SDL": "📖", "US_CASE": "🔊",
     "COMPLAINT": "📝", "SERIOUS_INC": "🚨",
     "EDU_ACT": "🎓", "FORMAL_COURSE": "📋",
     # Newly visible forms
@@ -2197,6 +2186,7 @@ FORM_BUTTON_LABELS = {
     # Core WPBAs — official RCEM codes
     "CBD": "CBD",
     "DOPS": "DOPS",
+    "DOPS_ACCS": "DOPS ACCS",
     "MINI_CEX": "Mini-CEX",
     "ACAT": "ACAT",
     "ACAF": "ACAF",
@@ -2214,6 +2204,7 @@ FORM_BUTTON_LABELS = {
     # Procedures & Clinical
     "DOPS_PROC": "DOPS Procedure",
     "PROC_LOG": "Procedural Log",
+    "PROCEDURAL_LOG_ACCS": "Procedural Log ACCS",
     "US_CASE": "Ultrasound Case",
     # Reflection & Incidents
     "SERIOUS_INC": "Serious Incident",
@@ -2386,6 +2377,8 @@ _2021_CURRICULUM_FORM_ALIASES = {
     # User-facing assessed ESLE is named ESLE_ASSESS in Portfolio Guru, but the
     # Kaizen 2021 curriculum form is keyed as ESLE_2021.
     "ESLE_ASSESS": "ESLE_2021",
+    "DOPS_ACCS": "DOPS_ACCS_2021",
+    "PROCEDURAL_LOG_ACCS": "PROCEDURAL_LOG_ACCS_2021",
 }
 
 

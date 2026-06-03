@@ -224,6 +224,20 @@ FORM_UUIDS = {
     "FORMAL_COURSE": "c7cd9a95-e2aa-4f61-a441-b663f3c933c6",
     "REFLECT_LOG":   "32d0fcb9-05d0-4d6d-b877-ebd5daf0b4e9",
     "TEACH_OBS":     "30668ad8-e1db-4a27-bb2d-3e395e6acfcf",
+    # ─── ACCS / Intermediate specialist forms (live read-only scrape 2026-06-03)
+    "DOPS_ACCS":              "fea13c0a-4027-410a-a8cd-f66f526cfde6",
+    "DOPS_ACCS_2021":         "7b475751-1e7d-47e2-bd72-9bee4b99d7bb",
+    "PROCEDURAL_LOG_ACCS":    "d13ccff4-4aac-495c-ae2f-aca1056c5d15",
+    "PROCEDURAL_LOG_ACCS_2021": "da35b64b-951c-47de-9d93-f3ca26097963",
+    "ASAT":                   "ed5c4835-644c-45d9-b714-b133e951f0f7",
+    "EPA1":                   "eabcb525-f333-4a4e-888f-28bef609785f",
+    "EPA2":                   "b385d12b-9dcb-4ff1-8d6f-91e68f46ee0c",
+    "HALO_ICM":               "21c38d4f-d3ca-4888-975f-0493ed55268d",
+    "HALO_PROCEDURAL_SEDATION": "bfe89344-f6ec-4314-af63-ea00a4609a67",
+    "IAC":                    "67c11970-9683-47f6-aa40-10970277c46a",
+    "MCR_MTR_ACCS":           "ecb9954b-6c21-4b19-8fe9-9d57102a2fd5",
+    "ACCS_PROGRESS":          "9c09af89-18a8-4424-87ce-d7335e31f788",
+    "INTERMEDIATE_PROGRESS":  "b703a117-0513-4de2-adea-4e05aebed2d6",
     # ─── 2021 versions ────────────────────────────────────────────────────
     "CBD_2021":           "310b903a-8c97-44e0-8ec3-4bf692b33441",
     "DOPS_2021":          "27a300c6-245a-4fed-943e-fe2976686d0d",
@@ -295,6 +309,8 @@ FORM_SCHEMA_ALIASES = {
     # The 2021 curriculum form is keyed as ESLE_2021 in Kaizen, but it uses the
     # same assessed-ESLE draft schema as the current ESLE_ASSESS flow.
     "ESLE_2021": "ESLE_ASSESS",
+    "DOPS_ACCS_2021": "DOPS_ACCS",
+    "PROCEDURAL_LOG_ACCS_2021": "PROCEDURAL_LOG_ACCS",
 }
 
 
