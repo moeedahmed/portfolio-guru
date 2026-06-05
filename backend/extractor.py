@@ -871,14 +871,74 @@ Reply with ONE word only from the list."""
     return "ambiguous"
 
 
+def _looks_like_standalone_form_choice(text_lower: str) -> bool:
+    if not text_lower:
+        return False
+    has_question = "?" in text_lower or bool(
+        re.match(r"^(what|which|can|could|should|is|are|do|does|will|how)\b", text_lower)
+    )
+    has_form_choice = any(
+        phrase in text_lower
+        for phrase in (
+            "what form",
+            "which form",
+            "best form",
+            "form is best",
+            "form would be best",
+            "best for",
+            "right form",
+            "recommend",
+            "suggest",
+            "what should i use",
+            "teaching assessment",
+        )
+    )
+    activity_terms = (
+        "procedural",
+        "sedation",
+        "septic",
+        "sepsis",
+        "shock",
+        "child",
+        "paediatric",
+        "pediatric",
+        "wheeze",
+        "asthma",
+        "teaching",
+        "presentation",
+    )
+    return has_question and has_form_choice and any(term in text_lower for term in activity_terms)
+
+
+def _looks_like_standalone_capability_question(text_lower: str) -> bool:
+    if not text_lower:
+        return False
+    if text_lower in {"help", "what can you do", "what can you do?", "features"}:
+        return True
+    return bool(
+        re.match(r"^(what|how|can|could|do|does)\b", text_lower)
+        and any(
+            phrase in text_lower
+            for phrase in (
+                "what can you do",
+                "how does this work",
+                "how do you work",
+                "can i send",
+                "voice note",
+                "photo",
+                "document",
+                "pdf",
+            )
+        )
+    )
+
+
 async def answer_question(text: str, case_context: str = "") -> str:
     """Generate a helpful answer about the bot's capabilities.
 
     When case_context is provided and the question relates to form types,
     the answer is grounded in that specific case rather than being generic.
     """
-    client = _get_client()
-
     # If the user has an active case and is asking about forms/suggestions,
     # give a case-specific answer instead of a generic list
     if case_context:
@@ -905,8 +965,44 @@ Be concise. For each suggestion give the form name and a one-line reason why it 
             text = await _generate(prompt)
             return sanitize_internal_form_codes(text.strip())
 
-    # Check if user is asking about specific form types or capabilities
+    # Check deterministic standalone product/help questions before broad form support.
     text_lower = text.lower()
+    if _looks_like_standalone_capability_question(text_lower):
+        return sanitize_internal_form_codes(
+            "🩺 I turn anonymised case notes, voice notes, photos, or documents into RCEM portfolio drafts. I can suggest the best form, show you the draft first, and save it to Kaizen as a draft after you approve."
+        )
+
+    # Check if user is asking about a standalone activity-to-form choice.
+    # These should recommend a form, not dump the supported-forms catalogue.
+    if _looks_like_standalone_form_choice(text_lower):
+        if any(term in text_lower for term in ("procedural sedation", "sedation", "procedure", "procedural")):
+            return (
+                "🩺 For procedural sedation, use DOPS (Direct Observation of Procedural Skills) if someone observed you performing or supervising the sedation. "
+                "Add Procedural Log as a supporting record if you keep a procedural count. "
+                "Send the case details and I’ll draft it safely."
+            )
+        if any(term in text_lower for term in ("septic shock", "sepsis", "resus", "resuscitation")):
+            return (
+                "🩺 For a septic shock case, use CBD if the focus is clinical reasoning and management. "
+                "Mini-CEX or ACAT may fit better if the assessment happened under direct observation. "
+                "Send the case details and I’ll recommend the best fit."
+            )
+        if any(term in text_lower for term in ("child", "paediatric", "pediatric", "wheeze", "asthma")):
+            return (
+                "🩺 For a child with wheeze, CBD usually fits reasoning and management. "
+                "Mini-CEX fits if someone directly observed your assessment. "
+                "Send the case details and I’ll recommend the best fit."
+            )
+        if any(term in text_lower for term in ("teaching", "teach", "presentation")):
+            return (
+                "🎓 For teaching, use Teaching Session for delivered teaching, or STAT if the teaching itself was formally assessed. "
+                "Send the session details and feedback, and I’ll draft the right form."
+            )
+        return (
+            "🩺 Tell me the activity in one or two lines and I’ll recommend the best RCEM form before drafting."
+        )
+
+    # Check if user is asking about specific form types or capabilities
     form_keywords = ["form", "ticket", "type", "mapped", "support", "management", "cbd", "dops", "lat", "qiat", "msf", "available"]
     is_asking_about_forms = any(kw in text_lower for kw in form_keywords)
 
@@ -941,13 +1037,13 @@ Be concise. For each suggestion give the form name and a one-line reason why it 
                     f"✅ Yes, {form_code} ({form_name}) is fully supported with auto-filing to Kaizen."
                 )
 
-        # General question about what's supported
-        forms_text = "\n".join([f"• {code} — {name}" for code, name in form_list[:10]])
-        forms_text += f"\n• ...and {len(form_list) - 10} more"
+        # General question about what's supported. Keep the examples short:
+        # the product truth is 45 forms, not this local alias preview list.
+        examples = ", ".join(name for _, name in form_list[:5])
 
         return sanitize_internal_form_codes(f"""📋 I support 45 RCEM forms across assessments, reflections, teaching, management, audit and research.
 
-{forms_text}
+Examples include {examples}.
 
 Supported forms are auto-filled with structured data and saved as drafts in Kaizen after you approve them.
 

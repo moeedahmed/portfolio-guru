@@ -1,5 +1,29 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-05 addendum — intelligence-layer question routing repair landed offline on
+> branch `feature/conversation-supervisor-20260605`.**
+> Scope: dogfood fix after random/product questions were being treated as case
+> material, creating stale `Draft now` paths and generic/long catalogue answers.
+>
+> Result:
+>
+> - Standalone product/help/form-choice/safety/random prompts now route before
+>   extraction or drafting, but after the existing settings/stats menu router.
+> - Stale `Draft now` callbacks now refuse to draft when no gathered case is
+>   present and clear stale gathering state.
+> - Obvious form-choice prompts now return brief recommendations instead of the
+>   supported-forms catalogue: procedural sedation -> DOPS / Procedural Log,
+>   septic shock -> CBD / Mini-CEX / ACAT, child wheeze -> CBD / Mini-CEX,
+>   teaching -> Teaching Session / STAT.
+> - Supported-forms copy stays concise: 45-form truth, five examples, no
+>   duplicated names, and no stale "...and 9 more" copy.
+>
+> Verification: focused routing/gathering/menu gate passed (`96 passed`), failed
+> full-suite menu regressions were fixed, and the full offline gate passed:
+> `1174 passed, 27 deselected`.
+>
+> Runtime state: ready for local bot restart/health check.
+>
 > **2026-06-05 addendum — conversation-supervisor slice landed offline on
 > branch `feature/conversation-supervisor-20260605`.**
 > Scope: consolidate fragmented gathering-mode decisioning into one

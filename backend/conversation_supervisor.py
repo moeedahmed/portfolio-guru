@@ -73,8 +73,11 @@ _CAPABILITY_PHRASES: frozenset[str] = frozenset(
 _SIDE_QUESTION_INTENTS: frozenset[ConversationalIntent] = frozenset(
     {
         ConversationalIntent.PORTFOLIO_QUESTION,
+        ConversationalIntent.HELP_OR_CAPABILITY,
+        ConversationalIntent.SAFETY_OR_MEDICAL_ADVICE,
         ConversationalIntent.ACCOUNT_OR_BILLING,
         ConversationalIntent.SETUP_OR_CREDENTIALS,
+        ConversationalIntent.OUT_OF_SCOPE,
     }
 )
 
@@ -136,7 +139,7 @@ async def decide_gathering_turn(
             intent=intent,
             add_to_case=False,
             reply=ChannelReply(
-                body=render_message(copy_key), continuation=continuation, actions=actions
+                body=render_message(copy_key), continuation=continuation
             ),
         )
 
@@ -154,7 +157,7 @@ async def decide_gathering_turn(
         kind=kind,
         intent=intent,
         add_to_case=False,
-        reply=ChannelReply(body=body, continuation=continuation, actions=actions),
+        reply=ChannelReply(body=body, continuation=continuation),
     )
 
 

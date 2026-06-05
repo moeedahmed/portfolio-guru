@@ -15,10 +15,13 @@ from enum import Enum
 class ConversationalIntent(str, Enum):
     NEW_CASE = "new_case"
     PORTFOLIO_QUESTION = "portfolio_question"
+    HELP_OR_CAPABILITY = "help_or_capability"
+    SAFETY_OR_MEDICAL_ADVICE = "safety_or_medical_advice"
     EDIT_DRAFT = "edit_draft"
     FILE_TO_KAIZEN = "file_to_kaizen"
     ACCOUNT_OR_BILLING = "account_or_billing"
     SETUP_OR_CREDENTIALS = "setup_or_credentials"
+    OUT_OF_SCOPE = "out_of_scope"
     UNKNOWN = "unknown"
 
 
@@ -92,6 +95,35 @@ PORTFOLIO_QUESTION_TERMS = (
     "eportfolio",
 )
 
+HELP_CAPABILITY_TERMS = (
+    "help",
+    "how does this work",
+    "what can you do",
+    "what do you do",
+    "features",
+    "upload",
+    "voice",
+    "voice note",
+    "photo",
+    "document",
+    "pdf",
+    "word document",
+    "style",
+    "writing style",
+    "tone",
+    "voice profile",
+)
+
+PROMPT_INJECTION_TERMS = (
+    "ignore previous",
+    "ignore all previous",
+    "system prompt",
+    "developer message",
+    "reveal your prompt",
+    "jailbreak",
+    "pretend you are",
+)
+
 EDIT_TERMS = (
     "make it",
     "rewrite",
@@ -153,6 +185,20 @@ SETUP_TERMS = (
     "reconnect",
 )
 
+SECURITY_TERMS = (
+    "secure",
+    "security",
+    "privacy",
+    "private",
+    "data",
+    "stored",
+    "store",
+    "encrypted",
+    "encryption",
+    "credential safety",
+    "safe with my login",
+)
+
 UNKNOWN_CLARIFICATION = (
     "I can help draft portfolio evidence, answer portfolio questions, edit a draft, "
     "or prepare a Kaizen draft. Which would you like to do?"
@@ -168,6 +214,20 @@ def route_message(message: str) -> RouterResult:
 
     form_type = _extract_form_type(text)
 
+    if _contains_any(text, PROMPT_INJECTION_TERMS):
+        return RouterResult(
+            intent=ConversationalIntent.OUT_OF_SCOPE,
+            confidence=0.94,
+            signals=_compact_signals(action="safe_redirect"),
+        )
+
+    if _contains_safety_medical_request(text):
+        return RouterResult(
+            intent=ConversationalIntent.SAFETY_OR_MEDICAL_ADVICE,
+            confidence=0.9,
+            signals=_compact_signals(action="medical_safety_redirect"),
+        )
+
     if _contains_any(text, SETUP_TERMS):
         return RouterResult(
             intent=ConversationalIntent.SETUP_OR_CREDENTIALS,
@@ -175,11 +235,25 @@ def route_message(message: str) -> RouterResult:
             signals=_compact_signals(action="setup_credentials"),
         )
 
+    if _looks_like_question(text) and _contains_any(text, SECURITY_TERMS):
+        return RouterResult(
+            intent=ConversationalIntent.SETUP_OR_CREDENTIALS,
+            confidence=0.86,
+            signals=_compact_signals(action="security_credentials"),
+        )
+
     if _contains_any(text, ACCOUNT_TERMS):
         return RouterResult(
             intent=ConversationalIntent.ACCOUNT_OR_BILLING,
             confidence=0.86,
             signals=_compact_signals(action="account_or_billing"),
+        )
+
+    if _looks_like_help_or_capability_question(text):
+        return RouterResult(
+            intent=ConversationalIntent.HELP_OR_CAPABILITY,
+            confidence=0.86,
+            signals=_compact_signals(action="answer_capability"),
         )
 
     if _contains_any(text, FILE_TERMS):
@@ -253,6 +327,37 @@ def _extract_edit_action(text: str) -> str:
 
 def _looks_like_portfolio_question(text: str) -> bool:
     return "?" in text and _contains_any(text, PORTFOLIO_QUESTION_TERMS)
+
+
+def _looks_like_help_or_capability_question(text: str) -> bool:
+    if text in {"help", "features"}:
+        return True
+    return _looks_like_question(text) and _contains_any(text, HELP_CAPABILITY_TERMS)
+
+
+def _contains_safety_medical_request(text: str) -> bool:
+    if _contains_any(
+        text,
+        (
+            "clinical advice",
+            "medical advice",
+            "should i treat",
+            "should i prescribe",
+            "what dose",
+            "is it safe",
+            "treatment advice",
+        ),
+    ):
+        return True
+    return _looks_like_question(text) and bool(
+        re.search(r"\b(diagnose|prescribe|treat|dose|safe)\b", text)
+    )
+
+
+def _looks_like_question(text: str) -> bool:
+    return "?" in text or bool(
+        re.match(r"^(what|which|how|why|when|where|who|can|could|do|does|is|are|will|should)\b", text)
+    )
 
 
 def _looks_like_case_description(text: str) -> bool:

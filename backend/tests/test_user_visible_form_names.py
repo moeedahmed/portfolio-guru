@@ -126,6 +126,47 @@ async def test_answer_question_form_count_matches_product_copy(monkeypatch):
     assert "45 RCEM forms" in answer
     assert "19 RCEM" not in answer
     assert "19 forms" not in answer
+    assert "and 9 more" not in answer
+    assert "Examples include" in answer
+    assert "Case-Based Discussion (Case-Based Discussion)" not in answer
+
+
+@pytest.mark.asyncio
+async def test_answer_question_capability_copy_is_short_and_deterministic(monkeypatch):
+    import extractor
+
+    monkeypatch.setattr(extractor, "_get_client", lambda: object())
+
+    answer = await extractor.answer_question("what can you do?")
+
+    assert answer.startswith("🩺")
+    assert "portfolio drafts" in answer
+    assert "Kaizen" in answer
+    assert len(answer) < 300
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("prompt", "expected"),
+    [
+        ("What form is best for doing procedural sedation?", "Direct Observation of Procedural Skills"),
+        ("Which form would be best for procedural sedation", "Direct Observation of Procedural Skills"),
+        ("Form is best for procedural sedation?", "Direct Observation of Procedural Skills"),
+        ("What form is best for a septic shock case?", "CBD"),
+        ("I saw a child with wheeze, what should I use?", "Mini-CEX"),
+        ("Can you write a teaching assessment?", "STAT"),
+    ],
+)
+async def test_answer_question_form_choice_recommends_form_not_catalogue(monkeypatch, prompt, expected):
+    import extractor
+
+    monkeypatch.setattr(extractor, "_get_client", lambda: object())
+
+    answer = await extractor.answer_question(prompt)
+
+    assert expected in answer
+    assert "45 RCEM forms" not in answer
+    assert "Examples include" not in answer
 
 
 @pytest.mark.asyncio

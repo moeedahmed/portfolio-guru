@@ -91,6 +91,7 @@ async def test_capability_decision_is_templated_and_carries_continuation():
     decision = await decide_gathering_turn("what can you do", answer_question=_unused_answer)
     assert decision.kind is GatheringTurnKind.ANSWER_CAPABILITY
     assert decision.add_to_case is False
+    assert decision.reply.actions == ()
     text = decision.reply.full_text()
     assert "Nothing goes to Kaizen until you approve it" in text
     assert "Back to your case" in text
@@ -105,6 +106,7 @@ async def test_side_question_uses_injected_grounded_answer():
     grounded.assert_awaited_once_with("Which form would this map to?")
     assert decision.kind is GatheringTurnKind.ANSWER_SIDE_QUESTION
     assert decision.add_to_case is False
+    assert decision.reply.actions == ()
     text = decision.reply.full_text()
     assert "That maps best to a CBD." in text
     assert "Back to your case" in text  # never strands the user outside filling

@@ -40,7 +40,7 @@ from kaizen_index import (
 from kaizen_sync import sync_kaizen_portfolio_index_for_user
 from bulk_filer import bulk_file
 from kaizen_unsigned_scraper import scrape_unsigned_tickets
-from conversational_router import route_message
+from conversational_router import ConversationalIntent, route_message
 from channel_actions import to_telegram_keyboard
 from conversation_supervisor import GatheringTurnKind, decide_gathering_turn
 from message_policy import render_message, style_grounded_answer
@@ -860,6 +860,100 @@ def _is_recent_filing_status_question(text: str) -> bool:
         or "were you" in lowered
         or "are you" in lowered
         or "stuck" in lowered
+    )
+
+
+_PRE_CAPTURE_ANSWER_INTENTS = frozenset(
+    {
+        ConversationalIntent.PORTFOLIO_QUESTION,
+        ConversationalIntent.HELP_OR_CAPABILITY,
+        ConversationalIntent.ACCOUNT_OR_BILLING,
+        ConversationalIntent.SETUP_OR_CREDENTIALS,
+    }
+)
+
+
+def _standalone_pre_capture_route(text: str) -> str | None:
+    """Route obvious non-case first turns before extraction/drafting."""
+    raw = (text or "").strip()
+    if not raw:
+        return None
+
+    lowered = raw.lower()
+    menu_commandish = any(
+        hint in lowered
+        for hint in (
+            "setting",
+            "settings",
+            "stat",
+            "stats",
+            "how many cases",
+            "how many this month",
+            "this month",
+            "usage",
+            "limit",
+            "show my",
+            "show me",
+            "open settings",
+        )
+    )
+    if menu_commandish:
+        return None
+
+    result = route_message(raw)
+    if result.intent in _PRE_CAPTURE_ANSWER_INTENTS:
+        return "answer"
+    if result.intent in {
+        ConversationalIntent.SAFETY_OR_MEDICAL_ADVICE,
+        ConversationalIntent.OUT_OF_SCOPE,
+    }:
+        return "safe_redirect"
+    if result.intent is ConversationalIntent.NEW_CASE:
+        return None
+
+    questionish = bool(
+        "?" in raw
+        or re.match(r"^(what|which|how|why|when|where|who|can|could|do|does|is|are|will|should)\b", lowered)
+    )
+    prompt_injectionish = bool(
+        re.search(r"\b(ignore previous|system prompt|developer message|jailbreak|reveal your prompt)\b", lowered)
+    )
+    clinical_hits = sum(
+        1
+        for keyword in (
+            "patient",
+            "presented",
+            "diagnosed",
+            "managed",
+            "treated",
+            "resus",
+            "chest pain",
+            "abdominal pain",
+            "fracture",
+            "procedure",
+            "supervisor",
+        )
+        if keyword in lowered
+    )
+    has_demographic = bool(re.search(r"\b\d{1,3}\s*([mf]|male|female)\b", lowered))
+
+    if prompt_injectionish:
+        return "safe_redirect"
+    if questionish:
+        return "answer"
+    if not clinical_hits and not has_demographic and len(raw.split()) <= 6:
+        return "safe_redirect"
+    return None
+
+
+def _standalone_safe_redirect_text(text: str) -> str:
+    lowered = (text or "").lower()
+    if re.search(r"\b(clinical advice|medical advice|what dose|prescribe|treat|diagnose|safe for)\b", lowered):
+        return style_grounded_answer(
+            "I can’t give clinical advice. I can help turn anonymised case notes into portfolio drafts, or answer admin questions about Kaizen and supported forms."
+        )
+    return style_grounded_answer(
+        "I can help with portfolio/admin work: send an anonymised case, ask about supported forms, or ask about Kaizen setup."
     )
 
 
@@ -7189,6 +7283,22 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 )
                 return ConversationHandler.END
 
+            pre_capture_route = _standalone_pre_capture_route(raw_text)
+            if pre_capture_route == "safe_redirect":
+                await update.message.reply_text(_standalone_safe_redirect_text(raw_text))
+                return ConversationHandler.END
+            if pre_capture_route == "answer":
+                try:
+                    answer = style_grounded_answer(await answer_question(raw_text))
+                    await update.message.reply_text(answer)
+                except Exception:
+                    await update.message.reply_text(
+                        style_grounded_answer(
+                            "I help draft portfolio evidence from anonymised text, voice, photos, or documents. Send a case when you want me to start."
+                        )
+                    )
+                return ConversationHandler.END
+
             if is_question_pattern and word_count < 15:
                 # Short question — answer directly without classify
                 intent = "question"
@@ -7524,6 +7634,19 @@ async def _finish_gathering_case(update: Update, context: ContextTypes.DEFAULT_T
 async def gather_done_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
+    if not _gathering_case_active(context):
+        _clear_gathering_case(context)
+        context.user_data.pop("gathering_msg_id", None)
+        context.user_data.pop("gathering_chat_id", None)
+        try:
+            await query.edit_message_text(
+                "⚠️ I do not have a case captured for that button. Send case details when you are ready to draft."
+            )
+        except Exception:
+            await update.effective_message.reply_text(
+                "⚠️ I do not have a case captured for that button. Send case details when you are ready to draft."
+            )
+        return ConversationHandler.END
     return await _finish_gathering_case(update, context)
 
 

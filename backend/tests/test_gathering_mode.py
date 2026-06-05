@@ -78,6 +78,7 @@ async def test_gathering_mode_answers_side_question_without_adding_case_detail(m
     assert "collect a case across several messages" in answered
     assert "Nothing goes to Kaizen until you approve it" in answered
     assert "Back to your case" in answered  # continuation keeps user in the filling flow
+    assert sim.get_last_buttons() == []
     lowered = answered.lower()
     assert "dogfood" not in lowered
     assert "vnext" not in lowered
@@ -103,6 +104,7 @@ async def test_gathering_mode_portfolio_question_uses_grounded_answer(monkeypatc
     answered = sim.messages_sent[-1][1]
     assert "This fits a CBD" in answered
     assert "Back to your case" in answered  # continuation returns the user to filling
+    assert sim.get_last_buttons() == []
 
 
 @pytest.mark.asyncio
@@ -150,6 +152,52 @@ async def test_gathering_reply_offers_done_button(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_capability_question_does_not_start_gathering_or_show_draft_button(monkeypatch):
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_text_update("what can you do?")
+
+    grounded = AsyncMock(return_value="I can draft RCEM portfolio evidence from anonymised notes.")
+    process_case = AsyncMock(return_value=AWAIT_FORM_CHOICE)
+    with patch("bot.has_credentials", return_value=True), \
+         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 0, 10, "free"))), \
+         patch("bot.answer_question", new=grounded), \
+         patch("bot._process_case_text", new=process_case):
+        result = await handle_case_input(update, context)
+
+    assert result == bot.ConversationHandler.END
+    grounded.assert_awaited_once()
+    process_case.assert_not_awaited()
+    assert "gathering_case" not in context.user_data
+    assert sim.get_last_buttons() == []
+    assert "I can draft RCEM portfolio evidence" in sim.get_last_text()
+
+
+@pytest.mark.asyncio
+async def test_form_choice_question_does_not_start_gathering_or_show_draft_button(monkeypatch):
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_text_update("What form is best for doing procedural sedation?")
+
+    process_case = AsyncMock(return_value=AWAIT_FORM_CHOICE)
+    with patch("bot.has_credentials", return_value=True), \
+         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 0, 10, "free"))), \
+         patch("bot._process_case_text", new=process_case):
+        result = await handle_case_input(update, context)
+
+    assert result == bot.ConversationHandler.END
+    process_case.assert_not_awaited()
+    assert "gathering_case" not in context.user_data
+    assert sim.get_last_buttons() == []
+    answer = sim.get_last_text()
+    assert "Direct Observation of Procedural Skills" in answer
+    assert "Procedural Log" in answer
+    assert "I support 45 RCEM forms" not in answer
+
+
+@pytest.mark.asyncio
 async def test_gathering_cancel_button_clears_case(monkeypatch):
     monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
     sim = BotSimulator()
@@ -186,3 +234,25 @@ async def test_gather_done_callback_finishes_case(monkeypatch):
     process_case.assert_awaited_once()
     assert "gathering_case" not in context.user_data
     update.callback_query.answer.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_stale_gather_done_callback_does_not_draft(monkeypatch):
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["gathering_msg_id"] = 123
+    context.user_data["gathering_chat_id"] = 456
+    update = sim._make_callback_update("GATHER|done")
+
+    process_case = AsyncMock(return_value=AWAIT_FORM_CHOICE)
+    with patch("bot._process_case_text", new=process_case):
+        result = await gather_done_callback(update, context)
+
+    assert result == bot.ConversationHandler.END
+    process_case.assert_not_awaited()
+    assert "gathering_case" not in context.user_data
+    assert "gathering_msg_id" not in context.user_data
+    assert "gathering_chat_id" not in context.user_data
+    update.callback_query.answer.assert_awaited()
+    assert "do not have a case captured" in sim.get_last_text()

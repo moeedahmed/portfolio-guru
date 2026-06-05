@@ -189,7 +189,7 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
     "gathering_continuation": MessageTemplate(
         key="gathering_continuation",
         message_class=MessageClass.FIXED,
-        text="💬 Back to your case — add more detail, or choose Draft now when you’re ready.",
+        text="💬 Back to your case — add more detail when you’re ready.",
     ),
 }
 
