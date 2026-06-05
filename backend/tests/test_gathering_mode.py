@@ -256,3 +256,50 @@ async def test_stale_gather_done_callback_does_not_draft(monkeypatch):
     assert "gathering_chat_id" not in context.user_data
     update.callback_query.answer.assert_awaited()
     assert "do not have a case captured" in sim.get_last_text()
+
+
+@pytest.mark.asyncio
+async def test_second_text_addition_keeps_both_buttons(monkeypatch):
+    """Regression: adding text during AWAIT_GATHERING must keep Draft Now + Cancel."""
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+    bot._append_gathering_case(context, _FIRST_CASE, "text")
+
+    update = sim._make_text_update("I also performed a 12-lead ECG and arranged urgent cardiology review.")
+
+    result = await handle_gathering_input(update, context)
+
+    assert result == AWAIT_GATHERING
+    assert "Captured" in sim.get_last_text()
+    assert sim.get_last_buttons() == [
+        ("✅ Draft now", "GATHER|done"),
+        ("❌ Cancel", "ACTION|cancel"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_gathering_prompt_idempotent_across_repeated_additions(monkeypatch):
+    """Every new text addition must produce the same two-button surface — idempotency."""
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+    bot._append_gathering_case(context, _FIRST_CASE, "text")
+
+    additions = [
+        "I performed a 12-lead ECG and arranged urgent cardiology review.",
+        "The patient was haemodynamically stable throughout.",
+        "Reflection: I should escalate high-risk ACS cases earlier in future.",
+    ]
+    expected_buttons = [
+        ("✅ Draft now", "GATHER|done"),
+        ("❌ Cancel", "ACTION|cancel"),
+    ]
+    for text in additions:
+        sim.clear_messages()
+        update = sim._make_text_update(text)
+        result = await handle_gathering_input(update, context)
+        assert result == AWAIT_GATHERING, f"Expected AWAIT_GATHERING after: {text!r}"
+        assert sim.get_last_buttons() == expected_buttons, (
+            f"Both buttons missing after addition: {text!r}"
+        )

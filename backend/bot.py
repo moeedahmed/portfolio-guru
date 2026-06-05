@@ -7681,7 +7681,7 @@ async def handle_gathering_input(update: Update, context: ContextTypes.DEFAULT_T
 
     _append_gathering_case(context, raw_text, "text")
     await _delete_previous_gathering_message(context)
-    gathering_msg = await update.message.reply_text(reply.full_text(), reply_markup=markup)
+    gathering_msg = await update.message.reply_text(reply.full_text(), reply_markup=_gathering_done_keyboard())
     context.user_data["gathering_msg_id"] = gathering_msg.message_id
     context.user_data["gathering_chat_id"] = gathering_msg.chat_id
     return AWAIT_GATHERING
