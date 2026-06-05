@@ -26,6 +26,10 @@ Portfolio Guru uses five testing layers, and every change must preserve all of t
 
 `backend/tests/test_telegram_qa_offline_transcript.py` runs the anonymised Haris/Sana golden case pack through the same offline PTB lane and writes JSON + Markdown transcripts under `.artifacts/telegram-qa-transcript/` by default. The pack now covers text plus synthetic photo, voice, document/PDF, and mixed photo+text inputs. Use it when you need to review bot suggestions, draft previews, inline buttons, selected form, source handling, and workflow failures without asking Moeed for screenshots or sending live Telegram messages.
 
+## Layer 5B — Offline Weird Prompt QA
+
+`backend/tests/test_weird_prompt_qa_offline.py` runs product-help, safety, prompt-injection, settings/stats, random, and form-choice prompts through the real `handle_case_input` path with `BotSimulator`. It writes a Markdown + JSON report under `.artifacts/weird-prompt-qa/` and fails if a non-case prompt enters case processing, creates gathering state, or shows `Draft now`. Use this before asking Moeed to manually retest strange bot responses.
+
 ## Layer 6 — Live Telegram
 
 `backend/tests/test_e2e_live.py` sends real messages to the real bot via Telethon personal account. Marked `@pytest.mark.live` and skipped unless `TELETHON_SESSION` is set. Manual trigger only, never in CI: `pytest -m live`.
@@ -45,6 +49,8 @@ Run `cd backend && venv/bin/python3 -m pytest tests/ -v --ignore=tests/test_e2e.
 Run `cd backend && venv/bin/python3 -m pytest tests/ -v -m e2e` for offline E2E tests only.
 
 Run `cd backend && venv/bin/python3 -m pytest tests/test_telegram_qa_offline_transcript.py -q` to generate the reusable Haris/Sana offline transcript.
+
+Run `bash scripts/weird_prompt_qa.sh` to generate the weird-prompt QA report without touching live Telegram.
 
 Run `cd backend && venv/bin/python3 -m pytest tests/ -v -m live` for live Telegram tests (manual only, requires `TELETHON_SESSION`).
 

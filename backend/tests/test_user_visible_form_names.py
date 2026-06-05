@@ -146,6 +146,33 @@ async def test_answer_question_capability_copy_is_short_and_deterministic(monkey
 
 
 @pytest.mark.asyncio
+async def test_answer_question_style_copy_is_not_marketing_slop(monkeypatch):
+    import extractor
+
+    monkeypatch.setattr(extractor, "_get_client", lambda: object())
+
+    answer = await extractor.answer_question("Can you make it sound less generic?")
+
+    assert answer.startswith("🩺")
+    assert "portfolio wording" in answer
+    assert "supervisor spammed" not in answer
+    assert "lock it in" not in answer
+
+
+@pytest.mark.asyncio
+async def test_answer_question_pricing_copy_is_not_free_hallucination(monkeypatch):
+    import extractor
+
+    monkeypatch.setattr(extractor, "_get_client", lambda: object())
+
+    answer = await extractor.answer_question("How much does this cost?")
+
+    assert "5 cases" in answer
+    assert "£9.99/month" in answer
+    assert "completely free" not in answer.lower()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("prompt", "expected"),
     [

@@ -1,5 +1,25 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-05 addendum — weird-prompt QA harness added.**
+> Scope: replace screenshot-driven random prompt testing with an offline
+> deterministic runner that exercises the Telegram handler without contacting
+> live Telegram.
+>
+> Result:
+>
+> - New `backend/tests/test_weird_prompt_qa_offline.py` feeds product-help,
+>   safety, prompt-injection, pricing, settings/stats, random, style, and
+>   form-choice prompts through `handle_case_input` with `BotSimulator`.
+> - The harness writes Markdown + JSON reports under
+>   `.artifacts/weird-prompt-qa/` and fails if a non-case prompt creates
+>   gathering state, enters `_process_case_text`, or shows `Draft now`.
+> - New `scripts/weird_prompt_qa.sh` runs the report lane directly.
+> - Pricing and style questions are now deterministic: no "completely free"
+>   pricing hallucination and no marketing-style "lock it in" copy.
+>
+> Verification: `bash scripts/weird_prompt_qa.sh` passed and focused
+> answer/gathering tests passed (`43 passed`).
+>
 > **2026-06-05 addendum — intelligence-layer question routing repair landed offline on
 > branch `feature/conversation-supervisor-20260605`.**
 > Scope: dogfood fix after random/product questions were being treated as case

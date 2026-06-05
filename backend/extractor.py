@@ -933,6 +933,44 @@ def _looks_like_standalone_capability_question(text_lower: str) -> bool:
     )
 
 
+def _looks_like_standalone_style_question(text_lower: str) -> bool:
+    if not text_lower:
+        return False
+    return bool(
+        re.match(r"^(can|could|will|would|make|rewrite|improve)\b", text_lower)
+        and any(
+            phrase in text_lower
+            for phrase in (
+                "less generic",
+                "more personal",
+                "first person",
+                "my style",
+                "sound like me",
+                "improve the reflection",
+                "improve this reflection",
+            )
+        )
+    )
+
+
+def _looks_like_pricing_question(text_lower: str) -> bool:
+    if not text_lower:
+        return False
+    return any(
+        phrase in text_lower
+        for phrase in (
+            "price",
+            "pricing",
+            "cost",
+            "paid plan",
+            "free plan",
+            "how much",
+            "subscription",
+            "upgrade",
+        )
+    )
+
+
 async def answer_question(text: str, case_context: str = "") -> str:
     """Generate a helpful answer about the bot's capabilities.
 
@@ -970,6 +1008,14 @@ Be concise. For each suggestion give the form name and a one-line reason why it 
     if _looks_like_standalone_capability_question(text_lower):
         return sanitize_internal_form_codes(
             "🩺 I turn anonymised case notes, voice notes, photos, or documents into RCEM portfolio drafts. I can suggest the best form, show you the draft first, and save it to Kaizen as a draft after you approve."
+        )
+    if _looks_like_standalone_style_question(text_lower):
+        return (
+            "🩺 Yes. Send the draft or case details and I can make the portfolio wording more specific, first-person, and closer to your style before you save it."
+        )
+    if _looks_like_pricing_question(text_lower):
+        return (
+            "💳 The free plan includes 5 cases a month. Portfolio Guru Unlimited is £9.99/month for unlimited filing and premium features."
         )
 
     # Check if user is asking about a standalone activity-to-form choice.
