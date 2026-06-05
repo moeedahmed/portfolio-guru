@@ -146,6 +146,34 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         message_class=MessageClass.FIXED,
         text="\n\n💬 Reply to refine this draft, or save/cancel before sending a new case.",
     ),
+    "capability_overview": MessageTemplate(
+        key="capability_overview",
+        message_class=MessageClass.FIXED,
+        text=(
+            "🩺 Portfolio Guru turns your case notes into RCEM portfolio drafts. I can:\n"
+            "• collect a case across several messages\n"
+            "• keep what you send separate from chat, so nothing is invented\n"
+            "• recommend the best-fit WPBA form\n"
+            "• show the draft for review before anything is saved\n\n"
+            "Nothing goes to Kaizen until you approve it."
+        ),
+        safety_critical=True,
+    ),
+    "greeting_reply": MessageTemplate(
+        key="greeting_reply",
+        message_class=MessageClass.FIXED,
+        text="👋 Hi — tell me what happened in the case, or ask what I can do.",
+    ),
+    "gathering_captured": MessageTemplate(
+        key="gathering_captured",
+        message_class=MessageClass.FIXED,
+        text="📥 Captured. Add anything else before I draft this?",
+    ),
+    "gathering_continuation": MessageTemplate(
+        key="gathering_continuation",
+        message_class=MessageClass.FIXED,
+        text="💬 Back to your case — add more detail, or choose Draft now when you’re ready.",
+    ),
 }
 
 

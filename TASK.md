@@ -1,5 +1,33 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-05 addendum — conversation-supervisor slice landed offline on
+> branch `feature/conversation-supervisor-20260605`.**
+> Scope: consolidate fragmented gathering-mode decisioning into one
+> channel-agnostic control loop and make the Telegram flow portable to
+> WhatsApp. Filing reliability was explicitly out of scope.
+>
+> What changed:
+>
+> - New `backend/channel_actions.py`: a reply is defined once (`ChannelReply`)
+>   and renders losslessly as Telegram buttons (`callback_data == action_id`)
+>   and as a WhatsApp numbered block; `resolve_numbered_choice` maps a reply
+>   back to the action id.
+> - New `backend/conversation_supervisor.py`: `classify_gathering_turn` +
+>   `decide_gathering_turn` separate canonical intent, turn kind, and the
+>   channel-agnostic reply. Side questions go through an injected grounded
+>   `answer_question` and always return a continuation line back to the case.
+> - `message_policy.py` now owns capability/greeting/gathering copy.
+> - The live "vNext private test bot / dogfood" side-chat copy is removed from
+>   `vnext_dialogue_policy.py` and `bot.handle_gathering_input`, which now
+>   delegates to the supervisor.
+>
+> Verification: `backend/venv/bin/python3 -m pytest tests/test_channel_actions.py
+> tests/test_conversation_supervisor.py tests/test_gathering_mode.py
+> tests/test_vnext_dialogue_policy.py -v` → 48 passed; full offline gate
+> (`tests/ --ignore test_e2e --ignore test_e2e_live`) → 1140 passed.
+>
+> Runtime state: not live until the Mac Mini bot is restarted/deployed.
+
 > **2026-06-02 addendum — local Kaizen form catalogue audit/fix landed offline.**
 > Scope: follow-up after the Intermediate QIAT regression. The issue was local
 > catalogue drift, not Kaizen: ACCS and Intermediate were distinct in role

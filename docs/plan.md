@@ -372,3 +372,47 @@ Build Phase 1 only:
 2. Do not wire it into live message handling yet.
 3. Run the test suite.
 4. Commit the branch checkpoint.
+
+## 2026-06-05 — Conversation-supervisor slice (channel-agnostic)
+
+Branch `feature/conversation-supervisor-20260605`. Smallest coherent
+architecture slice that consolidates gathering-mode decisioning and makes the
+Telegram implementation portable to WhatsApp.
+
+What changed:
+
+- **`backend/channel_actions.py`** — channel-agnostic reply model. A reply is
+  defined once as a `ChannelReply` (body, optional continuation, actions) and
+  renders losslessly two ways: Telegram inline buttons (`callback_data ==
+  action_id`) via `to_telegram_keyboard`, and a WhatsApp-friendly numbered
+  block via `render_numbered`. `resolve_numbered_choice` maps a numbered/plain
+  reply back to the `action_id`. Telegram button text is no longer the source
+  of truth.
+- **`backend/conversation_supervisor.py`** — the single gathering-turn control
+  loop. `classify_gathering_turn` separates canonical intent (from
+  `conversational_router`) from turn kind (`FINISH_CASE`, `ANSWER_CAPABILITY`,
+  `ANSWER_SIDE_QUESTION`, `CONTINUE_GATHERING`). `decide_gathering_turn`
+  returns a channel-agnostic `GatheringDecision`. Genuine
+  portfolio/account/setup questions are answered through an injected grounded
+  `answer_question` callable and always carry a continuation line back to the
+  case, so a side question never strands the user outside filling. Capability/
+  greeting copy is templated and deterministic. The supervisor owns no I/O.
+- **`backend/message_policy.py`** — capability, greeting, gathering-captured,
+  and gathering-continuation copy now live here as auditable FIXED templates.
+- **`backend/vnext_dialogue_policy.py` / `backend/bot.py`** — the old
+  "private vNext test bot / dogfood" side-chat copy is removed from the live
+  gathering path. `bot.handle_gathering_input` now delegates to
+  `decide_gathering_turn`. For live copy this supersedes the earlier "separate
+  private dogfood bot" decision recorded above: dogfood/test-bot wording can no
+  longer reach a real user, and tests enforce it.
+
+Out of scope (unchanged): Kaizen filing, `filer_router`, `browser_filer`,
+credentials, billing/Stripe, supervisor submission, and every
+confirm-before-file gate.
+
+Tests: `test_channel_actions.py`, `test_conversation_supervisor.py`, and
+updated `test_gathering_mode.py` prove dogfood copy cannot leak, grounded side
+questions use the injected answer path plus a continuation, and actions render
+as both Telegram buttons and numbered replies without losing labels/context.
+Full offline gate green (1140 passed). Not live until the Mac Mini bot is
+redeployed.

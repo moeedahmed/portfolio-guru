@@ -73,7 +73,35 @@ async def test_gathering_mode_answers_side_question_without_adding_case_detail(m
 
     assert result == AWAIT_GATHERING
     assert context.user_data["gathering_case"]["parts"] == original_parts
-    assert any("collect a case over multiple messages" in message for _, message, _ in sim.messages_sent)
+    answered = sim.messages_sent[-1][1]
+    assert "collect a case across several messages" in answered
+    assert "Nothing goes to Kaizen until you approve it" in answered
+    assert "Back to your case" in answered  # continuation keeps user in the filling flow
+    lowered = answered.lower()
+    assert "dogfood" not in lowered
+    assert "vnext" not in lowered
+    assert "test bot" not in lowered
+
+
+@pytest.mark.asyncio
+async def test_gathering_mode_portfolio_question_uses_grounded_answer(monkeypatch):
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+    bot._append_gathering_case(context, _FIRST_CASE, "text")
+    original_parts = list(context.user_data["gathering_case"]["parts"])
+    update = sim._make_text_update("Which form would this map to?")
+
+    grounded = AsyncMock(return_value="This fits a CBD based on the clinical reasoning you described.")
+    with patch("bot.answer_question", new=grounded):
+        result = await handle_gathering_input(update, context)
+
+    assert result == AWAIT_GATHERING
+    grounded.assert_awaited_once()
+    assert context.user_data["gathering_case"]["parts"] == original_parts
+    answered = sim.messages_sent[-1][1]
+    assert "This fits a CBD" in answered
+    assert "Back to your case" in answered  # continuation returns the user to filling
 
 
 @pytest.mark.asyncio

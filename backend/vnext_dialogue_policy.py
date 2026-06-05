@@ -1,9 +1,13 @@
-"""Conversational reply policy for the private vNext bot.
+"""Conversational gathering helpers over the pure case engine.
 
-This layer keeps the pure case engine underneath, but stops the Telegram
-dogfood bot from behaving like a parser harness. The bot should gather case
-details across turns, ask for the next useful fact, and show the local preview
-only when the user says they are done or asks to draft/file.
+This layer keeps the deterministic case engine underneath but stops the
+bot from behaving like a parser harness. The bot gathers case details
+across turns, asks for the next useful fact, and previews only when the
+user says they are done or asks to draft/file.
+
+Side-chat / capability replies are no longer produced here — that copy
+now lives in :mod:`message_policy` and is routed through
+:mod:`conversation_supervisor` so it stays auditable and channel-agnostic.
 """
 
 from __future__ import annotations
@@ -11,6 +15,7 @@ from __future__ import annotations
 import re
 
 from conversational_case_engine import CaseFact, CaseWorkspace
+from message_policy import render_message
 
 _COMPLETION_RE = re.compile(
     r"\b("
@@ -49,29 +54,6 @@ _PRIORITY_MISSING_KEYS: tuple[str, ...] = (
     "learning_point",
 )
 
-_FEATURE_TERMS: tuple[str, ...] = (
-    "feature",
-    "features",
-    "what can you do",
-    "what do you do",
-    "help",
-    "how does this work",
-)
-
-_GREETING_TERMS: tuple[str, ...] = (
-    "hi",
-    "hello",
-    "hey",
-    "hello there",
-)
-
-_WELLBEING_TERMS: tuple[str, ...] = (
-    "how are you",
-    "how's it going",
-    "how is it going",
-)
-
-
 def is_completion_request(text: str | None) -> bool:
     """True when the user is asking to move from collecting to preview."""
     if not text:
@@ -99,7 +81,7 @@ def next_missing_prompt(workspace: CaseWorkspace) -> str:
 
 def collecting_reply(workspace: CaseWorkspace) -> str:
     """Brief acknowledgement while the user is still sharing information."""
-    return "📥 Captured. Add anything else before I draft this?"
+    return render_message("gathering_captured")
 
 
 def not_ready_reply(workspace: CaseWorkspace) -> str:
@@ -110,50 +92,3 @@ def not_ready_reply(workspace: CaseWorkspace) -> str:
     )
 
 
-def side_chat_reply(text: str | None, workspace: CaseWorkspace) -> str:
-    """Answer non-case chat without turning it into case collection."""
-    normalised = _normalise(text)
-    if _contains_any(normalised, _FEATURE_TERMS):
-        return (
-            "I am the private Portfolio Guru vNext test bot. Right now I can:\n"
-            "- collect a case over multiple messages\n"
-            "- keep source-tied facts separate from chat\n"
-            "- ask for the next useful missing detail\n"
-            "- recommend a likely portfolio form\n"
-            "- show a local dogfood preview when you ask to finish\n\n"
-            "Kaizen filing is deliberately not connected here yet."
-        )
-    if _contains_any(normalised, _WELLBEING_TERMS):
-        return (
-            "I am good - and currently in dogfood mode. Send me a case in natural "
-            "language, or ask what I can do."
-        )
-    if _is_greeting(normalised):
-        return (
-            "Hi. I am the private Portfolio Guru vNext test bot. Tell me a case "
-            "in your own words, or ask what I can do."
-        )
-    if workspace.draft_eligible_facts():
-        return (
-            "I have kept that as chat, not case detail. "
-            f"{captured_fact_summary(workspace)}\n\n"
-            "Add more case detail, or say 'done' when you want the form recommendation."
-        )
-    return (
-        "I can help capture portfolio evidence conversationally. Tell me what "
-        "happened in the case, or ask what I can do."
-    )
-
-
-def _normalise(text: str | None) -> str:
-    if not text:
-        return ""
-    return " ".join(text.strip().lower().split())
-
-
-def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
-    return any(term in text for term in terms)
-
-
-def _is_greeting(text: str) -> bool:
-    return text in _GREETING_TERMS

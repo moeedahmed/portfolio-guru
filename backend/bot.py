@@ -40,10 +40,9 @@ from kaizen_index import (
 from kaizen_sync import sync_kaizen_portfolio_index_for_user
 from bulk_filer import bulk_file
 from kaizen_unsigned_scraper import scrape_unsigned_tickets
-from conversational_case_engine import CaseFact, CaseState, CaseWorkspace, SourceType
-from conversational_router import ConversationalIntent, route_message
-from vnext_dialogue_policy import collecting_reply, is_completion_request, side_chat_reply
-from vnext_text_extractor import extract_text_facts
+from conversational_router import route_message
+from channel_actions import to_telegram_keyboard
+from conversation_supervisor import GatheringTurnKind, decide_gathering_turn
 from message_policy import render_message
 import chase_guard
 
@@ -934,11 +933,6 @@ def _combined_pending_case_bundle(context) -> tuple[str, str]:
 
 _GATHERING_MODE_FALSE_VALUES = {"0", "false", "no", "off", "disabled"}
 _GATHERING_CASE_KEY = "gathering_case"
-_GATHERING_CHAT_INTENTS = {
-    ConversationalIntent.PORTFOLIO_QUESTION,
-    ConversationalIntent.ACCOUNT_OR_BILLING,
-    ConversationalIntent.SETUP_OR_CREDENTIALS,
-}
 
 
 def _gathering_env_enabled() -> bool:
@@ -970,7 +964,7 @@ def _append_gathering_case(context, text: str, source: str) -> None:
     now = time.time()
     case = context.user_data.setdefault(
         _GATHERING_CASE_KEY,
-        {"parts": [], "sources": [], "facts": [], "created_at": now, "updated_at": now},
+        {"parts": [], "sources": [], "created_at": now, "updated_at": now},
     )
     case.setdefault("created_at", now)
     case["updated_at"] = now
@@ -978,10 +972,6 @@ def _append_gathering_case(context, text: str, source: str) -> None:
     sources = case.setdefault("sources", [])
     if source not in sources:
         sources.append(source)
-    case.setdefault("facts", []).extend(
-        {"key": key, "value": value, "source": source}
-        for key, value in extract_text_facts(text)
-    )
 
 
 def _combined_gathering_case(context) -> tuple[str, str]:
@@ -996,42 +986,12 @@ def _combined_gathering_case(context) -> tuple[str, str]:
     return combine_case_inputs(parts[0], parts[1:]) if parts else "", source
 
 
-def _gathering_workspace(context) -> CaseWorkspace:
-    case = context.user_data.get(_GATHERING_CASE_KEY) or {}
-    facts: list[CaseFact] = []
-    for idx, fact in enumerate(case.get("facts", []), start=1):
-        source_name = fact.get("source", "text")
-        source_type = {
-            "voice": SourceType.VOICE,
-            "photo": SourceType.IMAGE,
-            "document": SourceType.DOCUMENT,
-        }.get(source_name, SourceType.TEXT)
-        facts.append(
-            CaseFact(
-                key=fact.get("key", ""),
-                value=fact.get("value", ""),
-                source_type=source_type,
-                source_turn_id=f"gathering-{idx}",
-                confirmed=source_type is SourceType.TEXT,
-            )
-        )
-    return CaseWorkspace(case_id="main-bot-gathering", state=CaseState.COLLECTING, facts=tuple(facts))
-
-
 def _gathering_done_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("✅ Draft now", callback_data="GATHER|done")]])
 
 
 def _gathering_reply(context) -> tuple[str, InlineKeyboardMarkup]:
-    text = "📥 Captured. Add anything else before I draft this?"
-    return text, _gathering_done_keyboard()
-
-
-def _looks_like_gathering_side_chat(text: str, intent: ConversationalIntent) -> bool:
-    if intent in _GATHERING_CHAT_INTENTS:
-        return True
-    normalised = " ".join((text or "").strip().lower().strip("?!.,").split())
-    return normalised in {"hi", "hello", "hey", "help", "how does this work", "what can you do"}
+    return render_message("gathering_captured"), _gathering_done_keyboard()
 
 # ConversationHandler states
 (AWAIT_USERNAME, AWAIT_PASSWORD,
@@ -7575,22 +7535,25 @@ async def handle_gathering_input(update: Update, context: ContextTypes.DEFAULT_T
     if not raw_text:
         return AWAIT_GATHERING
 
-    if is_completion_request(raw_text) or _is_case_bundle_done(raw_text):
+    if _is_case_bundle_done(raw_text):
         return await _finish_gathering_case(update, context)
 
-    routed = route_message(raw_text)
-    if routed.intent is ConversationalIntent.FILE_TO_KAIZEN:
+    decision = await decide_gathering_turn(raw_text, answer_question=answer_question)
+    if decision.kind is GatheringTurnKind.FINISH_CASE:
         return await _finish_gathering_case(update, context)
-    if _looks_like_gathering_side_chat(raw_text, routed.intent):
-        await update.message.reply_text(side_chat_reply(raw_text, _gathering_workspace(context)))
+
+    reply = decision.reply
+    markup = to_telegram_keyboard(reply)
+
+    if not decision.add_to_case:
+        # Side question / capability answer — stay in gathering, point the
+        # user back to the case. Case workspace is left untouched.
+        await update.message.reply_text(reply.full_text(), reply_markup=markup)
         return AWAIT_GATHERING
 
     _append_gathering_case(context, raw_text, "text")
     await _delete_previous_gathering_message(context)
-    gathering_msg = await update.message.reply_text(
-        collecting_reply(_gathering_workspace(context)),
-        reply_markup=_gathering_done_keyboard(),
-    )
+    gathering_msg = await update.message.reply_text(reply.full_text(), reply_markup=markup)
     context.user_data["gathering_msg_id"] = gathering_msg.message_id
     context.user_data["gathering_chat_id"] = gathering_msg.chat_id
     return AWAIT_GATHERING
