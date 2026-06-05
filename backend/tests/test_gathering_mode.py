@@ -7,6 +7,7 @@ from bot import (
     AWAIT_FORM_CHOICE,
     AWAIT_GATHERING,
     gather_done_callback,
+    handle_callback,
     handle_case_input,
     handle_gathering_input,
 )
@@ -142,7 +143,31 @@ async def test_gathering_reply_offers_done_button(monkeypatch):
         await handle_case_input(update, context)
 
     assert sim.messages_sent[-1][1] == "📥 Captured. Add anything else before I draft this?"
-    assert sim.get_last_buttons() == [("✅ Draft now", "GATHER|done")]
+    assert sim.get_last_buttons() == [
+        ("✅ Draft now", "GATHER|done"),
+        ("❌ Cancel", "ACTION|cancel"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_gathering_cancel_button_clears_case(monkeypatch):
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+    bot._append_gathering_case(context, _FIRST_CASE, "text")
+    context.user_data["gathering_msg_id"] = 123
+    context.user_data["gathering_chat_id"] = 456
+    update = sim._make_callback_update("ACTION|cancel")
+
+    with patch("bot.has_credentials", return_value=True):
+        result = await handle_callback(update, context)
+
+    assert result == bot.ConversationHandler.END
+    assert "gathering_case" not in context.user_data
+    assert "gathering_msg_id" not in context.user_data
+    assert "gathering_chat_id" not in context.user_data
+    update.callback_query.answer.assert_awaited()
+    assert sim.get_last_text().startswith("↩️ Cancelled.")
 
 
 @pytest.mark.asyncio

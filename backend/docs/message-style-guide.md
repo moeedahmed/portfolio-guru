@@ -44,11 +44,14 @@ First capture:
 📥 Captured. Add anything else before I draft this?
 ```
 
-Button: `✅ Draft now`
+Buttons: `✅ Draft now` · `❌ Cancel`
 
 When user taps ✅ Draft now, this message is edited in place to the full CAPTURED_ACK
 ("📥 Captured. I'll turn this into portfolio evidence…") and the keyboard is
 removed; the form recommendation arrives as a new message.
+
+When user taps ❌ Cancel, the captured case is discarded and the bot returns to
+the standard ready state.
 
 After subsequent messages:
 

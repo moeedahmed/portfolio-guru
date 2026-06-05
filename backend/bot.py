@@ -987,7 +987,10 @@ def _combined_gathering_case(context) -> tuple[str, str]:
 
 
 def _gathering_done_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[InlineKeyboardButton("✅ Draft now", callback_data="GATHER|done")]])
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Draft now", callback_data="GATHER|done"),
+        InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel"),
+    ]])
 
 
 def _gathering_reply(context) -> tuple[str, InlineKeyboardMarkup]:
@@ -9476,6 +9479,7 @@ def build_application() -> Application:
                 MessageHandler(filters.PHOTO, handle_case_input),
                 MessageHandler(filters.Document.ALL, handle_case_input),
                 CallbackQueryHandler(gather_done_callback, pattern=r"^GATHER\|done$"),
+                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|cancel$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
             ],
             AWAIT_FORM_CHOICE: [
