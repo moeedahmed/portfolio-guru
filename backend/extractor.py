@@ -945,11 +945,11 @@ Be concise. For each suggestion give the form name and a one-line reason why it 
         forms_text = "\n".join([f"• {code} — {name}" for code, name in form_list[:10]])
         forms_text += f"\n• ...and {len(form_list) - 10} more"
 
-        return sanitize_internal_form_codes(f"""📋 I support all 19 RCEM WPBA forms with full auto-filing to Kaizen:
+        return sanitize_internal_form_codes(f"""📋 I support 45 RCEM forms across assessments, reflections, teaching, management, audit and research.
 
 {forms_text}
 
-All forms are auto-filled with structured data and saved as drafts in Kaizen.
+Supported forms are auto-filled with structured data and saved as drafts in Kaizen after you approve them.
 
 Describe your case or activity and I'll recommend the right form.""")
 
@@ -958,8 +958,8 @@ Describe your case or activity and I'll recommend the right form.""")
 
 Answer this question about what you do. Be concise and helpful. Key facts:
 - You accept case descriptions via text, voice note, photo, or document (PDF, Word, PowerPoint)
-- You support all 19 RCEM WPBA forms: CBD, DOPS, Mini-CEX, ACAT, LAT, ACAF, STAT, MSF, QIAT, JCF, Teaching, Procedural Log, SDL, Ultrasound Case, ESLE, Complaint, Serious Incident, Educational Activity, Formal Course
-- All 19 forms have full auto-filing to Kaizen — data is extracted and forms are filled automatically
+- You support 45 RCEM forms across assessments, reflections, teaching, management, audit and research
+- Supported forms are auto-filled to Kaizen as drafts after the user approves them
 - The draft is shown for review before filing
 - Nothing is submitted to a supervisor - only saved as a draft
 - Credentials are encrypted and never shared

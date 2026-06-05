@@ -116,6 +116,19 @@ async def test_answer_question_form_list_does_not_show_internal_keys(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_answer_question_form_count_matches_product_copy(monkeypatch):
+    import extractor
+
+    monkeypatch.setattr(extractor, "_get_client", lambda: object())
+
+    answer = await extractor.answer_question("What forms do you support?")
+
+    assert "45 RCEM forms" in answer
+    assert "19 RCEM" not in answer
+    assert "19 forms" not in answer
+
+
+@pytest.mark.asyncio
 async def test_recent_activity_llm_output_is_sanitised(monkeypatch):
     import extractor
 
