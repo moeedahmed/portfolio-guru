@@ -30,6 +30,8 @@ Portfolio Guru uses five testing layers, and every change must preserve all of t
 
 `backend/tests/test_weird_prompt_qa_offline.py` runs product-help, safety, prompt-injection, settings/stats, random, and form-choice prompts through the real `handle_case_input` path with `BotSimulator`. It writes a Markdown + JSON report under `.artifacts/weird-prompt-qa/` and fails if a non-case prompt enters case processing, creates gathering state, or shows `Draft now`. Use this before asking Moeed to manually retest strange bot responses.
 
+When failures occur the run also writes `.artifacts/weird-prompt-qa/latest/fix-queue.json`. Each entry records the prompt id, category, reply preview, button action IDs, state flags (`entered_case_processing`, `has_gathering_case`), the failure reasons, and a concrete fix hint. `scripts/weird_prompt_qa.sh` prints the fix queue path and a next-action line so the next coding agent can fix the routing/reply gaps without touching live Telegram. This is the autonomous QA-to-fix loop: `bash scripts/weird_prompt_qa.sh` → read `fix-queue.json` → fix the gaps → re-run to verify.
+
 ## Layer 6 — Live Telegram
 
 `backend/tests/test_e2e_live.py` sends real messages to the real bot via Telethon personal account. Marked `@pytest.mark.live` and skipped unless `TELETHON_SESSION` is set. Manual trigger only, never in CI: `pytest -m live`.

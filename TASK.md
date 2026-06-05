@@ -1,5 +1,42 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-05 addendum — autonomous QA-to-fix loop wired.**
+> Scope: extend the offline weird-prompt QA harness so failures produce a
+> machine-readable fix queue a coding agent can act on without touching live
+> Telegram.
+>
+> Result:
+>
+> - `WeirdPromptCase` gains a `category` field (product-help / safety /
+>   form-choice / command / capability / random / style); all 13 existing
+>   cases are tagged.
+> - `WeirdPromptObservation` gains `category` and `fix_hint` fields; fix hints
+>   are derived from failure reasons and category at observation time.
+> - New `_generate_fix_queue(observations)` helper produces a structured dict
+>   with `failure_count`, `total_cases`, and a `fixes` list. Each fix entry
+>   records: prompt id, category, reply preview (≤150 chars), button labels +
+>   action IDs, state flags (`entered_case_processing`, `has_gathering_case`),
+>   user data keys, failure reasons, and a concrete fix hint.
+> - `_write_reports` now returns a third path and writes
+>   `.artifacts/weird-prompt-qa/latest/fix-queue.json` only when
+>   `failure_count > 0`.
+> - `_render_markdown` shows category, button action IDs, and a bold Fix hint
+>   line for failed cases.
+> - `scripts/weird_prompt_qa.sh` captures pytest's exit code, prints the fix
+>   queue path + failure count when the file is present, and prints a
+>   next-action line. Exits non-zero when pytest fails.
+> - New unit tests: `test_fix_queue_empty_when_all_pass`,
+>   `test_fix_queue_contains_failed_case_with_full_evidence`,
+>   `test_fix_queue_reply_preview_truncated_at_150`,
+>   `test_derive_fix_hint_routing_failure`,
+>   `test_derive_fix_hint_forbidden_text`,
+>   `test_derive_fix_hint_missing_expected_text`.
+> - `TESTING.md` Layer 5B and `TASK.md` updated.
+>
+> Usage: `bash scripts/weird_prompt_qa.sh` → if failures exist, read
+> `.artifacts/weird-prompt-qa/latest/fix-queue.json`, fix the routing/reply
+> gaps, re-run to verify.
+>
 > **2026-06-05 addendum — weird-prompt QA harness added.**
 > Scope: replace screenshot-driven random prompt testing with an offline
 > deterministic runner that exercises the Telegram handler without contacting
