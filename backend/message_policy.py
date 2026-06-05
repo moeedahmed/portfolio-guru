@@ -8,9 +8,26 @@ template layer, not a free-form message generator.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import Enum
 from string import Formatter
+
+# Every templated Portfolio Guru message leads with an emoji marker. A
+# grounded free-form answer (e.g. an LLM reply routed through the
+# conversation supervisor) must inherit the same standard rather than
+# arriving as bare prose.
+HOUSE_EMOJI = "🩺"
+
+_LEADING_EMOJI = re.compile(
+    "^\\s*["
+    "\U0001F300-\U0001FAFF"  # pictographs / emoji (📋 📥 👋 💬 …)
+    "\U00002600-\U000027BF"  # misc symbols + dingbats (✅ ✨ ⚠ …)
+    "\U00002100-\U000021FF"  # letterlike + arrows (ℹ ↩ …)
+    "\U00002B00-\U00002BFF"  # arrows + stars (⬅ ⭐ …)
+    "\U0001F1E6-\U0001F1FF"  # regional indicators
+    "]"
+)
 
 
 class MessageClass(str, Enum):
@@ -182,6 +199,21 @@ def render_message(key: str, **kwargs) -> str:
     allowed = {field for _, field, _, _ in Formatter().parse(template.text) if field}
     safe_kwargs = {field: kwargs.get(field, "") for field in allowed}
     return template.text.format(**safe_kwargs)
+
+
+def style_grounded_answer(body: str) -> str:
+    """Make a free-form grounded answer follow the house emoji standard.
+
+    Templated copy in this module already leads with an emoji; a grounded
+    answer about forms, billing, or setup may arrive as bare prose. Prefix
+    the house marker so a supervisor side-question answer is visually
+    consistent with every other Portfolio Guru message, on every channel.
+    Answers that already lead with an emoji are returned unchanged.
+    """
+    stripped = body.strip()
+    if not stripped or _LEADING_EMOJI.match(stripped):
+        return stripped
+    return f"{HOUSE_EMOJI} {stripped}"
 
 
 def message_audit_summary() -> dict[str, int]:

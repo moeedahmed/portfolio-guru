@@ -111,6 +111,31 @@ async def test_side_question_uses_injected_grounded_answer():
 
 
 @pytest.mark.asyncio
+async def test_side_question_answer_inherits_house_emoji_standard():
+    # A bare-prose grounded answer must lead with the house emoji, like
+    # every other Portfolio Guru message, instead of plain generic copy.
+    grounded = AsyncMock(return_value="The paid plan is £9 a month.")
+    decision = await decide_gathering_turn(
+        "How much does the paid plan cost?", answer_question=grounded
+    )
+    assert decision.kind is GatheringTurnKind.ANSWER_SIDE_QUESTION
+    body = decision.reply.body
+    assert body.startswith("🩺 ")
+    assert "The paid plan is £9 a month." in body
+
+
+@pytest.mark.asyncio
+async def test_side_question_answer_keeps_existing_leading_emoji():
+    # Grounded answers that already lead with an emoji are not double-prefixed.
+    grounded = AsyncMock(return_value="📋 I support 45 RCEM forms.")
+    decision = await decide_gathering_turn(
+        "Which form would this map to?", answer_question=grounded
+    )
+    assert decision.kind is GatheringTurnKind.ANSWER_SIDE_QUESTION
+    assert decision.reply.body.startswith("📋 I support 45 RCEM forms.")
+
+
+@pytest.mark.asyncio
 async def test_side_question_falls_back_to_capability_copy_on_error():
     failing = AsyncMock(side_effect=RuntimeError("LLM down"))
     decision = await decide_gathering_turn(

@@ -33,7 +33,7 @@ from typing import Awaitable, Callable
 
 from channel_actions import ChannelAction, ChannelReply
 from conversational_router import ConversationalIntent, route_message
-from message_policy import render_message
+from message_policy import render_message, style_grounded_answer
 from vnext_dialogue_policy import is_completion_request
 
 # Stable id mirrors the existing Telegram callback (``GATHER|done``) so the
@@ -140,9 +140,11 @@ async def decide_gathering_turn(
             ),
         )
 
-    # ANSWER_SIDE_QUESTION — grounded answer, then back to the case.
+    # ANSWER_SIDE_QUESTION — grounded answer, then back to the case. The
+    # grounded answer is free-form prose, so route it through the house
+    # emoji standard before it reaches any channel.
     try:
-        body = (await answer_question(text or "")).strip()
+        body = style_grounded_answer(await answer_question(text or ""))
     except Exception:
         body = render_message("capability_overview")
     if not body:

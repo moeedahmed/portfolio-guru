@@ -101,6 +101,15 @@ class TestMessagePolicy:
         assert "encrypted" in profile
         assert "files your medical WPBA entries in seconds" not in profile
 
+    def test_style_grounded_answer_applies_house_emoji_standard(self):
+        from message_policy import HOUSE_EMOJI, style_grounded_answer
+
+        assert style_grounded_answer("It costs £9.") == f"{HOUSE_EMOJI} It costs £9."
+        # Already-emoji answers and empties pass through unchanged.
+        assert style_grounded_answer("📋 45 forms.") == "📋 45 forms."
+        assert style_grounded_answer("✅ Yes, CBD is supported.") == "✅ Yes, CBD is supported."
+        assert style_grounded_answer("   ") == ""
+
     def test_form_recommendation_template_is_mobile_first_and_privacy_safe(self):
         from bot import _build_form_recommendation_text
         from extractor import FORM_UUIDS
