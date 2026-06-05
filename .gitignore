@@ -27,6 +27,8 @@ __pycache__/
 
 # Local generated/debug artefacts
 .artifacts/
+cache/
+tmp/
 *_inspection_results.json
 p0_inspection_results.json
 *_conflict_resolution_*.json
