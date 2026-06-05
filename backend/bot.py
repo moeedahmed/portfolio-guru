@@ -43,7 +43,7 @@ from kaizen_unsigned_scraper import scrape_unsigned_tickets
 from conversational_router import route_message
 from channel_actions import to_telegram_keyboard
 from conversation_supervisor import GatheringTurnKind, decide_gathering_turn
-from message_policy import render_message
+from message_policy import render_message, style_grounded_answer
 import chase_guard
 
 from dotenv import load_dotenv
@@ -6796,7 +6796,7 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
 
     elif intent == "question_general":
         try:
-            answer = await answer_question(raw_text)
+            answer = style_grounded_answer(await answer_question(raw_text))
             await update.message.reply_text(
                 f"{answer}\n\n💬 Your case is still open — send more detail or tap Cancel."
             )
@@ -6913,7 +6913,9 @@ async def handle_edit_value_with_intent(update: Update, context: ContextTypes.DE
     if intent in ("question_general", "question_about_case"):
         try:
             case_text = context.user_data.get("case_text", "")
-            answer = sanitize_internal_form_codes(await answer_question(raw_text, case_context=case_text))
+            answer = style_grounded_answer(
+                sanitize_internal_form_codes(await answer_question(raw_text, case_context=case_text))
+            )
             await msg.reply_text(
                 f"{answer}\n\nStill in edit mode — send your new value for *{field}* when ready.",
                 parse_mode="Markdown"
@@ -7209,7 +7211,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
             if intent in ("question", "question_general"):
                 try:
-                    answer = await answer_question(raw_text)
+                    answer = style_grounded_answer(await answer_question(raw_text))
                     await update.message.reply_text(answer)
                 except Exception:
                     await update.message.reply_text(
@@ -9050,7 +9052,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
 
     elif intent in ("question_general", "question_about_case"):
         try:
-            answer = await answer_question(raw_text, case_context=case_text)
+            answer = style_grounded_answer(await answer_question(raw_text, case_context=case_text))
             if has_draft:
                 await update.message.reply_text(
                     f"{answer}\n\nYour draft is ready above — tap Save as draft when ready."
