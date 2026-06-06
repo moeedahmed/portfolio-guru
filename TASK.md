@@ -1,5 +1,36 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-06 addendum — deterministic release-closure loop (slice 1).**
+> Scope: stop leaving deploy/restart as a remembered second step after a local
+> fix. Wrap the repeatable closure behind one gated entrypoint while AI keeps
+> doing diagnosis + code + commit.
+>
+> Result:
+>
+> - New `scripts/release_loop.sh --surface telegram --mode prepare|ship` — a thin
+>   orchestrator that reuses existing pieces, never reimplements deploy logic.
+> - `prepare` is safe/non-live: prints git state, runs `scripts/preflight.sh` +
+>   `scripts/telegram_qa_offline.sh`, checks branch/clean/fast-forward gates, and
+>   reports READY (exit 0) or BLOCKED (exit 1) with reasons. Never pushes/deploys.
+> - `ship` is gated and conservative. Checks approval FIRST (before any git fetch
+>   or mutation): `RELEASE_APPROVED=telegram-YYYYMMDD` (date+surface scoped) or
+>   `--approved`. Refuses on main/detached, dirty tracked tree, non-fast-forward,
+>   or nothing-ahead. Then re-runs the offline gates, reconciles branch→main and
+>   pushes (fast-forward only) so `.github/workflows/deploy-mac.yml` →
+>   `scripts/deploy_mac.sh` deploys + restarts on the Mac Mini, prints
+>   deploy/restart proof commands (optional `gh run watch` via
+>   `RELEASE_LOOP_WATCH_DEPLOY=1`), and runs the `scripts/dogfood_smoke.sh`
+>   checkpoint. Deploy/restart is delegated to CI, not reimplemented.
+> - New `backend/tests/test_release_loop.py` (8 tests): syntax, --help, every
+>   usage/refusal gate. Fast + offline; never ships.
+> - Docs updated: `docs/dev-workflow.md` (Release closure section) and `AGENTS.md`
+>   point future agents at this entrypoint.
+>
+> Verification: `bash -n` + `shellcheck` clean; `--help` and ship-refusal paths
+> exit as designed (2 = no/stale approval, 3 = tree/branch gate, 64 = usage);
+> `prepare` reported READY with 1227 offline tests + telegram offline QA passing.
+> Not run: `ship` with approval, push, deploy, restart, live Telegram.
+>
 > **2026-06-05 addendum — autonomous QA-to-fix loop wired.**
 > Scope: extend the offline weird-prompt QA harness so failures produce a
 > machine-readable fix queue a coding agent can act on without touching live

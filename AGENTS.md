@@ -18,6 +18,7 @@ Portfolio Guru automates e-portfolio filing for UK EM trainees. A doctor sends a
 - Install/runtime: use the existing backend virtualenvs (`backend/.venv` or `backend/venv`). Do not create a new dependency manager unless the repo is deliberately migrated.
 - Local bot: `bash start-bot.sh` from the repo root. This calls `backend/run_local.sh`, loads secrets from BWS, starts the Stripe webhook server on port `8099`, ensures CDP Chrome is available, then runs `backend/bot.py`.
 - Preflight before commit or handoff: `bash scripts/preflight.sh`.
+- Release closure: `scripts/release_loop.sh --surface telegram --mode prepare|ship` is the deterministic closure entrypoint. `prepare` reports READY/BLOCKED and is always side-effect free; `ship` is gated (refuses without `RELEASE_APPROVED=telegram-YYYYMMDD` or `--approved`, and refuses on a dirty/non-fast-forwardable tree) and reuses preflight + telegram offline QA + the push→`deploy-mac.yml`→`deploy_mac.sh` CI deploy + `dogfood_smoke.sh`. Use this instead of remembering separate test/push/deploy/restart commands. Do not run `ship` with approval autonomously.
 - Main offline gate: `cd backend && venv/bin/python3 -m pytest tests/ -v --ignore=tests/test_e2e.py --ignore=tests/test_e2e_live.py`.
 - Offline E2E only: `cd backend && venv/bin/python3 -m pytest tests/ -v -m e2e`.
 - Live Telegram smoke: `cd backend && venv/bin/python3 -m pytest tests/ -v -m live` only when explicitly approved and `TELETHON_SESSION` is set. Never run live Telegram tests as routine CI or autonomous loops.

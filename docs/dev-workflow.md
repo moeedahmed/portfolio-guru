@@ -57,6 +57,38 @@ git push -u origin HEAD
 
 Then merge via GitHub or after review.
 
+## Release closure (deterministic)
+
+Once a fix is committed, close the release with the single deterministic
+entrypoint instead of remembering separate test/push/deploy/restart commands:
+
+```bash
+# Safe readiness report. Never pushes, deploys, or restarts.
+scripts/release_loop.sh --surface telegram --mode prepare
+
+# Gated closure. Refuses without explicit approval and a clean, fast-forwardable
+# tree. On approval it pushes main (CI deploys + restarts on the Mac Mini),
+# then drives the deploy/restart proof and the dogfood checkpoint.
+RELEASE_APPROVED=telegram-$(date -u +%Y%m%d) \
+  scripts/release_loop.sh --surface telegram --mode ship
+# or, interactively:
+scripts/release_loop.sh --surface telegram --mode ship --approved
+```
+
+What it wires (reusing existing pieces, not reimplementing them):
+
+1. Offline gate — `scripts/preflight.sh` + `scripts/telegram_qa_offline.sh`.
+2. Commit must already be present (ship never creates commits; refuses if dirty).
+3. Reconcile feature branch → `main` and push (fast-forward only).
+4. Deploy + restart — the push to `main` triggers
+   `.github/workflows/deploy-mac.yml` → `scripts/deploy_mac.sh` on the Mac Mini.
+5. Dogfood checkpoint — `scripts/dogfood_smoke.sh`.
+
+`ship` checks approval **before** any live or mutating action, so an unapproved
+run is side-effect free. Approval is surface- and date-scoped, so a stale token
+does not silently re-ship. Run `prepare` first; it tells you READY or BLOCKED
+(and why).
+
 ## Files that should stay local/private
 
 Do not commit:
