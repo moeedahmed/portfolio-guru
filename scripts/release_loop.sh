@@ -26,8 +26,10 @@
 #                    is READY or BLOCKED (and why). NEVER pushes/deploys/restarts.
 #   --mode ship      Gated, conservative closure. Refuses without explicit
 #                    approval and a clean, fast-forwardable tree. When approved,
-#                    pushes main (so CI deploys + restarts), then drives the
-#                    deploy/restart proof and the dogfood checkpoint.
+#                    pushes main (so CI deploys + restarts), then collects
+#                    deploy/restart proof and the dogfood checkpoint where
+#                    available. It prints FINAL_RELEASE_STATE=live only when
+#                    proof was actually collected; otherwise proof-pending.
 #
 # Surfaces:
 #   --surface telegram   (only surface wired in this slice)
@@ -57,6 +59,16 @@ info()   { printf '    %s\n' "$*"; }
 warn()   { printf '  ! %s\n' "$*"; }
 err()    { printf '  ERROR: %s\n' "$*" >&2; }
 
+final_state() {
+  local state="$1"
+  local gate="$2"
+  local proof="$3"
+  banner "FINAL RELEASE STATE"
+  info "FINAL_RELEASE_STATE=$state"
+  info "FINAL_RELEASE_GATE=$gate"
+  info "FINAL_RELEASE_PROOF=$proof"
+}
+
 usage() {
   cat <<'EOF'
 Portfolio Guru — deterministic release closure.
@@ -70,7 +82,8 @@ Options:
   --surface <name>   Release surface. Only "telegram" is wired today.
   --mode <mode>      "prepare" (safe readiness report) or "ship" (gated closure).
   --approved         Explicit per-invocation approval for ship.
-  --no-dogfood       ship: skip the interactive dogfood checkpoint (not advised).
+  --no-dogfood       ship: skip the interactive dogfood checkpoint (forces
+                     FINAL_RELEASE_STATE=proof-pending).
   -h, --help         Show this help.
 
 Approval for ship (one of, checked before any live action):
@@ -79,7 +92,8 @@ Approval for ship (one of, checked before any live action):
 
 prepare never pushes, deploys, or restarts. ship pushes main only after every
 gate passes; deploy + restart are then performed by CI (deploy_mac.sh on the
-Mac Mini), not by this script.
+Mac Mini), not by this script. ship ends with one final state: live,
+release-ready, proof-pending, or blocked.
 EOF
 }
 
@@ -272,6 +286,7 @@ require_approval() {
   if [[ -n "${RELEASE_APPROVED:-}" ]]; then
     echo "  Note: RELEASE_APPROVED is set but does not match $expected (stale or wrong surface)." >&2
   fi
+  final_state "release-ready" "provide RELEASE_APPROVED=$expected or --approved, then rerun ship" "no live action taken"
   exit 2
 }
 
@@ -289,33 +304,32 @@ ship_reconcile_and_push() {
 
 ship_deploy_restart_proof() {
   step "Deploy + restart proof (delegated to CI — not reimplemented here)"
-  cat <<'PROOF'
-    The push to main triggers .github/workflows/deploy-mac.yml on the Mac Mini
-    self-hosted runner, which runs scripts/deploy_mac.sh:
-      git pull main -> pip install -> py_compile bot.py -> launchctl restart
-      com.portfolioguru.bot.
-
-    Verify deploy + restart:
-      gh run list --workflow "Deploy Mac Mini" --limit 1
-      launchctl print gui/$(id -u)/com.portfolioguru.bot | sed -n '1,25p'
-      tail -n 30 /tmp/portfolio-guru-bot.log   # bot logs commit+branch on boot
-PROOF
   if [[ "$WATCH_DEPLOY" == "1" ]] && command -v gh >/dev/null 2>&1; then
     info "Watching latest Deploy Mac Mini run (best-effort)…"
     local run_id
     run_id="$(gh run list --workflow "Deploy Mac Mini" --limit 1 \
       --json databaseId -q '.[0].databaseId' 2>/dev/null || true)"
     if [[ -n "$run_id" ]]; then
-      gh run watch "$run_id" 2>/dev/null \
-        || warn "Could not watch CI run; verify manually with the commands above."
+      if gh run watch "$run_id" 2>/dev/null; then
+        local conclusion
+        conclusion="$(gh run view "$run_id" --json conclusion -q '.conclusion' 2>/dev/null || true)"
+        if [[ "$conclusion" == "success" ]]; then
+          info "PASS: Deploy Mac Mini workflow completed successfully."
+          return 0
+        fi
+        warn "Deploy Mac Mini workflow conclusion was '${conclusion:-unknown}'."
+      else
+        warn "Could not watch CI run to completion."
+      fi
     else
-      warn "No Deploy Mac Mini run found yet; verify manually."
+      warn "No Deploy Mac Mini run found yet."
     fi
-  else
-    warn "Deploy/restart proof not auto-collected (set RELEASE_LOOP_WATCH_DEPLOY=1"
-    warn "with gh installed to watch CI). Confirm with the commands above before"
-    warn "trusting this release."
   fi
+  warn "Deploy/restart proof not auto-collected. Next gate:"
+  warn "  gh run list --workflow \"Deploy Mac Mini\" --limit 1"
+  warn "  launchctl print gui/\$(id -u)/com.portfolioguru.bot | sed -n '1,25p'"
+  warn "  tail -n 30 /tmp/portfolio-guru-bot.log   # bot logs commit+branch on boot"
+  return 1
 }
 
 ship_dogfood_checkpoint() {
@@ -323,14 +337,20 @@ ship_dogfood_checkpoint() {
   if [[ "$NO_DOGFOOD" == "1" ]]; then
     warn "Skipped by --no-dogfood. Run 'bash scripts/dogfood_smoke.sh' before"
     warn "trusting this release — this step is required, not optional."
-    return 0
+    return 1
   fi
   if [[ -t 0 && -t 1 ]]; then
     info "Launching interactive dogfood smoke (scripts/dogfood_smoke.sh)…"
-    bash "$ROOT/scripts/dogfood_smoke.sh"
+    if bash "$ROOT/scripts/dogfood_smoke.sh"; then
+      info "PASS: dogfood checkpoint completed."
+      return 0
+    fi
+    warn "Dogfood checkpoint failed."
+    return 1
   else
     warn "Non-interactive shell — dogfood smoke needs a TTY. Run it by hand:"
     warn "  bash scripts/dogfood_smoke.sh"
+    return 1
   fi
 }
 
@@ -343,6 +363,7 @@ mode_ship() {
   # Gate 2: must be on a feature branch (protects the Mac Mini main checkout).
   if [[ "$branch" == "main" || -z "$branch" ]]; then
     err "SHIP refused — on main / detached HEAD. Ship from a feature branch."
+    final_state "blocked" "checkout a feature branch with the release commit, then rerun ship" "no live action taken"
     exit 3
   fi
 
@@ -352,6 +373,7 @@ mode_ship() {
   if ! tracked_tree_is_clean; then
     err "SHIP refused — uncommitted tracked changes present. Commit first."
     git status --short --untracked-files=no | sed 's/^/      /' >&2
+    final_state "blocked" "commit or revert tracked changes, then rerun ship" "no live action taken"
     exit 3
   fi
 
@@ -359,34 +381,52 @@ mode_ship() {
   read -r behind ahead < <(ahead_behind)
   if [[ "$ahead" == "?" ]]; then
     err "SHIP refused — origin/main not found; cannot reconcile safely."
+    final_state "blocked" "fetch origin/main or repair the remote, then rerun ship" "no live action taken"
     exit 3
   fi
   if ! origin_main_ancestor; then
     err "SHIP refused — origin/main is not an ancestor of HEAD (behind=$behind)."
     err "Rebase onto main before shipping."
+    final_state "blocked" "rebase onto origin/main, then rerun ship" "no live action taken"
     exit 3
   fi
   if [[ "$ahead" == "0" ]]; then
     err "SHIP refused — no commits ahead of origin/main. Nothing to ship."
+    final_state "blocked" "create a release commit or use prepare for readiness only" "no live action taken"
     exit 3
   fi
 
   # Gate 5: offline gates must pass before anything goes out.
   run_check "Offline preflight (scripts/preflight.sh)" \
     bash "$ROOT/scripts/preflight.sh" \
-    || { err "SHIP refused — offline preflight failed."; exit 1; }
+    || { err "SHIP refused — offline preflight failed."; final_state "blocked" "fix scripts/preflight.sh failures, then rerun ship" "no live action taken"; exit 1; }
   run_check "Telegram offline QA (scripts/telegram_qa_offline.sh)" \
     bash "$ROOT/scripts/telegram_qa_offline.sh" \
-    || { err "SHIP refused — telegram offline QA failed."; exit 1; }
+    || { err "SHIP refused — telegram offline QA failed."; final_state "blocked" "fix scripts/telegram_qa_offline.sh failures, then rerun ship" "no live action taken"; exit 1; }
 
   # Live closure — only reached after every gate passes.
   ship_reconcile_and_push
-  ship_deploy_restart_proof
-  ship_dogfood_checkpoint
+  local deploy_proved=0
+  local dogfood_proved=0
+  ship_deploy_restart_proof && deploy_proved=1
+  ship_dogfood_checkpoint && dogfood_proved=1
 
-  banner "SHIP complete"
-  info "main is pushed; CI deploys + restarts on the Mac Mini."
-  info "Confirm the deploy/restart proof above before declaring the release done."
+  if [[ "$deploy_proved" == "1" && "$dogfood_proved" == "1" ]]; then
+    banner "SHIP complete"
+    info "main is pushed; deploy/restart and dogfood proof were collected."
+    final_state "live" "none" "deploy/restart workflow succeeded; dogfood checkpoint passed"
+    return 0
+  fi
+
+  local next_gate="collect deploy/restart proof, then run bash scripts/dogfood_smoke.sh"
+  if [[ "$deploy_proved" == "1" ]]; then
+    next_gate="run bash scripts/dogfood_smoke.sh"
+  elif [[ "$dogfood_proved" == "1" ]]; then
+    next_gate="collect deploy/restart proof from GitHub Actions, launchctl, and bot logs"
+  fi
+  banner "SHIP proof pending"
+  info "main is pushed; do not call this release live until the next gate passes."
+  final_state "proof-pending" "$next_gate" "deploy_proved=$deploy_proved dogfood_proved=$dogfood_proved"
 }
 
 # --- dispatch ----------------------------------------------------------------

@@ -75,6 +75,8 @@ def test_ship_refuses_without_approval():
     result = run("--surface", "telegram", "--mode", "ship", env=env)
     assert result.returncode == 2
     assert "approval required" in result.stderr.lower()
+    assert "FINAL_RELEASE_STATE=release-ready" in result.stdout
+    assert "FINAL_RELEASE_GATE=" in result.stdout
 
 
 def test_ship_refuses_with_stale_approval_token():
@@ -83,6 +85,57 @@ def test_ship_refuses_with_stale_approval_token():
     result = run("--surface", "telegram", "--mode", "ship", env=env)
     assert result.returncode == 2
     assert "stale or wrong surface" in result.stderr.lower()
+    assert "FINAL_RELEASE_STATE=release-ready" in result.stdout
+
+
+def test_ship_reports_proof_pending_when_live_proof_is_not_collected(tmp_path):
+    """A gated ship without deploy/dogfood proof must not call itself live."""
+    fake_root = tmp_path / "repo"
+    fake_root.mkdir()
+    (fake_root / "scripts").mkdir()
+    (fake_root / "scripts" / "preflight.sh").write_text("#!/usr/bin/env bash\nexit 0\n")
+    (fake_root / "scripts" / "telegram_qa_offline.sh").write_text(
+        "#!/usr/bin/env bash\nexit 0\n"
+    )
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "git").write_text(
+        f"""#!/usr/bin/env bash
+case "$1 $2" in
+  "rev-parse --show-toplevel") printf '%s\\n' "{fake_root}" ;;
+  "rev-parse --short") printf 'abc1234\\n' ;;
+  "branch --show-current") printf 'feature/final-state\\n' ;;
+  "status --porcelain") exit 0 ;;
+  "ls-files --others") exit 0 ;;
+  "fetch origin") exit 0 ;;
+  "merge-base --is-ancestor") exit 0 ;;
+  "rev-list --left-right") printf '0 1\\n' ;;
+  "checkout main") exit 0 ;;
+  "pull --ff-only") exit 0 ;;
+  "merge --ff-only") exit 0 ;;
+  "push origin") exit 0 ;;
+  "checkout feature/final-state") exit 0 ;;
+  *) exit 0 ;;
+esac
+"""
+    )
+    (fake_bin / "git").chmod(0o755)
+    env = {"PATH": f"{fake_bin}:{_path_only()}"}
+
+    result = run(
+        "--surface",
+        "telegram",
+        "--mode",
+        "ship",
+        "--approved",
+        "--no-dogfood",
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "FINAL_RELEASE_STATE=proof-pending" in result.stdout
+    assert "FINAL_RELEASE_STATE=live" not in result.stdout
+    assert "FINAL_RELEASE_GATE=collect deploy/restart proof" in result.stdout
 
 
 def _path_only():

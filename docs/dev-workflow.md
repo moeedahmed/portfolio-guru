@@ -68,7 +68,7 @@ scripts/release_loop.sh --surface telegram --mode prepare
 
 # Gated closure. Refuses without explicit approval and a clean, fast-forwardable
 # tree. On approval it pushes main (CI deploys + restarts on the Mac Mini),
-# then drives the deploy/restart proof and the dogfood checkpoint.
+# then collects deploy/restart proof and the dogfood checkpoint where available.
 RELEASE_APPROVED=telegram-$(date -u +%Y%m%d) \
   scripts/release_loop.sh --surface telegram --mode ship
 # or, interactively:
@@ -88,6 +88,11 @@ What it wires (reusing existing pieces, not reimplementing them):
 run is side-effect free. Approval is surface- and date-scoped, so a stale token
 does not silently re-ship. Run `prepare` first; it tells you READY or BLOCKED
 (and why).
+
+`ship` always prints one machine-readable final state:
+`FINAL_RELEASE_STATE=live|release-ready|proof-pending|blocked`. Printed proof
+commands are a next gate, not completion proof; only collected deploy/restart
+and dogfood proof can make the state `live`.
 
 ## Files that should stay local/private
 
