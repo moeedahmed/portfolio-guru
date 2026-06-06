@@ -447,6 +447,110 @@ def generate_health_chart(user_id: int) -> str:
     return asyncio.run(generate_health_chart_async(user_id))
 
 
+# ── Weekly nudge card (lean behaviour nudge, not dense dashboard) ────────────
+
+
+async def generate_weekly_nudge_chart_async(user_id: int) -> str:
+    data = await _collect_nudge(user_id)
+    return _render_nudge_card(
+        user_id=user_id,
+        cases_this_week=data["cases_this_week"],
+        form_types_this_month=data["form_types_this_month"],
+        top_form=data.get("top_form"),
+        gap=data.get("gap"),
+    )
+
+
+async def _collect_nudge(user_id: int) -> dict:
+    from bot import _compute_weekly_stats
+    return await _compute_weekly_stats(user_id)
+
+
+def _render_nudge_card(
+    user_id: int,
+    cases_this_week: int,
+    form_types_this_month: int,
+    top_form: tuple | None,
+    gap: tuple | None,
+) -> str:
+    fig = plt.figure(figsize=(6, 3.2), dpi=100, facecolor=COLOR_BG)
+
+    # Header band
+    header_ax = fig.add_axes([0, 0.80, 1, 0.20])
+    header_ax.axis("off")
+    header_ax.add_patch(
+        Rectangle((0, 0), 1, 1, transform=header_ax.transAxes,
+                  color=COLOR_HEADER, zorder=0)
+    )
+    header_ax.text(
+        0.08, 0.55, "Portfolio Check-In",
+        fontsize=17, fontweight="bold", color=COLOR_TEXT_LIGHT,
+        va="center", transform=header_ax.transAxes,
+    )
+
+    # Body — up to 3 data rows + action callout
+    body_y = 0.70
+    row_spacing = 0.16
+    fig.text(0.08, body_y,
+             _nudge_line_win(cases_this_week),
+             fontsize=13, color=COLOR_TEXT_DARK, fontweight="bold",
+             va="center")
+
+    fig.text(0.08, body_y - row_spacing,
+             _nudge_line_signal(form_types_this_month, top_form),
+             fontsize=13, color=COLOR_TEXT_DARK,
+             va="center")
+
+    gap_line, action_line = _nudge_line_deficiency_and_action(gap)
+    if gap_line:
+        fig.text(0.08, body_y - row_spacing * 2,
+                 gap_line,
+                 fontsize=13, color="#C0392B",
+                 va="center")
+
+    # Action callout strip at bottom
+    if action_line:
+        action_ax = fig.add_axes([0.06, 0.06, 0.88, 0.18])
+        action_ax.set_facecolor("#EBF5FB")
+        action_ax.axis("off")
+        action_ax.text(0.04, 0.5, action_line,
+                       fontsize=11, color=COLOR_ACCENT, fontweight="bold",
+                       va="center", transform=action_ax.transAxes)
+
+    fd, path = tempfile.mkstemp(prefix=f"weekly_nudge_{user_id}_", suffix=".png")
+    os.close(fd)
+    fig.savefig(path, dpi=100, facecolor=COLOR_BG, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def _nudge_line_win(cases: int) -> str:
+    s = "s" if cases != 1 else ""
+    return f"{cases} case{s} filed this week"
+
+
+def _nudge_line_signal(form_types: int, top_form: tuple | None) -> str:
+    if not form_types:
+        return "No filings yet this month"
+    line = f"{form_types} form type{'s' if form_types != 1 else ''} this month"
+    if top_form:
+        label, count = top_form
+        line += f"  ·  Most: {label} ({count})"
+    return line
+
+
+def _nudge_line_deficiency_and_action(gap: tuple | None) -> tuple[str, str]:
+    if gap:
+        label, days = gap
+        deficiency = f"Gap: {label}, {days} days"
+        if "Procedure Log" in label:
+            action = ("Add one " + label + "  /  Tap /health for full breakdown")
+        else:
+            action = ("Log a " + label + "  /  Tap /health for full breakdown")
+        return deficiency, action
+    return "", "Tap /health for full breakdown"
+
+
 if __name__ == "__main__":
     import sys
     uid = int(sys.argv[1]) if len(sys.argv) > 1 else 6912896590

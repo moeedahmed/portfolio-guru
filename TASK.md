@@ -1,5 +1,36 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-06 addendum — weekly digest lean nudge (slice 2).**
+> Scope: turn the weekly Portfolio Health push from a dense 4-panel dashboard
+> chart into a compact behaviour nudge. The dense dashboard stays behind /health;
+> the weekly reminder is now a simple card + short caption.
+>
+> Result:
+>
+> - New `generate_weekly_nudge_chart_async` in `backend/portfolio_chart.py` —
+>   renders a compact "Portfolio Check-In" card with at most 3 data points
+>   (cases this week, form types this month, gap) and one highlighted next
+>   action. No dense bar charts, no SLO grid, no usage headline. Kept under
+>   600x320 — a nudge, not a report.
+> - `_build_weekly_digest_text` in `backend/bot.py` rewritten to produce a
+>   short (<200 char), human, action-led caption that pairs with the card.
+>   Format: one win, one signal, one deficiency, one action. Stateless empty
+>   and no-gap variants handled.
+> - `weekly_push` job now calls `generate_weekly_nudge_chart_async` instead of
+>   `generate_health_chart_async`. The `/health` command path is untouched and
+>   still uses the dense dashboard chart.
+> - All weekly digest copy is pathway-neutral — no ARCP, CESR, or CCT framing
+>   in the weekly nudge surface.
+> - New focused tests in `backend/tests/test_health_bot.py` (14 tests):
+>   caption composition (empty/gap/no-gap/pathway-neutral/length limits),
+>   chart helper functions (win/signal/deficiency/action line formatters),
+>   and chart rendering (PNG output for normal/empty/no-gap states).
+>
+> Verification: offline gate `1250 passed, 16 deselected`; zero regressions.
+> No live Telegram, Kaizen, BWS, CDP, deploy, restart, or push used.
+> Activation: next bot restart will pick up the new chart + caption in
+> `weekly_push` jobs. No manual deploy gate needed beyond normal restart.
+
 > **2026-06-06 addendum — deterministic release-closure loop (slice 1).**
 > Scope: stop leaving deploy/restart as a remembered second step after a local
 > fix. Wrap the repeatable closure behind one gated entrypoint while AI keeps

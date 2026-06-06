@@ -416,38 +416,34 @@ async def _build_nudge_message(stats: dict) -> tuple[str, InlineKeyboardMarkup |
 
 
 def _build_weekly_digest_text(stats: dict) -> str:
-    """Compose the weekly digest body (Markdown).
+    """Compose the weekly digest caption (short, human, action-led).
 
-    Mirrors the fields agreed in the digest brief: cases-this-week, top form
-    this month, form-type breadth (used as a faithful proxy for coverage —
-    we don't store KC codes in portfolio_usage so we don't claim KC numbers),
-    and a single nudge line.
+    The visual card carries the data points; this caption is the nudge copy
+    that pairs with it. Kept under 200 characters — dense dashboard copy
+    moved to /health.
     """
     cases = stats.get("cases", 0)
-    top_form = stats.get("top_form")
-    form_types = stats.get("form_types_this_month", 0)
     gap = stats.get("gap")
 
-    lines = ["📊 *Your Weekly Portfolio Digest*", ""]
-    lines.append(f"This week: {cases} case{'s' if cases != 1 else ''} filed.")
-    if top_form:
-        label, count = top_form
-        lines.append(f"Top form this month: {label} ({count})")
-    if form_types:
-        lines.append(f"Form types this month: {form_types}")
+    if cases == 0:
+        return (
+            "No cases filed this week. "
+            "One takes 2 minutes — send text, voice, photo, or document. "
+            "Tap /health for your full breakdown."
+        )
 
     if gap:
         label, days = gap
-        nudge = f"Longest gap: no {label} in {days} days — worth a quick log."
-    elif cases == 0:
-        nudge = "No cases this week — one takes 2 minutes. Send text, voice, photo, or document."
-    else:
-        nudge = "Keep the momentum going — send me what happened next."
-    lines.append("")
-    lines.append(nudge)
-    lines.append("")
-    lines.append("Tap /health for full analysis.")
-    return "\n".join(lines)
+        return (
+            f"Strong week. Your main gap is {label} coverage — "
+            f"last filed {days} days ago. "
+            f"Add one now or tap /health for the full breakdown."
+        )
+
+    return (
+        "Solid week. No major gaps showing. "
+        "Keep the momentum going — tap /health for the full breakdown."
+    )
 
 
 async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -482,8 +478,8 @@ async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
 
             chart_path = None
             try:
-                from portfolio_chart import generate_health_chart_async
-                chart_path = await generate_health_chart_async(user_id)
+                from portfolio_chart import generate_weekly_nudge_chart_async
+                chart_path = await generate_weekly_nudge_chart_async(user_id)
             except ImportError:
                 logger.info("matplotlib not installed; weekly digest will be text-only for %s", user_id)
             except Exception as e:
@@ -504,7 +500,6 @@ async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
             await context.bot.send_message(
                 chat_id=user_id,
                 text=text,
-                parse_mode="Markdown",
             )
             sent += 1
         except Exception as e:

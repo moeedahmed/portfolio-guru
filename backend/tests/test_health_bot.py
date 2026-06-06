@@ -705,3 +705,181 @@ def test_pathway_for_detected_role_docstring_uses_training_cct_not_arcp():
     # Forbid framings that present ARCP as a pathway / destination label
     assert "→ ARCP" not in doc
     assert "ARCP pathway" not in doc
+
+
+# ── Weekly digest: caption composition ────────────────────────────────────────
+
+
+def test_weekly_digest_caption_empty_state():
+    import bot
+
+    text = bot._build_weekly_digest_text({"cases": 0, "gap": None})
+    assert "No cases" in text
+    assert "/health" in text
+    assert len(text) < 200
+
+
+def test_weekly_digest_caption_with_gap():
+    import bot
+
+    text = bot._build_weekly_digest_text({
+        "cases": 9,
+        "gap": ("Procedure Log", 23),
+    })
+    assert "Strong week" in text
+    assert "Procedure Log" in text
+    assert "23 days" in text
+    assert "/health" in text
+    assert len(text) < 200
+
+
+def test_weekly_digest_caption_no_gap_but_filed():
+    import bot
+
+    text = bot._build_weekly_digest_text({"cases": 5, "gap": None})
+    assert "Solid week" in text
+    assert "No major gaps" in text
+    assert "/health" in text
+    assert len(text) < 200
+
+
+def test_weekly_digest_caption_is_pathway_neutral():
+    """Weekly digest caption must not reference ARCP, CESR, or any
+    pathway-specific career framing."""
+    import bot
+
+    for stats in (
+        {"cases": 0, "gap": None},
+        {"cases": 9, "gap": ("Mini-CEX", 14)},
+        {"cases": 5, "gap": None},
+    ):
+        text = bot._build_weekly_digest_text(stats)
+        assert "ARCP" not in text
+        assert "CESR" not in text
+        assert "CCT" not in text
+        assert "training pathway" not in text.lower()
+
+
+def test_weekly_digest_caption_under_200_chars():
+    """Every caption variant must stay under 200 characters — it is a
+    nudge, not a dashboard."""
+    import bot
+
+    scenarios = [
+        {"cases": 0, "gap": None},
+        {"cases": 1, "gap": None},
+        {"cases": 12, "gap": None},
+        {"cases": 9, "gap": ("Procedure Log", 23)},
+        {"cases": 3, "gap": ("DOPS", 7)},
+    ]
+    for stats in scenarios:
+        text = bot._build_weekly_digest_text(stats)
+        assert len(text) < 200, f"Caption too long ({len(text)} chars) for {stats}: {text!r}"
+
+
+# ── Weekly nudge chart — rendering ───────────────────────────────────────────
+
+
+def test_weekly_nudge_chart_functions_exist():
+    import portfolio_chart
+
+    assert callable(getattr(portfolio_chart, "generate_weekly_nudge_chart_async", None))
+    assert callable(getattr(portfolio_chart, "_render_nudge_card", None))
+    assert callable(getattr(portfolio_chart, "_nudge_line_win", None))
+    assert callable(getattr(portfolio_chart, "_nudge_line_signal", None))
+    assert callable(getattr(portfolio_chart, "_nudge_line_deficiency_and_action", None))
+
+
+def test_nudge_line_win_formats_correctly():
+    import portfolio_chart
+
+    assert "9 cases" in portfolio_chart._nudge_line_win(9)
+    assert "1 case" in portfolio_chart._nudge_line_win(1)
+    assert "0 cases" in portfolio_chart._nudge_line_win(0)
+
+
+def test_nudge_line_signal_with_top_form():
+    import portfolio_chart
+
+    line = portfolio_chart._nudge_line_signal(8, ("CBD", 4))
+    assert "8 form types" in line
+    assert "CBD" in line
+    assert "(4)" in line
+
+
+def test_nudge_line_signal_empty():
+    import portfolio_chart
+
+    line = portfolio_chart._nudge_line_signal(0, None)
+    assert "No filings" in line
+
+
+def test_nudge_line_deficiency_and_action_with_gap():
+    import portfolio_chart
+
+    deficiency, action = portfolio_chart._nudge_line_deficiency_and_action(
+        ("Procedure Log", 23)
+    )
+    assert "Procedure Log" in deficiency
+    assert "23 days" in deficiency
+    assert "Procedure Log" in action
+    assert "/health" in action
+
+
+def test_nudge_line_deficiency_and_action_no_gap():
+    import portfolio_chart
+
+    deficiency, action = portfolio_chart._nudge_line_deficiency_and_action(None)
+    assert deficiency == ""
+    assert "/health" in action
+
+
+def test_render_nudge_card_creates_png():
+    import tempfile
+    import os
+    import portfolio_chart
+
+    path = portfolio_chart._render_nudge_card(
+        user_id=999999,
+        cases_this_week=9,
+        form_types_this_month=8,
+        top_form=("CBD", 3),
+        gap=("Procedure Log", 23),
+    )
+    assert path.endswith(".png")
+    assert os.path.getsize(path) > 500
+    os.unlink(path)
+
+
+def test_render_nudge_card_empty_state():
+    import tempfile
+    import os
+    import portfolio_chart
+
+    path = portfolio_chart._render_nudge_card(
+        user_id=999999,
+        cases_this_week=0,
+        form_types_this_month=0,
+        top_form=None,
+        gap=None,
+    )
+    assert path.endswith(".png")
+    assert os.path.getsize(path) > 500
+    os.unlink(path)
+
+
+def test_render_nudge_card_no_gap():
+    import tempfile
+    import os
+    import portfolio_chart
+
+    path = portfolio_chart._render_nudge_card(
+        user_id=999999,
+        cases_this_week=5,
+        form_types_this_month=3,
+        top_form=None,
+        gap=None,
+    )
+    assert path.endswith(".png")
+    assert os.path.getsize(path) > 500
+    os.unlink(path)
