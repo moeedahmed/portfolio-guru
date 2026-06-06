@@ -1017,6 +1017,21 @@ Be concise. For each suggestion give the form name and a one-line reason why it 
         return (
             "💳 The free plan includes 5 cases a month. Portfolio Guru Unlimited is £9.99/month for unlimited filing and premium features."
         )
+    if any(
+        phrase in text_lower
+        for phrase in (
+            "save directly to kaizen",
+            "save to kaizen",
+            "directly to kaizen",
+            "do you file to kaizen",
+            "do you save in kaizen",
+        )
+    ):
+        return (
+            "🩺 Yes, I can save supported forms to Kaizen, but only as drafts after "
+            "you review and approve the auto-filled content. Nothing is submitted "
+            "to a supervisor."
+        )
 
     # Check if user is asking about a standalone activity-to-form choice.
     # These should recommend a form, not dump the supported-forms catalogue.

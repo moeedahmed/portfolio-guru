@@ -43,7 +43,7 @@ from kaizen_unsigned_scraper import scrape_unsigned_tickets
 from conversational_router import ConversationalIntent, route_message
 from channel_actions import to_telegram_keyboard
 from conversation_supervisor import GatheringTurnKind, decide_gathering_turn
-from message_policy import render_message, style_grounded_answer
+from message_policy import render_message, safety_redirect_text, style_grounded_answer
 import chase_guard
 
 from dotenv import load_dotenv
@@ -947,14 +947,7 @@ def _standalone_pre_capture_route(text: str) -> str | None:
 
 
 def _standalone_safe_redirect_text(text: str) -> str:
-    lowered = (text or "").lower()
-    if re.search(r"\b(clinical advice|medical advice|what dose|prescribe|treat|diagnose|safe for)\b", lowered):
-        return style_grounded_answer(
-            "I can’t give clinical advice. I can help turn anonymised case notes into portfolio drafts, or answer admin questions about Kaizen and supported forms."
-        )
-    return style_grounded_answer(
-        "I can help with portfolio/admin work: send an anonymised case, ask about supported forms, or ask about Kaizen setup."
-    )
+    return safety_redirect_text(text)
 
 
 def _clear_pending_case_bundle(context) -> None:

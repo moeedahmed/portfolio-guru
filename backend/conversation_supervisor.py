@@ -33,7 +33,7 @@ from typing import Awaitable, Callable
 
 from channel_actions import ChannelAction, ChannelReply
 from conversational_router import ConversationalIntent, route_message
-from message_policy import render_message, style_grounded_answer
+from message_policy import render_message, safety_redirect_text, style_grounded_answer
 from vnext_dialogue_policy import is_completion_request
 
 # Stable id mirrors the existing Telegram callback (``GATHER|done``) so the
@@ -100,6 +100,9 @@ def classify_gathering_turn(
     if intent in _SIDE_QUESTION_INTENTS:
         return GatheringTurnKind.ANSWER_SIDE_QUESTION, intent
 
+    if intent is ConversationalIntent.UNKNOWN and _looks_like_short_off_topic(normalised):
+        return GatheringTurnKind.ANSWER_SIDE_QUESTION, intent
+
     return GatheringTurnKind.CONTINUE_GATHERING, intent
 
 
@@ -143,6 +146,21 @@ async def decide_gathering_turn(
             ),
         )
 
+    if intent in {
+        ConversationalIntent.SAFETY_OR_MEDICAL_ADVICE,
+        ConversationalIntent.OUT_OF_SCOPE,
+        ConversationalIntent.UNKNOWN,
+    }:
+        return GatheringDecision(
+            kind=kind,
+            intent=intent,
+            add_to_case=False,
+            reply=ChannelReply(
+                body=safety_redirect_text(text, intent=intent.value),
+                continuation=continuation,
+            ),
+        )
+
     # ANSWER_SIDE_QUESTION — grounded answer, then back to the case. The
     # grounded answer is free-form prose, so route it through the house
     # emoji standard before it reaches any channel.
@@ -165,3 +183,32 @@ def _normalise(text: str | None) -> str:
     if not text:
         return ""
     return " ".join(text.strip().lower().strip("?!.,").split())
+
+
+def _looks_like_short_off_topic(normalised: str) -> bool:
+    if not normalised:
+        return True
+    words = normalised.split()
+    if len(words) > 2:
+        return False
+    if any(char.isdigit() for char in normalised):
+        return False
+    clinical_fragments = (
+        "patient",
+        "pain",
+        "resus",
+        "ed",
+        "icu",
+        "sepsis",
+        "trauma",
+        "ecg",
+        "xray",
+        "x-ray",
+        "ct",
+        "troponin",
+        "discharged",
+        "admitted",
+        "consultant",
+        "supervisor",
+    )
+    return not any(fragment in normalised for fragment in clinical_fragments)

@@ -191,6 +191,34 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         message_class=MessageClass.FIXED,
         text="💬 Back to your case — add more detail when you’re ready.",
     ),
+    "prompt_injection_refusal": MessageTemplate(
+        key="prompt_injection_refusal",
+        message_class=MessageClass.FIXED,
+        text=(
+            "🩺 I can’t share internal instructions. "
+            "Send a case or choose a form to start a Kaizen draft."
+        ),
+        safety_critical=True,
+    ),
+    "medical_advice_refusal": MessageTemplate(
+        key="medical_advice_refusal",
+        message_class=MessageClass.FIXED,
+        text=(
+            "🩺 I can’t advise on medication doses, prescribing, diagnosis, or treatment. "
+            "Use your local ED prescribing guidance and senior/pharmacy support. "
+            "I can help turn anonymised case notes into a portfolio draft, with clinical decisions documented as your own."
+        ),
+        safety_critical=True,
+    ),
+    "scope_redirect": MessageTemplate(
+        key="scope_redirect",
+        message_class=MessageClass.FIXED,
+        text=(
+            "🩺 I can help with portfolio/admin work: send an anonymised case, "
+            "ask about supported forms, or ask about Kaizen setup."
+        ),
+        safety_critical=True,
+    ),
 }
 
 
@@ -214,6 +242,32 @@ def style_grounded_answer(body: str) -> str:
     if not stripped or _LEADING_EMOJI.match(stripped):
         return stripped
     return f"{HOUSE_EMOJI} {stripped}"
+
+
+_PROMPT_INJECTION_RE = re.compile(
+    r"\b(ignore previous|ignore all previous|system prompt|developer message|"
+    r"reveal your prompt|jailbreak|pretend you are)\b"
+)
+
+
+def safety_redirect_text(text: str | None = None, *, intent: str | None = None) -> str:
+    """Return deterministic copy for unsafe or out-of-scope prompts.
+
+    Principle-based, not prompt-specific:
+    - Prompt injection (by intent or text) → concise internal-instruction refusal.
+    - Clinical dosing/advice → explicit refusal + ED/pharmacy redirect.
+    - Off-topic/unknown → short scope redirect.
+    Neither path invites case gathering or drafting.
+    """
+    lowered = (text or "").lower()
+    if intent == "out_of_scope" or _PROMPT_INJECTION_RE.search(lowered):
+        return render_message("prompt_injection_refusal")
+    if intent == "safety_or_medical_advice" or re.search(
+        r"\b(clinical advice|medical advice|what dose|dose of|prescribe|prescribing|treat|treatment|diagnose|diagnosis|safe for|is it safe|medication|drug)\b",
+        lowered,
+    ):
+        return render_message("medical_advice_refusal")
+    return render_message("scope_redirect")
 
 
 def message_audit_summary() -> dict[str, int]:
