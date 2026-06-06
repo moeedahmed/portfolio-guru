@@ -863,6 +863,33 @@ def _is_recent_filing_status_question(text: str) -> bool:
     )
 
 
+_SUBMIT_INQUIRY_RE = re.compile(
+    r"(?:supervisor|assessor)\b"
+    r"|save\s+directly\s+(?:in|into|to)\s+kaizen"
+    r"|(?:submit|sign|forward)\b.*\b(?:supervisor|assessor|automatic)"
+    r"|will\s+(?:this|it)\s+(?:be\s+)?(?:sent|submitted|forwarded|signed|go\s+to)",
+    re.IGNORECASE,
+)
+
+_DRAFT_ONLY_CLARIFICATION = (
+    "Portfolio Guru saves Kaizen entries as *drafts only*. "
+    "No supervisor request, sign-off, or submission is ever made automatically.\n\n"
+    "You review the draft here, then save it. "
+    "Supervisor assignment happens separately in Kaizen when you're ready."
+)
+
+
+def _is_submit_inquiry(text: str) -> bool:
+    """True when the user asks whether the bot will submit/sign/send to supervisor."""
+    if not text:
+        return False
+    lowered = text.lower()
+    return bool(_SUBMIT_INQUIRY_RE.search(text)) and (
+        "?" in text
+        or any(w in lowered for w in ("submit", "sign", "send", "forward", "will", "does", "would", "save directly"))
+    )
+
+
 _PRE_CAPTURE_ANSWER_INTENTS = frozenset(
     {
         ConversationalIntent.PORTFOLIO_QUESTION,
@@ -1090,7 +1117,8 @@ def _gathering_reply(context) -> tuple[str, InlineKeyboardMarkup]:
  AWAIT_CASE_INPUT, AWAIT_TRAINING_LEVEL,
  AWAIT_VOICE_EXAMPLES, AWAIT_TEMPLATE_REVIEW,
  AWAIT_CURRICULUM, AWAIT_FORM_SEARCH,
- AWAIT_GATHERING, AWAIT_PATHWAY) = range(14)
+ AWAIT_GATHERING, AWAIT_PATHWAY,
+ AWAIT_DOC_INTENT) = range(15)
 
 # Common button patterns used across the bot
 _BTN_SETUP = InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")
@@ -2663,6 +2691,19 @@ def _build_amend_keyboard(improved_once: bool = False) -> InlineKeyboardMarkup:
         rows[0].append(InlineKeyboardButton("✨ Quick improve", callback_data="IMPROVE|reflection"))
     rows.append([InlineKeyboardButton("❌ Cancel amend", callback_data="AMEND|cancel")])
     return InlineKeyboardMarkup(rows)
+
+
+def _build_doc_intent_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📝 Read as case info", callback_data="DOCUSE|info"),
+            InlineKeyboardButton("📎 Attach only", callback_data="DOCUSE|attach"),
+        ],
+        [
+            InlineKeyboardButton("📎 Read + attach", callback_data="DOCUSE|both"),
+            InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|doc_intent"),
+        ],
+    ])
 
 
 def _active_draft_keyboard(context) -> InlineKeyboardMarkup:
@@ -6481,6 +6522,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.clear()
             return await _process_case_text(query.message, context, user_id, merged, "text")
 
+    elif data.startswith("DOCUSE|"):
+        return await handle_document_intent(update, context)
+
     elif data.startswith("FORM|"):
         return await handle_form_choice(update, context)
 
@@ -6512,6 +6556,88 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=_build_next_step_keyboard(user_id),
         )
         return ConversationHandler.END
+
+
+async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Apply the user's explicit document intent: read, attach, or both."""
+    query = update.callback_query
+    await query.answer()
+    mode = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else ""
+    pending_doc = context.user_data.pop("_pending_doc", None) or {}
+    file_path = pending_doc.get("path")
+    file_name = pending_doc.get("name") or "document"
+
+    if mode not in {"info", "attach", "both"} or not file_path or not os.path.exists(file_path):
+        await query.edit_message_text(
+            "That document choice has expired. Send the file again when you're ready."
+        )
+        return AWAIT_CASE_INPUT
+
+    if mode in {"attach", "both"}:
+        context.user_data["attachment_path"] = file_path
+        context.user_data["attachment_name"] = file_name
+
+    if mode == "attach":
+        await query.edit_message_text(
+            f"📎 *{file_name}* will be attached to the Kaizen draft.\n\n"
+            "Now send the anonymised case details you want drafted.",
+            parse_mode="Markdown",
+        )
+        return AWAIT_CASE_INPUT
+
+    await query.edit_message_text(f"📄 Reading *{file_name}*…", parse_mode="Markdown")
+    try:
+        case_text = await extract_from_document(file_path)
+    except Exception as exc:
+        logger.error("Document extraction failed after DOCUSE=%s: %s", mode, exc, exc_info=True)
+        case_text = ""
+
+    if not case_text or not case_text.strip():
+        if mode == "both":
+            await query.edit_message_text(
+                f"📎 *{file_name}* will still be attached, but I couldn't read useful text from it.\n\n"
+                "Send the anonymised case details in text and I'll draft from that.",
+                parse_mode="Markdown",
+            )
+            return AWAIT_CASE_INPUT
+        await query.edit_message_text(
+            f"⚠️ Couldn't extract text from *{file_name}*. "
+            "The file may be scanned or password-protected.\n\n"
+            "Send the case details in text, or upload again and choose Attach only.",
+            parse_mode="Markdown",
+        )
+        return AWAIT_CASE_INPUT
+
+    max_chars = 15000
+    if len(case_text) > max_chars:
+        case_text = case_text[:max_chars] + "\n\n[Document truncated — using first 15,000 characters]"
+
+    if mode == "info":
+        try:
+            os.unlink(file_path)
+        except OSError:
+            pass
+    context.user_data["document_name"] = file_name
+
+    if _gathering_enabled(context) and not (context.user_data.get("chosen_form") and context.user_data.get("awaiting_detail")):
+        if not _gathering_case_active(context):
+            existing_attachment_path = context.user_data.get("attachment_path")
+            existing_attachment_name = context.user_data.get("attachment_name")
+            _clear_case_review_state(context, keep_case=False)
+            if existing_attachment_path:
+                context.user_data["attachment_path"] = existing_attachment_path
+                context.user_data["attachment_name"] = existing_attachment_name
+        _append_gathering_case(context, case_text, "document")
+        reply_text, reply_markup = _gathering_reply(context)
+        await query.edit_message_text(reply_text, reply_markup=reply_markup)
+        context.user_data["gathering_msg_id"] = query.message.message_id
+        context.user_data["gathering_chat_id"] = query.message.chat_id
+        context.user_data["_gathering_ack_used"] = True
+        return AWAIT_GATHERING
+
+    await query.edit_message_text(CAPTURED_ACK, parse_mode="Markdown")
+    _track_latest_message(context, query.message)
+    return await _process_case_text(query.message, context, update.effective_user.id, case_text, "document")
 
 
 # === IMPLICIT CASE ACCUMULATION ===
@@ -7188,6 +7314,13 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             words_lower = raw_text.lower()
             word_count = len(raw_text.split())
 
+            if _is_submit_inquiry(raw_text):
+                await update.message.reply_text(
+                    _DRAFT_ONLY_CLARIFICATION,
+                    parse_mode="Markdown",
+                )
+                return ConversationHandler.END
+
             # Fast-path: question patterns (before clinical heuristic)
             # Catches "Do you have...", "Can you...", "What about...", "Is X mapped?"
             _QUESTION_PATTERNS = [
@@ -7421,7 +7554,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         # Handle document files (PDF, PPTX, DOCX)
         doc = update.message.document
         file_name = doc.file_name or "document"
-        
+
         if not is_supported_document(file_name):
             await update.message.reply_text(
                 f"📄 *{file_name}*\n\nI can read PDF, PowerPoint (.pptx), Word (.docx), and text files. "
@@ -7429,68 +7562,44 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 parse_mode="Markdown"
             )
             return ConversationHandler.END
-        
+
         await _delete_previous_gathering_message(context)
-        ack = await update.message.reply_text(f"📄 Reading *{file_name}*…", parse_mode="Markdown")
+        ack = await update.message.reply_text(f"📄 Receiving *{file_name}*…", parse_mode="Markdown")
         tmp_path = None
         try:
+            import shutil
             doc_file = await doc.get_file()
-            # Determine file extension from original filename
             suffix = os.path.splitext(file_name)[1] or ".tmp"
             with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
                 tmp_path = tmp.name
                 await doc_file.download_to_drive(tmp_path)
-                case_text = await extract_from_document(tmp_path)
-            
-            if not case_text or not case_text.strip():
-                await ack.edit_text(
-                    f"⚠️ Couldn't extract text from *{file_name}*. "
-                    "The file might be scanned images (no text layer) or password-protected.\n\n"
-                    "Try:\n"
-                    "• Sending a clearer/updated version\n"
-                    "• Describing the case in text instead",
-                    parse_mode="Markdown"
-                )
-                return ConversationHandler.END
-            
-            # Truncate very long documents
-            max_chars = 15000
-            if len(case_text) > max_chars:
-                case_text = case_text[:max_chars] + "\n\n[Document truncated — using first 15,000 characters]"
-            
-            if _gathering_enabled(context) and not (context.user_data.get("chosen_form") and context.user_data.get("awaiting_detail")):
-                reply_text, reply_markup = _gathering_reply(context)
-                await ack.edit_text(reply_text, reply_markup=reply_markup)
-                context.user_data["gathering_msg_id"] = ack.message_id
-                context.user_data["gathering_chat_id"] = ack.chat_id
-                context.user_data["_gathering_ack_used"] = True
-            else:
-                await ack.edit_text(f"📄 *{file_name}* read. Finding matching forms…", parse_mode="Markdown")
-            _track_latest_message(context, ack)
-            context.user_data["document_name"] = file_name
 
-            # Preserve a copy in a safe temp/cache location with original-ish suffix and store metadata
-            import shutil
+            # Cache the file before extraction so the intent callback can use it.
             cache_dir = os.path.join(tempfile.gettempdir(), "portfolio_guru_cache")
             os.makedirs(cache_dir, exist_ok=True)
-            cache_suffix = os.path.splitext(file_name)[1] or ".tmp"
-            with tempfile.NamedTemporaryFile(dir=cache_dir, suffix=cache_suffix, delete=False) as cached_file:
+            with tempfile.NamedTemporaryFile(dir=cache_dir, suffix=suffix, delete=False) as cached_file:
                 cached_path = cached_file.name
             shutil.copy2(tmp_path, cached_path)
-
-            attachment_path_to_save = cached_path
-            attachment_name_to_save = file_name
         except Exception as e:
-            logger.error(f"Document processing failed: {e}", exc_info=True)
+            logger.error(f"Document download failed: {e}", exc_info=True)
             context.user_data.clear()
             await ack.edit_text(
-                f"⚠️ Couldn't read *{file_name}*. Try a different file format or describe the case in text.",
+                f"⚠️ Couldn't receive *{file_name}*. Try again or describe the case in text.",
                 parse_mode="Markdown"
             )
             return ConversationHandler.END
         finally:
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
+
+        context.user_data["_pending_doc"] = {"path": cached_path, "name": file_name}
+        await ack.edit_text(
+            f"📄 *{file_name}* — how would you like to use this document?",
+            reply_markup=_build_doc_intent_keyboard(),
+            parse_mode="Markdown",
+        )
+        _track_latest_message(context, ack)
+        return AWAIT_DOC_INTENT
 
     if not case_text:
         context.user_data.clear()
@@ -7525,11 +7634,16 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     chosen_form = context.user_data.get("chosen_form")
     if _gathering_enabled(context) and not (chosen_form and context.user_data.get("awaiting_detail")):
+        existing_attachment_path = context.user_data.get("attachment_path")
+        existing_attachment_name = context.user_data.get("attachment_name")
         if not _gathering_case_active(context):
             _clear_case_review_state(context, keep_case=False)
         if attachment_path_to_save:
             context.user_data["attachment_path"] = attachment_path_to_save
             context.user_data["attachment_name"] = attachment_name_to_save
+        elif existing_attachment_path:
+            context.user_data["attachment_path"] = existing_attachment_path
+            context.user_data["attachment_name"] = existing_attachment_name
         _append_gathering_case(context, case_text, input_source)
         if context.user_data.pop("_gathering_ack_used", False):
             return AWAIT_GATHERING
@@ -7565,10 +7679,15 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     active_chat_id = context.user_data.get("last_bot_chat_id")
     active_status_id = context.user_data.get("status_msg_id")
     active_status_chat = context.user_data.get("status_msg_chat")
+    existing_attachment_path = context.user_data.get("attachment_path")
+    existing_attachment_name = context.user_data.get("attachment_name")
     _clear_case_review_state(context, keep_case=False)
     if attachment_path_to_save:
         context.user_data["attachment_path"] = attachment_path_to_save
         context.user_data["attachment_name"] = attachment_name_to_save
+    elif existing_attachment_path:
+        context.user_data["attachment_path"] = existing_attachment_path
+        context.user_data["attachment_name"] = existing_attachment_name
     if active_msg_id and active_chat_id:
         context.user_data["last_bot_msg_id"] = active_msg_id
         context.user_data["last_bot_chat_id"] = active_chat_id
@@ -9086,6 +9205,32 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
 
     raw_text = update.message.text.strip()
     case_text = context.user_data.get("case_text", "")
+    has_draft = bool(_load_draft(context))
+    has_pending = bool(context.user_data.get("pending_draft_data"))
+    in_flow = has_draft or has_pending or bool(case_text) or bool(context.user_data.get("_pending_doc"))
+
+    if _is_submit_inquiry(raw_text):
+        if context.user_data.get("_pending_doc"):
+            suffix = "\n\nYour document is still waiting above — choose how you want to use it."
+            next_state = AWAIT_DOC_INTENT
+        elif has_draft:
+            suffix = "\n\nYour draft is still ready above — tap *Save as draft* when you have reviewed it."
+            next_state = AWAIT_APPROVAL
+        elif has_pending:
+            suffix = "\n\nYour case is still in progress — use the buttons above to continue."
+            next_state = AWAIT_TEMPLATE_REVIEW
+        elif in_flow:
+            suffix = "\n\nYour case is still in progress — use the buttons above to continue."
+            next_state = AWAIT_FORM_CHOICE
+        else:
+            suffix = ""
+            next_state = AWAIT_CASE_INPUT
+        await update.message.reply_text(
+            _DRAFT_ONLY_CLARIFICATION + suffix,
+            parse_mode="Markdown",
+        )
+        return next_state
+
     if _is_text_filing_approval(raw_text):
         if _load_draft(context) or _restore_retryable_draft(context):
             return await handle_approval_approve(update, context)
@@ -9106,9 +9251,6 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
         intent = "new_case"
 
     # Check if we're in a state with an active draft
-    has_draft = bool(_load_draft(context))
-    has_pending = bool(context.user_data.get("pending_draft_data"))
-    in_flow = has_draft or has_pending or bool(case_text)
     amend_mode = bool(context.user_data.get("amend_mode") and has_draft)
 
     if _is_text_filing_approval(raw_text) and context.user_data.get("last_filing_status") == "success":
@@ -9597,6 +9739,11 @@ def build_application() -> Application:
                 CallbackQueryHandler(gather_done_callback, pattern=r"^GATHER\|done$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|cancel$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
+            ],
+            AWAIT_DOC_INTENT: [
+                CallbackQueryHandler(handle_document_intent, pattern=r"^DOCUSE\|"),
+                CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
             ],
             AWAIT_FORM_CHOICE: [
                 CallbackQueryHandler(handle_form_choice, pattern=r"^FORM\|"),

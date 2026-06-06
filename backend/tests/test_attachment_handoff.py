@@ -3,13 +3,21 @@ import tempfile
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from bot import handle_case_input, handle_approval_approve, AWAIT_FORM_CHOICE, AWAIT_APPROVAL
+from bot import (
+    AWAIT_CASE_INPUT,
+    AWAIT_DOC_INTENT,
+    AWAIT_FORM_CHOICE,
+    handle_approval_approve,
+    handle_case_input,
+    handle_document_intent,
+    handle_mid_conversation_text,
+)
 from tests.bot_simulator import BotSimulator
 from extractor import FormDraft
 
 @pytest.mark.asyncio
 async def test_document_case_stores_attachment_path():
-    """Verify that document cases preserve the attachment in a cache directory and save metadata."""
+    """Document uploads first ask how the file should be used."""
     sim = BotSimulator()
     context = sim._make_context()
     update = sim._make_text_update('')
@@ -31,20 +39,124 @@ async def test_document_case_stores_attachment_path():
 
     with patch('bot.has_credentials', return_value=True), \
          patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
-         patch('bot.extract_from_document', new=AsyncMock(return_value="Patient presented with chest pain...")), \
+         patch('bot.extract_from_document', new=AsyncMock(return_value="Patient presented with chest pain...")) as extract_mock, \
          patch('bot.get_training_level', return_value='ST5'), \
          patch('bot.get_curriculum', return_value='2025'), \
          patch('bot.recommend_form_types', new=AsyncMock(return_value=[])):
         
         result = await handle_case_input(update, context)
 
-    assert "attachment_path" in context.user_data
-    assert context.user_data["attachment_name"] == "clinical-notes.pdf"
-    assert os.path.exists(context.user_data["attachment_path"])
+    assert result == AWAIT_DOC_INTENT
+    assert "_pending_doc" in context.user_data
+    assert context.user_data["_pending_doc"]["name"] == "clinical-notes.pdf"
+    assert os.path.exists(context.user_data["_pending_doc"]["path"])
+    extract_mock.assert_not_called()
+    buttons = sim.get_last_buttons()
+    assert ("📝 Read as case info", "DOCUSE|info") in buttons
+    assert ("📎 Attach only", "DOCUSE|attach") in buttons
+    assert ("📎 Read + attach", "DOCUSE|both") in buttons
     
     # Clean up the cached file
-    if os.path.exists(context.user_data["attachment_path"]):
-        os.unlink(context.user_data["attachment_path"])
+    path = context.user_data["_pending_doc"]["path"]
+    if os.path.exists(path):
+        os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_document_attach_only_does_not_extract_and_waits_for_case_details():
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_callback_update("DOCUSE|attach")
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+        temp_path = f.name
+        f.write(b"dummy pdf content")
+    context.user_data["_pending_doc"] = {"path": temp_path, "name": "evidence.pdf"}
+
+    with patch('bot.extract_from_document', new=AsyncMock()) as extract_mock:
+        result = await handle_document_intent(update, context)
+
+    assert result == AWAIT_CASE_INPUT
+    extract_mock.assert_not_called()
+    assert context.user_data["attachment_path"] == temp_path
+    assert context.user_data["attachment_name"] == "evidence.pdf"
+    assert "case_text" not in context.user_data
+    assert "attached to the Kaizen draft" in sim.get_last_text()
+
+    if os.path.exists(temp_path):
+        os.unlink(temp_path)
+
+
+@pytest.mark.asyncio
+async def test_document_read_and_attach_extracts_case_and_preserves_attachment():
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_callback_update("DOCUSE|both")
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+        temp_path = f.name
+        f.write(b"dummy pdf content")
+    context.user_data["_pending_doc"] = {"path": temp_path, "name": "notes.pdf"}
+
+    with patch('bot.extract_from_document', new=AsyncMock(return_value="45F chest pain with normal ECG and negative troponins.")), \
+         patch('bot.get_training_level', return_value='ST5'), \
+         patch('bot.get_curriculum', return_value='2025'), \
+         patch('bot.recommend_form_types', new=AsyncMock(return_value=[])):
+        result = await handle_document_intent(update, context)
+
+    assert result == AWAIT_FORM_CHOICE
+    assert context.user_data["attachment_path"] == temp_path
+    assert context.user_data["attachment_name"] == "notes.pdf"
+    assert "45F chest pain" in context.user_data["case_text"]
+
+    if os.path.exists(temp_path):
+        os.unlink(temp_path)
+
+
+@pytest.mark.asyncio
+async def test_attach_only_attachment_survives_next_text_case():
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_text_update("45F chest pain, ECG normal, troponins negative, discharged with safety netting.")
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+        temp_path = f.name
+        f.write(b"dummy pdf content")
+    context.user_data["attachment_path"] = temp_path
+    context.user_data["attachment_name"] = "evidence.pdf"
+
+    with patch('bot.has_credentials', return_value=True), \
+         patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+         patch('bot.get_training_level', return_value='ST5'), \
+         patch('bot.get_curriculum', return_value='2025'), \
+         patch('bot.recommend_form_types', new=AsyncMock(return_value=[])):
+        result = await handle_case_input(update, context)
+
+    assert result == AWAIT_FORM_CHOICE
+    assert context.user_data["attachment_path"] == temp_path
+    assert context.user_data["attachment_name"] == "evidence.pdf"
+
+    if os.path.exists(temp_path):
+        os.unlink(temp_path)
+
+
+@pytest.mark.asyncio
+async def test_mid_flow_submit_question_answers_draft_only_and_preserves_state():
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_text_update("Will this submit to my supervisor?")
+    context.user_data["case_text"] = "45F chest pain, ECG normal, troponins negative."
+    context.user_data["form_recommendations"] = []
+
+    with patch('bot.classify_intent', new=AsyncMock()) as classify_mock:
+        result = await handle_mid_conversation_text(update, context)
+
+    assert result == AWAIT_FORM_CHOICE
+    classify_mock.assert_not_called()
+    text = sim.get_last_text()
+    assert "drafts only" in text
+    assert "No supervisor request" in text
+    assert context.user_data["case_text"] == "45F chest pain, ECG normal, troponins negative."
 
 
 @pytest.mark.asyncio
@@ -157,4 +269,3 @@ async def test_filing_handles_missing_attachment_gracefully():
     # Verify that the user was notified about the skipped attachment in the final message
     any_missing_msg = any("Attachment skipped: file missing" in str(msg) for msg in sim.messages_sent)
     assert any_missing_msg
-

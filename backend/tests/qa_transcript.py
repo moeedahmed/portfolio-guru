@@ -284,6 +284,11 @@ async def offline_application():
                 CallbackQueryHandler(bot.handle_callback, pattern=r"^ACTION\|add_detail$"),
                 CallbackQueryHandler(bot.handle_callback, pattern=r"^ACTION\|continue_thin$"),
             ],
+            bot.AWAIT_DOC_INTENT: [
+                CallbackQueryHandler(bot.handle_document_intent, pattern=r"^DOCUSE\|"),
+                CallbackQueryHandler(bot.handle_callback, pattern=r"^CANCEL\|"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_mid_conversation_text),
+            ],
             bot.AWAIT_FORM_CHOICE: [
                 CallbackQueryHandler(bot.handle_form_choice, pattern=r"^FORM\|"),
                 CallbackQueryHandler(bot.handle_callback, pattern=r"^CANCEL\|"),
