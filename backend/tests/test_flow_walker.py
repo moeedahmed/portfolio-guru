@@ -588,6 +588,60 @@ class TestFlowWalker:
         assert any(data == 'APPROVE|draft' for _, data in sim.get_last_buttons())
 
     @pytest.mark.asyncio
+    async def test_quick_improve_targets_formal_course_reflective_notes(self):
+        from bot import AWAIT_APPROVAL, handle_quick_improve
+        from models import FormDraft
+
+        original = FormDraft(
+            form_type='FORMAL_COURSE',
+            uuid='uuid-formal-course',
+            fields={
+                'stage_of_training': 'Higher/ST4-ST6',
+                'project_description': 'I completed the ATLS Course for Doctors.',
+                'reflective_notes': '',
+                'resources_used': '',
+                'lessons_learned': '',
+            },
+        )
+        improved = FormDraft(
+            form_type='FORMAL_COURSE',
+            uuid='uuid-formal-course',
+            fields={
+                **original.fields,
+                'reflective_notes': (
+                    'Completing ATLS helped me structure trauma assessment more reliably '
+                    'and reinforced the need to use a clear primary survey under pressure.'
+                ),
+                'resources_used': 'ATLS course manual and simulated trauma scenarios.',
+                'lessons_learned': 'I will use the ATLS structure when leading trauma assessments.',
+            },
+        )
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('IMPROVE|reflection')
+        context = sim._make_context()
+        context.user_data['case_text'] = 'I completed ATLS and have a certificate.'
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': 'FORMAL_COURSE',
+            'fields': original.fields,
+            'uuid': original.uuid,
+        }
+
+        with patch('bot.get_voice_profile', return_value=''), \
+             patch('bot.extract_form_data', new_callable=AsyncMock, return_value=improved) as extract_mock:
+            result = await handle_quick_improve(update, context)
+
+        assert result == AWAIT_APPROVAL
+        updated_fields = context.user_data['draft_data']['fields']
+        assert updated_fields['reflective_notes'] == improved.fields['reflective_notes']
+        assert updated_fields['resources_used'] == improved.fields['resources_used']
+        assert updated_fields['lessons_learned'] == improved.fields['lessons_learned']
+        assert updated_fields['project_description'] == original.fields['project_description']
+        assert "does not have a reflection field" not in "\n".join(text or "" for _, text, _ in sim.messages_sent)
+        assert extract_mock.await_args.args[1] == 'FORMAL_COURSE'
+
+    @pytest.mark.asyncio
     async def test_quick_improve_edits_original_draft_in_place(self, thin_draft):
         """The revised draft must replace the original draft message (edit in
         place) and never spawn a second full draft message. The chat should

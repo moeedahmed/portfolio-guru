@@ -393,6 +393,82 @@ async def test_qiat_blanks_unsourced_training_year_and_supplements_qi_kcs():
     assert draft.fields["curriculum_links"] == ["SLO11", "SLO12"]
 
 
+def test_qiat_journey_list_is_not_mapped_to_reflections_textarea():
+    from kaizen_form_filer import FORM_FIELD_MAP
+
+    qiat_map = FORM_FIELD_MAP["QIAT"]
+    assert qiat_map["reflection"] == "8a8f2bce-26fa-4baa-81d3-5b567ce9d45c"
+    assert "qi_journey_aspects" not in qiat_map
+
+
+def test_qiat_normaliser_drops_list_values_from_narrative_fields():
+    from kaizen_form_filer import normalise_fields_for_deterministic_filing
+
+    result = normalise_fields_for_deterministic_filing(
+        "QIAT",
+        {
+            "qi_journey_aspects": ["Measurement", "Implement"],
+            "reflection": ["Measurement", "Implement"],
+            "qi_understanding": {"internal": "value"},
+            "next_pdp": "Review the project outcomes with supervisor feedback.",
+        },
+    )
+
+    assert result["qi_journey_aspects"] == ["Measurement", "Implement"]
+    assert "reflection" not in result
+    assert "qi_understanding" not in result
+    assert result["next_pdp"]
+
+
+def test_qiat_header_defaults_do_not_invent_missing_dates():
+    from kaizen_form_filer import FORM_FIELD_MAP, apply_common_header_defaults
+
+    fields, meta = apply_common_header_defaults(
+        "QIAT",
+        {"reflection": "QI project using baseline audit, intervention and re-audit."},
+        FORM_FIELD_MAP["QIAT"],
+    )
+
+    assert "date_of_encounter" not in fields
+    assert "end_date" not in fields
+    assert meta["activity_date"] == ""
+
+
+@pytest.mark.asyncio
+async def test_minimal_sepsis_qiat_cycle_drafts_cautious_narrative_without_raw_array():
+    from extractor import extract_form_data
+
+    source = "I completed an ED sepsis QI project with baseline audit, intervention and re-audit."
+    payload = {
+        "date_of_encounter": "",
+        "stage_of_training": "",
+        "placement": "",
+        "pdp_summary": "",
+        "qi_engagement": "",
+        "qi_understanding": "",
+        "involved_in_project": "Yes",
+        "qi_journey_aspects": ["Measurement", "Implement"],
+        "reflection": "",
+        "next_pdp": "",
+        "curriculum_links": [],
+        "key_capabilities": [],
+    }
+
+    with patch("extractor._generate", new=AsyncMock(return_value=json.dumps(payload))):
+        draft = await extract_form_data(source, "QIAT")
+
+    assert draft.fields["date_of_encounter"] == ""
+    assert draft.fields["stage_of_training"] == ""
+    assert draft.fields["placement"] == ""
+    assert draft.fields["involved_in_project"] == "Yes"
+    assert draft.fields["qi_journey_aspects"] == ["Measurement", "Implement", "Testing Changes"]
+    assert "['Measurement'" not in draft.fields["reflection"]
+    assert "baseline audit" in draft.fields["reflection"]
+    assert "specific results" in draft.fields["reflection"]
+    assert draft.fields["pdp_summary"] == ""
+    assert draft.fields["qi_engagement"] == ""
+
+
 @pytest.mark.asyncio
 async def test_2021_user_selectable_variant_routes_deterministically():
     from filer_router import route_filing

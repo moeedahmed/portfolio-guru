@@ -160,6 +160,61 @@ async def test_mid_flow_submit_question_answers_draft_only_and_preserves_state()
 
 
 @pytest.mark.asyncio
+async def test_text_while_document_choice_pending_is_captured_and_keeps_buttons_valid():
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_text_update("I completed ATLS and have a certificate.")
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+        temp_path = f.name
+        f.write(b"dummy pdf content")
+    context.user_data["_pending_doc"] = {"path": temp_path, "name": "atls.pdf"}
+
+    with patch('bot.classify_intent', new=AsyncMock()) as classify_mock:
+        result = await handle_mid_conversation_text(update, context)
+
+    assert result == AWAIT_DOC_INTENT
+    classify_mock.assert_not_called()
+    assert context.user_data["_pending_doc"]["name"] == "atls.pdf"
+    assert context.user_data["_pending_doc_context"] == "I completed ATLS and have a certificate."
+    assert "document choice is still pending" in sim.get_last_text()
+
+    if os.path.exists(temp_path):
+        os.unlink(temp_path)
+
+
+@pytest.mark.asyncio
+async def test_pending_document_context_is_merged_after_read_choice():
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_callback_update("DOCUSE|info")
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+        temp_path = f.name
+        f.write(b"dummy pdf content")
+    context.user_data["_pending_doc"] = {"path": temp_path, "name": "atls.pdf"}
+    context.user_data["_pending_doc_context"] = "I completed ATLS and have a certificate."
+
+    async def fake_process(message, ctx, user_id, case_text, input_source):
+        ctx.user_data["processed_case_text"] = case_text
+        ctx.user_data["processed_input_source"] = input_source
+        return AWAIT_FORM_CHOICE
+
+    with patch('bot.extract_from_document', new=AsyncMock(return_value="Advanced Trauma Life Support certificate")), \
+         patch('bot._process_case_text', new=AsyncMock(side_effect=fake_process)):
+        result = await handle_document_intent(update, context)
+
+    assert result == AWAIT_FORM_CHOICE
+    assert "I completed ATLS" in context.user_data["processed_case_text"]
+    assert "Advanced Trauma Life Support certificate" in context.user_data["processed_case_text"]
+    assert context.user_data["processed_input_source"] == "document"
+    assert "_pending_doc_context" not in context.user_data
+
+    if os.path.exists(temp_path):
+        os.unlink(temp_path)
+
+
+@pytest.mark.asyncio
 async def test_filing_call_receives_attachment_path():
     """Verify that when a user saves a draft, the preserved attachment path is passed to route_filing."""
     sim = BotSimulator()

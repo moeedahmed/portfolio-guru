@@ -2961,12 +2961,42 @@ def _build_form_recommendation_text(
     )
 
 
-def _find_reflection_key(fields: dict) -> str | None:
+def _find_reflection_keys(fields: dict, form_type: str | None = None) -> list[str]:
+    if not isinstance(fields, dict):
+        return []
+    if schema_form_type(form_type or "") == "FORMAL_COURSE":
+        return [key for key in ("reflective_notes", "resources_used", "lessons_learned") if key in fields]
+
+    keys: list[str] = []
     if "reflection" in fields:
-        return "reflection"
+        keys.append("reflection")
+    preferred = (
+        "reflective_notes",
+        "lessons_learned",
+        "learning_points",
+        "learning_outcomes",
+        "learned",
+    )
+    for key in preferred:
+        if key in fields and key not in keys:
+            keys.append(key)
     for key in fields:
-        if "reflection" in key:
-            return key
+        normalised = str(key).lower()
+        if (
+            "reflection" in normalised
+            or "reflective" in normalised
+            or "lesson" in normalised
+            or "learned" in normalised
+            or "learning" in normalised
+        ) and key not in keys:
+            keys.append(key)
+    return keys
+
+
+def _find_reflection_key(fields: dict, form_type: str | None = None) -> str | None:
+    keys = _find_reflection_keys(fields, form_type)
+    if keys:
+        return keys[0]
     return None
 
 
@@ -2974,7 +3004,7 @@ def _draft_reflection_text(draft) -> str:
     if isinstance(draft, CBDData):
         return draft.reflection or ""
     if isinstance(draft, FormDraft):
-        key = _find_reflection_key(draft.fields)
+        key = _find_reflection_key(draft.fields, draft.form_type)
         return str(draft.fields.get(key) or "") if key else ""
     return ""
 
@@ -6564,6 +6594,7 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
     await query.answer()
     mode = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else ""
     pending_doc = context.user_data.pop("_pending_doc", None) or {}
+    pending_doc_context = context.user_data.pop("_pending_doc_context", "")
     file_path = pending_doc.get("path")
     file_name = pending_doc.get("name") or "document"
 
@@ -6593,6 +6624,17 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
         case_text = ""
 
     if not case_text or not case_text.strip():
+        if pending_doc_context.strip():
+            case_text = pending_doc_context.strip()
+            if mode == "info":
+                try:
+                    os.unlink(file_path)
+                except OSError:
+                    pass
+            context.user_data["document_name"] = file_name
+            await query.edit_message_text(CAPTURED_ACK, parse_mode="Markdown")
+            _track_latest_message(context, query.message)
+            return await _process_case_text(query.message, context, update.effective_user.id, case_text, "document")
         if mode == "both":
             await query.edit_message_text(
                 f"📎 *{file_name}* will still be attached, but I couldn't read useful text from it.\n\n"
@@ -6611,6 +6653,9 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
     max_chars = 15000
     if len(case_text) > max_chars:
         case_text = case_text[:max_chars] + "\n\n[Document truncated — using first 15,000 characters]"
+
+    if pending_doc_context.strip():
+        case_text = f"{pending_doc_context.strip()}\n\nDocument text:\n{case_text}".strip()
 
     if mode == "info":
         try:
@@ -8892,8 +8937,8 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
         )
 
     form_type = _draft_form_type(draft)
-    reflection_key = "reflection" if isinstance(draft, CBDData) else _find_reflection_key(draft.fields)
-    if not reflection_key:
+    reflection_keys = ["reflection"] if isinstance(draft, CBDData) else _find_reflection_keys(draft.fields, form_type)
+    if not reflection_keys:
         await query.message.reply_text(
             "This form does not have a reflection field to improve. You can still save it as a draft or tap Edit.",
             reply_markup=_active_draft_keyboard(context),
@@ -8904,9 +8949,10 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
     case_text = context.user_data.get("case_text", "")
     current_draft_text = _format_draft_preview(draft, _chosen_form_reason(context, form_type))
     feedback = (
-        "Improve the reflection only. Keep the clinical facts, date, setting, curriculum links, "
-        "and every non-reflection field unchanged. Make the reflection concise, first-person, "
-        "specific, and useful for a UK EM WPBA assessor. If the case involves a judgement issue, "
+        "Improve only the reflection or reflection-like narrative fields. Keep the clinical facts, "
+        "date, setting, curriculum links, and every non-reflection field unchanged. Make the "
+        "reflection concise, first-person, specific, and useful for a UK EM WPBA assessor. "
+        "If the case involves a judgement issue, "
         "frame it as initially narrow reasoning or a plan changed after senior challenge, not as "
         "a blunt admission of wrong judgement. Anchor the learning to the available evidence and "
         "the concrete practice change."
@@ -8941,11 +8987,15 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
                 ),
                 timeout=45,
             )
-            improved_reflection = str(regenerated.fields.get(reflection_key) or "").strip()
-            if not improved_reflection:
-                raise ValueError("Improved reflection was empty")
             fields = dict(draft.fields)
-            fields[reflection_key] = improved_reflection
+            improved_any = False
+            for reflection_key in reflection_keys:
+                improved_value = str(regenerated.fields.get(reflection_key) or "").strip()
+                if improved_value:
+                    fields[reflection_key] = improved_value
+                    improved_any = True
+            if not improved_any:
+                raise ValueError("Improved reflection was empty")
             updated = FormDraft(form_type=draft.form_type, fields=fields, uuid=draft.uuid)
         _store_draft(context, updated)
         context.user_data["quick_improve_used"] = True
@@ -9208,6 +9258,16 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
     has_draft = bool(_load_draft(context))
     has_pending = bool(context.user_data.get("pending_draft_data"))
     in_flow = has_draft or has_pending or bool(case_text) or bool(context.user_data.get("_pending_doc"))
+
+    if context.user_data.get("_pending_doc"):
+        existing = context.user_data.get("_pending_doc_context", "").strip()
+        context.user_data["_pending_doc_context"] = (
+            f"{existing}\n\n{raw_text}".strip() if existing else raw_text
+        )
+        await update.message.reply_text(
+            "I've kept that as extra context. Your document choice is still pending - use the buttons above to choose whether to read it, attach it, or both."
+        )
+        return AWAIT_DOC_INTENT
 
     if _is_submit_inquiry(raw_text):
         if context.user_data.get("_pending_doc"):

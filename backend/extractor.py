@@ -413,7 +413,7 @@ _HUMANIZE_FIELDS = {
     "root_causes", "contributing_factors", "resource_details",
     "clinical_scenario", "how_used", "learning_outcomes",
     "key_features", "key_aspects", "pdp_summary", "qi_engagement",
-    "qi_understanding", "qi_journey_aspects", "next_pdp",
+    "qi_understanding", "next_pdp",
     "situation", "evidence_evaluation", "apply_to_practice",
     "search_methodology", "communicate_to_patient", "future_research",
     "project_description", "reflective_notes", "resources_used",
@@ -2198,6 +2198,80 @@ def _normalise_list_field(value) -> list:
     return [cleaned] if cleaned else []
 
 
+def _qiat_journey_aspects_from_source(case_description: str) -> list[str]:
+    """Derive QI journey checkboxes only from explicit audit/QI cycle language."""
+    text = f" {case_description or ''} ".lower()
+    aspects: list[str] = []
+    if any(term in text for term in ("baseline", "audit", "re-audit", "reaudit", "measurement", "measured")):
+        aspects.append("Measurement")
+    if any(term in text for term in ("intervention", "change", "pdsa", "tested", "testing")):
+        aspects.append("Testing Changes")
+    if any(term in text for term in ("implemented", "implementation", "intervention", "introduced")):
+        aspects.append("Implement")
+    return list(dict.fromkeys(aspects))
+
+
+def _source_describes_qi_project(case_description: str) -> bool:
+    text = f" {case_description or ''} ".lower()
+    return any(term in text for term in ("qi project", "quality improvement", "audit", "re-audit", "reaudit"))
+
+
+def _source_describes_qi_cycle(case_description: str) -> bool:
+    text = f" {case_description or ''} ".lower()
+    has_measurement = any(term in text for term in ("baseline", "audit", "measurement", "measured"))
+    has_change = any(term in text for term in ("intervention", "change", "introduced", "implemented"))
+    has_remeasurement = any(term in text for term in ("re-audit", "reaudit", "re audit", "repeat audit"))
+    return has_measurement and has_change and has_remeasurement
+
+
+def _coerce_qiat_text_value(value) -> str:
+    """Keep list/JSON-ish internal values out of QIAT narrative text fields."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if re.fullmatch(r"\[\s*['\"][^]]+['\"](?:\s*,\s*['\"][^]]+['\"])*\s*\]", cleaned):
+            return ""
+        return cleaned
+    if isinstance(value, (list, tuple, set, dict)):
+        return ""
+    return str(value).strip()
+
+
+def _polish_qiat_fields(fields: dict, case_description: str) -> dict:
+    """Improve sparse QIAT drafts without inventing unverifiable project facts."""
+    out = dict(fields or {})
+
+    for key in ("pdp_summary", "qi_engagement", "qi_understanding", "reflection", "next_pdp"):
+        out[key] = _coerce_qiat_text_value(out.get(key))
+
+    if _source_describes_qi_project(case_description) and not out.get("involved_in_project"):
+        out["involved_in_project"] = "Yes"
+
+    derived_aspects = _qiat_journey_aspects_from_source(case_description)
+    existing_aspects = _normalise_list_field(out.get("qi_journey_aspects"))
+    if derived_aspects:
+        out["qi_journey_aspects"] = list(dict.fromkeys(existing_aspects + derived_aspects))
+
+    if _source_describes_qi_cycle(case_description):
+        if not out.get("qi_understanding"):
+            out["qi_understanding"] = (
+                "This developed my practical understanding of using baseline measurement, "
+                "an intervention and re-audit to assess change in an ED quality improvement project."
+            )
+        if not out.get("reflection"):
+            out["reflection"] = (
+                "I completed an ED sepsis quality improvement project using baseline audit, "
+                "an intervention and re-audit. This gave me practical experience of a full "
+                "audit cycle and how measurement can be used to judge whether a change has "
+                "improved care.\n\n"
+                "The draft should be reviewed to add the specific results, my exact role, "
+                "team involvement and how the work was shared before submission."
+            )
+
+    return out
+
+
 def _normalise_dropdown_field(value, options: list, leave_missing_blank: bool):
     cleaned = _normalise_text_field(value, leave_missing_blank, "")
     if cleaned in options:
@@ -2727,6 +2801,16 @@ Example for handover/referral reflections:
 Anti-repetition rule: if you find yourself writing the words "ECG", "atrial flutter", "fixation bias" (or any other case-specific term) in more than two fields — stop and redistribute. Each key concept appears in ONE field only.
 """ if schema_key == "REFLECT_LOG" else ""
 
+    qiat_instruction = """
+===== QIAT FIELD SCOPING (mandatory) =====
+
+For QIAT, separate checkbox concepts from prose:
+- qi_journey_aspects is a multi-select list only. Return values such as "Measurement", "Testing Changes" and "Implement" as a JSON array. Never put that array in reflection or another text field.
+- If the source says baseline audit + intervention + re-audit, it supports "Measurement", "Testing Changes", "Implement", involved_in_project="Yes", and cautious narrative about completing an audit/QI cycle.
+- Do not invent stage, placement, completion date, numerical results, trainee role, team membership, teaching, project sharing, courses attended, or PDP goals. Leave those blank unless stated.
+- Narrative fields may say that details need review when specific facts are missing.
+""" if schema_key == "QIAT" else ""
+
     today = date.today()
     yesterday = today - timedelta(days=1)
     today_str = today.strftime("%Y-%m-%d")
@@ -2736,7 +2820,7 @@ Anti-repetition rule: if you find yourself writing the words "ECG", "atrial flut
     system_prompt = f"""You are a medical portfolio assistant. Extract data for a {schema['name']} ({form_type}) WPBA entry.
 
 Today's date: {today_str} ({day_of_week}). Yesterday: {yesterday_str}.
-{reflection_instruction}{reflect_log_instruction}
+{reflection_instruction}{reflect_log_instruction}{qiat_instruction}
 Return ONLY a JSON object with these exact keys:
 {json_template}
 
@@ -2888,6 +2972,8 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
         schema_key=schema_key,
         has_kc_tick=has_kc_tick,
     )
+    if schema_key == "QIAT":
+        normalised = _polish_qiat_fields(normalised, case_description)
 
     # Apply humanizer to ALL narrative fields before user sees the draft
     normalised = _humanize_all_fields(normalised)

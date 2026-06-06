@@ -70,6 +70,17 @@ def _is_other_choice(value: Any) -> bool:
     return "other" in str(value or "").strip().lower()
 
 
+def _text_control_value(value: Any) -> str:
+    """Prepare values for text controls without leaking Python reprs."""
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        return ""
+    if isinstance(value, (list, tuple, set)):
+        return _strip_emojis(", ".join(str(item).strip() for item in value if str(item).strip()))
+    return _strip_emojis(str(value))
+
+
 # ─── Date helper ──────────────────────────────────────────────────────────────
 
 def _to_uk_date(raw: str) -> str:
@@ -505,7 +516,10 @@ FORM_FIELD_MAP = {
         "qi_engagement": "fd738d73-9b88-4bfb-8c67-a7d7a0defa57",
         "qi_understanding": "dab68d71-46ca-46a6-97e8-e2f2a6b29a82",
         "involved_in_project": "2e2096f3-f65e-465c-bdd6-effadbe743dc",
-        "qi_journey_aspects": "8a8f2bce-26fa-4baa-81d3-5b567ce9d45c",
+        # QI journey aspects are Angular kzt-checkbox controls without stable
+        # DOM ids. Do not map their list values to this UUID: the current DOM
+        # map identifies it as 4.2 Reflections and Learning.
+        "reflection": "8a8f2bce-26fa-4baa-81d3-5b567ce9d45c",
         "next_pdp": "09a89221-ab2c-42f6-8462-1333540f8cf8",
     },
     "TEACH": {
@@ -904,7 +918,7 @@ SCHEMA_REQUIRED_FIELD_HANDLING = {
         "stage_of_training": "safe_skip:self_evaluation_form_has_no_verified_stage_dom",
     },
     "QIAT": {
-        "reflection": "safe_skip:no_verified_dom_field",
+        "qi_journey_aspects": "safe_skip:no_verified_qi_journey_checkbox_dom_ids",
     },
     "SDL": {
         "learning_activity_type": "merge:resource_details",
@@ -1034,6 +1048,11 @@ def normalise_fields_for_deterministic_filing(form_type: str, fields: dict) -> d
         out["resource_details"] = _append_section(out.get("resource_details"), "Learning activity type", value)
         out.pop("learning_activity_type", None)
 
+    elif handling_key == "QIAT":
+        for key in ("pdp_summary", "qi_engagement", "qi_understanding", "reflection", "next_pdp"):
+            if isinstance(out.get(key), (list, tuple, set, dict)):
+                out.pop(key, None)
+
     return _guard_profile_admin_backfill(out)
 
 
@@ -1141,8 +1160,16 @@ def apply_common_header_defaults(form_type: str, fields: dict, field_map: dict |
 
     source_date = _first_present_value(out, date_source_keys)
     if not source_date:
-        source_date = date.today().isoformat()
-        defaulted.append("date_of_encounter")
+        if canonical_form_type(form_type) == "QIAT":
+            meta = {
+                "defaulted_fields": defaulted,
+                "activity_date": "",
+                "event_description": out.get("event_description") or "",
+            }
+            return out, meta
+        else:
+            source_date = date.today().isoformat()
+            defaulted.append("date_of_encounter")
 
     if not _first_present_value(out, start_keys):
         out["date_of_encounter"] = source_date
@@ -2624,12 +2651,12 @@ async def fill_kaizen_form(
                     value = await _normalise_dops_select_value(page, key, dom_id, value)
                 ok = await _fill_select(page, dom_id, str(value))
             elif tag in ("TEXTAREA", "INPUT"):
-                ok = await _fill_text(page, dom_id, str(value))
+                ok = await _fill_text(page, dom_id, _text_control_value(value))
             elif tag == "DIV":
                 # Some fields wrap textarea in a div
-                ok = await _fill_text(page, dom_id, str(value))
+                ok = await _fill_text(page, dom_id, _text_control_value(value))
             else:
-                ok = await _fill_text(page, dom_id, str(value))
+                ok = await _fill_text(page, dom_id, _text_control_value(value))
 
             if ok:
                 filled.append(key)
@@ -2914,7 +2941,9 @@ async def _fill_field_legacy(page: Page, dom_id: str, value: Any, field_key: str
 
         # Textareas and text inputs
         if tag in ("TEXTAREA", "INPUT"):
-            clean_value = _strip_emojis(str(value))
+            clean_value = _text_control_value(value)
+            if not clean_value:
+                return False
             try:
                 # Try normal click first exactly as originally written to preserve signature for mock tests
                 await el.click()
