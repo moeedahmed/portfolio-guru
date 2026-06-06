@@ -1890,6 +1890,75 @@ class TestFlowWalker:
         assert context.user_data.get('draft_data') is None
 
     @pytest.mark.asyncio
+    async def test_store_draft_clears_stale_failed_filing_retry_state(self, thin_draft):
+        """A freshly created draft (e.g. a certificate/document draft) must not
+        inherit a failed-filing retry affordance from an earlier, unrelated
+        filing. Storing a new draft clears the sticky last_filing_* state so the
+        'Retry filing this draft' gate only appears for a draft that genuinely
+        had a filing attempt."""
+        from bot import _store_draft, _has_retryable_failed_filing_draft
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        # Stale state left behind by an earlier failed filing on a different case.
+        context.user_data['last_filing_status'] = 'failed'
+        context.user_data['last_filing_form_name'] = 'Case-Based Discussion'
+        context.user_data['last_amend_draft'] = {
+            '_type': 'FORM',
+            'form_type': thin_draft.form_type,
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+        # Sticky status would otherwise make the old draft look retryable.
+        assert _has_retryable_failed_filing_draft(context) is True
+
+        # A brand-new draft is created (the document/certificate review flow).
+        _store_draft(context, thin_draft)
+
+        assert context.user_data.get('last_filing_status') not in {'failed', 'partial'}
+        assert _has_retryable_failed_filing_draft(context) is False
+
+    def test_draft_review_and_failed_filing_keyboards_are_distinct(self):
+        """The normal draft-review keyboard must never offer 'Retry filing this
+        draft' — that affordance belongs only to the failed-filing gate."""
+        from bot import (
+            _build_approval_keyboard,
+            _build_failed_filing_input_gate_keyboard,
+        )
+
+        def labels(markup):
+            return [
+                button.text
+                for row in markup.inline_keyboard
+                for button in row
+            ]
+
+        review_labels = labels(_build_approval_keyboard())
+        gate_labels = labels(_build_failed_filing_input_gate_keyboard())
+
+        assert not any('Retry filing' in label for label in review_labels)
+        assert any('Retry filing' in label for label in gate_labels)
+
+    @pytest.mark.asyncio
+    async def test_media_feedback_on_fresh_draft_skips_retry_gate(self, thin_draft):
+        """Sending a document/photo as extra detail on a freshly stored draft
+        must regenerate the draft, not surface the failed-filing retry gate,
+        even if an earlier unrelated case left a stale 'failed' status."""
+        from bot import _store_draft, _has_retryable_failed_filing_draft
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        # Earlier unrelated failure leaves sticky status before the new draft.
+        context.user_data['last_filing_status'] = 'failed'
+        context.user_data['last_filing_form_name'] = 'Case-Based Discussion'
+
+        # Creating/presenting the new certificate draft stores it.
+        _store_draft(context, thin_draft)
+
+        # The new draft never had a filing attempt, so no retry gate is owed.
+        assert _has_retryable_failed_filing_draft(context) is False
+
+    @pytest.mark.asyncio
     async def test_global_try_again_button_can_retry_after_conversation_end(self, thin_draft):
         from bot import handle_action_button, handle_same_case_another
 

@@ -670,9 +670,24 @@ def _serialise_draft(draft):
     return None
 
 
+def _clear_filing_retry_state(context) -> None:
+    """Drop the sticky last_filing_* markers so the failed-filing retry gate is
+    not offered for a draft that never had a filing attempt. PicklePersistence
+    keeps user_data across turns, so a stale 'failed'/'partial' status from an
+    earlier case would otherwise make a brand-new draft look retryable."""
+    for key in ("last_filing_status", "last_filing_form_name", "last_filing_report"):
+        context.user_data.pop(key, None)
+
+
 def _store_draft(context, draft):
-    """Store draft as plain dict so PicklePersistence can serialise it."""
+    """Store draft as plain dict so PicklePersistence can serialise it.
+
+    Storing a freshly built or edited draft supersedes any earlier failed
+    filing, so the retry affordance is cleared here. The genuine retry path
+    restores `draft_data` directly via `_restore_retryable_draft` and never
+    routes through this helper, so its status is preserved."""
     context.user_data["draft_data"] = _serialise_draft(draft)
+    _clear_filing_retry_state(context)
 
 
 def _deserialise_draft(raw):
