@@ -13,6 +13,7 @@ from models import CBDData, FormTypeRecommendation, FormDraft
 from form_schemas import FORM_SCHEMAS
 from form_display import public_form_name, sanitize_internal_form_codes
 from model_config import gemini_three_five_flash_model
+import ai_telemetry
 
 # RCEM Higher EM Curriculum (2025 Update) — Exact Kaizen checkbox labels
 # Source: Live Kaizen CBD form screenshot (verified 2026-03-08)
@@ -126,10 +127,14 @@ def _select_providers(tier: str = ""):
     return PROVIDERS
 
 
-async def _generate(prompt, retries: int = 1, tier: str = ""):
+async def _generate(prompt, retries: int = 1, tier: str = "", purpose: str = "unspecified"):
     """Call the configured extractor LLM.
     Defaults to DeepSeek V4 Flash.
     Returns the response as a plain string.
+
+    ``purpose`` is a stable, low-cardinality label (e.g. "intent_classification")
+    recorded via ai_telemetry so AI-layer usage is observable and deterministic
+    rails can be proven to avoid the model. It never affects the request itself.
     """
     import time as _time
     loop = asyncio.get_event_loop()
@@ -138,11 +143,15 @@ async def _generate(prompt, retries: int = 1, tier: str = ""):
 
     providers = _select_providers(tier)
 
-    for provider in providers:
+    for provider_index, provider in enumerate(providers):
         api_key = os.environ.get(provider["env_key"])
         if not api_key:
             logger.debug("Skipping %s — %s not set", provider["name"], provider["env_key"])
             continue
+
+        # First configured provider responding is the normal path; a later one
+        # responding means we fell back (e.g. DeepSeek billing → Gemini).
+        outcome = "success" if provider_index == 0 else "fallback"
 
         for attempt in range(retries + 1):
             try:
@@ -155,6 +164,10 @@ async def _generate(prompt, retries: int = 1, tier: str = ""):
                     )
                     elapsed = _time.monotonic() - t0
                     logger.info(f"{provider['name']} ({model_name}) responded in {elapsed:.1f}s")
+                    ai_telemetry.record(
+                        purpose, provider=provider["name"], model=model_name,
+                        status=outcome, elapsed_ms=int(elapsed * 1000),
+                    )
                     return result.text
                 else:
                     # OpenAI-compatible DeepSeek endpoint. Use httpx directly so
@@ -180,6 +193,10 @@ async def _generate(prompt, retries: int = 1, tier: str = ""):
                         response_json = response.json()
                     elapsed = _time.monotonic() - t0
                     logger.info(f"{provider['name']} ({model_name}) responded in {elapsed:.1f}s")
+                    ai_telemetry.record(
+                        purpose, provider=provider["name"], model=model_name,
+                        status=outcome, elapsed_ms=int(elapsed * 1000),
+                    )
                     return response_json["choices"][0]["message"]["content"]
             except Exception as e:
                 last_error = e
@@ -198,6 +215,7 @@ async def _generate(prompt, retries: int = 1, tier: str = ""):
                     logger.warning("%s error (%s), trying next provider", provider["name"], e)
                     break  # next provider
 
+    ai_telemetry.record(purpose, status="error", elapsed_ms=int((_time.monotonic() - t0) * 1000))
     raise last_error or RuntimeError("All providers failed — none configured")
 
 FORM_UUIDS = {
@@ -812,7 +830,7 @@ Message: {text}
 
 Respond with ONLY one of: chitchat, question_general, new_case"""
 
-    text = await _generate(prompt)
+    text = await _generate(prompt, purpose="intent_classification")
     result = text.strip().lower()
 
     # Normalize response to valid category
@@ -851,7 +869,7 @@ Message: {text}
 Reply with ONE word only from the list."""
 
     try:
-        response = (await _generate(prompt)).strip().lower()
+        response = (await _generate(prompt, purpose="menu_intent_classification")).strip().lower()
     except Exception as e:
         logger.warning("classify_menu_intent failed: %s", e)
         return "ambiguous"
@@ -1000,7 +1018,7 @@ Analyse the case and suggest the 2-3 best RCEM WPBA form types for THIS specific
 Available forms: CBD, DOPS, Mini-CEX, ACAT, LAT, ACAF, STAT, MSF, QIAT, JCF, Teaching, Procedural Log, SDL, Ultrasound Case, ESLE, Complaint, Serious Incident, Educational Activity, Formal Course.
 
 Be concise. For each suggestion give the form name and a one-line reason why it fits this case."""
-            text = await _generate(prompt)
+            text = await _generate(prompt, purpose="grounded_answer")
             return sanitize_internal_form_codes(text.strip())
 
     # Check deterministic standalone product/help questions before broad form support.
@@ -1125,7 +1143,7 @@ Question: {text}
 
 Answer concisely. If the question is about a specific form type, confirm it's supported."""
 
-    text = await _generate(prompt)
+    text = await _generate(prompt, purpose="grounded_answer")
     return sanitize_internal_form_codes(text.strip())
 
 
@@ -1152,7 +1170,7 @@ Rules:
 - Questions should target the specific gaps: missing reasoning, missing outcome, missing reflection, etc.
 - Return ONLY the JSON. No explanation."""
 
-    text = await _generate(prompt)
+    text = await _generate(prompt, purpose="case_sufficiency")
     raw = text.strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1]
@@ -1455,6 +1473,123 @@ def _prefer_dops_for_observed_procedure(
     return _dedupe_recommendations([dops, proc_log, *remaining])[:3]
 
 
+def _deterministic_recommend_form_types(
+    case_description: str,
+    input_source: str = "text",
+) -> list[FormTypeRecommendation] | None:
+    """Return high-confidence form recommendations without an LLM.
+
+    This pre-pass is deliberately conservative. It only handles cases where the
+    user has effectively named the portfolio event type or described an
+    unambiguous procedural/QI/course signal. General clinical cases continue to
+    the AI recommender.
+    """
+    if _is_image_source(input_source):
+        return None
+
+    text = f" {case_description or ''} ".lower()
+    recommendations: list[FormTypeRecommendation] = []
+
+    def add(form_type: str, rationale: str) -> None:
+        if form_type not in {rec.form_type for rec in recommendations}:
+            recommendations.append(FormTypeRecommendation(
+                form_type=form_type,
+                rationale=rationale,
+                uuid=FORM_UUIDS.get(form_type),
+            ))
+
+    if _has_qi_project_signal(case_description):
+        add(
+            "QIAT",
+            "QI/audit project with measurement and change; QIAT is the specific assessment form.",
+        )
+        if "teaching intervention" in text or "education intervention" in text:
+            add(
+                "TEACH",
+                "Teaching was described as an intervention within the QI/audit project.",
+            )
+        return recommendations
+
+    if re.search(r"\bjournal\s+club\b", text) and re.search(
+        r"\b(presented|led|presenting|discussed|appraised)\b", text
+    ):
+        add("JCF", "Journal club presentation or discussion described explicitly.")
+        return recommendations
+
+    course_patterns = (
+        r"\bals\b",
+        r"\batls\b",
+        r"\bapls\b",
+        r"\balso\s+course\b",
+        r"\badvanced life support in obstetrics\b",
+        r"\blife support\b",
+        r"\bformal course\b",
+        r"\bsimulation course\b",
+        r"\bleadership course\b",
+        r"\bcourse certificate\b",
+    )
+    if any(re.search(pattern, text) for pattern in course_patterns) and re.search(
+        r"\b(attended|completed|passed|certificate|certified|course)\b", text
+    ):
+        add("FORMAL_COURSE", "Formal course attendance/completion is stated explicitly.")
+        return recommendations
+
+    if any(term in text for term in ("pocus", "fast scan", "lung ultrasound", "cardiac echo", "ivc ultrasound")):
+        add("US_CASE", "Point-of-care ultrasound case is stated explicitly.")
+        return recommendations
+
+    if _has_directly_observed_procedure_signal(case_description):
+        add(
+            "DOPS",
+            "Directly observed hands-on procedure with senior supervision; DOPS is the specific assessed-procedure form.",
+        )
+        add(
+            "PROC_LOG",
+            "The performed procedure can also be recorded in the procedural log.",
+        )
+        if any(term in text for term in ("feedback", "learning point", "reflected", "reflection")):
+            add(
+                "REFLECT_LOG",
+                "Feedback/reflection was included alongside the procedural assessment.",
+            )
+        return recommendations
+
+    performed_procedure = any(term in text for term in _OBSERVED_PROCEDURE_TERMS)
+    trainee_performed = re.search(
+        r"\b(i|trainee)\s+.*\b(performed|administered|inserted|reduced|completed|did)\b",
+        text,
+    )
+    if performed_procedure and trainee_performed:
+        add("PROC_LOG", "Trainee-performed procedure without a clear direct-assessment signal.")
+        return recommendations
+
+    formal_teaching = any(
+        term in text
+        for term in (
+            "formal teaching session",
+            "simulation teaching",
+            "lecture",
+            "tutorial",
+            "teaching session",
+        )
+    )
+    observed_teaching = any(
+        term in text
+        for term in (
+            "assessor observed",
+            "consultant observed",
+            "observed my teaching",
+            "feedback on my teaching",
+            "stat assessment",
+        )
+    )
+    if formal_teaching and observed_teaching:
+        add("STAT", "Formal teaching session with observation/assessment stated explicitly.")
+        return recommendations
+
+    return None
+
+
 async def recommend_form_types(case_description: str, input_source: str = "text") -> List[FormTypeRecommendation]:
     """Recommend applicable WPBA form types based on case description.
 
@@ -1463,6 +1598,17 @@ async def recommend_form_types(case_description: str, input_source: str = "text"
     recommendations toward procedure/reflection forms rather than CBD — image
     evidence is usually a procedure or imaging finding, not a managed case.
     """
+    deterministic = _deterministic_recommend_form_types(case_description, input_source)
+    if deterministic is not None:
+        logger.info(
+            "form_recommendation source=deterministic input_source=%s forms=%s",
+            input_source,
+            [rec.form_type for rec in deterministic],
+        )
+        return deterministic
+
+    logger.info("form_recommendation source=ai input_source=%s", input_source)
+
     system_prompt = """You are an expert RCEM portfolio advisor. Analyse the clinical or educational event described and
 recommend the 1-3 most appropriate RCEM Kaizen WPBA form types.
 
@@ -2832,6 +2978,29 @@ verdict rules: "ready" if overall_score >= 3.5, "improve" if 2.5-3.4, "weak" if 
 
 _RECOVERY_COPY_CACHE: dict[str, str] = {}
 
+# Deterministic recovery copy for filing errors we can already classify.
+# Keyed by (status, error_category). These are low-judgement, repeatable
+# situations — a fixed, calm sentence is just as good as an LLM-written one and
+# avoids a model call on the common failure paths. The "unknown" category is
+# deliberately absent so genuinely novel errors still fall through to the model,
+# which keeps the flexible AI fallback for situations we haven't seen.
+#
+# Copy rules mirror the LLM prompt below: one plain sentence, names the likely
+# cause and the next step, never claims Kaizen saved the entry, no exclamation
+# marks.
+_RECOVERY_COPY_TEMPLATES: dict[tuple[str, str], str] = {
+    ("failed", "login_failed"): "Your Kaizen login didn't go through, so nothing was saved — reconnect your account and try filing again.",
+    ("failed", "timeout"): "Kaizen took too long to respond, so the entry wasn't saved — try again in a moment once the connection settles.",
+    ("failed", "unverified_save"): "I couldn't confirm whether Kaizen saved this, so please check your portfolio before refiling to avoid a duplicate.",
+    ("failed", "load_failed"): "The Kaizen page didn't load, so the entry wasn't saved — try again shortly, or check that Kaizen is reachable.",
+    ("failed", "validation"): "Some required details were missing, so Kaizen wouldn't accept the entry — add the missing fields and try again.",
+    ("partial", "login_failed"): "Your Kaizen session dropped partway through, so this may be incomplete — reconnect and check the draft in your portfolio.",
+    ("partial", "timeout"): "Kaizen slowed down partway through, so the entry may be incomplete — check your portfolio before refiling.",
+    ("partial", "unverified_save"): "I couldn't fully confirm this save, so check your Kaizen portfolio before refiling to avoid a duplicate.",
+    ("partial", "load_failed"): "A page didn't load partway through, so the entry may be incomplete — check your portfolio before trying again.",
+    ("partial", "validation"): "Some fields were rejected, so only part of the entry went in — review the draft in Kaizen and complete the missing details.",
+}
+
 
 def _categorise_filing_error(error_text: str) -> str:
     """Coarse bucket for filing errors, used as a cache key."""
@@ -2862,6 +3031,14 @@ async def compose_filing_recovery_copy(status: str, error_text: str) -> str:
     if cache_key in _RECOVERY_COPY_CACHE:
         return _RECOVERY_COPY_CACHE[cache_key]
 
+    # Deterministic rail: classifiable failures get fixed, calm copy and never
+    # touch the model. Unknown errors fall through to the LLM below so novel
+    # situations still get a tailored explanation.
+    template = _RECOVERY_COPY_TEMPLATES.get((status, category))
+    if template:
+        _RECOVERY_COPY_CACHE[cache_key] = template
+        return template
+
     prompt = f"""You are writing a short, calm recovery message for a doctor whose UK Emergency Medicine portfolio filing did not complete cleanly. They are mid-flow and want to know what happened.
 
 Filing status: {status}  (one of: failed, partial)
@@ -2875,7 +3052,7 @@ Write ONE sentence (under 25 words) that:
 Do not promise that Kaizen has saved the entry. Do not invent details. No exclamation marks. Reply with the sentence only, no quotes."""
 
     try:
-        text = (await _generate(prompt)).strip().strip('"').strip("'").strip()
+        text = (await _generate(prompt, purpose="filing_recovery_copy")).strip().strip('"').strip("'").strip()
     except Exception as e:
         logger.warning("compose_filing_recovery_copy failed: %s", e)
         return ""
