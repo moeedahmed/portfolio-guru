@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -75,9 +76,26 @@ _INTERMEDIATE_SIGNALS: tuple[str, ...] = ("intermediate",)
 _ACCS_SIGNALS: tuple[str, ...] = ("accs trainee", "accs")
 _ASSESSOR_SIGNALS: tuple[str, ...] = ("clinical supervisor",)
 
+_DASH_TRANSLATION = str.maketrans({
+    "\u2010": "-",
+    "\u2011": "-",
+    "\u2012": "-",
+    "\u2013": "-",
+    "\u2014": "-",
+    "\u2212": "-",
+    "\xa0": " ",
+})
+
 
 def _matches(haystack: str, needles: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(needle for needle in needles if needle in haystack)
+
+
+def _normalise_detection_text(text: str | None) -> str:
+    """Return stable lowercase text for Kaizen dashboard signal matching."""
+    if not text:
+        return ""
+    return unicodedata.normalize("NFKC", text).translate(_DASH_TRANSLATION).lower()
 
 
 def load_selectors() -> dict:
@@ -106,8 +124,8 @@ def detect_portfolio_profile(dashboard_title: str, page_text: str) -> PortfolioP
     ``unknown`` — the explicit guardrail against silently mapping the
     account to HST / ACCS / Intermediate or to a stage we cannot verify.
     """
-    title = (dashboard_title or "").lower()
-    body = (page_text or "").lower()
+    title = _normalise_detection_text(dashboard_title)
+    body = _normalise_detection_text(page_text)
     combined = f"{title}\n{body}"
     evidence: list[str] = []
 

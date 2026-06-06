@@ -241,6 +241,15 @@ def get_kaizen_role(telegram_user_id: int) -> Optional[str]:
         return profile.kaizen_role if profile else None
 
 
+def delete_user_profile(telegram_user_id: int) -> None:
+    """Delete the stored portfolio/profile row for one Telegram user."""
+    with Session(engine) as session:
+        profile = _select_profile(session, telegram_user_id)
+        if profile:
+            session.delete(profile)
+            session.commit()
+
+
 def list_users_by_kaizen_role(role: str) -> list[int]:
     """Return Telegram user IDs whose cached Kaizen role matches ``role``.
 

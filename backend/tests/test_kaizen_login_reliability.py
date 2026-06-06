@@ -255,14 +255,10 @@ async def test_test_kaizen_login_propagates_infrastructure_error(monkeypatch):
     from bot import _test_kaizen_login
     from engine.providers.kaizen import KaizenInfrastructureError
 
-    class FakeProvider:
-        def __init__(self, *a, **k):
-            pass
+    async def fake_connect():
+        raise KaizenInfrastructureError("cdp died")
 
-        def connect(self):
-            raise KaizenInfrastructureError("subprocess died")
-
-    monkeypatch.setattr("engine.providers.kaizen.KaizenProvider", FakeProvider)
+    monkeypatch.setattr("kaizen_form_filer.connect_cdp_browser", fake_connect)
     with pytest.raises(KaizenInfrastructureError):
         await _test_kaizen_login("u", "p")
 
@@ -271,21 +267,74 @@ async def test_test_kaizen_login_propagates_infrastructure_error(monkeypatch):
 async def test_test_kaizen_login_returns_false_on_credential_rejection(monkeypatch):
     from bot import _test_kaizen_login
 
-    class FakeProvider:
-        portfolio_type = "unknown"
+    class FakeContext:
+        def __init__(self):
+            self.closed = False
 
-        def __init__(self, *a, **k):
-            pass
+        async def close(self):
+            self.closed = True
 
-        def connect(self):
-            return False
+    class FakePW:
+        def __init__(self):
+            self.stopped = False
 
-        def disconnect(self):
-            pass
+        async def stop(self):
+            self.stopped = True
 
-    monkeypatch.setattr("engine.providers.kaizen.KaizenProvider", FakeProvider)
+    context = FakeContext()
+    pw = FakePW()
+    page = MagicMock(context=context)
+
+    async def fake_connect():
+        return page, pw
+
+    async def fake_login(_page, _username, _password):
+        return False
+
+    monkeypatch.setattr("kaizen_form_filer.connect_cdp_browser", fake_connect)
+    monkeypatch.setattr("kaizen_form_filer._login", fake_login)
     result = await _test_kaizen_login("u", "bad")
     assert result is False
+    assert context.closed
+    assert pw.stopped
+
+
+@pytest.mark.asyncio
+async def test_test_kaizen_login_detects_role_from_isolated_logged_in_page(monkeypatch):
+    from bot import _test_kaizen_login
+
+    class FakeContext:
+        async def close(self):
+            pass
+
+    class FakePW:
+        async def stop(self):
+            pass
+
+    class FakeLocator:
+        async def inner_text(self, timeout=5000):
+            return "Non-Trainee Higher / CESR-Portfolio Pathway"
+
+    class FakePage:
+        context = FakeContext()
+
+        async def title(self):
+            return "Higher Trainee Dashboard"
+
+        def locator(self, _selector):
+            return FakeLocator()
+
+    async def fake_connect():
+        return FakePage(), FakePW()
+
+    async def fake_login(_page, username, password):
+        assert (username, password) == ("sana@example.com", "secret")
+        return True
+
+    monkeypatch.setattr("kaizen_form_filer.connect_cdp_browser", fake_connect)
+    monkeypatch.setattr("kaizen_form_filer._login", fake_login)
+
+    assert await _test_kaizen_login("sana@example.com", "secret") == "non_training_higher"
 
 
 # ─── password-message delete + visible testing feedback ──────────────────────

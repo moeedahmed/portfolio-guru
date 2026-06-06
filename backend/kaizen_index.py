@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Iterable, Literal, Optional
@@ -268,6 +269,55 @@ async def count_evidence_items(user_id: str | int) -> int:
         ) as cursor:
             row = await cursor.fetchone()
             return int(row[0]) if row else 0
+
+
+async def delete_user_index(user_id: str | int) -> dict[str, int]:
+    """Delete all local Kaizen index rows and run audits for one user."""
+    await _ensure_db()
+    async with aiosqlite.connect(_current_db_path()) as db:
+        evidence_cursor = await db.execute(
+            "DELETE FROM evidence_items WHERE user_id = ?",
+            (str(user_id),),
+        )
+        runs_cursor = await db.execute(
+            "DELETE FROM index_runs WHERE user_id = ?",
+            (str(user_id),),
+        )
+        await db.commit()
+    return {
+        "evidence_items": max(evidence_cursor.rowcount or 0, 0),
+        "index_runs": max(runs_cursor.rowcount or 0, 0),
+    }
+
+
+def delete_user_index_sync(user_id: str | int) -> None:
+    """Synchronous variant used by credential rotation cleanup."""
+    path = _current_db_path()
+    if not os.path.exists(path):
+        return
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with sqlite3.connect(path) as db:
+        tables = {
+            row[0]
+            for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        if "evidence_items" not in tables and "index_runs" not in tables:
+            return
+        if "evidence_items" not in tables:
+            db.execute("DELETE FROM index_runs WHERE user_id = ?", (str(user_id),))
+            db.commit()
+            return
+        if "index_runs" not in tables:
+            db.execute("DELETE FROM evidence_items WHERE user_id = ?", (str(user_id),))
+            db.commit()
+            return
+        db.execute("DELETE FROM evidence_items WHERE user_id = ?", (str(user_id),))
+        db.execute("DELETE FROM index_runs WHERE user_id = ?", (str(user_id),))
+        db.commit()
 
 
 # ── Index run lifecycle ─────────────────────────────────────────────────────

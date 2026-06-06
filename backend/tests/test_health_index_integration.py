@@ -20,6 +20,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from cryptography.fernet import Fernet
+from sqlmodel import SQLModel, create_engine
 
 from health_models import HealthProfile, Pathway
 from tests.bot_simulator import BotSimulator
@@ -75,6 +77,65 @@ def _evidence_row(kaizen_index, **overrides):
 
 
 # ── /health source priority ─────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_account_switch_clears_previous_account_health_sources(
+    tmp_path, monkeypatch, kaizen_index, isolated_health_store
+):
+    import bot
+    import usage
+
+    usage_db = tmp_path / "account_switch_usage.db"
+    monkeypatch.setenv("USAGE_DB_PATH", str(usage_db))
+    usage = importlib.reload(usage)
+    kaizen_index = importlib.reload(kaizen_index)
+
+    monkeypatch.setattr(bot, "delete_portfolio_evidence", usage.delete_portfolio_evidence)
+    monkeypatch.setattr(bot, "delete_user_index", kaizen_index.delete_user_index)
+    monkeypatch.setattr(bot, "delete_health_profile", isolated_health_store.delete_health_profile)
+    monkeypatch.setattr(bot, "list_evidence_items", kaizen_index.list_evidence_items)
+    monkeypatch.setattr(bot, "get_case_history", usage.get_case_history)
+    monkeypatch.setattr(
+        "kaizen_form_filer.invalidate_session_cache",
+        lambda *_args, **_kwargs: 0,
+    )
+
+    user_id = 9106
+    await usage.record_case_filed(user_id, "CBD")
+    await usage.save_kc_coverage(user_id, "CBD", ["Higher SLO1 KC1"])
+    await kaizen_index.upsert_evidence_item(
+        _evidence_row(
+            kaizen_index,
+            id="old-account-cbd",
+            user_id=str(user_id),
+            event_type="CBD",
+        )
+    )
+    run_id = await kaizen_index.start_index_run(user_id)
+    await kaizen_index.finish_index_run(run_id, "ok", rows_written=1)
+    isolated_health_store.save_health_profile(_profile(user_id, Pathway.training_arcp))
+
+    before_items, before_history, before_source = await bot._resolve_health_evidence(user_id)
+    assert before_items
+    assert before_history
+    assert before_source == "kaizen_index"
+
+    await bot._clear_local_portfolio_account_data(user_id, reason="kaizen_account_switch")
+
+    after_items, after_history, after_source = await bot._resolve_health_evidence(user_id)
+    assert after_items == []
+    assert after_history == []
+    assert after_source == "case_history"
+    assert await usage.get_kc_stats(user_id) == {
+        "total_kcs": 0,
+        "slos_covered": 0,
+        "slos_total": 12,
+        "recent_kcs": [],
+    }
+    assert await kaizen_index.count_evidence_items(user_id) == 0
+    assert await kaizen_index.latest_index_run(user_id) is None
+    assert isolated_health_store.get_health_profile(user_id) is None
 
 
 @pytest.mark.asyncio
@@ -179,6 +240,123 @@ async def test_run_health_analysis_uses_indexed_source_when_history_empty(
     assert "No cases filed yet" not in text
     assert "WPBA progress toward 36" in text
     assert "1/36" in text
+
+
+@pytest.mark.asyncio
+async def test_health_evidence_is_strictly_scoped_to_requested_user(
+    kaizen_index, isolated_health_store, monkeypatch
+):
+    import bot
+
+    moeed_id = 9101
+    sana_id = 9102
+    await kaizen_index.upsert_evidence_item(
+        _evidence_row(
+            kaizen_index,
+            id="moeed-cbd",
+            event_type="CBD",
+            user_id=str(moeed_id),
+            description="Moeed HST CBD evidence",
+        )
+    )
+    await kaizen_index.upsert_evidence_item(
+        _evidence_row(
+            kaizen_index,
+            id="sana-qiat",
+            event_type="QIAT",
+            user_id=str(sana_id),
+            description="Sana CESR QI evidence",
+        )
+    )
+    isolated_health_store.save_health_profile(_profile(moeed_id, Pathway.training_arcp))
+    isolated_health_store.save_health_profile(_profile(sana_id, Pathway.cesr_portfolio))
+
+    async def fake_history(user_id, months=6):
+        return [
+            {
+                "form_type": "MINI_CEX" if user_id == moeed_id else "REFLECT_LOG",
+                "filed_at": "2026-05-10 09:00:00",
+                "status": "filed",
+            }
+        ]
+
+    monkeypatch.setattr(bot, "get_case_history", fake_history)
+
+    sana_items, sana_history, sana_source = await bot._resolve_health_evidence(sana_id)
+    moeed_items, moeed_history, moeed_source = await bot._resolve_health_evidence(moeed_id)
+
+    assert sana_source == "kaizen_index"
+    assert {item.form_type for item in sana_items} == {"QIAT"}
+    assert "Moeed" not in " ".join(item.summary for item in sana_items)
+    assert sana_history == [
+        {"form_type": "REFLECT_LOG", "filed_at": "2026-05-10 09:00:00", "status": "filed"}
+    ]
+    assert isolated_health_store.get_health_profile(sana_id).pathway is Pathway.cesr_portfolio
+
+    assert moeed_source == "kaizen_index"
+    assert {item.form_type for item in moeed_items} == {"CBD"}
+    assert "Sana" not in " ".join(item.summary for item in moeed_items)
+    assert moeed_history == [
+        {"form_type": "MINI_CEX", "filed_at": "2026-05-10 09:00:00", "status": "filed"}
+    ]
+    assert isolated_health_store.get_health_profile(moeed_id).pathway is Pathway.training_arcp
+
+
+@pytest.mark.asyncio
+async def test_kaizen_username_reconnect_clears_previous_account_health_context(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "portfolio_guru.db"
+    usage_path = tmp_path / "usage.db"
+    monkeypatch.setenv("USAGE_DB_PATH", str(usage_path))
+    monkeypatch.setenv(
+        "PORTFOLIO_GURU_HEALTH_PROFILE_PATH",
+        str(tmp_path / "health_profiles.json"),
+    )
+
+    import credentials
+    import health_profile_store
+    import kaizen_index
+    import profile_store
+    import usage
+
+    account_engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    monkeypatch.setattr(credentials, "engine", account_engine)
+    monkeypatch.setattr(credentials, "FERNET_KEY", Fernet.generate_key())
+    monkeypatch.setattr(profile_store, "engine", account_engine)
+    monkeypatch.setattr(usage, "DB_PATH", str(usage_path))
+    SQLModel.metadata.create_all(account_engine)
+
+    user_id = 9201
+    credentials.store_credentials(user_id, "moeed@example.com", "old-password")
+    await usage.record_case_filed(user_id, "CBD")
+    await kaizen_index.upsert_evidence_item(
+        _evidence_row(
+            kaizen_index,
+            id="moeed-cbd",
+            event_type="CBD",
+            user_id=str(user_id),
+            description="Moeed indexed evidence",
+        )
+    )
+    health_profile_store.save_health_profile(_profile(user_id, Pathway.training_arcp))
+    profile_store.store_training_level(user_id, "HIGHER")
+    profile_store.store_kaizen_role(user_id, "hst")
+
+    credentials.store_credentials(user_id, "moeed@example.com", "rotated-password")
+    assert await usage.get_case_history(user_id, months=6)
+    assert await kaizen_index.list_evidence_items(user_id)
+    assert health_profile_store.get_health_profile(user_id) is not None
+    assert profile_store.get_training_level(user_id) == "HIGHER"
+
+    credentials.store_credentials(user_id, "sana@example.com", "new-password")
+
+    assert credentials.get_credentials(user_id) == ("sana@example.com", "new-password")
+    assert await usage.get_case_history(user_id, months=6) == []
+    assert await kaizen_index.list_evidence_items(user_id) == []
+    assert await kaizen_index.latest_index_run(user_id) is None
+    assert health_profile_store.get_health_profile(user_id) is None
+    assert profile_store.get_kaizen_role(user_id) is None
 
 
 # ── /settings Kaizen evidence row ───────────────────────────────────────────
@@ -728,6 +906,19 @@ async def test_inline_health_button_runs_immediately_when_stale(monkeypatch):
     await send_result("Health result", None)
     assert ("🔙 Back to settings", "ACTION|settings") in sim.get_last_buttons()
     assert ("🔙 Back", "ACTION|back_to_menu") not in sim.get_last_buttons()
+
+
+def test_health_result_keyboard_offers_file_and_change_pathway():
+    import bot
+
+    buttons = [
+        (button.text, button.callback_data)
+        for row in bot._health_result_keyboard().inline_keyboard
+        for button in row
+    ]
+    assert ("✍️ File missing evidence", "ACTION|file") in buttons
+    assert ("📊 Change pathway", "ACTION|change_pathway") in buttons
+    assert ("🔙 Back to settings", "ACTION|settings") not in buttons
 
 
 def test_health_refresh_confirm_back_returns_to_settings():

@@ -344,18 +344,21 @@ def _install_session_stubs(
     login_exc=None,
     save_state_exc=None,
     creds_calls=None,
+    cached_calls=None,
     login_calls=None,
     save_state_calls=None,
 ):
     creds_calls = creds_calls if creds_calls is not None else []
+    cached_calls = cached_calls if cached_calls is not None else []
     login_calls = login_calls if login_calls is not None else []
     save_state_calls = save_state_calls if save_state_calls is not None else []
 
     async def fake_open():
         return page, pw
 
-    async def fake_cached(arg_page, arg_uid):
+    async def fake_cached(arg_page, arg_uid, username=None):
         assert arg_page is page
+        cached_calls.append((arg_uid, username))
         if cached_exc is not None:
             raise cached_exc
         return cached_result
@@ -370,8 +373,8 @@ def _install_session_stubs(
             raise login_exc
         return login_result
 
-    async def fake_save_state(ctx, uid):
-        save_state_calls.append((ctx, uid))
+    async def fake_save_state(ctx, uid, username=None):
+        save_state_calls.append((ctx, uid, username))
         if save_state_exc is not None:
             raise save_state_exc
 
@@ -382,6 +385,7 @@ def _install_session_stubs(
     monkeypatch.setattr(kaizen_sync, "_persist_session_state", fake_save_state)
     return {
         "creds_calls": creds_calls,
+        "cached_calls": cached_calls,
         "login_calls": login_calls,
         "save_state_calls": save_state_calls,
     }
@@ -422,7 +426,8 @@ async def test_sync_for_user_uses_cached_session_without_credentials(sync_module
 
     assert result.status == "ok"
     assert result.rows_written == 1
-    assert calls["creds_calls"] == []
+    assert calls["creds_calls"] == [42]
+    assert calls["cached_calls"] == [(42, None)]
     assert calls["login_calls"] == []
     assert calls["save_state_calls"] == []
     assert page.context.closed
@@ -453,8 +458,9 @@ async def test_sync_for_user_logs_in_when_cache_is_stale(sync_modules, monkeypat
     assert result.status == "ok"
     assert result.rows_written == 1
     assert calls["creds_calls"] == [99]
+    assert calls["cached_calls"] == [(99, "trainee@example.com")]
     assert calls["login_calls"] == [("trainee@example.com", "secret")]
-    assert calls["save_state_calls"] and calls["save_state_calls"][0][1] == 99
+    assert calls["save_state_calls"] and calls["save_state_calls"][0][1:] == (99, "trainee@example.com")
     assert page.context.closed
     assert pw.stopped
 

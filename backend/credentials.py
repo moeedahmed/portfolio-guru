@@ -52,16 +52,45 @@ def _invalidate_cached_kaizen_session(telegram_user_id: int) -> None:
         pass
 
 
+def _clear_account_scoped_state(telegram_user_id: int) -> None:
+    """Clear state tied to the currently connected Kaizen account."""
+    try:
+        from health_profile_store import delete_health_profile
+        delete_health_profile(telegram_user_id)
+    except Exception:
+        pass
+    try:
+        from kaizen_index import delete_user_index_sync
+        delete_user_index_sync(telegram_user_id)
+    except Exception:
+        pass
+    try:
+        from usage import delete_user_portfolio_history_sync
+        delete_user_portfolio_history_sync(telegram_user_id)
+    except Exception:
+        pass
+    try:
+        from profile_store import delete_user_profile
+        delete_user_profile(telegram_user_id)
+    except Exception:
+        pass
+
+
 def store_credentials(telegram_user_id: int, username: str, password: str) -> None:
     """Encrypt and store credentials for a user. Upsert."""
     f = _fernet()
     enc_user = f.encrypt(username.encode())
     enc_pass = f.encrypt(password.encode())
+    previous_username: str | None = None
     with Session(engine) as session:
         existing = session.exec(
             select(UserCredential).where(UserCredential.telegram_user_id == telegram_user_id)
         ).first()
         if existing:
+            try:
+                previous_username = f.decrypt(existing.kaizen_username_enc).decode()
+            except Exception:
+                previous_username = None
             existing.kaizen_username_enc = enc_user
             existing.kaizen_password_enc = enc_pass
             existing.updated_at = datetime.utcnow()
@@ -76,6 +105,8 @@ def store_credentials(telegram_user_id: int, username: str, password: str) -> No
         session.commit()
 
     _invalidate_cached_kaizen_session(telegram_user_id)
+    if previous_username is not None and previous_username.strip().lower() != username.strip().lower():
+        _clear_account_scoped_state(telegram_user_id)
 
     try:
         from supabase_sync import mirror_credentials

@@ -358,6 +358,8 @@ async def test_arcp_health_output_prioritises_action_plan_when_llm_succeeds(monk
     "detected_role,expected",
     [
         ("sas", Pathway.cesr_portfolio),
+        ("non_training_higher", Pathway.cesr_portfolio),
+        ("non_training_unknown", Pathway.cesr_portfolio),
         ("hst", Pathway.training_arcp),
         ("accs", Pathway.training_arcp),
         ("accs_intermediate", Pathway.training_arcp),
@@ -380,6 +382,19 @@ def test_autoset_health_pathway_saves_cesr_for_sas(isolated_health_store):
     pathway = bot._autoset_health_pathway_from_role(7001, "sas")
     assert pathway is Pathway.cesr_portfolio
     stored = isolated_health_store.get_health_profile(7001)
+    assert stored is not None
+    assert stored.pathway is Pathway.cesr_portfolio
+
+
+@pytest.mark.parametrize("detected_role", ["non_training_higher", "non_training_unknown"])
+def test_autoset_health_pathway_saves_cesr_for_non_training_roles(
+    isolated_health_store, detected_role
+):
+    import bot
+    user_id = 7050 + abs(hash(detected_role)) % 100
+    pathway = bot._autoset_health_pathway_from_role(user_id, detected_role)
+    assert pathway is Pathway.cesr_portfolio
+    stored = isolated_health_store.get_health_profile(user_id)
     assert stored is not None
     assert stored.pathway is Pathway.cesr_portfolio
 
@@ -473,6 +488,97 @@ async def test_setup_password_autosaves_cesr_pathway_for_sas(isolated_health_sto
     stored = isolated_health_store.get_health_profile(8001)
     assert stored is not None
     assert stored.pathway is Pathway.cesr_portfolio
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("detected_role", ["non_training_higher", "non_training_unknown"])
+async def test_setup_password_autosaves_cesr_for_non_training_roles(
+    isolated_health_store, monkeypatch, detected_role
+):
+    import bot
+    _patch_setup_password_deps(monkeypatch, detected_role=detected_role)
+
+    user_id = 8050 + abs(hash(detected_role)) % 100
+    sim = BotSimulator(user_id=user_id)
+    sim.user_data["setup_username"] = "doctor@example.com"
+    update = sim._make_text_update("super-secret")
+    update.message.delete = AsyncMock()
+    context = sim._make_context()
+
+    await bot.setup_password(update, context)
+
+    stored = isolated_health_store.get_health_profile(user_id)
+    assert stored is not None
+    assert stored.pathway is Pathway.cesr_portfolio
+
+
+@pytest.mark.asyncio
+async def test_setup_password_clears_local_health_sources_on_kaizen_account_switch(
+    isolated_health_store, monkeypatch
+):
+    import bot
+    _patch_setup_password_deps(monkeypatch, detected_role="non_training_higher")
+    clear_account_data = AsyncMock(return_value={})
+    monkeypatch.setattr(bot, "get_credentials", lambda _uid: ("moeed@example.com", "old"))
+    monkeypatch.setattr(bot, "_clear_local_portfolio_account_data", clear_account_data)
+
+    sim = BotSimulator(user_id=8070)
+    sim.user_data["setup_username"] = "sana@example.com"
+    update = sim._make_text_update("super-secret")
+    update.message.delete = AsyncMock()
+    context = sim._make_context()
+
+    await bot.setup_password(update, context)
+
+    clear_account_data.assert_awaited_once_with(8070, reason="kaizen_account_switch")
+    stored = isolated_health_store.get_health_profile(8070)
+    assert stored is not None
+    assert stored.pathway is Pathway.cesr_portfolio
+
+
+@pytest.mark.asyncio
+async def test_setup_password_continues_when_health_pathway_save_fails(monkeypatch):
+    import bot
+    _patch_setup_password_deps(monkeypatch, detected_role="hst")
+    monkeypatch.setattr(
+        bot,
+        "_autoset_health_pathway_from_role",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(PermissionError("blocked")),
+    )
+
+    sim = BotSimulator(user_id=8060)
+    sim.user_data["setup_username"] = "doctor@example.com"
+    update = sim._make_text_update("super-secret")
+    update.message.delete = AsyncMock()
+    context = sim._make_context()
+
+    result = await bot.setup_password(update, context)
+
+    assert result == bot.ConversationHandler.END
+
+
+@pytest.mark.asyncio
+async def test_setup_password_clears_local_health_context_when_kaizen_username_changes(monkeypatch):
+    import bot
+    _patch_setup_password_deps(monkeypatch, detected_role="non_training_higher")
+
+    cleared = AsyncMock(return_value={})
+    stored = []
+    monkeypatch.setattr(bot, "get_credentials", lambda _uid: ("moeed@example.com", "old-secret"))
+    monkeypatch.setattr(bot, "_clear_local_portfolio_account_data", cleared)
+    monkeypatch.setattr(bot, "store_credentials", lambda *args: stored.append(args))
+
+    sim = BotSimulator(user_id=8065)
+    sim.user_data["setup_username"] = "sana@example.com"
+    update = sim._make_text_update("super-secret")
+    update.message.delete = AsyncMock()
+    context = sim._make_context()
+
+    result = await bot.setup_password(update, context)
+
+    assert result == bot.ConversationHandler.END
+    cleared.assert_awaited_once_with(8065, reason="kaizen_account_switch")
+    assert stored == [(8065, "sana@example.com", "super-secret")]
 
 
 @pytest.mark.asyncio

@@ -6,6 +6,7 @@ Uses aiosqlite for async SQLite access.
 import json
 import os
 import re
+import sqlite3
 import aiosqlite
 from datetime import datetime, timezone, timedelta
 
@@ -123,6 +124,57 @@ async def get_case_history(user_id: int, months: int = 6) -> list:
         ) as cursor:
             rows = await cursor.fetchall()
             return [{"form_type": r["form_type"], "filed_at": r["filed_at"], "status": r["status"]} for r in rows]
+
+
+async def delete_portfolio_evidence(user_id: int) -> dict[str, int]:
+    """Delete local portfolio evidence for one Telegram user.
+
+    This intentionally leaves ``user_profiles`` billing/subscription rows
+    alone. It clears only the local filing/KC evidence that Portfolio Health
+    and usage counters read.
+    """
+    await _ensure_db()
+    async with aiosqlite.connect(DB_PATH) as db:
+        usage_cursor = await db.execute(
+            "DELETE FROM portfolio_usage WHERE telegram_user_id = ?",
+            (user_id,),
+        )
+        kc_cursor = await db.execute(
+            "DELETE FROM kc_coverage WHERE telegram_user_id = ?",
+            (user_id,),
+        )
+        await db.commit()
+    return {
+        "portfolio_usage": max(usage_cursor.rowcount or 0, 0),
+        "kc_coverage": max(kc_cursor.rowcount or 0, 0),
+    }
+
+
+async def delete_user_portfolio_history(user_id: int) -> None:
+    """Delete account-scoped Portfolio Guru history for one Telegram user."""
+    await _ensure_db()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM portfolio_usage WHERE telegram_user_id = ?", (user_id,))
+        await db.execute("DELETE FROM kc_coverage WHERE telegram_user_id = ?", (user_id,))
+        await db.commit()
+
+
+def delete_user_portfolio_history_sync(user_id: int) -> None:
+    """Synchronous variant used during credential account rotation."""
+    if not os.path.exists(DB_PATH):
+        return
+    with sqlite3.connect(DB_PATH) as db:
+        tables = {
+            row[0]
+            for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        if "portfolio_usage" in tables:
+            db.execute("DELETE FROM portfolio_usage WHERE telegram_user_id = ?", (user_id,))
+        if "kc_coverage" in tables:
+            db.execute("DELETE FROM kc_coverage WHERE telegram_user_id = ?", (user_id,))
+        db.commit()
 
 
 async def get_user_tier(user_id: int) -> str:

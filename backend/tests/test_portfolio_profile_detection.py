@@ -117,6 +117,21 @@ def test_non_trainee_higher_without_title_still_detected_from_body():
     assert profile.portfolio_type == "non_training_higher"
 
 
+def test_sana_like_non_trainee_higher_cesr_pathway_beats_hst_title():
+    """Live regression pin: Higher chrome must not override non-training markers."""
+    profile = detect_portfolio_profile(
+        "Higher Trainee Dashboard",
+        (
+            "RISR Advance portfolio summary. "
+            "Non\u2011Trainee Higher / CESR-Portfolio Pathway. "
+            "Specialty Doctor SAS portfolio."
+        ),
+    )
+    assert profile.category == "non_training"
+    assert profile.stage == "higher"
+    assert profile.portfolio_type == "non_training_higher"
+
+
 def test_non_trainee_supervisor_copy_does_not_become_assessor():
     profile = detect_portfolio_profile(
         "Higher Trainee Dashboard",

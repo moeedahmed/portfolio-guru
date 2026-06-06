@@ -63,3 +63,16 @@ def save_health_profile(profile: HealthProfile) -> None:
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     tmp_path.write_text(json.dumps(profiles, indent=2, sort_keys=True), encoding="utf-8")
     tmp_path.replace(path)
+
+
+def delete_health_profile(user_id: int) -> None:
+    """Remove a user's stored health profile, if present."""
+    path = _store_path()
+    profiles = _load_all()
+    if str(user_id) not in profiles:
+        return
+    profiles.pop(str(user_id), None)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(profiles, indent=2, sort_keys=True), encoding="utf-8")
+    tmp_path.replace(path)

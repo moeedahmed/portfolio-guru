@@ -511,11 +511,15 @@ async def _open_kaizen_session_page() -> tuple[Any, Any]:
     return await connect_cdp_browser()
 
 
-async def _restore_cached_session(page: Any, user_id: str | int) -> bool:
+async def _restore_cached_session(
+    page: Any,
+    user_id: str | int,
+    username: str | None = None,
+) -> bool:
     """Try to replay a previously saved Kaizen session into ``page``."""
     from kaizen_form_filer import use_cached_session
 
-    return await use_cached_session(page, int(user_id))
+    return await use_cached_session(page, int(user_id), username)
 
 
 async def _login_kaizen_page(page: Any, username: str, password: str) -> bool:
@@ -525,11 +529,15 @@ async def _login_kaizen_page(page: Any, username: str, password: str) -> bool:
     return await _kaizen_login(page, username, password)
 
 
-async def _persist_session_state(context: Any, user_id: str | int) -> None:
+async def _persist_session_state(
+    context: Any,
+    user_id: str | int,
+    username: str | None = None,
+) -> None:
     """Best-effort save of the freshly-authenticated session cookies."""
     from kaizen_form_filer import save_session_state
 
-    await save_session_state(context, int(user_id))
+    await save_session_state(context, int(user_id), username)
 
 
 def _load_user_credentials(user_id: str | int) -> Optional[tuple[str, str]]:
@@ -607,15 +615,16 @@ async def sync_kaizen_portfolio_index_for_user(
             "Could not open isolated Kaizen CDP context.",
         )
     context = getattr(page, "context", None)
+    credentials = _load_user_credentials(user_id)
+    username = credentials[0] if credentials else None
 
     try:
         try:
-            authed = await _restore_cached_session(page, user_id)
+            authed = await _restore_cached_session(page, user_id, username)
         except Exception:
             authed = False
 
         if not authed:
-            credentials = _load_user_credentials(user_id)
             if not credentials:
                 return await _record_bootstrap_failure(
                     user_id,
@@ -639,7 +648,7 @@ async def sync_kaizen_portfolio_index_for_user(
                 )
             if context is not None:
                 try:
-                    await _persist_session_state(context, user_id)
+                    await _persist_session_state(context, user_id, username)
                 except Exception:
                     pass
 

@@ -1,5 +1,54 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-06 addendum — same-Telegram Kaizen account-switch isolation repair.**
+> Scope: critical offline follow-up after live evidence showed `/delete` then
+> reconnecting Sana's Kaizen credentials could still show Moeed's old Portfolio
+> Health data for the same Telegram account.
+>
+> Result:
+>
+> - `/delete` now clears local filing history, KC coverage, Kaizen index rows,
+>   index run audits, health profile data, and Kaizen session cache, not just
+>   credentials/profile state. The delete confirmation text now says local
+>   filing history and Portfolio Health evidence are cleared.
+> - `/setup` detects a changed Kaizen username for the same Telegram user and
+>   clears local account-scoped health/evidence/cache before accepting the new
+>   account metadata.
+> - Setup credential verification now uses an isolated Playwright login context
+>   and detects portfolio type from that logged-in page, avoiding reuse of a
+>   managed CDP tab/profile that may already be logged in as another account.
+> - Read-only Kaizen sync now restores/saves session cache with the Kaizen
+>   username as part of the cache key, matching deterministic filing.
+> - Added offline regression pins for stale `/health` source clearing after an
+>   account switch, setup-triggered purge on username change, isolated login
+>   role detection, and username-scoped sync cache restore/save.
+>
+> Verification: focused health/setup/sync/login/profile tests passed; broader
+> related files passed. No live Telegram, live Kaizen, BWS output, CDP browser,
+> Kaizen writes, deploy, push, restart, or real data deletion used. Remaining
+> gate: one approved manual/live reconnect smoke should confirm the live managed
+> CDP browser no longer reports the previous Kaizen account after reconnect.
+
+> **2026-06-06 addendum — Sana Non-Trainee Higher/CESR detection repair.**
+> Scope: offline-only fix for a live-reported first-link regression where a
+> Non-Trainee Higher / CESR-Portfolio Pathway account could be treated as HST.
+>
+> Result:
+>
+> - Kaizen portfolio detection now normalises Unicode dash / non-breaking-space
+>   variants before matching, so `Non‑Trainee Higher` markers remain visible.
+> - Portfolio Health autoset now maps `non_training_higher` and
+>   `non_training_unknown` to `Pathway.cesr_portfolio`; real HST/ACCS/
+>   Intermediate still map to `training_arcp`.
+> - Health result buttons keep `File missing evidence` and replace weak
+>   `Back to settings` with `Change pathway`.
+> - Added deterministic offline pins for the Sana-like fixture, non-training
+>   health autoset/setup flow, and health result keyboard.
+>
+> Verification: focused regression tests and the main offline pytest gate
+> passed; no live Telegram, Kaizen writes, BWS output, deploy, push, restart,
+> or reset used.
+
 > **2026-06-06 addendum — weekly digest lean nudge (slice 2).**
 > Scope: turn the weekly Portfolio Health push from a dense 4-panel dashboard
 > chart into a compact behaviour nudge. The dense dashboard stays behind /health;

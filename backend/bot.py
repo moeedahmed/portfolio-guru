@@ -18,7 +18,7 @@ from telegram.ext import (
 )
 from store import store_credentials, get_credentials, has_credentials, init
 from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, is_reuse_request, review_draft, analyse_portfolio_health, summarise_recent_activity, generate_nudge_copy, extract_field_updates, compose_filing_recovery_copy, combine_case_inputs, _has_qi_project_signal, schema_form_type
-from usage import record_case_filed, get_cases_this_month, check_can_file, get_user_tier, set_user_tier, get_case_history, TIER_LIMITS, get_all_active_users, get_cases_this_week, is_beta_tester, set_beta_tester, save_kc_coverage
+from usage import record_case_filed, get_cases_this_month, check_can_file, get_user_tier, set_user_tier, get_case_history, TIER_LIMITS, get_all_active_users, get_cases_this_week, is_beta_tester, set_beta_tester, save_kc_coverage, delete_portfolio_evidence
 from filer_router import route_filing
 from kaizen_form_filer import FORM_UUIDS
 from form_schemas import FORM_SCHEMAS
@@ -30,9 +30,10 @@ from documents import extract_from_document, is_supported_document
 from profile_store import init_profile_db, store_training_level, get_training_level, get_voice_profile, store_voice_profile, clear_voice_profile, store_curriculum, get_curriculum, get_kaizen_role
 from health_models import HealthProfile, HealthDomain, Pathway
 from health_engine import case_history_to_evidence_items, compute_snapshot
-from health_profile_store import get_health_profile, save_health_profile
+from health_profile_store import get_health_profile, save_health_profile, delete_health_profile
 from kaizen_index import (
     KaizenSyncStatus,
+    delete_user_index,
     evidence_rows_to_health_items,
     get_kaizen_sync_status,
     list_evidence_items,
@@ -1140,7 +1141,7 @@ _BTN_BACK_TO_MISSING = InlineKeyboardButton("⬅️ Back to missing details", ca
 _DATA_CLEAR_TEXT = (
     "✅ Your Portfolio Guru data is clear.\n\n"
     "I don’t have any Kaizen credentials, portfolio preferences, curriculum choice, voice profile, "
-    "or bot draft state stored for you now.\n\n"
+    "local filing history, Portfolio Health evidence, or bot draft state stored for you now.\n\n"
     "Cases already saved in Kaizen are unaffected.\n\n"
     "To use Portfolio Guru again, reconnect Kaizen."
 )
@@ -2102,7 +2103,7 @@ def _health_refresh_confirm_keyboard() -> InlineKeyboardMarkup:
 def _health_result_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✍️ File missing evidence", callback_data="ACTION|file")],
-        [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
+        [InlineKeyboardButton("📊 Change pathway", callback_data="ACTION|change_pathway")],
     ])
 
 
@@ -3682,15 +3683,52 @@ def _extract_setup_email_candidate(text: str) -> str | None:
 
 
 async def _test_kaizen_login(username: str, password: str) -> bool | str:
-    """Test Kaizen credentials via the engine and detect portfolio type.
-    Returns role string ("hst", "accs", "assessor") or False on failure."""
-    from engine.providers.kaizen import KaizenProvider
-    provider = KaizenProvider(username, password)
-    if not provider.connect():
-        return False
-    role = provider.portfolio_type
-    provider.disconnect()
-    return role if role != "unknown" else "unknown"
+    """Test Kaizen credentials in an isolated browser context.
+
+    The managed CDP browser may already be logged in to another Kaizen
+    account. Setup must therefore never trust an existing persistent tab or
+    profile session when deciding which account was connected.
+    """
+    from engine.portfoliotypes.base import detect_portfolio_type
+    from engine.providers.kaizen import KaizenInfrastructureError
+    from kaizen_form_filer import _login, connect_cdp_browser
+
+    page = None
+    pw = None
+    context = None
+    try:
+        page, pw = await connect_cdp_browser()
+        if page is None:
+            raise KaizenInfrastructureError("Could not open isolated Kaizen login context")
+        context = getattr(page, "context", None)
+        logged_in = await _login(page, username, password)
+        if not logged_in:
+            return False
+        try:
+            title = await page.title()
+        except Exception:
+            title = ""
+        try:
+            body = await page.locator("body").inner_text(timeout=5000)
+        except Exception:
+            body = ""
+        role = detect_portfolio_type(title, body[:2000])
+        return role if role != "unknown" else "unknown"
+    except KaizenInfrastructureError:
+        raise
+    except Exception as exc:
+        raise KaizenInfrastructureError(f"isolated Kaizen login probe failed: {exc}") from exc
+    finally:
+        if context is not None:
+            try:
+                await context.close()
+            except Exception:
+                pass
+        if pw is not None:
+            try:
+                await pw.stop()
+            except Exception:
+                pass
 
 
 async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -3790,6 +3828,13 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         context.user_data.pop("setup_username", None)
         return AWAIT_USERNAME
 
+    previous_creds = get_credentials(user_id)
+    previous_username = (previous_creds[0] if previous_creds else "").strip().lower()
+    new_username = username.strip().lower()
+    account_switched = bool(previous_username and new_username and previous_username != new_username)
+    if account_switched:
+        await _clear_local_portfolio_account_data(user_id, reason="kaizen_account_switch")
+
     store_credentials(user_id, username, password)
     context.user_data.pop("setup_username", None)
     context.user_data.pop("_setup_state_hint", None)
@@ -3823,9 +3868,15 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if auto_level:
         store_training_level(user_id, auto_level)
 
-    auto_pathway = _autoset_health_pathway_from_role(user_id, detected_role)
+    try:
+        auto_pathway = _autoset_health_pathway_from_role(user_id, detected_role)
+    except Exception:
+        # Health pathway persistence is helpful metadata; it must not block a
+        # successful Kaizen credential setup.
+        logger.warning("Health pathway auto-detection save failed", exc_info=True)
+        auto_pathway = None
 
-    if not get_curriculum(user_id):
+    if auto_level:
         store_curriculum(user_id, _default_curriculum_for_training_level(auto_level))
 
     if auto_level:
@@ -5052,10 +5103,11 @@ async def delete_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     """Delete all stored data for this user — credentials, profile, conversation state."""
     user_id = update.effective_user.id
     context.user_data.clear()
+    await _clear_local_portfolio_account_data(user_id, reason="delete_data")
 
     # Delete credentials
     from credentials import engine as cred_engine, UserCredential
-    from profile_store import engine as prof_engine, UserProfile
+    from profile_store import delete_user_profile
     from sqlmodel import Session, select
 
     with Session(cred_engine) as session:
@@ -5063,23 +5115,46 @@ async def delete_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         if cred:
             session.delete(cred)
             session.commit()
-            try:
-                from kaizen_form_filer import invalidate_session_cache
-                invalidate_session_cache(user_id)
-            except Exception:
-                logger.warning("Could not clear Kaizen session cache during data deletion", exc_info=True)
 
-    with Session(prof_engine) as session:
-        profile = session.exec(select(UserProfile).where(UserProfile.telegram_user_id == user_id)).first()
-        if profile:
-            session.delete(profile)
-            session.commit()
+    try:
+        delete_user_profile(user_id)
+    except Exception:
+        logger.warning("Could not delete stored user profile", exc_info=True)
 
     await update.message.reply_text(
         _DATA_CLEAR_TEXT,
         reply_markup=_build_data_clear_keyboard(),
     )
     return ConversationHandler.END
+
+
+async def _clear_local_portfolio_account_data(user_id: int, *, reason: str) -> dict[str, int]:
+    """Clear local account-scoped portfolio evidence used by /health.
+
+    Kaizen itself is untouched. This clears only Portfolio Guru's local
+    evidence/cache for the Telegram user so a delete or Kaizen account switch
+    cannot show a previous account's health/history.
+    """
+    cleared: dict[str, int] = {}
+    try:
+        cleared.update(await delete_portfolio_evidence(user_id))
+    except Exception:
+        logger.warning("Could not clear local usage/KC evidence for %s", reason, exc_info=True)
+    try:
+        cleared.update(await delete_user_index(user_id))
+    except Exception:
+        logger.warning("Could not clear local Kaizen index for %s", reason, exc_info=True)
+    try:
+        delete_health_profile(user_id)
+        cleared["health_profile"] = 1
+    except Exception:
+        logger.warning("Could not clear health profile for %s", reason, exc_info=True)
+    try:
+        from kaizen_form_filer import invalidate_session_cache
+        cleared["session_cache"] = invalidate_session_cache(user_id)
+    except Exception:
+        logger.warning("Could not clear Kaizen session cache for %s", reason, exc_info=True)
+    return cleared
 
 
 HELP_MSG = """📖 *Portfolio Guru — Help*
@@ -5678,6 +5753,7 @@ def _get_or_default_health_profile(user_id: int) -> HealthProfile:
 
 
 _TRAINEE_DETECTED_ROLES = frozenset({"hst", "accs", "accs_intermediate", "intermediate"})
+_CESR_DETECTED_ROLES = frozenset({"sas", "non_training_higher", "non_training_unknown"})
 
 
 def _pathway_for_detected_role(detected_role: str) -> Pathway | None:
@@ -5689,7 +5765,7 @@ def _pathway_for_detected_role(detected_role: str) -> Pathway | None:
     Ambiguous probes (``unknown``, ``assessor``, empty) return None so the
     caller falls back to existing manual selection rather than guessing.
     """
-    if detected_role == "sas":
+    if detected_role in _CESR_DETECTED_ROLES:
         return Pathway.cesr_portfolio
     if detected_role in _TRAINEE_DETECTED_ROLES:
         return Pathway.training_arcp

@@ -85,6 +85,35 @@ SHAPE_TO_USER_ID = {
 }
 
 
+class _FakeLoginContext:
+    async def close(self):
+        return None
+
+
+class _FakeLoginPlaywright:
+    async def stop(self):
+        return None
+
+
+class _FakeLoginLocator:
+    async def inner_text(self, timeout=5000):
+        return "Portfolio dashboard"
+
+
+class _FakeLoginPage:
+    context = _FakeLoginContext()
+
+    async def title(self):
+        return "Portfolio dashboard"
+
+    def locator(self, _selector):
+        return _FakeLoginLocator()
+
+
+async def _fake_login_page():
+    return _FakeLoginPage(), _FakeLoginPlaywright()
+
+
 # ─── credential_failure per shape ───────────────────────────────────────────
 
 
@@ -99,19 +128,11 @@ async def test_credential_failure_classifies_as_login_failed_per_shape(
     their password is in fact wrong."""
     from bot import _test_kaizen_login
 
-    class FakeProvider:
-        portfolio_type = "unknown"
+    async def fake_login(_page, _username, _password):
+        return False
 
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        def connect(self):
-            return False
-
-        def disconnect(self):
-            pass
-
-    monkeypatch.setattr("engine.providers.kaizen.KaizenProvider", FakeProvider)
+    monkeypatch.setattr("kaizen_form_filer.connect_cdp_browser", _fake_login_page)
+    monkeypatch.setattr("kaizen_form_filer._login", fake_login)
     result = await _test_kaizen_login("doctor@example.com", "wrong-pw")
     assert result is False, (
         f"{shape}: credential rejection must classify as False "
@@ -134,14 +155,10 @@ async def test_infra_failure_classifies_as_infrastructure_error_per_shape(
     from bot import _test_kaizen_login
     from engine.providers.kaizen import KaizenInfrastructureError
 
-    class FakeProvider:
-        def __init__(self, *_args, **_kwargs):
-            pass
+    async def fake_connect():
+        raise KaizenInfrastructureError(f"{shape}: subprocess died")
 
-        def connect(self):
-            raise KaizenInfrastructureError(f"{shape}: subprocess died")
-
-    monkeypatch.setattr("engine.providers.kaizen.KaizenProvider", FakeProvider)
+    monkeypatch.setattr("kaizen_form_filer.connect_cdp_browser", fake_connect)
     with pytest.raises(KaizenInfrastructureError):
         await _test_kaizen_login("doctor@example.com", "pw")
 
@@ -166,19 +183,12 @@ async def test_dashboard_landing_classifies_as_success_per_shape(
 
     expected_role = SHAPE_TO_PROVIDER_ROLE[shape]
 
-    class FakeProvider:
-        portfolio_type = expected_role
+    async def fake_login(_page, _username, _password):
+        return True
 
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        def connect(self):
-            return True
-
-        def disconnect(self):
-            pass
-
-    monkeypatch.setattr("engine.providers.kaizen.KaizenProvider", FakeProvider)
+    monkeypatch.setattr("kaizen_form_filer.connect_cdp_browser", _fake_login_page)
+    monkeypatch.setattr("kaizen_form_filer._login", fake_login)
+    monkeypatch.setattr("engine.portfoliotypes.base.detect_portfolio_type", lambda *_args: expected_role)
     result = await _test_kaizen_login("doctor@example.com", "pw")
     assert result == expected_role, (
         f"{shape}: dashboard landing must classify as {expected_role!r}, "
