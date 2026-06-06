@@ -1,12 +1,12 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-06-03T17:12:26+00:00
+Generated: 2026-06-06T02:20:17+00:00
 Status: stale_or_needs_review
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
-- Branch: fix/sana-sas-catalogue
-- Last commit: 7280c08 2026-06-03 fix(filing): guard profile admin fields from clinical backfill
+- Branch: feature/conversation-supervisor-20260605
+- Last commit: 2106b6f 2026-06-05 fix(bot): keep gathering actions idempotent
 - Uncommitted changes: yes
 
 ## Immediate read before restarting
@@ -23,21 +23,20 @@ Status: stale_or_needs_review
 - No missing practical sections
 
 ## Recent commits
-- 7280c08 2026-06-03 fix(filing): guard profile admin fields from clinical backfill
-- ed1d39f 2026-06-03 fix(filing): improve leadership assessment extraction
-- 260dde9 2026-06-03 fix(bot): preserve draft report when filing another case
-- 4e2bb55 2026-06-03 fix(filing): tick key capabilities without curriculum links
-- 1df1227 2026-06-03 fix(bot): remove post-save field edit buttons
-- c7b5a6a 2026-06-03 fix(ui): hide curriculum variant codes in drafts
-- 6904958 2026-06-03 fix(filing): resolve stale drafts to curriculum variants
-- 815b2ef 2026-06-03 fix(recommender): keep observed procedures on DOPS
+- 2106b6f 2026-06-05 fix(bot): keep gathering actions idempotent
+- bf34758 2026-06-05 chore: ignore local generated artefacts
+- eea3c87 2026-06-05 test: add weird prompt fix queue
+- 167c0d6 2026-06-05 test: add offline weird prompt qa
+- 283e464 2026-06-05 fix: harden standalone question routing
+- 6c511ec 2026-06-05 Add cancel button to gathering prompt
+- 8116f00 2026-06-05 fix(bot): apply house emoji standard to all live answer paths
+- 5274ca7 2026-06-05 fix(bot): apply house emoji standard to supervisor side answers
 
 ## Uncommitted change summary
-- ?? cache/
-- ?? tmp/
+- M docs/continuity/RESUME_BRIEF.md
 
 ## Repo context snapshot
-### AGENTS.md — present, 0 days old
+### AGENTS.md — present, 2 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
@@ -48,7 +47,7 @@ Key headings:
 - ## Safety
 - ## Supported Forms
 
-### CLAUDE.md — present, 0 days old
+### CLAUDE.md — present, 2 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
@@ -74,7 +73,7 @@ Key headings:
 - ## UX Polish Slice — Post-Filed Buttons (2026-05-26)
 - # 539 passed, 22 skipped, 13 deselected, 3 snapshots passed
 
-### WORKFLOWS.md — present, 4 days old
+### WORKFLOWS.md — present, 7 days old
 Key headings:
 - # Portfolio Guru — Agent Workflow Reference
 - ## Conversation States

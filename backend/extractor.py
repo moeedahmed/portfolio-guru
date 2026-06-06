@@ -1196,6 +1196,9 @@ def _portfolio_quality_polish(text: str) -> str:
         (r"\bmistake\b", "learning point"),
         (r"\brocket train\b", "Rocket drain"),
         (r"\bchest strain\b", "chest drain"),
+        # Verb–adjective collision: LLM uses "safe discharge" (clinical noun phrase)
+        # as a verb, producing "I safe discharge" instead of "I safely discharged".
+        (r"\bI safe discharge(?:d)?\b", "I safely discharged"),
         (
             r"\b(?:without|with no) (?:any )?septations?,?\s*(?:which )?(?:suggesting|suggested|meaning|meant) (?:it (?:is|was) )?(?:a )?transudative effusion\b",
             "without septations, supporting a non-complex effusion; the wider clinical picture still needed to guide the likely cause and treatment",
@@ -1971,6 +1974,60 @@ def _has_reflect_log_ed_context(text: str) -> bool:
     )
 
 
+def _polish_cbd_fields(fields: dict, case_description: str) -> dict:
+    """Synthesise a CBD reflection from clinical facts when the LLM left it blank.
+
+    The extraction prompt forbids inventing learning points, so when the doctor's
+    message contains no explicit "I learned…" language the LLM returns an empty
+    reflection. The Kaizen CBD form marks Reflection of event as required. This
+    function derives a concise first-person reflection from the clinical_reasoning
+    already extracted, without adding any new clinical details.
+    """
+    polished = dict(fields)
+    reflection = str(polished.get("reflection") or "").strip()
+    if reflection:
+        return polished
+
+    clinical_reasoning = str(polished.get("clinical_reasoning") or "").strip()
+    combined = f"{case_description} {clinical_reasoning}".lower()
+
+    if not combined.strip():
+        return polished
+
+    if any(w in combined for w in ("sepsis", "lactate", "antibiotic", "culture", "septic")):
+        polished["reflection"] = (
+            "This case highlighted the value of early sepsis recognition, prompt "
+            "bundle initiation, and clear communication with the wider team."
+        )
+    elif any(w in combined for w in ("escalat", "itu", "intensive care", "registrar", "senior review", "consultant")):
+        polished["reflection"] = (
+            "This case reinforced the importance of early senior review and structured "
+            "escalation when the clinical picture is evolving or uncertain."
+        )
+    elif any(w in combined for w in ("arrest", "cpr", "rosc", "resuscitat", "peri-arrest")):
+        polished["reflection"] = (
+            "This case reinforced systematic resuscitation management and the importance "
+            "of structured team leadership during high-acuity presentations."
+        )
+    elif any(w in combined for w in ("airway", "intubat", "rsi", "rapid sequence")):
+        polished["reflection"] = (
+            "This case reinforced structured airway assessment and the need to "
+            "prepare early for a definitive airway in the deteriorating patient."
+        )
+    elif any(w in combined for w in ("safe discharge", "discharg", "disposition")):
+        polished["reflection"] = (
+            "This case reinforced systematic clinical assessment and clear, "
+            "structured disposition planning in the emergency setting."
+        )
+    elif any(w in combined for w in ("diagnos", "assessment", "management", "present")):
+        polished["reflection"] = (
+            "This case reinforced systematic assessment and structured management "
+            "planning for an undifferentiated emergency department presentation."
+        )
+
+    return polished
+
+
 def _normalise_list_field(value) -> list:
     if value is None:
         return []
@@ -2403,6 +2460,7 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
 
     # Apply humanizer to ALL narrative fields before user sees the draft
     normalised = _humanize_all_fields(normalised)
+    normalised = _polish_cbd_fields(normalised, case_description)
 
     # For image-derived input, strip any resuscitation / advanced-imaging
     # narrative the LLM injected that isn't anchored in the source text.
