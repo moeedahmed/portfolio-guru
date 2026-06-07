@@ -156,7 +156,7 @@ def _build_message(cases: int, gap: tuple[str, int] | None) -> str:
     else:
         lines.append("\U0001f4cb Portfolio check-in")
         lines.append("")
-        lines.append("No cases filed this week \u2014 that's fine, but worth a nudge.")
+        lines.append("No Portfolio Guru cases filed this week \u2014 that's fine, but worth a nudge.")
 
     if gap:
         label, days = gap

@@ -2177,7 +2177,7 @@ class TestFlowWalker:
             text, _ = await _build_nudge_message(stats)
 
         assert 'Portfolio check-in' in text
-        assert 'No cases filed this week' in text
+        assert 'No Portfolio Guru cases filed this week' in text
 
     @pytest.mark.asyncio
     async def test_successful_filing_includes_observation_line(self, thin_draft):
