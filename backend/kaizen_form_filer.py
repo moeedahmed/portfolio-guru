@@ -2001,6 +2001,52 @@ async def _fill_assessor_invite(page: Page, query: str, expected_name: str = "")
 
 # ─── Curriculum links (SLO expansion + KC ticking) ──────────────────────────
 
+# Map a stored portfolio training-level bucket (profile_store.UserProfile.
+# training_level — UNKNOWN|ACCS|INTERMEDIATE|HIGHER|SAS or legacy ST3-ST6) to
+# the SLO-tree stage prefix Kaizen uses in its curriculum accordions. SAS and
+# UNKNOWN have no dedicated tree, so they fall through to the "Higher" default.
+_TRAINING_LEVEL_STAGE_PREFIX = {
+    "HIGHER": "Higher",
+    "INTERMEDIATE": "Intermediate",
+    "ACCS": "ACCS",
+    "PEM": "PEM",
+    "ST3": "Intermediate",
+    "ST4": "Higher",
+    "ST5": "Higher",
+    "ST6": "Higher",
+}
+
+
+def _curriculum_stage_label(fields: dict, telegram_user_id: Optional[int]) -> str:
+    """Resolve the stage whose SLO tree the KC ticks belong to.
+
+    Several curriculum-bearing forms (Reflective Practice Log, ESLE Reflection,
+    Teaching Observation, LAT) have no in-form ``stage_of_training`` selector,
+    so ``fields`` carries no stage and the KC writer would otherwise default to
+    the Higher tree. For a non-Higher trainee that expands the wrong SLO
+    accordions and silently ticks nothing. Fall back to the user's saved
+    portfolio training level so the right tree is reached regardless of form.
+
+    Order of authority: an explicit form stage value > the profile bucket >
+    the historical "Higher" default (also used for SAS/unknown profiles, which
+    have no dedicated Kaizen SLO tree).
+    """
+    stage = (fields.get("stage") or fields.get("stage_of_training") or "").strip()
+    if stage:
+        return stage
+    if telegram_user_id is not None:
+        try:
+            from profile_store import get_training_level
+            level = get_training_level(telegram_user_id)
+        except Exception:
+            level = None
+        if level:
+            prefix = _TRAINING_LEVEL_STAGE_PREFIX.get(level.strip().upper())
+            if prefix:
+                return prefix
+    return "Higher"
+
+
 async def _fill_curriculum_links(
     page: Page,
     slo_codes: List[str],
@@ -2683,7 +2729,8 @@ async def fill_kaizen_form(
         kc_targets = fields.get("key_capabilities", []) or slo_codes
         if slo_codes or kc_targets:
             ticked, kc_errors = await _fill_curriculum_links(
-                page, slo_codes, kc_targets, stage_value or "Higher"
+                page, slo_codes, kc_targets,
+                _curriculum_stage_label(fields, telegram_user_id),
             )
             if ticked:
                 filled.append(f"curriculum_links ({len(ticked)} KCs)")
@@ -3620,8 +3667,19 @@ async def file_to_kaizen(
         if curriculum_links or kc_targets:
             slo_codes = curriculum_links or []
             ticked, kc_errors = await _fill_curriculum_links(
-                page, slo_codes, kc_targets, fields.get("stage_of_training", "Higher")
+                page, slo_codes, kc_targets,
+                _curriculum_stage_label(fields, telegram_user_id),
             )
+            # Surface the KC writeback outcome — without this the ticks (and any
+            # failures) were silently discarded, hiding when Key Capabilities
+            # never landed on the saved draft. A KC failure routes through
+            # `skipped`, which downgrades the filing status to "partial".
+            if ticked:
+                filled.append(f"curriculum_links ({len(ticked)} KCs)")
+            if kc_errors:
+                skipped.append(f"key_capabilities ({len(kc_errors)} not ticked)")
+                for kc_error in kc_errors:
+                    logger.warning("KC writeback gap for %s: %s", form_type, kc_error)
 
         # Handle file attachment
         temp_attachment = None
