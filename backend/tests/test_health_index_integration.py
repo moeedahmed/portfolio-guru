@@ -237,7 +237,7 @@ async def test_run_health_analysis_uses_indexed_source_when_history_empty(
 
     text = sent["text"]
     assert "*Portfolio Health — CESR / Portfolio Pathway*" in text
-    assert "No cases filed yet" not in text
+    assert "No Portfolio Guru cases filed yet" not in text
     assert "WPBA progress toward 36" in text
     assert "1/36" in text
 

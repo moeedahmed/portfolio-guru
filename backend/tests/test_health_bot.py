@@ -143,6 +143,35 @@ async def test_settings_pathway_change_saves_and_returns_to_settings(isolated_he
 
 
 @pytest.mark.asyncio
+async def test_health_empty_state_clarifies_portfolio_guru_scope(monkeypatch):
+    """Empty state must say cases are absent in Portfolio Guru, not in Kaizen."""
+    import bot
+
+    user_id = 5150
+    monkeypatch.setattr(bot, "list_evidence_items", AsyncMock(return_value=[]))
+    monkeypatch.setattr(bot, "get_case_history", AsyncMock(return_value=[]))
+    monkeypatch.setattr(bot, "get_health_profile", lambda _user_id: _profile(user_id, Pathway.training_arcp))
+    monkeypatch.setattr(bot, "get_training_level", lambda _user_id: "ST6")
+
+    sent: dict[str, str] = {}
+
+    await bot._run_health_analysis(
+        user_id=user_id,
+        chat=SimpleNamespace(send_action=AsyncMock()),
+        send_progress=AsyncMock(),
+        send_result=AsyncMock(side_effect=lambda text, reply_markup: sent.setdefault("text", text)),
+        send_photo_fn=AsyncMock(),
+        fail_fn=AsyncMock(),
+    )
+
+    text = sent["text"]
+    assert "No Portfolio Guru cases filed yet" in text
+    assert "existing Kaizen cases aren't affected" in text
+    # Must not read as "you have no cases in Kaizen".
+    assert "No cases filed yet." not in text
+
+
+@pytest.mark.asyncio
 async def test_cesr_health_output_uses_deterministic_engine_without_llm(monkeypatch):
     import sys
     import bot
@@ -820,7 +849,7 @@ def test_weekly_digest_caption_empty_state():
     import bot
 
     text = bot._build_weekly_digest_text({"cases": 0, "gap": None})
-    assert "No cases" in text
+    assert "No Portfolio Guru cases" in text
     assert "/health" in text
     assert len(text) < 200
 

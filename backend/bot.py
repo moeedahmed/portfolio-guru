@@ -393,7 +393,7 @@ def _static_nudge_text(stats: dict) -> str:
     else:
         lines.append("\U0001f4cb Portfolio check-in")
         lines.append("")
-        lines.append("No cases filed this week \u2014 that's fine, but worth a nudge.")
+        lines.append("No Portfolio Guru cases filed this week \u2014 that's fine, but worth a nudge.")
     if gap:
         label, days = gap
         lines.append("")
@@ -428,7 +428,7 @@ def _build_weekly_digest_text(stats: dict) -> str:
 
     if cases == 0:
         return (
-            "No cases filed this week. "
+            "No Portfolio Guru cases filed this week. "
             "One takes 2 minutes — send text, voice, photo, or document. "
             "Tap /health for your full breakdown."
         )
@@ -5678,7 +5678,8 @@ async def _run_health_analysis(
     if not evidence_items:
         await send_result(
             f"📊 *Portfolio Health — {pathway_label}*\n\n"
-            f"No cases filed yet. Start filing cases and come back to check your {empty_state_label} readiness.\n\n"
+            f"No Portfolio Guru cases filed yet. Start filing here and come back to check your {empty_state_label} readiness.\n\n"
+            "This only reflects cases filed through Portfolio Guru — your existing Kaizen cases aren't affected.\n\n"
             "Tip: Send a clinical case to get started.",
             None,
         )
