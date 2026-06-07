@@ -69,6 +69,22 @@ def test_accs_plus_intermediate_combines_to_accs_intermediate():
     assert profile.portfolio_type == "accs_intermediate"
 
 
+def test_accs_plus_late_intermediate_access_combines_to_accs_intermediate():
+    """Dual-access accounts may show ACCS in the title and Intermediate
+    access much later in the rendered dashboard body.
+
+    The provider must pass enough body text into the detector for the
+    higher access to win instead of silently storing ACCS-only.
+    """
+    late_body = "ACCS Trainee Dashboard\n" + ("Dashboard item\n" * 350) + (
+        "Intermediate Portfolio access"
+    )
+    profile = detect_portfolio_profile("ACCS Trainee Dashboard", late_body)
+
+    assert profile.category == "training"
+    assert profile.portfolio_type == "accs_intermediate"
+
+
 def test_higher_trainee_supervisor_copy_does_not_become_assessor():
     """A trainee dashboard can mention the assigned Clinical Supervisor.
 

@@ -19,9 +19,10 @@ DEFAULT_KAIZEN_CDP_URL = "http://localhost:18800"
 # window was too small to surface SAS / CESR / Non-Trainee signals — Kaizen
 # renders the chrome (nav, header, breadcrumbs) before the portfolio-type
 # label, so the marker words land well after byte 200 on a real dashboard.
-# Pin to 3000 (matches the ``substring(0,3000)`` snip we already take from
-# ``document.body.innerText``) and assert via the offline detection tests.
-KAIZEN_DASHBOARD_BODY_PREVIEW_CHARS = 3000
+# Pin to a broad dashboard read. Dual-access accounts can expose the higher
+# portfolio link well below the initial header/nav block, so a short preview
+# may see ACCS only and miss Intermediate.
+KAIZEN_DASHBOARD_BODY_PREVIEW_CHARS = 30000
 
 
 class KaizenInfrastructureError(RuntimeError):

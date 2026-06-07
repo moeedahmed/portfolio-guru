@@ -348,6 +348,38 @@ class TestFlowWalker:
         assert ('✅ Draft Self-directed Learning Reflection', 'FORM|SDL') in sim.get_last_buttons()
 
     @pytest.mark.asyncio
+    async def test_detailed_self_directed_learning_reflection_opens_sdl_choice(self):
+        from bot import AWAIT_FORM_CHOICE, _process_case_text
+
+        case_text = (
+            "Self-directed learning reflection. I completed the RCEMLearning module on adult "
+            "sepsis recognition and initial ED management on 6 June 2026. I reviewed the NICE "
+            "sepsis guidance and local ED sepsis pathway afterwards. Key learning was earlier "
+            "recognition of high-risk features, prompt senior escalation, timely antibiotics, "
+            "lactate measurement, cultures, and fluid reassessment. I realised I need to be "
+            "more systematic with documenting sepsis screening and safety-netting when patients "
+            "are discharged after infection assessment. I will use the ED sepsis checklist during "
+            "my next shifts and discuss one relevant case with my supervisor to evidence change "
+            "in practice."
+        )
+        sim = BotSimulator()
+        context = sim._make_context()
+        update = sim._make_text_update(case_text)
+
+        result = await _process_case_text(
+            update.message,
+            context,
+            update.effective_user.id,
+            update.message.text,
+            'text',
+        )
+
+        assert result == AWAIT_FORM_CHOICE
+        text = sim.get_last_text()
+        assert 'Self-directed Learning' in text
+        assert ('✅ Draft Self-directed Learning Reflection', 'FORM|SDL') in sim.get_last_buttons()
+
+    @pytest.mark.asyncio
     async def test_sdl_thin_draft_asks_for_learning_notes_not_patient_details(self):
         from bot import AWAIT_CASE_INPUT, handle_form_choice
         from models import FormDraft
