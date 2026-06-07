@@ -895,8 +895,19 @@ def _is_submit_inquiry(text: str) -> bool:
     if not text:
         return False
     lowered = text.lower()
-    return bool(_SUBMIT_INQUIRY_RE.search(text)) and (
+    questionish = bool(
         "?" in text
+        or re.match(
+            r"^\s*(what|which|how|why|when|where|who|can|could|do|does|is|are|will|would|should)\b",
+            lowered,
+        )
+    )
+    # Long reflective/case narratives often mention a supervisor as part of
+    # future learning/action plans. Do not divert those into the safety copy.
+    if not questionish and len(text.split()) > 25:
+        return False
+    return bool(_SUBMIT_INQUIRY_RE.search(text)) and (
+        questionish
         or any(w in lowered for w in ("submit", "sign", "send", "forward", "will", "does", "would", "save directly"))
     )
 

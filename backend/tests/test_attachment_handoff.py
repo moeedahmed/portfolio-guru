@@ -160,6 +160,34 @@ async def test_mid_flow_submit_question_answers_draft_only_and_preserves_state()
 
 
 @pytest.mark.asyncio
+async def test_mid_flow_sdl_reflection_with_supervisor_action_plan_is_processed_as_case():
+    from bot import AWAIT_FORM_CHOICE
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_text_update(
+        "Self-directed learning reflection. I completed the RCEMLearning module on adult "
+        "sepsis recognition and initial ED management on 6 June 2026. I reviewed the NICE "
+        "sepsis guidance and local ED sepsis pathway afterwards. Key learning was earlier "
+        "recognition of high-risk features, prompt senior escalation, timely antibiotics, "
+        "lactate measurement, cultures, and fluid reassessment. I realised I need to be "
+        "more systematic with documenting sepsis screening and safety-netting when patients "
+        "are discharged after infection assessment. I will use the ED sepsis checklist during "
+        "my next shifts and discuss one relevant case with my supervisor to evidence change "
+        "in practice."
+    )
+    context.user_data["case_text"] = "previous case still in form-choice state"
+    context.user_data["form_recommendations"] = []
+
+    with patch('bot._process_case_text', new=AsyncMock(return_value=AWAIT_FORM_CHOICE)) as process_case:
+        result = await handle_mid_conversation_text(update, context)
+
+    assert result == AWAIT_FORM_CHOICE
+    process_case.assert_awaited_once()
+    assert "Self-directed learning reflection" in process_case.await_args.args[3]
+
+
+@pytest.mark.asyncio
 async def test_text_while_document_choice_pending_is_captured_and_keeps_buttons_valid():
     sim = BotSimulator()
     context = sim._make_context()
