@@ -96,7 +96,7 @@ BOT_COMMANDS = [
     ("link", "Link to your EM Gurus Hub web account"),
     ("health", "Portfolio health chart and pathway-aware analysis"),
     ("cancel", "Cancel whatever is happening"),
-    ("delete", "Delete all your stored data"),
+    ("reset", "Reset Portfolio Guru and reconnect Kaizen"),
     ("help", "How to use Portfolio Guru"),
 ]
 
@@ -2236,7 +2236,7 @@ def _settings_view_components(
     buttons.extend([
         [InlineKeyboardButton(setup_button_label, callback_data="ACTION|setup")],
         [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu"),
-         InlineKeyboardButton("🗑️ Delete data", callback_data="ACTION|delete")],
+         InlineKeyboardButton("🔄 Reset", callback_data="ACTION|delete")],
     ])
     text = (
         f"⚙️ Your settings\n\n"
@@ -4552,8 +4552,8 @@ async def handle_info_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
 
-    # Post-delete state is stable and idempotent: the storage explainer here
-    # must describe what is not retained after /delete, and Back must return
+    # Post-reset state is stable and idempotent: the storage explainer here
+    # must describe what is not retained after /reset, and Back must return
     # to the exact same all-clear card rather than the generic product explainer.
     if query.data == "INFO|stored_after_delete":
         await query.message.edit_text(
@@ -4969,11 +4969,13 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         )
 
     elif action == "delete":
-        # Confirm before deleting
+        # Reset confirmation. The callback name stays "delete" for
+        # backwards-compatibility with reset buttons in old chat history; the
+        # user-facing copy and the public command are both "reset".
         await query.message.edit_text(
-            "⚠️ This wipes your saved Kaizen login, portfolio, curriculum choice, and voice profile. It does not affect cases already saved in Kaizen. Are you sure?",
+            "⚠️ This resets Portfolio Guru — it clears your saved Kaizen login, portfolio, pathway and curriculum choice, voice profile, and local filing history and Portfolio Health evidence. It does not affect cases already saved in Kaizen. Are you sure?",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🗑️ Yes, delete", callback_data="CONFIRM|delete"),
+                [InlineKeyboardButton("🔄 Yes, reset", callback_data="CONFIRM|reset"),
                  InlineKeyboardButton("❌ No, keep", callback_data="ACTION|cancel")],
             ])
         )
@@ -5099,13 +5101,19 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return ConversationHandler.END
 
 
-async def delete_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Delete all stored data for this user — credentials, profile, conversation state."""
-    user_id = update.effective_user.id
-    context.user_data.clear()
-    await _clear_local_portfolio_account_data(user_id, reason="delete_data")
+async def _perform_reset(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Comprehensive local purge backing /reset (and the hidden /delete alias).
 
-    # Delete credentials
+    Clears every piece of local Portfolio Guru state for this Telegram user:
+    bot draft/flow state, stored Kaizen credentials, the saved profile
+    (training level / curriculum / voice), and all account-scoped evidence and
+    cache (usage/KC coverage, Kaizen index, Portfolio Health, session cache).
+    Cases already saved in Kaizen are never touched.
+    """
+    context.user_data.clear()
+    await _clear_local_portfolio_account_data(user_id, reason="reset")
+
+    # Clear credentials
     from credentials import engine as cred_engine, UserCredential
     from profile_store import delete_user_profile
     from sqlmodel import Session, select
@@ -5119,9 +5127,29 @@ async def delete_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     try:
         delete_user_profile(user_id)
     except Exception:
-        logger.warning("Could not delete stored user profile", exc_info=True)
+        logger.warning("Could not clear stored user profile", exc_info=True)
 
+
+async def reset_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle /reset (and the hidden /delete backwards-compat alias) — wipe all
+    local Portfolio Guru state for this user and prompt them to reconnect
+    Kaizen. Cases already saved in Kaizen are unaffected."""
+    await _perform_reset(update.effective_user.id, context)
     await update.message.reply_text(
+        _DATA_CLEAR_TEXT,
+        reply_markup=_build_data_clear_keyboard(),
+    )
+    return ConversationHandler.END
+
+
+async def handle_reset_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle the inline reset confirmation (CONFIRM|reset, plus the legacy
+    CONFIRM|delete from old chat history) — run the comprehensive reset and
+    show the all-clear card in place."""
+    query = update.callback_query
+    await query.answer()
+    await _perform_reset(update.effective_user.id, context)
+    await query.message.edit_text(
         _DATA_CLEAR_TEXT,
         reply_markup=_build_data_clear_keyboard(),
     )
@@ -5176,6 +5204,7 @@ Suggest the best form, extract all the fields, show you a draft to review and ed
 /voice — Set up your writing style profile
 /settings — Plan, usage, preferences
 /upgrade — View subscription plans
+/reset — Clear local data and reconnect Kaizen
 /help — This message"""
 
 
@@ -9992,7 +10021,11 @@ def build_application() -> Application:
 
     # Register handlers
     application.add_handler(CommandHandler("cancel", cancel_command))
-    application.add_handler(CommandHandler("delete", delete_data))
+    application.add_handler(CommandHandler("reset", reset_data))
+    # /delete kept as a hidden, backwards-compatible alias for users who learned
+    # it before the public command was consolidated to /reset. Not advertised in
+    # the command menu or /help.
+    application.add_handler(CommandHandler("delete", reset_data))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("settings", settings_command))
     application.add_handler(CommandHandler("link", link_command))
@@ -10024,6 +10057,9 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(handle_chase_log, pattern=r"^CHASE_LOG\|"))
     # Top-level handlers that must work regardless of conversation state
     application.add_handler(CallbackQueryHandler(handle_info_button, pattern=r"^INFO\|"))
+    # Inline reset confirmation. Accepts the legacy CONFIRM|delete payload so
+    # reset buttons in old chat history still complete.
+    application.add_handler(CallbackQueryHandler(handle_reset_confirm, pattern=r"^CONFIRM\|(?:reset|delete)$"))
     application.add_handler(
         CallbackQueryHandler(
             handle_action_button,

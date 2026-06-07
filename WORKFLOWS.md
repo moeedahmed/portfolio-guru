@@ -402,16 +402,28 @@ User says "edit my last case" or similar
 
 ## Flow 5 — Reset / Recovery
 
+Two distinct surfaces — keep them separate:
+
 ```
-User sends /reset (any state)
+SOFT recovery (return to idle, keep the account):
+  /cancel  OR  the 🆕 Start fresh button (ACTION|reset)
 → context.user_data.clear()
-→ "Reset. Send me a case whenever you're ready."
-→ END (returns to idle)
+→ "❌ Cancelled." / next-step keyboard
+→ END (returns to idle; credentials and profile untouched)
+
+FULL reset (wipe local state, reconnect Kaizen):
+  /reset   (and the hidden /delete backwards-compat alias)
+→ comprehensive local purge: bot draft/flow state, Kaizen credentials,
+  saved profile, usage/KC evidence, Kaizen index, Portfolio Health,
+  session cache
+→ "✅ Your Portfolio Guru data is clear …" + Connect Kaizen keyboard
+→ END. Cases already saved in Kaizen are NOT touched.
 
 User sends a new case while mid-state (stuck)
 → classify_intent → CASE
 → If AWAIT_APPROVAL or AWAIT_EDIT_*:
-    "Looks like a new case. Send /reset to start fresh."
+    "Looks like a new case — start fresh or fold it into the current one?"
+    (offers Start fresh / fold-in buttons — never points at /reset)
 → If IDLE:
     proceed normally
 ```
@@ -700,21 +712,21 @@ made" — it is the trust layer and should never be dropped.
 
 ### Callback / recovery / control messages
 
-| Surface                                 | Helper / function                                                       | Copy                                                                                                                                                           |
-| --------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/cancel` (connected user)              | `_cancelled_next_step_text` → `cancel_command` / `ACTION\|cancel`       | `✅ Cancelled. Just send your next case when ready.`                                                                                                           |
-| `/cancel` (disconnected user)           | `_cancelled_next_step_text`                                             | `❌ Cancelled. Connect Kaizen to start filing.`                                                                                                                |
-| Stale callback (button expired ~30 s)   | `error_handler` → `_resume_paused_flow`                                 | `That earlier button is no longer active.` (+ rebuild paused draft / form choice / start-fresh path)                                                           |
-| Setup-flow stale button                 | `_expired_prompt_text`                                                  | `⏳ That button has expired. Finish setup from the latest message and I'll pick it up from there.`                                                             |
-| Generic stale button (no setup pending) | `_expired_prompt_text`                                                  | `⏳ That button has expired. Start a new case from the latest message and I'll pick it up from there.`                                                         |
-| Unknown error with draft alive          | `error_handler`                                                         | `Something went wrong while filing. Try again or start fresh.` + retry/start-fresh keyboard                                                                    |
-| Unknown error with no draft             | `error_handler`                                                         | `Something went wrong. Use the latest message to start again.` + next-step keyboard                                                                            |
-| Stale "earlier draft" recovery          | `_resume_paused_flow(reason="That earlier draft is no longer active.")` | `That earlier draft is no longer active.` (+ paused-flow rebuild)                                                                                              |
-| Live submit attempt (legacy submit btn) | `handle_approval_submit`                                                | `Portfolio Guru only saves Kaizen entries as drafts. Use Save as draft when you're ready.`                                                                     |
-| Reuse same case after success           | `ACTION\|same_case_another`                                             | `🔁 Reusing the same case. I'll suggest a different WPBA type — not the one you already filed.`                                                                |
-| Amend after a filed draft               | `handle_amend_draft`                                                    | Re-shows the draft preview with the amend keyboard (`📤 Save updated draft` / `❌ Cancel amend`).                                                              |
-| `/health` empty portfolio               | `ACTION\|health`                                                        | `📊 No cases filed yet — start filing and come back to check your ARCP readiness.`                                                                             |
-| `/delete` confirmation                  | `ACTION\|delete`                                                        | `⚠️ This wipes your saved Kaizen login, training level, curriculum choice, and voice profile. It does not affect cases already saved in Kaizen. Are you sure?` |
+| Surface                                 | Helper / function                                                       | Copy                                                                                                                                                                                                                                                  |
+| --------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/cancel` (connected user)              | `_cancelled_next_step_text` → `cancel_command` / `ACTION\|cancel`       | `✅ Cancelled. Just send your next case when ready.`                                                                                                                                                                                                  |
+| `/cancel` (disconnected user)           | `_cancelled_next_step_text`                                             | `❌ Cancelled. Connect Kaizen to start filing.`                                                                                                                                                                                                       |
+| Stale callback (button expired ~30 s)   | `error_handler` → `_resume_paused_flow`                                 | `That earlier button is no longer active.` (+ rebuild paused draft / form choice / start-fresh path)                                                                                                                                                  |
+| Setup-flow stale button                 | `_expired_prompt_text`                                                  | `⏳ That button has expired. Finish setup from the latest message and I'll pick it up from there.`                                                                                                                                                    |
+| Generic stale button (no setup pending) | `_expired_prompt_text`                                                  | `⏳ That button has expired. Start a new case from the latest message and I'll pick it up from there.`                                                                                                                                                |
+| Unknown error with draft alive          | `error_handler`                                                         | `Something went wrong while filing. Try again or start fresh.` + retry/start-fresh keyboard                                                                                                                                                           |
+| Unknown error with no draft             | `error_handler`                                                         | `Something went wrong. Use the latest message to start again.` + next-step keyboard                                                                                                                                                                   |
+| Stale "earlier draft" recovery          | `_resume_paused_flow(reason="That earlier draft is no longer active.")` | `That earlier draft is no longer active.` (+ paused-flow rebuild)                                                                                                                                                                                     |
+| Live submit attempt (legacy submit btn) | `handle_approval_submit`                                                | `Portfolio Guru only saves Kaizen entries as drafts. Use Save as draft when you're ready.`                                                                                                                                                            |
+| Reuse same case after success           | `ACTION\|same_case_another`                                             | `🔁 Reusing the same case. I'll suggest a different WPBA type — not the one you already filed.`                                                                                                                                                       |
+| Amend after a filed draft               | `handle_amend_draft`                                                    | Re-shows the draft preview with the amend keyboard (`📤 Save updated draft` / `❌ Cancel amend`).                                                                                                                                                     |
+| `/health` empty portfolio               | `ACTION\|health`                                                        | `📊 No cases filed yet — start filing and come back to check your ARCP readiness.`                                                                                                                                                                    |
+| `/reset` confirmation (inline)          | `ACTION\|delete` → `CONFIRM\|reset`                                     | `⚠️ This resets Portfolio Guru — it clears your saved Kaizen login, portfolio, pathway and curriculum choice, voice profile, and local filing history and Portfolio Health evidence. It does not affect cases already saved in Kaizen. Are you sure?` |
 
 Conversation-state invariant: every path to `ConversationHandler.END` must
 call `context.user_data.clear()` first. The cancel/recovery surfaces above

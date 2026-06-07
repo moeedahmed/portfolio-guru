@@ -257,7 +257,7 @@ For each fixture, against the dev bot **only**:
    forms (HST superset, ACCS/Intermediate ST3 catalogue, SAS fallback
    union, consultant: trainee filing is not the intended path here).
 4. Open the draft preview.
-5. **Do not tap Save as draft.** Use `/reset` or `Cancel` and capture a
+5. **Do not tap Save as draft.** Use `Cancel` / `Start fresh` and capture a
    screenshot of the preview for Moeed's manual review later.
 
 **Stop-go.** Each fixture's draft preview renders without:
@@ -386,7 +386,7 @@ production smoke noted in step 9 below.
    only; do not run unless P3 includes attachment coverage).
 7. `Edit` flow updates a field cleanly; preview redraws once;
    original keyboard reappears.
-8. `Cancel` / `/reset` cleanly returns to idle; no orphan keyboards.
+8. `Cancel` / `Start fresh` cleanly returns to idle; no orphan keyboards.
 9. Stale callback recovery — wait ~45 s, tap an old button; the bot
    recovers with the correct flat keyboard.
 10. `Save as draft` on a synthetic CBD case for Moeed's HST profile.
@@ -476,7 +476,7 @@ fixture.**
 - [ ] Photo case → preview (or clean NOT_CLINICAL for placeholders).
 - [ ] Document attachment is acknowledged and queued for upload.
 - [ ] `Edit` updates one field cleanly; preview redraws once.
-- [ ] `Cancel` and `/reset` return to idle cleanly.
+- [ ] `Cancel` and `Start fresh` return to idle cleanly.
 - [ ] Stale-button recovery works after ~45 s.
 - [ ] Save-as-draft on my HST CBD case lands in Kaizen; I delete it
       by hand.

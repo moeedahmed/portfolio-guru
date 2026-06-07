@@ -38,7 +38,7 @@ Source: `WORKFLOWS.md` Flow 1, Flow 2, Flow 3, Flow 5.
    `✨ Quick improve`, or `❌ Cancel`.
 5. On save: deterministic Playwright via browser-harness CDP files the draft
    on Kaizen. User reviews and submits/signs inside Kaizen manually.
-6. `/reset` always returns the user to idle. Stale buttons recover with a
+6. `Cancel` / `Start fresh` returns the user to idle. Stale buttons recover with a
    `That earlier draft is no longer active.` message — never a dead end.
 
 Forms in scope for beta filing: whatever `filer_router.py` marks as DOM-mapped.
@@ -227,9 +227,11 @@ Send this verbatim (or close) to each beta user before they connect:
 > - Do not paste patient-identifiable detail into the beta thread. The
 >   operator can see the bot logs without you re-sending the case.
 >
-> Reset is always safe:
+> Reset is safe, but it is a full local reset:
 >
-> - `/reset` returns you to a clean state at any time.
+> - Use `Cancel` / `Start fresh` to leave a draft and return to idle.
+> - Use `/reset` only when you want to clear Portfolio Guru's local state
+>   and reconnect Kaizen. Cases already saved in Kaizen are unaffected.
 
 ---
 

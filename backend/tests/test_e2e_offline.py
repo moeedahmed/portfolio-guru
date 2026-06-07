@@ -217,7 +217,8 @@ async def offline_app(monkeypatch, tmp_path):
     app.add_handler(CommandHandler("start", bot.start))
     app.add_handler(CommandHandler("settings", bot.settings_command))
     app.add_handler(CommandHandler("cancel", bot.cancel_command))
-    app.add_handler(CommandHandler("delete", bot.delete_data))
+    app.add_handler(CommandHandler("reset", bot.reset_data))
+    app.add_handler(CommandHandler("delete", bot.reset_data))
     app.add_handler(CommandHandler("help", bot.help_command))
     app.add_handler(CommandHandler("bulk", bot.bulk_command))
     app.add_handler(CommandHandler("unsigned", bot.unsigned_command))
@@ -226,6 +227,7 @@ async def offline_app(monkeypatch, tmp_path):
     app.add_handler(CallbackQueryHandler(bot.handle_set_curriculum, pattern=r"^SET_CURRICULUM\|"))
     app.add_handler(CallbackQueryHandler(bot.handle_chase_log, pattern=r"^CHASE_LOG\|"))
     app.add_handler(CallbackQueryHandler(bot.handle_info_button, pattern=r"^INFO\|"))
+    app.add_handler(CallbackQueryHandler(bot.handle_reset_confirm, pattern=r"^CONFIRM\|(?:reset|delete)$"))
     app.add_handler(
         CallbackQueryHandler(
             bot.handle_action_button,
@@ -636,10 +638,13 @@ class TestOfflineE2E:
         text = collector.texts[0]
         assert "Cancel" in text or "cancel" in text or "❌" in text
 
-    async def test_delete_is_idempotent_and_shows_clear_state(self, offline_app, monkeypatch, tmp_path):
-        """First and repeated /delete both reassure the user that data is clear."""
+    async def test_reset_is_idempotent_and_shows_clear_state(self, offline_app, monkeypatch, tmp_path):
+        """First and repeated /reset both reassure the user that data is clear,
+        the hidden /delete alias behaves identically, and the inline reset
+        confirmation button completes the same purge."""
         app, collector = offline_app
 
+        import bot
         import credentials
         import profile_store
         from sqlmodel import Session, SQLModel, create_engine, select
@@ -657,32 +662,43 @@ class TestOfflineE2E:
         invalidated = []
         monkeypatch.setattr("kaizen_form_filer.invalidate_session_cache", lambda uid: invalidated.append(uid))
 
-        with Session(cred_engine) as session:
-            session.add(credentials.UserCredential(
-                telegram_user_id=TEST_USER.id,
-                kaizen_username_enc=b"user",
-                kaizen_password_enc=b"pass",
-            ))
-            session.commit()
-        with Session(prof_engine) as session:
-            session.add(profile_store.UserProfile(
-                telegram_user_id=TEST_USER.id,
-                training_level="HIGHER",
-                curriculum="2025",
-                voice_profile="{}",
-                voice_examples_count=1,
-            ))
-            session.commit()
+        def seed_user():
+            with Session(cred_engine) as session:
+                session.add(credentials.UserCredential(
+                    telegram_user_id=TEST_USER.id,
+                    kaizen_username_enc=b"user",
+                    kaizen_password_enc=b"pass",
+                ))
+                session.commit()
+            with Session(prof_engine) as session:
+                session.add(profile_store.UserProfile(
+                    telegram_user_id=TEST_USER.id,
+                    training_level="HIGHER",
+                    curriculum="2025",
+                    voice_profile="{}",
+                    voice_examples_count=1,
+                ))
+                session.commit()
 
-        expected = (
-            "✅ Your Portfolio Guru data is clear.\n\n"
-            "I don’t have any Kaizen credentials, portfolio preferences, curriculum choice, voice profile, "
-            "or bot draft state stored for you now.\n\n"
-            "Cases already saved in Kaizen are unaffected.\n\n"
-            "To use Portfolio Guru again, reconnect Kaizen."
-        )
+        def user_data_is_purged():
+            with Session(cred_engine) as session:
+                cred_gone = session.exec(
+                    select(credentials.UserCredential).where(credentials.UserCredential.telegram_user_id == TEST_USER.id)
+                ).first() is None
+            with Session(prof_engine) as session:
+                prof_gone = session.exec(
+                    select(profile_store.UserProfile).where(profile_store.UserProfile.telegram_user_id == TEST_USER.id)
+                ).first() is None
+            return cred_gone and prof_gone
 
-        update = make_command_update("delete")
+        # Reference the live constant so the test tracks the bot's copy.
+        expected = bot._DATA_CLEAR_TEXT
+        assert "Cases already saved in Kaizen are unaffected." in expected
+        assert "reconnect Kaizen" in expected
+
+        seed_user()
+
+        update = make_command_update("reset")
         _prepare_update(update, app.bot)
         await app.process_update(update)
 
@@ -692,18 +708,11 @@ class TestOfflineE2E:
         buttons = [btn.callback_data for row in collector.sent[0]["reply_markup"].inline_keyboard for btn in row]
         assert buttons == ["ACTION|setup"]
         assert invalidated == [TEST_USER.id]
+        assert user_data_is_purged()
 
-        with Session(cred_engine) as session:
-            assert session.exec(
-                select(credentials.UserCredential).where(credentials.UserCredential.telegram_user_id == TEST_USER.id)
-            ).first() is None
-        with Session(prof_engine) as session:
-            assert session.exec(
-                select(profile_store.UserProfile).where(profile_store.UserProfile.telegram_user_id == TEST_USER.id)
-            ).first() is None
-
+        # Repeated /reset stays idempotent.
         collector.sent.clear()
-        update = make_command_update("delete")
+        update = make_command_update("reset")
         _prepare_update(update, app.bot)
         await app.process_update(update)
 
@@ -711,6 +720,30 @@ class TestOfflineE2E:
         assert "No stored data found" not in collector.texts[0]
         buttons = [btn.callback_data for row in collector.sent[0]["reply_markup"].inline_keyboard for btn in row]
         assert buttons == ["ACTION|setup"]
+
+        # Hidden /delete alias performs the same purge.
+        seed_user()
+        collector.sent.clear()
+        update = make_command_update("delete")
+        _prepare_update(update, app.bot)
+        await app.process_update(update)
+
+        assert collector.texts == [expected]
+        buttons = [btn.callback_data for row in collector.sent[0]["reply_markup"].inline_keyboard for btn in row]
+        assert buttons == ["ACTION|setup"]
+        assert user_data_is_purged()
+
+        # Inline reset confirmation button completes the purge in place.
+        seed_user()
+        collector.sent.clear()
+        update = make_callback_update("CONFIRM|reset", message_text="⚠️ This resets Portfolio Guru — are you sure?")
+        _prepare_update(update, app.bot)
+        await app.process_update(update)
+
+        assert collector.texts == [expected]
+        buttons = [btn.callback_data for row in collector.sent[0]["reply_markup"].inline_keyboard for btn in row]
+        assert buttons == ["ACTION|setup"]
+        assert user_data_is_purged()
 
         collector.sent.clear()
         update = make_callback_update("INFO|stored_after_delete", message_text=expected)
