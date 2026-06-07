@@ -195,9 +195,9 @@ Pass if Kaizen state matches expectation."
 if [[ "$RECORD" == "1" ]]; then
   {
     printf '\n## Summary\n\n'
-    printf '- Pass: %s\n' "$PASS"
-    printf '- Fail: %s\n' "$FAIL"
-    printf '- Skip: %s\n' "$SKIP"
+    printf -- '- Pass: %s\n' "$PASS"
+    printf -- '- Fail: %s\n' "$FAIL"
+    printf -- '- Skip: %s\n' "$SKIP"
   } >> "$ARTEFACT"
 
   printf '\nArtefact: %s\n' "$ARTEFACT"
