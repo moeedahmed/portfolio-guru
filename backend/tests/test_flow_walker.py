@@ -380,6 +380,38 @@ class TestFlowWalker:
         assert ('✅ Draft Self-directed Learning Reflection', 'FORM|SDL') in sim.get_last_buttons()
 
     @pytest.mark.asyncio
+    async def test_explicit_sdl_see_all_forms_back_restores_same_choice(self):
+        from bot import AWAIT_FORM_CHOICE, _process_case_text, handle_form_choice
+
+        case_text = (
+            "Self-directed learning reflection. I completed the RCEMLearning module on adult "
+            "sepsis recognition and initial ED management. I will discuss one relevant case "
+            "with my supervisor to evidence change in practice."
+        )
+        sim = BotSimulator()
+        context = sim._make_context()
+        update = sim._make_text_update(case_text)
+
+        result = await _process_case_text(
+            update.message,
+            context,
+            update.effective_user.id,
+            case_text,
+            'text',
+        )
+        assert result == AWAIT_FORM_CHOICE
+        first_text = sim.get_last_text()
+        first_buttons = sim.get_last_buttons()
+
+        with patch('bot.get_training_level', return_value='INTERMEDIATE'), \
+             patch('bot.get_curriculum', return_value='2025'):
+            await handle_form_choice(sim._make_callback_update('FORM|show_all'), context)
+            await handle_form_choice(sim._make_callback_update('FORM|back'), context)
+
+        assert sim.get_last_text() == first_text
+        assert sim.get_last_buttons() == first_buttons
+
+    @pytest.mark.asyncio
     async def test_sdl_thin_draft_asks_for_learning_notes_not_patient_details(self):
         from bot import AWAIT_CASE_INPUT, handle_form_choice
         from models import FormDraft

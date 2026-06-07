@@ -762,6 +762,7 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
         "pending_new_case_text",
         "template_prompt_message_id",
         "template_prompt_chat_id",
+        "explicit_form_choice",
         "form_recommendations",
         "form_recommendations_text",
         "document_name",
@@ -2686,6 +2687,25 @@ def _build_explicit_form_keyboard(form_type: str):
         [InlineKeyboardButton("📋 See all forms", callback_data="FORM|show_all")],
         [_BTN_CANCEL],
     ])
+
+
+def _store_explicit_form_choice_state(
+    context: ContextTypes.DEFAULT_TYPE,
+    form_type: str,
+    prompt_text: str,
+) -> None:
+    """Persist an explicit-form screen so See all forms -> Back is stable."""
+    from extractor import FORM_UUIDS
+
+    context.user_data["form_recommendations"] = [
+        FormTypeRecommendation(
+            form_type=form_type,
+            rationale="Requested directly by the case text.",
+            uuid=FORM_UUIDS.get(form_type),
+        )
+    ]
+    context.user_data["form_recommendations_text"] = prompt_text
+    context.user_data["explicit_form_choice"] = form_type
 
 
 def _build_approval_keyboard(improved_once: bool = False, can_back_to_missing: bool = False):
@@ -6377,10 +6397,14 @@ async def _handle_reuse_request(update: Update, context: ContextTypes.DEFAULT_TY
 
     if explicit_form:
         context.user_data["chosen_form"] = explicit_form
-        await update.message.reply_text(
+        prompt_text = (
             f"🔁 Reusing your previous case for *{_form_display_name(explicit_form)}*.\n\n"
             f"Tap Draft to extract the fields from the case you already filed — "
-            f"I won't invent any new clinical details.",
+            f"I won't invent any new clinical details."
+        )
+        _store_explicit_form_choice_state(context, explicit_form, prompt_text)
+        await update.message.reply_text(
+            prompt_text,
             parse_mode="Markdown",
             reply_markup=_build_explicit_form_keyboard(explicit_form),
         )
@@ -6408,10 +6432,15 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
     explicit_form = extract_explicit_form_type(case_text)
     if explicit_form:
         context.user_data["chosen_form"] = explicit_form
+        prompt_text = (
+            f"I’ll use *{_form_display_name(explicit_form)}* for this entry.\n\n"
+            "Tap Draft to extract the fields from what you sent."
+        )
+        _store_explicit_form_choice_state(context, explicit_form, prompt_text)
         await _send_latest_message(
             message,
             context,
-            f"I’ll use *{_form_display_name(explicit_form)}* for this entry.\n\nTap Draft to extract the fields from what you sent.",
+            prompt_text,
             reply_markup=_build_explicit_form_keyboard(explicit_form),
             parse_mode="Markdown",
         )
@@ -8070,9 +8099,19 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         # Restore the AI recommendations screen
         recommendations = context.user_data.get("form_recommendations", [])
         saved_text = context.user_data.get("form_recommendations_text", "Which form would you like to create?")
+        explicit_form = context.user_data.get("explicit_form_choice")
+        keyboard = (
+            _build_explicit_form_keyboard(explicit_form)
+            if explicit_form
+            else _build_form_choice_keyboard(
+                recommendations,
+                curriculum=_effective_curriculum(update.effective_user.id),
+            )
+        )
         await query.edit_message_text(
             saved_text,
-            reply_markup=_build_form_choice_keyboard(recommendations, curriculum=_effective_curriculum(update.effective_user.id))
+            reply_markup=keyboard,
+            parse_mode="Markdown",
         )
         return AWAIT_FORM_CHOICE
 
