@@ -90,9 +90,8 @@ MAX_TELEGRAM_MSG = 4096
 
 BOT_COMMANDS = [
     ("start", "Open Portfolio Guru and get started"),
-    ("setup", "Connect your portfolio account"),
     ("voice", "Set up your personal writing voice"),
-    ("settings", "View status, usage, and preferences"),
+    ("settings", "Plan, usage, Kaizen connection, and preferences"),
     ("link", "Link to your EM Gurus Hub web account"),
     ("health", "Portfolio health chart and pathway-aware analysis"),
     ("cancel", "Cancel whatever is happening"),
@@ -3655,6 +3654,12 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             await update.callback_query.answer()
         return ConversationHandler.END
 
+    # /setup command guard: connected users get settings; explicit button
+    # clicks (Update Kaizen login / Connect Kaizen) always start setup.
+    if not update.callback_query and has_credentials(update.effective_user.id):
+        await settings_command(update, context)
+        return ConversationHandler.END
+
     # Can be triggered by command or callback. Anchor the setup flow message.
     if update.callback_query:
         await update.callback_query.answer()
@@ -5231,9 +5236,8 @@ Suggest the best form, extract all the fields, show you a draft to review and ed
 
 *Commands:*
 /start — Main menu
-/setup — Connect or update Kaizen credentials
 /voice — Set up your writing style profile
-/settings — Plan, usage, preferences
+/settings — Plan, usage, Kaizen connection, and preferences
 /upgrade — View subscription plans
 /reset — Clear local data and reconnect Kaizen
 /help — This message"""
@@ -9641,7 +9645,7 @@ async def bulk_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user_id = update.effective_user.id
     creds = get_credentials(user_id)
     if not creds:
-        await update.message.reply_text("Connect your Kaizen account first with /setup")
+        await update.message.reply_text("Connect your Kaizen account first with /settings")
         return
 
     text = (update.message.text or "").replace("/bulk", "", 1).strip()
@@ -9824,7 +9828,7 @@ async def unsigned_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if not has_credentials(user_id):
         await update.message.reply_text(
-            "🔗 Connect your Kaizen account first.\n\nUse /setup to get started.",
+            "🔗 Connect your Kaizen account first.\n\nOpen /settings to get started.",
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("⚙️ Connect Kaizen", callback_data="ACTION|setup")
             ]])

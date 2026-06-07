@@ -74,7 +74,7 @@ async def file_entry(request: FileRequest):
         from credentials import get_credentials
         creds = get_credentials(request.telegram_user_id)
         if not creds:
-            raise HTTPException(status_code=401, detail="No credentials stored for this user. Run /setup.")
+            raise HTTPException(status_code=401, detail="No credentials stored for this user. Open /settings to connect Kaizen.")
         username, password = creds
     else:
         # Fall back to env var / BWS credentials (for local testing)

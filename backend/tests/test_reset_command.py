@@ -7,26 +7,55 @@ saved in Kaizen are never touched.
 """
 
 import inspect
+from unittest.mock import AsyncMock
 
 import pytest
 
 
-def test_reset_is_the_public_command_and_delete_is_hidden():
+def test_reset_is_the_public_command_and_setup_is_hidden():
     import bot
 
     commands = {command for command, _ in bot.BOT_COMMANDS}
     assert "reset" in commands
     assert "delete" not in commands
+    # /setup is no longer advertised — Kaizen connection is owned by /settings.
+    assert "setup" not in commands
 
     reset_description = next(desc for command, desc in bot.BOT_COMMANDS if command == "reset")
     assert "Kaizen" in reset_description
 
 
-def test_help_copy_lists_reset_not_delete():
+def test_help_copy_lists_reset_not_delete_and_not_setup():
     import bot
 
     assert "/reset" in bot.HELP_MSG
     assert "/delete" not in bot.HELP_MSG
+    # /setup is no longer a user-facing command — Kaizen connection
+    # is now owned by /settings.
+    assert "/setup" not in bot.HELP_MSG
+
+
+@pytest.mark.asyncio
+async def test_setup_command_redirects_connected_user_to_settings(monkeypatch):
+    import bot
+    from tests.bot_simulator import BotSimulator
+
+    sim = BotSimulator(user_id=4242)
+    update = sim._make_text_update("/setup")
+    update.effective_chat.type = "private"
+    context = sim._make_context()
+
+    monkeypatch.setattr(bot, "has_credentials", lambda _uid: True)
+    monkeypatch.setattr(bot, "get_user_tier", AsyncMock(return_value="free"))
+    monkeypatch.setattr(bot, "get_cases_this_month", AsyncMock(return_value=0))
+    monkeypatch.setattr(bot, "is_beta_tester", AsyncMock(return_value=False))
+    monkeypatch.setattr(bot, "_safe_kaizen_sync_status", AsyncMock(return_value=None))
+
+    result = await bot.setup_start(update, context)
+
+    assert result == bot.ConversationHandler.END
+    assert "Your settings" in sim.get_last_text()
+    assert "What's your Kaizen username" not in sim.get_last_text()
 
 
 def test_clear_card_copy_is_reset_framed_and_protects_kaizen_cases():

@@ -1,13 +1,13 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-06-06T02:20:17+00:00
-Status: stale_or_needs_review
+Generated: 2026-06-07T22:47:24+00:00
+Status: ready
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
-- Branch: feature/conversation-supervisor-20260605
-- Last commit: 2106b6f 2026-06-05 fix(bot): keep gathering actions idempotent
-- Uncommitted changes: yes
+- Branch: main
+- Last commit: 1e4a893 2026-06-07 fix(filer): resolve KC tree stage from profile for stageless forms
+- Uncommitted changes: no
 
 ## Immediate read before restarting
 1. Product hub Status + Brief in Notion
@@ -15,28 +15,29 @@ Status: stale_or_needs_review
 3. `TASK.md` for active sprint state, if present
 4. This resume brief for drift warnings and repo state
 
-## Warnings
-- Repo has uncommitted changes — capture/commit or summarise before switching context
-
 ## Practical AGENTS.md check
 - Useful for coding-agent/ACP work: yes
 - No missing practical sections
 
-## Recent commits
-- 2106b6f 2026-06-05 fix(bot): keep gathering actions idempotent
-- bf34758 2026-06-05 chore: ignore local generated artefacts
-- eea3c87 2026-06-05 test: add weird prompt fix queue
-- 167c0d6 2026-06-05 test: add offline weird prompt qa
-- 283e464 2026-06-05 fix: harden standalone question routing
-- 6c511ec 2026-06-05 Add cancel button to gathering prompt
-- 8116f00 2026-06-05 fix(bot): apply house emoji standard to all live answer paths
-- 5274ca7 2026-06-05 fix(bot): apply house emoji standard to supervisor side answers
+## Release-loop readiness
+- Verdict: present — deterministic closure entrypoint detected
+- Scripts found: scripts/release_loop.sh
+- Documented references: none
+- Surface hints: telegram_bot: yes
+- Live/deploy signals: railway.json, render.yaml, .github/workflows/deploy-mac.yml
 
-## Uncommitted change summary
-- M docs/continuity/RESUME_BRIEF.md
+## Recent commits
+- 1e4a893 2026-06-07 fix(filer): resolve KC tree stage from profile for stageless forms
+- 98905f0 2026-06-07 fix(bot): restore explicit form choice on back
+- fe6c6f6 2026-06-07 fix(bot): route SDL reflections before supervisor safety copy
+- 1c920bf 2026-06-07 fix(bot): detect Harris dual-access profile
+- 0b30cc1 2026-06-07 fix(bot): apply empty-state clarification to weekly_check mirror and flow_walker test
+- 9ed3e7e 2026-06-07 fix(bot): clarify empty-state wording — 'No Portfolio Guru cases filed' not 'No cases filed'
+- 50ac93a 2026-06-07 fix(bot): consolidate data clearing to a single public /reset command
+- 90a2c9d 2026-06-06 fix(bot): isolate portfolio health on account switch
 
 ## Repo context snapshot
-### AGENTS.md — present, 2 days old
+### AGENTS.md — present, 1 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
@@ -47,7 +48,7 @@ Key headings:
 - ## Safety
 - ## Supported Forms
 
-### CLAUDE.md — present, 2 days old
+### CLAUDE.md — present, 1 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
@@ -73,7 +74,22 @@ Key headings:
 - ## UX Polish Slice — Post-Filed Buttons (2026-05-26)
 - # 539 passed, 22 skipped, 13 deselected, 3 snapshots passed
 
-### WORKFLOWS.md — present, 7 days old
+### docs/plan.md — present, 1 days old
+Key headings:
+- # Portfolio Guru - Conversational Router Plan
+- ## Goal
+- ## Product Decision
+- ## Architecture
+- ### Layer 1 - Natural conversation intake
+- ### Layer 2 - Intent router
+- ### Layer 3 - Existing deterministic workflows
+- ### Layer 4 - Safety and recovery
+- ## Implementation Phases
+- ### Phase 0 - Checkpoint and branch
+- ### Phase 1 - Router contract and tests
+- ### Phase 2 - Passive shadow mode
+
+### WORKFLOWS.md — present, 0 days old
 Key headings:
 - # Portfolio Guru — Agent Workflow Reference
 - ## Conversation States
@@ -89,6 +105,6 @@ Key headings:
 - ## Data Flow
 
 ## Recommended restart path
-Refresh the product hub/Brief and repo context before a new build sprint.
+Continuity context looks sufficient; proceed with normal product-docs workflow.
 
 If this product has been idle for weeks, do not start implementation from memory. Refresh the product hub Status/Brief first, then create or update `TASK.md` for the next sprint.
