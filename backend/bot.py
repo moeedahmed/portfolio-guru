@@ -90,10 +90,7 @@ MAX_TELEGRAM_MSG = 4096
 
 BOT_COMMANDS = [
     ("start", "Open Portfolio Guru and get started"),
-    ("voice", "Set up your personal writing voice"),
     ("settings", "Plan, usage, Kaizen connection, and preferences"),
-    ("link", "Link to your EM Gurus Hub web account"),
-    ("health", "Portfolio health chart and pathway-aware analysis"),
     ("cancel", "Cancel whatever is happening"),
     ("reset", "Reset Portfolio Guru and reconnect Kaizen"),
     ("help", "How to use Portfolio Guru"),
@@ -5236,9 +5233,7 @@ Suggest the best form, extract all the fields, show you a draft to review and ed
 
 *Commands:*
 /start — Main menu
-/voice — Set up your writing style profile
 /settings — Plan, usage, Kaizen connection, and preferences
-/upgrade — View subscription plans
 /reset — Clear local data and reconnect Kaizen
 /help — This message"""
 

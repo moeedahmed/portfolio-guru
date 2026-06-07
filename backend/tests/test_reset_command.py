@@ -25,6 +25,14 @@ def test_reset_is_the_public_command_and_setup_is_hidden():
     assert "Kaizen" in reset_description
 
 
+def test_public_command_menu_is_core_only():
+    import bot
+
+    commands = [command for command, _ in bot.BOT_COMMANDS]
+
+    assert commands == ["start", "settings", "cancel", "reset", "help"]
+
+
 def test_help_copy_lists_reset_not_delete_and_not_setup():
     import bot
 
@@ -33,6 +41,10 @@ def test_help_copy_lists_reset_not_delete_and_not_setup():
     # /setup is no longer a user-facing command — Kaizen connection
     # is now owned by /settings.
     assert "/setup" not in bot.HELP_MSG
+    assert "/link" not in bot.HELP_MSG
+    assert "/voice" not in bot.HELP_MSG
+    assert "/health" not in bot.HELP_MSG
+    assert "/upgrade" not in bot.HELP_MSG
 
 
 @pytest.mark.asyncio
