@@ -36,6 +36,15 @@ def test_public_command_menu_is_core_only():
 def test_help_copy_lists_reset_not_delete_and_not_setup():
     import bot
 
+    command_lines = [
+        line.strip()
+        for line in bot.HELP_MSG.splitlines()
+        if line.strip().startswith("/")
+    ]
+    assert command_lines == [
+        f"/{command} — {description}"
+        for command, description in bot.BOT_COMMANDS
+    ]
     assert "/reset" in bot.HELP_MSG
     assert "/delete" not in bot.HELP_MSG
     # /setup is no longer a user-facing command — Kaizen connection

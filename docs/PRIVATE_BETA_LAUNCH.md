@@ -15,7 +15,7 @@ Source of truth for filing routing: `backend/filer_router.py`.
 - **Audience.** 3–5 trusted UK EM trainees, hand-picked. Same WhatsApp/Signal
   thread as the operator. No promotion, no referral link, no public Telegram
   username share.
-- **Bot account.** Existing production `@PortfolioGuruBot`. No new account.
+- **Bot account.** Existing production [`@portfolio_guru_bot`](https://t.me/portfolio_guru_bot). No new account.
 - **Window.** Open-ended, but treat each week as a checkpoint. Pull the plug
   rather than letting it drift if rollback signals appear.
 - **What this is.** A signed-up trainee can use the live bot with their real

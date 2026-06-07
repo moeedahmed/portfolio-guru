@@ -86,7 +86,7 @@ Portfolio Guru — private-beta dogfood smoke checklist.
 
 This is a guided checklist. It does not touch Telegram, Kaizen, the LLM, or
 the live filer. Run the bot actions yourself in Telegram against the live
-@PortfolioGuruBot (or your dev bot) using your own account, then come back
+@portfolio_guru_bot (or your dev bot) using your own account, then come back
 to this terminal and record pass/fail/skip for each step.
 
 Hard rules for this run:

@@ -97,6 +97,10 @@ BOT_COMMANDS = [
 ]
 
 
+def _format_public_commands() -> str:
+    return "\n".join(f"/{command} — {description}" for command, description in BOT_COMMANDS)
+
+
 async def _log_conversational_router_shadow(
     text: str,
     user_id: int | None,
@@ -5218,7 +5222,7 @@ async def _clear_local_portfolio_account_data(user_id: int, *, reason: str) -> d
     return cleared
 
 
-HELP_MSG = """📖 *Portfolio Guru — Help*
+HELP_MSG = f"""📖 *Portfolio Guru — Help*
 
 *How it works:*
 📝 Describe → 🔍 I pick the form → ✅ You approve → 📤 Filed to Kaizen
@@ -5232,10 +5236,7 @@ Suggest the best form, extract all the fields, show you a draft to review and ed
 *45 RCEM forms supported* — assessments, reflections, teaching, management, audit, research, and more.
 
 *Commands:*
-/start — Main menu
-/settings — Plan, usage, Kaizen connection, and preferences
-/reset — Clear local data and reconnect Kaizen
-/help — This message"""
+{_format_public_commands()}"""
 
 
 async def link_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
