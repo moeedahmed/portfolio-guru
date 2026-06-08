@@ -127,7 +127,10 @@ async def test_settings_pathway_change_saves_and_returns_to_settings(isolated_he
 
     assert ("Training (CCT)", "PATHWAY_SETTINGS|training_arcp") in sim.get_last_buttons()
     assert ("Portfolio (CESR)", "PATHWAY_SETTINGS|cesr_portfolio") in sim.get_last_buttons()
-    assert ("🔙 Back to settings", "ACTION|settings") in sim.get_last_buttons()
+    # The pathway picker is a section under Portfolio defaults, so its Back
+    # button must return to the Portfolio defaults submenu, not main /settings.
+    assert ("🔙 Back to portfolio defaults", "ACTION|portfolio_defaults") in sim.get_last_buttons()
+    assert ("🔙 Back to settings", "ACTION|settings") not in sim.get_last_buttons()
 
     result = await bot.handle_pathway_choice(
         sim._make_callback_update("PATHWAY_SETTINGS|cesr_portfolio"),
@@ -140,6 +143,87 @@ async def test_settings_pathway_change_saves_and_returns_to_settings(isolated_he
     assert stored.pathway == Pathway.cesr_portfolio
     assert "Portfolio (CESR)" in sim.get_last_text()
     assert ("📋 Portfolio defaults", "ACTION|portfolio_defaults") in sim.get_last_buttons()
+
+
+@pytest.mark.asyncio
+async def test_portfolio_defaults_back_button_returns_to_settings(isolated_health_store, monkeypatch):
+    """The Portfolio defaults submenu sits directly under main /settings, so its
+    Back button must read 'Back to settings' and route to ACTION|settings."""
+    import bot
+
+    monkeypatch.setattr(bot, "get_curriculum", lambda _user_id: "2025")
+    monkeypatch.setattr(bot, "get_training_level", lambda _user_id: "ST5")
+    monkeypatch.setattr(bot, "get_kaizen_role", lambda _user_id: None)
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|portfolio_defaults"),
+        context,
+    )
+
+    buttons = sim.get_last_buttons()
+    assert ("🔙 Back to settings", "ACTION|settings") in buttons
+    # The submenu must not strand the user with a bare "Back" label.
+    assert ("🔙 Back", "ACTION|settings") not in buttons
+
+
+@pytest.mark.asyncio
+async def test_change_level_back_button_returns_to_portfolio_defaults(monkeypatch):
+    """The Portfolio (training level) section is reached from Portfolio defaults,
+    so its Back button must return there — never to main /settings."""
+    import bot
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|change_level"),
+        context,
+    )
+
+    buttons = sim.get_last_buttons()
+    assert ("🔙 Back to portfolio defaults", "ACTION|portfolio_defaults") in buttons
+    assert ("🔙 Back to settings", "ACTION|settings") not in buttons
+
+
+@pytest.mark.asyncio
+async def test_change_curriculum_back_button_returns_to_portfolio_defaults(monkeypatch):
+    """The Curriculum section is reached from Portfolio defaults, so its Back
+    button must return there — never to main /settings."""
+    import bot
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|change_curriculum"),
+        context,
+    )
+
+    buttons = sim.get_last_buttons()
+    assert ("🔙 Back to portfolio defaults", "ACTION|portfolio_defaults") in buttons
+    assert ("🔙 Back to settings", "ACTION|settings") not in buttons
+
+
+@pytest.mark.asyncio
+async def test_change_pathway_back_button_returns_to_portfolio_defaults(isolated_health_store, monkeypatch):
+    """The Pathway section is reached from Portfolio defaults, so its Back button
+    must return there — never to main /settings."""
+    import bot
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|change_pathway"),
+        context,
+    )
+
+    buttons = sim.get_last_buttons()
+    assert ("🔙 Back to portfolio defaults", "ACTION|portfolio_defaults") in buttons
+    assert ("🔙 Back to settings", "ACTION|settings") not in buttons
 
 
 @pytest.mark.asyncio

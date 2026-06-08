@@ -1,5 +1,26 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-08 addendum — Portfolio defaults back-button routing fix.**
+> Scope: follow-up to the settings grouping below, after a Telegram screenshot
+> showed the section-level Back buttons skipping the new submenu.
+>
+> Result:
+>
+> - The Portfolio defaults sections (Portfolio type, Pathway, Curriculum) now
+>   have a `🔙 Back to portfolio defaults` button routing to
+>   `ACTION|portfolio_defaults`, instead of jumping straight to main `/settings`.
+> - The Portfolio defaults submenu's own Back button is relabelled
+>   `🔙 Back to settings` (was a bare `🔙 Back`) and still routes to
+>   `ACTION|settings`, matching the wording used elsewhere.
+> - Save/select flows (`handle_set_level`, `handle_set_curriculum`,
+>   `handle_pathway_choice`) keep their current return-to-settings behaviour.
+> - Added regression tests pinning all four back-button routes in
+>   `tests/test_health_bot.py`.
+>
+> Verification: focused settings tests passed (health_bot, health_index_integration,
+> setup_manual_profile_fallback, flow_walker — 260 passed). Not run: live Telegram
+> smoke, push, deploy, restart.
+
 > **2026-06-08 addendum — settings menu grouping.**
 > Scope: clean up the Telegram `/settings` surface after dogfood screenshots
 > showed the main settings screen behaving like a debug/control panel.
@@ -322,7 +343,7 @@
 >   redirected the 2025 CBD form URL to `/events/list`, no fields were filled,
 >   and the activities check found no synthetic test draft or markers.
 > - Bot-handler path then saved one synthetic `CBD - Case Based Discussion
->   (2021)` draft using the real save-as-draft approval handler.
+> (2021)` draft using the real save-as-draft approval handler.
 > - Filing QA was GREEN for the 2021 CBD surface: 6 fields filled, stage
 >   intentionally skipped / acceptable-empty for the CESR account.
 > - Opened draft `8bfa7f9a-019c-4b38-aa3a-ebfd90710a10` was `DRAFT PRIVATE`

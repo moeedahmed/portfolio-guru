@@ -4961,7 +4961,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 [InlineKeyboardButton(f"🎓 Portfolio: {training_level}", callback_data="ACTION|change_level")],
                 [InlineKeyboardButton(f"📊 Pathway: {pathway_label}", callback_data="ACTION|change_pathway")],
                 [InlineKeyboardButton(f"📚 Curriculum: {curriculum_label}", callback_data="ACTION|change_curriculum")],
-                [InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")],
+                [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
             ]),
         )
 
@@ -4971,7 +4971,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("2025 Update", callback_data="SET_CURRICULUM|2025")],
                 [InlineKeyboardButton("2021 Curriculum", callback_data="SET_CURRICULUM|2021")],
-                [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
+                [InlineKeyboardButton("🔙 Back to portfolio defaults", callback_data="ACTION|portfolio_defaults")],
             ]),
         )
 
@@ -4981,7 +4981,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             [InlineKeyboardButton("Intermediate Profile", callback_data="SETLEVEL|INTERMEDIATE")],
             [InlineKeyboardButton("HST Profile", callback_data="SETLEVEL|HIGHER")],
             [InlineKeyboardButton("Non-Training Profile", callback_data="SETLEVEL|SAS")],
-            [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
+            [InlineKeyboardButton("🔙 Back to portfolio defaults", callback_data="ACTION|portfolio_defaults")],
         ])
         await query.message.edit_text(
             "🎓 Which Kaizen portfolio applies to you?",
@@ -5860,7 +5860,7 @@ def _build_pathway_keyboard(*, from_settings: bool = False) -> InlineKeyboardMar
         [InlineKeyboardButton("Portfolio (CESR)", callback_data=f"{prefix}|{Pathway.cesr_portfolio.value}")],
     ]
     if from_settings:
-        rows.append([InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")])
+        rows.append([InlineKeyboardButton("🔙 Back to portfolio defaults", callback_data="ACTION|portfolio_defaults")])
     return InlineKeyboardMarkup(rows)
 
 
