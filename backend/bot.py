@@ -1157,6 +1157,10 @@ _DATA_CLEAR_TEXT = (
     "Cases already saved in Kaizen are unaffected.\n\n"
     "To use Portfolio Guru again, reconnect Kaizen."
 )
+_KAIZEN_USERNAME_PROMPT = (
+    "📧 What's your Kaizen username (email)?\n\n"
+    "🔒 Stored encrypted. Used only to file your drafts on Kaizen — never shared."
+)
 
 
 def _nav_row(
@@ -1241,10 +1245,8 @@ def _build_next_step_keyboard(user_id: int) -> InlineKeyboardMarkup | None:
     return None
 
 
-def _build_data_clear_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [_BTN_SETUP],
-    ])
+def _build_data_clear_keyboard() -> None:
+    return None
 
 
 async def _prompt_implicit_kaizen_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -3667,8 +3669,7 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     _flow_done(context, "setup")  # fresh start — drop any stale anchor
     await _flow_msg(
         update, context,
-        "📧 What's your Kaizen username (email)?\n\n"
-        "🔒 Stored encrypted. Used only to file your drafts on Kaizen — never shared.",
+        _KAIZEN_USERNAME_PROMPT,
         flow_key="setup",
     )
     return AWAIT_USERNAME
@@ -5195,7 +5196,8 @@ async def reset_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         _DATA_CLEAR_TEXT,
         reply_markup=_build_data_clear_keyboard(),
     )
-    return ConversationHandler.END
+    await update.message.reply_text(_KAIZEN_USERNAME_PROMPT)
+    return AWAIT_USERNAME
 
 
 async def handle_reset_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -5209,7 +5211,8 @@ async def handle_reset_confirm(update: Update, context: ContextTypes.DEFAULT_TYP
         _DATA_CLEAR_TEXT,
         reply_markup=_build_data_clear_keyboard(),
     )
-    return ConversationHandler.END
+    await query.message.reply_text(_KAIZEN_USERNAME_PROMPT)
+    return AWAIT_USERNAME
 
 
 async def _clear_local_portfolio_account_data(user_id: int, *, reason: str) -> dict[str, int]:

@@ -703,11 +703,11 @@ class TestOfflineE2E:
         _prepare_update(update, app.bot)
         await app.process_update(update)
 
-        assert collector.texts == [expected]
+        assert collector.texts == [expected, bot._KAIZEN_USERNAME_PROMPT]
         assert "No stored data found" not in collector.texts[0]
         assert "What is stored?" not in collector.texts[0]
-        buttons = [btn.callback_data for row in collector.sent[0]["reply_markup"].inline_keyboard for btn in row]
-        assert buttons == ["ACTION|setup"]
+        assert collector.sent[0].get("reply_markup") is None
+        assert collector.sent[1].get("reply_markup") is None
         assert invalidated == [TEST_USER.id]
         assert user_data_is_purged()
 
@@ -717,10 +717,10 @@ class TestOfflineE2E:
         _prepare_update(update, app.bot)
         await app.process_update(update)
 
-        assert collector.texts == [expected]
+        assert collector.texts == [expected, bot._KAIZEN_USERNAME_PROMPT]
         assert "No stored data found" not in collector.texts[0]
-        buttons = [btn.callback_data for row in collector.sent[0]["reply_markup"].inline_keyboard for btn in row]
-        assert buttons == ["ACTION|setup"]
+        assert collector.sent[0].get("reply_markup") is None
+        assert collector.sent[1].get("reply_markup") is None
 
         # Hidden /delete alias performs the same purge.
         seed_user()
@@ -729,9 +729,9 @@ class TestOfflineE2E:
         _prepare_update(update, app.bot)
         await app.process_update(update)
 
-        assert collector.texts == [expected]
-        buttons = [btn.callback_data for row in collector.sent[0]["reply_markup"].inline_keyboard for btn in row]
-        assert buttons == ["ACTION|setup"]
+        assert collector.texts == [expected, bot._KAIZEN_USERNAME_PROMPT]
+        assert collector.sent[0].get("reply_markup") is None
+        assert collector.sent[1].get("reply_markup") is None
         assert user_data_is_purged()
 
         # Inline reset confirmation button completes the purge in place.
@@ -741,9 +741,9 @@ class TestOfflineE2E:
         _prepare_update(update, app.bot)
         await app.process_update(update)
 
-        assert collector.texts == [expected]
-        buttons = [btn.callback_data for row in collector.sent[0]["reply_markup"].inline_keyboard for btn in row]
-        assert buttons == ["ACTION|setup"]
+        assert collector.texts == [expected, bot._KAIZEN_USERNAME_PROMPT]
+        assert collector.sent[0].get("reply_markup") is None
+        assert collector.sent[1].get("reply_markup") is None
         assert user_data_is_purged()
 
         collector.sent.clear()
@@ -753,8 +753,7 @@ class TestOfflineE2E:
 
         assert collector.texts == [expected]
         assert "turns clinical notes into RCEM portfolio drafts" not in collector.texts[0]
-        buttons = [btn.callback_data for row in collector.sent[0]["reply_markup"].inline_keyboard for btn in row]
-        assert buttons == ["ACTION|setup"]
+        assert collector.sent[0].get("reply_markup") is None
 
         collector.sent.clear()
         update = make_callback_update("ACTION|back_to_delete_clear", message_text=expected)
@@ -762,8 +761,7 @@ class TestOfflineE2E:
         await app.process_update(update)
 
         assert collector.texts == [expected]
-        buttons = [btn.callback_data for row in collector.sent[0]["reply_markup"].inline_keyboard for btn in row]
-        assert buttons == ["ACTION|setup"]
+        assert collector.sent[0].get("reply_markup") is None
 
     async def test_setup_flow_stores_credentials(self, offline_app, monkeypatch):
         """Walk through full setup flow → credentials stored."""
