@@ -66,10 +66,8 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         message_class=MessageClass.FIXED,
         text=(
             "🩺 Portfolio Guru is ready.\n\n"
-            "Send the case details in whatever format is easiest: text, voice, photo, or document.\n\n"
-            "I’ll read what you send, suggest the best-fit portfolio options, then show buttons for what to do next. "
-            "Send extra messages only if you want to add or correct case detail.\n\n"
-            "I won’t invent clinical detail, and nothing goes to Kaizen until you approve it."
+            "Send an anonymised case: text, voice, photo, or document.\n\n"
+            "I’ll suggest the form, prepare the draft, and ask before saving to Kaizen."
         ),
         safety_critical=True,
     ),

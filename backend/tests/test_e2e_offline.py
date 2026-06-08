@@ -320,8 +320,9 @@ class TestOfflineE2E:
         assert len(collector.texts) >= 1
         text = collector.texts[0]
         assert "Portfolio Guru is ready" in text
-        assert "suggest the best-fit portfolio options" in text
-        assert "show buttons for what to do next" in text
+        assert "Send an anonymised case" in text
+        assert "before saving to Kaizen" in text
+        assert "show buttons for what to do next" not in text
         assert "draft it" not in text
         sent = collector.sent[0]
         # Connected welcome has no inline keyboard.

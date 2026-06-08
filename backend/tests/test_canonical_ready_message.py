@@ -88,8 +88,8 @@ async def test_canonical_message_matches_brief():
     The canonical message must:
     - announce that Portfolio Guru is ready,
     - invite case evidence in any supported modality,
-    - tell the user that buttons will guide the next step,
-    - frame extra writing as case-detail only,
+    - stay lean enough to work as the central idempotent ready state,
+    - preserve approval-before-save safety framing,
     - not tell the user to say "draft it".
     """
     from bot import WELCOME_MSG_CONNECTED
@@ -98,6 +98,7 @@ async def test_canonical_message_matches_brief():
     assert "Portfolio Guru is ready" in text
     for modality in ("text", "voice", "photo", "document"):
         assert modality in text.lower(), f"missing modality in canonical copy: {modality}"
-    assert "buttons" in text.lower()
-    assert "case detail" in text.lower()
+    assert "before saving to Kaizen" in text
+    assert "buttons" not in text.lower()
+    assert len(text.splitlines()) <= 5
     assert "draft it" not in text.lower()
