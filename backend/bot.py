@@ -1152,10 +1152,7 @@ _BTN_CONTINUE_THIN = InlineKeyboardButton("✅ Show me the draft", callback_data
 _BTN_BACK_TO_MISSING = InlineKeyboardButton("⬅️ Back to missing details", callback_data="ACTION|back_to_missing")
 _DATA_CLEAR_TEXT = (
     "✅ Your Portfolio Guru data is clear.\n\n"
-    "I don’t have any Kaizen credentials, portfolio preferences, curriculum choice, voice profile, "
-    "local filing history, Portfolio Health evidence, or bot draft state stored for you now.\n\n"
-    "Cases already saved in Kaizen are unaffected.\n\n"
-    "To use Portfolio Guru again, reconnect Kaizen."
+    "Your local Portfolio Guru details have been removed. Cases already saved in Kaizen are unaffected."
 )
 _KAIZEN_USERNAME_PROMPT = (
     "📧 What's your Kaizen username (email)?\n\n"

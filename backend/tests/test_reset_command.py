@@ -103,7 +103,6 @@ def test_clear_card_copy_is_reset_framed_and_protects_kaizen_cases():
 
     text = bot._DATA_CLEAR_TEXT
     assert "Cases already saved in Kaizen are unaffected." in text
-    assert "reconnect Kaizen" in text
     # The all-clear card should reassure, never threaten deletion of real cases.
     assert "delete" not in text.lower()
 

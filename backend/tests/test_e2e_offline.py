@@ -695,7 +695,6 @@ class TestOfflineE2E:
         # Reference the live constant so the test tracks the bot's copy.
         expected = bot._DATA_CLEAR_TEXT
         assert "Cases already saved in Kaizen are unaffected." in expected
-        assert "reconnect Kaizen" in expected
 
         seed_user()
 
