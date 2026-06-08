@@ -35,7 +35,7 @@ async def test_disconnected_reconnect_sentence_extracts_email():
 
 
 @pytest.mark.asyncio
-async def test_disconnected_clinical_case_still_asks_to_connect_first():
+async def test_disconnected_clinical_case_goes_straight_to_username_step():
     sim = BotSimulator()
     context = sim._make_context()
     update = sim._make_text_update(
@@ -48,10 +48,11 @@ async def test_disconnected_clinical_case_still_asks_to_connect_first():
          patch("bot._process_case_text", new=process_case):
         result = await bot.handle_case_input(update, context)
 
-    assert result == bot.ConversationHandler.END
+    assert result == bot.AWAIT_USERNAME
     process_case.assert_not_awaited()
-    assert "Connect your Kaizen account first" in sim.get_last_text()
-    assert ("🔗 Connect Kaizen", "ACTION|setup") in sim.get_last_buttons()
+    assert "Before I can save drafts to Kaizen" in sim.get_last_text()
+    assert "Send your Kaizen username or email" in sim.get_last_text()
+    assert sim.get_last_buttons() == [("❌ Cancel", "ACTION|cancel")]
 
 
 @pytest.mark.asyncio

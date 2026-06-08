@@ -1247,6 +1247,16 @@ def _build_data_clear_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+async def _prompt_implicit_kaizen_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data.clear()
+    await update.message.reply_text(
+        "Before I can save drafts to Kaizen, I need to connect your account.\n\n"
+        "Send your Kaizen username or email to start. Your details are stored encrypted and only used to save drafts.",
+        reply_markup=_KB_CANCEL,
+    )
+    return AWAIT_USERNAME
+
+
 def _cancelled_next_step_text(user_id: int, scope: str = "Cancelled") -> str:
     if _setup_needs_finishing(user_id):
         return f"❌ {scope}. Connect Kaizen to start filing."
@@ -7404,14 +7414,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 context.user_data.clear()
                 context.user_data["kaizen_reconnect_hint"] = True
                 return await _prompt_kaizen_password(update, context, email)
-        context.user_data.clear()
-        await update.message.reply_text(
-            "Connect your Kaizen account first.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")]
-            ])
-        )
-        return ConversationHandler.END
+        return await _prompt_implicit_kaizen_username(update, context)
 
     # Tier enforcement — check usage limit
     allowed, used, limit, tier = await check_can_file(user_id)
@@ -9953,6 +9956,16 @@ def build_application() -> Application:
                 MessageHandler(filters.Document.ALL, handle_case_input),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|continue_thin$"),
             ],
+            AWAIT_USERNAME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, setup_username),
+                MessageHandler(~filters.TEXT & ~filters.COMMAND, _setup_wrong_input),
+            ],
+            AWAIT_PASSWORD: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, setup_password),
+                MessageHandler(~filters.TEXT & ~filters.COMMAND, _setup_wrong_input),
+            ],
+            AWAIT_TRAINING_LEVEL: [CallbackQueryHandler(setup_training_level, pattern=r"^SETLEVEL\|")],
+            AWAIT_CURRICULUM: [CallbackQueryHandler(setup_curriculum, pattern=r"^SETUP_CURRICULUM\|")],
             AWAIT_GATHERING: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_gathering_input),
                 MessageHandler(filters.VOICE, handle_case_input),
