@@ -54,6 +54,25 @@ def test_help_copy_lists_reset_not_delete_and_not_setup():
     assert "/voice" not in bot.HELP_MSG
     assert "/health" not in bot.HELP_MSG
     assert "/upgrade" not in bot.HELP_MSG
+    assert "How it works" not in bot.HELP_MSG
+    assert "Saved as Kaizen draft" not in bot.HELP_MSG
+    assert "ask before saving anything to Kaizen" in bot.HELP_MSG
+
+
+@pytest.mark.asyncio
+async def test_help_command_is_text_only_with_no_dead_inline_buttons():
+    import bot
+    from tests.bot_simulator import BotSimulator
+
+    sim = BotSimulator(user_id=4242)
+    update = sim._make_text_update("/help")
+    context = sim._make_context()
+
+    result = await bot.help_command(update, context)
+
+    assert result == bot.ConversationHandler.END
+    assert "Portfolio Guru help" in sim.get_last_text()
+    assert sim.messages_sent[-1][2] is None
 
 
 @pytest.mark.asyncio

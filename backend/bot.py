@@ -5214,20 +5214,11 @@ async def _clear_local_portfolio_account_data(user_id: int, *, reason: str) -> d
     return cleared
 
 
-HELP_MSG = f"""📖 *Portfolio Guru — Help*
+HELP_MSG = f"""📖 *Portfolio Guru help*
 
-*How it works:*
-📝 Describe → 🔍 I pick the form → ✅ You approve → 📤 Saved as Kaizen draft
+Send an anonymised case as text, voice, photo, or document.
 
-*What you can send:*
-Text, voice note, photo, or document (PDF, PPTX, Word)
-
-*What I do:*
-Suggest the best form, extract all the fields, show you a draft to review and edit, then save as a Kaizen draft when you approve.
-
-*Draft-only* — entries are saved as Kaizen drafts. Supervisor submission is never automatic.
-
-*45 RCEM forms supported* — assessments, reflections, teaching, management, audit, research, and more.
+Portfolio Guru will suggest the best portfolio form, prepare a draft, and ask before saving anything to Kaizen.
 
 *Commands:*
 {_format_public_commands()}"""
@@ -5268,10 +5259,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     await update.message.reply_text(
         HELP_MSG,
         parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup([
-            [_BTN_SETUP, _BTN_VOICE],
-            [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")],
-        ])
     )
     return ConversationHandler.END
 
