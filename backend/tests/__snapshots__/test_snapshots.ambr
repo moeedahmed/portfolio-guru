@@ -85,15 +85,13 @@
       ),
     ]),
     'text': '''
-      🩺 Portfolio Guru — RCEM portfolio drafts from rough notes.
+      👋 Welcome to Portfolio Guru
       
-      Send a case by text, voice, photo, or document. I’ll match it to the right form (CBD, DOPS, Mini-CEX, ACAT, reflections, teaching, procedurals, and more) and draft only after you choose.
+      Send rough case notes as text, voice, photo or document. I’ll turn them into RCEM portfolio drafts across 45 forms, then ask you to approve before anything is saved to Kaizen.
       
-      I won’t invent clinical detail. Missing fields stay blank, and nothing is filed until you approve it.
+      🔒 Your Kaizen login is stored encrypted and only used to save approved drafts.
       
-      Your Kaizen login is encrypted and used only to save drafts — never shared.
-      
-      Tap 🔗 Connect to start.
+      Connect Kaizen to start.
     ''',
   })
 # ---

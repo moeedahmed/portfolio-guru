@@ -50,14 +50,12 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         key="welcome_disconnected",
         message_class=MessageClass.FIXED,
         text=(
-            "🩺 Portfolio Guru — RCEM portfolio drafts from rough notes.\n\n"
-            "Send a case by text, voice, photo, or document. I’ll match it to the right form "
-            "(CBD, DOPS, Mini-CEX, ACAT, reflections, teaching, procedurals, and more) "
-            "and draft only after you choose.\n\n"
-            "I won’t invent clinical detail. Missing fields stay blank, and nothing is filed "
-            "until you approve it.\n\n"
-            "Your Kaizen login is encrypted and used only to save drafts — never shared.\n\n"
-            "Tap 🔗 Connect to start."
+            "👋 Welcome to Portfolio Guru\n\n"
+            "Send rough case notes as text, voice, photo or document. I’ll turn them into "
+            "RCEM portfolio drafts across 45 forms, then ask you to approve before anything "
+            "is saved to Kaizen.\n\n"
+            "🔒 Your Kaizen login is stored encrypted and only used to save approved drafts.\n\n"
+            "Connect Kaizen to start."
         ),
         safety_critical=True,
     ),
