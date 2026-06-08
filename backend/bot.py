@@ -913,6 +913,22 @@ def _is_submit_inquiry(text: str) -> bool:
     )
 
 
+_IDLE_CHAT_RE = re.compile(
+    r"^\s*(?:hi|hello|hey|hiya|yo|good\s+(?:morning|afternoon|evening)|thanks|thank\s+you)\s*[!.]*\s*$",
+    re.IGNORECASE,
+)
+
+_IDLE_CHAT_NUDGE = (
+    "🩺 Hi! I'm here when you have case notes ready. "
+    "Send text, voice, photo, or document and I'll turn it into a portfolio draft."
+)
+
+
+def _is_idle_chat_nudge(text: str) -> bool:
+    """True for short connected-idle chat that should not enter case capture."""
+    return bool(_IDLE_CHAT_RE.match(text or ""))
+
+
 _PRE_CAPTURE_ANSWER_INTENTS = frozenset(
     {
         ConversationalIntent.PORTFOLIO_QUESTION,
@@ -949,6 +965,9 @@ def _standalone_pre_capture_route(text: str) -> str | None:
     )
     if menu_commandish:
         return None
+
+    if _is_idle_chat_nudge(raw):
+        return "idle_nudge"
 
     result = route_message(raw)
     if result.intent in _PRE_CAPTURE_ANSWER_INTENTS:
@@ -7615,6 +7634,9 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 return ConversationHandler.END
 
             pre_capture_route = _standalone_pre_capture_route(raw_text)
+            if pre_capture_route == "idle_nudge":
+                await update.message.reply_text(_IDLE_CHAT_NUDGE)
+                return ConversationHandler.END
             if pre_capture_route == "safe_redirect":
                 await update.message.reply_text(_standalone_safe_redirect_text(raw_text))
                 return ConversationHandler.END

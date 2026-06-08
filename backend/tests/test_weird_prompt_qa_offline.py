@@ -62,6 +62,13 @@ PROMPTS: tuple[WeirdPromptCase, ...] = (
         category="product-help",
     ),
     WeirdPromptCase(
+        label="idle-greeting",
+        prompt="hi",
+        expect_text_any=("case notes", "text, voice, photo", "portfolio draft"),
+        forbid_text_any=("Draft now", "Captured.", "Add anything else", "portfolio/admin work"),
+        category="random",
+    ),
+    WeirdPromptCase(
         label="supported-forms",
         prompt="Which forms do you support?",
         expect_text_any=("45 RCEM forms", "Examples include"),

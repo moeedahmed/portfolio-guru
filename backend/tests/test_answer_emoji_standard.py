@@ -150,6 +150,32 @@ async def test_standalone_product_questions_do_not_enter_case_pipeline(prompt):
 
 
 @pytest.mark.asyncio
+async def test_connected_idle_greeting_gets_workflow_nudge_not_case_pipeline():
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_text_update("hi")
+
+    grounded = AsyncMock(return_value="Should not be used.")
+    process_case = AsyncMock(return_value=bot.ConversationHandler.END)
+    with patch("bot.has_credentials", return_value=True), \
+         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 0, 10, "free"))), \
+         patch("bot.answer_question", new=grounded), \
+         patch("bot._process_case_text", new=process_case):
+        await bot.handle_case_input(update, context)
+
+    grounded.assert_not_awaited()
+    process_case.assert_not_awaited()
+    text = _last_text(sim)
+    assert text.startswith(f"{HOUSE_EMOJI} ")
+    assert "case notes ready" in text
+    assert "text, voice, photo, or document" in text
+    assert "Draft now" not in text
+    assert "portfolio/admin work" not in text
+    assert "gathering_case" not in context.user_data
+    assert sim.get_last_buttons() == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("prompt", "expected", "forbidden"),
     [
