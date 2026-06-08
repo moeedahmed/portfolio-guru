@@ -52,7 +52,10 @@ async def test_disconnected_clinical_case_goes_straight_to_username_step():
     process_case.assert_not_awaited()
     assert "Before I can save drafts to Kaizen" in sim.get_last_text()
     assert "Send your Kaizen username or email" in sim.get_last_text()
-    assert sim.get_last_buttons() == [("❌ Cancel", "ACTION|cancel")]
+    # The forced connection prompt offers no Cancel: entering a username/email
+    # is the only usable path for a disconnected user, so a Cancel button would
+    # just loop back to the same state.
+    assert sim.get_last_buttons() == []
 
 
 @pytest.mark.asyncio

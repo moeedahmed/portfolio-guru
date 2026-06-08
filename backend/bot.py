@@ -1249,10 +1249,14 @@ def _build_data_clear_keyboard() -> InlineKeyboardMarkup:
 
 async def _prompt_implicit_kaizen_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
+    # No Cancel button here: this prompt fires when a disconnected user sends a
+    # case/message (e.g. after /reset), so entering a Kaizen username/email is
+    # the only usable next step. A Cancel would just loop back to the same
+    # "connect first" state. Explicit Connect Kaizen routes (/start, /settings)
+    # keep their buttons.
     await update.message.reply_text(
         "Before I can save drafts to Kaizen, I need to connect your account.\n\n"
         "Send your Kaizen username or email to start. Your details are stored encrypted and only used to save drafts.",
-        reply_markup=_KB_CANCEL,
     )
     return AWAIT_USERNAME
 
