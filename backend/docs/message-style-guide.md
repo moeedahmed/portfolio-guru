@@ -7,8 +7,10 @@
 - **Emoji header** — every substantive bot message starts with an emoji that signals the message type.
 - **Structure** — header line, then detail/summary, then action instruction. Separated by blank lines.
 - **No Markdown tables** — they don't render well on mobile.
-- **No internal codes** — user-facing text never contains form codes like "CBD", "DOPS", "PROC_LOG". Use "Case-Based Discussion", "Direct Observation of Procedural Skills", "Procedural Log".
+- **No raw internal codes** — user-facing text never contains implementation codes like "PROC_LOG" or "MINI_CEX". Common clinician-facing acronyms such as CBD, DOPS, Mini-CEX and ACAT may appear in compact explanatory lists when they are clearer for RCEM users.
 - **No raw errors** — error details are logged server-side. The user sees a plain-English explanation and a recovery action.
+- **Draft-only framing** — all entries are described as saved to Kaizen as drafts, never as filed or submitted. Supervisor submission is never automatic.
+- **Professional emoji only** — avoid decorative/consumer emoji (✨ sparkles, 🤖 robot, ⭐⭐ stars, 🎉 party). Prefer functional emoji that signal message type (✅, ⚠️, 📋, 📤).
 
 ## Emoji Categories
 
@@ -24,7 +26,10 @@
 | ✏️    | Edit / refine                               |
 | 📋    | Form / WPBA reference                       |
 | 💬    | Reply / chat action hint                    |
+| 💡    | Tip / improvement suggestion                |
 | 🔙    | Back navigation                             |
+| 📖    | Reading / learning from evidence            |
+| 🗣️    | Voice profile / voice input                 |
 
 ## Message Structure
 
@@ -67,7 +72,7 @@ Completion prompt (when user says "done" or taps button):
 
 ## Example Existing Messages
 
-Welcome:
+Welcome (disconnected):
 
 ```
 🩺 Portfolio Guru — RCEM portfolio drafts from rough notes.
@@ -79,6 +84,8 @@ and draft only after you choose.
 I won't invent clinical detail. Missing fields stay blank, and nothing is filed
 until you approve it.
 
+Your Kaizen login is encrypted and used only to save drafts — never shared.
+
 Tap 🔗 Connect to start.
 ```
 
@@ -87,11 +94,9 @@ Connected welcome:
 ```
 🩺 Portfolio Guru is ready.
 
-Send the case details in whatever format is easiest: text, voice, photo, or document.
+Send an anonymised case: text, voice, photo, or document.
 
-I'll read what you send, suggest the best-fit portfolio options, then show buttons for what to do next. Send extra messages only if you want to add or correct case detail.
-
-I won't invent clinical detail, and nothing goes to Kaizen until you approve it.
+I'll suggest the form, prepare the draft, and ask before saving to Kaizen.
 ```
 
 Draft saved:
@@ -101,3 +106,46 @@ Draft saved:
 {Form name} saved as a Kaizen draft. 📅 {date}
 {field count} fields completed.
 ```
+
+Help:
+
+```
+📖 Portfolio Guru — Help
+
+How it works:
+📝 Describe → 🔍 I pick the form → ✅ You approve → 📤 Saved as Kaizen draft
+
+What you can send:
+Text, voice note, photo, or document (PDF, PPTX, Word)
+
+What I do:
+Suggest the best form, extract all the fields, show you a draft to review
+and edit, then save as a Kaizen draft when you approve.
+
+Draft-only — entries are saved as Kaizen drafts. Supervisor submission is
+never automatic.
+```
+
+## Health Wording
+
+Portfolio Health is read-only portfolio evidence planning support. Avoid
+language that implies a formal assessment, clinical evaluation, or guaranteed
+outcome:
+
+- Use "ARCP evidence review", not "ARCP readiness check".
+- Use "suggested filing actions", not "urgent filing actions".
+- Use "gap analysis" or "evidence review", not "readiness scoring".
+- CESR pathway: "building toward application", not "on track for".
+
+## Proof Report Wording
+
+Proof reports are trust-layer summaries, not operational logs. Avoid raw
+operational detail (source type, WPBA codes, internal state labels):
+
+- Use "Draft saved" / "Save not confirmed" / "Filing stopped", not
+  "Filed as draft" / "Failed / blocked".
+- Use "Next: ..." for action guidance, not separate "Not done" lines.
+- Use "Issue: ..." for blockers, not "Blocker: ...".
+- Sanitise issues before display; raw exception text belongs in logs.
+- Never mention "no supervisor request sent" or "no final submission made"
+  in user-facing text — these are product invariants, not per-filing facts.

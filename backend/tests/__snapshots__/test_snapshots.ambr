@@ -7,7 +7,7 @@
         'APPROVE|draft',
       ),
       tuple(
-        '✨ Quick improve',
+        '💡 Improve reflection',
         'IMPROVE|reflection',
       ),
       tuple(
@@ -40,7 +40,7 @@
       • *SLO3 — Clinical questions & decisions*
         ↳ KC1: able to support the pre-hospital, medical,…
       
-      💡 Reflection is short — Quick improve can flesh it out.
+      💡 Reflection is short — Improve reflection can flesh it out.
       
       💬 Reply to refine this draft, or save/cancel before sending a new case.
     ''',

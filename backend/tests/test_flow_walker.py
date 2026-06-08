@@ -766,7 +766,7 @@ class TestFlowWalker:
         # outbound "reply" should be the tiny status ack.
         replies = [m for m in sim.messages_sent if m[0] == 'reply']
         assert len(replies) == 1
-        assert 'Tightening' in replies[0][1]
+        assert 'Improving the reflection only' in replies[0][1]
         # That status ack must have been dismissed (deleted), so the chat
         # ends up with a single living draft instead of a status + draft.
         assert any(m[0] == 'delete' for m in sim.messages_sent)
@@ -2780,7 +2780,7 @@ class TestRecentPortfolioFixes:
 
         # After one use, the improve button is removed entirely
         assert ('Improved once ✅', 'IMPROVE|used') not in buttons
-        assert ('✨ Quick improve', 'IMPROVE|reflection') not in buttons
+        assert ('💡 Improve reflection', 'IMPROVE|reflection') not in buttons
         assert ('📤 Save as draft', 'APPROVE|draft') in buttons
 
     def test_dops_pre_file_guard_blocks_blank_voice_draft(self):
@@ -3570,7 +3570,7 @@ class TestTrainingStageGroups:
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
         assert buttons[0] == ('✍️ Writing style: Not set', 'ACTION|voice')
         assert ('📚 Curriculum: 2025 Update', 'ACTION|change_curriculum') in buttons
-        assert 'Helps drafts sound like you' in text
+        assert 'Helps drafts match your portfolio writing' in text
 
 
 class TestImageOCRProgress:
@@ -3957,12 +3957,12 @@ class TestVoiceProfileTwoPathFlow:
 
         assert result == AWAIT_VOICE_EXAMPLES
         buttons = sim.get_last_buttons()
-        assert ('🤖 Learn from Kaizen entries', 'VOICE|path_kaizen') in buttons
+        assert ('📖 Learn from Kaizen entries', 'VOICE|path_kaizen') in buttons
         assert ('✍️ Add examples manually', 'VOICE|path_manual') in buttons
         assert ('🔙 Back to settings', 'VOICE|back_to_settings') in buttons
         assert ('❌ Cancel', 'VOICE|cancel') not in buttons
         text = sim.get_last_text() or ''
-        assert 'Voice Profile Setup' in text
+        assert 'Writing style setup' in text
         assert 'read-only' in text.lower()
         assert "won't create" in text.lower()
         assert 'submit' in text.lower()
@@ -3985,7 +3985,7 @@ class TestVoiceProfileTwoPathFlow:
         update.callback_query.answer.assert_awaited_once()
         assert sim.messages_sent[-1][0] == 'bot_edit'
         buttons = sim.get_last_buttons()
-        assert ('🤖 Learn from Kaizen entries', 'VOICE|path_kaizen') in buttons
+        assert ('📖 Learn from Kaizen entries', 'VOICE|path_kaizen') in buttons
         assert ('✍️ Add examples manually', 'VOICE|path_manual') in buttons
         assert ('🔙 Back to settings', 'VOICE|back_to_settings') in buttons
 
@@ -4002,7 +4002,7 @@ class TestVoiceProfileTwoPathFlow:
 
         assert result == AWAIT_VOICE_EXAMPLES
         buttons = sim.get_last_buttons()
-        assert ('🤖 Learn from Kaizen entries', 'VOICE|path_kaizen') in buttons
+        assert ('📖 Learn from Kaizen entries', 'VOICE|path_kaizen') in buttons
         assert ('✍️ Add examples manually', 'VOICE|path_manual') in buttons
         assert ('🗑️ Remove Profile', 'VOICE|remove') in buttons
         assert ('🔙 Back to settings', 'VOICE|back_to_settings') in buttons
@@ -4456,6 +4456,6 @@ class TestVoiceProfileTwoPathFlow:
         assert result == AWAIT_VOICE_EXAMPLES
         assert context.user_data.get('voice_kaizen_path_started') is None
         buttons = sim.get_last_buttons()
-        assert ('🤖 Learn from Kaizen entries', 'VOICE|path_kaizen') in buttons
+        assert ('📖 Learn from Kaizen entries', 'VOICE|path_kaizen') in buttons
         assert ('✍️ Add examples manually', 'VOICE|path_manual') in buttons
         assert ('🔙 Back to settings', 'VOICE|back_to_settings') in buttons

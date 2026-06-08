@@ -1147,7 +1147,7 @@ def _gathering_reply(context) -> tuple[str, InlineKeyboardMarkup]:
 _BTN_SETUP = InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")
 _BTN_CANCEL = InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel")
 _BTN_HELP = InlineKeyboardButton("ℹ️ Help", callback_data="INFO|what")
-_BTN_VOICE = InlineKeyboardButton("✍️ Voice Profile", callback_data="ACTION|voice")
+_BTN_VOICE = InlineKeyboardButton("✍️ Writing style", callback_data="ACTION|voice")
 _BTN_CONTINUE_THIN = InlineKeyboardButton("✅ Show me the draft", callback_data="ACTION|continue_thin")
 _BTN_BACK_TO_MISSING = InlineKeyboardButton("⬅️ Back to missing details", callback_data="ACTION|back_to_missing")
 _DATA_CLEAR_TEXT = (
@@ -1929,19 +1929,18 @@ def _format_proof_report(
 ) -> str:
     """Trust-layer summary shown after filing attempts."""
     if status == "success":
-        state = FLOW_STATE_LABELS["filed_as_draft"]
+        state = "Draft saved"
         needs_review = "Review in Kaizen before you submit or assign an assessor."
     elif status == "partial" and not error:
-        state = FLOW_STATE_LABELS["filed_as_draft"]
-        needs_review = "Complete the blank fields in Kaizen before submission."
+        state = "Draft saved — needs your review"
+        needs_review = "Complete the blank fields in Kaizen."
     elif status == "partial":
-        state = FLOW_STATE_LABELS["blocked"]
+        state = "Save not confirmed"
         needs_review = "Check whether the draft saved, then retry if needed."
     else:
-        state = FLOW_STATE_LABELS["blocked"]
-        needs_review = "No final submission was made. Retry or file manually."
+        state = "Filing stopped"
+        needs_review = "Retry or file manually in Kaizen."
 
-    source = input_source or "case input"
     filled_text = ", ".join(str(f).replace("_", " ") for f in filled[:6]) if filled else "none confirmed"
     if len(filled) > 6:
         filled_text += f", +{len(filled) - 6} more"
@@ -1950,19 +1949,15 @@ def _format_proof_report(
         skipped_text += f", +{len(skipped) - 4} more"
 
     lines = [
-        "",
-        "Portfolio Guru proof report",
+        f"Filing report: {form_name}",
         f"Status: {state}",
-        f"WPBA type: {form_name}",
-        f"Source: {source}",
         f"Fields completed: {filled_text}",
-        f"Needs your review: {needs_review}",
-        "Not done: no supervisor request sent, no final submission made",
+        f"Next: {needs_review}",
     ]
     if skipped:
-        lines.insert(6, f"Left blank / skipped: {skipped_text}")
+        lines.insert(3, f"Left blank: {skipped_text}")
     if error:
-        lines.append(f"Blocker: {error}")
+        lines.append(f"Issue: {sanitize_internal_form_codes(error)}")
     return "\n".join(lines)
 
 
@@ -1972,10 +1967,9 @@ def _format_failed_filing_summary(
 ) -> str:
     """Compact trust-layer summary for failed filing attempts."""
     lines = [
-        "What happened",
-        "Saved in Kaizen: not confirmed",
-        "Final submission: not sent",
-        "Supervisor request: not sent",
+        "Filing report",
+        "Kaizen draft: not confirmed",
+        "Next: review and retry if needed",
     ]
     if skipped:
         skipped_text = ", ".join(sanitize_internal_form_codes(str(f).replace("_", " ")) for f in skipped[:4])
@@ -1983,7 +1977,7 @@ def _format_failed_filing_summary(
             skipped_text += f", +{len(skipped) - 4} more"
         lines.append(f"Needs manual check: {skipped_text}")
     if error:
-        lines.append(f"Blocker: {sanitize_internal_form_codes(error)}")
+        lines.append(f"Issue: {sanitize_internal_form_codes(error)}")
     return "\n".join(lines)
 
 
@@ -2211,7 +2205,7 @@ def _settings_view_components(
     voice_profile = get_voice_profile(user_id)
     voice_status = "Active" if voice_profile else "Not set"
     voice_cta = f"✍️ Writing style: {voice_status}"
-    voice_hint = "Helps drafts sound like you." if not voice_profile else "Drafts are already styled to your voice."
+    voice_hint = "Helps drafts match your portfolio writing." if not voice_profile else "Drafts already use your writing style."
 
     plan_lines = []
     if connected is False:
@@ -2718,7 +2712,7 @@ def _build_approval_keyboard(improved_once: bool = False, can_back_to_missing: b
     else:
         rows.append([
             InlineKeyboardButton("📤 Save as draft", callback_data="APPROVE|draft"),
-            InlineKeyboardButton("✨ Quick improve", callback_data="IMPROVE|reflection"),
+            InlineKeyboardButton("💡 Improve reflection", callback_data="IMPROVE|reflection"),
         ])
     if can_back_to_missing:
         rows.append(_nav_row("⬅️ Back to missing details", "ACTION|back_to_missing", "❌ Cancel", "CANCEL|draft"))
@@ -2730,7 +2724,7 @@ def _build_approval_keyboard(improved_once: bool = False, can_back_to_missing: b
 def _build_amend_keyboard(improved_once: bool = False) -> InlineKeyboardMarkup:
     rows = [[InlineKeyboardButton("📤 Save updated draft", callback_data="APPROVE|draft")]]
     if not improved_once:
-        rows[0].append(InlineKeyboardButton("✨ Quick improve", callback_data="IMPROVE|reflection"))
+        rows[0].append(InlineKeyboardButton("💡 Improve reflection", callback_data="IMPROVE|reflection"))
     rows.append([InlineKeyboardButton("❌ Cancel amend", callback_data="AMEND|cancel")])
     return InlineKeyboardMarkup(rows)
 
@@ -3056,9 +3050,9 @@ def _draft_coach_note(draft) -> str:
     Returns "" for solid reflections so the preview isn't padded with noise."""
     reflection = _draft_reflection_text(draft).strip()
     if not reflection:
-        return "Coach note: Tap Quick improve to draft a stronger reflection."
+        return "Coach note: Tap Improve reflection to draft a stronger reflection."
     if len(reflection.split()) < 18:
-        return "Coach note: Reflection is short — Quick improve can flesh it out."
+        return "Coach note: Reflection is short — Improve reflection can flesh it out."
     return ""
 
 
@@ -3927,9 +3921,7 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             update, context,
             f"✅ Kaizen connected — detected as *{role_name}*.\n\n"
             f"{pathway_line}"
-            f"{render_message('welcome_connected')}\n\n"
-            "Use the *Menu* (☰ bottom-left) any time for Settings or Voice profile.\n"
-            f"Use */settings* if your portfolio is different.",
+            f"{render_message('welcome_connected')}",
             parse_mode="Markdown",
             flow_key="setup",
         )
@@ -4020,15 +4012,15 @@ async def setup_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 # === VOICE PROFILE FLOW ===
 
 VOICE_CHOICE_FRESH_COPY = (
-    "⭐ *Voice Profile Setup*\n\n"
-    "Drafts can sound like you instead of a generic bot. Pick how you'd like to teach me your voice:\n\n"
-    "🤖 *Learn from my Kaizen entries* — I'll read your previous portfolio entries only, read-only, "
-    "to learn your tone and structure. I won't create, edit, submit, sign, or share anything.\n\n"
+    "🗣️ *Writing style setup*\n\n"
+    "Drafts can match your portfolio writing style. Choose a source:\n\n"
+    "📖 *Learn from Kaizen entries* — read-only review of previous portfolio entries "
+    "to learn tone and structure. I won't create, edit, submit, sign, or share anything.\n\n"
     "✍️ *Add examples manually* — paste, photo, or voice-note 3-5 of your own portfolio entries."
 )
 
 VOICE_CHOICE_REBUILD_COPY = (
-    "✍️ You already have a voice profile active. Your drafts are styled to match your writing.\n\n"
+    "✍️ Your writing style profile is active. Drafts are styled to match your portfolio writing.\n\n"
     "Want to rebuild it? Pick a source:"
 )
 
@@ -4039,7 +4031,7 @@ VOICE_MANUAL_INTRO_COPY = (
     "• pasted text — best quality\n"
     "• screenshots/photos — I'll extract the text\n"
     "• voice notes — useful, but pasted examples are cleaner\n\n"
-    "I'll learn your tone, structure, reflection depth and phrases. Send the first example now."
+    "I'll learn your tone, structure, reflection depth and phrasing. Send the first example now."
 )
 
 VOICE_KAIZEN_SAMPLE_COPY = (
@@ -4052,7 +4044,7 @@ VOICE_KAIZEN_SAMPLE_COPY = (
 
 def _voice_choice_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🤖 Learn from Kaizen entries", callback_data="VOICE|path_kaizen")],
+        [InlineKeyboardButton("📖 Learn from Kaizen entries", callback_data="VOICE|path_kaizen")],
         [InlineKeyboardButton("✍️ Add examples manually", callback_data="VOICE|path_manual")],
         [InlineKeyboardButton("🔙 Back to settings", callback_data="VOICE|back_to_settings")],
     ])
@@ -4060,7 +4052,7 @@ def _voice_choice_keyboard() -> InlineKeyboardMarkup:
 
 def _voice_rebuild_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🤖 Learn from Kaizen entries", callback_data="VOICE|path_kaizen")],
+        [InlineKeyboardButton("📖 Learn from Kaizen entries", callback_data="VOICE|path_kaizen")],
         [InlineKeyboardButton("✍️ Add examples manually", callback_data="VOICE|path_manual")],
         [InlineKeyboardButton("🗑️ Remove Profile", callback_data="VOICE|remove")],
         [InlineKeyboardButton("🔙 Back to settings", callback_data="VOICE|back_to_settings")],
@@ -4297,9 +4289,9 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
             _flow_done(context, "voice")
             await _flow_msg(
                 update, context,
-                "You were in Voice Profile setup — I've exited so you can file your case. "
+                "You were in Writing style setup — I've exited so you can file your case. "
                 "Send it and I'll help you draft it.\n\n"
-                "You can come back to Voice Profile from /settings any time.",
+                "You can come back to Writing style from /settings any time.",
                 reply_markup=_build_next_step_keyboard(update.effective_user.id),
                 flow_key="voice",
             )
@@ -4750,7 +4742,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 "📬 Unsigned ticket scanning is included in Portfolio Guru Unlimited.\n\n"
                 "Upgrade to see all your pending assessments grouped by assessor, with chase guardrails (14-day cooldown, max 3 per assessor).",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
+                    [InlineKeyboardButton("📊 Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
                 ]),
             )
             return ConversationHandler.END
@@ -4771,9 +4763,9 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
 
         if not await _health_gate_check(user_id):
             await query.message.edit_text(
-                "📊 Portfolio Health is included in Portfolio Guru Unlimited.\n\nUpgrade to get gap analysis and readiness scoring.",
+                "📊 Portfolio Health is included in Portfolio Guru Unlimited.\n\nUpgrade to get gap analysis and evidence review.",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
+                    [InlineKeyboardButton("📊 Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
                     [back_btn],
                 ]),
             )
@@ -4893,9 +4885,9 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
 
         if not await _health_gate_check(user_id):
             await query.message.edit_text(
-                "📊 Portfolio Health is included in Portfolio Guru Unlimited.\n\nUpgrade to get gap analysis and readiness scoring.",
+                "📊 Portfolio Health is included in Portfolio Guru Unlimited.\n\nUpgrade to get gap analysis and evidence review.",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
+                    [InlineKeyboardButton("📊 Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
                     [back_btn],
                 ]),
             )
@@ -5225,13 +5217,15 @@ async def _clear_local_portfolio_account_data(user_id: int, *, reason: str) -> d
 HELP_MSG = f"""📖 *Portfolio Guru — Help*
 
 *How it works:*
-📝 Describe → 🔍 I pick the form → ✅ You approve → 📤 Filed to Kaizen
+📝 Describe → 🔍 I pick the form → ✅ You approve → 📤 Saved as Kaizen draft
 
 *What you can send:*
 Text, voice note, photo, or document (PDF, PPTX, Word)
 
 *What I do:*
-Suggest the best form, extract all the fields, show you a draft to review and edit, then save to Kaizen as a draft when you approve.
+Suggest the best form, extract all the fields, show you a draft to review and edit, then save as a Kaizen draft when you approve.
+
+*Draft-only* — entries are saved as Kaizen drafts. Supervisor submission is never automatic.
 
 *45 RCEM forms supported* — assessments, reflections, teaching, management, audit, research, and more.
 
@@ -5316,7 +5310,7 @@ def _upgrade_buttons(current_tier: str) -> list:
     if current_tier == "pro_plus":
         return []
     return [
-        [InlineKeyboardButton("⭐⭐ Upgrade to Unlimited (£9.99/mo)", callback_data="UPGRADE|pro_plus")],
+        [InlineKeyboardButton("📊 Upgrade to Unlimited (£9.99/mo)", callback_data="UPGRADE|pro_plus")],
     ]
 
 
@@ -5333,7 +5327,9 @@ async def upgrade_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if tier == "pro_plus":
         await _flow_msg(
             update, context,
-            "You're on the top plan! 🎉\n\nPortfolio Guru Unlimited — unlimited Kaizen WPBA filing, AI extraction, draft review, auto-filing, Portfolio Health, and unsigned-ticket scanning.",
+            "You're on Portfolio Guru Unlimited.\n\n"
+            "Unlimited Kaizen WPBA filing, AI extraction, draft review, "
+            "Portfolio Health, and unsigned-ticket scanning.",
             flow_key="upgrade",
         )
         _flow_done(context, "upgrade")
@@ -5341,10 +5337,10 @@ async def upgrade_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     text = f"📊 Your plan: {TIER_LABELS.get(tier, tier)} ({used}/{limit_str} cases used this month)\n\n"
     text += (
-        "⭐⭐ *Portfolio Guru Unlimited* — £9.99/month\n"
+        "*Portfolio Guru Unlimited* — £9.99/month\n"
         "• Unlimited Kaizen WPBA filing\n"
         "• Draft Review (AI critique before filing)\n"
-        "• Portfolio Health — pathway-aware analysis (Training/CCT ARCP readiness check or CESR / Portfolio Pathway evidence plan)\n"
+        "• Portfolio Health — pathway-aware analysis (Training/CCT ARCP evidence review or CESR / Portfolio Pathway evidence plan)\n"
         "• Unsigned ticket scanning with chase guardrails\n"
         "• Bulk filing\n"
     )
@@ -5605,7 +5601,7 @@ async def assignbeta_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try:
         await context.bot.send_message(
             chat_id=target_id,
-            text="🎉 You've been upgraded to Portfolio Guru Beta! You can now file up to 100 cases per month. Happy filing!",
+            text="✅ You've been upgraded to Portfolio Guru Beta. You can now file up to 100 cases per month.",
         )
     except Exception:
         logger.warning("Could not notify user %s about beta approval", target_id)
@@ -5690,12 +5686,13 @@ async def _run_health_analysis(
     pathway_label = (
         "CESR / Portfolio Pathway"
         if is_cesr
-        else "Training (CCT) pathway · ARCP readiness check"
+        else "Training (CCT) pathway · ARCP evidence review"
     )
+
     empty_state_label = (
         "CESR / Portfolio Pathway"
-        if is_cesr
-        else "ARCP readiness within the Training (CCT) pathway"
+        if profile.pathway == Pathway.cesr_portfolio
+        else "ARCP evidence review within the Training (CCT) pathway"
     )
 
     training_level = get_training_level(user_id)
@@ -5965,7 +5962,7 @@ def _format_arcp_action_plan_message(
     missing = _missing_domain_labels(snapshot)
 
     lines = [
-        "📊 *Portfolio Health — Training (CCT) pathway · ARCP readiness check*",
+        "📊 *Portfolio Health — Training (CCT) pathway · ARCP evidence review*",
         month_label,
         "",
     ]
@@ -5976,7 +5973,7 @@ def _format_arcp_action_plan_message(
         f"*ARCP risk:* {risk}",
         f"*Why:* {reason}",
         "",
-        "*Next 3 urgent filing actions before ARCP*",
+        "*Next 3 suggested filing actions before ARCP*",
         _numbered_list(actions),
         "",
         "*Already strong*",
@@ -6220,11 +6217,11 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not await _health_gate_check(user_id):
         await update.message.reply_text(
             "📊 Portfolio Health is included in Portfolio Guru Unlimited.\n\n"
-            "Upgrade to get monthly portfolio readiness analysis tailored to "
-            "your Training (CCT) pathway (ARCP readiness check) or "
+            "Upgrade to get monthly portfolio evidence review tailored to "
+            "your Training (CCT) pathway (ARCP evidence review) or "
             "CESR / Portfolio Pathway view.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
+                [InlineKeyboardButton("📊 Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
             ]),
         )
         return ConversationHandler.END
@@ -8969,7 +8966,7 @@ async def handle_review_draft(update: Update, context: ContextTypes.DEFAULT_TYPE
             "📝 Draft Review is included in Portfolio Guru Unlimited.\n\n"
             "Upgrade to unlock AI critique of your entries before filing — catches missed reflections, weak reasoning, and curriculum mismatches.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
+                [InlineKeyboardButton("📊 Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
             ]),
         )
         return AWAIT_APPROVAL
@@ -9080,7 +9077,7 @@ async def _dismiss_quick_improve_ack(ack) -> None:
     except Exception:
         logger.debug("Could not delete quick-improve status message", exc_info=True)
     try:
-        await ack.edit_text("✨ Done")
+        await ack.edit_text("✅ Done")
     except Exception:
         logger.debug("Could not edit quick-improve status message to Done", exc_info=True)
 
@@ -9111,7 +9108,7 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return AWAIT_APPROVAL
 
-    ack = await query.message.reply_text("✨ Tightening the reflection only…")
+    ack = await query.message.reply_text("💡 Improving the reflection only…")
     case_text = context.user_data.get("case_text", "")
     current_draft_text = _format_draft_preview(draft, _chosen_form_reason(context, form_type))
     feedback = (
@@ -9167,19 +9164,19 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data["quick_improve_used"] = True
     except asyncio.TimeoutError:
         await _restore_active_draft_buttons(query, context)
-        await ack.edit_text("⏳ Quick improve timed out. Your original draft is still ready.")
+        await ack.edit_text("⏳ Improve reflection timed out. Your original draft is still ready.")
         return AWAIT_APPROVAL
     except Exception as exc:
-        logger.error("Quick improve failed for %s: %s", form_type, exc, exc_info=True)
+        logger.error("Improve reflection failed for %s: %s", form_type, exc, exc_info=True)
         await _restore_active_draft_buttons(query, context)
-        await ack.edit_text("⚠️ Quick improve failed. Your original draft is still ready.")
+        await ack.edit_text("⚠️ Improve reflection failed. Your original draft is still ready.")
         return AWAIT_APPROVAL
 
     # Edit the ORIGINAL draft message in place so the chat keeps a single
     # living draft instead of stacking a second full preview underneath. The
     # tiny status line is dismissed once the in-place edit lands.
     preview = _format_draft_preview(updated, _chosen_form_reason(context, form_type))
-    header = "✨ *Revised draft* — polished from the first version.\n\n"
+    header = "💡 *Revised draft* — improved from the first version.\n\n"
     await _safe_edit_text(
         query.message,
         header + preview + _REPLY_HINT_SUFFIX,
@@ -9837,7 +9834,7 @@ async def unsigned_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             "📬 Unsigned ticket scanning is included in Portfolio Guru Unlimited.\n\n"
             "Upgrade to see all your pending assessments grouped by assessor, with chase guardrails (14-day cooldown, max 3 per assessor).",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⭐⭐ Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
+                [InlineKeyboardButton("📊 Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
             ]),
         )
         return
@@ -10212,9 +10209,9 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
                 await _send_latest_message(
                     update.effective_message,
                     context,
-                    "That older voice-profile button is no longer active. Your setup is still saved — open Voice Profile and I'll rebuild it with you.",
+                    "That older writing-style button is no longer active. Your setup is still saved — open Writing style and I'll rebuild it with you.",
                     reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("✍️ Open Voice Profile", callback_data="ACTION|voice")],
+                        [InlineKeyboardButton("✍️ Open Writing style", callback_data="ACTION|voice")],
                     ]),
                 )
                 return

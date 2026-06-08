@@ -312,12 +312,12 @@ async def test_arcp_health_falls_back_to_deterministic_output_when_llm_fails(mon
     )
 
     text = sent["text"]
-    assert "*Portfolio Health — Training (CCT) pathway · ARCP readiness check*" in text
+    assert "*Portfolio Health — Training (CCT) pathway · ARCP evidence review*" in text
     assert "Training (ARCP)" not in text
     assert "AI ARCP narrative is temporarily unavailable" in text
     assert "ARCP risk:" in text
     assert "Why:" in text
-    assert "Next 3 urgent filing actions before ARCP" in text
+    assert "Next 3 suggested filing actions before ARCP" in text
     assert "Already strong" in text
     assert "Missing domains" in text
     assert "Domain coverage:" not in text
@@ -365,11 +365,11 @@ async def test_arcp_health_output_prioritises_action_plan_when_llm_succeeds(monk
     )
 
     text = sent["text"]
-    assert "*Portfolio Health — Training (CCT) pathway · ARCP readiness check*" in text
+    assert "*Portfolio Health — Training (CCT) pathway · ARCP evidence review*" in text
     assert "Training (ARCP)" not in text
     assert "ARCP risk:" in text
     assert "Why:" in text
-    assert "Next 3 urgent filing actions before ARCP" in text
+    assert "Next 3 suggested filing actions before ARCP" in text
     assert "Already strong" in text
     assert "Missing domains" in text
     assert "CPD" in text
@@ -704,7 +704,7 @@ async def _run_health_capture(monkeypatch, user_id: int, pathway: Pathway) -> st
 @pytest.mark.asyncio
 async def test_arcp_and_cesr_pathway_outputs_diverge_in_lead_framing(monkeypatch):
     """Same evidence, different pathway. The lead framing must diverge:
-    ARCP leads with ARCP risk and the next 3 urgent filing actions; CESR
+    ARCP leads with ARCP risk and the next 3 suggested filing actions; CESR
     leads with long-term readiness and a yearly evidence plan.
     """
     arcp_text = await _run_health_capture(monkeypatch, 6001, Pathway.training_arcp)
@@ -713,10 +713,10 @@ async def test_arcp_and_cesr_pathway_outputs_diverge_in_lead_framing(monkeypatch
     # Training (CCT) pathway framing — ARCP is a checkpoint inside this pathway,
     # not a standalone pathway label.
     assert "Training (CCT) pathway" in arcp_text
-    assert "ARCP readiness check" in arcp_text
+    assert "ARCP evidence review" in arcp_text
     assert "Training (ARCP)" not in arcp_text
     assert "ARCP risk:" in arcp_text
-    assert "Next 3 urgent filing actions before ARCP" in arcp_text
+    assert "Next 3 suggested filing actions before ARCP" in arcp_text
     # ARCP must NOT carry CESR / yearly-plan framing
     assert "CESR" not in arcp_text
     assert "this year" not in arcp_text.lower()
