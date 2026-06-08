@@ -89,7 +89,7 @@ PROMPTS: tuple[WeirdPromptCase, ...] = (
     WeirdPromptCase(
         label="settings-command",
         prompt="open settings please",
-        expect_text_any=("Your settings",),
+        expect_text_any=("Settings",),
         category="command",
     ),
     WeirdPromptCase(

@@ -476,9 +476,10 @@ def test_settings_shows_stale_running_sync_as_timed_out(
 def test_settings_makes_portfolio_health_primary_and_hides_manual_sync(
     isolated_health_store, monkeypatch
 ):
-    """Product rule: connected users see Portfolio health as the primary settings
-    CTA. Manual Kaizen sync remains a hidden troubleshooting action, not a
-    normal settings button users have to understand.
+    """Product rule: settings top-level shows only Kaizen connection, Writing style,
+    Portfolio defaults, and Reset data. Portfolio health is reached via /health
+    or the inline flow from other surfaces. Manual Kaizen sync is a hidden
+    troubleshooting action, not a normal settings button.
     """
     import bot
 
@@ -493,24 +494,16 @@ def test_settings_makes_portfolio_health_primary_and_hides_manual_sync(
         connected=True,
     )
 
-    rows = [
-        [(button.text, button.callback_data) for button in row]
-        for row in keyboard.inline_keyboard
-    ]
-    flat = [pair for row in rows for pair in row]
+    flat = [button.callback_data for row in keyboard.inline_keyboard for button in row]
+    assert sorted(flat) == sorted([
+        "ACTION|setup",
+        "ACTION|voice",
+        "ACTION|portfolio_defaults",
+        "ACTION|delete",
+    ])
 
-    # Portfolio health appears, routes to the existing inline ACTION|health
-    # handler (which itself prompts the read-only refresh when needed).
-    assert ("📊 Portfolio health", "ACTION|health") in flat
-
-    # Manual Kaizen refresh is hidden from the normal settings surface. The
-    # callback flow remains covered separately for troubleshooting/support use.
-    button_labels = [text for text, _ in flat]
-    assert "🔄 Refresh portfolio" not in button_labels
-    assert "🔄 Sync Kaizen evidence" not in button_labels
-    assert "ACTION|refresh_portfolio" not in [
-        callback for _, callback in flat
-    ]
+    assert "ACTION|health" not in flat
+    assert "ACTION|refresh_portfolio" not in flat
 
 
 def test_settings_omits_portfolio_health_button_when_not_connected(

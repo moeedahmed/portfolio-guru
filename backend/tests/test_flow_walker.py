@@ -2319,7 +2319,7 @@ class TestFlowWalker:
             await handle_case_input(update, context)
 
         text = sim.get_last_text()
-        assert 'your settings' in text.lower()
+        assert 'settings' in text.lower()
         # The merged dashboard surfaces plan + usage that used to be in /status.
         assert 'plan: free' in text.lower()
         assert '2/5 cases' in text.lower()
@@ -2352,7 +2352,7 @@ class TestFlowWalker:
             await asyncio.sleep(0)
 
         assert result == ConversationHandler.END
-        assert 'your settings' in sim.get_last_text().lower()
+        assert 'settings' in sim.get_last_text().lower()
         route_mock.assert_called_once_with('how many cases this month')
         log_mock.assert_called_once()
         assert log_mock.call_args.args[0].startswith('Conversational router shadow route')
@@ -2401,9 +2401,9 @@ class TestFlowWalker:
             await handle_case_input(update, context)
 
         text = sim.get_last_text()
-        assert 'your settings' in text.lower()
+        assert 'settings' in text.lower()
         buttons = sim.get_last_buttons()
-        assert any(data == 'ACTION|change_level' for _, data in buttons)
+        assert any(data == 'ACTION|portfolio_defaults' for _, data in buttons)
 
     @pytest.mark.asyncio
     async def test_menu_intent_clinical_text_skips_router(self, recommended_forms):
@@ -3530,7 +3530,7 @@ class TestTrainingStageGroups:
              patch('bot.get_voice_profile', return_value=None):
             text, _ = _settings_view_components(123)
 
-        assert 'Portfolio: Unknown' in text
+        assert 'Unknown' in text
 
     def test_unlimited_settings_labels_cases_as_filed_not_usage(self):
         from bot import _settings_view_components
@@ -3568,8 +3568,8 @@ class TestTrainingStageGroups:
             text, keyboard = _settings_view_components(123)
 
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
-        assert buttons[0] == ('✍️ Writing style: Not set', 'ACTION|voice')
-        assert ('📚 Curriculum: 2025 Update', 'ACTION|change_curriculum') in buttons
+        assert ('✍️ Writing style: Not set', 'ACTION|voice') in buttons
+        assert ('📋 Portfolio defaults', 'ACTION|portfolio_defaults') in buttons
         assert 'Helps drafts match your portfolio writing' in text
 
 
@@ -4051,8 +4051,7 @@ class TestVoiceProfileTwoPathFlow:
         assert result == ConversationHandler.END
         assert context.user_data.get('voice_examples') is None
         assert context.user_data.get('voice_kaizen_path_started') is None
-        assert 'Your settings' in (sim.get_last_text() or '')
-        assert ('🔙 Back', 'ACTION|back_to_menu') in sim.get_last_buttons()
+        assert 'Settings' in (sim.get_last_text() or '')
 
     @pytest.mark.asyncio
     async def test_kaizen_path_opens_sample_size_choice_with_read_only_copy(self):

@@ -2230,28 +2230,20 @@ def _settings_view_components(
 
     setup_button_label = "🔗 Connect Kaizen" if connected is False else "🔗 Update Kaizen login"
 
-    buttons: list[list[InlineKeyboardButton]] = []
-    if connected is True:
-        buttons.append([InlineKeyboardButton("📊 Portfolio health", callback_data="ACTION|health")])
-    buttons.extend([
-        [InlineKeyboardButton(voice_cta, callback_data="ACTION|voice")],
-        [InlineKeyboardButton(f"🎓 Portfolio: {training_level}", callback_data="ACTION|change_level")],
-        [InlineKeyboardButton(f"📊 Pathway: {pathway_label}", callback_data="ACTION|change_pathway")],
-        [InlineKeyboardButton(f"📚 Curriculum: {curriculum_label}", callback_data="ACTION|change_curriculum")],
-    ])
-    buttons.extend([
+    portfolio_defaults_summary = f"{training_level} · {pathway_label} · {curriculum_label}"
+
+    buttons: list[list[InlineKeyboardButton]] = [
         [InlineKeyboardButton(setup_button_label, callback_data="ACTION|setup")],
-        [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu"),
-         InlineKeyboardButton("🔄 Reset", callback_data="ACTION|delete")],
-    ])
+        [InlineKeyboardButton(voice_cta, callback_data="ACTION|voice")],
+        [InlineKeyboardButton("📋 Portfolio defaults", callback_data="ACTION|portfolio_defaults")],
+        [InlineKeyboardButton("🔄 Reset data", callback_data="ACTION|delete")],
+    ]
     text = (
-        f"⚙️ Your settings\n\n"
+        f"⚙️ Settings\n\n"
         f"{plan_block}"
         f"✍️ Writing style: {voice_status}\n"
         f"   {voice_hint}\n\n"
-        f"🎓 Portfolio: {training_level}\n"
-        f"📊 Pathway: {pathway_label}\n"
-        f"📚 Curriculum: {curriculum_label}\n\n"
+        f"📋 Portfolio defaults: {portfolio_defaults_summary}\n\n"
         f"Pick what you want to change."
     )
     return text, InlineKeyboardMarkup(buttons)
@@ -4951,6 +4943,27 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             fail_fn=fail_fn,
         )
         return ConversationHandler.END
+
+    elif action == "portfolio_defaults":
+        curriculum = get_curriculum(user_id) or "2025"
+        curriculum_label = "2021 Curriculum" if curriculum == "2021" else "2025 Update"
+        training_level = _portfolio_settings_label(
+            get_training_level(user_id), get_kaizen_role(user_id)
+        )
+        pathway_label = _pathway_label(_get_or_default_health_profile(user_id).pathway)
+        await query.message.edit_text(
+            f"📋 Portfolio defaults\n\n"
+            f"🎓 Portfolio: {training_level}\n"
+            f"📊 Pathway: {pathway_label}\n"
+            f"📚 Curriculum: {curriculum_label}\n\n"
+            f"Pick what you want to change.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(f"🎓 Portfolio: {training_level}", callback_data="ACTION|change_level")],
+                [InlineKeyboardButton(f"📊 Pathway: {pathway_label}", callback_data="ACTION|change_pathway")],
+                [InlineKeyboardButton(f"📚 Curriculum: {curriculum_label}", callback_data="ACTION|change_curriculum")],
+                [InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")],
+            ]),
+        )
 
     elif action == "change_curriculum":
         await query.message.edit_text(

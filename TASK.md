@@ -1,5 +1,24 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-08 addendum — settings menu grouping.**
+> Scope: clean up the Telegram `/settings` surface after dogfood screenshots
+> showed the main settings screen behaving like a debug/control panel.
+>
+> Result:
+>
+> - Top-level `/settings` now shows configuration groups only: Kaizen
+>   connection, Writing style, Portfolio defaults, and Reset data.
+> - Portfolio type, Portfolio Health pathway, and curriculum selection now sit
+>   behind a focused `Portfolio defaults` submenu with a Back button.
+> - Portfolio Health remains available through `/health`, not as a settings
+>   control.
+> - Settings, setup redirect, weird-prompt QA, and health/settings regression
+>   tests were updated to pin the grouped layout.
+>
+> Verification: focused settings tests passed; offline Telegram QA passed; E2E
+> offline tests passed; full offline gate passed with 1291 tests and snapshots.
+> Not run: live Telegram smoke, push, deploy, restart.
+
 > **2026-06-06 addendum — same-Telegram Kaizen account-switch isolation repair.**
 > Scope: critical offline follow-up after live evidence showed `/delete` then
 > reconnecting Sana's Kaizen credentials could still show Moeed's old Portfolio

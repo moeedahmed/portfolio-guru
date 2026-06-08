@@ -94,7 +94,7 @@ async def test_setup_command_redirects_connected_user_to_settings(monkeypatch):
     result = await bot.setup_start(update, context)
 
     assert result == bot.ConversationHandler.END
-    assert "Your settings" in sim.get_last_text()
+    assert "Settings" in sim.get_last_text()
     assert "What's your Kaizen username" not in sim.get_last_text()
 
 

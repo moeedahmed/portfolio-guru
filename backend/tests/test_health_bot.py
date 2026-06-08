@@ -100,8 +100,8 @@ def test_settings_shows_pathway_change_control(isolated_health_store, monkeypatc
     )
 
     buttons = [(button.text, button.callback_data) for row in keyboard.inline_keyboard for button in row]
-    assert "Pathway: Training (CCT)" in text
-    assert ("📊 Pathway: Training (CCT)", "ACTION|change_pathway") in buttons
+    assert "Training (CCT)" in text
+    assert ("📋 Portfolio defaults", "ACTION|portfolio_defaults") in buttons
 
 
 @pytest.mark.asyncio
@@ -138,8 +138,8 @@ async def test_settings_pathway_change_saves_and_returns_to_settings(isolated_he
     stored = health_profile_store.get_health_profile(sim.user_id)
     assert stored is not None
     assert stored.pathway == Pathway.cesr_portfolio
-    assert "Pathway: Portfolio (CESR)" in sim.get_last_text()
-    assert ("📊 Pathway: Portfolio (CESR)", "ACTION|change_pathway") in sim.get_last_buttons()
+    assert "Portfolio (CESR)" in sim.get_last_text()
+    assert ("📋 Portfolio defaults", "ACTION|portfolio_defaults") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio
