@@ -7767,9 +7767,21 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         except Exception as e:
             ocr_done.set()
             progress_task.cancel()
-            context.user_data.clear()
-            await ack.edit_text("⚠️ Couldn't read image. Try a clearer photo or describe the case in text.")
-            return ConversationHandler.END
+            logger.warning("Photo OCR failed: %s", e)
+            if _gathering_case_active(context):
+                await ack.edit_text(
+                    "⚠️ Couldn't read that image — your other inputs are still saved.\n"
+                    "Send more or tap Done to draft.",
+                    reply_markup=_gathering_done_keyboard(),
+                )
+                return AWAIT_GATHERING
+            await ack.edit_text(
+                "⚠️ Couldn't read image. Try a clearer photo or describe the case in text.",
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel")]]
+                ),
+            )
+            return AWAIT_CASE_INPUT
         finally:
             typing_stop.set()
             typing_task.cancel()

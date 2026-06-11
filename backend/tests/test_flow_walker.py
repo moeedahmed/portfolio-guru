@@ -3896,6 +3896,85 @@ class TestMessageStandardCopy:
         assert "Type your feedback instead" in final, final
         assert "describe the case in text" not in final, final
 
+    @pytest.mark.asyncio
+    async def test_new_case_image_error_is_non_terminal(self):
+        """Photo OCR failure with no accumulated evidence stays in AWAIT_CASE_INPUT.
+
+        The conversation must NOT end so a second photo (e.g. from the same
+        Telegram album) or a follow-up text can still produce a draft.
+        """
+        from bot import AWAIT_CASE_INPUT, handle_case_input
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data["sentinel"] = "kept"
+        update = sim._make_text_update('')
+        photo = MagicMock()
+        file_obj = MagicMock()
+        file_obj.download_to_drive = AsyncMock()
+        photo.get_file = AsyncMock(return_value=file_obj)
+        update.message.text = None
+        update.message.voice = None
+        update.message.audio = None
+        update.message.document = None
+        update.message.caption = None
+        update.message.photo = [photo]
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.extract_from_image', new=AsyncMock(side_effect=RuntimeError('vision down'))):
+            result = await handle_case_input(update, context)
+
+        assert result == AWAIT_CASE_INPUT, f"Expected AWAIT_CASE_INPUT, got {result}"
+        edits = [text for kind, text, _ in sim.messages_sent if kind == 'edit' and text]
+        assert edits, f"Expected an error edit, got: {sim.messages_sent}"
+        final = edits[-1]
+        assert "Couldn't read image" in final, final
+        assert "describe the case in text" in final, final
+        # State must NOT be wiped — other inputs (or a second album photo) can continue
+        assert context.user_data.get("sentinel") == "kept", "user_data must not be cleared"
+
+    @pytest.mark.asyncio
+    async def test_gathering_image_error_preserves_evidence_and_stays_in_gathering(self):
+        """Photo OCR failure when a gathering case is active must not destroy evidence.
+
+        The bot must stay in AWAIT_GATHERING with a soft 'other inputs saved'
+        message, so the user can tap Done and still produce a draft from the
+        text/voice parts already collected.
+        """
+        from bot import AWAIT_GATHERING, _append_gathering_case, handle_case_input
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        _append_gathering_case(context, "62-year-old chest pain, STEMI, cath lab referral.", "text")
+
+        update = sim._make_text_update('')
+        photo = MagicMock()
+        file_obj = MagicMock()
+        file_obj.download_to_drive = AsyncMock()
+        photo.get_file = AsyncMock(return_value=file_obj)
+        update.message.text = None
+        update.message.voice = None
+        update.message.audio = None
+        update.message.document = None
+        update.message.caption = None
+        update.message.photo = [photo]
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.extract_from_image', new=AsyncMock(side_effect=RuntimeError('vision down'))):
+            result = await handle_case_input(update, context)
+
+        assert result == AWAIT_GATHERING, f"Expected AWAIT_GATHERING, got {result}"
+        edits = [text for kind, text, _ in sim.messages_sent if kind == 'edit' and text]
+        assert edits, f"Expected an error edit, got: {sim.messages_sent}"
+        final = edits[-1]
+        assert "other inputs" in final.lower() or "still saved" in final.lower(), final
+        # Gathering evidence must survive the failed image
+        parts = context.user_data.get("gathering_case", {}).get("parts", [])
+        assert any("STEMI" in p.get("text", "") for p in parts), \
+            "gathering_case parts must be preserved after OCR failure"
+
     def test_bot_source_has_no_deprecated_recovery_wording(self):
         """Static lint: deprecated copy variants must not creep back in.
 
