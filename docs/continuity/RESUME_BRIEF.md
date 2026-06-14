@@ -1,12 +1,12 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-06-13T01:14:19+00:00
+Generated: 2026-06-14T11:28:36+00:00
 Status: ready
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
 - Branch: fix/idle-chat-steering
-- Last commit: a819610 2026-06-11 fix(bot): preserve case flow on image OCR failure
+- Last commit: 09911c8 2026-06-13 feat(dogfood): add repair watch preflight
 - Uncommitted changes: no
 
 ## Immediate read before restarting
@@ -27,6 +27,7 @@ Status: ready
 - Live/deploy signals: railway.json, render.yaml, .github/workflows/deploy-mac.yml
 
 ## Recent commits
+- 09911c8 2026-06-13 feat(dogfood): add repair watch preflight
 - a819610 2026-06-11 fix(bot): preserve case flow on image OCR failure
 - 946eb83 2026-06-08 fix(portfolio): steer idle chat away from drafting
 - f8fe06b 2026-06-08 fix(bot): tighten first-open welcome copy
@@ -34,10 +35,9 @@ Status: ready
 - f5906d8 2026-06-08 fix(bot): tighten reset reconnect copy
 - cbddfe4 2026-06-08 fix(bot): prompt kaizen username after reset
 - 044c685 2026-06-08 Remove forced Kaizen setup cancel
-- 97828fa 2026-06-08 fix(bot): start kaizen setup from unconnected case
 
 ## Repo context snapshot
-### AGENTS.md — present, 6 days old
+### AGENTS.md — present, 7 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
@@ -48,7 +48,7 @@ Key headings:
 - ## Safety
 - ## Supported Forms
 
-### CLAUDE.md — present, 6 days old
+### CLAUDE.md — present, 7 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
@@ -59,7 +59,7 @@ Key headings:
 - ## Safety
 - ## Supported Forms
 
-### TASK.md — present, 4 days old
+### TASK.md — present, 6 days old
 Key headings:
 - # Active Task — Kaizen Mapping Sprint
 - ## Active Sprint — Kaizen Mapping (2026-06-01)
@@ -74,7 +74,7 @@ Key headings:
 - ## UX Polish Slice — Post-Filed Buttons (2026-05-26)
 - # 539 passed, 22 skipped, 13 deselected, 3 snapshots passed
 
-### docs/plan.md — present, 6 days old
+### docs/plan.md — present, 7 days old
 Key headings:
 - # Portfolio Guru - Conversational Router Plan
 - ## Goal
@@ -89,7 +89,7 @@ Key headings:
 - ### Phase 1 - Router contract and tests
 - ### Phase 2 - Passive shadow mode
 
-### WORKFLOWS.md — present, 5 days old
+### WORKFLOWS.md — present, 7 days old
 Key headings:
 - # Portfolio Guru — Agent Workflow Reference
 - ## Conversation States

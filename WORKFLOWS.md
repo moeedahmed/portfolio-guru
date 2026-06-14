@@ -11,6 +11,46 @@ smoke checklist lives in `scripts/dogfood_smoke.sh`.
 
 ---
 
+## Channel Boundary — EMGurus WhatsApp Gateway
+
+Portfolio Guru sits **behind** one EMGurus WhatsApp Gateway; it is not a
+direct WhatsApp bot. The architecture is one WhatsApp business number + one
+external EMGurus gateway/router that fans out to the right Guru (Career /
+Exam / Portfolio). The flows below are channel-neutral — they describe the
+1:1 portfolio conversation regardless of whether the gateway delivered it
+over Telegram, WhatsApp, or web.
+
+Responsibility split:
+
+| Concern                                                    | Owner           |
+| ---------------------------------------------------------- | --------------- |
+| WhatsApp business number, Meta/WhatsApp API plumbing       | EMGurus Gateway |
+| DM-vs-group detection and routing                          | EMGurus Gateway |
+| Identity resolution (channel id → EMGurus user)            | EMGurus Gateway |
+| Fan-out to the right Guru (Career / Exam / Portfolio)      | EMGurus Gateway |
+| 1:1 portfolio extraction, drafting, draft-only Kaizen save | Portfolio Guru  |
+
+Boundary contract (code: `backend/channel_contract.py`, the inbound
+counterpart to `backend/channel_actions.py`):
+
+- A gateway adapter hands in a channel-neutral `InboundMessage`
+  (`SessionRef` channel/conversation/user, `ConversationScope` DIRECT|GROUP,
+  `text`, `MediaRef` tuple, `private=True` default).
+- `accept_inbound()` is the single entrypoint and has no side effects:
+  `HANDLE` for DIRECT-with-content, `REFUSE_GROUP` (with a channel-neutral
+  refusal that never echoes the inbound content) for group scope,
+  `REFUSE_EMPTY` otherwise.
+- Group/community/exam behaviour belongs to the other Gurus behind the same
+  gateway. Portfolio Guru refuses GROUP scope and never owns group mode.
+- Portfolio evidence is private 1:1 state by default and must never be
+  replayed into any group/community agent context.
+- Contract + guard only: no Meta/WhatsApp connection, no credentials, and
+  no live handler imports it yet. The Telegram path is unchanged. The module
+  is import-clean of `python-telegram-bot` so it can run inside a gateway
+  process that never loads Telegram. Tests: `tests/test_channel_contract.py`.
+
+---
+
 ## Conversation States
 
 | State constant      | Meaning                                                      |
@@ -505,6 +545,7 @@ BWS secrets (at startup only):
 
 ## Hard Constraints (never violate)
 
+- NEVER handle GROUP scope — portfolio filing is 1:1 only; `accept_inbound()` refuses group/community turns and never echoes their content (gateway's job, not ours)
 - NEVER submit a form to supervisor — draft save only, every time
 - NEVER submit/sign an assessor ticket without explicit approval for that one ticket and reviewed response
 - NEVER create drafts, sign, submit, delete, approve, reject, or send feedback while running assessor mapping

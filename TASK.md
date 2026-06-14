@@ -1,5 +1,42 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-14 addendum — EMGurus WhatsApp Gateway boundary (contract only).**
+> Scope: prepare Portfolio Guru to sit behind one EMGurus WhatsApp Gateway
+> without connecting this repo to WhatsApp or touching live credentials. The
+> locked architecture: one WhatsApp business number + one external EMGurus
+> gateway/router; Portfolio Guru stays a separate internal service for 1:1
+> ARCP/Kaizen workflows. Group/community/exam behaviour belongs to the other
+> Gurus behind the same gateway, not this repo.
+>
+> Result:
+>
+> - Added `backend/channel_contract.py` — the channel-neutral _inbound_
+>   counterpart to `channel_actions.py`. A gateway hands in an `InboundMessage`
+>   (`SessionRef` channel/conversation/user, `ConversationScope` DIRECT|GROUP,
+>   `text`, `MediaRef` tuple, `private=True` default). `accept_inbound()` is the
+>   single entrypoint: `HANDLE` for DIRECT-with-content, `REFUSE_GROUP` (with a
+>   channel-neutral `ChannelReply` refusal that never echoes content) for group
+>   scope, `REFUSE_EMPTY` otherwise. DM-vs-group routing is explicitly the
+>   gateway's job; Portfolio Guru refuses and does not own group mode.
+> - Portfolio evidence is private by default and never shared into group context
+>   (privacy contract enforced by `private=True` default + group refusal).
+> - No live handler imports the contract yet; the Telegram path is unchanged.
+>   No Meta/WhatsApp connection, no credentials, no Kaizen save path touched.
+> - Architecture, responsibility split (gateway-owned vs PG-owned), and the next
+>   build slice are recorded in `docs/plan.md` (2026-06-14 section).
+>
+> Verification: `tests/test_channel_contract.py` — 10 passed. Full offline gate
+> (`pytest tests/ --ignore=test_e2e --ignore=test_e2e_live`): 1307 passed, 1
+> pre-existing unrelated failure
+> (`test_flow_walker.py::...routes_to_settings_for_stats` asserts `plan: free`
+> but the account now shows `plan: beta (unlimited)` — billing copy drift, a
+> locked no-touch area, not caused by this slice). Not run: live Telegram smoke,
+> push, deploy, restart.
+>
+> Launch surface classification: **private-by-design.** This is an internal
+> integration contract; nothing user-facing changed and there is no public
+> surface to prove. No Notion sync needed (no human-facing state changed).
+
 > **2026-06-08 addendum — Portfolio defaults back-button routing fix.**
 > Scope: follow-up to the settings grouping below, after a Telegram screenshot
 > showed the section-level Back buttons skipping the new submenu.

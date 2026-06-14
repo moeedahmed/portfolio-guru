@@ -416,3 +416,72 @@ questions use the injected answer path plus a continuation, and actions render
 as both Telegram buttons and numbered replies without losing labels/context.
 Full offline gate green (1140 passed). Not live until the Mac Mini bot is
 redeployed.
+
+## 2026-06-14 — EMGurus WhatsApp Gateway boundary (contract only)
+
+**Architecture decision (locked).** There is one EMGurus WhatsApp business
+number and one external EMGurus gateway/router. Portfolio Guru is a separate
+_internal service_ behind that gateway for 1:1 ARCP/Kaizen portfolio workflows
+— **not** a direct WhatsApp bot. Group, community, and exam behaviour belong to
+the other Gurus (Career / Exam) behind the same gateway, never to this repo.
+This repo does not connect to Meta/WhatsApp and holds no WhatsApp credentials.
+
+**Responsibility split (gateway-owned vs Portfolio Guru-owned):**
+
+| Concern                                                    | Owner           |
+| ---------------------------------------------------------- | --------------- |
+| WhatsApp business number, Meta/WhatsApp API plumbing       | EMGurus Gateway |
+| DM-vs-group detection and routing                          | EMGurus Gateway |
+| Identity resolution (channel id → EMGurus user)            | EMGurus Gateway |
+| Fan-out to the right Guru (Career / Exam / Portfolio)      | EMGurus Gateway |
+| 1:1 portfolio extraction, drafting, draft-only Kaizen save | Portfolio Guru  |
+| Refusing group scope for portfolio evidence                | Portfolio Guru  |
+| Keeping portfolio evidence private to the 1:1 session      | Portfolio Guru  |
+
+**Privacy (locked).** Portfolio evidence is private 1:1 state by default and is
+never shared into group/community agent context. The inbound contract marks
+content `private=True` by default and refuses any non-DIRECT scope.
+
+What changed (contract + guard only — no live wiring, Telegram path untouched):
+
+- **`backend/channel_contract.py`** — the _inbound_ counterpart to
+  `channel_actions.py`. A gateway hands in a channel-neutral `InboundMessage`
+  envelope: `SessionRef` (channel + conversation id + optional resolved gateway
+  user id), `ConversationScope` (`DIRECT` | `GROUP`), `text`, `MediaRef` tuple,
+  and `private` (default `True`). `accept_inbound()` is the single entrypoint a
+  gateway adapter calls before any portfolio workflow: it returns `HANDLE` for
+  a DIRECT turn with content, `REFUSE_GROUP` (with a channel-neutral
+  `ChannelReply` refusal that never echoes the inbound content) for group scope,
+  and `REFUSE_EMPTY` for a contentless turn. The module is import-clean of
+  `python-telegram-bot` so it can run inside a gateway process. It touches no
+  credential, no network, and no Kaizen save gate.
+
+How this composes with the existing channel-neutral stack: inbound
+`InboundMessage` → `accept_inbound` (this slice) → `conversational_router`
+(intent) → `conversation_supervisor` (decision, returns a `ChannelReply`) →
+`channel_actions` renderers (Telegram keyboard _or_ WhatsApp numbered block).
+The boundary is now symmetric: channel-neutral in, channel-neutral out.
+
+Out of scope (unchanged): all Meta/WhatsApp connection work, the WhatsApp
+number, credentials, Kaizen filing, `filer_router`, `browser_filer`,
+billing/Stripe, supervisor submission, and every confirm-before-file gate. No
+live handler imports `channel_contract` yet (same posture as the Phase 1 router
+checkpoint).
+
+Tests: `test_channel_contract.py` (10 tests) prove the envelope is channel-
+neutral across WhatsApp/Telegram/Web, portfolio content is private by default,
+group scope is refused as a gateway responsibility without leaking content, the
+refusal renders without Telegram, and the module imports clean of Telegram.
+
+**Next build slice (for the next agent).** When the gateway is ready to call in:
+
+1. Write a thin gateway adapter that maps the gateway's inbound payload onto
+   `InboundMessage` and `accept_inbound`, then bridges a `HANDLE` turn into the
+   existing `telegram_vnext_adapter` → `conversational_case_engine` path
+   (channel-neutral `IngestEvent`s), and renders the resulting `ChannelReply`
+   via `render_numbered`.
+2. Define how the gateway authenticates to Portfolio Guru and how it fetches
+   media bytes for a `MediaRef.uri` — credentials stay server-side, never in a
+   prompt or in this contract.
+3. Keep the Kaizen save draft-only and confirm-first regardless of channel; no
+   new path may file/save without the existing confirmation gates.

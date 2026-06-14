@@ -2312,6 +2312,7 @@ class TestFlowWalker:
              patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 5, 'free'))), \
              patch('bot.classify_menu_intent', new=AsyncMock(return_value='show_stats')), \
              patch('bot.get_user_tier', new=AsyncMock(return_value='free')), \
+             patch('bot.is_beta_tester', new=AsyncMock(return_value=False)), \
              patch('bot.get_cases_this_month', new=AsyncMock(return_value=2)), \
              patch('bot.get_training_level', return_value='ST5'), \
              patch('bot.get_curriculum', return_value='2025'), \
