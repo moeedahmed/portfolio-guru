@@ -17,6 +17,7 @@ Two responsibilities:
    JWT (sent as Bearer token), resolves their linked telegram_user_id
    from portfolio_users, and returns a Stripe Checkout URL.
 """
+import hmac
 import os
 import logging
 from fastapi import FastAPI, Request, HTTPException, Header
@@ -174,6 +175,114 @@ async def create_checkout(
         raise HTTPException(status_code=502, detail="Stripe checkout creation failed")
 
     return {"url": url}
+
+
+# ---------------------------------------------------------------------------
+# EMGurus WhatsApp Gateway inbound bridge
+# ---------------------------------------------------------------------------
+# Portfolio Guru sits behind the single EMGurus WhatsApp Gateway. The gateway
+# owns the WhatsApp number and DM-vs-group routing; it calls this endpoint to
+# learn whether Portfolio Guru will take a turn (DIRECT) or refuse it (GROUP /
+# empty). This is a thin, side-effect-free wrapper around
+# channel_contract.accept_inbound — it starts no workflow, touches no
+# credential, and never echoes inbound content back into a shared thread.
+#
+# The bridge is private: callers must present the shared secret in
+# PORTFOLIO_INBOUND_SECRET via the X-Gateway-Secret header. The gateway holds
+# the matching value; this server only ever reads it from the environment.
+
+from channel_contract import (
+    Channel,
+    ConversationScope,
+    InboundMessage,
+    MediaRef,
+    SessionRef,
+    accept_inbound,
+)
+
+
+class InboundMediaModel(BaseModel):
+    kind: str
+    uri: str | None = None
+    mime_type: str | None = None
+    caption: str | None = None
+
+
+class InboundRequest(BaseModel):
+    """Channel-neutral inbound envelope handed in by the gateway."""
+
+    channel: str
+    conversation_id: str
+    gateway_user_id: str | None = None
+    scope: str
+    text: str | None = None
+    media: list[InboundMediaModel] = []
+    private: bool = True
+
+
+def _verify_gateway_secret(provided: str | None) -> None:
+    """Authenticate a gateway-to-Portfolio request, or raise 401/500."""
+    expected = os.environ.get("PORTFOLIO_INBOUND_SECRET", "")
+    if not expected:
+        raise HTTPException(status_code=500, detail="Inbound bridge not configured")
+    if not provided or not hmac.compare_digest(provided, expected):
+        raise HTTPException(status_code=401, detail="Invalid gateway secret")
+
+
+def _build_inbound_message(body: InboundRequest) -> InboundMessage:
+    """Map the validated request onto the channel-neutral contract types.
+
+    Unknown channel/scope values are rejected as 422 rather than crashing —
+    the boundary receives untrusted gateway input.
+    """
+    try:
+        channel = Channel(body.channel)
+        scope = ConversationScope(body.scope)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    media = tuple(
+        MediaRef(kind=m.kind, uri=m.uri, mime_type=m.mime_type, caption=m.caption)
+        for m in body.media
+    )
+    return InboundMessage(
+        session=SessionRef(
+            channel=channel,
+            conversation_id=body.conversation_id,
+            gateway_user_id=body.gateway_user_id,
+        ),
+        scope=scope,
+        text=body.text,
+        media=media,
+        private=body.private,
+    )
+
+
+@app.post("/api/portfolio/inbound")
+async def portfolio_inbound(
+    body: InboundRequest,
+    x_gateway_secret: str | None = Header(default=None),
+):
+    """Decide whether Portfolio Guru handles this gateway-relayed turn.
+
+    Returns the channel-neutral disposition plus the refusal copy when the turn
+    is refused, so the gateway can render the same wording on any channel. No
+    portfolio workflow runs here; this only reports the routing verdict.
+    """
+    _verify_gateway_secret(x_gateway_secret)
+    try:
+        message = _build_inbound_message(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    decision = accept_inbound(message)
+    refusal = (
+        {
+            "body": decision.refusal.body,
+            "continuation": decision.refusal.continuation,
+        }
+        if decision.refusal is not None
+        else None
+    )
+    return {"disposition": decision.disposition.value, "refusal": refusal}
 
 
 @app.get("/health")
