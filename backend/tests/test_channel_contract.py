@@ -121,6 +121,21 @@ def test_contract_is_channel_agnostic_across_channels():
         assert accept_inbound(msg).disposition is InboundDisposition.HANDLE
 
 
+def test_handle_decision_has_fresh_start_true():
+    """fresh_start is always True until Portfolio Guru tracks server-side sessions.
+
+    The gateway (OpenClaw WhatsApp bridge) is authoritative for session
+    continuity in the interim: it uses an in-memory TTL to suppress the
+    "Starting…" ACK on continuation turns.
+    """
+    msg = InboundMessage(
+        session=_session(), scope=ConversationScope.DIRECT, text="CBD review"
+    )
+    decision = accept_inbound(msg)
+    assert decision.disposition is InboundDisposition.HANDLE
+    assert decision.fresh_start is True
+
+
 def test_module_imports_without_telegram():
     """The inbound contract must not pull in python-telegram-bot.
 

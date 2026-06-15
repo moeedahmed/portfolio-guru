@@ -282,7 +282,16 @@ async def portfolio_inbound(
         if decision.refusal is not None
         else None
     )
-    return {"disposition": decision.disposition.value, "refusal": refusal}
+    # fresh_start is always True here: Portfolio Guru has no server-side session
+    # store yet.  The gateway (OpenClaw WhatsApp bridge) is responsible for
+    # suppressing the "Starting…" ACK on continuation turns via its own
+    # in-memory session TTL.  When a backend session store is added, this field
+    # will reflect it and the gateway can defer to it.
+    return {
+        "disposition": decision.disposition.value,
+        "refusal": refusal,
+        "fresh_start": decision.fresh_start,
+    }
 
 
 @app.get("/health")

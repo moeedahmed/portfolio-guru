@@ -135,6 +135,19 @@ def test_unconfigured_secret_returns_500(monkeypatch):
     assert resp.status_code == 500
 
 
+def test_handle_response_includes_fresh_start(client: TestClient):
+    """fresh_start is always True until Portfolio Guru tracks server-side sessions."""
+    resp = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body(),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["disposition"] == "handle"
+    assert data.get("fresh_start") is True
+
+
 def test_invalid_scope_is_rejected(client: TestClient):
     resp = client.post(
         "/api/portfolio/inbound",

@@ -148,11 +148,21 @@ class InboundDecision:
     :attr:`InboundDisposition.HANDLE`; ``refusal`` is a channel-neutral
     :class:`~channel_actions.ChannelReply` only on a refusal, so the gateway can
     render the same wording on any channel.
+
+    ``fresh_start`` signals whether this is the opening turn of a new session.
+    Portfolio Guru currently has no server-side session store, so this is always
+    ``True`` on HANDLE responses. The gateway (OpenClaw WhatsApp bridge) is
+    authoritative for session continuity: it maintains an in-memory TTL per
+    conversationId and suppresses the "Starting…" acknowledgement on
+    continuation turns, regardless of this flag. When Portfolio Guru implements
+    its own session store this field will reflect backend-tracked state and the
+    gateway can defer to it.
     """
 
     disposition: InboundDisposition
     message: InboundMessage | None = None
     refusal: ChannelReply | None = None
+    fresh_start: bool = True
 
 
 # Refusal copy lives here rather than in ``message_policy`` because it is
