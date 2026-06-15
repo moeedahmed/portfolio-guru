@@ -430,7 +430,9 @@ def _patch_extraction(monkeypatch_obj, case: CaseDefinition) -> None:
 
     monkeypatch_obj.setattr("bot.recommend_form_types", fake_recommend)
     monkeypatch_obj.setattr("bot.classify_intent", AsyncMock(return_value="case"))
-    monkeypatch_obj.setattr("bot.extract_explicit_form_type", lambda text: None)
+    monkeypatch_obj.setattr(
+        "bot.extract_explicit_form_type", lambda text, *, require_intent=True: None
+    )
     monkeypatch_obj.setattr("bot.extract_form_data", fake_extract)
     monkeypatch_obj.setattr("bot.extract_cbd_data", fake_extract)
     monkeypatch_obj.setattr("bot.extract_from_image", fake_image_extract)

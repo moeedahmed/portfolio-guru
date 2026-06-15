@@ -1,5 +1,71 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-15 addendum — Trusted filing sprint (offline dogfood matrix).**
+> Scope: make RCEM Kaizen filing feel boringly reliable before widening
+> ambition. Offline/release-readiness pass only — no push, deploy, restart,
+> live Telegram, live Kaizen, credentials, or draft creation.
+>
+> Result:
+>
+> - Added `backend/tests/test_dogfood_matrix.py` — a reusable offline scorecard
+>   over the ten high-value forms (CBD, Mini-CEX, DOPS, ACAT, SDL, Reflective
+>   Practice Log, Procedure Log, Teaching, QIAT, Educational Activity) across
+>   five reliability dimensions: first-message handling, draft/recommendation
+>   path, missing-field handling, deterministic Kaizen-save readiness, and
+>   incomplete-draft recovery. Dimensions 1–4 are pure data assertions over the
+>   live form schema; dimension 5 drives the real conversation handler. 58
+>   passed.
+> - Confirmed existing generic form-lock + SDL incomplete-draft recovery remain
+>   release-ready (`test_sdl_dogfood_fixes.py`). Missing-field recovery is
+>   generic over form type (matrix asserts CBD/SDL/REFLECT_LOG/QIAT all
+>   re-enter amend mode on a complaint, never reset to idle copy). No raw
+>   markdown in any asserted user-visible copy.
+> - **Top reliability failure fixed (workflow pattern, test-isolation):**
+>   `tests/test_channel_contract.py::test_module_imports_without_telegram`
+>   reloaded `channel_contract` in-process, leaving importers
+>   (`webhook_server`) bound to stale classes, which made every later
+>   `test_portfolio_inbound_bridge` request fail body validation with HTTP 422
+>   (a pure test-ordering flake — production unaffected). The check now runs in
+>   an isolated subprocess, preserving its intent without poisoning the suite.
+> - Carried the `extract_explicit_form_type(require_intent=...)` test-stub
+>   fixes in `tests/qa_transcript.py` and `tests/test_e2e_offline.py` (stale
+>   `lambda text: None` doubles broke after the committed generic form-lock API
+>   change in `b3257cd`).
+>
+> Known finding (documented, not fixed): explicit keyword form-lock covers 7 of
+> the 10 named forms; REFLECT_LOG, PROC_LOG and TEACH do not lock from a bare
+> "file a …" phrase and resolve via the recommendation path instead. The matrix
+> pins this split (`KEYWORD_LOCK_FORMS` / `RECOMMENDATION_ONLY_FORMS`) so a
+> regression either way is caught. Re-adding REFLECT_LOG keywords risks
+> colliding with SDL ("reflection") intent, so the keyword gap is left as a
+> recorded finding rather than a contested production edit.
+>
+> Verification: full offline gate via `backend/venv`
+> (`venv/bin/python3 -m pytest tests/ --ignore=test_e2e --ignore=test_e2e_live`):
+> **1400 passed, 0 failed, 16 deselected.** Focused changed-surface
+> (matrix + SDL fixes + channel_contract + inbound_bridge + e2e_offline + qa
+> transcript): all green.
+>
+> Release readiness: `scripts/release_loop.sh --surface telegram --mode prepare`
+> → **BLOCKED**, for two reasons, neither a code defect:
+>
+> 1. _Offline preflight failed (24 collection errors)._ `scripts/preflight.sh`
+>    resolves its interpreter to system `python3` (the repo-root `../.venv`
+>    symlink is broken and `backend/.venv` does not exist), which lacks project
+>    deps (telegram, fastapi, sqlalchemy, sqlmodel, respx) → all 24 errors are
+>    `ModuleNotFoundError` at collection, not test failures. The real gate run
+>    under `backend/venv` is fully green. This is a pre-existing env/tooling
+>    mismatch (preflight does not know about `backend/venv`); left for
+>    orchestrator/infra to resolve rather than editing release tooling here.
+> 2. _Uncommitted tracked changes_ — resolved by this commit.
+>
+> Release classification: **release-ready (offline-proven), ship-gated.**
+> Remaining live/manual gates (orchestrator/foreground only): fix preflight venv
+> resolution (or repo-root `.venv`) so `release_loop prepare` passes; live
+> Telegram smoke; manual Haris SDL/dogfood retest; push → `deploy-mac.yml` →
+> `dogfood_smoke.sh`. Pre-existing dirty `docs/continuity/RESUME_BRIEF.md` left
+> untouched (out of sprint scope).
+
 > **2026-06-14 addendum — EMGurus WhatsApp Gateway boundary (contract only).**
 > Scope: prepare Portfolio Guru to sit behind one EMGurus WhatsApp Gateway
 > without connecting this repo to WhatsApp or touching live credentials. The
@@ -291,8 +357,8 @@
 >   delegates to the supervisor.
 >
 > Verification: `backend/venv/bin/python3 -m pytest tests/test_channel_actions.py
-> tests/test_conversation_supervisor.py tests/test_gathering_mode.py
-> tests/test_vnext_dialogue_policy.py -v` → 48 passed; full offline gate
+tests/test_conversation_supervisor.py tests/test_gathering_mode.py
+tests/test_vnext_dialogue_policy.py -v` → 48 passed; full offline gate
 > (`tests/ --ignore test_e2e --ignore test_e2e_live`) → 1140 passed.
 >
 > Runtime state: not live until the Mac Mini bot is restarted/deployed.
@@ -380,7 +446,7 @@
 >   redirected the 2025 CBD form URL to `/events/list`, no fields were filled,
 >   and the activities check found no synthetic test draft or markers.
 > - Bot-handler path then saved one synthetic `CBD - Case Based Discussion
-> (2021)` draft using the real save-as-draft approval handler.
+(2021)` draft using the real save-as-draft approval handler.
 > - Filing QA was GREEN for the 2021 CBD surface: 6 fields filled, stage
 >   intentionally skipped / acceptable-empty for the CESR account.
 > - Opened draft `8bfa7f9a-019c-4b38-aa3a-ebfd90710a10` was `DRAFT PRIVATE`

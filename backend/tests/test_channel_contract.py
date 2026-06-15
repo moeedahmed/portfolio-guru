@@ -125,10 +125,26 @@ def test_module_imports_without_telegram():
     """The inbound contract must not pull in python-telegram-bot.
 
     A future gateway adapter imports this module to decide routing before any
-    Telegram-specific code is loaded, so the import graph must stay clean.
+    Telegram-specific code is loaded, so the import graph must stay clean. The
+    check runs in a fresh subprocess: reloading channel_contract in-process
+    rebinds its classes and leaves importers (e.g. webhook_server) holding stale
+    references, which poisoned every test that ran afterwards.
     """
-    import importlib
+    import os
+    import subprocess
 
-    sys.modules.pop("telegram", None)
-    importlib.reload(importlib.import_module("channel_contract"))
-    assert "telegram" not in sys.modules
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys, channel_contract; "
+            "sys.exit(1 if 'telegram' in sys.modules else 0)",
+        ],
+        cwd=backend_dir,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"channel_contract import pulled in telegram:\n{result.stderr}"
+    )

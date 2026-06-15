@@ -349,7 +349,9 @@ class TestOfflineE2E:
 
         monkeypatch.setattr("bot.recommend_form_types", fake_recommend)
         monkeypatch.setattr("bot.classify_intent", AsyncMock(return_value="case"))
-        monkeypatch.setattr("bot.extract_explicit_form_type", lambda text: None)
+        monkeypatch.setattr(
+            "bot.extract_explicit_form_type", lambda text, *, require_intent=True: None
+        )
 
         update = make_text_update("45M chest pain, troponin positive, managed ACS, reflected on escalation")
         _prepare_update(update, app.bot)
@@ -408,7 +410,9 @@ class TestOfflineE2E:
 
         monkeypatch.setattr("bot.recommend_form_types", fake_recommend)
         monkeypatch.setattr("bot.classify_intent", AsyncMock(return_value="case"))
-        monkeypatch.setattr("bot.extract_explicit_form_type", lambda text: None)
+        monkeypatch.setattr(
+            "bot.extract_explicit_form_type", lambda text, *, require_intent=True: None
+        )
         monkeypatch.setattr("bot.extract_form_data", fake_extract)
         monkeypatch.setattr("bot.extract_cbd_data", fake_extract)
 
@@ -480,7 +484,9 @@ class TestOfflineE2E:
 
         monkeypatch.setattr("bot.recommend_form_types", fake_recommend)
         monkeypatch.setattr("bot.classify_intent", AsyncMock(return_value="case"))
-        monkeypatch.setattr("bot.extract_explicit_form_type", lambda text: None)
+        monkeypatch.setattr(
+            "bot.extract_explicit_form_type", lambda text, *, require_intent=True: None
+        )
         monkeypatch.setattr("bot.extract_form_data", fake_extract_form)
         monkeypatch.setattr("bot.extract_cbd_data", fake_extract_cbd)
         monkeypatch.setattr("bot.route_filing", fake_route_filing)
@@ -566,7 +572,9 @@ class TestOfflineE2E:
 
         monkeypatch.setattr("bot.recommend_form_types", fake_recommend)
         monkeypatch.setattr("bot.classify_intent", AsyncMock(return_value="case"))
-        monkeypatch.setattr("bot.extract_explicit_form_type", lambda text: None)
+        monkeypatch.setattr(
+            "bot.extract_explicit_form_type", lambda text, *, require_intent=True: None
+        )
         monkeypatch.setattr("bot.extract_form_data", fake_extract_form)
         monkeypatch.setattr("bot.extract_cbd_data", fake_extract_cbd)
         monkeypatch.setattr("bot.route_filing", fake_route_filing)
@@ -614,7 +622,9 @@ class TestOfflineE2E:
 
         # classify_intent returns "unclear" for gibberish
         monkeypatch.setattr("bot.classify_intent", AsyncMock(return_value="unclear"))
-        monkeypatch.setattr("bot.extract_explicit_form_type", lambda text: None)
+        monkeypatch.setattr(
+            "bot.extract_explicit_form_type", lambda text, *, require_intent=True: None
+        )
         monkeypatch.setattr("bot.answer_question", AsyncMock(return_value="I'm not sure what you mean. Try describing a clinical case."))
 
         update = make_text_update("asdfghjkl random weather bananas")
