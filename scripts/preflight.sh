@@ -56,10 +56,14 @@ fi
 echo
 if [[ -d backend ]]; then
   cd backend
-  if [[ -x ../.venv/bin/python ]]; then
-    PY="../.venv/bin/python"
+  if [[ -x venv/bin/python3 ]]; then
+    PY="venv/bin/python3"
+  elif [[ -x venv/bin/python ]]; then
+    PY="venv/bin/python"
   elif [[ -x .venv/bin/python ]]; then
     PY=".venv/bin/python"
+  elif [[ -x ../.venv/bin/python ]]; then
+    PY="../.venv/bin/python"
   else
     PY="python3"
   fi
