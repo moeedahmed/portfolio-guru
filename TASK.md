@@ -1,5 +1,50 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-15 addendum — EMGurus WhatsApp Gateway bridge: outbound reply path.**
+> Scope: wire the first real Portfolio Guru workflow response back to the WhatsApp
+> user through the OpenClaw gateway. Offline/local implementation only — no live
+> WhatsApp send, no deploy, no restart, no push, no live Kaizen, no Telegram.
+>
+> Result:
+>
+> - Added `extensions/whatsapp/src/inbound/portfolio-outbound-route.ts` (OpenClaw
+>   worktree) — `registerPortfolioOutboundRoute` registers
+>   `POST /api/channels/whatsapp/:accountId/send` via `registerPluginHttpRoute`
+>   (`auth: "plugin"`), verifies `X-Portfolio-Secret` against
+>   `PORTFOLIO_BRIDGE_SECRET`, calls the existing `createWebSendApi().sendMessage`.
+>   Inert unless `PORTFOLIO_BRIDGE_SECRET` is set.
+> - Modified `extensions/whatsapp/src/inbound/monitor.ts` (OpenClaw worktree) —
+>   registers the outbound route after `createWebSendApi` is created in
+>   `attachWebInboxToSocket`, unregisters on `close()`.
+> - Modified `backend/webhook_server.py` — `portfolio_inbound` now runs the first
+>   workflow step on HANDLE: produces a channel-neutral gathering `ChannelReply`
+>   via `_make_initial_gathering_reply`, renders it with `render_numbered`, and
+>   POSTs to the gateway via `_send_portfolio_turn_reply` (injectable, testable).
+>   GROUP/EMPTY dispositions unchanged. Outbound failures are logged as warnings;
+>   the inbound handler always returns successfully. Three new env vars:
+>   `PORTFOLIO_OUTBOUND_URL`, `PORTFOLIO_OUTBOUND_ACCOUNT_ID`,
+>   `PORTFOLIO_OUTBOUND_SECRET` — all optional; feature inert if absent.
+> - Extended `backend/tests/test_portfolio_inbound_bridge.py` — 6 new tests
+>   proving outbound is invoked on HANDLE with rendered text; GROUP/EMPTY do not
+>   trigger outbound; auth still rejects wrong secret; outbound failure safe; HANDLE
+>   returns successfully with no outbound configured.
+>
+> Verification:
+>
+> - OpenClaw: `node scripts/run-vitest.mjs
+>   extensions/whatsapp/src/inbound/portfolio-outbound-route.test.ts` → 11 passed.
+>   `node scripts/run-vitest.mjs
+>   extensions/whatsapp/src/auto-reply/monitor/portfolio-bridge.test.ts` → 17 passed (unchanged).
+> - Portfolio Guru: `venv/bin/python3 -m pytest tests/test_portfolio_inbound_bridge.py
+>   -v` → 15 passed. Full offline gate → **1408 passed, 0 failed, 16 deselected**.
+>
+> Release classification: **local/build-complete, proof-pending**.
+>
+> Remaining live/manual gates (orchestrator/foreground only): set
+> `PORTFOLIO_OUTBOUND_URL` / `PORTFOLIO_OUTBOUND_ACCOUNT_ID` /
+> `PORTFOLIO_OUTBOUND_SECRET` in Mac Mini BWS; set `PORTFOLIO_BRIDGE_SECRET`
+> in OpenClaw gateway env; live WhatsApp DM end-to-end smoke; push both repos.
+
 > **2026-06-15 addendum — Trusted filing sprint (offline dogfood matrix).**
 > Scope: make RCEM Kaizen filing feel boringly reliable before widening
 > ambition. Offline/release-readiness pass only — no push, deploy, restart,

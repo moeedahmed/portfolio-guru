@@ -1,19 +1,20 @@
 """HTTP bridge for the EMGurus WhatsApp Gateway inbound boundary.
 
 `POST /api/portfolio/inbound` is the smallest authenticated surface the gateway
-calls to learn whether Portfolio Guru will take a turn. It is a thin wrapper
-around :func:`channel_contract.accept_inbound` — no side effects, no workflow,
-no credential. These tests pin the boundary the gateway depends on:
+calls to hand a turn to Portfolio Guru and receive the first workflow reply.
+These tests pin the boundary the gateway depends on:
 
 * the endpoint is private: a request without the shared gateway secret is
   rejected before any routing decision;
-* a DIRECT 1:1 turn with content is handled;
-* a GROUP turn is refused as a gateway responsibility, and the refusal never
-  echoes the inbound content back into a shared thread;
-* a contentless turn is refused as empty.
+* a DIRECT 1:1 turn with content is handled, and the first Portfolio Guru
+  gathering reply is sent to the gateway outbound endpoint when configured;
+* a GROUP turn is refused as a gateway responsibility without triggering any
+  outbound send — the refusal never echoes the inbound content;
+* a contentless turn is refused as empty without any outbound send.
 
 They use the in-process FastAPI app via TestClient — no network, no live
-WhatsApp, no Stripe, no Telegram.
+WhatsApp, no Stripe, no Telegram.  Outbound sends are captured by
+monkeypatching webhook_server._send_portfolio_turn_reply with an async stub.
 """
 
 from __future__ import annotations
@@ -160,3 +161,141 @@ def test_invalid_scope_is_rejected(client: TestClient):
         headers={"X-Gateway-Secret": _SECRET},
     )
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Outbound turn-runner tests
+# ---------------------------------------------------------------------------
+# These tests verify that on HANDLE the handler sends the rendered Portfolio Guru
+# reply via the outbound path, and that GROUP/EMPTY turns produce no outbound
+# send.  The actual HTTP call is replaced by an async stub to stay offline.
+
+_OUTBOUND_URL = "http://gateway.local"
+_OUTBOUND_ACCOUNT = "wa-account-1"
+_OUTBOUND_SECRET = "outbound-secret"
+
+
+@pytest.fixture
+def outbound_client(monkeypatch) -> tuple[TestClient, list[tuple[str, str]]]:
+    """TestClient with outbound send stubbed; returns (client, captured_sends)."""
+    monkeypatch.setenv("PORTFOLIO_INBOUND_SECRET", _SECRET)
+    monkeypatch.setenv("PORTFOLIO_OUTBOUND_URL", _OUTBOUND_URL)
+    monkeypatch.setenv("PORTFOLIO_OUTBOUND_ACCOUNT_ID", _OUTBOUND_ACCOUNT)
+    monkeypatch.setenv("PORTFOLIO_OUTBOUND_SECRET", _OUTBOUND_SECRET)
+
+    captured: list[tuple[str, str]] = []
+
+    async def _stub_send(to: str, text: str, cfg: object) -> None:
+        captured.append((to, text))
+
+    monkeypatch.setattr(webhook_server, "_send_portfolio_turn_reply", _stub_send)
+    return TestClient(webhook_server.app), captured
+
+
+def test_direct_handled_turn_invokes_outbound_with_rendered_whatsapp_text(
+    outbound_client: tuple[TestClient, list[tuple[str, str]]],
+):
+    client, captured = outbound_client
+    resp = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body(),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["disposition"] == "handle"
+    # Outbound send must have fired exactly once.
+    assert len(captured) == 1
+    to, text = captured[0]
+    # The recipient is the inbound conversation_id.
+    assert to == "wa:+440000000000"
+    # The text is the rendered gathering reply — plain text, no Telegram markup.
+    assert "clinical case" in text.lower()
+    # render_numbered output must not contain Telegram-only markup.
+    assert "InlineKeyboard" not in text
+    assert "callback_data" not in text
+
+
+def test_group_turn_does_not_trigger_outbound(
+    outbound_client: tuple[TestClient, list[tuple[str, str]]],
+):
+    client, captured = outbound_client
+    resp = client.post(
+        "/api/portfolio/inbound",
+        json={
+            "channel": "whatsapp",
+            "conversation_id": "wa:120363@g.us",
+            "scope": "group",
+            "text": "group message with portfolio keyword",
+        },
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["disposition"] == "refuse_group"
+    assert captured == []
+
+
+def test_empty_direct_turn_does_not_trigger_outbound(
+    outbound_client: tuple[TestClient, list[tuple[str, str]]],
+):
+    client, captured = outbound_client
+    resp = client.post(
+        "/api/portfolio/inbound",
+        json={
+            "channel": "whatsapp",
+            "conversation_id": "wa:+440000000000",
+            "scope": "direct",
+        },
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["disposition"] == "refuse_empty"
+    assert captured == []
+
+
+def test_auth_still_rejects_wrong_secret_with_outbound_configured(
+    outbound_client: tuple[TestClient, list[tuple[str, str]]],
+):
+    client, captured = outbound_client
+    resp = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body(),
+        headers={"X-Gateway-Secret": "wrong-secret"},
+    )
+    assert resp.status_code == 401
+    assert captured == []
+
+
+def test_outbound_failure_reported_safely_without_kaizen_touch(
+    monkeypatch,
+):
+    """An outbound send error must not crash the inbound handler or leak to Kaizen."""
+    monkeypatch.setenv("PORTFOLIO_INBOUND_SECRET", _SECRET)
+    monkeypatch.setenv("PORTFOLIO_OUTBOUND_URL", _OUTBOUND_URL)
+    monkeypatch.setenv("PORTFOLIO_OUTBOUND_ACCOUNT_ID", _OUTBOUND_ACCOUNT)
+    monkeypatch.setenv("PORTFOLIO_OUTBOUND_SECRET", _OUTBOUND_SECRET)
+
+    async def _failing_send(to: str, text: str, cfg: object) -> None:
+        raise RuntimeError("gateway unreachable")
+
+    monkeypatch.setattr(webhook_server, "_send_portfolio_turn_reply", _failing_send)
+
+    client = TestClient(webhook_server.app)
+    resp = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body(),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    # Inbound handler must still respond successfully even when outbound fails.
+    assert resp.status_code == 200
+    assert resp.json()["disposition"] == "handle"
+
+
+def test_direct_handled_without_outbound_configured_still_returns_handle(client: TestClient):
+    """When outbound env vars are absent, HANDLE returns successfully with no send."""
+    resp = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body(),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["disposition"] == "handle"

@@ -191,9 +191,11 @@ async def create_checkout(
 # PORTFOLIO_INBOUND_SECRET via the X-Gateway-Secret header. The gateway holds
 # the matching value; this server only ever reads it from the environment.
 
+from channel_actions import ChannelReply, render_numbered
 from channel_contract import (
     Channel,
     ConversationScope,
+    InboundDisposition,
     InboundMessage,
     MediaRef,
     SessionRef,
@@ -257,16 +259,87 @@ def _build_inbound_message(body: InboundRequest) -> InboundMessage:
     )
 
 
+# ---------------------------------------------------------------------------
+# Outbound reply helpers
+# ---------------------------------------------------------------------------
+# When Portfolio Guru handles a DIRECT turn, it replies back to the user via
+# the gateway's WhatsApp outbound send endpoint.  The three env vars below
+# configure that path; the feature is inert when any of them is absent so
+# generic / non-WhatsApp installs are unaffected.
+#
+#   PORTFOLIO_OUTBOUND_URL          — base URL of the OpenClaw gateway
+#   PORTFOLIO_OUTBOUND_ACCOUNT_ID   — WhatsApp account id to route through
+#   PORTFOLIO_OUTBOUND_SECRET       — shared secret sent as X-Portfolio-Secret
+
+
+class _OutboundConfig:
+    """Resolved configuration for the Portfolio Guru outbound send path."""
+
+    def __init__(self, *, url: str, account_id: str, secret: str) -> None:
+        self.url = url
+        self.account_id = account_id
+        self.secret = secret
+
+
+def _resolve_outbound_config() -> "_OutboundConfig | None":
+    """Read the outbound config from the environment; return None if incomplete."""
+    url = os.environ.get("PORTFOLIO_OUTBOUND_URL", "").strip()
+    account_id = os.environ.get("PORTFOLIO_OUTBOUND_ACCOUNT_ID", "").strip()
+    secret = os.environ.get("PORTFOLIO_OUTBOUND_SECRET", "").strip()
+    if not url or not account_id or not secret:
+        return None
+    return _OutboundConfig(url=url, account_id=account_id, secret=secret)
+
+
+def _make_initial_gathering_reply() -> ChannelReply:
+    """Opening Portfolio Guru response for a handled WhatsApp turn.
+
+    This is the real first workflow step: asking the doctor for their clinical
+    case details so the conversation supervisor can classify and route the next
+    turn.  Rendered via render_numbered so it works on any plain-text channel.
+    """
+    return ChannelReply(
+        body=(
+            "👋 Thanks for reaching out to Portfolio Guru.\n\n"
+            "Please describe the clinical case you want to document — "
+            "include what happened, your role, and any key details you remember."
+        ),
+        continuation="I'll help you choose the right form and complete the filing.",
+    )
+
+
+async def _send_portfolio_turn_reply(
+    to: str,
+    text: str,
+    cfg: _OutboundConfig,
+) -> None:
+    """POST the rendered reply to the gateway's WhatsApp outbound send endpoint."""
+    import httpx
+
+    endpoint = (
+        f"{cfg.url.rstrip('/')}/api/channels/whatsapp/{cfg.account_id}/send"
+    )
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            endpoint,
+            json={"to": to, "text": text},
+            headers={"X-Portfolio-Secret": cfg.secret},
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+
+
 @app.post("/api/portfolio/inbound")
 async def portfolio_inbound(
     body: InboundRequest,
     x_gateway_secret: str | None = Header(default=None),
 ):
-    """Decide whether Portfolio Guru handles this gateway-relayed turn.
+    """Handle a gateway-relayed turn: accept/refuse and run the first workflow step.
 
-    Returns the channel-neutral disposition plus the refusal copy when the turn
-    is refused, so the gateway can render the same wording on any channel. No
-    portfolio workflow runs here; this only reports the routing verdict.
+    For DIRECT turns with content (HANDLE), runs the initial Portfolio Guru
+    gathering reply — rendered as a WhatsApp numbered block via render_numbered —
+    and posts it back to the gateway's outbound send endpoint when configured.
+    For GROUP and EMPTY turns, returns the refusal verdict with no side effects.
     """
     _verify_gateway_secret(x_gateway_secret)
     try:
@@ -274,6 +347,25 @@ async def portfolio_inbound(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     decision = accept_inbound(message)
+
+    if decision.disposition is InboundDisposition.HANDLE:
+        outbound_cfg = _resolve_outbound_config()
+        if outbound_cfg is not None:
+            reply = _make_initial_gathering_reply()
+            rendered = render_numbered(reply)
+            try:
+                await _send_portfolio_turn_reply(body.conversation_id, rendered, outbound_cfg)
+            except Exception as exc:
+                logger.warning("Portfolio outbound send failed: %s", exc)
+        return {
+            "disposition": decision.disposition.value,
+            "refusal": None,
+            # fresh_start is always True here: Portfolio Guru has no server-side
+            # session store yet.  The gateway is responsible for suppressing the
+            # "Starting…" ACK on continuation turns via its own in-memory TTL.
+            "fresh_start": decision.fresh_start,
+        }
+
     refusal = (
         {
             "body": decision.refusal.body,
@@ -282,11 +374,6 @@ async def portfolio_inbound(
         if decision.refusal is not None
         else None
     )
-    # fresh_start is always True here: Portfolio Guru has no server-side session
-    # store yet.  The gateway (OpenClaw WhatsApp bridge) is responsible for
-    # suppressing the "Starting…" ACK on continuation turns via its own
-    # in-memory session TTL.  When a backend session store is added, this field
-    # will reflect it and the gateway can defer to it.
     return {
         "disposition": decision.disposition.value,
         "refusal": refusal,

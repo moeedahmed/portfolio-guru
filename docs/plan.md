@@ -501,3 +501,82 @@ refusal renders without Telegram, and the module imports clean of Telegram.
    prompt or in this contract.
 3. Keep the Kaizen save draft-only and confirm-first regardless of channel; no
    new path may file/save without the existing confirmation gates.
+
+## 2026-06-15 — EMGurus WhatsApp Gateway bridge: outbound reply path (slice 2)
+
+**Architecture decision (locked).** The portfolio bridge is now end-to-end for
+a single DIRECT handled turn: Portfolio Guru replies back to the WhatsApp user
+via a new authenticated outbound endpoint on the OpenClaw gateway, so the
+user receives a real Portfolio Guru workflow question (not just the gateway ACK)
+in their DM.
+
+**What changed:**
+
+_OpenClaw worktree (`local/portfolio-bridge-v2026.6.6`):_
+
+- **`extensions/whatsapp/src/inbound/portfolio-outbound-route.ts`** (new) —
+  `registerPortfolioOutboundRoute` registers `POST /api/channels/whatsapp/:accountId/send`
+  via `registerPluginHttpRoute` (`auth: "plugin"`). Verifies `X-Portfolio-Secret`
+  header against `PORTFOLIO_BRIDGE_SECRET` env var (same secret used by the
+  inbound bridge, both directions). Calls `sendApi.sendMessage(to, text)` from
+  the existing `createWebSendApi` instance. Inert and unregistered when the
+  secret is not set — generic OpenClaw installs unaffected.
+
+- **`extensions/whatsapp/src/inbound/monitor.ts`** (modified) — `attachWebInboxToSocket`
+  calls `registerPortfolioOutboundRoute` after `createWebSendApi`, passes the
+  live `sendApi`, and unregisters on `close()`.
+
+_Portfolio Guru (`backend/webhook_server.py`):_
+
+- **Added outbound helpers** — `_OutboundConfig` (private class),
+  `_resolve_outbound_config` (reads `PORTFOLIO_OUTBOUND_URL` /
+  `PORTFOLIO_OUTBOUND_ACCOUNT_ID` / `PORTFOLIO_OUTBOUND_SECRET` from env;
+  returns `None` when incomplete — feature inert), `_make_initial_gathering_reply`
+  (returns a channel-neutral `ChannelReply` opening question rendered via
+  `render_numbered`), `_send_portfolio_turn_reply` (async `httpx` POST to the
+  gateway outbound route).
+
+- **Modified `portfolio_inbound` handler** — on `InboundDisposition.HANDLE`:
+  resolves outbound config, renders the gathering reply, calls
+  `_send_portfolio_turn_reply`; outbound failures are logged as warnings and
+  never propagate (handler still returns `disposition: handle`). GROUP and EMPTY
+  dispositions preserve their existing refusal/no-side-effect behaviour.
+
+**Env vars added (Portfolio Guru, all optional — feature inert if absent):**
+
+| Var | Purpose |
+|---|---|
+| `PORTFOLIO_OUTBOUND_URL` | Base URL of the OpenClaw gateway |
+| `PORTFOLIO_OUTBOUND_ACCOUNT_ID` | WhatsApp account id to route through |
+| `PORTFOLIO_OUTBOUND_SECRET` | Shared secret for X-Portfolio-Secret header |
+
+**Responsibility split update:** the gateway's `PORTFOLIO_BRIDGE_SECRET` is now
+used for both directions — it gates the gateway→PG inbound call (via
+`PORTFOLIO_INBOUND_SECRET` on the PG side) and the PG→gateway outbound call
+(via `PORTFOLIO_BRIDGE_SECRET` on the OpenClaw side, echoed as
+`PORTFOLIO_OUTBOUND_SECRET` in the PG env).
+
+**Out of scope (unchanged):** full conversation supervisor / case engine wiring,
+Kaizen filing, Telegram path, live WhatsApp, credentials, push, restart, deploy.
+
+**Tests:**
+
+- OpenClaw: `portfolio-outbound-route.test.ts` — 11 passed (inert with no
+  secret; route registration path/auth/accountId; handler 401 on missing/wrong
+  secret; 200 + sendMessage call on valid request; 400 on missing to/text or
+  invalid JSON; array-header handling).
+- Portfolio Guru: `test_portfolio_inbound_bridge.py` — 15 passed (6 carried +
+  9 new: outbound invoked on HANDLE with rendered WhatsApp text; GROUP/EMPTY do
+  not trigger outbound; auth still rejects on wrong secret; outbound failure
+  reported safely; HANDLE succeeds without outbound configured). Full offline
+  gate: **1408 passed, 0 failed**.
+
+**Release classification:** local/build-complete, proof-pending.
+
+**Remaining live/manual gates (orchestrator/foreground only):**
+1. Set `PORTFOLIO_OUTBOUND_URL` / `PORTFOLIO_OUTBOUND_ACCOUNT_ID` /
+   `PORTFOLIO_OUTBOUND_SECRET` in the Mac Mini Portfolio Guru env (BWS).
+2. Set `PORTFOLIO_BRIDGE_SECRET` in the OpenClaw gateway env (BWS).
+3. Live WhatsApp DM end-to-end smoke (user sends "portfolio" DM → gateway ACK →
+   Portfolio Guru gathering question received in same DM).
+4. Push both repos once live gates pass.
