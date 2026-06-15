@@ -43,6 +43,25 @@ try_secret() {
   BWS_ACCESS_TOKEN=$BWS_ACCESS_TOKEN "$BWS_BIN" secret get "$id" --output json 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['value'])" 2>/dev/null || true
 }
 
+get_mapped_secret() {
+  local key="$1"
+  local map_path="${OPENCLAW_SECRETS_MAP:-$HOME/.openclaw/workspace/secrets.json}"
+  local id
+  id="$(python3 - "$map_path" "$key" <<'PY'
+import json
+import sys
+path, key = sys.argv[1], sys.argv[2]
+entry = json.load(open(path))["credentials"][key]
+print(entry.get("bwsId") or entry.get("bws_secret_id") or "")
+PY
+)"
+  if [ -z "$id" ]; then
+    echo "No BWS id mapped for $key" >&2
+    exit 1
+  fi
+  get_secret "$id"
+}
+
 TELEGRAM_BOT_TOKEN="$(get_secret af553b7d-5c05-418a-b80e-b405015708ed)"
 export TELEGRAM_BOT_TOKEN
 GOOGLE_API_KEY="$(get_secret af6579a0-2cbe-4cef-94b3-b405017b48fe)"
@@ -70,6 +89,8 @@ STRIPE_WEBHOOK_SECRET="$(get_secret 3ffc5e11-f4d6-4ff8-872f-b428006e7126)"
 export STRIPE_WEBHOOK_SECRET
 export STRIPE_PRO_PRICE_ID="price_1TKY11FtxKHU39UdHFXn1yur"
 export STRIPE_PRO_PLUS_PRICE_ID="price_1TKY12FtxKHU39UdTQZY8rOq"
+PORTFOLIO_INBOUND_SECRET="${PORTFOLIO_INBOUND_SECRET:-$(get_mapped_secret PORTFOLIO_INBOUND_SECRET)}"
+export PORTFOLIO_INBOUND_SECRET
 
 # Persistent browser for Kaizen filing (login once, reuse session)
 export KAIZEN_USE_CDP="${KAIZEN_USE_CDP:-1}"
