@@ -45,6 +45,34 @@
 > `PORTFOLIO_OUTBOUND_SECRET` in Mac Mini BWS; set `PORTFOLIO_BRIDGE_SECRET`
 > in OpenClaw gateway env; live WhatsApp DM end-to-end smoke; push both repos.
 
+> **2026-06-15 finish-line check — still blocked before live smoke.**
+>
+> Result:
+>
+> - Portfolio Guru launcher now exports the outbound aliases expected by
+>   `backend/webhook_server.py`: `PORTFOLIO_OUTBOUND_URL` from mapped
+>   `PORTFOLIO_BRIDGE_URL`, `PORTFOLIO_OUTBOUND_ACCOUNT_ID=emgurus`, and
+>   `PORTFOLIO_OUTBOUND_SECRET` from mapped `PORTFOLIO_BRIDGE_SECRET`.
+> - Focused Portfolio bridge test re-run with the real backend venv:
+>   `./backend/venv/bin/python -m pytest backend/tests/test_portfolio_inbound_bridge.py -q`
+>   → 15 passed.
+> - Installed WhatsApp extension test commands are not currently runnable from
+>   the installed package: no npm scripts or local Vitest/TypeScript binaries;
+>   external Vitest fails with `Tsconfig not found`; `tsc --noEmit -p tsconfig.json`
+>   fails because `/Users/moeedahmed/.openclaw/extensions/tsconfig.package-boundary.base.json`
+>   is missing and plugin-sdk types cannot resolve.
+> - Critical runtime split: OpenClaw loads WhatsApp from
+>   `~/.openclaw/extensions/whatsapp/dist/index.js`. The new
+>   `src/inbound/portfolio-outbound-route.ts` is not present in loaded `dist`
+>   (`rg portfolio-outbound dist src` only finds the new source/test files).
+>
+> Release classification: **blocked at installed WhatsApp runtime bundle**.
+>
+> Required Operator action: rebuild/reinstall or safely patch the installed
+> WhatsApp extension so the loaded `dist` contains the Portfolio outbound route,
+> make the required gateway env available without exposing secrets, run a safe
+> gateway restart, then run the private WhatsApp DM smoke.
+
 > **2026-06-15 addendum — Trusted filing sprint (offline dogfood matrix).**
 > Scope: make RCEM Kaizen filing feel boringly reliable before widening
 > ambition. Offline/release-readiness pass only — no push, deploy, restart,
