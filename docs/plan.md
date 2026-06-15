@@ -14,6 +14,22 @@ This supersedes the earlier "keep one bot" decision recorded in this file. The r
 
 Approved on 2026-05-28 by Moeed. Migration of the public bot identity to the new engine remains gated on dogfood proof, not a calendar date.
 
+## Channel Architecture Decision
+
+Portfolio Guru is a separate product engine, not a sub-prompt inside the EMGurus/Guru agent.
+
+Current channel plan:
+
+- Telegram can keep the separate Portfolio Bot identity.
+- WhatsApp should initially route through the single EMGurus/Guru WhatsApp front door because the active WhatsApp number is registered to EMGurus/Guru.
+- The EMGurus/Guru WhatsApp agent owns channel routing, DM-vs-group gating, and handoff.
+- Portfolio Guru owns portfolio intake, extraction, drafting, confirmation, and draft-only Kaizen filing.
+- The WhatsApp bridge must connect to Portfolio Guru through channel-neutral contracts, so the same engine can later be used by a dedicated Portfolio Guru WhatsApp number, web app, API, or another channel.
+
+Do not move portfolio workflow logic into OpenClaw agent memory or the generic EMGurus/Guru prompt. The engine must remain portable and repo-owned.
+
+Canonical umbrella note: `../../emgurus-hub/docs/okf/emgurus-product-knowledge/channel-architecture.md`.
+
 ## Architecture
 
 ### Layer 1 - Natural conversation intake
