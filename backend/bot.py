@@ -929,6 +929,110 @@ def _is_idle_chat_nudge(text: str) -> bool:
     return bool(_IDLE_CHAT_RE.match(text or ""))
 
 
+# Complaints that a saved/active draft is incomplete — e.g. "you didn't fill the
+# rest of the details for this ticket". These must NOT reset to idle copy; the
+# active filing context should be preserved so the user can supply the gaps.
+_INCOMPLETE_DRAFT_COMPLAINT_RE = re.compile(
+    r"(?:"
+    # negation + fill/complete/finish: "didn't fill", "did not complete".
+    # Limited to draft-completion verbs so a post-filing clinical note like
+    # "patient didn't do well" is not misread as a draft complaint.
+    r"(?:did\s*n'?t|didn'?t|did\s+not|do\s+not|don'?t|have\s*n'?t|haven'?t|have\s+not|never)"
+    r"\s+(?:\w+\s+){0,3}?(?:fill|filled|complete|completed|finish|finished)"
+    # "rest/remainder of (the ticket) details/fields/sections"
+    r"|(?:rest|remainder)\s+of\s+(?:the\s+)?(?:\w+\s+){0,2}?(?:detail|field|section|form|info)s?"
+    # "incomplete" / "not complete"
+    r"|incomplete|not\s+complete"
+    # "fields/details/sections are missing/empty/blank/not filled"
+    r"|(?:field|detail|section|form|box)s?\s+(?:are\s+|is\s+|still\s+|were\s+)*(?:missing|empty|blank|incomplete|not\s+(?:filled|done|complete))"
+    # "half the form blank/empty/done"
+    r"|half\s+(?:the\s+|of\s+)?[\w\s]{0,20}?(?:blank|empty|done|filled|complete)"
+    # "left (the X) blank/empty" / "left out"
+    r"|left\s+(?:[\w\s]{0,25}?)?(?:blank|empty)\b|left\s+out\b"
+    # "missing the details/fields/reflection"
+    r"|missing\s+(?:the\s+)?(?:detail|field|section|reflection|info|rest)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _is_incomplete_draft_complaint(text: str) -> bool:
+    """True when the user complains a draft/ticket is missing fields or detail."""
+    return bool(text and _INCOMPLETE_DRAFT_COMPLAINT_RE.search(text))
+
+
+def _explicit_sdl_start_request(text: str) -> bool:
+    """True when the user is asking to start an SDL entry, not asking about SDL."""
+    lowered = (text or "").lower()
+    if extract_explicit_form_type(lowered, require_intent=False) != "SDL":
+        return False
+    return bool(
+        re.search(
+            r"\b(file|create|draft|fill|start|log|record|save|make|do)\b",
+            lowered,
+        )
+    )
+
+
+async def _handle_incomplete_draft_complaint(message, context) -> int | None:
+    """Recover from "you didn't fill the rest" complaints about a draft.
+
+    Restores the active draft (or the post-filing amend snapshot), re-enters
+    amend mode, names the missing reflective fields, and asks the user to supply
+    them — instead of resetting to generic idle copy. Returns the next
+    conversation state, or ``None`` when there is no draft to recover.
+    """
+    draft = _load_draft(context)
+    form_type = context.user_data.get("chosen_form")
+    if draft is None:
+        amend_draft = context.user_data.get("last_amend_draft")
+        if not amend_draft:
+            return None
+        context.user_data["draft_data"] = amend_draft
+        amend_case = context.user_data.get("last_amend_case_text")
+        if amend_case and not context.user_data.get("case_text"):
+            context.user_data["case_text"] = amend_case
+        form_type = context.user_data.get("last_amend_chosen_form") or form_type
+        if form_type:
+            context.user_data["chosen_form"] = form_type
+        draft = _load_draft(context)
+    if draft is None:
+        return None
+
+    form_type = form_type or getattr(draft, "form_type", None) or "CBD"
+    context.user_data["amend_mode"] = True
+    context.user_data["quick_improve_used"] = False
+
+    missing_required, missing_optional, _ = _missing_template_fields(draft, form_type)
+    missing = missing_required + missing_optional
+    form_name = _form_display_name(form_type)
+    _track_funnel_event(
+        context,
+        "incomplete_draft_recovery",
+        form_type=form_type,
+        has_missing=bool(missing),
+    )
+
+    lines = [f"Good catch — let's finish your {form_name} draft."]
+    if missing:
+        lines.append("")
+        lines.append("I left these blank because they weren't in what you sent:")
+        lines.extend(f"• {field['label']}" for field in missing[:6])
+        lines.append("")
+        lines.append(
+            "Reply with those details and I'll update the draft. "
+            "Your saved Kaizen draft stays as-is until you save the update."
+        )
+    else:
+        lines.append("")
+        lines.append(
+            "Every field already has content. Tell me which part looks wrong or "
+            "thin and I'll revise it, then you can save the update."
+        )
+    await message.reply_text("\n".join(lines), reply_markup=_build_amend_keyboard(improved_once=False))
+    return AWAIT_APPROVAL
+
+
 _PRE_CAPTURE_ANSWER_INTENTS = frozenset(
     {
         ConversationalIntent.PORTFOLIO_QUESTION,
@@ -7486,6 +7590,23 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 )
             return ConversationHandler.END
 
+        # Missing-field recovery: "you didn't fill the rest of the details for
+        # this ticket" must NOT reset to idle copy. Preserve the just-filed
+        # draft, list the missing reflective fields, and ask for them.
+        if (
+            context.user_data.get("last_amend_draft")
+            and _is_incomplete_draft_complaint(raw_text)
+        ):
+            recovered = await _handle_incomplete_draft_complaint(update.message, context)
+            if recovered is not None:
+                return recovered
+
+        if _explicit_sdl_start_request(raw_text):
+            context.user_data["chosen_form"] = "SDL"
+            context.user_data["awaiting_detail"] = True
+            await update.message.reply_text(render_message(_detail_request_message_key("SDL")))
+            return AWAIT_CASE_INPUT
+
         if context.user_data.get("pending_case_bundle"):
             if _looks_like_new_case_start(raw_text) and _pending_case_bundle_is_stale(context):
                 _clear_pending_case_bundle(context)
@@ -9498,6 +9619,16 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
     if _is_text_filing_approval(raw_text):
         if _load_draft(context) or _restore_retryable_draft(context):
             return await handle_approval_approve(update, context)
+
+    # Missing-field recovery: a "you didn't fill the rest" complaint about the
+    # active or just-filed draft lists the gaps and stays on the draft, instead
+    # of falling through to chitchat/"start fresh" copy.
+    if _is_incomplete_draft_complaint(raw_text) and (
+        has_draft or context.user_data.get("last_amend_draft")
+    ):
+        recovered = await _handle_incomplete_draft_complaint(update.message, context)
+        if recovered is not None:
+            return recovered
 
     if (
         _has_retryable_failed_filing_draft(context)
