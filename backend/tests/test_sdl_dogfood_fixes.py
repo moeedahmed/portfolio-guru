@@ -251,6 +251,52 @@ async def test_sdl_first_turn_file_request_asks_for_learning_details_not_generic
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("text", "expected_form", "expected_label"),
+    [
+        ("Can you file a CBD?", "CBD", "Case-Based Discussion"),
+        ("Create a DOPS for me", "DOPS", "Direct Observation of Procedural Skills"),
+        ("Log this as an ultrasound case", "US_CASE", "Ultrasound Case Reflection"),
+    ],
+)
+async def test_explicit_form_start_locks_requested_form_generically(
+    text,
+    expected_form,
+    expected_label,
+):
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_text_update(text)
+
+    answer = AsyncMock(return_value="LLM answer should not be used")
+    with patch("bot.has_credentials", return_value=True), \
+         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 1, 10, "free"))), \
+         patch("bot.answer_question", new=answer), \
+         patch("bot.classify_intent", new=AsyncMock(return_value="question")):
+        result = await bot.handle_case_input(update, context)
+
+    response = _last_text(sim)
+    assert result == AWAIT_CASE_INPUT
+    assert context.user_data["chosen_form"] == expected_form
+    assert context.user_data["awaiting_detail"] is True
+    assert expected_label in response
+    assert "whatever you have" in response
+    assert "appropriate" not in response.lower()
+    answer.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "What is a CBD?",
+        "Do you support DOPS?",
+    ],
+)
+def test_form_questions_do_not_lock_form_cycle(text):
+    assert bot._explicit_form_start_request(text) is None
+
+
+@pytest.mark.asyncio
 async def test_sdl_intent_copy_is_short_action_forward_no_start_question():
     from bot import AWAIT_FORM_CHOICE, _process_case_text
 

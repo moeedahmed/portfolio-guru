@@ -961,17 +961,30 @@ def _is_incomplete_draft_complaint(text: str) -> bool:
     return bool(text and _INCOMPLETE_DRAFT_COMPLAINT_RE.search(text))
 
 
-def _explicit_sdl_start_request(text: str) -> bool:
-    """True when the user is asking to start an SDL entry, not asking about SDL."""
+def _explicit_form_start_request(text: str) -> str | None:
+    """Return the explicitly requested form when the user asks to start one."""
     lowered = (text or "").lower()
-    if extract_explicit_form_type(lowered, require_intent=False) != "SDL":
-        return False
-    return bool(
-        re.search(
-            r"\b(file|create|draft|fill|start|log|record|save|make|do)\b",
-            lowered,
-        )
+    form_type = extract_explicit_form_type(lowered, require_intent=False)
+    if not form_type:
+        return None
+    starts_form = bool(
+        re.search(r"\b(file|create|draft|fill|start|log|record|save|make)\b", lowered)
+        or re.search(r"\b(?:do|use)\s+(?:a|an|this\s+as)\b", lowered)
     )
+    return form_type if starts_form else None
+
+
+def _explicit_form_detail_request_text(form_type: str) -> str:
+    form_name = _form_display_name(form_type)
+    return (
+        f"📋 Send rough notes for the {form_name} entry.\n\n"
+        "Include whatever you have. I’ll draft it for review and flag anything missing."
+    )
+
+
+def _explicit_form_start_needs_details(text: str) -> bool:
+    """True for a thin form-start request with no substantive same-turn evidence."""
+    return len((text or "").split()) <= 8
 
 
 async def _handle_incomplete_draft_complaint(message, context) -> int | None:
@@ -7601,10 +7614,11 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             if recovered is not None:
                 return recovered
 
-        if _explicit_sdl_start_request(raw_text):
-            context.user_data["chosen_form"] = "SDL"
+        explicit_start_form = _explicit_form_start_request(raw_text)
+        if explicit_start_form and _explicit_form_start_needs_details(raw_text):
+            context.user_data["chosen_form"] = explicit_start_form
             context.user_data["awaiting_detail"] = True
-            await update.message.reply_text(render_message(_detail_request_message_key("SDL")))
+            await update.message.reply_text(_explicit_form_detail_request_text(explicit_start_form))
             return AWAIT_CASE_INPUT
 
         if context.user_data.get("pending_case_bundle"):
