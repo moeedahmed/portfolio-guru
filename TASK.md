@@ -2041,3 +2041,57 @@ Runtime state:
 > has the old bundle loaded in memory. Operator must run the protected safe
 > restart path (`openclaw gateway restart --safe --json`) to pick up the new
 > dist. No live send until restart is confirmed.
+
+---
+
+> **2026-06-16 addendum — WhatsApp live smoke exposed quoted-reply/ACK gap.**
+>
+> Live private WhatsApp smoke reached the Guru front door, but did not yet pass:
+>
+> - `Portfolio` started the private Portfolio Guru session.
+> - The substantive Portfolio Guru prompt received only another start ACK.
+> - A later quoted `Reply` turn fell through to the generic EMGurus assistant.
+>
+> Root cause:
+>
+> - The WhatsApp bridge only routed intent from the current `msg.body`, so a
+>   quoted reply whose visible body was just `Reply` could miss the portfolio
+>   prompt in `replyToBody`.
+> - The gateway always sent `DIRECT_PORTFOLIO_ACK` after a backend
+>   `disposition: handle`, even when Portfolio Guru had already sent an outbound
+>   WhatsApp reply.
+> - The live Portfolio webhook process was also stale: it was started before the
+>   outbound env alias fix, so it may not have had the outbound reply variables.
+>
+> Action:
+>
+> - Added `getPortfolioIntentText` to the WhatsApp bridge source and installed
+>   dist containment patch. It prefers current message intent, then falls back to
+>   quoted `replyToBody` / `replyTo.body`.
+> - Updated WhatsApp routing to use that helper before falling through to normal
+>   EMGurus handling.
+> - Updated the bridge response contract: Portfolio Guru now returns
+>   `reply_sent`, and the gateway suppresses the extra start ACK when
+>   `reply_sent: true`.
+> - Backup before installed-dist edit:
+>   `~/.openclaw/extensions/whatsapp/dist/monitor-Cl_seCU0.js.bak-20260616-213057`
+>
+> Verification:
+>
+> - `bash -n backend/run_local.sh`
+> - `./backend/venv/bin/python -m pytest backend/tests/test_portfolio_inbound_bridge.py backend/tests/test_channel_contract.py -q` → 26 passed
+> - `node --check ~/.openclaw/extensions/whatsapp/dist/monitor-Cl_seCU0.js`
+> - `rg "getPortfolioIntentText|replySent|reply_sent"` over WhatsApp source/dist
+>   confirmed the installed bundle mirrors the source patch.
+> - Focused WhatsApp Vitest could not run in the installed/source split:
+>   `vitest.extension-whatsapp.config.ts` fails to import `vitest/config`
+>   because the OpenClaw source dependency tree is not installed.
+>
+> Activation state:
+>
+> Not live yet. No gateway restart was run because Telegram bot functioning is
+> being beta tested and this workstream should not disrupt it. To finish release
+> proof safely later: first refresh only the Portfolio webhook process if needed
+> to pick up outbound env aliases, then run a protected safe gateway restart
+> only when Telegram disruption risk is acceptable, then repeat the same private
+> WhatsApp DM smoke.

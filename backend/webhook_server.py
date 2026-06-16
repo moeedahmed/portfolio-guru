@@ -350,16 +350,19 @@ async def portfolio_inbound(
 
     if decision.disposition is InboundDisposition.HANDLE:
         outbound_cfg = _resolve_outbound_config()
+        reply_sent = False
         if outbound_cfg is not None:
             reply = _make_initial_gathering_reply()
             rendered = render_numbered(reply)
             try:
                 await _send_portfolio_turn_reply(body.conversation_id, rendered, outbound_cfg)
+                reply_sent = True
             except Exception as exc:
                 logger.warning("Portfolio outbound send failed: %s", exc)
         return {
             "disposition": decision.disposition.value,
             "refusal": None,
+            "reply_sent": reply_sent,
             # fresh_start is always True here: Portfolio Guru has no server-side
             # session store yet.  The gateway is responsible for suppressing the
             # "Starting…" ACK on continuation turns via its own in-memory TTL.

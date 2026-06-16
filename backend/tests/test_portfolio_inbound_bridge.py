@@ -58,6 +58,7 @@ def test_direct_text_turn_is_handled(client: TestClient):
     data = resp.json()
     assert data["disposition"] == "handle"
     assert data["refusal"] is None
+    assert data["reply_sent"] is False
 
 
 def test_group_turn_is_refused_and_does_not_echo_content(client: TestClient):
@@ -108,7 +109,9 @@ def test_media_only_direct_turn_is_handled(client: TestClient):
         headers={"X-Gateway-Secret": _SECRET},
     )
     assert resp.status_code == 200
-    assert resp.json()["disposition"] == "handle"
+    data = resp.json()
+    assert data["disposition"] == "handle"
+    assert data["reply_sent"] is False
 
 
 def test_missing_secret_is_unauthorized(client: TestClient):
@@ -202,7 +205,9 @@ def test_direct_handled_turn_invokes_outbound_with_rendered_whatsapp_text(
         headers={"X-Gateway-Secret": _SECRET},
     )
     assert resp.status_code == 200
-    assert resp.json()["disposition"] == "handle"
+    data = resp.json()
+    assert data["disposition"] == "handle"
+    assert data["reply_sent"] is True
     # Outbound send must have fired exactly once.
     assert len(captured) == 1
     to, text = captured[0]
@@ -287,7 +292,9 @@ def test_outbound_failure_reported_safely_without_kaizen_touch(
     )
     # Inbound handler must still respond successfully even when outbound fails.
     assert resp.status_code == 200
-    assert resp.json()["disposition"] == "handle"
+    data = resp.json()
+    assert data["disposition"] == "handle"
+    assert data["reply_sent"] is False
 
 
 def test_direct_handled_without_outbound_configured_still_returns_handle(client: TestClient):
@@ -298,4 +305,6 @@ def test_direct_handled_without_outbound_configured_still_returns_handle(client:
         headers={"X-Gateway-Secret": _SECRET},
     )
     assert resp.status_code == 200
-    assert resp.json()["disposition"] == "handle"
+    data = resp.json()
+    assert data["disposition"] == "handle"
+    assert data["reply_sent"] is False
