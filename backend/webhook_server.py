@@ -263,22 +263,31 @@ def _build_inbound_message(body: InboundRequest) -> InboundMessage:
 # Outbound reply helpers
 # ---------------------------------------------------------------------------
 # When Portfolio Guru handles a DIRECT turn, it replies back to the user via
-# the gateway's WhatsApp outbound send endpoint.  The three env vars below
+# the gateway's WhatsApp outbound send endpoint.  The four env vars below
 # configure that path; the feature is inert when any of them is absent so
 # generic / non-WhatsApp installs are unaffected.
 #
 #   PORTFOLIO_OUTBOUND_URL          — base URL of the OpenClaw gateway
 #   PORTFOLIO_OUTBOUND_ACCOUNT_ID   — WhatsApp account id to route through
 #   PORTFOLIO_OUTBOUND_SECRET       — shared secret sent as X-Portfolio-Secret
+#   PORTFOLIO_OUTBOUND_GATEWAY_TOKEN — gateway bearer token for plugin route auth
 
 
 class _OutboundConfig:
     """Resolved configuration for the Portfolio Guru outbound send path."""
 
-    def __init__(self, *, url: str, account_id: str, secret: str) -> None:
+    def __init__(
+        self,
+        *,
+        url: str,
+        account_id: str,
+        secret: str,
+        gateway_token: str,
+    ) -> None:
         self.url = url
         self.account_id = account_id
         self.secret = secret
+        self.gateway_token = gateway_token
 
 
 def _resolve_outbound_config() -> "_OutboundConfig | None":
@@ -286,9 +295,15 @@ def _resolve_outbound_config() -> "_OutboundConfig | None":
     url = os.environ.get("PORTFOLIO_OUTBOUND_URL", "").strip()
     account_id = os.environ.get("PORTFOLIO_OUTBOUND_ACCOUNT_ID", "").strip()
     secret = os.environ.get("PORTFOLIO_OUTBOUND_SECRET", "").strip()
-    if not url or not account_id or not secret:
+    gateway_token = os.environ.get("PORTFOLIO_OUTBOUND_GATEWAY_TOKEN", "").strip()
+    if not url or not account_id or not secret or not gateway_token:
         return None
-    return _OutboundConfig(url=url, account_id=account_id, secret=secret)
+    return _OutboundConfig(
+        url=url,
+        account_id=account_id,
+        secret=secret,
+        gateway_token=gateway_token,
+    )
 
 
 def _make_initial_gathering_reply() -> ChannelReply:
@@ -323,7 +338,10 @@ async def _send_portfolio_turn_reply(
         resp = await client.post(
             endpoint,
             json={"to": to, "text": text},
-            headers={"X-Portfolio-Secret": cfg.secret},
+            headers={
+                "Authorization": f"Bearer {cfg.gateway_token}",
+                "X-Portfolio-Secret": cfg.secret,
+            },
             timeout=10.0,
         )
         resp.raise_for_status()

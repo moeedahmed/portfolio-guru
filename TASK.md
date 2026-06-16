@@ -1,5 +1,50 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-16 addendum — WhatsApp bridge activated after outbound-auth fix.**
+>
+> Problem: code was built and the installed WhatsApp bundle was patched, but the
+> activation path was still wrong. `PORTFOLIO_OUTBOUND_URL` had been mapped to
+> `PORTFOLIO_BRIDGE_URL`, which points at the Portfolio backend. That made the
+> backend POST the WhatsApp reply to itself:
+> `/api/channels/whatsapp/emgurus/send` on port 8099 returned 404. A direct call
+> to the OpenClaw gateway route on port 18789 then returned 401 because the route
+> is registered as `auth: "plugin"` and needs gateway bearer auth in addition to
+> the Portfolio shared secret.
+>
+> Fix:
+>
+> - `backend/webhook_server.py` now requires
+>   `PORTFOLIO_OUTBOUND_GATEWAY_TOKEN` for outbound WhatsApp sends and includes
+>   it as `Authorization: Bearer ...` alongside `X-Portfolio-Secret`.
+> - `backend/run_local.sh` now defaults `PORTFOLIO_OUTBOUND_URL` to the local
+>   OpenClaw gateway (`http://127.0.0.1:18789`) instead of reusing
+>   `PORTFOLIO_BRIDGE_URL`.
+> - `backend/tests/test_portfolio_inbound_bridge.py` now proves outbound config
+>   stays inert without the gateway token and that handled turns report
+>   `reply_sent` correctly.
+>
+> Live activation:
+>
+> - Restarted only the Portfolio webhook process on port 8099 with BWS-loaded
+>   Portfolio secrets and the running gateway token in
+>   `PORTFOLIO_OUTBOUND_GATEWAY_TOKEN`.
+> - Did not restart or stop Telegram. Post-smoke channel status showed Telegram
+>   emgurus/founder/guardian/medic/openclaw all running and connected.
+> - Private WhatsApp smoke through `/api/portfolio/inbound` returned
+>   `{"disposition":"handle","reply_sent":true,"fresh_start":true}` and channel
+>   status showed WhatsApp `emgurus` outbound activity `just now`.
+>
+> Verification:
+>
+> - `bash -n backend/run_local.sh` → passed.
+> - `backend/venv/bin/python -m pytest backend/tests/test_portfolio_inbound_bridge.py -q`
+>   → 16 passed.
+>
+> Release classification: **Released / live bridge smoke passed** for the
+> backend-to-WhatsApp outbound leg. The remaining user-facing check is one
+> Moeed-sent quoted WhatsApp reply to prove the front-door quoted-message
+> selection uses `replyToBody` on the live WhatsApp Web path.
+
 > **2026-06-15 addendum — EMGurus WhatsApp Gateway bridge: outbound reply path.**
 > Scope: wire the first real Portfolio Guru workflow response back to the WhatsApp
 > user through the OpenClaw gateway. Offline/local implementation only — no live
@@ -50,9 +95,8 @@
 > Result:
 >
 > - Portfolio Guru launcher now exports the outbound aliases expected by
->   `backend/webhook_server.py`: `PORTFOLIO_OUTBOUND_URL` from mapped
->   `PORTFOLIO_BRIDGE_URL`, `PORTFOLIO_OUTBOUND_ACCOUNT_ID=emgurus`, and
->   `PORTFOLIO_OUTBOUND_SECRET` from mapped `PORTFOLIO_BRIDGE_SECRET`.
+>   `backend/webhook_server.py`. Superseded on 2026-06-16: outbound URL must
+>   point to the OpenClaw gateway, not mapped `PORTFOLIO_BRIDGE_URL`.
 > - Focused Portfolio bridge test re-run with the real backend venv:
 >   `./backend/venv/bin/python -m pytest backend/tests/test_portfolio_inbound_bridge.py -q`
 >   → 15 passed.

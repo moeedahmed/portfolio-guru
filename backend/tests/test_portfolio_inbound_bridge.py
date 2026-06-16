@@ -176,6 +176,7 @@ def test_invalid_scope_is_rejected(client: TestClient):
 _OUTBOUND_URL = "http://gateway.local"
 _OUTBOUND_ACCOUNT = "wa-account-1"
 _OUTBOUND_SECRET = "outbound-secret"
+_OUTBOUND_GATEWAY_TOKEN = "gateway-token"
 
 
 @pytest.fixture
@@ -185,6 +186,7 @@ def outbound_client(monkeypatch) -> tuple[TestClient, list[tuple[str, str]]]:
     monkeypatch.setenv("PORTFOLIO_OUTBOUND_URL", _OUTBOUND_URL)
     monkeypatch.setenv("PORTFOLIO_OUTBOUND_ACCOUNT_ID", _OUTBOUND_ACCOUNT)
     monkeypatch.setenv("PORTFOLIO_OUTBOUND_SECRET", _OUTBOUND_SECRET)
+    monkeypatch.setenv("PORTFOLIO_OUTBOUND_GATEWAY_TOKEN", _OUTBOUND_GATEWAY_TOKEN)
 
     captured: list[tuple[str, str]] = []
 
@@ -278,6 +280,7 @@ def test_outbound_failure_reported_safely_without_kaizen_touch(
     monkeypatch.setenv("PORTFOLIO_OUTBOUND_URL", _OUTBOUND_URL)
     monkeypatch.setenv("PORTFOLIO_OUTBOUND_ACCOUNT_ID", _OUTBOUND_ACCOUNT)
     monkeypatch.setenv("PORTFOLIO_OUTBOUND_SECRET", _OUTBOUND_SECRET)
+    monkeypatch.setenv("PORTFOLIO_OUTBOUND_GATEWAY_TOKEN", _OUTBOUND_GATEWAY_TOKEN)
 
     async def _failing_send(to: str, text: str, cfg: object) -> None:
         raise RuntimeError("gateway unreachable")
@@ -308,3 +311,12 @@ def test_direct_handled_without_outbound_configured_still_returns_handle(client:
     data = resp.json()
     assert data["disposition"] == "handle"
     assert data["reply_sent"] is False
+
+
+def test_outbound_config_requires_gateway_token(monkeypatch):
+    monkeypatch.setenv("PORTFOLIO_OUTBOUND_URL", _OUTBOUND_URL)
+    monkeypatch.setenv("PORTFOLIO_OUTBOUND_ACCOUNT_ID", _OUTBOUND_ACCOUNT)
+    monkeypatch.setenv("PORTFOLIO_OUTBOUND_SECRET", _OUTBOUND_SECRET)
+    monkeypatch.delenv("PORTFOLIO_OUTBOUND_GATEWAY_TOKEN", raising=False)
+
+    assert webhook_server._resolve_outbound_config() is None
