@@ -323,6 +323,61 @@ def _make_initial_gathering_reply() -> ChannelReply:
     )
 
 
+_RICH_CASE_WORD_THRESHOLD = 15
+
+
+def _has_rich_case_content(text: str | None) -> bool:
+    """True when text is substantive enough to route directly to the drafting path.
+
+    Pure word-count heuristic — no LLM call.  Short greetings and vague help
+    requests continue to the gathering prompt; detailed case descriptions skip
+    it and receive a form recommendation with targeted missing-info asks.
+    """
+    if not text:
+        return False
+    return len(text.split()) >= _RICH_CASE_WORD_THRESHOLD
+
+
+async def _make_case_insight_reply(text: str) -> ChannelReply:
+    """Draft-aware reply when the inbound message is a substantive clinical case.
+
+    Calls recommend_form_types to surface the most applicable WPBA form, then
+    returns a ChannelReply naming the form, stating the rationale, and asking
+    only for details genuinely absent from the description.  No Kaizen write
+    occurs — this is a recommendation and targeted fact-gather, not a filing.
+    Falls back to the standard gathering prompt if recommendation fails.
+    """
+    from extractor import recommend_form_types
+    from form_display import public_form_name
+
+    try:
+        recommendations = await recommend_form_types(text)
+    except Exception as exc:
+        logger.warning("Form recommendation failed, using gathering prompt: %s", exc)
+        return _make_initial_gathering_reply()
+
+    if not recommendations:
+        return _make_initial_gathering_reply()
+
+    top = recommendations[0]
+    form_label = public_form_name(top.form_type) or top.form_type
+
+    body = (
+        f"Based on your description, the recommended WPBA form is:\n"
+        f"{form_label} ({top.form_type})\n\n"
+        f"{top.rationale}\n\n"
+        "To complete your draft I need a few details:\n"
+        "- Date of the activity (dd/mm/yyyy)\n"
+        "- Your training grade and current placement\n"
+        "- Your specific role or contribution\n"
+        "- Supervisor / assessor name and grade\n"
+        "- Key metrics or outcomes (if applicable)\n\n"
+        "Reply with the above and I'll prepare your portfolio entry."
+    )
+
+    return ChannelReply(body=body, continuation=None)
+
+
 async def _send_portfolio_turn_reply(
     to: str,
     text: str,
@@ -370,7 +425,10 @@ async def portfolio_inbound(
         outbound_cfg = _resolve_outbound_config()
         reply_sent = False
         if outbound_cfg is not None:
-            reply = _make_initial_gathering_reply()
+            if _has_rich_case_content(body.text):
+                reply = await _make_case_insight_reply(body.text or "")
+            else:
+                reply = _make_initial_gathering_reply()
             rendered = render_numbered(reply)
             try:
                 await _send_portfolio_turn_reply(body.conversation_id, rendered, outbound_cfg)

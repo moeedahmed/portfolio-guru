@@ -28,6 +28,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import webhook_server
+from channel_actions import ChannelReply
 
 _SECRET = "test-gateway-secret"
 
@@ -320,3 +321,127 @@ def test_outbound_config_requires_gateway_token(monkeypatch):
     monkeypatch.delenv("PORTFOLIO_OUTBOUND_GATEWAY_TOKEN", raising=False)
 
     assert webhook_server._resolve_outbound_config() is None
+
+
+# ---------------------------------------------------------------------------
+# Drafting path tests — rich case vs. generic intake routing
+# ---------------------------------------------------------------------------
+# When a HANDLE turn carries a detailed case description (>= _RICH_CASE_WORD_THRESHOLD
+# words), the bridge should call _make_case_insight_reply and return a form
+# recommendation with targeted missing-info asks, not the generic gathering prompt.
+
+
+_RICH_CASE_TEXT = (
+    "I completed an ED sepsis QI project with baseline audit, "
+    "intervention and re-audit. Can you draft this for portfolio?"
+)
+
+
+def test_has_rich_case_content_false_for_short_and_empty():
+    assert not webhook_server._has_rich_case_content(None)
+    assert not webhook_server._has_rich_case_content("")
+    assert not webhook_server._has_rich_case_content("help")
+    assert not webhook_server._has_rich_case_content("58M chest pain CBD reflection")
+
+
+def test_has_rich_case_content_true_for_substantive_case():
+    assert webhook_server._has_rich_case_content(_RICH_CASE_TEXT)
+
+
+def test_rich_case_text_invokes_draft_insight_reply_not_gathering_prompt(
+    monkeypatch,
+    outbound_client,
+):
+    """A detailed case (>= threshold words) must get a draft-style reply, not
+    the generic 'Please describe the clinical case' intake prompt."""
+    client, captured = outbound_client
+
+    async def _stub_insight(text: str) -> ChannelReply:
+        return ChannelReply(
+            body=(
+                "Based on your description, the recommended WPBA form is:\n"
+                "Quality Improvement Assessment Tool (QIAT)\n\n"
+                "QI/audit project with measurement and change; QIAT is the specific assessment form.\n\n"
+                "To complete your draft I need a few details:\n"
+                "- Date of the activity (dd/mm/yyyy)\n"
+                "- Your training grade and current placement"
+            )
+        )
+
+    monkeypatch.setattr(webhook_server, "_make_case_insight_reply", _stub_insight)
+
+    resp = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body(_RICH_CASE_TEXT),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["disposition"] == "handle"
+    assert data["reply_sent"] is True
+    assert len(captured) == 1
+    _, sent_text = captured[0]
+    # Draft recommendation content is present.
+    assert "QIAT" in sent_text
+    assert "Quality Improvement" in sent_text
+    # Generic intake prompt must NOT appear when the case is already rich.
+    assert "Please describe the clinical case" not in sent_text
+
+
+def test_short_generic_text_still_returns_gathering_prompt(outbound_client):
+    """Short or vague messages (below word threshold) must still get the
+    intake gathering prompt, not the draft path."""
+    client, captured = outbound_client
+    resp = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body("help"),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["disposition"] == "handle"
+    assert data["reply_sent"] is True
+    assert len(captured) == 1
+    _, sent_text = captured[0]
+    assert "clinical case" in sent_text.lower()
+
+
+def test_rich_case_insight_reply_falls_back_to_gathering_on_extractor_error(
+    monkeypatch,
+    outbound_client,
+):
+    """If _make_case_insight_reply's extractor call raises, it falls back to
+    the gathering prompt — the outbound still sends and reply_sent is True."""
+    client, captured = outbound_client
+
+    async def _stub_insight_failing(text: str) -> ChannelReply:
+        # Simulate extractor failure path — returns gathering prompt as fallback.
+        return webhook_server._make_initial_gathering_reply()
+
+    monkeypatch.setattr(webhook_server, "_make_case_insight_reply", _stub_insight_failing)
+
+    resp = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body(_RICH_CASE_TEXT),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["disposition"] == "handle"
+    assert data["reply_sent"] is True
+    _, sent_text = captured[0]
+    assert "clinical case" in sent_text.lower()
+
+
+def test_rich_case_without_outbound_config_still_returns_handle(client: TestClient):
+    """Even with no outbound config, a rich case HANDLE returns 200 with
+    reply_sent=False — the drafting path is not activated without outbound."""
+    resp = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body(_RICH_CASE_TEXT),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["disposition"] == "handle"
+    assert data["reply_sent"] is False
