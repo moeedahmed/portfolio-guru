@@ -2007,3 +2007,37 @@ backend/tests/test_flow_walker.py -q` → 201 passed.
 Runtime state:
 
 - Code is not live until the Mac Mini bot is restarted/deployed.
+
+---
+
+> **2026-06-16 addendum — Installed WhatsApp dist repair (outbound bridge).**
+>
+> Problem: `~/.openclaw/extensions/whatsapp/dist/monitor-Cl_seCU0.js` was built
+> from a pre-patch snapshot. `src/inbound/portfolio-outbound-route.ts` and the
+> wiring in `src/inbound/monitor.ts` were added after the last dist build, so the
+> loaded bundle did not contain `registerPortfolioOutboundRoute`.
+>
+> Action: Dist patched in place. The available local OpenClaw monorepo snapshot
+> is stale for this installed-extension source split, so it cannot prove the
+> installed runtime bundle without first reconciling the source package.
+>
+> - Backup: `dist/monitor-Cl_seCU0.js.bak-20260616-071724`
+> - Added `import { registerPluginHttpRoute } from "openclaw/plugin-sdk/webhook-ingress"` at top of `monitor-Cl_seCU0.js`
+> - Inlined `registerPortfolioOutboundRoute` function (matches `src/inbound/portfolio-outbound-route.ts` logic exactly) under `#region portfolio-outbound-route.ts` comment at line 56
+> - Added `registerPortfolioOutboundRoute({ accountId, sendApi })` call after `createWebSendApi` in `attachWebInboxToSocket`
+> - Added `unregisterPortfolioOutboundRoute()` call inside `close()` handler
+>
+> Verification:
+>
+> - `rg "registerPortfolioOutboundRoute|registerPluginHttpRoute|PORTFOLIO_BRIDGE_SECRET|x-portfolio-secret|portfolio-outbound"` over dist → required symbols confirmed present
+> - `openclaw plugins inspect whatsapp` → Status: loaded, Source: `~/.openclaw/extensions/whatsapp/dist/index.js`
+> - `registerPluginHttpRoute` confirmed as function in `openclaw/plugin-sdk/webhook-ingress` (v2026.6.6)
+> - Portfolio Guru bridge tests: `backend/venv/bin/python -m pytest backend/tests/test_portfolio_inbound_bridge.py -q` → 15 passed
+> - PORTFOLIO_BRIDGE_SECRET: PRESENT in BWS
+>
+> Remaining blocker:
+>
+> **Gateway restart required.** The patched dist is on disk but the gateway still
+> has the old bundle loaded in memory. Operator must run the protected safe
+> restart path (`openclaw gateway restart --safe --json`) to pick up the new
+> dist. No live send until restart is confirmed.
