@@ -109,6 +109,24 @@ Proof:
 - Stripe tier flip test path green or blocked with exact account/access reason.
 - Dashboard reflects upgraded tier or the blocker is explicit.
 
+Status (2026-06-17, worker pass):
+
+- In-process Stripe path proven deterministically.
+  `backend/tests/test_stripe_webhook_e2e.py` drives `POST /webhook/stripe` and
+  `POST /api/create-checkout-session` via FastAPI `TestClient` with
+  `stripe.Webhook.construct_event`, `Subscription.retrieve`, `Session.create`,
+  and the Supabase JWT/auth lookup monkeypatched. SQLite
+  `user_profiles.tier` flips `free -> pro_plus` on
+  `checkout.session.completed` and `pro_plus -> free` on
+  `invoice.payment_failed`. Existing `tests/test_stripe_handler.py` (6
+  cases) remains green.
+- Recipe and live-mode gate documented in `docs/STRIPE_LOCAL_PROOF.md`.
+- Live Stripe-CLI proof (`stripe listen` + `stripe trigger`) stays a
+  foreground gate. Autonomous-live blockers: production-effective Stripe
+  key handling, `cloudflared` tunnel state, Supabase service-role key
+  exposure, and live price ID matching. All sit outside the worker's
+  no-touch rules.
+
 ## Sprint 4 — Hackathon Business-Agent Ledger
 
 Owner: Claude Code implementation worker for code/docs; foreground verifies
@@ -263,11 +281,11 @@ Before recording:
 > Verification:
 >
 > - OpenClaw: `node scripts/run-vitest.mjs
->   extensions/whatsapp/src/inbound/portfolio-outbound-route.test.ts` → 11 passed.
+extensions/whatsapp/src/inbound/portfolio-outbound-route.test.ts` → 11 passed.
 >   `node scripts/run-vitest.mjs
->   extensions/whatsapp/src/auto-reply/monitor/portfolio-bridge.test.ts` → 17 passed (unchanged).
+extensions/whatsapp/src/auto-reply/monitor/portfolio-bridge.test.ts` → 17 passed (unchanged).
 > - Portfolio Guru: `venv/bin/python3 -m pytest tests/test_portfolio_inbound_bridge.py
->   -v` → 15 passed. Full offline gate → **1408 passed, 0 failed, 16 deselected**.
+-v` → 15 passed. Full offline gate → **1408 passed, 0 failed, 16 deselected**.
 >
 > Release classification: **local/build-complete, proof-pending**.
 >
