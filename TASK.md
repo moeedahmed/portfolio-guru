@@ -1,4 +1,181 @@
-# Active Task — Kaizen Mapping Sprint
+# Active Task — Hermes Hackathon Production Cut
+
+> **2026-06-17 execution approval.**
+> Moeed approved proceeding with Claude Code for an end-to-end internal
+> execution workstream to make Portfolio Guru production-ready enough for the
+> Hermes Agent Accelerated Business Hackathon by 2026-06-30. Use Claude Code
+> heavily for implementation slices; keep live credentials, live Kaizen writes,
+> external/public submission, payment/account actions, and deployment decisions
+> with the foreground/orchestrator.
+
+## Hackathon Objective
+
+By 2026-06-30, ship a reliable hackathon demo and beta-ready product cut that
+shows Portfolio Guru as an autonomous medical-training business agent:
+
+1. Receives a trainee case note.
+2. Converts it into structured RCEM Kaizen portfolio evidence.
+3. Maps it to curriculum / ARCP / Portfolio Health gaps.
+4. Files a Kaizen draft with explicit human approval.
+5. Shows dashboard evidence, usage, health, and account state.
+6. Proves an earning path through Stripe.
+7. Proves a bounded spend/operations path through Stripe Skills/Hermes,
+   NVIDIA/Nemotron, or a clearly labelled demo ledger.
+8. Keeps clinical and product safety boundaries visible.
+
+## Locked Product Decision
+
+- Web app is the public front door: trust, onboarding, dashboard, pricing,
+  account linking, portfolio health, case history, upgrade, and conversion.
+- Telegram remains the fastest daily action engine for voice/text/photo/document
+  case capture and Kaizen draft filing.
+- WhatsApp is later routed convenience, not the public v1 identity.
+- Do not rebuild the dashboard or create generic agent theatre.
+
+## Sprint 1 — Onboarding And Trust Surface
+
+Owner: Claude Code implementation worker, foreground verifies.
+
+Scope:
+
+- Fix bot URL/casing consistently across web and bot surfaces.
+- Tighten `/portfolio`, dashboard, account-linking, pricing, and safety copy.
+- Add/clarify first-case onboarding: signup -> link Telegram -> connect Kaizen
+  -> send first case.
+- Make safety language clear but not scary: draft-only, human approval before
+  Kaizen write, no patient identifiers, no RCEM endorsement claim, Portfolio
+  Health is directional planning support.
+- Keep changes scoped to Portfolio Guru and EMGurus Hub Portfolio module.
+
+No-touch:
+
+- No live Kaizen writes.
+- No Telegram live automated tests.
+- No WhatsApp public promise.
+- No production Stripe billing action.
+- No Vercel deploy or GitHub push without foreground release gate.
+
+Proof:
+
+- Portfolio Guru relevant tests/preflight for touched bot/backend surfaces.
+- EMGurus Hub build for touched web surfaces.
+- Copy scan for forbidden claims: RCEM endorsement, guaranteed ARCP outcome,
+  auto-submit/sign/send/approve/reject/delete, public WhatsApp v1 promise.
+
+## Sprint 2 — Activation And Failure Telemetry
+
+Owner: Claude Code implementation worker after Sprint 1 is green.
+
+Events to add or verify:
+
+- signup
+- link token generated
+- bot linked
+- credentials connected
+- draft previewed
+- draft saved
+- health viewed
+- checkout started
+- checkout completed
+- filing failed
+
+Rules:
+
+- Telemetry must be best-effort and must never break filing.
+- Prefer existing logging/analytics patterns before adding new infrastructure.
+- Failed filing must have a visible, reportable reason for beta support.
+
+Proof:
+
+- Focused tests or deterministic log/assertion path for event emission.
+- Existing filing tests remain green.
+
+## Sprint 3 — Dashboard, Portfolio Health, And Stripe Proof
+
+Owner: Claude Code implementation worker, foreground verifies Stripe/live gates.
+
+Scope:
+
+- Make dashboard show link status, credential status, usage, tier, recent cases,
+  Portfolio Health/ARCP planning, and next best action clearly.
+- Soften ARCP Health naming/copy where needed: directional planning aid, not
+  official outcome assurance.
+- Verify/fix web checkout copy to match implemented checkout.
+- Prove Stripe test checkout -> webhook -> tier flip, or record exact blocker.
+
+Proof:
+
+- Hub build green.
+- Stripe tier flip test path green or blocked with exact account/access reason.
+- Dashboard reflects upgraded tier or the blocker is explicit.
+
+## Sprint 4 — Hackathon Business-Agent Ledger
+
+Owner: Claude Code implementation worker for code/docs; foreground verifies
+external access.
+
+Scope:
+
+- Add a demo-visible ledger showing earn event, spend event, operating status,
+  and guardrail outcome.
+- Use Stripe Skills/Hermes Projects if accessible in time.
+- Use NVIDIA/Nemotron for one bounded visible reasoning action only if access is
+  clean; otherwise cut it and use an honest demo ledger.
+- No real-money assessor payouts.
+
+Proof:
+
+- Demo-visible evidence exists.
+- Ledger labels test/demo spend honestly.
+- No public claim exceeds what the product actually does.
+
+## Demo Case And Recording Plan
+
+Use a synthetic/anonymised EM case. Preferred hero case: messy shift note from
+resus that can reasonably become a CBD or Mini-CEX, maps to one clear Portfolio
+Health gap, and produces a safe reflection without invented facts.
+
+Before recording:
+
+- Run the reset-state path twice: web signup/link surface -> Telegram case ->
+  preview -> approval-gated draft save or deterministic mocked save -> dashboard
+  record -> health view -> Stripe/ledger proof.
+- Record a fallback take that uses pre-seeded synthetic data if live Kaizen is
+  slow or credentials/manual approval blocks the run.
+
+## Day-By-Day Plan
+
+- 2026-06-17: lock plan, launch Sprint 1, choose synthetic case, verify
+  Stripe/NVIDIA access enough to decide whether to include them.
+- 2026-06-18: complete onboarding/linking/first-case path; launch activation
+  event sprint; begin dashboard/Portfolio Health copy pass.
+- 2026-06-19: prove Stripe checkout/tier flip; add failure reason visibility;
+  add or sharpen admin support/failure view.
+- 2026-06-20: live private smoke rehearsal with Moeed-owned credentials/manual
+  approval if available; fix only blockers from that path.
+- 2026-06-21 to 2026-06-23: hackathon ledger; Stripe Skills/Hermes proof;
+  NVIDIA/Nemotron bounded action or cut.
+- 2026-06-24 to 2026-06-26: demo hardening and reset-state dry runs. No new
+  feature work unless it fixes a demo failure.
+- 2026-06-27 to 2026-06-30: record, write submission, final proof pass, submit
+  early.
+
+## Hackathon Done Criteria
+
+- One synthetic case completes the full story.
+- Web surface looks trustworthy enough for beta.
+- Telegram remains the action engine.
+- Kaizen filing is draft-only and approval-gated.
+- Dashboard shows evidence, health, usage, and account state.
+- Stripe earning story is credible.
+- Spend/operations story is bounded and honest.
+- Safety boundaries are visible.
+- Demo script matches reality.
+- No rebuild, no generic agent theatre.
+
+---
+
+# Previous Active Task — Kaizen Mapping Sprint
 
 > **2026-06-17 public product plan.**
 > Canonical strategy for turning Portfolio Guru from private beta / hackathon
