@@ -2565,7 +2565,7 @@ def _recommendation_form_display_name(form_type: str, curriculum: str = "2025") 
     return name
 
 
-def _track_funnel_event(context, event: str, **metadata) -> None:
+def _track_funnel_event(context, event: str, *, update_last: bool = True, **metadata) -> None:
     """Log PHI-free UX funnel events for friction analysis."""
     safe = {
         key: value
@@ -2573,7 +2573,8 @@ def _track_funnel_event(context, event: str, **metadata) -> None:
         if key in {"source", "form_type", "state", "count", "has_draft", "has_missing", "tier", "reason"}
     }
     try:
-        context.user_data["last_funnel_event"] = event
+        if update_last:
+            context.user_data["last_funnel_event"] = event
     except Exception:
         pass
     logger.info("Portfolio Guru funnel event=%s metadata=%s", event, safe)
@@ -3417,7 +3418,13 @@ async def _show_draft_review(
     missing_required, missing_optional, _ = _missing_template_fields(draft, form_type)
     has_missing = bool(missing_required or missing_optional)
     _track_funnel_event(context, "draft_shown", form_type=form_type, has_missing=has_missing)
-    _track_funnel_event(context, "draft_previewed", form_type=form_type, has_missing=has_missing)
+    _track_funnel_event(
+        context,
+        "draft_previewed",
+        form_type=form_type,
+        has_missing=has_missing,
+        update_last=False,
+    )
     preview = _format_draft_preview(draft, _chosen_form_reason(context, form_type))
     text = preview + _REPLY_HINT_SUFFIX
     keyboard = _build_approval_keyboard(
@@ -6743,7 +6750,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _store_draft(context, draft)
         context.user_data.pop("awaiting_detail", None)
         _track_funnel_event(context, "draft_shown", form_type=chosen_form, has_missing=True)
-        _track_funnel_event(context, "draft_previewed", form_type=chosen_form, has_missing=True)
+        _track_funnel_event(
+            context,
+            "draft_previewed",
+            form_type=chosen_form,
+            has_missing=True,
+            update_last=False,
+        )
         preview = _format_draft_preview(draft, _chosen_form_reason(context, chosen_form))
         await _safe_edit_text(
             query.message,
