@@ -128,6 +128,7 @@ async def _handle_constructed_event(event, event_type: str | None) -> dict:
         await set_user_tier(user_id, tier,
                            stripe_customer_id=_get(session, "customer"),
                            stripe_subscription_id=subscription_id)
+        logger.info("Portfolio Guru funnel event=checkout_completed user_id=%s tier=%s", user_id, tier)
         return {"action": "upgraded", "user_id": user_id, "tier": tier}
 
     if event_type == "customer.subscription.deleted":

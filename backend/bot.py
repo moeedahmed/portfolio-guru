@@ -2570,7 +2570,7 @@ def _track_funnel_event(context, event: str, **metadata) -> None:
     safe = {
         key: value
         for key, value in metadata.items()
-        if key in {"source", "form_type", "state", "count", "has_draft", "has_missing"}
+        if key in {"source", "form_type", "state", "count", "has_draft", "has_missing", "tier", "reason"}
     }
     try:
         context.user_data["last_funnel_event"] = event
@@ -3417,6 +3417,7 @@ async def _show_draft_review(
     missing_required, missing_optional, _ = _missing_template_fields(draft, form_type)
     has_missing = bool(missing_required or missing_optional)
     _track_funnel_event(context, "draft_shown", form_type=form_type, has_missing=has_missing)
+    _track_funnel_event(context, "draft_previewed", form_type=form_type, has_missing=has_missing)
     preview = _format_draft_preview(draft, _chosen_form_reason(context, form_type))
     text = preview + _REPLY_HINT_SUFFIX
     keyboard = _build_approval_keyboard(
@@ -4007,6 +4008,7 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await _clear_local_portfolio_account_data(user_id, reason="kaizen_account_switch")
 
     store_credentials(user_id, username, password)
+    _track_funnel_event(context, "credentials_connected")
     context.user_data.pop("setup_username", None)
     context.user_data.pop("_setup_state_hint", None)
 
@@ -5413,6 +5415,8 @@ async def link_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         logger.warning("link_command errored: %s", exc, exc_info=True)
         ok, message = False, "Couldn't reach the web service. Try again in a moment."
 
+    if ok:
+        _track_funnel_event(context, "bot_linked")
     icon = "✅" if ok else "⚠️"
     await update.message.reply_text(f"{icon} {message}")
     return ConversationHandler.END
@@ -5520,6 +5524,7 @@ async def handle_upgrade_button(update: Update, context: ContextTypes.DEFAULT_TY
     try:
         from stripe_handler import create_checkout_session
         url = await create_checkout_session(update.effective_user.id, tier)
+        _track_funnel_event(context, "checkout_started", tier=tier)
         await _flow_edit(
             update, context,
             f"⭐ Upgrade to {tier_label}\n\nTap below to complete payment:",
@@ -5829,6 +5834,7 @@ async def _run_health_analysis(
       - send_photo_fn(file_handle): send the chart image
       - fail_fn(text): render an error after the analysis call fails
     """
+    logger.info("Portfolio Guru funnel event=health_viewed user_id=%s", user_id)
     await chat.send_action(constants.ChatAction.TYPING)
 
     profile = _get_or_default_health_profile(user_id)
@@ -6737,6 +6743,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _store_draft(context, draft)
         context.user_data.pop("awaiting_detail", None)
         _track_funnel_event(context, "draft_shown", form_type=chosen_form, has_missing=True)
+        _track_funnel_event(context, "draft_previewed", form_type=chosen_form, has_missing=True)
         preview = _format_draft_preview(draft, _chosen_form_reason(context, chosen_form))
         await _safe_edit_text(
             query.message,
@@ -8629,6 +8636,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             status="timeout",
             error="Filing exceeded 300s timeout",
         )
+        _track_funnel_event(context, "filing_failed", form_type=form_type, reason="timeout")
         kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS.get(form_type, '')}" if FORM_UUIDS.get(form_type) else "https://kaizenep.com/activities"
         timeout_msg = (
             "⏱ Filing took too long — Kaizen may be slow right now. "
@@ -8661,6 +8669,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             status="exception",
             error=str(e),
         )
+        _track_funnel_event(context, "filing_failed", form_type=form_type, reason="exception")
         # Keep draft data for retry — do NOT clear user_data
         retry_keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_filing")],
@@ -8799,6 +8808,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         context.user_data["last_amend_draft"] = amend_draft_data
         context.user_data["last_amend_case_text"] = amend_case_text
         context.user_data["last_amend_chosen_form"] = amend_chosen_form_type
+        _track_funnel_event(context, "draft_saved", form_type=form_type)
 
     # Only treat the post-save URL as a real draft link when the save itself
     # was credible. Partial-with-error means the save may not have landed, so
@@ -9021,6 +9031,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         # _classify_filing_failure(); see that helper for the marker phrases
         # each filer raises.
         classification = _classify_filing_failure(error, skipped, status, filled)
+        _track_funnel_event(context, "filing_failed", form_type=form_type, reason=classification)
         kaizen_url = (
             f"https://kaizenep.com/events/new-section/{FORM_UUIDS[form_type]}"
             if platform == "kaizen" and FORM_UUIDS.get(form_type)
