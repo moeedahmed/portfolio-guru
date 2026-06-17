@@ -1,5 +1,14 @@
 # Active Task — Kaizen Mapping Sprint
 
+> **2026-06-17 public product plan.**
+> Canonical strategy for turning Portfolio Guru from private beta / hackathon
+> asset into a viable public-facing product now lives at
+> `docs/PUBLIC_PRODUCT_PLAN_2026-06-17.md`.
+> Decision: web-first public front door, Telegram-first action engine, WhatsApp
+> later as a routed convenience layer, dashboard as the trust/conversion surface.
+> Read that plan before editing Telegram onboarding, WhatsApp bridge, EMGurus Hub
+> Portfolio pages, pricing, ARCP/Portfolio Health, or launch/beta workflows.
+
 > **2026-06-16 addendum — WhatsApp bridge activated after outbound-auth fix.**
 >
 > Problem: code was built and the installed WhatsApp bundle was patched, but the
