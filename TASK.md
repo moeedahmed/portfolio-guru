@@ -147,6 +147,78 @@ Proof:
 - Ledger labels test/demo spend honestly.
 - No public claim exceeds what the product actually does.
 
+## Sprint 4b — Demo / Rehearsal Kit
+
+Owner: Claude Code implementation worker, foreground reviews narration
+and the live-gated steps.
+
+Scope:
+
+- Add a synthetic / anonymised hero case asset (CBD on chest pain,
+  ACCS CT2) suitable for the 90-second take, with no patient
+  identifiers and no fabricated personal facts.
+- Add a deterministic reset-state rehearsal runbook for: web
+  signup/link surface -> Telegram case -> draft preview ->
+  approval-gated draft save or deterministic mocked fallback ->
+  dashboard record -> Portfolio Health -> Stripe / agent-ledger
+  proof.
+- Add a 90-second demo script that labels every beat as `[demo]`,
+  `[test]`, `[manual]`, or `[live-gated]` and never makes a public
+  claim that overshoots the codebase.
+- Light-touch web copy: link the rehearsal assets from the agent
+  ledger card so the narrative is discoverable. No dashboard rebuild.
+- Lightweight pytest gate that scans the new docs for forbidden
+  public claims (RCEM endorsement, guaranteed ARCP, auto-submit /
+  sign / send / approve / reject / delete in Kaizen, public WhatsApp
+  v1 promise, real-money assessor payouts) and for obvious patient
+  identifiers in the hero case.
+
+Status (2026-06-17, worker pass):
+
+- Hero case landed at `docs/demo/HERO_CASE_2026-06-30.md`. Synthetic
+  ACCS CT2 chest-pain shift note, age-band only, draft fields match
+  the deterministic extractor shape, declares its own provenance.
+- Reset-state rehearsal landed at
+  `docs/demo/REHEARSAL_RUNBOOK.md`. Eight numbered steps from web
+  front door through ledger, every step honesty-labelled. Pre-take
+  test run is gated on `tests/test_stripe_webhook_e2e.py`,
+  `tests/test_stripe_handler.py`, and the new
+  `tests/test_demo_assets.py`.
+- 90-second script landed at
+  `docs/demo/DEMO_SCRIPT_90S.md`. Beat sheet with timestamps, a
+  `What the script never says` section, and a fallback take rule for
+  the Kaizen leg.
+- Hub agent ledger card now links the three demo docs from
+  `src/modules/portfolio/pages/BusinessAgentLedger.tsx` (one extra
+  paragraph in the honesty card, no layout rebuild).
+- New deterministic gate at `backend/tests/test_demo_assets.py`
+  (15 cases) passes locally; covers existence, forbidden public
+  claims (section-scoped negation), auto-Kaizen-action verbs under
+  negation, hero-case identifier scan, synthetic-provenance
+  declaration, cross-document linking, and presence of honesty
+  labels.
+
+Remaining blockers (foreground gates, not autonomous-worker scope):
+
+- Live Stripe-CLI proof: still gated on founder-supplied test/live
+  keys, `cloudflared` tunnel for `stripe.solvorolabs.com`, and a
+  matched `whsec_…`. The in-process Stripe test path proves the
+  router and tier flip deterministically; the live forward-and-trigger
+  proof remains a manual step (see `docs/STRIPE_LOCAL_PROOF.md`).
+- Live Kaizen smoke: requires founder-owned Kaizen credentials loaded
+  into the CDP-attached Chrome session and a manual approval tap on
+  the day. The rehearsal runbook calls this a `[live-gated]` primary
+  take with a `[demo]` deterministic fallback; the worker does not
+  attempt live writes.
+- NVIDIA / Nemotron decision: spend leg is labelled as a bounded
+  demo entry in the agent ledger and in the script. A go/no-go on
+  real test-mode access is still required before the take. If access
+  is not clean, the entry stays as a `Demo / Test` row and the
+  narration does not claim live inference spend.
+- Public launch privacy / terms copy: out of scope for the hackathon
+  take. Before any paid public launch, GDPR review and T&Cs must be
+  in place per `docs/PUBLIC_PRODUCT_PLAN_2026-06-17.md`.
+
 ## Demo Case And Recording Plan
 
 Use a synthetic/anonymised EM case. Preferred hero case: messy shift note from
