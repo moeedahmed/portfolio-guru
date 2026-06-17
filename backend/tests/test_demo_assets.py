@@ -30,8 +30,9 @@ DEMO_DIR = REPO_ROOT / "docs" / "demo"
 HERO_CASE = DEMO_DIR / "HERO_CASE_2026-06-30.md"
 REHEARSAL_RUNBOOK = DEMO_DIR / "REHEARSAL_RUNBOOK.md"
 DEMO_SCRIPT = DEMO_DIR / "DEMO_SCRIPT_90S.md"
+HERMES_MAP = DEMO_DIR / "HERMES_CAPABILITY_MAP.md"
 
-ALL_DEMO_DOCS = (HERO_CASE, REHEARSAL_RUNBOOK, DEMO_SCRIPT)
+ALL_DEMO_DOCS = (HERO_CASE, REHEARSAL_RUNBOOK, DEMO_SCRIPT, HERMES_MAP)
 
 
 # ── existence ──────────────────────────────────────────────────────────
@@ -246,3 +247,28 @@ def test_doc_uses_honesty_labels(doc: Path) -> None:
         f"that touches an external system must carry [demo], [test], "
         f"[manual], or [live-gated]."
     )
+
+
+# ── capability map must not overclaim a Hermes integration ─────────────
+
+
+def test_capability_map_discloses_no_hermes_runtime_dependency() -> None:
+    """The judge-facing capability map maps PG capabilities to Hermes
+    framing. It must state plainly that PG does not run on the Hermes
+    runtime, that Gemini is the live engine, and that any Hermes/Nemotron
+    model slot is a roadmap target — so the map can never be read as
+    claiming an integration that does not exist in the codebase.
+    """
+    lower = HERMES_MAP.read_text(encoding="utf-8").lower()
+
+    assert "does not currently run on the hermes runtime" in lower or (
+        "not" in lower and "hermes runtime" in lower
+    ), "capability map must deny a Hermes-runtime dependency"
+    assert "gemini" in lower and "live" in lower, (
+        "capability map must name Gemini as the live extraction engine"
+    )
+    # Any Nemotron mention must be flagged as a non-live target slot.
+    if "nemotron" in lower:
+        assert "roadmap" in lower or "target" in lower or "not wired" in lower, (
+            "capability map mentions Nemotron without marking it roadmap/target"
+        )
