@@ -192,6 +192,13 @@ trainee-facing automation commands are not switched on in this cut.
 - We do not claim a public WhatsApp launch; WhatsApp is later routing.
 - The agent never auto-submits, auto-signs, auto-sends, auto-approves,
   auto-rejects, or auto-deletes on a supervisor's behalf.
+- **No shared Telegram token.** The Hermes profile is wired to the
+  separate test bot (`@portfolio_guru_test_bot`) using its own token
+  (`PORTFOLIO_GURU_VNEXT_TELEGRAM_BOT_TOKEN`). The live Portfolio Guru
+  beta bot uses a completely separate token
+  (`PORTFOLIO_GURU_TELEGRAM_BOT_TOKEN`). These two tokens are never
+  co-polled, swapped, or shared. The live beta is unaffected by any
+  Hermes test-bot activity.
 
 ## How a judge can verify in two minutes
 
