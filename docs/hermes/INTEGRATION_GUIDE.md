@@ -35,7 +35,7 @@ The three components and their responsibilities:
 
 | Component | Who owns it | Token it uses |
 |---|---|---|
-| Hermes agent profile | Hermes / OpenClaw | Test bot token (BWS: `PORTFOLIO_GURU_VNEXT_TELEGRAM_BOT_TOKEN`) |
+| Hermes agent profile | Hermes / OpenClaw | BWS secret: `TELEGRAM_BOT_TOKEN_PORTFOLIO_TEST` (OpenClaw alias: `PORTFOLIO_GURU_VNEXT_TELEGRAM_BOT_TOKEN`) |
 | Portfolio Guru deterministic engine | Portfolio Guru Python process | None (stateless, called in-process or via IPC) |
 | Live beta bot | Python process (`backend/bot.py`) | Live token (BWS: `PORTFOLIO_GURU_TELEGRAM_BOT_TOKEN`) |
 
@@ -48,10 +48,11 @@ loop.
 
 ## Token isolation (hard rule)
 
-**The test bot token (`PORTFOLIO_GURU_VNEXT_TELEGRAM_BOT_TOKEN`) is
-owned by the Hermes profile. The live beta token
-(`PORTFOLIO_GURU_TELEGRAM_BOT_TOKEN`) is owned by `backend/bot.py`.
-These tokens must never be co-polled, swapped, or shared.**
+**The test bot token (BWS secret name: `TELEGRAM_BOT_TOKEN_PORTFOLIO_TEST`;
+OpenClaw/runtime alias: `PORTFOLIO_GURU_VNEXT_TELEGRAM_BOT_TOKEN`) is owned
+by the Hermes profile. The live beta token (`PORTFOLIO_GURU_TELEGRAM_BOT_TOKEN`)
+is owned by `backend/bot.py`. These tokens must never be co-polled, swapped,
+or shared.**
 
 Telegram rejects a second `getUpdates` long-poll for the same token
 with a 409 Conflict error. If you see a 409 on the test bot, something
@@ -195,8 +196,9 @@ following:
 This sequence applies when all shadow-mode and preflight checks are
 clean. No step should be skipped.
 
-1. Confirm `PORTFOLIO_GURU_VNEXT_TELEGRAM_BOT_TOKEN` is in BWS and is
-   the test bot token (not the live beta token).
+1. Confirm BWS secret `TELEGRAM_BOT_TOKEN_PORTFOLIO_TEST` is the test
+   bot token (not the live beta token). The OpenClaw/runtime alias is
+   `PORTFOLIO_GURU_VNEXT_TELEGRAM_BOT_TOKEN`.
 2. Confirm no existing process is polling the test bot token
    (`getUpdates` or webhook). Resolve any 409 before proceeding.
 3. Start the Hermes agent with the profile from

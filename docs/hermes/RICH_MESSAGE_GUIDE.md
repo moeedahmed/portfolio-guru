@@ -8,8 +8,9 @@ message is intelligible even when rich rendering fails.
 **Scope.** This guide applies to the test bot only — the live beta bot
 uses the same python-telegram-bot stack but is a separate process with
 its own token (`PORTFOLIO_GURU_TELEGRAM_BOT_TOKEN`). The test bot token
-(`PORTFOLIO_GURU_VNEXT_TELEGRAM_BOT_TOKEN`) is separate and must never
-be shared with or co-polled alongside the live token. See
+(BWS secret name: `TELEGRAM_BOT_TOKEN_PORTFOLIO_TEST`; OpenClaw/runtime
+alias: `PORTFOLIO_GURU_VNEXT_TELEGRAM_BOT_TOKEN`) is separate and must
+never be shared with or co-polled alongside the live token. See
 [`INTEGRATION_GUIDE.md`](INTEGRATION_GUIDE.md) for the full token
 isolation rules.
 

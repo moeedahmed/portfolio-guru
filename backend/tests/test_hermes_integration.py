@@ -132,6 +132,52 @@ def test_hermes_doc_does_not_claim_direct_kaizen_write(doc: Path) -> None:
         )
 
 
+CAPABILITY_MAP = REPO_ROOT / "docs" / "demo" / "HERMES_CAPABILITY_MAP.md"
+
+
+# ── BWS secret name vs runtime alias ──────────────────────────────────────
+
+
+def test_integration_guide_names_actual_bws_secret() -> None:
+    """INTEGRATION_GUIDE must name TELEGRAM_BOT_TOKEN_PORTFOLIO_TEST as the BWS secret.
+
+    That is the key visible in Bitwarden; PORTFOLIO_GURU_VNEXT_TELEGRAM_BOT_TOKEN
+    is only the local/OpenClaw runtime alias and must not be presented as the BWS name.
+    """
+    text = INTEGRATION_GUIDE.read_text(encoding="utf-8")
+    assert "TELEGRAM_BOT_TOKEN_PORTFOLIO_TEST" in text, (
+        "INTEGRATION_GUIDE.md must contain 'TELEGRAM_BOT_TOKEN_PORTFOLIO_TEST' "
+        "(the actual BWS secret name). "
+        "PORTFOLIO_GURU_VNEXT_TELEGRAM_BOT_TOKEN is only the OpenClaw runtime alias."
+    )
+
+
+def test_docs_do_not_present_alias_as_bws_name() -> None:
+    """No Hermes doc or capability map may present the runtime alias as the BWS secret name.
+
+    Forbidden patterns that incorrectly imply PORTFOLIO_GURU_VNEXT_TELEGRAM_BOT_TOKEN
+    is a Bitwarden secret key:
+      - 'bws: `portfolio_guru_vnext_telegram_bot_token`'
+      - 'confirm `portfolio_guru_vnext_telegram_bot_token` is in bws'
+    """
+    forbidden = (
+        "bws: `portfolio_guru_vnext_telegram_bot_token`",
+        "confirm `portfolio_guru_vnext_telegram_bot_token` is in bws",
+    )
+    docs_to_check = list(ALL_HERMES_DOCS) + [CAPABILITY_MAP]
+    for doc in docs_to_check:
+        if not doc.is_file():
+            continue
+        lower = doc.read_text(encoding="utf-8").lower()
+        for pattern in forbidden:
+            assert pattern not in lower, (
+                f"{doc.name} contains {pattern!r}, which presents the OpenClaw "
+                "runtime alias as the Bitwarden secret name. Use "
+                "'BWS secret name: TELEGRAM_BOT_TOKEN_PORTFOLIO_TEST; "
+                "OpenClaw/runtime alias: PORTFOLIO_GURU_VNEXT_TELEGRAM_BOT_TOKEN' instead."
+            )
+
+
 # ── bridge contract: import clean ─────────────────────────────────────────
 
 

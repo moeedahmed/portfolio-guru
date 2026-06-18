@@ -43,8 +43,9 @@ Typical call sequence
 Token isolation reminder
 ------------------------
 This module never reads, stores, or logs Telegram bot tokens. The test
-bot token (``PORTFOLIO_GURU_VNEXT_TELEGRAM_BOT_TOKEN``) lives in BWS
-and is owned exclusively by the Hermes profile. The live beta token
+bot token (BWS secret name: ``TELEGRAM_BOT_TOKEN_PORTFOLIO_TEST``;
+OpenClaw/runtime alias: ``PORTFOLIO_GURU_VNEXT_TELEGRAM_BOT_TOKEN``) is
+owned exclusively by the Hermes profile. The live beta token
 (``PORTFOLIO_GURU_TELEGRAM_BOT_TOKEN``) belongs to the existing Python
 bot. These two tokens must never be co-polled, swapped, or shared.
 """
