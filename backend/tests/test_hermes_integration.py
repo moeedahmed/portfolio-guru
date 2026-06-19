@@ -19,6 +19,7 @@ No network, Telegram, Kaizen, BWS, or bot-token access in any test here.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -130,6 +131,101 @@ def test_hermes_doc_does_not_claim_direct_kaizen_write(doc: Path) -> None:
             f"{doc.name} contains {phrase!r} which incorrectly claims "
             f"the Hermes profile writes directly to Kaizen."
         )
+
+
+# ── concise-answer / progressive-disclosure contract ──────────────────────
+
+
+def test_profile_prompt_caps_scope_and_capability_answer_length() -> None:
+    """The profile must cap scope/capability answers and disclose progressively.
+
+    A trainee asking a scope question ("What kind of cases can I share?")
+    must get a short, mobile-first answer followed by an invitation to go
+    deeper — never the whole product manual dumped in one message. The
+    profile prompt is where the Hermes LLM is told to do this, so the
+    contract is asserted against PROFILE_PROMPT.md directly.
+    """
+    lower = PROFILE_PROMPT.read_text(encoding="utf-8").lower()
+
+    # An explicit short-length budget (e.g. "5-7 lines" / "5 to 7 lines").
+    has_length_budget = bool(
+        re.search(r"\b5\s*(?:-|–|to)\s*7\s*(?:short\s*)?lines?\b", lower)
+    )
+    assert has_length_budget, (
+        "PROFILE_PROMPT.md must state an explicit short answer-length "
+        "budget (e.g. '5-7 lines') for scope/capability questions so the "
+        "Hermes test bot stops dumping the full manual."
+    )
+
+    # An explicit progressive-disclosure cue: answer short, then invite more.
+    progressive_signals = (
+        "progressive disclosure",
+        "then invite",
+        "invite a follow-up",
+        "offer an example",
+        "offer examples",
+        "let the user",
+    )
+    assert any(sig in lower for sig in progressive_signals), (
+        "PROFILE_PROMPT.md must tell the profile to answer briefly and "
+        "then invite a follow-up or offer examples (progressive "
+        "disclosure)."
+    )
+
+    # An explicit guard against dumping the manual / full catalogue.
+    no_dump_signals = (
+        "do not dump",
+        "don't dump",
+        "never paste the full",
+        "never dump",
+        "not the whole",
+        "whole product manual",
+        "entire form catalogue",
+        "full form catalogue",
+    )
+    assert any(sig in lower for sig in no_dump_signals), (
+        "PROFILE_PROMPT.md must explicitly forbid pasting the whole "
+        "product manual / full form catalogue in a single answer."
+    )
+
+
+def test_profile_prompt_has_concise_shareable_cases_answer() -> None:
+    """The profile must encode a worked, concise 'what can I share?' answer.
+
+    This is the exact question that produced the overlong reply. The
+    profile carries a short reference answer so the model has a concrete
+    target: anonymised material, identifiers kept out, the approval gate,
+    and an invitation to continue — not a manual.
+    """
+    text = PROFILE_PROMPT.read_text(encoding="utf-8")
+    lower = text.lower()
+
+    assert "what kind of cases can i share" in lower, (
+        "PROFILE_PROMPT.md must include the worked scope question "
+        "'What kind of cases can I share?' with a short reference answer."
+    )
+
+    # The reference answer must convey the shareable scope...
+    assert "anonymised" in lower, (
+        "The shareable-cases reference answer must say the material is "
+        "anonymised."
+    )
+    # ...keep patient identifiers out (privacy reminder)...
+    assert "identifier" in lower, (
+        "The shareable-cases reference answer must remind the user to keep "
+        "patient identifiers out."
+    )
+    # ...preserve the approval gate (nothing saved until approved)...
+    assert "approve" in lower, (
+        "The shareable-cases reference answer must preserve the approval "
+        "gate (nothing is saved until the user approves)."
+    )
+    # ...and end by inviting a follow-up / offering an example.
+    invite_signals = ("example", "send your first case", "want")
+    assert any(sig in lower for sig in invite_signals), (
+        "The shareable-cases reference answer must invite a follow-up or "
+        "offer an example rather than stopping at a wall of text."
+    )
 
 
 CAPABILITY_MAP = REPO_ROOT / "docs" / "demo" / "HERMES_CAPABILITY_MAP.md"
