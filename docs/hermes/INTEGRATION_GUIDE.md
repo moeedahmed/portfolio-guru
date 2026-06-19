@@ -33,11 +33,11 @@ Test bot sends reply to the trainee
 
 The three components and their responsibilities:
 
-| Component | Who owns it | Token it uses |
-|---|---|---|
-| Hermes agent profile | Hermes / OpenClaw | BWS secret: `TELEGRAM_BOT_TOKEN_PORTFOLIO_TEST` (OpenClaw alias: `PORTFOLIO_GURU_VNEXT_TELEGRAM_BOT_TOKEN`) |
-| Portfolio Guru deterministic engine | Portfolio Guru Python process | None (stateless, called in-process or via IPC) |
-| Live beta bot | Python process (`backend/bot.py`) | Live token (BWS: `PORTFOLIO_GURU_TELEGRAM_BOT_TOKEN`) |
+| Component                           | Who owns it                       | Token it uses                                                                                               |
+| ----------------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Hermes agent profile                | Hermes / OpenClaw                 | BWS secret: `TELEGRAM_BOT_TOKEN_PORTFOLIO_TEST` (OpenClaw alias: `PORTFOLIO_GURU_VNEXT_TELEGRAM_BOT_TOKEN`) |
+| Portfolio Guru deterministic engine | Portfolio Guru Python process     | None (stateless, called in-process or via IPC)                                                              |
+| Live beta bot                       | Python process (`backend/bot.py`) | Live token (BWS: `PORTFOLIO_GURU_TELEGRAM_BOT_TOKEN`)                                                       |
 
 The live beta bot and the Hermes test bot are **entirely separate
 processes** with **separate tokens**. They must never poll the same
@@ -134,13 +134,13 @@ Before processing any real trainee messages through Hermes, run in
 
 Suggested shadow test messages:
 
-| Input | Expected disposition | Expected first action |
-|---|---|---|
-| Clinical case text | HANDLE | ACK_CASE_DETAILS or REQUEST_CASE_CONFIRMATION |
-| "What forms would this support?" | HANDLE | ANSWER_CHAT |
-| "File this as a CBD" | HANDLE | SAVE_DRAFT or DRAFT_NOT_READY |
-| Empty message | REFUSE_EMPTY | — |
-| Medical advice question | HANDLE | ANSWER_CHAT (safety redirect) |
+| Input                            | Expected disposition | Expected first action                         |
+| -------------------------------- | -------------------- | --------------------------------------------- |
+| Clinical case text               | HANDLE               | ACK_CASE_DETAILS or REQUEST_CASE_CONFIRMATION |
+| "What forms would this support?" | HANDLE               | ANSWER_CHAT                                   |
+| "File this as a CBD"             | HANDLE               | SAVE_DRAFT or DRAFT_NOT_READY                 |
+| Empty message                    | REFUSE_EMPTY         | —                                             |
+| Medical advice question          | HANDLE               | ANSWER_CHAT (safety redirect)                 |
 
 ---
 
@@ -209,6 +209,73 @@ clean. No step should be skipped.
 6. Monitor for the stop conditions above during the first live session.
 7. The live beta bot (`backend/bot.py`) continues running unchanged
    throughout. Do not restart it.
+
+---
+
+## Repo-owned profile shim (test bot only)
+
+The Hermes test bot used to ship its own local `recommend.py`, `draft.py`,
+`health.py`, and `save.py` inside
+`~/.hermes/profiles/portfolio-guru/scripts/portfolio-guru/bin/`. Those
+scripts hosted a small keyword-scoring heuristic that drifted away from
+the deterministic engine. They have been archived under
+`_archived/<timestamp>/` in the profile folder and replaced by a single
+thin shim that delegates every command to the repo-owned CLI.
+
+| Layer                              | Owner                     | Source                                                                                                      |
+| ---------------------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Hermes profile shim (`pg`)         | Hermes profile (test bot) | `scripts/hermes-profile/pg` (repo-tracked)                                                                  |
+| Repo-owned CLI (`hermes_pg_cli`)   | Portfolio Guru repo       | `backend/hermes_pg_cli.py`                                                                                  |
+| Shadow-mode adapter                | Portfolio Guru repo       | `backend/hermes_shadow_adapter.py`                                                                          |
+| Bridge / channel contract / engine | Portfolio Guru repo       | `backend/hermes_bridge_contract.py`, `backend/channel_contract.py`, `backend/conversational_case_engine.py` |
+
+The shim resolves the repo at `$PORTFOLIO_GURU_REPO`
+(default `~/projects/portfolio-guru`), picks `backend/venv/bin/python3`,
+and runs `python -m hermes_pg_cli ...`. No product logic ever lives in
+the profile folder; reinstall the shim from
+`scripts/hermes-profile/README.md` after a profile rebuild.
+
+### Offline smoke command
+
+Run this from anywhere — it exercises both the repo CLI and the
+installed profile shim without touching Telegram, Kaizen, or BWS:
+
+```bash
+# Repo CLI directly (uses the backend venv)
+cd ~/projects/portfolio-guru/backend && venv/bin/python3 -m hermes_pg_cli status
+
+# Through the installed profile shim
+~/.hermes/profiles/portfolio-guru/scripts/portfolio-guru/bin/pg status
+
+# Push a Hermes-shaped payload through the engine
+~/.hermes/profiles/portfolio-guru/scripts/portfolio-guru/bin/pg shadow \
+  --payload '{"channel":"telegram","conversation_id":"tg:chat:smoke","scope":"direct","text":"62M chest pain in resus","private":true}'
+```
+
+Each invocation prints one JSON object with a top-level `status` of
+`ok | blocked | error`. `shadow` returns the engine's JSON-safe
+metadata (no clinical text). `recommend`, `draft`, `health` return
+`blocked` with `route_via: "shadow"`. `save` always returns `blocked`
+— Kaizen writes happen only in the live `backend/bot.py` process after
+an explicit user Approve.
+
+### Focused offline test suite
+
+```bash
+cd ~/projects/portfolio-guru/backend && venv/bin/python3 -m pytest \
+  tests/test_hermes_pg_cli.py \
+  tests/test_hermes_shadow_adapter.py \
+  tests/test_hermes_integration.py \
+  tests/test_channel_contract.py \
+  tests/test_channel_actions.py \
+  tests/test_portfolio_inbound_bridge.py \
+  tests/test_telegram_vnext_adapter.py \
+  tests/test_conversational_case_engine.py \
+  tests/test_vnext_text_extractor.py \
+  tests/test_vnext_draft_preview.py \
+  tests/test_vnext_form_recommender.py \
+  tests/test_vnext_dialogue_policy.py -v
+```
 
 ---
 

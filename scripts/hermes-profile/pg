@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+"""Hermes profile shim — delegates to the repo-owned Portfolio Guru CLI.
+
+This file is the **tracked source** for the executable installed at
+``~/.hermes/profiles/portfolio-guru/scripts/portfolio-guru/bin/pg``. The
+Hermes profile must not contain product logic of its own — recommend,
+draft, health, save, and shadow live in ``backend/hermes_pg_cli.py``.
+Re-install this shim into the profile (see ``README.md``) any time the
+profile copy drifts or the profile is rebuilt.
+
+Resolution
+----------
+1. Repo root: ``$PORTFOLIO_GURU_REPO`` if set, else
+   ``~/projects/portfolio-guru``.
+2. Python interpreter: prefer ``backend/venv/bin/python3``; fall back to
+   ``backend/.venv/bin/python3``; finally ``sys.executable``.
+3. Module: ``hermes_pg_cli`` run with ``PYTHONPATH`` rooted at
+   ``backend/`` so the engine modules import cleanly.
+
+Failure mode
+------------
+If the repo or the venv is unavailable the shim prints a structured
+``error`` JSON and exits non-zero — it never falls back to local
+heuristics. The Hermes test bot must surface the error to the operator
+so they can fix the install rather than receive silently wrong answers.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def _repo_root() -> Path:
+    env = os.environ.get("PORTFOLIO_GURU_REPO")
+    if env:
+        return Path(env).expanduser()
+    return Path.home() / "projects" / "portfolio-guru"
+
+
+def _pick_python(repo: Path) -> Path:
+    for candidate in (
+        repo / "backend" / "venv" / "bin" / "python3",
+        repo / "backend" / ".venv" / "bin" / "python3",
+    ):
+        if candidate.exists():
+            return candidate
+    return Path(sys.executable)
+
+
+def _fail(reason: str) -> int:
+    sys.stdout.write(
+        json.dumps(
+            {
+                "status": "error",
+                "error": reason,
+                "data": {
+                    "shim": "hermes-profile/pg",
+                    "hint": (
+                        "Set PORTFOLIO_GURU_REPO or reinstall the repo "
+                        "shim. See scripts/hermes-profile/README.md."
+                    ),
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+    sys.stdout.write("\n")
+    return 1
+
+
+def main(argv: list[str]) -> int:
+    repo = _repo_root()
+    backend = repo / "backend"
+    if not (backend / "hermes_pg_cli.py").exists():
+        return _fail(
+            f"hermes_pg_cli.py not found under {backend}; check PORTFOLIO_GURU_REPO."
+        )
+    python = _pick_python(repo)
+    env = os.environ.copy()
+    env["PYTHONPATH"] = (
+        str(backend) + os.pathsep + env.get("PYTHONPATH", "")
+    ).rstrip(os.pathsep)
+    os.execvpe(
+        str(python),
+        [str(python), "-m", "hermes_pg_cli", *argv[1:]],
+        env,
+    )
+    # execvpe replaces the process; if we get here, it failed.
+    return _fail(f"failed to exec {python}")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))
