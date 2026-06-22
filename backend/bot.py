@@ -8412,6 +8412,25 @@ def _friendly_field_name(key) -> str:
     return _FIELD_FRIENDLY.get(key_str, key_str.replace("_", " ").capitalize())
 
 
+def _is_session_failure_error(error: str | None) -> bool:
+    """True when a filing error means the Kaizen session/login is the problem.
+
+    Covers credential rejection, an expired login, AND the stale-session form
+    bounce (the 2025 CBD failure, where the cached session silently redirected
+    /events/new-section to /events/list). All three must route the user to
+    *reconnect* rather than 'Try Again' into the same poisoned cache or 'fill
+    manually' — retrying a stale session just reproduces the bounce.
+    """
+    if not error:
+        return False
+    err = error.lower()
+    return (
+        "login failed" in err
+        or "could not log in" in err
+        or "session expired" in err
+    )
+
+
 def _classify_filing_failure(
     error: str | None,
     skipped: list,
@@ -9001,11 +9020,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         # swap in a reconnect-first keyboard with a clear session-expired
         # message. force_reconnect lets the ACTION|setup handler bypass the
         # "already connected" short-circuit when the user taps Reconnect.
-        is_login_failure = bool(error) and (
-            "Login failed" in error
-            or "Could not log in to Kaizen" in error
-            or "could not log in" in error.lower()
-        )
+        is_login_failure = _is_session_failure_error(error)
         if is_login_failure and platform == "kaizen":
             context.user_data["force_reconnect"] = True
             msg = (

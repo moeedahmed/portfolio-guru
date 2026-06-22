@@ -174,6 +174,24 @@ def _is_kaizen_auth_url(url: str) -> bool:
     )
 
 
+def _is_form_navigation_bounce(url: str, form_marker: str = "new-section") -> bool:
+    """Detect when a create/edit-form navigation did NOT land on the form.
+
+    A stale Kaizen session does not always bounce to an auth URL. In the
+    2025 CBD beta failure the cached cookies were silently rejected and the
+    /events/new-section/<uuid> navigation was redirected to the in-app
+    /events/list activities page — an app URL, so ``_is_kaizen_auth_url``
+    returned False and the bounce slipped through as a generic UNKNOWN
+    failure. Treat any landing URL that is missing the requested form marker
+    (auth redirect *or* in-app bounce) as a navigation bounce so callers can
+    re-authenticate, retry, and ultimately invalidate the poisoned session
+    rather than looping the user back into the same stale cache.
+    """
+    if not url:
+        return True
+    return form_marker not in url
+
+
 # ─── Kaizen quirks observed in live forms ────────────────────────────────────
 # 1. When you re-open an existing draft, Kaizen sometimes RESETS startDate and
 #    endDate to today's date. The script must always re-fill these fields when
@@ -3505,6 +3523,40 @@ async def delete_all_drafts_of_type(
 
 # ─── Legacy main entry point (file_to_kaizen) ───────────────────────────────
 
+def _early_filing_failure(
+    form_type: str,
+    error: str,
+    *,
+    filled: Optional[List[str]] = None,
+    skipped: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Build a failed filing result for an early login/navigation/session
+    failure AND record it to the filing telemetry log.
+
+    Early returns (failed login, stale-session form bounce, form-page
+    redirect) used to exit before the ``log_filing_result`` call that sits
+    after the fill stage, so beta support had no telemetry record of why a
+    filing died before any field was touched — exactly the blind spot the
+    2025 CBD /events/list failure exposed. Logging is best-effort and never
+    blocks the failure return.
+    """
+    try:
+        from filing_result_logger import log_filing_result
+        log_filing_result(form_type=form_type, status="failed", error_hint=error)
+    except Exception as log_exc:  # pragma: no cover - logging must never mask the failure
+        logger.warning(
+            "Early filing-failure telemetry log error (non-blocking) for %s: %s",
+            form_type,
+            log_exc,
+        )
+    return {
+        "status": "failed",
+        "filled": filled or [],
+        "skipped": skipped or [],
+        "error": error,
+    }
+
+
 async def file_to_kaizen(
     form_type: str,
     fields: Dict[str, Any],
@@ -3580,13 +3632,13 @@ async def file_to_kaizen(
             if logged_in and telegram_user_id is not None:
                 await save_session_state(page.context, telegram_user_id, username)
         if not logged_in:
-            return {
-                "status": "failed", "filled": [], "skipped": [],
-                "error": (
+            return _early_filing_failure(
+                form_type,
+                (
                     "Could not log in to Kaizen with your saved credentials. "
                     "Use /settings to reconnect."
                 ),
-            }
+            )
 
         # Navigate to a new form by default. Reusing same-form drafts can
         # overwrite repeated ARCP tickets that legitimately share form type/date.
@@ -3597,28 +3649,51 @@ async def file_to_kaizen(
         if not reused_draft:
             form_url = f"https://kaizenep.com/events/new-section/{uuid}"
             await page.goto(form_url, wait_until="networkidle", timeout=30000)
-            if used_cached_session and _is_kaizen_auth_url(page.url):
+            await asyncio.sleep(5)
+
+            # A stale cached session silently bounces the create-form
+            # navigation — sometimes to an auth URL, but often to an in-app
+            # page like /events/list (the 2025 CBD failure). Both are
+            # recoverable session/navigation failures, not UNKNOWN. Re-auth
+            # and retry the navigation exactly once; if it STILL bounces the
+            # cached cookies are poisoned, so invalidate them and tell the
+            # user to reconnect rather than retrying into the same loop.
+            if used_cached_session and _is_form_navigation_bounce(page.url):
                 logger.info(
-                    "Cached Kaizen session expired during %s form navigation; re-authenticating",
+                    "Cached Kaizen session bounced %s form navigation to %s; re-authenticating",
                     form_type,
+                    page.url,
                 )
                 logged_in = await _login(page, username, password)
                 if logged_in and telegram_user_id is not None:
                     await save_session_state(page.context, telegram_user_id, username)
                 if not logged_in:
-                    return {
-                        "status": "failed", "filled": [], "skipped": [],
-                        "error": (
+                    return _early_filing_failure(
+                        form_type,
+                        (
                             "Login failed after cached session expired. "
-                            "Use /settings to reconnect."
+                            "Use /settings to reconnect Kaizen."
                         ),
-                    }
+                    )
                 await page.goto(form_url, wait_until="networkidle", timeout=30000)
-            await asyncio.sleep(5)
+                await asyncio.sleep(5)
+                if _is_form_navigation_bounce(page.url):
+                    if telegram_user_id is not None:
+                        invalidate_session_cache(telegram_user_id, username)
+                    return _early_filing_failure(
+                        form_type,
+                        (
+                            "Kaizen session expired — the form kept redirecting "
+                            f"to {page.url} instead of loading. The stale session "
+                            "has been cleared; use /settings to reconnect Kaizen."
+                        ),
+                    )
 
             if "new-section" not in page.url:
-                return {"status": "failed", "filled": [], "skipped": [],
-                        "error": f"Form page didn't load — redirected to {page.url}"}
+                return _early_filing_failure(
+                    form_type,
+                    f"Form page didn't load — redirected to {page.url}",
+                )
 
         # Fill stage_of_training FIRST
         if "stage_of_training" in field_map:
