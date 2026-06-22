@@ -82,11 +82,38 @@ def test_clinical_case_with_rich_text_reaches_offer_draft():
     assert result.metadata["disposition"] == "handle"
     assert result.metadata["state"] == "draft_ready"
     assert any(a["kind"] == "offer_draft" for a in result.metadata["actions"])
+    assert result.metadata["recommendation"]["status"] == "recommended"
+    assert result.metadata["form_options"]
     # Only fact keys exposed — never values.
     assert "fact_keys" in result.metadata
     assert isinstance(result.metadata["fact_keys"], list)
     for key in result.metadata["fact_keys"]:
         assert isinstance(key, str)
+
+
+def test_shadow_metadata_exposes_safe_form_options_without_reasons():
+    from hermes_shadow_adapter import process_payload
+
+    payload = _valid_payload(
+        text=(
+            "55-year-old male in ED resus with central chest pain and "
+            "anterior ST elevation. I escalated to cardiology for PCI."
+        )
+    )
+    result = process_payload(payload)
+
+    assert result.metadata["form_options"] == [
+        {"form_type": "CBD", "confidence": "medium"}
+    ]
+    assert result.metadata["recommendation"] == {
+        "status": "recommended",
+        "form_type": "CBD",
+        "confidence": "medium",
+    }
+    blob = json.dumps(result.metadata)
+    assert "chest pain" not in blob
+    assert "cardiology" not in blob
+    assert "PCI" not in blob
 
 
 # --- HANDLE: portfolio question ------------------------------------------

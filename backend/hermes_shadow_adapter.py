@@ -67,6 +67,11 @@ from telegram_vnext_adapter import (
     SUPPORTED_DOCUMENT_EXTENSIONS,
     event_from_telegram_message,
 )
+from vnext_form_recommender import (
+    FormRecommendation,
+    InsufficientFacts,
+    recommend as recommend_form,
+)
 
 
 @dataclass(frozen=True)
@@ -148,6 +153,7 @@ def _handle_metadata(
     eligible = workspace.draft_eligible_facts()
     eligible_keys = sorted({fact.key for fact in eligible})
     extracted_keys = sorted({key for key, _ in event.extracted_facts})
+    recommendation = _recommendation_metadata(tuple(eligible))
 
     return {
         "disposition": decision.disposition.value,
@@ -164,6 +170,8 @@ def _handle_metadata(
         "has_unconfirmed_stricter_facts": workspace.has_unconfirmed_stricter_facts(),
         "chat_turn_count": len(workspace.chat_turns),
         "pending_clarification": workspace.pending_clarification,
+        "recommendation": recommendation,
+        "form_options": _form_options(recommendation),
         "actions": [
             {
                 "kind": action.kind.value,
@@ -172,6 +180,40 @@ def _handle_metadata(
             for action in snapshot.actions
         ],
     }
+
+
+def _recommendation_metadata(facts: tuple[Any, ...]) -> dict[str, Any]:
+    """Return safe recommendation metadata without source values.
+
+    The recommender may produce source-derived reasons. Shadow metadata is
+    allowed to expose the form code and confidence only, so Hermes can render
+    selectable options without seeing or logging clinical fact values.
+    """
+    if not facts:
+        return {"status": "insufficient"}
+    result = recommend_form(facts)
+    if isinstance(result, FormRecommendation):
+        return {
+            "status": "recommended",
+            "form_type": result.form_type,
+            "confidence": result.confidence,
+        }
+    if isinstance(result, InsufficientFacts):
+        return {"status": "insufficient"}
+    return {"status": "insufficient"}
+
+
+def _form_options(recommendation: dict[str, Any]) -> list[dict[str, str]]:
+    if recommendation.get("status") != "recommended":
+        return []
+    form_type = recommendation.get("form_type")
+    confidence = recommendation.get("confidence")
+    if not isinstance(form_type, str):
+        return []
+    option = {"form_type": form_type}
+    if isinstance(confidence, str):
+        option["confidence"] = confidence
+    return [option]
 
 
 # ---------------------------------------------------------------------------
