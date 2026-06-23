@@ -130,6 +130,18 @@ def _is_repo_dirty() -> bool:
     return bool(result.stdout.strip())
 
 
+def _repo_dirty_human_gate_reason(failure_count: int) -> str | None:
+    """Only surface repo dirt when it blocks a real repair attempt.
+
+    The watch is meant to stay silent when offline QA is healthy. A continuity
+    preflight can leave generated tracked dirt behind; reporting that as a
+    Portfolio blocker creates noise even though there is no repair to perform.
+    """
+    if failure_count > 0:
+        return "repo has uncommitted tracked changes - commit before automated repair"
+    return None
+
+
 def _fix_queue_path() -> Path:
     return _repo_root() / ".artifacts" / "weird-prompt-qa" / "latest" / "fix-queue.json"
 
@@ -256,6 +268,10 @@ def self_check() -> int:
         errors.append(f"safe hint incorrectly flagged as human-gate: {safe_reasons}")
     if not live_reasons:
         errors.append("live hint not flagged as human-gate")
+    if _repo_dirty_human_gate_reason(0) is not None:
+        errors.append("repo dirt incorrectly surfaces when no repair is needed")
+    if _repo_dirty_human_gate_reason(1) is None:
+        errors.append("repo dirt did not block an actual repair attempt")
 
     # 4 - state serialisation round-trip
     original = {
@@ -316,11 +332,6 @@ def run_watch(as_json: bool = False, with_prepare: bool = False) -> int:
 
     human_gate_reasons: list[str] = []
 
-    if _is_repo_dirty():
-        human_gate_reasons.append(
-            "repo has uncommitted tracked changes - commit before automated repair"
-        )
-
     if qa_exit != 0 and fix_queue is None:
         human_gate_reasons.append(
             "weird-prompt QA exited non-zero but produced no fix-queue.json "
@@ -340,6 +351,11 @@ def run_watch(as_json: bool = False, with_prepare: bool = False) -> int:
                 fix_hints.append(hint)
             if cat:
                 repair_categories.add(cat)
+
+    repo_dirty = _is_repo_dirty()
+    repo_dirty_reason = _repo_dirty_human_gate_reason(failure_count) if repo_dirty else None
+    if repo_dirty_reason:
+        human_gate_reasons.append(repo_dirty_reason)
 
     human_gate_reasons.extend(_detect_human_gate_hints(fix_hints))
 
@@ -385,8 +401,8 @@ def run_watch(as_json: bool = False, with_prepare: bool = False) -> int:
             "proof_command": proof_command,
             "human_gate_reasons": human_gate_reasons,
             "repo": {
-                "clean": not _is_repo_dirty(),
-                "dirty": _is_repo_dirty(),
+                "clean": not repo_dirty,
+                "dirty": repo_dirty,
             },
             "qa_exit_code": qa_exit,
         }
