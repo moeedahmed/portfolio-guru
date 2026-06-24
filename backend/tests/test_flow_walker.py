@@ -202,6 +202,39 @@ class TestFlowWalker:
         recommend.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_reply_to_rich_case_with_explicit_cbd_uses_quoted_case_text(self):
+        from bot import AWAIT_FORM_CHOICE, handle_case_input
+
+        original_case = (
+            "32-year-old adult attended ED with sudden pleuritic chest pain and shortness of breath. "
+            "Initial observations: HR 118, BP 126/78, RR 22, SpO2 96% air, afebrile. "
+            "No ECG ischaemic changes. History revealed recent long-haul travel. "
+            "I assessed PE risk, discussed Wells/PERC reasoning with senior, arranged D-dimer and CTPA "
+            "after positive D-dimer, gave safety-netting, analgesia, and explained the plan. "
+            "CTPA confirmed small segmental PE. I started anticoagulation and reflected on documenting "
+            "the PE risk score more explicitly."
+        )
+        sim = BotSimulator()
+        update = sim._make_text_update("File this as a CBD")
+        update.message.reply_to_message = MagicMock()
+        update.message.reply_to_message.text = original_case
+        update.message.reply_to_message.caption = None
+        context = sim._make_context()
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.recommend_form_types', new=AsyncMock()) as recommend:
+            result = await handle_case_input(update, context)
+
+        assert result == AWAIT_FORM_CHOICE
+        assert context.user_data['chosen_form'] == 'CBD'
+        assert original_case in context.user_data['case_text']
+        assert context.user_data.get('awaiting_detail') is not True
+        assert 'Send rough notes' not in (sim.get_last_text() or '')
+        assert ('✅ Draft Case-Based Discussion', 'FORM|CBD') in sim.get_last_buttons()
+        recommend.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_explicit_qiat_from_evidence_can_still_choose_another_form(self):
         from bot import AWAIT_FORM_CHOICE, handle_case_input
 

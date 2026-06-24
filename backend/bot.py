@@ -987,6 +987,27 @@ def _explicit_form_start_needs_details(text: str) -> bool:
     return len((text or "").split()) <= 8
 
 
+def _reply_context_text(message) -> str:
+    """Return the text/caption from the Telegram message this turn replies to."""
+    replied = getattr(message, "reply_to_message", None)
+    if not replied:
+        return ""
+    return (
+        getattr(replied, "text", None)
+        or getattr(replied, "caption", None)
+        or ""
+    ).strip()
+
+
+def _case_text_with_reply_context(raw_text: str, reply_text: str) -> str:
+    """Keep the user's form instruction while drafting from the replied case."""
+    raw = (raw_text or "").strip()
+    reply = (reply_text or "").strip()
+    if raw and reply:
+        return f"{raw}\n\n{reply}"
+    return raw or reply
+
+
 async def _handle_incomplete_draft_complaint(message, context) -> int | None:
     """Recover from "you didn't fill the rest" complaints about a draft.
 
@@ -7695,6 +7716,17 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
         explicit_start_form = _explicit_form_start_request(raw_text)
         if explicit_start_form and _explicit_form_start_needs_details(raw_text):
+            reply_text = _reply_context_text(update.message)
+            if reply_text and _has_rich_clinical_evidence(reply_text):
+                ack = await update.message.reply_text(CAPTURED_ACK, parse_mode="Markdown")
+                _track_latest_message(context, ack)
+                return await _process_case_text(
+                    update.message,
+                    context,
+                    user_id,
+                    _case_text_with_reply_context(raw_text, reply_text),
+                    "text",
+                )
             context.user_data["chosen_form"] = explicit_start_form
             context.user_data["awaiting_detail"] = True
             await update.message.reply_text(_explicit_form_detail_request_text(explicit_start_form))
