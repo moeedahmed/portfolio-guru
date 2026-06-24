@@ -23,6 +23,9 @@ patches that drift.
   area while you're in there.
 - **Fix only the specific field/selector that was wrong.** Adjacent
   fields that happen to be in the same map block stay untouched.
+- **Prefer semantic selector plans for new mappings.** Rank label, role,
+  text, placeholder, name/id/data attributes ahead of raw CSS or XPath,
+  while retaining DOM id/XPath fallback candidates for verification.
 - **Re-file the same case type after the fix.** QA must show the gap
   closed before the work is considered done.
 - **If the fix touches the extractor prompt, verify with a similar

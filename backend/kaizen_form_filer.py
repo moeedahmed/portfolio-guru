@@ -36,11 +36,17 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from playwright.async_api import async_playwright, Page, Browser, BrowserContext
+from selector_strategy import fallback_dom_id
 
 logger = logging.getLogger(__name__)
 
 CDP_URL = os.environ.get("KAIZEN_CDP_URL", "http://localhost:18800")
 KAIZEN_USE_CDP = os.environ.get("KAIZEN_USE_CDP", "").lower() in ("1", "true", "yes")
+_PLAYWRIGHT_LOCATOR_VALUE_RE = re.compile(
+    r"page\.get_by_(?:label|text|placeholder)\(\s*(['\"])(.*?)\1"
+)
+_PLAYWRIGHT_ROLE_RE = re.compile(r"page\.get_by_role\(\s*(['\"])(.*?)\1")
+_PLAYWRIGHT_ROLE_NAME_RE = re.compile(r"name\s*=\s*(['\"])(.*?)\1")
 
 # ─── Emoji stripping — portfolio entries must NEVER contain emojis ────────────
 
@@ -97,6 +103,96 @@ def _to_uk_date(raw: str) -> str:
         except ValueError:
             continue
     return raw
+
+
+def _field_dom_id(field_target: Any) -> str:
+    """Return the legacy DOM id for a string map or selector-plan fallback."""
+    return fallback_dom_id(field_target) or (field_target if isinstance(field_target, str) else "")
+
+
+def _selector_plan_candidates(field_target: Any) -> List[Dict[str, Any]]:
+    if isinstance(field_target, dict):
+        candidates = field_target.get("candidates")
+        if isinstance(candidates, list):
+            return [item for item in candidates if isinstance(item, dict)]
+    return []
+
+
+def _semantic_locator_value(value: str, strategy: str | None) -> str:
+    """Extract user-facing text from logged Playwright locator strings."""
+    if strategy == "role":
+        role_name = _PLAYWRIGHT_ROLE_NAME_RE.search(value)
+        if role_name:
+            return role_name.group(2)
+    semantic_match = _PLAYWRIGHT_LOCATOR_VALUE_RE.search(value)
+    if semantic_match:
+        return semantic_match.group(2)
+    return value
+
+
+def _semantic_role_value(value: str) -> str:
+    role_match = _PLAYWRIGHT_ROLE_RE.search(value)
+    if role_match:
+        return role_match.group(2)
+    if value.startswith("role="):
+        return value.removeprefix("role=").strip()
+    return "textbox"
+
+
+async def _locator_from_selector_candidate(page: Page, candidate: Dict[str, Any]):
+    """Build a Playwright locator from one selector-plan candidate."""
+    strategy = candidate.get("strategy")
+    value = _semantic_locator_value(str(candidate.get("value") or ""), strategy)
+    if not value:
+        return None
+    if strategy == "label":
+        return page.get_by_label(value)
+    if strategy == "placeholder":
+        return page.get_by_placeholder(value)
+    if strategy == "text":
+        return page.get_by_text(value, exact=True)
+    if strategy == "role":
+        return page.get_by_role(_semantic_role_value(str(candidate.get("value") or "")), name=value)
+    return page.locator(value).first
+
+
+async def _first_field_locator(page: Page, field_target: Any, *, field_key: str = ""):
+    """Prefer selector-plan candidates, then fall back to the legacy DOM id."""
+    for candidate in _selector_plan_candidates(field_target):
+        try:
+            el = await _locator_from_selector_candidate(page, candidate)
+            if el is not None and await el.count():
+                if bool(candidate.get("expected_unique", True)):
+                    count = await el.count()
+                    if count > 1:
+                        logger.warning(
+                            f"Selector plan for {field_key or field_target} expected one match; got {count}"
+                        )
+                        continue
+                return el.first
+        except Exception as exc:
+            logger.debug(f"Selector candidate failed for {field_key or field_target}: {exc}")
+
+    dom_id = _field_dom_id(field_target)
+    if not dom_id:
+        return None
+    return page.locator(f'[id="{dom_id}"]')
+
+
+async def _field_tag(page: Page, field_target: Any, *, field_key: str = "") -> Optional[str]:
+    el = await _first_field_locator(page, field_target, field_key=field_key)
+    if el is not None and await el.count():
+        try:
+            return await el.evaluate("el => el.tagName")
+        except Exception:
+            return None
+    dom_id = _field_dom_id(field_target)
+    if not dom_id:
+        return None
+    return await page.evaluate(
+        "(domId) => { var el = document.getElementById(domId); return el ? el.tagName : null; }",
+        dom_id,
+    )
 
 
 # ─── Stage select Angular values ─────────────────────────────────────────────
@@ -1160,8 +1256,8 @@ def apply_common_header_defaults(form_type: str, fields: dict, field_map: dict |
     field_map = field_map or FORM_FIELD_MAP.get(canonical_form_type(form_type), {})
     defaulted = []
 
-    start_keys = tuple(key for key, dom_id in field_map.items() if dom_id == "startDate") + ("date_of_encounter",)
-    end_keys = tuple(key for key, dom_id in field_map.items() if dom_id == "endDate") + ("end_date",)
+    start_keys = tuple(key for key, dom_id in field_map.items() if _field_dom_id(dom_id) == "startDate") + ("date_of_encounter",)
+    end_keys = tuple(key for key, dom_id in field_map.items() if _field_dom_id(dom_id) == "endDate") + ("end_date",)
     date_source_keys = (
         "date_of_encounter",
         "date_of_event",
@@ -1678,7 +1774,7 @@ async def _login(page: Page, username: str, password: str) -> bool:
 
 # ─── Date filling (THE critical fix) ─────────────────────────────────────────
 
-async def _fill_date(page: Page, dom_id: str, raw_value: str) -> bool:
+async def _fill_date(page: Page, dom_id: Any, raw_value: str) -> bool:
     """
     Fill a date field using click + triple_click + type + Tab.
     This is the ONLY way to trigger AngularJS watchers on date inputs.
@@ -1688,8 +1784,10 @@ async def _fill_date(page: Page, dom_id: str, raw_value: str) -> bool:
     if not uk_date:
         return False
 
-    el = page.locator(f'[id="{dom_id}"]')
-    if not await el.count():
+    field_target = dom_id
+    dom_id = _field_dom_id(field_target)
+    el = await _first_field_locator(page, field_target, field_key="date")
+    if el is None or not await el.count():
         logger.warning(f"Date field not found: {dom_id}")
         return False
 
@@ -1776,7 +1874,7 @@ async def _fill_date(page: Page, dom_id: str, raw_value: str) -> bool:
 
 # ─── Stage dropdown ──────────────────────────────────────────────────────────
 
-async def _fill_stage(page: Page, dom_id: str, stage_label: str) -> bool:
+async def _fill_stage(page: Page, dom_id: Any, stage_label: str) -> bool:
     """Fill stage of training dropdown using Angular select value."""
     # Empty stage means the user didn't declare a training level. Better to
     # skip and leave the dropdown untouched than to guess and write the wrong
@@ -1787,6 +1885,8 @@ async def _fill_stage(page: Page, dom_id: str, stage_label: str) -> bool:
         return False
 
     # QIAT uses a different stage dropdown with individual year values
+    field_target = dom_id
+    dom_id = _field_dom_id(field_target)
     is_qiat_stage = (dom_id == "415a72f2-7cf3-420a-bee4-9a7aed746612")
     values_map = QIAT_STAGE_VALUES if is_qiat_stage else STAGE_SELECT_VALUES
 
@@ -1810,8 +1910,8 @@ async def _fill_stage(page: Page, dom_id: str, stage_label: str) -> bool:
         logger.warning(f"Unknown stage: {stage_label}")
         return False
 
-    el = page.locator(f'[id="{dom_id}"]')
-    if not await el.count():
+    el = await _first_field_locator(page, field_target, field_key="stage_of_training")
+    if el is None or not await el.count():
         # Try generic stage selector
         el = page.locator('select[ng-model*="stage"], select[ng-model*="Stage"]').first
         if not await el.count():
@@ -1826,11 +1926,36 @@ async def _fill_stage(page: Page, dom_id: str, stage_label: str) -> bool:
 
 # ─── Text field filling ─────────────────────────────────────────────────────
 
-async def _fill_text(page: Page, dom_id: str, value: str) -> bool:
+async def _fill_text(page: Page, dom_id: Any, value: str) -> bool:
     """Fill a text/textarea field. Strips emojis."""
     clean = _strip_emojis(str(value))
     if not clean:
         return False
+
+    field_target = dom_id
+    if _selector_plan_candidates(field_target):
+        el = await _first_field_locator(page, field_target, field_key="text")
+        if el is not None and await el.count():
+            try:
+                await el.click()
+            except Exception as e:
+                logger.warning(f"Normal click on text selector-plan field failed or timed out: {e}. Trying force=True.")
+                try:
+                    await el.click(force=True, timeout=2000)
+                except Exception:
+                    try:
+                        await el.focus()
+                    except Exception:
+                        pass
+            try:
+                await el.fill(clean)
+                await asyncio.sleep(0.5)
+                logger.info("Text filled via selector plan (%s chars)", len(clean))
+                return True
+            except Exception as e:
+                logger.warning(f"Text fill via selector plan failed; falling back to DOM id: {e}")
+
+    dom_id = _field_dom_id(field_target)
 
     # Try multiple selector patterns
     for selector in [
@@ -1882,10 +2007,12 @@ async def _fill_text(page: Page, dom_id: str, value: str) -> bool:
 
 # ─── Select dropdown filling ────────────────────────────────────────────────
 
-async def _fill_select(page: Page, dom_id: str, value: str) -> bool:
+async def _fill_select(page: Page, dom_id: Any, value: str) -> bool:
     """Fill a generic select dropdown by label text (exact or partial match)."""
-    el = page.locator(f'[id="{dom_id}"]')
-    if not await el.count():
+    field_target = dom_id
+    dom_id = _field_dom_id(field_target)
+    el = await _first_field_locator(page, field_target, field_key="select")
+    if el is None or not await el.count():
         return False
 
     try:
@@ -2335,7 +2462,7 @@ async def _verify_fields(page: Page, fields: dict, field_map: dict, filled_keys:
     for key in ("date", "date_occurred_on", "date_of_encounter", "end_date", "date_of_education", "date_of_activity",
                 "date_of_teaching", "date_of_case", "date_of_complaint", "date_of_incident"):
         if key in fields and key in field_map:
-            dom_id = field_map[key]
+            dom_id = _field_dom_id(field_map[key])
             val = await page.evaluate(
                 "(domId) => { var el = document.getElementById(domId); return el ? el.value : null; }",
                 dom_id
@@ -2351,7 +2478,7 @@ async def _verify_fields(page: Page, fields: dict, field_map: dict, filled_keys:
     for key in filled_keys:
         if key in ("date", "end_date", "stage", "curriculum_links") or "date" in key:
             continue
-        dom_id = field_map.get(key)
+        dom_id = _field_dom_id(field_map.get(key))
         if not dom_id or dom_id in ("startDate", "endDate"):
             continue
         val = await page.evaluate(
@@ -2502,7 +2629,8 @@ async def _verify_filing_qa(
         body = _normalise_text(body_text)
         return any(check in body for check in checks)
 
-    for key, dom_id in field_map.items():
+    for key, field_target in field_map.items():
+        dom_id = _field_dom_id(field_target)
         try:
             state = await page.evaluate(_QA_READ_FIELD_JS, dom_id)
         except Exception as exc:
@@ -2791,10 +2919,7 @@ async def fill_kaizen_form(
                 continue
 
             # Detect field type
-            tag = await page.evaluate(
-                "(domId) => { var el = document.getElementById(domId); return el ? el.tagName : null; }",
-                dom_id
-            )
+            tag = await _field_tag(page, dom_id, field_key=key)
 
             if tag == "SELECT":
                 if form_type == "DOPS":
@@ -3068,7 +3193,7 @@ async def _cdp_re_login(page: Page, username: str, password: str) -> bool:
 
 # ─── Legacy field filling (used by file_to_kaizen) ──────────────────────────
 
-async def _fill_field_legacy(page: Page, dom_id: str, value: Any, field_key: str, form_type: str = "") -> bool:
+async def _fill_field_legacy(page: Page, dom_id: Any, value: Any, field_key: str, form_type: str = "") -> bool:
     """Fill a single field by its DOM id. Returns True if filled."""
     if value is None or value == "" or value == []:
         return False
@@ -3077,8 +3202,10 @@ async def _fill_field_legacy(page: Page, dom_id: str, value: Any, field_key: str
         if field_key == "stage_of_training":
             return await _fill_stage(page, dom_id, str(value))
 
-        el = page.locator(f'[id="{dom_id}"]')
-        if not await el.count():
+        field_target = dom_id
+        dom_id = _field_dom_id(field_target)
+        el = await _first_field_locator(page, field_target, field_key=field_key)
+        if el is None or not await el.count():
             logger.warning(f"Field not found: [id=\"{dom_id}\"] ({field_key})")
             return False
 

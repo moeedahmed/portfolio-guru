@@ -10,6 +10,7 @@ import sys
 
 # Load FERNET key from BWS before importing credentials
 from playwright.async_api import async_playwright
+from selector_strategy import build_selector_plan
 
 # Forms to discover (not yet in FORM_FIELD_MAP)
 FORMS_TO_DISCOVER = [
@@ -73,7 +74,14 @@ async def discover_form_fields(page, form_type, form_uuid):
             const tag = el.tagName;
             const type = el.type || '';
             const name = el.name || '';
+            const placeholder = el.getAttribute('placeholder') || '';
             const ngModel = el.getAttribute('ng-model') || '';
+            const dataAttributes = {};
+            Array.from(el.attributes || []).forEach(attr => {
+                if (attr.name.indexOf('data-') === 0) {
+                    dataAttributes[attr.name] = attr.value;
+                }
+            });
 
             // Find label
             let label = '';
@@ -113,6 +121,8 @@ async def discover_form_fields(page, form_type, form_uuid):
                 tag: tag,
                 type: type,
                 name: name,
+                placeholder: placeholder,
+                dataAttributes: dataAttributes,
                 label: label,
                 ngModel: ngModel,
                 isTextarea: tag === 'TEXTAREA',
@@ -131,6 +141,8 @@ async def discover_form_fields(page, form_type, form_uuid):
                     tag: el.tagName,
                     type: el.type || '',
                     name: el.name || '',
+                    placeholder: el.getAttribute('placeholder') || '',
+                    dataAttributes: {},
                     label: specialId === 'startDate' ? 'Start Date' : 'End Date',
                     ngModel: el.getAttribute('ng-model') || '',
                     isTextarea: false,
@@ -147,9 +159,24 @@ async def discover_form_fields(page, form_type, form_uuid):
 
     # Filter to only form-relevant fields (inputs, textareas, selects)
     relevant = [f for f in fields if f['isTextarea'] or f['isSelect'] or f['isInput']]
+    for f in relevant:
+        f["selector_plan"] = build_selector_plan(
+            field_key=f.get("name") or f.get("ngModel") or f.get("id", ""),
+            label=f.get("label", ""),
+            dom_id=f.get("id", ""),
+            name=f.get("name", ""),
+            placeholder=f.get("placeholder", ""),
+            data_attributes=f.get("dataAttributes", {}),
+            expected_unique=True,
+            source=f"discover_fields:{form_type}",
+        )
 
     for f in relevant:
-        print(f"  [{f['tag']}/{f['type']}] id={f['id']}  label=\"{f['label']}\"  ng-model=\"{f['ngModel']}\"")
+        preferred = (f.get("selector_plan", {}).get("preferred") or {}).get("strategy", "id")
+        print(
+            f"  [{f['tag']}/{f['type']}] id={f['id']}  label=\"{f['label']}\"  "
+            f"ng-model=\"{f['ngModel']}\"  preferred={preferred}"
+        )
 
     return {
         "form_type": form_type,

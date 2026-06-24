@@ -19,6 +19,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from selector_strategy import build_selector_plan, rank_selector_candidates
+
 logger = logging.getLogger(__name__)
 
 SELECTOR_LOG_DIR = Path.home() / ".openclaw/data/portfolio-guru/selector-logs"
@@ -42,12 +44,14 @@ class SelectorLogger:
         value: str = "",
         success: bool = True,
         raw_action: str = "",
+        selector_meta: Optional[Dict[str, Any]] = None,
     ):
         """Log a single browser-use step."""
         self.steps.append({
             "step": step_num,
             "action": action_type,
             "selector": selector,
+            "selector_meta": selector_meta or {},
             "label": label,
             "value": value,
             "success": success,
@@ -95,12 +99,12 @@ def get_selector_history(platform: str, form_type: str) -> List[Dict]:
     return sessions
 
 
-def analyse_selectors(platform: str, form_type: str) -> Optional[Dict[str, str]]:
+def analyse_selector_plans(platform: str, form_type: str) -> Optional[Dict[str, Dict[str, Any]]]:
     """
     If enough consistent selector data exists (3+ successful filings),
-    return a candidate deterministic field mapping.
+    return candidate deterministic selector plans.
 
-    Returns: {field_label: most_common_selector} or None if not enough data.
+    Returns: {field_label: selector_plan} or None if not enough data.
     """
     history = get_selector_history(platform, form_type)
     successful = [h for h in history if h.get("success_count", 0) > 0]
@@ -108,8 +112,11 @@ def analyse_selectors(platform: str, form_type: str) -> Optional[Dict[str, str]]
     if len(successful) < 3:
         return None
 
-    # Count selector frequency per label
+    # Count selector frequency per label. Candidate choice is semantic-first:
+    # label/role/text/placeholder/name/id/data selectors beat CSS/XPath even
+    # when an XPath happened to be logged more often during exploration.
     label_selectors: Dict[str, Dict[str, int]] = {}
+    label_metadata: Dict[str, Dict[str, Dict[str, Any]]] = {}
     for session in successful:
         for step in session.get("steps", []):
             if not step.get("success") or not step.get("selector") or not step.get("label"):
@@ -118,14 +125,35 @@ def analyse_selectors(platform: str, form_type: str) -> Optional[Dict[str, str]]
             sel = step["selector"]
             if label not in label_selectors:
                 label_selectors[label] = {}
+                label_metadata[label] = {}
             label_selectors[label][sel] = label_selectors[label].get(sel, 0) + 1
+            label_metadata[label][sel] = step.get("selector_meta") or {}
 
-    # Pick the most common selector per label (must appear in 2+ sessions)
-    candidate = {}
+    # Keep selectors seen in 2+ sessions, then rank by strategy. The full plan
+    # retains fallback candidates for verification and later manual repair.
+    candidate: Dict[str, Dict[str, Any]] = {}
     for label, selectors in label_selectors.items():
-        best_sel = max(selectors, key=selectors.get)
-        if selectors[best_sel] >= 2:
-            candidate[label] = best_sel
+        stable = [
+            {
+                "value": selector,
+                "strategy": label_metadata[label].get(selector, {}).get("strategy"),
+                "kind": label_metadata[label].get(selector, {}).get("kind") or "playwright",
+                "expected_unique": label_metadata[label].get(selector, {}).get("expected_unique", True),
+                "intent": label,
+                "source": f"selector-log:{selectors[selector]}",
+            }
+            for selector in selectors
+            if selectors[selector] >= 2
+        ]
+        if stable:
+            ranked = rank_selector_candidates(stable)
+            candidate[label] = build_selector_plan(
+                field_key=label,
+                label="",
+                selectors=[item["value"] for item in ranked],
+                expected_unique=True,
+                source=f"selector-log:{platform}/{form_type}",
+            )
 
     if len(candidate) < 3:
         return None  # Not enough consistent fields
@@ -135,3 +163,21 @@ def analyse_selectors(platform: str, form_type: str) -> Optional[Dict[str, str]]
         f"{len(candidate)} fields from {len(successful)} sessions"
     )
     return candidate
+
+
+def analyse_selectors(platform: str, form_type: str) -> Optional[Dict[str, str]]:
+    """
+    Backwards-compatible selector summary.
+
+    Returns the preferred selector value from the semantic-first plan for each
+    label. Use analyse_selector_plans when fallback/verification metadata is
+    needed.
+    """
+    plans = analyse_selector_plans(platform, form_type)
+    if plans is None:
+        return None
+    return {
+        label: plan["preferred"]["value"]
+        for label, plan in plans.items()
+        if plan.get("preferred")
+    }
