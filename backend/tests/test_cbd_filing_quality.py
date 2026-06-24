@@ -3,7 +3,8 @@
 Covers the beta-blocking issues found during the June 2026 live Kaizen test:
 1. Reflection of event was blank even when clinical facts were present.
 2. Case text contained broken grammar ("I safe discharge with his daughter").
-3. Procedural skills field is not a CBD field (documented here, not a bug).
+3. Procedural skill should not be a CBD content field, but Kaizen's visible
+   procedural-skill dropdown still needs an explicit n/a default when rendered.
 """
 
 import os
@@ -122,20 +123,20 @@ def test_grammar_fix_does_not_alter_safe_discharge_used_correctly():
     assert "safe discharge" in result
 
 
-# ─── Procedural skills: not a CBD field ──────────────────────────────────────
+# ─── Procedural skills: no CBD content field, but DOM defaults apply ─────────
 
 
 def test_cbd_schema_has_no_procedural_skill_field():
     """CBD has no procedural_skill field — it is a clinical reasoning form, not
-    a procedure assessment. A blank procedural skills slot in a CBD draft is
-    not a bug; the field does not exist for this form type."""
+    a procedure assessment. The DOM-level Kaizen procedural dropdown is handled
+    by the filer n/a default, not exposed as a CBD draft field."""
     cbd_schema_keys = {f["key"] for f in FORM_SCHEMAS["CBD"]["fields"]}
     assert "procedural_skill" not in cbd_schema_keys
     assert "procedure_name" not in cbd_schema_keys
 
 
 def test_cbd_field_map_has_no_procedural_skill_dom_entry():
-    """FORM_FIELD_MAP for CBD has no procedural_skill DOM target."""
+    """CBD does not ask the extractor/user for a procedural skill value."""
     cbd_dom_map = FORM_FIELD_MAP["CBD"]
     assert "procedural_skill" not in cbd_dom_map
     assert "procedure_name" not in cbd_dom_map

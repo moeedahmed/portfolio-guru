@@ -1917,6 +1917,92 @@ async def _fill_select(page: Page, dom_id: str, value: str) -> bool:
             return False
 
 
+_PROCEDURAL_SKILL_NA_SELECT_IDS = (
+    "eed0e8dc-075d-4661-aea5-2c3238af4c5b",  # ACCS Procedural skills
+    "31bd55b7-0e32-4918-8cc0-4ba33af83772",  # Intermediate Procedural skills
+    "8def931e-3a00-43ac-8529-44cdaf34be2d",  # ST4-ST6 Higher EM Procedural Skills
+    "131840e2-282d-4979-bfed-45deb28d4851",  # Procedural skills list
+)
+
+_PROCEDURAL_FORMS_REQUIRING_A_REAL_SKILL = {
+    "DOPS",
+    "DOPS_ACCS",
+    "DOPS_ACCS_2021",
+    "PROC_LOG",
+    "PROCEDURAL_LOG_ACCS",
+    "PROCEDURAL_LOG_ACCS_2021",
+}
+
+
+async def _default_non_applicable_procedural_selects(page: Page, form_type: str) -> list[str]:
+    """Select ``- n/a -`` for non-procedural forms with procedural-skill widgets.
+
+    Kaizen renders procedural-skill dropdowns on several curriculum-bearing
+    forms, including CBD. For clinical/non-procedural WBAs, a blank dropdown is
+    worse than an explicit ``n/a``. Procedural forms are excluded so DOPS and
+    procedural logs still require a real skill choice.
+    """
+    form_type = canonical_form_type(form_type)
+    if form_type in _PROCEDURAL_FORMS_REQUIRING_A_REAL_SKILL:
+        return []
+
+    try:
+        candidates = await page.evaluate(
+            """(knownIds) => {
+              const known = new Set(knownIds);
+              const selects = Array.from(document.querySelectorAll('select'));
+              return selects.map((select) => {
+                const options = Array.from(select.options || []).map((option) => ({
+                  text: (option.textContent || '').trim(),
+                  value: option.value || '',
+                }));
+                const selected = select.options?.[select.selectedIndex];
+                const selectedText = (selected?.textContent || '').trim();
+                const selectedValue = select.value || '';
+                const container = select.closest('.form-group, .formly-field, .control-group, div');
+                const label = (
+                  select.getAttribute('aria-label')
+                  || select.getAttribute('placeholder')
+                  || container?.textContent
+                  || ''
+                ).replace(/\\s+/g, ' ').trim();
+                return {
+                  id: select.id || select.getAttribute('name') || '',
+                  label,
+                  selectedText,
+                  selectedValue,
+                  hasNa: options.some((option) => /n\\/?a/i.test(option.text)),
+                };
+              }).filter((item) => {
+                if (!item.id || !item.hasNa) return false;
+                const looksProcedural = known.has(item.id) || /procedural\\s+skills?/i.test(item.label);
+                const blank = !item.selectedText || item.selectedValue === '?' || item.selectedText === 'Please select';
+                return looksProcedural && blank;
+              });
+            }""",
+            list(_PROCEDURAL_SKILL_NA_SELECT_IDS),
+        )
+    except Exception as exc:
+        logger.warning("Could not inspect procedural-skill n/a dropdowns: %s", exc)
+        candidates = []
+
+    defaulted = []
+    seen = set()
+    for candidate in candidates or []:
+        dom_id = str(candidate.get("id") or "").strip()
+        if not dom_id or dom_id in seen:
+            continue
+        seen.add(dom_id)
+        if await _fill_select(page, dom_id, "- n/a -"):
+            defaulted.append(dom_id)
+            logger.info(
+                "Defaulted non-applicable procedural skill select to n/a: %s (%s)",
+                dom_id,
+                candidate.get("label") or "unlabelled select",
+            )
+    return defaulted
+
+
 async def _normalise_dops_select_value(page: Page, field_key: str, dom_id: str, value: Any) -> str:
     """Map DOPS select aliases to exact rendered Kaizen option labels."""
     if field_key != "placement":
@@ -2741,6 +2827,10 @@ async def fill_kaizen_form(
             and not any(k in filled for k in ("higher_procedural_skill_other", "procedure_other"))
         ):
             errors.append("Other procedural skill detail was not filled")
+
+        defaulted_proc_na = await _default_non_applicable_procedural_selects(page, form_type)
+        if defaulted_proc_na:
+            filled.append(f"procedural_skills_n/a ({len(defaulted_proc_na)})")
 
         # ─── STEP 4: Curriculum links (SLO expansion + KC ticking) ───────────
         slo_codes = fields.get("curriculum_links", [])
@@ -3721,21 +3811,9 @@ async def file_to_kaizen(
             else:
                 skipped.append(field_key)
 
-        # Default procedural skills dropdowns to n/a for non-procedural forms
-        _proc_dropdowns = {
-            "eed0e8dc-075d-4661-aea5-2c3238af4c5b": "ACCS Procedural Skills",
-            "31bd55b7-0e32-4918-8cc0-4ba33af83772": "Intermediate Procedural Skills",
-            "8def931e-3a00-43ac-8529-44cdaf34be2d": "Higher EM Procedural Skills",
-        }
-        for dd_id, dd_label in _proc_dropdowns.items():
-            try:
-                sel = page.locator(f"select#{dd_id}")
-                if await sel.count() > 0 and await sel.input_value() == "":
-                    # No selection made — default to n/a
-                    await sel.select_option(label="- n/a -")
-                    logger.info(f"Defaulted {dd_label} to n/a")
-            except Exception:
-                pass
+        defaulted_proc_na = await _default_non_applicable_procedural_selects(page, form_type)
+        if defaulted_proc_na:
+            filled.append(f"procedural_skills_n/a ({len(defaulted_proc_na)})")
 
         # Curriculum links
         kc_targets = fields.get("key_capabilities", []) or curriculum_links or []
