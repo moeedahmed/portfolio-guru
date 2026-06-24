@@ -3073,10 +3073,8 @@ def _build_post_filing_keyboard(
 
     if status == "partial" or uncertain:
         if same_case_available and not uncertain:
-            rows.append([
-                InlineKeyboardButton(_POST_FILING_SAME_CASE_LABEL, callback_data="ACTION|same_case_another"),
-                InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file"),
-            ])
+            rows.append([InlineKeyboardButton(_POST_FILING_SAME_CASE_LABEL, callback_data="ACTION|same_case_another")])
+            rows.append([InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file")])
         else:
             rows.append([InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file")])
         if saved_url:
@@ -3090,10 +3088,8 @@ def _build_post_filing_keyboard(
         return InlineKeyboardMarkup(rows)
 
     if same_case_available:
-        rows.append([
-            InlineKeyboardButton(_POST_FILING_SAME_CASE_LABEL, callback_data="ACTION|same_case_another"),
-            InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file"),
-        ])
+        rows.append([InlineKeyboardButton(_POST_FILING_SAME_CASE_LABEL, callback_data="ACTION|same_case_another")])
+        rows.append([InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file")])
     else:
         rows.append([InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file")])
     if saved_url:

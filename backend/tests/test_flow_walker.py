@@ -2948,14 +2948,14 @@ class TestRecentPortfolioFixes:
         assert ('💾 Save as another WBA', 'ACTION|same_case_another') in buttons
         assert ('📋 File another case', 'ACTION|file') in buttons
         assert [
-            ('💾 Save as another WBA', 'ACTION|same_case_another'),
-            ('📋 File another case', 'ACTION|file'),
-        ] == [
             [(b.text, b.callback_data) for b in row]
             for row in keyboard.inline_keyboard
-        ][0]
+        ][:2] == [
+            [('💾 Save as another WBA', 'ACTION|same_case_another')],
+            [('📋 File another case', 'ACTION|file')],
+        ]
 
-    def test_post_filing_keyboard_puts_open_saved_draft_below_action_row(self):
+    def test_post_filing_keyboard_puts_open_saved_draft_below_file_again_row(self):
         from bot import _build_post_filing_keyboard
 
         saved_url = 'https://kaizenep.com/events/fillin/draft-doc-id?autosave=auto-1'
@@ -2971,11 +2971,9 @@ class TestRecentPortfolioFixes:
             for row in keyboard.inline_keyboard
         ]
 
-        assert rows[0] == [
-            ('💾 Save as another WBA', 'ACTION|same_case_another', None),
-            ('📋 File another case', 'ACTION|file', None),
-        ]
-        assert rows[1] == [('🔗 Open saved draft', None, saved_url)]
+        assert rows[0] == [('💾 Save as another WBA', 'ACTION|same_case_another', None)]
+        assert rows[1] == [('📋 File another case', 'ACTION|file', None)]
+        assert rows[2] == [('🔗 Open saved draft', None, saved_url)]
 
     def test_post_filing_keyboard_offers_same_case_for_clean_partial(self):
         """Clean partial (no error) should also surface the 'Same case,
