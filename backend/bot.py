@@ -1056,6 +1056,61 @@ _PRE_CAPTURE_ANSWER_INTENTS = frozenset(
 )
 
 
+_RICH_CLINICAL_EVIDENCE_KEYWORDS = (
+    "patient",
+    "presented",
+    "attended",
+    "diagnosed",
+    "managed",
+    "treated",
+    "assessed",
+    "reviewed",
+    "history",
+    "examination",
+    "investigation",
+    "observations",
+    "ecg",
+    "bloods",
+    "d-dimer",
+    "ctpa",
+    "analgesia",
+    "anticoagulation",
+    "safety-netting",
+    "senior",
+    "supervisor",
+    "reflection",
+    "chest pain",
+    "shortness of breath",
+    "abdominal pain",
+    "fracture",
+    "procedure",
+    "resus",
+)
+
+
+def _has_rich_clinical_evidence(text: str) -> bool:
+    """True when a first turn contains enough clinical evidence to draft from.
+
+    This deliberately runs before generic capability/support routing. A rich
+    case mentioning form/support words should enter the draft flow, not receive
+    static "form is supported" copy.
+    """
+    raw = (text or "").strip()
+    if len(raw.split()) < 25:
+        return False
+    lowered = raw.lower()
+    clinical_hits = sum(
+        1 for keyword in _RICH_CLINICAL_EVIDENCE_KEYWORDS if keyword in lowered
+    )
+    has_demographic = bool(
+        re.search(
+            r"\b\d{1,3}\s*(?:[mf]|male|female)\b|\b\d{1,3}[-\s]?year[-\s]?old\b",
+            lowered,
+        )
+    )
+    return clinical_hits >= 2 or (has_demographic and clinical_hits >= 1)
+
+
 def _standalone_pre_capture_route(text: str) -> str | None:
     """Route obvious non-case first turns before extraction/drafting."""
     raw = (text or "").strip()
@@ -1086,6 +1141,15 @@ def _standalone_pre_capture_route(text: str) -> str | None:
     if _is_idle_chat_nudge(raw):
         return "idle_nudge"
 
+    prompt_injectionish = bool(
+        re.search(r"\b(ignore previous|system prompt|developer message|jailbreak|reveal your prompt)\b", lowered)
+    )
+    if prompt_injectionish:
+        return "safe_redirect"
+
+    if _has_rich_clinical_evidence(raw):
+        return None
+
     result = route_message(raw)
     if result.intent in _PRE_CAPTURE_ANSWER_INTENTS:
         return "answer"
@@ -1100,9 +1164,6 @@ def _standalone_pre_capture_route(text: str) -> str | None:
     questionish = bool(
         "?" in raw
         or re.match(r"^(what|which|how|why|when|where|who|can|could|do|does|is|are|will|should)\b", lowered)
-    )
-    prompt_injectionish = bool(
-        re.search(r"\b(ignore previous|system prompt|developer message|jailbreak|reveal your prompt)\b", lowered)
     )
     clinical_hits = sum(
         1
@@ -1123,8 +1184,6 @@ def _standalone_pre_capture_route(text: str) -> str | None:
     )
     has_demographic = bool(re.search(r"\b\d{1,3}\s*([mf]|male|female)\b", lowered))
 
-    if prompt_injectionish:
-        return "safe_redirect"
     if questionish:
         return "answer"
     if not clinical_hits and not has_demographic and len(raw.split()) <= 6:
@@ -7640,6 +7699,10 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             context.user_data["awaiting_detail"] = True
             await update.message.reply_text(_explicit_form_detail_request_text(explicit_start_form))
             return AWAIT_CASE_INPUT
+        if explicit_start_form:
+            ack = await update.message.reply_text(CAPTURED_ACK, parse_mode="Markdown")
+            _track_latest_message(context, ack)
+            return await _process_case_text(update.message, context, user_id, raw_text, "text")
 
         if context.user_data.get("pending_case_bundle"):
             if _looks_like_new_case_start(raw_text) and _pending_case_bundle_is_stale(context):

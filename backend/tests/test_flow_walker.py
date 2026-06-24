@@ -132,6 +132,76 @@ class TestFlowWalker:
         analyse.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_rich_clinical_case_bypasses_support_answer_route(self, recommended_forms):
+        from conversational_router import ConversationalIntent, RouterResult
+        from bot import AWAIT_FORM_CHOICE, handle_case_input
+
+        case_text = (
+            "32-year-old adult attended ED with sudden pleuritic chest pain and shortness of breath. "
+            "Initial observations: HR 118, BP 126/78, RR 22, SpO2 96% air, afebrile. "
+            "No ECG ischaemic changes. History revealed recent long-haul travel. "
+            "I assessed PE risk, discussed Wells/PERC reasoning with senior, arranged D-dimer and CTPA "
+            "after positive D-dimer, gave safety-netting, analgesia, and explained the plan. "
+            "CTPA confirmed small segmental PE. I started anticoagulation and reflected on earlier "
+            "ambulatory care involvement."
+        )
+        sim = BotSimulator()
+        update = sim._make_text_update(case_text)
+        context = sim._make_context()
+
+        bad_support_route = RouterResult(
+            intent=ConversationalIntent.HELP_OR_CAPABILITY,
+            confidence=0.99,
+            signals={"form_type": "LAT"},
+        )
+        answer = AsyncMock(return_value="Leadership Assessment Tool is supported.")
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.route_message', return_value=bad_support_route) as route_mock, \
+             patch('bot.answer_question', new=answer), \
+             patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_curriculum', return_value='2025'), \
+             patch('bot.recommend_form_types', new=AsyncMock(return_value=recommended_forms)):
+            result = await handle_case_input(update, context)
+
+        assert result == AWAIT_FORM_CHOICE
+        route_mock.assert_not_called()
+        answer.assert_not_awaited()
+        assert context.user_data['case_text'] == case_text
+        assert 'Leadership Assessment Tool is supported' not in (sim.get_last_text() or '')
+        assert 'fit your case' in (sim.get_last_text() or '').lower()
+
+    @pytest.mark.asyncio
+    async def test_explicit_cbd_with_details_locks_requested_form_not_support_copy(self):
+        from bot import AWAIT_FORM_CHOICE, handle_case_input
+
+        case_text = (
+            "Can you file this as a CBD? 32-year-old adult attended ED with sudden pleuritic chest pain "
+            "and shortness of breath. I assessed PE risk, discussed Wells/PERC reasoning with senior, "
+            "arranged D-dimer and CTPA, started anticoagulation, and reflected on documenting PE risk "
+            "more explicitly next time."
+        )
+        sim = BotSimulator()
+        update = sim._make_text_update(case_text)
+        context = sim._make_context()
+
+        answer = AsyncMock(return_value="Leadership Assessment Tool is supported.")
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.answer_question', new=answer), \
+             patch('bot.recommend_form_types', new=AsyncMock()) as recommend:
+            result = await handle_case_input(update, context)
+
+        assert result == AWAIT_FORM_CHOICE
+        assert context.user_data['chosen_form'] == 'CBD'
+        assert 'Case-Based Discussion' in (sim.get_last_text() or '')
+        assert 'Leadership Assessment Tool is supported' not in (sim.get_last_text() or '')
+        assert ('✅ Draft Case-Based Discussion', 'FORM|CBD') in sim.get_last_buttons()
+        answer.assert_not_awaited()
+        recommend.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_explicit_qiat_from_evidence_can_still_choose_another_form(self):
         from bot import AWAIT_FORM_CHOICE, handle_case_input
 
