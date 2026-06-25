@@ -288,6 +288,38 @@ async def get_user_by_stripe_subscription(stripe_subscription_id: str) -> int | 
             return row[0] if row else None
 
 
+async def get_subscribed_user_ids() -> list[int]:
+    """Telegram ids of users who have ever had a Stripe customer/subscription.
+
+    The daily reconciliation job walks these to repair any tier that a missed
+    webhook left stale.
+    """
+    await _ensure_db()
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT telegram_user_id FROM user_profiles "
+            "WHERE stripe_subscription_id IS NOT NULL OR stripe_customer_id IS NOT NULL",
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [r[0] for r in rows]
+
+
+async def get_stripe_ids_for_user(telegram_user_id: int) -> tuple[str | None, str | None]:
+    """Return (stripe_customer_id, stripe_subscription_id) for a user, or (None, None).
+
+    Used by reconciliation to ask Stripe for the authoritative subscription state
+    when a webhook may have been missed.
+    """
+    await _ensure_db()
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT stripe_customer_id, stripe_subscription_id FROM user_profiles WHERE telegram_user_id = ?",
+            (telegram_user_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return (row[0], row[1]) if row else (None, None)
+
+
 async def set_user_tier(user_id: int, tier: str, stripe_customer_id: str = None, stripe_subscription_id: str = None):
     """Set or update a user's subscription tier."""
     await _ensure_db()

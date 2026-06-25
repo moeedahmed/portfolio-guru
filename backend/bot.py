@@ -10648,6 +10648,28 @@ def main():
     except Exception:
         logger.warning("Could not schedule liveness heartbeat", exc_info=True)
 
+    # Daily Stripe reconciliation — repairs any tier a missed webhook left stale
+    # so a paying user is never permanently stranded. Also surfaces the Stripe
+    # mode/config at startup. Inert if Stripe isn't configured.
+    try:
+        from datetime import time as _rec_time
+        try:
+            from zoneinfo import ZoneInfo as _RecZone
+            _rec_tz = _RecZone("Europe/London")
+        except Exception:
+            _rec_tz = None
+        from stripe_handler import log_stripe_mode, reconcile_all_subscriptions, stripe_mode
+        log_stripe_mode()
+        if stripe_mode() != "unknown" and getattr(application, "job_queue", None):
+            async def _reconcile_job(_context):
+                await reconcile_all_subscriptions()
+            application.job_queue.run_daily(
+                _reconcile_job, time=_rec_time(hour=4, minute=0, tzinfo=_rec_tz), name="stripe_reconcile",
+            )
+            logger.info("Daily Stripe reconciliation scheduled (04:00 UK)")
+    except Exception:
+        logger.warning("Could not schedule Stripe reconciliation", exc_info=True)
+
     # Weekly portfolio digest — Sunday 20:00 UK time (handles BST/GMT).
     # JobQueue.run_daily uses ISO weekdays: Monday=0 … Sunday=6.
     from datetime import time as _dtime

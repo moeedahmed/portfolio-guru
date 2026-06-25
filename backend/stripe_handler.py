@@ -160,6 +160,31 @@ async def _handle_constructed_event(event, event_type: str | None) -> dict:
                 return {"action": "updated", "user_id": user_id, "tier": tier}
         return {"action": "ignored", "user_id": user_id, "subscription_status": status}
 
+    if event_type in ("invoice.paid", "invoice.payment_succeeded"):
+        # Reactivation path: a payment that recovered after a failure (Stripe
+        # dunning) does not always emit subscription.updated -> active, so a
+        # user we downgraded on payment_failed would otherwise stay locked out
+        # despite paying. Re-sync their tier from the live subscription.
+        invoice = obj
+        subscription_id = _get(invoice, "subscription")
+        customer_id = _get(invoice, "customer")
+        user_id = None
+        if customer_id:
+            user_id = await get_user_by_stripe_customer(customer_id)
+        if user_id is None and subscription_id:
+            user_id = await get_user_by_stripe_subscription(subscription_id)
+        if user_id is None:
+            return {"action": "ignored", "customer_id": customer_id, "error": "user not found"}
+        if not subscription_id:
+            return {"action": "ignored", "user_id": user_id, "error": "invoice has no subscription"}
+        subscription = stripe.Subscription.retrieve(subscription_id)
+        result = await _apply_subscription_to_user(user_id, subscription)
+        logger.info(
+            "Portfolio Guru funnel event=invoice_paid user_id=%s action=%s",
+            user_id, result.get("action"),
+        )
+        return result
+
     if event_type == "invoice.payment_failed":
         invoice = obj
         customer_id = _get(invoice, "customer")
@@ -175,3 +200,114 @@ async def _handle_constructed_event(event, event_type: str | None) -> dict:
         return {"action": "ignored", "customer_id": customer_id, "error": "user not found"}
 
     return {"action": "ignored"}
+
+
+async def _apply_subscription_to_user(user_id: int, subscription) -> dict:
+    """Set a user's tier from a Stripe subscription object.
+
+    Shared by the invoice.paid branch and reconciliation so they cannot drift.
+    active/trialing -> the price's tier; past_due/unpaid/canceled -> free.
+    """
+    status = _get(subscription, "status")
+    customer_id = _get(subscription, "customer")
+    subscription_id = _get(subscription, "id")
+    if status in ACTIVE_SUBSCRIPTION_STATUSES:
+        price_id = _subscription_price_id(subscription)
+        tier = _tier_from_price(price_id)
+        if tier is None:
+            return {"action": "error", "user_id": user_id, "error": "unknown subscription price"}
+        await set_user_tier(user_id, tier, stripe_customer_id=customer_id, stripe_subscription_id=subscription_id)
+        return {"action": "upgraded", "user_id": user_id, "tier": tier}
+    if status in INACTIVE_SUBSCRIPTION_STATUSES:
+        await set_user_tier(user_id, "free", stripe_customer_id=customer_id, stripe_subscription_id=subscription_id)
+        return {"action": "downgraded", "user_id": user_id, "reason": f"subscription_{status}"}
+    return {"action": "ignored", "user_id": user_id, "subscription_status": status}
+
+
+async def reconcile_subscription(telegram_user_id: int) -> dict:
+    """Authoritatively re-sync a user's tier from Stripe.
+
+    The webhook is the fast path but a single dropped event would otherwise
+    strand a paying user. Call this on the checkout success-redirect and from a
+    daily job so entitlement is eventually correct even if a webhook is missed.
+    """
+    from usage import get_stripe_ids_for_user
+
+    customer_id, subscription_id = await get_stripe_ids_for_user(telegram_user_id)
+    if not subscription_id and not customer_id:
+        return {"action": "no_subscription", "user_id": telegram_user_id}
+
+    subscription = None
+    try:
+        if subscription_id:
+            subscription = stripe.Subscription.retrieve(subscription_id)
+        elif customer_id:
+            subs = stripe.Subscription.list(customer=customer_id, status="all", limit=1)
+            data = _get(subs, "data", []) or []
+            subscription = data[0] if data else None
+    except Exception as e:
+        logger.warning("reconcile_subscription: Stripe lookup failed for %s: %s", telegram_user_id, e)
+        return {"action": "error", "user_id": telegram_user_id, "error": str(e)}
+
+    if subscription is None:
+        await set_user_tier(telegram_user_id, "free")
+        return {"action": "downgraded", "user_id": telegram_user_id, "reason": "no_active_subscription"}
+    return await _apply_subscription_to_user(telegram_user_id, subscription)
+
+
+async def reconcile_all_subscriptions() -> dict:
+    """Reconcile every subscribed user against Stripe. For the daily safety job.
+
+    Returns a small summary; per-user failures are logged and do not abort the
+    sweep.
+    """
+    from usage import get_subscribed_user_ids
+
+    summary = {"checked": 0, "changed": 0, "errors": 0}
+    try:
+        user_ids = await get_subscribed_user_ids()
+    except Exception as e:
+        logger.warning("reconcile_all_subscriptions: could not list users: %s", e)
+        return summary
+    for uid in user_ids:
+        summary["checked"] += 1
+        try:
+            result = await reconcile_subscription(uid)
+            if result.get("action") in ("upgraded", "downgraded"):
+                summary["changed"] += 1
+        except Exception as e:
+            summary["errors"] += 1
+            logger.warning("reconcile_all_subscriptions: %s failed: %s", uid, e)
+    logger.info("Stripe reconcile sweep: %s", summary)
+    return summary
+
+
+def stripe_mode() -> str:
+    """'live' | 'test' | 'unknown', inferred from the secret key prefix."""
+    key = os.environ.get("STRIPE_SECRET_KEY", "") or ""
+    if key.startswith(("sk_live", "rk_live")):
+        return "live"
+    if key.startswith(("sk_test", "rk_test")):
+        return "test"
+    return "unknown"
+
+
+def log_stripe_mode() -> None:
+    """Log the Stripe mode + warn on missing billing config at startup.
+
+    A mismatched key/price/secret (e.g. live key + unset price) otherwise fails
+    silently as a charged-but-unupgraded customer. Surface it loudly instead.
+    """
+    mode = stripe_mode()
+    missing = [
+        name for name, val in (
+            ("STRIPE_PRO_PLUS_PRICE_ID", PRO_PLUS_PRICE_ID),
+            ("STRIPE_WEBHOOK_SECRET", os.environ.get("STRIPE_WEBHOOK_SECRET")),
+        ) if not val
+    ]
+    if mode == "unknown":
+        logger.warning("Stripe: secret key missing or unrecognized prefix — billing is effectively disabled")
+    else:
+        logger.info("Stripe mode: %s", mode)
+    if missing:
+        logger.warning("Stripe: missing billing config %s — purchases may not upgrade users", missing)
