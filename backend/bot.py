@@ -10565,6 +10565,18 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         logger.warning("409 Conflict — another bot instance running, will self-resolve")
         return
 
+    # Real, unexpected error — page the operator (rate-limited) so failures
+    # aren't silent. Benign cases above already returned.
+    try:
+        import ops_alert
+        await ops_alert.notify_operator(
+            getattr(context, "bot", None),
+            f"handler error: {str(context.error)[:300]}",
+            key="handler_error",
+        )
+    except Exception:
+        logger.debug("operator alert failed", exc_info=True)
+
     # Generic fallback — preserve draft if we're in approval state
     if update and hasattr(update, 'effective_message') and update.effective_message:
         # Check if we have a draft in user_data (means we're in approval flow)
@@ -10621,6 +10633,20 @@ def main():
 
     application = build_application()
     application.add_error_handler(error_handler)
+
+    # Liveness heartbeat — pings an external uptime monitor every 5 min. If the
+    # event loop wedges (alive but not polling), the pings stop and the monitor
+    # pages the operator: a dead-man switch launchd's crash-restart can't give.
+    # No-op unless PG_HEARTBEAT_URL is set.
+    try:
+        import ops_alert
+        if ops_alert.HEARTBEAT_URL and getattr(application, "job_queue", None):
+            async def _heartbeat_job(_context):
+                ops_alert.heartbeat()
+            application.job_queue.run_repeating(_heartbeat_job, interval=300, first=15, name="heartbeat")
+            logger.info("Liveness heartbeat scheduled (every 300s)")
+    except Exception:
+        logger.warning("Could not schedule liveness heartbeat", exc_info=True)
 
     # Weekly portfolio digest — Sunday 20:00 UK time (handles BST/GMT).
     # JobQueue.run_daily uses ISO weekdays: Monday=0 … Sunday=6.

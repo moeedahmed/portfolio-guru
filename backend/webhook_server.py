@@ -64,7 +64,26 @@ async def stripe_webhook(request: Request):
         result = await handle_webhook_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
     except Exception as e:
         logger.error("Webhook processing failed: %s", e)
+        try:
+            import ops_alert
+            ops_alert.notify_operator_sync(f"Stripe webhook FAILED: {e}", key="webhook_fail")
+        except Exception:
+            logger.debug("operator alert failed", exc_info=True)
         raise HTTPException(status_code=400, detail=str(e))
+
+    # A paid event that did not result in a tier change is a billing-correctness
+    # problem (e.g. unknown price id, unlinked user) — these return a 200 today,
+    # so without an alert a charged-but-unupgraded customer is invisible.
+    if result.get("action") in {"error", "ignored", "user_not_found"}:
+        try:
+            import ops_alert
+            ops_alert.notify_operator_sync(
+                f"Stripe webhook unhandled outcome: {result.get('action')} "
+                f"({result.get('error') or result.get('type') or ''})",
+                key="webhook_unhandled",
+            )
+        except Exception:
+            logger.debug("operator alert failed", exc_info=True)
 
     # On upgrade, notify user via Telegram
     if result.get("action") == "upgraded" and TELEGRAM_BOT_TOKEN:
