@@ -39,6 +39,9 @@ fi
 
 git fetch origin main
 git checkout main
+# Capture the currently-deployed commit as the rollback target BEFORE we move.
+PREV_COMMIT="$(git rev-parse HEAD)"
+echo "Last known-good commit (rollback target): $(git rev-parse --short "$PREV_COMMIT")"
 git pull --ff-only origin main
 
 echo "Updated commit: $(git rev-parse --short HEAD)"
@@ -132,5 +135,44 @@ launchctl print "gui/$(id -u)/${SERVICE_LABEL}" | sed -n '1,25p'
 
 echo "Running Portfolio Guru processes:"
 pgrep -fl "/portfolio-guru/backend|webhook_server:app|bot.py" || true
+
+# -------------------------------------------------------------------------
+# Post-deploy smoke + automatic rollback.
+# A green compile is not a green runtime: if the freshly-started service has
+# no live process, or it dies within the settle window (crash-loop), revert
+# to the last known-good commit, restart, and fail the deploy so CI is red.
+# -------------------------------------------------------------------------
+service_pid_now() {
+  launchctl print "gui/$(id -u)/${SERVICE_LABEL}" 2>/dev/null | awk '/pid =/ {print $3; exit}'
+}
+
+smoke_ok() {
+  sleep 20  # let the service boot and clear any immediate crash-loop
+  local pid; pid="$(service_pid_now)"
+  if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
+    echo "SMOKE FAIL: launchd service has no live pid after start"; return 1
+  fi
+  sleep 8   # confirm it stays up (didn't crash-loop right after boot)
+  local pid2; pid2="$(service_pid_now)"
+  if [[ -z "$pid2" ]] || ! kill -0 "$pid2" 2>/dev/null; then
+    echo "SMOKE FAIL: service died after start (crash-loop)"; return 1
+  fi
+  if ! lsof -tiTCP:8099 -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "SMOKE WARN: webhook server not listening on 8099 (billing webhook down)"
+  fi
+  echo "SMOKE OK: service pid ${pid2} stable"; return 0
+}
+
+if ! smoke_ok; then
+  echo "Post-deploy smoke FAILED — rolling back to ${PREV_COMMIT}"
+  git -C "$APP_DIR" reset --hard "$PREV_COMMIT"
+  ( cd "$APP_DIR/backend" && "$PYTHON" -m pip install -q -r requirements.txt && "$PYTHON" -m py_compile bot.py )
+  launchctl bootout "gui/$(id -u)" "$PLIST_PATH" 2>/dev/null || true
+  sleep 3
+  launchctl bootstrap "gui/$(id -u)" "$PLIST_PATH"
+  launchctl enable "gui/$(id -u)/${SERVICE_LABEL}" 2>/dev/null || true
+  echo "ROLLED BACK to $(git -C "$APP_DIR" rev-parse --short HEAD). Deploy marked failed."
+  exit 1
+fi
 
 echo "Deploy complete: $(git -C "$APP_DIR" rev-parse --short HEAD)"
