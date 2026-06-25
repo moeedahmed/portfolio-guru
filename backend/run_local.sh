@@ -43,6 +43,14 @@ try_secret() {
   BWS_ACCESS_TOKEN=$BWS_ACCESS_TOKEN "$BWS_BIN" secret get "$id" --output json 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['value'])" 2>/dev/null || true
 }
 
+get_secret_by_key() {
+  # Look up a BWS secret by its KEY name (not id). Non-fatal: prints empty if
+  # absent. Used for the Vertex secrets whose ids aren't known until created.
+  local key="$1"
+  BWS_ACCESS_TOKEN=$BWS_ACCESS_TOKEN "$BWS_BIN" secret list --output json 2>/dev/null \
+    | python3 -c "import json,sys; d=json.load(sys.stdin); print(next((s['value'] for s in d if s.get('key')=='$key'), ''))" 2>/dev/null || true
+}
+
 get_mapped_secret() {
   local key="$1"
   local map_path="${OPENCLAW_SECRETS_MAP:-$HOME/.openclaw/workspace/secrets.json}"
@@ -71,6 +79,31 @@ export PORTFOLIO_GURU_EXTRACTOR_PROVIDER="deepseek-v4-flash"
 export GEMINI_3_5_FLASH_MODEL="${GEMINI_3_5_FLASH_MODEL:-gemini-3.5-flash}"
 export PG_GATHERING_MODE="${PG_GATHERING_MODE:-1}"
 echo "Model: extractor=$PORTFOLIO_GURU_EXTRACTOR_PROVIDER fallback=$GEMINI_3_5_FLASH_MODEL"
+
+# --- Vertex AI (EU) routing for clinical extraction -----------------------
+# Inert until the GCP secrets exist in BWS. When GCP_PROJECT_ID + the service-
+# account JSON are present, the SA key is materialised to a temp file and
+# GOOGLE_APPLICATION_CREDENTIALS is set. Routing only switches on when
+# PG_USE_VERTEX is also truthy (so creds can land and be model-verified BEFORE
+# the flip). use_vertex() additionally requires GCP_PROJECT_ID, so a stray flag
+# without creds safely falls back to the developer API.
+GCP_PROJECT_ID="$(get_secret_by_key GCP_PROJECT_ID)"
+if [ -n "$GCP_PROJECT_ID" ]; then
+  export GCP_PROJECT_ID
+  GCP_VERTEX_LOCATION="$(get_secret_by_key GCP_VERTEX_LOCATION)"
+  export GCP_VERTEX_LOCATION="${GCP_VERTEX_LOCATION:-europe-west2}"
+  GCP_VERTEX_SA_JSON="$(get_secret_by_key GCP_VERTEX_SA_JSON)"
+  if [ -n "$GCP_VERTEX_SA_JSON" ]; then
+    _SA_FILE="$(mktemp -t pg-vertex-sa)"
+    printf '%s' "$GCP_VERTEX_SA_JSON" > "$_SA_FILE"
+    chmod 600 "$_SA_FILE"
+    export GOOGLE_APPLICATION_CREDENTIALS="$_SA_FILE"
+    unset GCP_VERTEX_SA_JSON
+  fi
+  export PG_USE_VERTEX="$(get_secret_by_key PG_USE_VERTEX)"
+  echo "Vertex AI (EU) creds present: project=$GCP_PROJECT_ID location=$GCP_VERTEX_LOCATION use_vertex=${PG_USE_VERTEX:-off}"
+fi
+
 FERNET_SECRET_KEY="$(get_secret 9e653679-9a33-4c23-a15c-b405015713de)"
 export FERNET_SECRET_KEY
 # OpenAI keys not in use — extractor uses DeepSeek V4 Flash

@@ -124,6 +124,12 @@ PROVIDERS = [
 
 
 def _select_providers(tier: str = ""):
+    from gemini_client import use_vertex
+    if use_vertex():
+        # EU-only routing: never send clinical text to DeepSeek (China). Use the
+        # Gemini provider, which _get_client()/make_client() route through Vertex
+        # AI in an EU region.
+        return [p for p in PROVIDERS if p["type"] == "gemini"]
     return PROVIDERS
 
 
@@ -143,9 +149,14 @@ async def _generate(prompt, retries: int = 1, tier: str = "", purpose: str = "un
 
     providers = _select_providers(tier)
 
+    from gemini_client import use_vertex, vertex_model
+    vertex_on = use_vertex()
+
     for provider_index, provider in enumerate(providers):
         api_key = os.environ.get(provider["env_key"])
-        if not api_key:
+        # In Vertex mode the Gemini provider authenticates via ADC, not an API
+        # key, so GOOGLE_API_KEY may legitimately be unset.
+        if not api_key and not (provider["type"] == "gemini" and vertex_on):
             logger.debug("Skipping %s — %s not set", provider["name"], provider["env_key"])
             continue
 
@@ -158,6 +169,10 @@ async def _generate(prompt, retries: int = 1, tier: str = "", purpose: str = "un
                 if provider["type"] == "gemini":
                     client = _get_client()
                     model_name = provider["model"]() if callable(provider["model"]) else provider["model"]
+                    if vertex_on:
+                        # Developer-API preview model names aren't assumed to
+                        # exist on Vertex; use the configured EU-available model.
+                        model_name = vertex_model()
                     result = await loop.run_in_executor(
                         None,
                         lambda m=model_name: client.models.generate_content(model=m, contents=prompt)
@@ -424,7 +439,8 @@ _HUMANIZE_FIELDS = {
 def _get_client():
     global _client
     if _client is None:
-        _client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
+        from gemini_client import make_client
+        _client = make_client()
     return _client
 
 

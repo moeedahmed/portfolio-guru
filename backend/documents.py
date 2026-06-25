@@ -40,10 +40,10 @@ async def extract_from_document(file_path: str) -> str:
 async def _ocr_pdf_with_gemini(file_path: str) -> str:
     """OCR a scanned PDF using Gemini Vision (native PDF input — no page rendering needed)."""
     import asyncio
-    from google import genai
     from google.genai import types
+    from gemini_client import make_client
 
-    client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
+    client = make_client()
 
     with open(file_path, "rb") as f:
         pdf_data = f.read()

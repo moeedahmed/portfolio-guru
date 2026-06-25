@@ -81,14 +81,13 @@ async def _transcribe_local(file_path: str) -> str:
 
 async def _transcribe_gemini(file_path: str) -> str:
     """Transcribe using Gemini's native audio understanding."""
-    from google import genai
     from google.genai import types
+    from gemini_client import make_client, use_vertex
 
-    api_key = os.environ.get("GOOGLE_API_KEY")
-    if not api_key:
+    if not use_vertex() and not os.environ.get("GOOGLE_API_KEY"):
         raise RuntimeError("GOOGLE_API_KEY not set")
 
-    client = genai.Client(api_key=api_key)
+    client = make_client()
 
     with open(file_path, "rb") as f:
         audio_data = f.read()

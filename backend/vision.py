@@ -50,7 +50,8 @@ Return the extracted facts only — no preamble, no summary, no commentary."""
 def _get_client():
     global _client
     if _client is None:
-        _client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
+        from gemini_client import make_client
+        _client = make_client()
     return _client
 
 
