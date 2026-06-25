@@ -122,8 +122,15 @@ STRIPE_SECRET_KEY="$(get_secret 4450d6ac-f7a2-4802-a27a-b428006488c9)"
 export STRIPE_SECRET_KEY
 STRIPE_WEBHOOK_SECRET="$(get_secret 3ffc5e11-f4d6-4ff8-872f-b428006e7126)"
 export STRIPE_WEBHOOK_SECRET
-export STRIPE_PRO_PRICE_ID="price_1TKY11FtxKHU39UdHFXn1yur"
-export STRIPE_PRO_PLUS_PRICE_ID="price_1TKY12FtxKHU39UdTQZY8rOq"
+# Price IDs are BWS-overridable so going live is a secrets-only change (no code
+# edit). Falls back to the current test-mode prices when the BWS key is unset.
+# IMPORTANT: live secret key + live webhook secret MUST be paired with LIVE
+# price IDs, or the webhook can't map the price and the customer is charged but
+# not upgraded (log_stripe_mode() warns on a mismatch at startup).
+export STRIPE_PRO_PRICE_ID="$(get_secret_by_key STRIPE_PRO_PRICE_ID)"
+export STRIPE_PRO_PRICE_ID="${STRIPE_PRO_PRICE_ID:-price_1TKY11FtxKHU39UdHFXn1yur}"
+export STRIPE_PRO_PLUS_PRICE_ID="$(get_secret_by_key STRIPE_PRO_PLUS_PRICE_ID)"
+export STRIPE_PRO_PLUS_PRICE_ID="${STRIPE_PRO_PLUS_PRICE_ID:-price_1TKY12FtxKHU39UdTQZY8rOq}"
 PORTFOLIO_INBOUND_SECRET="${PORTFOLIO_INBOUND_SECRET:-$(get_mapped_secret PORTFOLIO_INBOUND_SECRET)}"
 export PORTFOLIO_INBOUND_SECRET
 # The outbound path must point at the OpenClaw gateway, not this webhook server.
