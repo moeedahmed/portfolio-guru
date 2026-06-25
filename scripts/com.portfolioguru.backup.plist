@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.portfolioguru.backup</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/moeedahmed/projects/portfolio-guru/scripts/backup_db.sh</string>
+  </array>
+  <!-- Set PG_BACKUP_REMOTE to an OFF-DEVICE target before this is real protection.
+       Empty value = on-device backups only (better than nothing, not disaster-proof). -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PG_BACKUP_REMOTE</key>
+    <string></string>
+    <key>PG_BACKUP_RETAIN_DAYS</key>
+    <string>30</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>3</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/moeedahmed/.openclaw/backups/portfolio-guru/backup.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/moeedahmed/.openclaw/backups/portfolio-guru/backup.err.log</string>
+</dict>
+</plist>
