@@ -4,6 +4,31 @@
 > Goal: get from "single-operator private beta" → invite-only **paid** beta → public paid launch, in the safe order.
 > Channels in scope: Telegram (live, `@portfolio_guru_bot`), web front (`emgurus.com/portfolio`), WhatsApp (planned), Hermes `emgurus` intelligence layer (in progress).
 
+## Locked decisions (2026-06-25)
+
+| Area       | Decision                                                                                                                |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------- |
+| AI routing | **UK/EU only → Google Vertex AI (EU, `europe-west2`)** for text/voice/vision; drop DeepSeek/consumer-API default        |
+| Infra      | **Hybrid** — Supabase becomes billing/DB source-of-truth (+ Edge Function webhook); filing engine stays on the Mac Mini |
+| Launch ICP | **Open to all**, unproven portfolio types (SAS/CESR) clearly labelled beta                                              |
+| Deploy     | **Autonomous push**, protected by the gate + smoke + rollback below                                                     |
+| Pricing    | **£9.99/mo Unlimited + free 5/mo**, locked                                                                              |
+| Legal      | **Drafts** written for solicitor review → `docs/legal/`                                                                 |
+| Channels   | WhatsApp + Hermes are **post-launch** (re-open the compliance surface)                                                  |
+
+## Live progress (shipped to `main`, gated deploy verified)
+
+- ✅ **0.1 Deploy gate** — `deploy-mac.yml` gated on Tests passing (proven: blocked a red-CI deploy)
+- ✅ **3.1 Smoke + auto-rollback** — `deploy_mac.sh` reverts on runtime failure
+- ✅ **0.2 PII fix** — `extracted_fields` Fernet-encrypted before Supabase (was plaintext)
+- ✅ **0.3 Erasure** — `delete_user_data()` wired into `/reset` (GDPR Art. 17)
+- ✅ **0.4 Backup** — `scripts/backup_db.sh` + daily plist + restore doc (agent install is manual)
+- ✅ **0.5 / 3.3 Alerting** — `ops_alert.py`: operator paging on crash + webhook failure + liveness heartbeat
+- ✅ **CI fix** — `test.yml` had an invalid Fernet key; suite was red for weeks (masked by the ungated deploy)
+- ✅ **Legal drafts** — privacy/terms/DPIA/consent/ROPA in `docs/legal/`
+
+**Remaining / blocked:** Vertex EU client (needs GCP creds), Stripe reconciliation+dunning+`invoice.paid` (logic buildable now; live-proof needs live keys), Supabase source-of-truth flip (high-risk — touches live credentials).
+
 ## How to read this
 
 - **P0** = legal / financial / safety. Cannot charge the public until these are done. Do first.
