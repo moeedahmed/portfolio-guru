@@ -9962,46 +9962,6 @@ async def bulk_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     """Handle /bulk — disabled for now, coming in a future update."""
     await update.message.reply_text("📦 Bulk filing is coming soon. For now, send cases one at a time.")
     return
-    # --- Original implementation below (disabled) ---
-    user_id = update.effective_user.id
-    creds = get_credentials(user_id)
-    if not creds:
-        await update.message.reply_text("Connect your Kaizen account first with /settings")
-        return
-
-    text = (update.message.text or "").replace("/bulk", "", 1).strip()
-    if not text:
-        await update.message.reply_text(
-            "Usage: /bulk followed by a JSON array of entries.\n"
-            'Each entry: {"form_type": "CBD", "fields": {...}}'
-        )
-        return
-
-    try:
-        import json as _json
-        entries = _json.loads(text)
-        if not isinstance(entries, list):
-            await update.message.reply_text("Expected a JSON array of entries.")
-            return
-    except _json.JSONDecodeError as e:
-        await update.message.reply_text(f"Invalid JSON: {e}")
-        return
-
-    msg = await update.message.reply_text(f"Filing {len(entries)} entries...")
-    credentials = {"username": creds[0], "password": creds[1]}
-
-    results = await bulk_file(entries, credentials)
-
-    # Send progress summary
-    success = sum(1 for r in results if r["status"] in ("success", "partial"))
-    failed = sum(1 for r in results if r["status"] == "failed")
-    lines = [f"Filed {success}/{len(entries)} — {failed} failed"]
-    for r in results:
-        status_icon = "✅" if r["status"] in ("success", "partial") else "❌"
-        err = f": {r['error']}" if r.get("error") else ""
-        lines.append(f"{status_icon} {r['form_type']}{err}")
-
-    await msg.edit_text("\n".join(lines))
 
 
 async def _show_unsigned_range_picker(target_message, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -10177,38 +10137,6 @@ async def chase_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "This feature will let you send reminders directly through Kaizen for unsigned tickets."
     )
     return
-    # --- Original implementation below (needs unsigned ticket integration) ---
-    text = (update.message.text or "").replace("/chase", "", 1).strip()
-    if not text:
-        await update.message.reply_text("Usage: /chase <assessor_email>")
-        return
-
-    email = text.split()[0]
-    allowed, reason = chase_guard.check_allowed(email)
-
-    if not allowed:
-        await update.message.reply_text(f"🔴 {reason}")
-        return
-
-    # Build chase template
-    chases = chase_guard.get_assessor_chases(email)
-    chase_num = len(chases) + 1
-    template = (
-        f"🟢 Chase #{chase_num} allowed for {email}\n\n"
-        f"Suggested message:\n"
-        f"---\n"
-        f"Dear colleague,\n\n"
-        f"I hope you are well. I have an outstanding portfolio entry awaiting your review "
-        f"on Kaizen. I would be very grateful if you could sign it at your convenience.\n\n"
-        f"Many thanks.\n"
-        f"---\n\n"
-        f"Send the chase yourself, then tap Confirm to log it."
-    )
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Confirm chase sent", callback_data=f"CHASE_LOG|{email}")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="CHASE_LOG|cancel")],
-    ])
-    await update.message.reply_text(template, reply_markup=keyboard)
 
 
 async def handle_chase_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
