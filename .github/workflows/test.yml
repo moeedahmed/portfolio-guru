@@ -10,7 +10,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
     env:
-      FERNET_SECRET_KEY: test
+# Throwaway, CI-only Fernet key. Must be a valid 32-byte url-safe base64 key
+      # (the literal "test" is not, which silently broke every credential-encrypt
+      # test in CI). Encrypts only synthetic test data — never real secrets.
+      FERNET_SECRET_KEY: "5Wv33F9sq99WGD2lEzwwd3J_JH5p6vxKdDiAwCWqoYQ="
       TELEGRAM_BOT_TOKEN: fake
       GOOGLE_API_KEY: fake
     defaults:
@@ -29,7 +32,10 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     env:
-      FERNET_SECRET_KEY: test
+# Throwaway, CI-only Fernet key. Must be a valid 32-byte url-safe base64 key
+      # (the literal "test" is not, which silently broke every credential-encrypt
+      # test in CI). Encrypts only synthetic test data — never real secrets.
+      FERNET_SECRET_KEY: "5Wv33F9sq99WGD2lEzwwd3J_JH5p6vxKdDiAwCWqoYQ="
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN_PORTFOLIO }}
       GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
       TELETHON_API_ID: ${{ secrets.TELETHON_API_ID }}
