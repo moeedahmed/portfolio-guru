@@ -92,6 +92,8 @@ if [ -n "$GCP_PROJECT_ID" ]; then
   export GCP_PROJECT_ID
   GCP_VERTEX_LOCATION="$(get_secret_by_key GCP_VERTEX_LOCATION)"
   export GCP_VERTEX_LOCATION="${GCP_VERTEX_LOCATION:-europe-west2}"
+  # Optional model override (empty -> gemini_client default gemini-3.5-flash).
+  export GEMINI_VERTEX_MODEL="$(get_secret_by_key GEMINI_VERTEX_MODEL)"
   GCP_VERTEX_SA_JSON="$(get_secret_by_key GCP_VERTEX_SA_JSON)"
   if [ -n "$GCP_VERTEX_SA_JSON" ]; then
     _SA_FILE="$(mktemp -t pg-vertex-sa)"

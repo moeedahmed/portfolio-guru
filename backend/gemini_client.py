@@ -40,14 +40,14 @@ def vertex_location() -> str:
     return os.environ.get("GCP_VERTEX_LOCATION", "europe-west2")
 
 
-def vertex_model(default: str = "gemini-2.5-flash") -> str:
+def vertex_model(default: str = "gemini-3.5-flash") -> str:
     """Model id to use in Vertex mode.
 
-    Overridable via GEMINI_VERTEX_MODEL. Defaults to a model broadly available
-    on Vertex in EU regions; preview developer-API model names are not assumed
-    to exist on Vertex — confirm availability per region before changing.
+    Overridable via GEMINI_VERTEX_MODEL (empty value falls back to the default).
+    gemini-3.5-flash and gemini-2.5-flash are both verified available on Vertex
+    in europe-west2; confirm any other model per region before switching.
     """
-    return os.environ.get("GEMINI_VERTEX_MODEL", default)
+    return os.environ.get("GEMINI_VERTEX_MODEL") or default
 
 
 def make_client():
