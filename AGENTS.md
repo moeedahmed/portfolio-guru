@@ -11,7 +11,7 @@ Portfolio Guru automates e-portfolio filing for UK EM trainees. A doctor sends a
 - Target: Kaizen ePortfolio (`eportfolio.rcem.ac.uk` → `kaizenep.com`).
 - Inputs: text, voice, audio, photos, documents.
 - Output: Kaizen draft save only. No supervisor submission.
-- Disabled code: `/bulk`, `/unsigned`, `/chase` return early with "coming soon" — code below the return is not live.
+- Disabled commands: `/bulk` and `/chase` return early with "coming soon" (their dead implementation code has been removed). `/unsigned` is NOT disabled — it is a live, tier-gated (`pro_plus`) feature registered in `build_application`.
 
 ## Dev / Test Commands
 
@@ -36,7 +36,7 @@ Single source: `backend/filer_router.py` selects the method per form type.
 
 ## Key Known Failure Modes
 
-- Disabled features have code paths below `return` — never treat as live.
+- `/bulk` and `/chase` are disabled (early `return`, "coming soon"); `/unsigned` IS live (tier-gated). Don't assume a command is disabled from docs alone — check its handler body.
 - Kaizen date format: `d/m/yyyy`, not US `m/d/yyyy`.
 - Two separate filer implementations: `filer.py` (browser-use) and `browser_filer.py` (Playwright). Shared logic, different failure modes.
 - LLM extraction is non-deterministic — test with multiple runs.
