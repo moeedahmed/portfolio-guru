@@ -1,9 +1,13 @@
 name: Deploy Mac Mini
 
 on:
-  push:
-    branches:
-      - main
+  # Gated deploy: only runs after the "Tests" workflow completes successfully on main.
+  # This prevents a red test suite (or a green-compile/red-runtime change) from
+  # auto-deploying to the live bot. Use workflow_dispatch for a manual override.
+  workflow_run:
+    workflows: ["Tests"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -13,6 +17,8 @@ concurrency:
 jobs:
   deploy:
     runs-on: [self-hosted, macOS, ARM64, portfolio-guru]
+    # Deploy only when the triggering Tests run passed, or when manually dispatched.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - name: Deploy on Mac Mini
         shell: bash

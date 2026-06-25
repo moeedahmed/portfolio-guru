@@ -5404,6 +5404,17 @@ async def _perform_reset(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> No
     except Exception:
         logger.warning("Could not clear stored user profile", exc_info=True)
 
+    # Erase the Supabase mirror too — cloud copies of credentials, clinical
+    # cases, profile, usage and chase log. GDPR Art. 17. Best-effort; the
+    # local reset above must never be blocked by a Supabase failure. The
+    # billing link (tier / Stripe IDs) is intentionally retained so an active
+    # subscription isn't orphaned by a data reset.
+    try:
+        from supabase_sync import delete_user_data
+        delete_user_data(user_id)
+    except Exception:
+        logger.warning("Could not clear Supabase mirror on reset", exc_info=True)
+
 
 async def reset_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle /reset (and the hidden /delete backwards-compat alias) — wipe all
@@ -8972,9 +8983,10 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             logger.warning("KC coverage save failed", exc_info=True)
 
         # Mirror the filed case to Supabase portfolio_cases so the web app's
-        # case browser can render it. Encrypt the case_text with the same
-        # Fernet key used for credentials — plaintext clinical narratives
-        # never leave the bot. See feedback-no-fabrication for context.
+        # case browser can render it. Both the case_text and the structured
+        # extracted_fields are Fernet-encrypted (case_text here, fields inside
+        # mirror_case) with the same key used for credentials — no plaintext
+        # clinical content leaves the bot. See feedback-no-fabrication.
         try:
             from supabase_sync import mirror_case
             from credentials import _fernet

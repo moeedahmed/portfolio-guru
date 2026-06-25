@@ -333,6 +333,33 @@ def mirror_chase(
         logger.warning("mirror_chase failed for %s: %s", telegram_user_id, exc)
 
 
+def _encrypt_fields(fields: dict | None) -> dict:
+    """Encrypt the extracted clinical fields before they leave the bot.
+
+    ``extracted_fields`` can contain special-category patient detail (age, sex,
+    presentation, and any identifiers the extractor lifted from the case). It is
+    NEVER stored as plaintext in Supabase. The dict is JSON-encoded and
+    Fernet-encrypted with the same key the credentials/case_text use; the column
+    holds ``{"_encrypted": "<token>"}``. A server-side reader holding the Fernet
+    key can decrypt it; without the key it is opaque ciphertext.
+
+    Fail-closed: if encryption is unavailable for any reason we drop the fields
+    rather than fall back to plaintext PII.
+    """
+    if not fields:
+        return {}
+    try:
+        from credentials import _fernet
+
+        token = _fernet().encrypt(json.dumps(fields, default=str).encode()).decode()
+        return {"_encrypted": token}
+    except Exception as exc:  # pragma: no cover - defensive, must never leak plaintext
+        logger.warning(
+            "extracted_fields encryption failed for mirror; dropping fields: %s", exc
+        )
+        return {}
+
+
 def mirror_case(
     telegram_user_id: int,
     form_type: str,
@@ -347,10 +374,12 @@ def mirror_case(
 ) -> None:
     """Mirror a filed case (success / partial / failed) to portfolio_cases.
 
-    This is the first time the bot durably persists case content — case_text
-    is encrypted with the same Fernet key the credentials use, never stored
-    plaintext. extracted_fields is the FormDraft.fields dict the bot
-    produced.
+    This is the first time the bot durably persists case content. Both the
+    free-text ``case_text`` AND the structured ``extracted_fields`` are
+    Fernet-encrypted with the same key the credentials use — no plaintext
+    clinical content (narrative or structured patient detail) ever leaves the
+    bot. ``curriculum_links``/``key_capabilities`` are RCEM taxonomy references
+    (no patient data) and are stored as-is.
     """
     sb = _supabase()
     if sb is None:
@@ -363,7 +392,7 @@ def mirror_case(
         "form_type": form_type,
         "status": status,
         "source": source,
-        "extracted_fields": extracted_fields or {},
+        "extracted_fields": _encrypt_fields(extracted_fields),
         "curriculum_links": curriculum_links or [],
         "key_capabilities": key_capabilities or [],
     }
@@ -375,6 +404,64 @@ def mirror_case(
         sb.table("portfolio_cases").insert(payload).execute()
     except Exception as exc:
         logger.warning("mirror_case failed for %s: %s", telegram_user_id, exc)
+
+
+# ---------------------------------------------------------------------------
+# Erasure — GDPR Art. 17 / right to be forgotten.
+# ---------------------------------------------------------------------------
+
+def delete_user_data(telegram_user_id: int, *, include_billing_link: bool = False) -> dict:
+    """Erase this user's mirrored data from Supabase (supports GDPR Art. 17).
+
+    Deletes the special-category and sensitive personal data the bot mirrors:
+    Kaizen credentials, clinical cases, training profile, usage history, chase
+    log, and any outstanding link tokens — all keyed by ``emgurus_user_id``.
+
+    By default the ``portfolio_users`` row (identity link + tier + Stripe IDs)
+    is KEPT, because deleting it would orphan an active subscription and the
+    billing relationship has its own retention basis. Pass
+    ``include_billing_link=True`` for a full erasure (e.g. a verified data-
+    subject request from a user with no active subscription).
+
+    Best-effort and never raises — mirrors the module's design principle. The
+    service-role key bypasses RLS, so the deletes apply. Returns a
+    ``{table: "deleted"|"error: ..."}`` map for logging/audit.
+    """
+    result: dict[str, Any] = {}
+    sb = _supabase()
+    if sb is None:
+        result["_skipped"] = "supabase not configured"
+        return result
+    uid = _resolve_emgurus_user_id(telegram_user_id)
+    if uid is None:
+        result["_skipped"] = "user not linked"
+        return result
+
+    tables = [
+        "portfolio_credentials",
+        "portfolio_cases",
+        "portfolio_profile",
+        "portfolio_usage",
+        "portfolio_chase_log",
+        "portfolio_link_tokens",
+    ]
+    if include_billing_link:
+        tables.append("portfolio_users")
+
+    for table in tables:
+        try:
+            sb.table(table).delete().eq("emgurus_user_id", uid).execute()
+            result[table] = "deleted"
+        except Exception as exc:
+            logger.warning(
+                "delete_user_data: %s purge failed for %s: %s", table, telegram_user_id, exc
+            )
+            result[table] = f"error: {exc}"
+
+    # Drop the cached telegram->uuid mapping so a future re-link re-resolves.
+    _id_cache.pop(telegram_user_id, None)
+    logger.info("delete_user_data for %s: %s", telegram_user_id, result)
+    return result
 
 
 # ---------------------------------------------------------------------------
