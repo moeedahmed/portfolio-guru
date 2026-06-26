@@ -709,6 +709,86 @@ async def test_fill_text_click_non_actionable_fallback(mock_playwright_ctx):
     assert result is True
 
 
+@pytest.mark.asyncio
+async def test_legacy_field_fill_preserves_selector_plan_for_date():
+    from kaizen_form_filer import _fill_field_legacy
+
+    page = MagicMock()
+    page.keyboard.press = AsyncMock()
+    page.evaluate = AsyncMock(return_value=False)
+    date_field = AsyncMock()
+    date_field.count = AsyncMock(return_value=1)
+    date_field.first = date_field
+    date_field.click = AsyncMock()
+    date_field.type = AsyncMock()
+    date_field.evaluate = AsyncMock(side_effect=["INPUT", "28/03/2026"])
+    page.get_by_label.return_value = date_field
+    page.locator = MagicMock()
+
+    plan = {
+        "candidates": [
+            {
+                "strategy": "label",
+                "kind": "label",
+                "value": "Date occurred on",
+                "expected_unique": True,
+            },
+            {
+                "strategy": "id",
+                "kind": "css",
+                "value": '[id="startDate"]',
+                "expected_unique": True,
+            },
+        ]
+    }
+
+    result = await _fill_field_legacy(page, plan, "28/03/2026", "date_of_encounter", "CBD")
+
+    assert result is True
+    page.get_by_label.assert_called_with("Date occurred on")
+    page.locator.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_legacy_field_fill_preserves_selector_plan_for_select_without_dom_id():
+    from kaizen_form_filer import _fill_field_legacy
+
+    page = MagicMock()
+    page.evaluate = AsyncMock()
+    select_field = AsyncMock()
+    select_field.count = AsyncMock(return_value=1)
+    select_field.first = select_field
+    select_field.evaluate = AsyncMock(
+        side_effect=[
+            "SELECT",
+            ["1 - Emergency Medicine", "2 - Anaesthetics"],
+        ]
+    )
+    select_field.select_option = AsyncMock(
+        side_effect=[Exception("label miss"), Exception("value miss"), None]
+    )
+    page.get_by_label.return_value = select_field
+    page.locator = MagicMock()
+
+    plan = {
+        "candidates": [
+            {
+                "strategy": "label",
+                "kind": "label",
+                "value": "Placement",
+                "expected_unique": True,
+            }
+        ]
+    }
+
+    result = await _fill_field_legacy(page, plan, "Emergency", "placement", "CBD")
+
+    assert result is True
+    page.get_by_label.assert_called_with("Placement")
+    page.evaluate.assert_not_called()
+    select_field.select_option.assert_any_await(label="1 - Emergency Medicine")
+
+
 # ─── _save_form selectors ────────────────────────────────────────────
 
 

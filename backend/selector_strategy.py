@@ -150,6 +150,11 @@ def build_selector_plan(
 
     ranked = rank_selector_candidates(candidates)
     fallback = next((item for item in ranked if item["strategy"] in {"id", "xpath", "css"}), None)
+    repair_hint = {
+        "on_drift": "Prefer repairing or adding label/role/placeholder/name/data candidates before changing DOM id or XPath fallbacks.",
+        "snapshot": "Capture page URL, field label, candidate counts, screenshot, and HTML around the field before updating the map.",
+        "verify": "A repaired candidate should match exactly one control and preserve the existing DOM id fallback when available.",
+    }
     return {
         "field_key": _clean(field_key),
         "intent": intent,
@@ -157,6 +162,7 @@ def build_selector_plan(
         "preferred": ranked[0] if ranked else None,
         "fallback": fallback,
         "candidates": ranked,
+        "repair_hint": repair_hint,
     }
 
 

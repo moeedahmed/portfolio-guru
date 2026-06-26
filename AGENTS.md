@@ -31,10 +31,10 @@ Portfolio Guru automates e-portfolio filing for UK EM trainees. A doctor sends a
 
 Single source: `backend/filer_router.py` selects the method per form type.
 
-- **DOM-mapped forms** → deterministic Playwright via CDP (`localhost:18800`). No browser-use. If partial, log gap and fix — never credentials in LLM prompts.
+- **Mapped forms** → deterministic Playwright via CDP (`localhost:18800`). New/updated maps use semantic-first selector plans: label/role/placeholder/name/data candidates first, DOM id/CSS/XPath as fallback, with repair hints and snapshot evidence when selectors drift. No browser-use. If partial, log gap and fix — never credentials in LLM prompts.
 - **Unknown form types on supported platform** → browser-use via CDP as emergency bridge. Auth in persistent Chrome session, never in prompt.
 - **Unknown platforms** → browser-harness + domain skills first. User connects their Chrome, CDP navigates, persists helpers.
-- browser-use is NEVER a substitute for DOM mapping.
+- browser-use is NEVER a substitute for deterministic mapped forms.
 
 ## Key Known Failure Modes
 

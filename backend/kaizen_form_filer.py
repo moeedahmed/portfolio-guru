@@ -1813,7 +1813,7 @@ async def _fill_date(page: Page, dom_id: Any, raw_value: str) -> bool:
         logger.warning(f"Date type failed for {dom_id}; using JS event fallback: {e}")
         ok = await page.evaluate(
             """({domId, value}) => {
-                const el = document.getElementById(domId);
+                const el = domId ? document.getElementById(domId) : null;
                 if (!el) return false;
                 el.focus();
                 el.value = value;
@@ -1825,7 +1825,22 @@ async def _fill_date(page: Page, dom_id: Any, raw_value: str) -> bool:
             {"domId": dom_id, "value": uk_date},
         )
         if not ok:
-            return False
+            try:
+                ok = await el.evaluate(
+                    """(element, value) => {
+                        element.focus();
+                        element.value = value;
+                        element.dispatchEvent(new Event('input', { bubbles: true }));
+                        element.dispatchEvent(new Event('change', { bubbles: true }));
+                        element.dispatchEvent(new Event('blur', { bubbles: true }));
+                        return true;
+                    }""",
+                    uk_date,
+                )
+            except Exception:
+                ok = False
+            if not ok:
+                return False
     await page.keyboard.press("Tab")  # trigger Angular watcher
     await asyncio.sleep(1)
 
@@ -1850,9 +1865,9 @@ async def _fill_date(page: Page, dom_id: Any, raw_value: str) -> bool:
         f"Date verify mismatch on type+Tab path: expected {uk_date}, got {val}. "
         "Retrying via direct JS value assignment."
     )
-    await page.evaluate(
+    js_retry_ok = await page.evaluate(
         """({domId, value}) => {
-            const el = document.getElementById(domId);
+            const el = domId ? document.getElementById(domId) : null;
             if (!el) return false;
             el.focus();
             el.value = value;
@@ -1863,6 +1878,24 @@ async def _fill_date(page: Page, dom_id: Any, raw_value: str) -> bool:
         }""",
         {"domId": dom_id, "value": uk_date},
     )
+    if not js_retry_ok:
+        try:
+            js_retry_ok = await el.evaluate(
+                """(element, value) => {
+                    element.focus();
+                    element.value = value;
+                    element.dispatchEvent(new Event('input', { bubbles: true }));
+                    element.dispatchEvent(new Event('change', { bubbles: true }));
+                    element.dispatchEvent(new Event('blur', { bubbles: true }));
+                    return true;
+                }""",
+                uk_date,
+            )
+        except Exception:
+            js_retry_ok = False
+    if not js_retry_ok:
+        logger.warning(f"Date JS fallback could not target field: {dom_id}")
+        return False
     await asyncio.sleep(1)
     val = await el.evaluate("el => el.value")
     if val and _norm(val) == _norm(uk_date):
@@ -2029,10 +2062,16 @@ async def _fill_select(page: Page, dom_id: Any, value: str) -> bool:
         except Exception:
             # Try partial label match (e.g. procedure dropdowns have numbered prefixes)
             try:
-                options = await page.evaluate(
-                    "(domId) => { var s = document.getElementById(domId); return s ? Array.from(s.options).map(o => o.text) : []; }",
-                    dom_id
-                )
+                options = []
+                if dom_id:
+                    options = await page.evaluate(
+                        "(domId) => { var s = document.getElementById(domId); return s ? Array.from(s.options).map(o => o.text) : []; }",
+                        dom_id
+                    )
+                if not options:
+                    options = await el.evaluate(
+                        "select => Array.from(select.options || []).map(o => o.text)"
+                    )
                 match = next((o for o in options if value.lower() in o.lower()), None)
                 if match:
                     await el.select_option(label=match)
@@ -3203,8 +3242,8 @@ async def _fill_field_legacy(page: Page, dom_id: Any, value: Any, field_key: str
             return await _fill_stage(page, dom_id, str(value))
 
         field_target = dom_id
-        dom_id = _field_dom_id(field_target)
         el = await _first_field_locator(page, field_target, field_key=field_key)
+        dom_id = _field_dom_id(field_target)
         if el is None or not await el.count():
             logger.warning(f"Field not found: [id=\"{dom_id}\"] ({field_key})")
             return False
@@ -3213,13 +3252,13 @@ async def _fill_field_legacy(page: Page, dom_id: Any, value: Any, field_key: str
 
         # Date fields
         if dom_id == "startDate" or dom_id == "endDate" or "date" in field_key.lower():
-            return await _fill_date(page, dom_id, str(value))
+            return await _fill_date(page, field_target, str(value))
 
         # Select dropdowns
         if tag == "SELECT":
             if form_type == "DOPS" and field_key == "placement":
                 value = await _normalise_dops_select_value(page, field_key, dom_id, value)
-            return await _fill_select(page, dom_id, str(value))
+            return await _fill_select(page, field_target, str(value))
 
         # Textareas and text inputs
         if tag in ("TEXTAREA", "INPUT"):

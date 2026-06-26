@@ -45,6 +45,8 @@ def test_selector_plan_keeps_id_fallback_and_intent_metadata():
     assert plan["expected_unique"] is True
     assert fallback_dom_id(plan) == "610b5c60-99ac-4902-9407-22974d6a5799"
     assert any(candidate["strategy"] == "xpath" for candidate in plan["candidates"])
+    assert "label/role/placeholder/name/data" in plan["repair_hint"]["on_drift"]
+    assert "screenshot" in plan["repair_hint"]["snapshot"].lower()
 
 
 def test_infer_selector_strategy_for_common_playwright_and_css_forms():
