@@ -45,15 +45,38 @@ snapshots plus the pickle/JSON state.
    launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.portfolioguru.bot.plist
    ```
 
-## Off-device protection (do this)
+## Off-device protection (LIVE)
 
-On-device backups don't survive a disk failure. Set `PG_BACKUP_REMOTE` in the
-launchd plist (`EnvironmentVariables`) to an off-device target — an external
-disk path, an iCloud Drive path, an `rsync` host (`user@host:/path`), or an
-`rclone` remote (`gdrive:pg-backups`) — then reload the agent:
+Every nightly backup is **gpg-encrypted (AES256)** and uploaded to an EU bucket
+**`gs://portfolio-guru-eu-backups`** (London, `portfolio-guru-eu` project, 90-day
+lifecycle). The local copy stays unencrypted for quick restore; the off-device
+copy is always encrypted. The encryption passphrase lives in BWS
+(`PG_BACKUP_GPG_PASSPHRASE`) — it is NOT on disk and NOT in the backup, so the
+bucket alone is useless to anyone without it.
+
+### Restore from the off-device (encrypted) backup
+
+If the Mac is gone, restore from the bucket:
 
 ```
-launchctl bootout  "gui/$(id -u)" ~/Library/LaunchAgents/com.portfolioguru.backup.plist 2>/dev/null || true
-cp scripts/com.portfolioguru.backup.plist ~/Library/LaunchAgents/
-launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.portfolioguru.backup.plist
+# 1. fetch the passphrase from BWS (on a machine with the BWS token)
+export BWS_ACCESS_TOKEN=$(cat ~/.openclaw/.bws-token)
+PASS=$(bws secret list --output json | python3 -c "import json,sys;print(next(s['value'] for s in json.load(sys.stdin) if s['key']=='PG_BACKUP_GPG_PASSPHRASE'))")
+
+# 2. download the newest encrypted archive
+LATEST=$(gcloud storage ls gs://portfolio-guru-eu-backups/ | tail -1)
+gcloud storage cp "$LATEST" /tmp/restore.tar.gz.gpg
+
+# 3. decrypt, then follow the restore steps above with /tmp/restore.tar.gz
+printf '%s' "$PASS" | gpg --batch --pinentry-mode loopback --passphrase-fd 0 -o /tmp/restore.tar.gz -d /tmp/restore.tar.gz.gpg
 ```
+
+> ⚠️ The `PG_BACKUP_GPG_PASSPHRASE` BWS secret is the single key to every
+> off-device backup. If BWS is lost, the bucket backups cannot be decrypted —
+> keep a sealed offline copy of that passphrase somewhere safe.
+
+### Future (full cloud deployment)
+
+When the data layer moves to managed cloud Postgres (Supabase), provider-managed
+daily backups + point-in-time recovery replace this script; the bucket can remain
+as an extra archival layer.
