@@ -6,9 +6,11 @@ Portfolio Guru automates e-portfolio filing for UK EM trainees. A doctor sends a
 
 ## Current State
 
-- Phase: local/private beta on Mac Mini. Deploy: GitHub Actions self-hosted runner, push to `main`.
-- Stack: python-telegram-bot v21+ polling, Gemini fast extraction, Playwright/CDP for DOM-mapped Kaizen forms, Fernet-encrypted SQLite, PicklePersistence.
-- Target: Kaizen ePortfolio (`eportfolio.rcem.ac.uk` → `kaizenep.com`).
+- Phase: beta-ready (private/invite-only paid beta) on Mac Mini. Deploy: GitHub Actions self-hosted runner, push to `main`, **gated on CI tests passing** with post-deploy smoke + auto-rollback (`deploy_mac.sh`).
+- Stack: python-telegram-bot v21+ polling, **Vertex AI (EU, London `europe-west2`) `gemini-3.5-flash`** extraction (via `gemini_client.make_client()`, flag `PG_USE_VERTEX`; dedicated GCP project `portfolio-guru-eu`), Playwright/CDP for DOM-mapped Kaizen forms, Fernet-encrypted SQLite, PicklePersistence, best-effort Supabase (EU) mirror.
+- Compliance/ops live: EU data residency for clinical AI, `extracted_fields` encrypted before Supabase, GDPR `/reset` erasure (`delete_user_data`), operator alerting + heartbeat (`ops_alert.py`), daily DB backup (launchd). Legal drafts in `docs/legal/` (solicitor review gates _public_ launch).
+- Billing: Stripe **live** (proven end-to-end: real £9.99 → upgrade). £9.99/mo Unlimited + free (5/mo). Reconciliation + `invoice.paid` + mode guard in `stripe_handler.py`.
+- Target: Kaizen ePortfolio (`eportfolio.rcem.ac.uk` → `kaizenep.com`). Multi-platform-ready via `filer_router.PLATFORM_REGISTRY` (kaizen built, horus stubbed).
 - Inputs: text, voice, audio, photos, documents.
 - Output: Kaizen draft save only. No supervisor submission.
 - Disabled commands: `/bulk` and `/chase` return early with "coming soon" (their dead implementation code has been removed). `/unsigned` is NOT disabled — it is a live, tier-gated (`pro_plus`) feature registered in `build_application`.
