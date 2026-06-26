@@ -15,9 +15,12 @@ if [[ -z "$branch" ]]; then
 fi
 
 if [[ "$branch" == "main" ]]; then
-  echo "ERROR: you are on main. Create a task branch before editing."
-  echo "Example: git checkout -b fix/short-task-name"
-  exit 1
+  if [[ "${PREFLIGHT_REQUIRE_TASK_BRANCH:-0}" == "1" ]]; then
+    echo "ERROR: branch-only preflight requested. Create a task branch before editing."
+    echo "Example: git checkout -b fix/short-task-name"
+    exit 1
+  fi
+  echo "On main: allowed for solo verified slices. Push/deploy remain separate gates."
 fi
 
 git fetch --quiet origin
