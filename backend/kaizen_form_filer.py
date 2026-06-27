@@ -37,6 +37,7 @@ from typing import Any, Dict, List, Optional
 
 from playwright.async_api import async_playwright, Page, Browser, BrowserContext
 from selector_strategy import fallback_dom_id
+from form_schemas import FORM_SCHEMAS
 
 logger = logging.getLogger(__name__)
 
@@ -441,6 +442,23 @@ FORMS_USING_TAG_BASED_CURRICULUM = {
     "COST_IMPROVE", "EQUIP_SERVICE", "APPRAISAL",
     # Reflective entries that may also use tag-based linking:
     "COMPLAINT", "SERIOUS_INC", "REFLECT_LOG",
+    # ── Procedural / core WPBA forms whose curriculum lives ONLY in the Add
+    # tags modal (no usable in-form KC tree). These were live-verified as
+    # modal-only on 2026-04-22/23 (see commit 395393e) and corroborated by the
+    # Kaizen domain skill README "Verified fields" lists, which show no in-form
+    # curriculum control on CBD or Procedural Log — only the toolbar "Add tags"
+    # picker. They were accidentally dropped by the 2026-05-22 file recovery
+    # (commit e9c5741), which silently regressed them to the in-form KC-tree
+    # path: that path ticks NOTHING when no [kz-tree] is present yet still
+    # reports "curriculum_links (N KCs)" success. Restored here.
+    #   CBD       — kzTreeAttr=1 but sloAnchors=0, tree lives in the modal.
+    #   DOPS      — inline kz-tree has no SLO/KC nodes (procedural multi-selects
+    #               on the page previously fooled the tree-ready check).
+    #   PROC_LOG  — no inline curriculum tree, only the modal.
+    # NOTE: US_CASE deliberately stays OUT — it has a genuine inline kz-tree
+    # where KCs must be ticked to count as curriculum evidence (verified
+    # 2026-04-23); routing it through tags would file KCs in the wrong place.
+    "CBD", "DOPS", "PROC_LOG",
 }
 
 
@@ -2451,9 +2469,34 @@ async def _fill_curriculum_links(
     return ticked, errors
 
 
+def _curriculum_base_form_type(form_type: str) -> str:
+    """Resolve a form code to the base whose curriculum routing it inherits.
+
+    Folds user-facing aliases (``canonical_form_type``) and ``*_2021`` /
+    variant codes (``_FORM_FIELD_MAP_VARIANT_BASES``) down to the base form, so
+    e.g. ``CBD_2021`` and ``DOPS_2021`` route exactly like ``CBD`` / ``DOPS``.
+    """
+    base = canonical_form_type(form_type)
+    return _FORM_FIELD_MAP_VARIANT_BASES.get(base, base)
+
+
 def _uses_tag_based_curriculum(form_type: str) -> bool:
-    """Return True when Kaizen exposes curriculum linkage via Add Tags."""
-    return canonical_form_type(form_type) in FORMS_USING_TAG_BASED_CURRICULUM
+    """Return True when Kaizen exposes curriculum linkage via Add Tags.
+
+    Single source of truth, most specific first:
+      1. an explicit ``tag_based_curriculum`` flag on the form's FORM_SCHEMAS
+         entry (lets a per-form decision live next to the schema and override
+         the default — e.g. TEACH=False keeps its 2025 in-form tree, REFLECT_LOG
+         =True forces tags);
+      2. otherwise membership in FORMS_USING_TAG_BASED_CURRICULUM, the
+         live-verified default set.
+    ``*_2021`` and other variant codes inherit their base form's routing.
+    """
+    base = _curriculum_base_form_type(form_type)
+    schema = FORM_SCHEMAS.get(base, {})
+    if "tag_based_curriculum" in schema:
+        return bool(schema["tag_based_curriculum"])
+    return base in FORMS_USING_TAG_BASED_CURRICULUM
 
 
 async def _read_tag_count(page: Page) -> int:
@@ -2689,7 +2732,7 @@ async def _verify_sent_to_assessor(page: Page, expected_assessor: str = "") -> b
 
 # ─── Verification pass ───────────────────────────────────────────────────────
 
-async def _verify_fields(page: Page, fields: dict, field_map: dict, filled_keys: List[str]) -> List[str]:
+async def _verify_fields(page: Page, form_type: str, fields: dict, field_map: dict, filled_keys: List[str]) -> List[str]:
     """Post-fill verification. Returns list of issues."""
     issues = []
 
@@ -3260,7 +3303,7 @@ async def fill_kaizen_form(
                 errors.append("assessor: missing assessor_query/assessor_email for live send")
 
         # ─── STEP 6: Verification pass ───────────────────────────────────────
-        verify_issues = await _verify_fields(page, fields, field_map, filled)
+        verify_issues = await _verify_fields(page, form_type, fields, field_map, filled)
         if verify_issues:
             for issue in verify_issues:
                 logger.warning(f"Verify: {issue}")

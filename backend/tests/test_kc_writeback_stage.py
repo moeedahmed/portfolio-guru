@@ -28,6 +28,7 @@ from kaizen_form_filer import (
     _curriculum_stage_label,
     _fill_curriculum_for_form,
     _fill_curriculum_links,
+    _uses_tag_based_curriculum,
     _verify_filing_qa,
     file_to_kaizen,
 )
@@ -131,6 +132,83 @@ async def test_higher_stage_still_expands_higher_tree(monkeypatch):
         stage_label="Higher/ST4-ST6",
     )
     assert page.expanded_texts == ["Higher SLO6:"]
+
+
+# ─── _uses_tag_based_curriculum routing classification ──────────────────────
+#
+# Forms whose curriculum lives ONLY in the Add tags modal (no usable in-form KC
+# tree) MUST route through the tag path. If they fall through to the in-form
+# tree writer, it ticks nothing yet reports success — silently dropping the
+# trainee's curriculum evidence. CBD/DOPS/PROC_LOG were live-verified as
+# modal-only (2026-04-22/23, commit 395393e) but were regressed by a 2026-05-22
+# file recovery; these tests pin them so the regression cannot recur.
+
+
+@pytest.mark.parametrize(
+    "form_type",
+    [
+        # Live-verified modal-only WPBA / procedural forms (the regression).
+        "CBD", "DOPS", "PROC_LOG",
+        # 2021 variants must inherit their base form's routing.
+        "CBD_2021", "DOPS_2021", "PROC_LOG_2021",
+        # Reflective entry verified tag-based (schema flag + set).
+        "REFLECT_LOG", "REFLECT_LOG_2021",
+        # Management / governance family — no in-form curriculum tree.
+        "CRIT_INCIDENT", "CLIN_GOV", "MGMT_PROJECT", "MGMT_ROTA",
+        "MGMT_RISK", "MGMT_REPORT", "APPRAISAL", "BUSINESS_CASE",
+        "COST_IMPROVE", "EQUIP_SERVICE", "COMPLAINT", "SERIOUS_INC",
+    ],
+)
+def test_tag_based_forms_route_through_add_tags(form_type):
+    assert _uses_tag_based_curriculum(form_type) is True
+
+
+@pytest.mark.parametrize(
+    "form_type",
+    [
+        # US_CASE has a genuine inline kz-tree where KCs must be ticked to count
+        # as curriculum evidence (verified 2026-04-23) — never route via tags.
+        "US_CASE", "US_CASE_2021",
+        # TEACH (2025 Update) carries its own in-form curriculum tree; the
+        # schema flag tag_based_curriculum=False pins this deliberately.
+        "TEACH", "TEACH_2021",
+    ],
+)
+def test_inline_tree_forms_do_not_route_through_add_tags(form_type):
+    assert _uses_tag_based_curriculum(form_type) is False
+
+
+def test_schema_flag_overrides_default_set(monkeypatch):
+    """An explicit tag_based_curriculum flag is authoritative over the set."""
+    # Flag wins when the form is NOT in the default set.
+    monkeypatch.setitem(
+        kaizen_form_filer.FORM_SCHEMAS, "US_CASE", {"tag_based_curriculum": True}
+    )
+    assert _uses_tag_based_curriculum("US_CASE") is True
+    # Flag wins when the form IS in the default set.
+    monkeypatch.setitem(
+        kaizen_form_filer.FORM_SCHEMAS, "CBD", {"tag_based_curriculum": False}
+    )
+    assert _uses_tag_based_curriculum("CBD") is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("form_type", ["CBD", "DOPS", "PROC_LOG"])
+async def test_modal_only_forms_dispatch_to_tag_filler(monkeypatch, form_type):
+    """Restored modal-only forms reach _fill_curriculum_tags, not the tree writer."""
+    page = MagicMock()
+    tag_fill = AsyncMock(return_value=(["SLO3 KC3"], []))
+    in_form_fill = AsyncMock(return_value=([], ["wrong route"]))
+    monkeypatch.setattr(kaizen_form_filer, "_fill_curriculum_tags", tag_fill)
+    monkeypatch.setattr(kaizen_form_filer, "_fill_curriculum_links", in_form_fill)
+
+    ticked, errors = await _fill_curriculum_for_form(
+        page, form_type, ["SLO3"], ["SLO3 KC3"], "Higher"
+    )
+
+    assert ticked == ["SLO3 KC3"]
+    tag_fill.assert_awaited_once()
+    in_form_fill.assert_not_awaited()
 
 
 @pytest.mark.asyncio

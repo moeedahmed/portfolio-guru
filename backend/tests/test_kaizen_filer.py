@@ -539,11 +539,15 @@ def test_no_duplicate_uuids_within_form():
 
 # ─── Section I: Curriculum ticking ──────────────────────────────────────────────
 
+# These patch the routing dispatcher _fill_curriculum_for_form (not the inline
+# tree writer directly) so they verify the slo_codes/kc_targets threading
+# independently of whether CBD routes via the in-form tree or the Add tags
+# modal. CBD is tag-based, so the inline writer is never reached for it.
 @pytest.mark.asyncio
 async def test_curriculum_links_trigger_tick_attempt(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
         with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
-            with patch("kaizen_form_filer._fill_curriculum_links", AsyncMock(return_value=([], []))) as mock_fill:
+            with patch("kaizen_form_filer._fill_curriculum_for_form", AsyncMock(return_value=([], []))) as mock_fill:
                 fields = {"stage_of_training": "Higher", "clinical_reasoning": "test"}
                 result = await file_to_kaizen(
                     "CBD", fields, "user", "pass",
@@ -551,22 +555,22 @@ async def test_curriculum_links_trigger_tick_attempt(mock_playwright_ctx):
                 )
                 mock_fill.assert_called_once()
                 args = mock_fill.call_args[0]
-                assert args[1] == ["SLO1", "SLO3"]
                 assert args[2] == ["SLO1", "SLO3"]
+                assert args[3] == ["SLO1", "SLO3"]
 
 
 @pytest.mark.asyncio
 async def test_key_capabilities_without_curriculum_links_triggers_tick(mock_playwright_ctx):
     with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
         with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
-            with patch("kaizen_form_filer._fill_curriculum_links", AsyncMock(return_value=([], []))) as mock_fill:
+            with patch("kaizen_form_filer._fill_curriculum_for_form", AsyncMock(return_value=([], []))) as mock_fill:
                 kcs = ["SLO1 KC1: Assess and stabilise the patient"]
                 fields = {"stage_of_training": "Higher", "key_capabilities": kcs}
                 result = await file_to_kaizen("CBD", fields, "user", "pass")
                 mock_fill.assert_called_once()
                 args = mock_fill.call_args[0]
-                assert args[1] == []
-                assert args[2] == kcs
+                assert args[2] == []
+                assert args[3] == kcs
 
 
 @pytest.mark.asyncio
