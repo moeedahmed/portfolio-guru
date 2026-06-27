@@ -46,6 +46,7 @@ NAMED_FORBIDDEN = (
 EXPECTED_PUBLIC = (
     "start",
     "settings",
+    "health",
     "cancel",
     "reset",
     "help",

@@ -30,7 +30,7 @@ def test_public_command_menu_is_core_only():
 
     commands = [command for command, _ in bot.BOT_COMMANDS]
 
-    assert commands == ["start", "settings", "cancel", "reset", "help"]
+    assert commands == ["start", "settings", "health", "cancel", "reset", "help"]
 
 
 def test_help_copy_lists_reset_not_delete_and_not_setup():
@@ -52,7 +52,7 @@ def test_help_copy_lists_reset_not_delete_and_not_setup():
     assert "/setup" not in bot.HELP_MSG
     assert "/link" not in bot.HELP_MSG
     assert "/voice" not in bot.HELP_MSG
-    assert "/health" not in bot.HELP_MSG
+    assert "/health" in bot.HELP_MSG
     assert "/upgrade" not in bot.HELP_MSG
     assert "How it works" not in bot.HELP_MSG
     assert "Saved as Kaizen draft" not in bot.HELP_MSG

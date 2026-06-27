@@ -59,6 +59,7 @@ from collections.abc import Iterable
 PUBLIC_COMMANDS: tuple[tuple[str, str], ...] = (
     ("start", "Open Portfolio Guru and get started"),
     ("settings", "Manage Kaizen, writing style, and portfolio defaults"),
+    ("health", "View portfolio health and evidence gaps"),
     ("cancel", "Cancel the current action"),
     ("reset", "Reset Portfolio Guru and reconnect Kaizen"),
     ("help", "How to use Portfolio Guru"),
@@ -113,7 +114,7 @@ FORBIDDEN_COMMANDS: frozenset[str] = frozenset(
 )
 
 #: The ideal product command list, expressed in product terms. Some of
-#: these (settings/setup, health) have no Hermes built-in equivalent yet
+#: these (settings/setup) have no Hermes built-in equivalent yet
 #: and would need a plugin-registered command to become visible; they are
 #: documented here so the product intent is explicit even where the
 #: runtime cannot satisfy it today.

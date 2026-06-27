@@ -883,13 +883,14 @@ async def test_pathway_command_describes_arcp_as_checkpoint_not_pathway(isolated
         ), f"ARCP must read as a checkpoint inside Training (CCT); got: {text!r}"
 
 
-def test_health_is_hidden_from_command_menu_but_still_typeable():
-    """Portfolio Health is a settings/dashboard action, not a top-level
-    public menu command. The handler must remain callable so existing
-    flows/tests can continue to use it."""
+def test_health_is_in_command_menu_and_still_typeable():
+    """Portfolio Health is a primary beta command and must appear in the
+    Telegram slash-command menu as well as remain directly typeable."""
     import bot
 
-    assert all(command != "health" for command, _ in bot.BOT_COMMANDS)
+    commands = {command: description for command, description in bot.BOT_COMMANDS}
+
+    assert commands["health"] == "View portfolio health and evidence gaps"
     assert callable(bot.health_command)
 
 

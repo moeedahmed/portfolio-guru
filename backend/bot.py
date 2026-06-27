@@ -91,6 +91,7 @@ MAX_TELEGRAM_MSG = 4096
 BOT_COMMANDS = [
     ("start", "Open Portfolio Guru and get started"),
     ("settings", "Manage Kaizen, writing style, and portfolio defaults"),
+    ("health", "View portfolio health and evidence gaps"),
     ("cancel", "Cancel the current action"),
     ("reset", "Reset Portfolio Guru and reconnect Kaizen"),
     ("help", "How to use Portfolio Guru"),
