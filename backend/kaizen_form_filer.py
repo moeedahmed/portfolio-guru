@@ -634,6 +634,7 @@ FORM_FIELD_MAP = {
     "MINI_CEX": {
         "date_of_encounter": "startDate",
         "end_date": "endDate",
+        "date_of_event": "5391f8de-de63-4db3-9e08-baaa2a380cfe",
         "clinical_setting": "f091f9c5-6c77-48be-9b96-05ebe1b56a07",
         "patient_presentation": "60772a97-92eb-4dbe-a813-6a5293be82f9",
         "stage_of_training": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
@@ -1358,6 +1359,23 @@ def apply_common_header_defaults(form_type: str, fields: dict, field_map: dict |
         out["end_date"] = source_date
         if "end_date" not in defaulted:
             defaulted.append("end_date")
+
+    section_date_keys = {
+        "date_of_event",
+        "date_of_activity",
+        "date_of_education",
+        "date_of_teaching",
+        "date_of_teaching_activity",
+        "date_of_case",
+        "date_of_complaint",
+        "date_of_incident",
+        "date_of_completion",
+    }
+    for key in section_date_keys:
+        if key in field_map and not _first_present_value(out, (key,)):
+            out[key] = source_date
+            if key not in defaulted:
+                defaulted.append(key)
 
     if out.get("event_description"):
         out["event_description"] = _one_line_event_summary(out["event_description"])
@@ -2842,7 +2860,7 @@ async def _verify_fields(page: Page, form_type: str, fields: dict, field_map: di
     issues = []
 
     # Check date fields
-    for key in ("date", "date_occurred_on", "date_of_encounter", "end_date", "date_of_education", "date_of_activity",
+    for key in ("date", "date_occurred_on", "date_of_encounter", "end_date", "date_of_event", "date_of_education", "date_of_activity",
                 "date_of_teaching", "date_of_case", "date_of_complaint", "date_of_incident"):
         if key in fields and key in field_map:
             dom_id = _field_dom_id(field_map[key])
@@ -4452,6 +4470,15 @@ async def file_to_kaizen(
         else:
             status = "failed"
             save_error = "No fields were filled"
+
+        qa_gaps = list((filing_qa or {}).get("gaps") or [])
+        if saved and qa_gaps:
+            for gap in qa_gaps:
+                field = str(gap.get("field") or "").strip()
+                if field and field not in skipped:
+                    skipped.append(field)
+            if status == "success":
+                status = "partial"
 
         # Log filing result for the autonomous gap-fix loop
         from filing_result_logger import log_filing_result

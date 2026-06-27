@@ -16,6 +16,7 @@ from kaizen_form_filer import (
     FORM_FIELD_MAP,
     FORM_UUIDS,
     STAGE_SELECT_VALUES,
+    apply_common_header_defaults,
     _attach_file,
     _session_cache_path,
     _default_non_applicable_procedural_selects,
@@ -196,6 +197,26 @@ async def test_login_success_proceeds_to_form(mock_playwright_ctx):
 def test_auth_subdomain_is_not_kaizen_app_url():
     assert _is_kaizen_app_url("https://kaizenep.com/activities") is True
     assert _is_kaizen_app_url("https://auth.kaizenep.com/interaction/abc") is False
+
+
+def test_minicex_maps_and_defaults_visible_date_of_event():
+    field_map = FORM_FIELD_MAP["MINI_CEX"]
+    assert field_map["date_of_event"] == "5391f8de-de63-4db3-9e08-baaa2a380cfe"
+
+    fields, meta = apply_common_header_defaults(
+        "MINI_CEX",
+        {
+            "clinical_setting": "Emergency Department",
+            "patient_presentation": "Central chest pain with anterior ST elevation.",
+            "reflection": "Repeat ECG earlier next time.",
+        },
+        field_map,
+    )
+
+    assert fields["date_of_encounter"]
+    assert fields["end_date"] == fields["date_of_encounter"]
+    assert fields["date_of_event"] == fields["date_of_encounter"]
+    assert {"date_of_encounter", "end_date", "date_of_event"} <= set(meta["defaulted_fields"])
 
 
 @pytest.mark.asyncio
@@ -1025,6 +1046,43 @@ async def test_file_to_kaizen_includes_filing_qa_in_result(mock_playwright_ctx):
                     result = await file_to_kaizen("CBD", fields, "user", "pass")
                     assert "filing_qa" in result
                     assert result["filing_qa"]["filled"] == ["reflection"]
+
+
+@pytest.mark.asyncio
+async def test_file_to_kaizen_qa_gap_downgrades_false_success(mock_playwright_ctx):
+    """A saved draft with a required mapped field still blank must not be reported as clean success."""
+    qa_gap = {
+        "field": "date_of_event",
+        "dom_id": "5391f8de-de63-4db3-9e08-baaa2a380cfe",
+        "form_type": "MINI_CEX",
+        "kind": "text",
+        "missing_dom": False,
+        "expected_preview": "27/6/2026",
+        "reason": "value_not_persisted",
+    }
+    with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
+            with patch("kaizen_form_filer._verify_entry_saved", AsyncMock(return_value=True)):
+                with patch(
+                    "kaizen_form_filer._verify_filing_qa",
+                    AsyncMock(return_value={
+                        "filled": ["date_of_encounter", "end_date"],
+                        "empty_expected": ["date_of_event"],
+                        "empty_acceptable": [],
+                        "gaps": [qa_gap],
+                    }),
+                ):
+                    fields = {
+                        "date_of_encounter": "2026-06-27",
+                        "clinical_setting": "Emergency Department",
+                        "patient_presentation": "Central chest pain.",
+                        "reflection": "Repeat ECG earlier next time.",
+                    }
+                    result = await file_to_kaizen("MINI_CEX", fields, "user", "pass")
+
+    assert result["status"] == "partial"
+    assert "date_of_event" in result["skipped"]
+    assert result["error"] is None
 
 
 @pytest.mark.asyncio
