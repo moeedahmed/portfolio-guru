@@ -2339,8 +2339,100 @@ def _health_refresh_confirm_keyboard() -> InlineKeyboardMarkup:
 def _health_result_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✍️ File missing evidence", callback_data="ACTION|file")],
-        [InlineKeyboardButton("📊 Change pathway", callback_data="ACTION|change_pathway")],
+        [
+            InlineKeyboardButton("🔎 Evidence basis", callback_data="ACTION|health_detail|basis"),
+            InlineKeyboardButton("📈 Activity snapshot", callback_data="ACTION|health_detail|activity"),
+        ],
+        [InlineKeyboardButton("📋 Domain detail", callback_data="ACTION|health_detail|domains")],
     ])
+
+
+def _health_detail_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 Back to health report", callback_data="ACTION|health_back_to_report")],
+    ])
+
+
+def _extract_markdown_section(text: str, heading: str) -> str:
+    lines = text.splitlines()
+    marker = f"*{heading}*"
+    try:
+        start = lines.index(marker)
+    except ValueError:
+        return ""
+
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        line = lines[index].strip()
+        if not line and index > start + 1:
+            end = index
+            break
+    return "\n".join(lines[start:end]).strip()
+
+
+def _health_report_sections(full_text: str) -> dict[str, str]:
+    basis = _extract_markdown_section(full_text, "Evidence basis")
+    activity = _extract_markdown_section(full_text, "Activity snapshot")
+
+    domain_parts = [
+        _extract_markdown_section(full_text, "Already strong"),
+        _extract_markdown_section(full_text, "Domain balance"),
+        _extract_markdown_section(full_text, "Missing domains"),
+        _extract_markdown_section(full_text, "Evidence gaps to close before applying"),
+    ]
+    domain_detail = "\n\n".join(part for part in domain_parts if part)
+
+    return {
+        "basis": basis or "*Evidence basis*\nNot available for this report.",
+        "activity": activity or "*Activity snapshot*\nNot available for this report.",
+        "domains": domain_detail or "*Domain detail*\nNot available for this report.",
+    }
+
+
+def _health_compact_report_text(full_text: str) -> str:
+    lines = full_text.splitlines()
+    skip_headings = {
+        "*Evidence basis*",
+        "*Already strong*",
+        "*Domain balance*",
+        "*Evidence gaps to close before applying*",
+        "*Activity snapshot*",
+    }
+    compact: list[str] = []
+    skipping = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped in skip_headings:
+            skipping = True
+            continue
+        if skipping:
+            if not stripped:
+                skipping = False
+            continue
+        compact.append(line)
+
+    text = "\n".join(compact).strip()
+
+    sections = _health_report_sections(full_text)
+    basis_lines = [
+        line for line in sections["basis"].splitlines()
+        if line.startswith("Scanned:") or line.startswith("Confidence:")
+    ]
+    basis_summary = "\n".join(basis_lines[:2])
+
+    if basis_summary and "Scanned:" not in text:
+        text = f"{text}\n\n*Scan confidence*\n{basis_summary}"
+
+    return text
+
+
+def _store_health_report_context(context, full_text: str) -> str:
+    summary = _health_compact_report_text(full_text)
+    context.user_data["last_health_report"] = {
+        "summary": summary,
+        "sections": _health_report_sections(full_text),
+    }
+    return summary
 
 
 def _refresh_portfolio_result_keyboard(status: str) -> InlineKeyboardMarkup:
@@ -5004,11 +5096,12 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 pass
 
         async def send_result(text, reply_markup):
+            text = _store_health_report_context(context, text)
             await _safe_edit_text(
                 query.message,
                 text,
                 parse_mode="Markdown",
-                reply_markup=reply_markup or back_markup,
+                reply_markup=reply_markup or _health_result_keyboard(),
             )
 
         async def fail_fn(text):
@@ -5020,6 +5113,34 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             send_progress=send_progress,
             send_result=send_result,
             fail_fn=fail_fn,
+        )
+        return ConversationHandler.END
+
+    elif action.startswith("health_detail|"):
+        detail_key = action.split("|", 1)[1]
+        report = context.user_data.get("last_health_report") or {}
+        sections = report.get("sections") or {}
+        detail_text = sections.get(detail_key)
+        if not detail_text:
+            detail_text = "This health detail is no longer available. Run /health again to refresh the report."
+        await _safe_edit_text(
+            query.message,
+            detail_text,
+            parse_mode="Markdown",
+            reply_markup=_health_detail_keyboard(),
+        )
+        return ConversationHandler.END
+
+    elif action == "health_back_to_report":
+        report = context.user_data.get("last_health_report") or {}
+        summary = report.get("summary")
+        if not summary:
+            summary = "This health report is no longer available. Run /health again to refresh it."
+        await _safe_edit_text(
+            query.message,
+            summary,
+            parse_mode="Markdown",
+            reply_markup=_health_result_keyboard(),
         )
         return ConversationHandler.END
 
@@ -5145,11 +5266,12 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 pass
 
         async def send_result(text, reply_markup):
+            text = _store_health_report_context(context, text)
             await _safe_edit_text(
                 query.message,
                 text,
                 parse_mode="Markdown",
-                reply_markup=reply_markup or back_markup,
+                reply_markup=reply_markup or _health_result_keyboard(),
             )
 
         async def fail_fn(text):
@@ -6555,6 +6677,7 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         progress_holder["msg"] = await update.message.reply_text("📊 Analysing your portfolio...")
 
     async def send_result(text, reply_markup):
+        text = _store_health_report_context(context, text)
         msg = progress_holder.get("msg")
         if msg is not None:
             await _safe_edit_text(msg, text, parse_mode="Markdown", reply_markup=reply_markup)

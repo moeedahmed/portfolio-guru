@@ -907,11 +907,13 @@ async def test_inline_health_button_runs_immediately_when_stale(monkeypatch):
 
     send_result = run_health.await_args.kwargs["send_result"]
     await send_result("Health result", None)
-    assert ("🔙 Back to settings", "ACTION|settings") in sim.get_last_buttons()
+    assert ("✍️ File missing evidence", "ACTION|file") in sim.get_last_buttons()
+    assert ("🔎 Evidence basis", "ACTION|health_detail|basis") in sim.get_last_buttons()
     assert ("🔙 Back", "ACTION|back_to_menu") not in sim.get_last_buttons()
+    assert ("🔙 Back to settings", "ACTION|settings") not in sim.get_last_buttons()
 
 
-def test_health_result_keyboard_offers_file_and_change_pathway():
+def test_health_result_keyboard_offers_file_and_detail_sections():
     import bot
 
     buttons = [
@@ -920,8 +922,79 @@ def test_health_result_keyboard_offers_file_and_change_pathway():
         for button in row
     ]
     assert ("✍️ File missing evidence", "ACTION|file") in buttons
-    assert ("📊 Change pathway", "ACTION|change_pathway") in buttons
+    assert ("🔎 Evidence basis", "ACTION|health_detail|basis") in buttons
+    assert ("📈 Activity snapshot", "ACTION|health_detail|activity") in buttons
+    assert ("📋 Domain detail", "ACTION|health_detail|domains") in buttons
+    assert ("📊 Change pathway", "ACTION|change_pathway") not in buttons
     assert ("🔙 Back to settings", "ACTION|settings") not in buttons
+
+
+def test_health_compact_report_moves_audit_detail_behind_buttons():
+    import bot
+
+    full_text = (
+        "📊 *Portfolio Health — Training (CCT) evidence scan*\n"
+        "June 2026\n\n"
+        "*Evidence basis*\n"
+        "Scanned: Portfolio Guru filing history only: 3 case(s) in last 6 months\n"
+        "Window: last 6 months of Portfolio Guru filings only; ARCP cycle month not set yet\n"
+        "Assumed pathway: Training (CCT) — change if wrong\n"
+        "Confidence: low — Kaizen index not available, so this cannot reflect your full portfolio\n\n"
+        "*Evidence gap level:* 🔴 Red\n"
+        "*Why:* Red because CPD evidence is missing.\n\n"
+        "*Next 3 useful filing actions*\n"
+        "1. Add a recent CPD course\n\n"
+        "*Already strong*\n"
+        "• clinical: 2\n\n"
+        "*Missing domains*\n"
+        "CPD · QI\n\n"
+        "*Activity snapshot*\n"
+        "- This month: 3 cases\n"
+        "- Form mix: Mini-CEX 1, Reflection 1, CBD 1"
+    )
+
+    summary = bot._health_compact_report_text(full_text)
+
+    assert "*Evidence gap level:* 🔴 Red" in summary
+    assert "*Next 3 useful filing actions*" in summary
+    assert "*Missing domains*" in summary
+    assert "*Evidence basis*" not in summary
+    assert "*Activity snapshot*" not in summary
+    assert "*Already strong*" not in summary
+    assert "*Scan confidence*" in summary
+    assert "Scanned: Portfolio Guru filing history only" in summary
+    assert "Confidence: low" in summary
+
+
+@pytest.mark.asyncio
+async def test_health_detail_buttons_restore_last_report(monkeypatch):
+    import bot
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+    context.user_data["last_health_report"] = {
+        "summary": "Main health report",
+        "sections": {
+            "basis": "*Evidence basis*\nScanned: Portfolio Guru only",
+            "activity": "*Activity snapshot*\n- This month: 3 cases",
+        },
+    }
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_detail|basis"),
+        context,
+    )
+
+    assert sim.get_last_text() == "*Evidence basis*\nScanned: Portfolio Guru only"
+    assert ("🔙 Back to health report", "ACTION|health_back_to_report") in sim.get_last_buttons()
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_back_to_report"),
+        context,
+    )
+
+    assert sim.get_last_text() == "Main health report"
+    assert ("✍️ File missing evidence", "ACTION|file") in sim.get_last_buttons()
 
 
 def test_health_refresh_confirm_back_returns_to_settings():
