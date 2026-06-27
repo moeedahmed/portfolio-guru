@@ -1980,6 +1980,123 @@ class TestFlowWalker:
         assert second == ConversationHandler.END
 
     @pytest.mark.asyncio
+    async def test_failed_filing_try_again_updates_same_status_message(self, thin_draft):
+        from bot import AWAIT_APPROVAL, handle_approval_approve, handle_callback
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin_draft.form_type,
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+
+        route_filing = AsyncMock(side_effect=[
+            {
+                'status': 'failed',
+                'filled': [],
+                'skipped': [],
+                'method': 'deterministic',
+                'error': 'Browser launch failed',
+            },
+            {
+                'status': 'success',
+                'filled': ['date_of_encounter', 'clinical_reasoning'],
+                'skipped': [],
+                'method': 'deterministic',
+            },
+        ])
+
+        with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.route_filing', new=route_filing):
+            first = await handle_approval_approve(sim._make_callback_update('APPROVE|draft'), context)
+            before_retry_count = len(sim.messages_sent)
+            second = await handle_callback(sim._make_callback_update('ACTION|retry_filing'), context)
+
+        retry_messages = sim.messages_sent[before_retry_count:]
+        assert first == AWAIT_APPROVAL
+        assert second == ConversationHandler.END
+        assert route_filing.await_args_list[1].kwargs['reuse_draft'] is True
+        assert any(kind == 'edit' and 'Retrying Kaizen filing' in text for kind, text, _ in retry_messages)
+        assert any(kind == 'edit' and 'Kaizen draft saved' in text for kind, text, _ in retry_messages)
+        assert not any(kind in {'reply', 'send'} for kind, _, _ in retry_messages)
+
+    @pytest.mark.asyncio
+    async def test_failed_filing_try_again_updates_same_message_on_repeat_failure(self, thin_draft):
+        from bot import AWAIT_APPROVAL, handle_approval_approve, handle_callback
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin_draft.form_type,
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+
+        route_filing = AsyncMock(side_effect=[
+            {
+                'status': 'failed',
+                'filled': [],
+                'skipped': [],
+                'method': 'deterministic',
+                'error': 'Browser launch failed',
+            },
+            {
+                'status': 'failed',
+                'filled': [],
+                'skipped': [],
+                'method': 'deterministic',
+                'error': 'Kaizen still unavailable',
+            },
+        ])
+
+        with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.route_filing', new=route_filing):
+            first = await handle_approval_approve(sim._make_callback_update('APPROVE|draft'), context)
+            before_retry_count = len(sim.messages_sent)
+            second = await handle_callback(sim._make_callback_update('ACTION|retry_filing'), context)
+
+        retry_messages = sim.messages_sent[before_retry_count:]
+        assert first == AWAIT_APPROVAL
+        assert second == AWAIT_APPROVAL
+        assert route_filing.await_args_list[1].kwargs['reuse_draft'] is True
+        assert any(kind == 'edit' and 'Retrying Kaizen filing' in text for kind, text, _ in retry_messages)
+        assert any(kind == 'edit' and "Filing didn't complete" in text for kind, text, _ in retry_messages)
+        assert not any(kind in {'reply', 'send'} for kind, _, _ in retry_messages)
+
+    @pytest.mark.asyncio
+    async def test_failed_filing_try_again_falls_back_when_status_edit_fails(self, thin_draft):
+        from bot import handle_callback
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': thin_draft.form_type,
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+
+        route_filing = AsyncMock(return_value={
+            'status': 'success',
+            'filled': ['date_of_encounter'],
+            'skipped': [],
+            'method': 'deterministic',
+        })
+        update = sim._make_callback_update('ACTION|retry_filing')
+        update.callback_query.message.edit_text.side_effect = RuntimeError('message is not modified')
+
+        with patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.route_filing', new=route_filing):
+            result = await handle_callback(update, context)
+
+        assert result == ConversationHandler.END
+        assert any(kind == 'reply' and 'Retrying Kaizen filing' in text for kind, text, _ in sim.messages_sent)
+        assert any(kind == 'edit' and 'Kaizen draft saved' in text for kind, text, _ in sim.messages_sent)
+
+    @pytest.mark.asyncio
     async def test_failed_filing_new_text_shows_intent_gate(self, thin_draft):
         from bot import AWAIT_APPROVAL, handle_approval_approve, handle_mid_conversation_text
 

@@ -8692,13 +8692,25 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
 
     # Determine platform (default: kaizen; future: from user profile)
     platform = "kaizen"
-    saving_text = f"📤 Saving {form_name} as a Kaizen draft…"
-    # Send a new progress message so the draft preview survives in the chat
-    # history — the user can scroll up to verify what was filed. The progress
-    # message is later edited with the final result.
-    ack = await source_message.reply_text(saving_text)
-
     reuse_existing_draft = bool(context.user_data.pop("retry_filing_requested", False))
+    saving_text = (
+        f"⏳ Retrying Kaizen filing for {form_name}…"
+        if reuse_existing_draft
+        else f"📤 Saving {form_name} as a Kaizen draft…"
+    )
+    # First save: send a new progress message so the draft preview survives in
+    # the chat history. Retry: mutate the existing failure/status message so
+    # one filing attempt has one living status message instead of accumulating
+    # failure → retrying → success/failure messages.
+    if reuse_existing_draft and is_callback and source_message:
+        try:
+            ack = await source_message.edit_text(saving_text)
+        except Exception:
+            logger.warning("Could not edit retry status message, falling back to fresh progress message", exc_info=True)
+            ack = await source_message.reply_text(saving_text)
+    else:
+        ack = await source_message.reply_text(saving_text)
+    _track_latest_message(context, ack)
 
     # Retrieve attachment path and validate existence / support
     attachment_path = context.user_data.get("attachment_path")
