@@ -2415,3 +2415,55 @@ Runtime state:
 > to pick up outbound env aliases, then run a protected safe gateway restart
 > only when Telegram disruption risk is acceptable, then repeat the same private
 > WhatsApp DM smoke.
+
+---
+
+> **2026-06-27 — Demo-path rehearsal verification (Claude Code worker).**
+>
+> Production-cut/rehearsal pass focused only on the winning demo path. No
+> push, deploy, live Telegram, live Kaizen, or live Stripe.
+>
+> Confirmed truths:
+>
+> - **Telegram is the hackathon action surface; WhatsApp stays later
+>   convenience.** Multi-surface case capture handlers verified at
+>   `backend/bot.py:10197-10201` (text/voice/audio/photo/document →
+>   `handle_case_input`).
+> - **Hermes is the conversational/test AI layer over the deterministic,
+>   repo-owned engine — not a runtime dependency.** Proven live offline:
+>   `venv/bin/python3 -m hermes_pg_cli shadow --payload '{...hero case...}'`
+>   drove the deterministic engine to `recommendation: CBD` (confidence
+>   `high`, state `draft_ready`), matching `HERO_CASE_2026-06-30.md`, with
+>   only fact *keys* (no clinical values) in the JSON-safe metadata.
+> - Approval gate (`handle_approval_approve` at `backend/bot.py:8594`) and
+>   funnel telemetry (`_track_funnel_event` at `backend/bot.py:2648`) are
+>   draft-only and PHI-free.
+>
+> Fixes this pass:
+>
+> - Corrected four stale judge-facing code citations in
+>   `docs/demo/HERMES_CAPABILITY_MAP.md` (handlers `10151→10197`,
+>   `10154-10155→10200-10201`; `handle_approval_approve` `8473→8594`;
+>   `_track_funnel_event` `2568→2648`; "verify in two minutes" lines).
+> - Added a deterministic citation-freshness guard
+>   (`test_capability_map_code_citations_resolve` in
+>   `backend/tests/test_demo_assets.py`) that reads each `backend/<file>.py:<line>`
+>   citation from the map and validates it against the real file, so the
+>   judge-facing pointers cannot silently rot again.
+>
+> Verification (offline, focused):
+>
+> - `cd backend && venv/bin/python3 -m pytest tests/test_demo_assets.py
+>   tests/test_stripe_webhook_e2e.py tests/test_stripe_handler.py
+>   tests/test_hermes_command_surface.py tests/test_hermes_integration.py
+>   tests/test_hermes_pg_cli.py tests/test_hermes_shadow_adapter.py -q`
+>   → 107 passed, 2 skipped; demo-assets now 20 passed with the new guard.
+>
+> Next concrete recording step:
+>
+> - Run `docs/demo/REHEARSAL_RUNBOOK.md` end-to-end once from a reset state
+>   (preflight → deterministic test block → golden-path beats), then record
+>   the 90-second take per `docs/demo/DEMO_SCRIPT_90S.md`. The live Kaizen
+>   save and live Stripe-CLI legs remain `[live-gated]` foreground steps;
+>   the deterministic mocked fallback is the truthful demo path if either is
+>   not green on the day.

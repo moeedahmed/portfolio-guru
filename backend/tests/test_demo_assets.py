@@ -252,6 +252,59 @@ def test_doc_uses_honesty_labels(doc: Path) -> None:
 # ── capability map must not overclaim a Hermes integration ─────────────
 
 
+# ── capability map code citations must be fresh ────────────────────────
+
+# The capability map and its "verify in two minutes" section point a judge
+# at exact `backend/<file>.py:<line>` locations. If bot.py shifts and the
+# citations are not updated, a judge jumps to the wrong line and the trust
+# claim breaks. This guard reads each citation FROM the doc and validates
+# it against the real file, so the doc stays the source of the line number
+# while the test proves the number is still correct.
+
+_CITATION_RE = re.compile(
+    r"`backend/([\w/]+\.py):(\d+)(?:-(\d+))?`(?:\s+`(\w+)`)?"
+)
+
+
+def test_capability_map_code_citations_resolve() -> None:
+    text = HERMES_MAP.read_text(encoding="utf-8")
+    citations = _CITATION_RE.findall(text)
+    assert citations, "capability map should cite backend code locations"
+
+    problems: list[str] = []
+    file_lines: dict[str, list[str]] = {}
+    for rel_path, start_s, end_s, symbol in citations:
+        abs_path = REPO_ROOT / "backend" / rel_path
+        if not abs_path.is_file():
+            problems.append(f"cited file does not exist: backend/{rel_path}")
+            continue
+        if rel_path not in file_lines:
+            file_lines[rel_path] = abs_path.read_text(
+                encoding="utf-8"
+            ).splitlines()
+        lines = file_lines[rel_path]
+        start = int(start_s)
+        end = int(end_s) if end_s else start
+        if end > len(lines):
+            problems.append(
+                f"backend/{rel_path}:{start_s}{'-' + end_s if end_s else ''} "
+                f"is past end of file ({len(lines)} lines)"
+            )
+            continue
+        if symbol:
+            window = "\n".join(lines[start - 1 : end])
+            if symbol not in window:
+                problems.append(
+                    f"backend/{rel_path}:{start_s} should contain "
+                    f"{symbol!r} but does not"
+                )
+
+    assert not problems, (
+        "capability map cites stale code locations:\n  - "
+        + "\n  - ".join(problems)
+    )
+
+
 def test_capability_map_discloses_no_hermes_runtime_dependency() -> None:
     """The judge-facing capability map maps PG capabilities to Hermes
     framing. It must state plainly that PG does not run on the Hermes
