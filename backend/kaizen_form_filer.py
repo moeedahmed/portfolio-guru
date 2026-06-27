@@ -1508,14 +1508,26 @@ EXPAND_SLO_FALLBACK_JS = """(sloText) => {
 }"""
 
 TICK_KC_JS = """(prefix) => {
+    function normalise(s) {
+        return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\\s+/g, ' ').trim();
+    }
     function variants(raw) {
         var out = [raw];
-        var m = raw.match(/\\bSLO\\s*(\\d+)\\s*KC\\s*(\\d+)\\b/i);
+        var m = raw.match(/\\bSLO\\s*(\\d+)[\\s\\S]*?\\bKC\\s*(\\d+)\\b/i);
         if (m) {
+            out.push('SLO' + m[1] + ' KC' + m[2]);
+            out.push('SLO ' + m[1] + ' KC ' + m[2]);
             out.push('SLO' + m[1] + ' Key Capability ' + m[2]);
             out.push('SLO ' + m[1] + ' Key Capability ' + m[2]);
+            var desc = raw.slice(m.index + m[0].length).replace(/^\\s*[:\\-–—>↳]+\\s*/, '');
+            if (desc) {
+                out.push('KC' + m[2] + ' ' + desc);
+                out.push('KC ' + m[2] + ' ' + desc);
+                out.push('Key Capability ' + m[2] + ' ' + desc);
+                out.push(desc);
+            }
         }
-        return out.map(function(v) { return v.toLowerCase().replace(/\\s+/g, ' ').trim(); });
+        return out.map(normalise).filter(Boolean);
     }
     var wanted = variants(prefix);
     var selectors = ['span.ng-binding.ng-scope', 'span.ng-binding'];
@@ -1523,7 +1535,7 @@ TICK_KC_JS = """(prefix) => {
         var spans = document.querySelectorAll(selectors[s]);
         for (var i = 0; i < spans.length; i++) {
             var txt = spans[i].textContent.trim();
-            var normalised = txt.toLowerCase().replace(/\\s+/g, ' ').trim();
+            var normalised = normalise(txt);
             if (wanted.some(function(v) { return normalised.indexOf(v) !== -1; })) {
                 var li = spans[i].parentElement;
                 while (li && li.tagName !== 'LI') { li = li.parentElement; }
@@ -1546,16 +1558,23 @@ TICK_KC_JS = """(prefix) => {
 # broader text scan across labels/divs/list items, climb to whichever ancestor
 # carries a checkbox, and click the label as a last resort.
 TICK_KC_FALLBACK_JS = """(prefix) => {
-    function normalise(s) { return (s || '').toLowerCase().replace(/\\s+/g, ' ').trim(); }
-    var m = prefix.match(/SLO\\s*(\\d+)\\s*KC\\s*(\\d+)/i);
+    function normalise(s) { return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\\s+/g, ' ').trim(); }
+    var m = prefix.match(/SLO\\s*(\\d+)[\\s\\S]*?KC\\s*(\\d+)/i);
     if (!m) return { found: false };
     var sloNum = m[1], kcNum = m[2];
+    var desc = prefix.slice(m.index + m[0].length).replace(/^\\s*[:\\-–—>↳]+\\s*/, '');
     var patterns = [
         'slo' + sloNum + ' kc' + kcNum,
         'slo ' + sloNum + ' kc ' + kcNum,
         'slo' + sloNum + ' key capability ' + kcNum,
         'slo ' + sloNum + ' key capability ' + kcNum,
-    ];
+    ].map(normalise);
+    if (desc) {
+        patterns.push(normalise('kc' + kcNum + ' ' + desc));
+        patterns.push(normalise('kc ' + kcNum + ' ' + desc));
+        patterns.push(normalise('key capability ' + kcNum + ' ' + desc));
+        patterns.push(normalise(desc));
+    }
     var nodes = document.querySelectorAll('li, label, .list-group-item, .checkbox, div.ng-scope, span');
     for (var i = 0; i < nodes.length; i++) {
         var t = normalise(nodes[i].textContent);
@@ -2342,9 +2361,9 @@ async def _fill_curriculum_links(
     slos = set()
     for source in (slo_codes, kc_targets):
         for entry in source:
-            m = re.search(r"SLO(\d+)", entry)
+            m = re.search(r"SLO\s*(\d+)", entry, re.IGNORECASE)
             if m:
-                slos.add(m.group(0))
+                slos.add(f"SLO{m.group(1)}")
 
     stage_prefix = "Higher"
     if stage_label:
@@ -2552,20 +2571,32 @@ _QA_READ_FIELD_JS = """(domId) => {
 }"""
 
 _QA_READ_KC_JS = """(prefix) => {
+    function normalise(s) {
+        return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\\s+/g, ' ').trim();
+    }
     function variants(raw) {
         var out = [raw];
-        var m = raw.match(/\\bSLO\\s*(\\d+)\\s*KC\\s*(\\d+)\\b/i);
+        var m = raw.match(/\\bSLO\\s*(\\d+)[\\s\\S]*?\\bKC\\s*(\\d+)\\b/i);
         if (m) {
+            out.push('SLO' + m[1] + ' KC' + m[2]);
+            out.push('SLO ' + m[1] + ' KC ' + m[2]);
             out.push('SLO' + m[1] + ' Key Capability ' + m[2]);
             out.push('SLO ' + m[1] + ' Key Capability ' + m[2]);
+            var desc = raw.slice(m.index + m[0].length).replace(/^\\s*[:\\-–—>↳]+\\s*/, '');
+            if (desc) {
+                out.push('KC' + m[2] + ' ' + desc);
+                out.push('KC ' + m[2] + ' ' + desc);
+                out.push('Key Capability ' + m[2] + ' ' + desc);
+                out.push(desc);
+            }
         }
-        return out.map(function(v) { return v.toLowerCase().replace(/\\s+/g, ' ').trim(); });
+        return out.map(normalise).filter(Boolean);
     }
     var wanted = variants(prefix);
     var spans = document.querySelectorAll('span.ng-binding');
     for (var i = 0; i < spans.length; i++) {
         var txt = spans[i].textContent.trim();
-        var normalised = txt.toLowerCase().replace(/\\s+/g, ' ').trim();
+        var normalised = normalise(txt);
         if (wanted.some(function(v) { return normalised.indexOf(v) !== -1; })) {
             var li = spans[i].parentElement;
             while (li && li.tagName !== 'LI') { li = li.parentElement; }

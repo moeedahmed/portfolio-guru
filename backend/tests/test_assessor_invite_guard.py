@@ -99,3 +99,14 @@ async def test_verify_sent_to_assessor_accepts_awaiting_response_to_named_assess
 def test_kc_ticking_supports_short_kc_codes():
     assert "Key Capability" in kaizen_form_filer.TICK_KC_JS
     assert "KC" in kaizen_form_filer.TICK_KC_JS
+
+
+def test_kc_ticking_supports_slo_title_between_slo_and_kc():
+    """Extractor/UI text may render as `SLO3 — title ↳ KC3: ...`.
+
+    The Kaizen checkbox matcher must not require SLO and KC to be adjacent,
+    otherwise Reflective Log saves can leave requested KCs unticked.
+    """
+    assert "[\\s\\S]*?\\bKC" in kaizen_form_filer.TICK_KC_JS
+    assert "[\\s\\S]*?\\bKC" in kaizen_form_filer._QA_READ_KC_JS
+    assert "replace(/[^a-z0-9]+/g, ' ')" in kaizen_form_filer.TICK_KC_JS

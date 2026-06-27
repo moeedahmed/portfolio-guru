@@ -3072,14 +3072,14 @@ def _build_post_filing_keyboard(
         return InlineKeyboardMarkup(rows)
 
     if status == "partial" or uncertain:
+        if saved_url:
+            rows.append([InlineKeyboardButton("🔗 Open saved draft", url=saved_url)])
         if same_case_available and not uncertain:
             rows.append([InlineKeyboardButton(_POST_FILING_SAME_CASE_LABEL, callback_data="ACTION|same_case_another")])
             rows.append([InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file")])
         else:
             rows.append([InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file")])
-        if saved_url:
-            rows.append([InlineKeyboardButton("🔗 Open saved draft", url=saved_url)])
-        elif FORM_UUIDS.get(form_type):
+        if not saved_url and FORM_UUIDS.get(form_type):
             rows.append([InlineKeyboardButton("🔗 Open Kaizen", url="https://kaizenep.com/activities")])
         if uncertain:
             rows.append([InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")])
@@ -3087,14 +3087,14 @@ def _build_post_filing_keyboard(
             rows.append([_BTN_CANCEL])
         return InlineKeyboardMarkup(rows)
 
+    if saved_url:
+        rows.append([InlineKeyboardButton("🔗 Open saved draft", url=saved_url)])
     if same_case_available:
         rows.append([InlineKeyboardButton(_POST_FILING_SAME_CASE_LABEL, callback_data="ACTION|same_case_another")])
         rows.append([InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file")])
     else:
         rows.append([InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file")])
-    if saved_url:
-        rows.append([InlineKeyboardButton("🔗 Open saved draft", url=saved_url)])
-    elif FORM_UUIDS.get(form_type):
+    if not saved_url and FORM_UUIDS.get(form_type):
         rows.append([InlineKeyboardButton("🔗 Open Kaizen", url="https://kaizenep.com/activities")])
     return InlineKeyboardMarkup(rows)
 

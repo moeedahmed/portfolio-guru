@@ -2509,3 +2509,39 @@ Runtime state:
 > if it continues to produce the stronger Kaizen-style draft. Hermes can now be
 > shown only as a short behind-the-scenes proof layer without the broken
 > metadata-only turn.
+
+---
+
+> **2026-06-27 — Beta bot Reflective Log KC + post-save CTA repair.**
+>
+> Moeed dogfooded the original beta `@portfolio_guru_bot` with a STEMI case and
+> the saved Kaizen Reflective Practice Log reported `Key capabilities (2 not
+> ticked)`. The post-save keyboard also buried `Open saved draft` beneath
+> `Save as another WBA` and `File another case`.
+>
+> Diagnosis:
+>
+> - Local filing QA logs include the same reflective-log failure pattern for the
+>   current dogfood window: `REFLECT_LOG` saved as partial/GREEN with
+>   `kc:SLO3 KC3 ...` reported as `kc_not_ticked`.
+> - Read-only CDP inspection of Moeed's exact Kaizen saved-draft URL hung inside
+>   Playwright, so no live DOM mutation or restart was attempted.
+> - Code inspection showed the checkbox matcher handled adjacent labels such as
+>   `SLO3 KC3: ...`, but not the preview/UI shape `SLO3 — Clinical questions &
+>   decisions ↳ KC3: ...`, where SLO and KC are separated by the SLO title.
+>
+> Fixes:
+>
+> - Broadened the Kaizen KC tick/readback matchers to parse `SLO<n>` and
+>   `KC<n>` even when an SLO title sits between them, normalise punctuation, and
+>   match source-tied KC description variants.
+> - Made SLO expansion tolerate `SLO 3` as well as `SLO3`.
+> - Reordered post-save buttons so `Open saved draft` is first when a real saved
+>   draft URL is available. The generic `Open Kaizen` fallback stays below the
+>   workflow buttons because it is not a direct saved-draft link.
+>
+> Verification:
+>
+> - `backend/venv/bin/python3 -m pytest backend/tests/test_kc_writeback_stage.py
+>   backend/tests/test_kaizen_filer.py backend/tests/test_assessor_invite_guard.py
+>   backend/tests/test_flow_walker.py -q` → 226 passed.
