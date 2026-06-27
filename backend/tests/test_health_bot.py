@@ -407,16 +407,18 @@ async def test_arcp_health_falls_back_to_deterministic_output_when_llm_fails(mon
     )
 
     text = sent["text"]
-    assert "*Portfolio Health — Training (CCT) pathway · ARCP evidence review*" in text
+    assert "*Portfolio Health — Training (CCT) evidence scan*" in text
     assert "Training (ARCP)" not in text
     assert "*Evidence basis*" in text
     assert "Scanned: Portfolio Guru filing history only: 3 case(s) in last 6 months" in text
     assert "Window: last 6 months of Portfolio Guru filings only; ARCP cycle month not set yet" in text
     assert "Confidence: low" in text
     assert "AI ARCP narrative is temporarily unavailable" in text
-    assert "ARCP risk:" in text
+    assert "Evidence gap level:" in text
+    assert "ARCP risk:" not in text
     assert "Why:" in text
-    assert "Next 3 suggested filing actions before ARCP" in text
+    assert "Next 3 useful filing actions" in text
+    assert "before ARCP" not in text
     assert "Already strong" in text
     assert "Missing domains" in text
     assert "Domain coverage:" not in text
@@ -457,14 +459,16 @@ async def test_arcp_health_output_prioritises_action_plan_when_llm_succeeds(monk
     )
 
     text = sent["text"]
-    assert "*Portfolio Health — Training (CCT) pathway · ARCP evidence review*" in text
+    assert "*Portfolio Health — Training (CCT) evidence scan*" in text
     assert "Training (ARCP)" not in text
     assert "*Evidence basis*" in text
     assert "Scanned: Portfolio Guru filing history only: 3 case(s) in last 6 months" in text
     assert "Window: last 6 months of Portfolio Guru filings only; ARCP cycle month not set yet" in text
-    assert "ARCP risk:" in text
+    assert "Evidence gap level:" in text
+    assert "ARCP risk:" not in text
     assert "Why:" in text
-    assert "Next 3 suggested filing actions before ARCP" in text
+    assert "Next 3 useful filing actions" in text
+    assert "before ARCP" not in text
     assert "Already strong" in text
     assert "Missing domains" in text
     assert "CPD" in text
@@ -790,9 +794,42 @@ async def _run_health_capture(monkeypatch, user_id: int, pathway: Pathway) -> st
 
 
 @pytest.mark.asyncio
+async def test_health_default_pathway_is_labelled_as_assumed(monkeypatch):
+    import sys
+    import bot
+
+    user_id = 6000
+    history = _history_for_user(user_id)
+
+    monkeypatch.setitem(sys.modules, "portfolio_chart", _make_pc_mock())
+    monkeypatch.setattr(bot, "get_health_profile", lambda _user_id: None)
+    monkeypatch.setattr(bot, "get_training_level", lambda _user_id: "ST6")
+    monkeypatch.setattr(bot, "get_case_history", AsyncMock(return_value=history))
+    monkeypatch.setattr(
+        bot,
+        "analyse_portfolio_health",
+        AsyncMock(return_value={"suggestions": ["Book a supervisor review"]}),
+    )
+
+    sent: dict[str, str] = {}
+
+    await bot._run_health_analysis(
+        user_id=user_id,
+        chat=SimpleNamespace(send_action=AsyncMock()),
+        send_progress=AsyncMock(),
+        send_result=AsyncMock(side_effect=lambda text, reply_markup: sent.setdefault("text", text)),
+        send_photo_fn=AsyncMock(),
+        fail_fn=AsyncMock(),
+    )
+
+    assert "Assumed pathway: Training (CCT) — change if wrong" in sent["text"]
+    assert "Pathway: default Training (CCT)" not in sent["text"]
+
+
+@pytest.mark.asyncio
 async def test_arcp_and_cesr_pathway_outputs_diverge_in_lead_framing(monkeypatch):
     """Same evidence, different pathway. The lead framing must diverge:
-    ARCP leads with ARCP risk and the next 3 suggested filing actions; CESR
+    ARCP leads with evidence gap level and the next useful filing actions; CESR
     leads with long-term readiness and a yearly evidence plan.
     """
     arcp_text = await _run_health_capture(monkeypatch, 6001, Pathway.training_arcp)
@@ -800,11 +837,12 @@ async def test_arcp_and_cesr_pathway_outputs_diverge_in_lead_framing(monkeypatch
 
     # Training (CCT) pathway framing — ARCP is a checkpoint inside this pathway,
     # not a standalone pathway label.
-    assert "Training (CCT) pathway" in arcp_text
-    assert "ARCP evidence review" in arcp_text
+    assert "Training (CCT) evidence scan" in arcp_text
+    assert "ARCP evidence review" not in arcp_text
     assert "Training (ARCP)" not in arcp_text
-    assert "ARCP risk:" in arcp_text
-    assert "Next 3 suggested filing actions before ARCP" in arcp_text
+    assert "Evidence gap level:" in arcp_text
+    assert "ARCP risk:" not in arcp_text
+    assert "Next 3 useful filing actions" in arcp_text
     # ARCP must NOT carry CESR / yearly-plan framing
     assert "CESR" not in arcp_text
     assert "this year" not in arcp_text.lower()

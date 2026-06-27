@@ -5924,7 +5924,7 @@ async def _run_health_analysis(
     pathway_label = (
         "CESR / Portfolio Pathway"
         if is_cesr
-        else "Training (CCT) pathway · ARCP evidence review"
+        else "Training (CCT) evidence scan"
     )
 
     empty_state_label = (
@@ -6203,7 +6203,7 @@ def _format_arcp_action_plan_message(
     missing = _missing_domain_labels(snapshot)
 
     lines = [
-        "📊 *Portfolio Health — Training (CCT) pathway · ARCP evidence review*",
+        "📊 *Portfolio Health — Training (CCT) evidence scan*",
         month_label,
         "",
     ]
@@ -6213,10 +6213,10 @@ def _format_arcp_action_plan_message(
         lines.extend([f"_{fallback_note}_", ""])
 
     lines.extend([
-        f"*ARCP risk:* {risk}",
+        f"*Evidence gap level:* {risk}",
         f"*Why:* {reason}",
         "",
-        "*Next 3 suggested filing actions before ARCP*",
+        "*Next 3 useful filing actions*",
         _numbered_list(actions),
         "",
         "*Already strong*",
@@ -6262,7 +6262,7 @@ def _format_health_evidence_context(
         )
 
     if profile_is_default:
-        pathway_line = "Pathway: default Training (CCT) until you confirm it in Change pathway"
+        pathway_line = "Assumed pathway: Training (CCT) — change if wrong"
     else:
         pathway_line = f"Pathway: {_pathway_label(pathway)}"
 
@@ -6313,8 +6313,8 @@ def _format_arcp_risk_reason(snapshot) -> str:
     if missing:
         return f"{risk} because {_plain_join(missing)} evidence is missing."
     if strong:
-        return f"{risk} because the main evidence domains are covered; keep them recent before ARCP."
-    return "No portfolio evidence is visible yet, so ARCP readiness cannot be judged."
+        return f"{risk} because the main evidence domains are covered; keep them recent for your next review."
+    return "No portfolio evidence is visible yet, so an evidence gap level cannot be estimated."
 
 
 def _top_health_actions(snapshot, analysis: dict | None = None) -> list[str]:
