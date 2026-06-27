@@ -1,7 +1,7 @@
 # Portfolio Health + Pathway Guidance — Product Spec v2
 
 **Status:** Product spec. Replaces the narrower ARCP Health design (now superseded).
-**Last updated:** 2026-06-02
+**Last updated:** 2026-06-27
 **Supersedes:** `docs/ARCP_HEALTH_DESIGN.md` — retained as historical design artefact.
 
 ---
@@ -18,6 +18,72 @@ Both groups file WPBAs into the same Kaizen. Both use RCEM's SLO/curriculum fram
 Other pathways (GP, IMT, CST, SAS, foundation) are explicitly **out of scope for v1**. They will be added later when Portfolio Guru supports those platforms.
 
 Full pathway research (including out-of-scope pathways for reference): `docs/roadmap/portfolio-pathways-research-2026-06.md`.
+
+## Evidence Integrity Audit Addendum (2026-06-27)
+
+The live `/health` feature must be treated as a source-grounded planning aid,
+not an official readiness judgement. The report must disclose:
+
+- **Scanned source** — read-only Kaizen index when available; otherwise
+  Portfolio Guru filing history only.
+- **Evidence window** — current implementation does not yet know the user's
+  ARCP cycle month, LTFT extension, appraisal month, or target Portfolio
+  Pathway application window.
+- **Confidence** — high only when a fresh Kaizen index and confirmed pathway
+  are present; lower when the report falls back to Portfolio Guru history or a
+  default pathway.
+- **Inference boundary** — missing domains are inferred from visible evidence
+  in the scan and must not be presented as an official ARCP, Portfolio Pathway,
+  appraisal, or revalidation outcome.
+
+Source checks on 2026-06-27:
+
+- RCEM Higher Training ARCP requirement guide is an official trainee source,
+  but the PDF is not machine-readable through the current fetch path. Do not
+  encode exact ARCP minimums from search summaries alone; verify against the
+  PDF/manual extract before turning them into hard rules.
+- RCEM's CESR/Portfolio Pathway page says the standard changed from CCT
+  equivalence to demonstrating the Knowledge, Skills and Experience required
+  for specialist registration, and that the framework reflects the 12 EM SLOs.
+  It also emphasises ESLEs, core specialties, CPD, reflections, FRCEM, and
+  using evidence collected for revalidation where relevant:
+  https://rcem.ac.uk/certificate-of-eligibility-for-specialist-registration-cesr-and-combined-programme-cesr-cp/
+- GMC Portfolio Pathway guidance says applicants have 24 months to submit once
+  the application is opened, and that evidence gathering is a large undertaking
+  that should be planned before submission:
+  https://www.gmc-uk.org/registration-and-licensing/join-the-register/registration-applications/specialist-application-guides/specialist-registration-cesr-or-cegpr
+- GMC Emergency Medicine Portfolio Pathway SSG (last updated 2025-02-04)
+  frames assessment around Knowledge, Skills and Experience against the 12 EM
+  SLOs. It notes LTFT/breaks may allow evidence from additional years or WTE,
+  with gaps explained clearly. It also describes evidence such as FRCEM,
+  core specialty experience, CPD with reflection, QI/service improvement,
+  ESLEs, reflective case histories, courses, and structured evidence:
+  https://www.gmc-uk.org/-/media/documents/sat---ssg--emergency-medicine-2021-curriculum---dc13727_pdf-87179601.pdf
+- GMC revalidation supporting-information guidance is a separate non-training
+  profile. Doctors must participate in annual appraisals covering whole
+  practice and collect/reflect on six supporting information types over the
+  revalidation cycle: CPD, quality improvement activity, significant events,
+  patient/service-user feedback, colleague feedback, and compliments/complaints.
+  Doctors in training usually have revalidation considered through ARCP, but
+  still need supporting information for practice outside training posts:
+  https://www.gmc-uk.org/registration-and-licensing/managing-your-registration/revalidation/guidance-on-supporting-information-for-revalidation/guidance-on-supporting-information-for-revalidation
+
+Product consequence: `/health` should evolve into at least three profile
+templates, not one universal red/amber/green report:
+
+1. **Training (CCT) ARCP cycle** — requires training stage, ARCP month, cycle
+   start/end, FT/LTFT/WTE context, curriculum version, and source-labelled
+   minimums.
+2. **Portfolio Pathway / CESR** — multi-year SLO/KSE evidence map, target
+   application window, evidence currency, core specialty breadth, ESLE/CPD/QI/
+   reflection/structured-report coverage.
+3. **Annual appraisal / revalidation** — whole-practice annual appraisal view
+   based on GMC supporting information, separate from ARCP and Portfolio
+   Pathway readiness.
+
+Career Guru remains a fourth, separate strategic layer. It should not reuse the
+ARCP/CESR/appraisal verdict labels unless the user explicitly chooses that
+profile.
 
 ---
 
