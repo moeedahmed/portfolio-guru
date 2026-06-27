@@ -243,6 +243,10 @@ async def test_run_health_analysis_uses_indexed_source_when_history_empty(
 
     text = sent["text"]
     assert "*Portfolio Health — CESR / Portfolio Pathway*" in text
+    assert "*Evidence basis*" in text
+    assert "Scanned: Read-only Kaizen index: 1 visible evidence item(s)" in text
+    assert "Window: all indexed Kaizen evidence currently stored; CESR still needs a formal multi-year evidence map" in text
+    assert "Confidence:" in text
     assert "No Portfolio Guru cases filed yet" not in text
     assert "WPBA progress toward 36" in text
     assert "1/36" in text

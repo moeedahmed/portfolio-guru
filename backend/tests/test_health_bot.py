@@ -409,6 +409,10 @@ async def test_arcp_health_falls_back_to_deterministic_output_when_llm_fails(mon
     text = sent["text"]
     assert "*Portfolio Health — Training (CCT) pathway · ARCP evidence review*" in text
     assert "Training (ARCP)" not in text
+    assert "*Evidence basis*" in text
+    assert "Scanned: Portfolio Guru filing history only: 3 case(s) in last 6 months" in text
+    assert "Window: last 6 months of Portfolio Guru filings only; ARCP cycle month not set yet" in text
+    assert "Confidence: low" in text
     assert "AI ARCP narrative is temporarily unavailable" in text
     assert "ARCP risk:" in text
     assert "Why:" in text
@@ -455,6 +459,9 @@ async def test_arcp_health_output_prioritises_action_plan_when_llm_succeeds(monk
     text = sent["text"]
     assert "*Portfolio Health — Training (CCT) pathway · ARCP evidence review*" in text
     assert "Training (ARCP)" not in text
+    assert "*Evidence basis*" in text
+    assert "Scanned: Portfolio Guru filing history only: 3 case(s) in last 6 months" in text
+    assert "Window: last 6 months of Portfolio Guru filings only; ARCP cycle month not set yet" in text
     assert "ARCP risk:" in text
     assert "Why:" in text
     assert "Next 3 suggested filing actions before ARCP" in text

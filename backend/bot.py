@@ -5917,7 +5917,9 @@ async def _run_health_analysis(
     logger.info("Portfolio Guru funnel event=health_viewed user_id=%s", user_id)
     await chat.send_action(constants.ChatAction.TYPING)
 
-    profile = _get_or_default_health_profile(user_id)
+    stored_profile = get_health_profile(user_id)
+    profile = stored_profile or _get_or_default_health_profile(user_id)
+    profile_is_default = stored_profile is None
     is_cesr = profile.pathway == Pathway.cesr_portfolio
     pathway_label = (
         "CESR / Portfolio Pathway"
@@ -5938,7 +5940,7 @@ async def _run_health_analysis(
     else:
         level_note = ""
 
-    evidence_items, history, _ = await _resolve_health_evidence(user_id)
+    evidence_items, history, evidence_source = await _resolve_health_evidence(user_id)
     if not evidence_items:
         await send_result(
             f"📊 *Portfolio Health — {pathway_label}*\n\n"
@@ -5950,6 +5952,15 @@ async def _run_health_analysis(
         return
 
     snapshot = compute_snapshot(profile, evidence_items)
+    sync_status = await _safe_kaizen_sync_status(user_id)
+    evidence_context = _format_health_evidence_context(
+        source=evidence_source,
+        evidence_count=len(evidence_items),
+        history_count=len(history),
+        profile_is_default=profile_is_default,
+        sync_status=sync_status,
+        pathway=profile.pathway,
+    )
 
     await send_progress()
 
@@ -5957,7 +5968,7 @@ async def _run_health_analysis(
     month_label = _dt.now().strftime("%B %Y")
 
     if profile.pathway == Pathway.cesr_portfolio:
-        msg = _format_cesr_health_message(snapshot, history, month_label)
+        msg = _format_cesr_health_message(snapshot, history, month_label, evidence_context)
         msg = await _append_health_activity_snapshot(msg, user_id, history, training_level)
         await send_result(msg, _health_result_keyboard())
         return
@@ -5973,6 +5984,7 @@ async def _run_health_analysis(
             history,
             month_label,
             level_note,
+            evidence_context,
             "AI ARCP narrative timed out; deterministic health is shown below.",
         )
         msg = await _append_health_activity_snapshot(msg, user_id, history, training_level)
@@ -5985,6 +5997,7 @@ async def _run_health_analysis(
             history,
             month_label,
             level_note,
+            evidence_context,
             "AI ARCP narrative is temporarily unavailable; deterministic health is shown below.",
         )
         msg = await _append_health_activity_snapshot(msg, user_id, history, training_level)
@@ -5996,6 +6009,7 @@ async def _run_health_analysis(
         history=history,
         month_label=month_label,
         level_note=level_note,
+        evidence_context=evidence_context,
         analysis=analysis,
     )
     msg = await _append_health_activity_snapshot(msg, user_id, history, training_level)
@@ -6178,6 +6192,7 @@ def _format_arcp_action_plan_message(
     history: list[dict],
     month_label: str,
     level_note: str = "",
+    evidence_context: str = "",
     fallback_note: str = "",
     analysis: dict | None = None,
 ) -> str:
@@ -6192,6 +6207,8 @@ def _format_arcp_action_plan_message(
         month_label,
         "",
     ]
+    if evidence_context:
+        lines.extend([evidence_context, ""])
     if fallback_note:
         lines.extend([f"_{fallback_note}_", ""])
 
@@ -6209,10 +6226,78 @@ def _format_arcp_action_plan_message(
         " · ".join(missing) if missing else "None obvious from current evidence",
         "",
         f"Cases filed in Portfolio Guru: {len(history)} in the last 6 months",
+        "_Missing domains are inferred from visible evidence in this scan; this is not an official ARCP outcome._",
     ])
     if level_note:
         lines.append(level_note)
     return "\n".join(lines)
+
+
+def _format_health_evidence_context(
+    *,
+    source: str,
+    evidence_count: int,
+    history_count: int,
+    profile_is_default: bool,
+    sync_status: KaizenSyncStatus | None,
+    pathway: Pathway,
+) -> str:
+    if source == "kaizen_index":
+        scanned = f"Read-only Kaizen index: {evidence_count} visible evidence item(s)"
+        if history_count:
+            scanned += f"; Portfolio Guru filings for activity: {history_count} in last 6 months"
+        window = _health_window_label(pathway, source)
+        confidence = _health_confidence_label(
+            has_index=True,
+            profile_is_default=profile_is_default,
+            sync_is_fresh=_sync_status_is_fresh(sync_status),
+        )
+    else:
+        scanned = f"Portfolio Guru filing history only: {history_count} case(s) in last 6 months"
+        window = _health_window_label(pathway, source)
+        confidence = _health_confidence_label(
+            has_index=False,
+            profile_is_default=profile_is_default,
+            sync_is_fresh=False,
+        )
+
+    if profile_is_default:
+        pathway_line = "Pathway: default Training (CCT) until you confirm it in Change pathway"
+    else:
+        pathway_line = f"Pathway: {_pathway_label(pathway)}"
+
+    return "\n".join([
+        "*Evidence basis*",
+        f"Scanned: {scanned}",
+        f"Window: {window}",
+        f"{pathway_line}",
+        f"Confidence: {confidence}",
+    ])
+
+
+def _health_window_label(pathway: Pathway, source: str) -> str:
+    if pathway == Pathway.cesr_portfolio:
+        if source == "kaizen_index":
+            return "all indexed Kaizen evidence currently stored; CESR still needs a formal multi-year evidence map"
+        return "last 6 months of Portfolio Guru filings only; not enough for a CESR judgement"
+    if source == "kaizen_index":
+        return "all indexed Kaizen evidence currently stored; ARCP cycle month not set yet"
+    return "last 6 months of Portfolio Guru filings only; ARCP cycle month not set yet"
+
+
+def _health_confidence_label(
+    *,
+    has_index: bool,
+    profile_is_default: bool,
+    sync_is_fresh: bool,
+) -> str:
+    if not has_index:
+        return "low — Kaizen index not available, so this cannot reflect your full portfolio"
+    if profile_is_default:
+        return "medium — evidence was scanned, but the pathway is still the default"
+    if not sync_is_fresh:
+        return "medium — evidence was scanned, but the Kaizen index is not confirmed fresh"
+    return "high for scanned evidence; still cross-check against Kaizen and ARCP/CESR guidance"
 
 
 def _format_arcp_risk_reason(snapshot) -> str:
@@ -6289,7 +6374,12 @@ def _dedupe_text(values: list[str]) -> list[str]:
     return deduped
 
 
-def _format_cesr_health_message(snapshot, history: list[dict], month_label: str) -> str:
+def _format_cesr_health_message(
+    snapshot,
+    history: list[dict],
+    month_label: str,
+    evidence_context: str = "",
+) -> str:
     gaps = snapshot.gap_summary or ["No major gaps yet"]
     actions = snapshot.next_actions or ["Keep adding recent evidence"]
     readiness_label = _cesr_readiness_label(snapshot.health_score)
@@ -6309,6 +6399,10 @@ def _format_cesr_health_message(snapshot, history: list[dict], month_label: str)
         "📊 *Portfolio Health — CESR / Portfolio Pathway*",
         month_label,
         "",
+    ]
+    if evidence_context:
+        lines.extend([evidence_context, ""])
+    lines.extend([
         f"*Long-term CESR readiness:* {readiness_label}",
         f"*Why:* {readiness_reason}",
         "",
@@ -6334,7 +6428,8 @@ def _format_cesr_health_message(snapshot, history: list[dict], month_label: str)
         "Target: 36 WPBAs (12 DOPS · 12 Mini-CEX · 12 CBD) plus structured "
         "consultant reports, CPD, and SLO/CiP-level coverage within the 5-year "
         "evidence window. Build this as a multi-year portfolio, not an annual deadline.",
-    ]
+        "_Missing domains are inferred from visible evidence in this scan; this is not an official CESR outcome._",
+    ])
     return "\n".join(lines)
 
 
@@ -6393,6 +6488,7 @@ def _format_arcp_deterministic_health_message(
     history: list[dict],
     month_label: str,
     level_note: str,
+    evidence_context: str,
     fallback_note: str,
 ) -> str:
     return _format_arcp_action_plan_message(
@@ -6400,6 +6496,7 @@ def _format_arcp_deterministic_health_message(
         history=history,
         month_label=month_label,
         level_note=level_note,
+        evidence_context=evidence_context,
         fallback_note=fallback_note,
     )
 
