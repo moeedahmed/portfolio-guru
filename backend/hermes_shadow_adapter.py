@@ -50,6 +50,7 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
 
+from channel_actions import ChannelAction, ChannelReply, to_telegram_button_rows
 from channel_contract import (
     InboundDecision,
     InboundDisposition,
@@ -154,6 +155,8 @@ def _handle_metadata(
     eligible_keys = sorted({fact.key for fact in eligible})
     extracted_keys = sorted({key for key, _ in event.extracted_facts})
     recommendation = _recommendation_metadata(tuple(eligible))
+    form_options = _form_options(recommendation)
+    form_reply = _form_reply(form_options)
 
     return {
         "disposition": decision.disposition.value,
@@ -171,7 +174,8 @@ def _handle_metadata(
         "chat_turn_count": len(workspace.chat_turns),
         "pending_clarification": workspace.pending_clarification,
         "recommendation": recommendation,
-        "form_options": _form_options(recommendation),
+        "form_options": form_options,
+        "form_reply": form_reply,
         "actions": [
             {
                 "kind": action.kind.value,
@@ -214,6 +218,43 @@ def _form_options(recommendation: dict[str, Any]) -> list[dict[str, str]]:
     if isinstance(confidence, str):
         option["confidence"] = confidence
     return [option]
+
+
+def _form_reply(form_options: list[dict[str, str]]) -> dict[str, Any] | None:
+    """Build a JSON-safe, Telegram-ready reply for engine form choices.
+
+    Hermes can use ``telegram_button_rows`` directly for Telegram inline
+    keyboards. Plain-text channels can still render the same action labels as a
+    numbered fallback, but Telegram should not downgrade these options to text.
+    """
+    if not form_options:
+        return None
+    actions: list[ChannelAction] = []
+    for option in form_options:
+        form_type = option.get("form_type")
+        if not form_type:
+            continue
+        confidence = option.get("confidence")
+        label = form_type if not confidence else f"{form_type} — {confidence} confidence"
+        actions.append(
+            ChannelAction(action_id=f"FORM|{form_type}", label=label)
+        )
+    if not actions:
+        return None
+    reply = ChannelReply(
+        body="Portfolio Guru found a likely portfolio form.",
+        continuation="Choose the engine-backed option to preview the draft. Nothing is saved to Kaizen from this test bot.",
+        actions=tuple(actions),
+    )
+    return {
+        "body": reply.body,
+        "continuation": reply.continuation,
+        "actions": [
+            {"action_id": action.action_id, "label": action.label}
+            for action in reply.actions
+        ],
+        "telegram_button_rows": to_telegram_button_rows(reply),
+    }
 
 
 # ---------------------------------------------------------------------------

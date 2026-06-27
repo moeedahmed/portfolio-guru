@@ -12,6 +12,7 @@ from channel_actions import (
     ChannelReply,
     render_numbered,
     resolve_numbered_choice,
+    to_telegram_button_rows,
     to_telegram_keyboard,
 )
 
@@ -44,6 +45,13 @@ def test_telegram_keyboard_uses_action_id_as_callback_data():
     assert [(b.text, b.callback_data) for b in buttons] == [
         ("✅ Draft now", "GATHER|done"),
         ("❌ Cancel", "ACTION|cancel"),
+    ]
+
+
+def test_plain_telegram_button_rows_use_action_id_as_callback_data():
+    assert to_telegram_button_rows(_reply()) == [
+        [{"text": "✅ Draft now", "callback_data": "GATHER|done"}],
+        [{"text": "❌ Cancel", "callback_data": "ACTION|cancel"}],
     ]
 
 

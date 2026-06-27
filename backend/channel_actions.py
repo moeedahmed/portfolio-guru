@@ -74,6 +74,19 @@ def to_telegram_keyboard(reply: ChannelReply):
     return InlineKeyboardMarkup(rows)
 
 
+def to_telegram_button_rows(reply: ChannelReply) -> list[list[dict[str, str]]]:
+    """Render actions as Telegram Bot API compatible inline-keyboard rows.
+
+    This is the dependency-free sibling of :func:`to_telegram_keyboard` for
+    Hermes/profile boundaries that need a plain JSON payload instead of a
+    ``python-telegram-bot`` object.
+    """
+    return [
+        [{"text": action.label, "callback_data": action.action_id}]
+        for action in reply.actions
+    ]
+
+
 def render_numbered(reply: ChannelReply) -> str:
     """Render the reply for a numbered/plain-text channel (e.g. WhatsApp).
 

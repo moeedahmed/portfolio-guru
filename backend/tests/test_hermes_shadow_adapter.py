@@ -105,6 +105,19 @@ def test_shadow_metadata_exposes_safe_form_options_without_reasons():
     assert result.metadata["form_options"] == [
         {"form_type": "CBD", "confidence": "medium"}
     ]
+    assert result.metadata["form_reply"] == {
+        "body": "Portfolio Guru found a likely portfolio form.",
+        "continuation": (
+            "Choose the engine-backed option to preview the draft. Nothing is "
+            "saved to Kaizen from this test bot."
+        ),
+        "actions": [
+            {"action_id": "FORM|CBD", "label": "CBD — medium confidence"}
+        ],
+        "telegram_button_rows": [
+            [{"text": "CBD — medium confidence", "callback_data": "FORM|CBD"}]
+        ],
+    }
     assert result.metadata["recommendation"] == {
         "status": "recommended",
         "form_type": "CBD",
