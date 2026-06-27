@@ -10,6 +10,12 @@ class FakePage:
         self.url = url
         self.goto = AsyncMock()
         self.inner_text = AsyncMock(return_value=body)
+        self.evaluate = AsyncMock(side_effect=self._evaluate)
+
+    async def _evaluate(self, script, *args):
+        if args:
+            return {"tag": "INPUT", "type": "text", "value": "filled"}
+        return ""
 
 
 @pytest.mark.asyncio

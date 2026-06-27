@@ -23,6 +23,7 @@ from kaizen_form_filer import (
     _is_kaizen_app_url,
     _strip_emojis,
     _to_uk_date,
+    _verify_fields,
     invalidate_session_cache,
     load_session_state,
     save_session_state,
@@ -217,6 +218,74 @@ def test_minicex_maps_and_defaults_visible_date_of_event():
     assert fields["end_date"] == fields["date_of_encounter"]
     assert fields["date_of_event"] == fields["date_of_encounter"]
     assert {"date_of_encounter", "end_date", "date_of_event"} <= set(meta["defaulted_fields"])
+
+
+def test_esle_and_research_default_mapped_visible_date_fields():
+    esle_map = FORM_FIELD_MAP["ESLE_PART1_2"]
+    assert esle_map["date_of_esle"] == "2c86886b-0a18-4771-9b25-6c2272fdad6b"
+
+    esle_fields, esle_meta = apply_common_header_defaults(
+        "ESLE_ASSESS",
+        {
+            "stage_of_training": "Higher/ST4-ST6",
+            "reflection": "Leadership and non-technical skills reviewed.",
+        },
+        esle_map,
+    )
+
+    assert esle_fields["date_of_encounter"]
+    assert esle_fields["date_of_esle"] == esle_fields["date_of_encounter"]
+    assert "date_of_esle" in esle_meta["defaulted_fields"]
+
+    research_map = FORM_FIELD_MAP["RESEARCH"]
+    assert research_map["date_started"] == "7fbf5f39-c9b1-4e2c-8c3d-455f159935fe"
+    assert research_map["date_finished"] == "025d5d3f-363b-470d-9c74-7427a8b898fd"
+
+    research_fields, research_meta = apply_common_header_defaults(
+        "RESEARCH",
+        {
+            "title": "Poster presentation",
+            "reflection": "Research activity completed and reflected on.",
+        },
+        research_map,
+    )
+
+    assert research_fields["date_of_encounter"]
+    assert research_fields["date_started"] == research_fields["date_of_encounter"]
+    assert research_fields["date_finished"] == research_fields["date_of_encounter"]
+    assert {"date_started", "date_finished"} <= set(research_meta["defaulted_fields"])
+
+
+@pytest.mark.asyncio
+async def test_verify_fields_checks_mapped_visible_date_fields():
+    page = AsyncMock()
+
+    async def evaluate(script, dom_id):
+        values = {
+            FORM_FIELD_MAP["QIAT"]["date_of_completion"]: "1/1/2026",
+            FORM_FIELD_MAP["TEACH"]["date_of_teaching_activity"]: "2/1/2026",
+        }
+        return values.get(dom_id)
+
+    page.evaluate = AsyncMock(side_effect=evaluate)
+
+    qiat_issues = await _verify_fields(
+        page,
+        "QIAT",
+        {"date_of_completion": "2026-06-27"},
+        FORM_FIELD_MAP["QIAT"],
+        ["date_of_completion"],
+    )
+    teach_issues = await _verify_fields(
+        page,
+        "TEACH",
+        {"date_of_teaching_activity": "2026-06-27"},
+        FORM_FIELD_MAP["TEACH"],
+        ["date_of_teaching_activity"],
+    )
+
+    assert any("date_of_completion" in issue for issue in qiat_issues)
+    assert any("date_of_teaching_activity" in issue for issue in teach_issues)
 
 
 @pytest.mark.asyncio

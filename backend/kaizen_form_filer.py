@@ -1326,6 +1326,7 @@ def apply_common_header_defaults(form_type: str, fields: dict, field_map: dict |
 
     start_keys = tuple(key for key, dom_id in field_map.items() if _field_dom_id(dom_id) == "startDate") + ("date_of_encounter",)
     end_keys = tuple(key for key, dom_id in field_map.items() if _field_dom_id(dom_id) == "endDate") + ("end_date",)
+    mapped_date_keys = tuple(key for key in field_map if "date" in key)
     date_source_keys = (
         "date_of_encounter",
         "date_of_event",
@@ -1338,7 +1339,7 @@ def apply_common_header_defaults(form_type: str, fields: dict, field_map: dict |
         "date_of_incident",
         "date_of_completion",
         "end_date",
-    )
+    ) + mapped_date_keys
 
     source_date = _first_present_value(out, date_source_keys)
     if not source_date:
@@ -1371,6 +1372,10 @@ def apply_common_header_defaults(form_type: str, fields: dict, field_map: dict |
         "date_of_incident",
         "date_of_completion",
     }
+    section_date_keys.update(
+        key for key in mapped_date_keys
+        if key not in start_keys and key not in end_keys
+    )
     for key in section_date_keys:
         if key in field_map and not _first_present_value(out, (key,)):
             out[key] = source_date
@@ -2860,8 +2865,13 @@ async def _verify_fields(page: Page, form_type: str, fields: dict, field_map: di
     issues = []
 
     # Check date fields
-    for key in ("date", "date_occurred_on", "date_of_encounter", "end_date", "date_of_event", "date_of_education", "date_of_activity",
-                "date_of_teaching", "date_of_case", "date_of_complaint", "date_of_incident"):
+    verify_date_keys = dict.fromkeys((
+        "date", "date_occurred_on", "date_of_encounter", "end_date",
+        "date_of_event", "date_of_education", "date_of_activity",
+        "date_of_teaching", "date_of_case", "date_of_complaint",
+        "date_of_incident",
+    ) + tuple(key for key in fields if "date" in key and key in field_map))
+    for key in verify_date_keys:
         if key in fields and key in field_map:
             dom_id = _field_dom_id(field_map[key])
             val = await page.evaluate(
