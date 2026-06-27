@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import kaizen_form_filer
 from kaizen_form_filer import (
     _can_fallback_to_tag_based_curriculum,
+    _curriculum_base_form_type,
     _curriculum_stage_label,
     _fill_curriculum_for_form,
     _fill_curriculum_links,
@@ -137,42 +138,85 @@ async def test_higher_stage_still_expands_higher_tree(monkeypatch):
 
 # ─── _uses_tag_based_curriculum routing classification ──────────────────────
 #
-# Forms whose curriculum lives ONLY in the Add tags modal (no usable in-form KC
-# tree) MUST route through the tag path. If they fall through to the in-form
-# tree writer, it ticks nothing yet reports success — silently dropping the
-# trainee's curriculum evidence. CBD/DOPS/PROC_LOG were live-verified as
-# modal-only (2026-04-22/23, commit 395393e) but were regressed by a 2026-05-22
-# file recovery; these tests pin them so the regression cannot recur.
+# Evidence source: read-only DOM scrape of /events/new-section/<uuid> on an
+# ACCS/Intermediate Kaizen account, 2026-06-27 (docs/kc_route_evidence_20260627.json).
+#
+# Three buckets:
+#   TAG_ONLY   — kzTreeElsAll=0; curriculum lives exclusively in Add Tags modal.
+#   FALLBACK   — kzTreeElsAll≥1 but inline tree unconfirmed for expansion; try
+#                inline first, rescue with Add Tags if KC ticks fail.
+#   VERIFIED   — kzTreeElsAll≥1, sloListItems≥4, kcCBs≥3; no Add Tags fallback.
 
 
 @pytest.mark.parametrize(
     "form_type",
     [
-        # Live-verified modal-only WPBA / procedural forms (the regression).
-        "CBD", "DOPS", "PROC_LOG",
-        # 2021 variants must inherit their base form's routing.
-        "CBD_2021", "DOPS_2021", "PROC_LOG_2021",
-        # Reflective entry verified tag-based (schema flag + set).
+        # ── Confirmed TAG_ONLY (kzTreeElsAll=0, 2026-06-27 scrape) ─────────────
+        # CBD: kzTreeElsAll=0 (earlier Kaizen had empty kz-tree attr, now removed)
+        "CBD", "CBD_2021",
+        # DOPS: kzTreeElsAll=0. No inline kz-tree even on this ACCS profile.
+        # Moeed's note that DOPS "has a KC tree" refers to DOPS_ACCS (kzTree=1),
+        # not the standard DOPS Higher WPBA. Routing stays tag-only.
+        "DOPS", "DOPS_2021",
+        # MINI_CEX: kzTreeElsAll=0. Previously in fallback; pinned tag-only since
+        # inline writer always found nothing and fell back on every run.
+        "MINI_CEX", "MINI_CEX_2021",
+        # REFLECT_LOG: schema flag tag_based_curriculum=True; also kzTreeElsAll=0.
         "REFLECT_LOG", "REFLECT_LOG_2021",
-        # Management / governance family — no in-form curriculum tree.
+        # RESEARCH, PDP: kzTreeElsAll=0. Previously in fallback bucket; now pinned.
+        "RESEARCH",
+        "PDP",
+        # ── Management / governance family — no in-form curriculum tree ─────────
         "CRIT_INCIDENT", "CLIN_GOV", "MGMT_PROJECT", "MGMT_ROTA",
         "MGMT_RISK", "MGMT_REPORT", "APPRAISAL", "BUSINESS_CASE",
-        "COST_IMPROVE", "EQUIP_SERVICE", "COMPLAINT", "SERIOUS_INC",
+        "COST_IMPROVE", "EQUIP_SERVICE",
     ],
 )
 def test_tag_based_forms_route_through_add_tags(form_type):
     assert _uses_tag_based_curriculum(form_type) is True
 
 
+def test_dops_is_confirmed_add_tags_only_not_inline():
+    """DOPS (standard Higher WPBA) is tag-only per 2026-06-27 DOM scrape.
+
+    kzTreeElsAll=0 — no [kz-tree] in form body. DOPS_ACCS (a separate ACCS-specific
+    form, UUID fea13c0a) DOES have kzTreeElsAll=1. They must not be confused.
+    DOPS_ACCS routes via the inline tree; DOPS routes via Add Tags.
+    _can_fallback_to_tag_based_curriculum is not meaningful for tag-only forms
+    (they never attempt the inline path, so fallback semantics don't apply).
+    """
+    assert _uses_tag_based_curriculum("DOPS") is True
+    assert _uses_tag_based_curriculum("DOPS_2021") is True
+
+
+def test_dops_accs_uses_inline_tree_not_add_tags():
+    """DOPS_ACCS (ACCS-specific form) has an in-form kz-tree.
+
+    2026-06-27 DOM scrape: kzTreeElsAll=1, sloListItems=4, kcCheckboxes=3.
+    Routes via inline tree, not Add Tags. Must not be confused with standard DOPS.
+    """
+    assert _uses_tag_based_curriculum("DOPS_ACCS") is False
+    assert _can_fallback_to_tag_based_curriculum("DOPS_ACCS") is False
+
+
 @pytest.mark.parametrize(
     "form_type",
     [
-        # US_CASE has a genuine inline kz-tree where KCs must be ticked to count
-        # as curriculum evidence (verified 2026-04-23) — never route via tags.
+        # US_CASE has a genuine inline kz-tree (verified 2026-04-23 and 2026-06-27).
         "US_CASE", "US_CASE_2021",
         # TEACH (2025 Update) carries its own in-form curriculum tree; the
         # schema flag tag_based_curriculum=False pins this deliberately.
         "TEACH", "TEACH_2021",
+        # ── Newly confirmed VERIFIED_INLINE forms (2026-06-27 DOM scrape) ───────
+        "ACAT", "ACAT_2021",
+        "JCF", "JCF_2021",
+        "SDL", "SDL_2021",
+        "ESLE_ASSESS", "ESLE_2021",
+        "TEACH_OBS", "TEACH_OBS_2021",
+        "TEACH_CONFID", "TEACH_CONFID_2021",
+        "EDU_ACT", "EDU_ACT_2021",
+        "FORMAL_COURSE", "FORMAL_COURSE_2021",
+        "DOPS_ACCS",  # ACCS-specific form with kzTree=1
     ],
 )
 def test_inline_tree_forms_do_not_route_through_add_tags(form_type):
@@ -182,29 +226,50 @@ def test_inline_tree_forms_do_not_route_through_add_tags(form_type):
 @pytest.mark.parametrize(
     "form_type",
     [
-        "MINI_CEX", "MINI_CEX_2021",
-        "ACAT", "ACAT_2021",
-        "ACAF", "ACAF_2021",
-        "JCF", "JCF_2021",
-        "SDL", "SDL_2021",
-        "EDU_ACT", "EDU_ACT_2021",
-        "FORMAL_COURSE", "FORMAL_COURSE_2021",
-        "ESLE_ASSESS", "ESLE_2021",
-        "TEACH_OBS", "TEACH_OBS_2021",
+        # PROC_LOG: 2026-06-27 scrape shows kzTreeElsAll=1, sloListItems=4, kcCBs=3.
+        # Inline tree now exists — removed from tag-only set. Stays in FALLBACK until
+        # inline expansion is confirmed working end-to-end (contradicts 2026-04-22).
+        "PROC_LOG", "PROC_LOG_2021",
+        # COMPLAINT / SERIOUS_INC: 2026-06-27 shows kzTreeElsAll=1, sloListItems=4.
+        # Inline tree now exists — removed from tag-only. In FALLBACK for safety.
+        "COMPLAINT", "SERIOUS_INC",
+        # AUDIT: not accessible on ACCS/Intermediate profile (redirect to /events/list).
+        # Route unverified — keep in FALLBACK.
         "AUDIT", "AUDIT_2021",
-        "RESEARCH",
-        "PDP",
+        # ACAF: not inspected in 2026-06-27 scrape — keep in FALLBACK.
+        "ACAF", "ACAF_2021",
     ],
 )
-def test_ambiguous_curriculum_forms_can_fallback_to_add_tags(form_type):
-    """Forms without a verified inline tree get an Add Tags rescue path."""
+def test_fallback_curriculum_forms_try_inline_then_add_tags(form_type):
+    """Forms with a confirmed OR probable inline tree but unverified expansion behaviour.
+
+    These are NOT tag-only (they have or may have a kz-tree) but they are also not
+    pinned as VERIFIED_INLINE — the Add Tags path rescues them if inline fails.
+    """
     assert _uses_tag_based_curriculum(form_type) is False
     assert _can_fallback_to_tag_based_curriculum(form_type) is True
 
 
 @pytest.mark.parametrize(
     "form_type",
-    ["US_CASE", "US_CASE_2021", "TEACH", "TEACH_2021", "QIAT", "QIAT_2021", "STAT", "STAT_2021", "LAT", "LAT_2021"],
+    [
+        # Previously verified (2026-04-23), re-confirmed 2026-06-27
+        "US_CASE", "US_CASE_2021",
+        "TEACH", "TEACH_2021",
+        "QIAT", "QIAT_2021",
+        "STAT", "STAT_2021",
+        "LAT", "LAT_2021",
+        # Newly verified 2026-06-27 (kzTreeElsAll≥1, sloListItems≥4, kcCBs≥3)
+        "ACAT", "ACAT_2021",
+        "JCF", "JCF_2021",
+        "SDL", "SDL_2021",
+        "ESLE_ASSESS", "ESLE_2021",
+        "TEACH_OBS", "TEACH_OBS_2021",
+        "TEACH_CONFID", "TEACH_CONFID_2021",
+        "EDU_ACT", "EDU_ACT_2021",
+        "FORMAL_COURSE", "FORMAL_COURSE_2021",
+        "DOPS_ACCS",  # ACCS-specific; standard DOPS is tag-only
+    ],
 )
 def test_verified_inline_tree_forms_do_not_use_tag_fallback(form_type):
     assert _uses_tag_based_curriculum(form_type) is False
@@ -227,9 +292,11 @@ def test_schema_flag_overrides_default_set(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("form_type", ["CBD", "DOPS", "PROC_LOG"])
+@pytest.mark.parametrize("form_type", ["CBD", "DOPS"])
 async def test_modal_only_forms_dispatch_to_tag_filler(monkeypatch, form_type):
-    """Restored modal-only forms reach _fill_curriculum_tags, not the tree writer."""
+    """Tag-only forms (kzTreeElsAll=0, 2026-06-27) reach _fill_curriculum_tags only.
+    PROC_LOG removed — it now has an inline tree (kzTreeElsAll=1) and falls to FALLBACK.
+    """
     page = MagicMock()
     tag_fill = AsyncMock(return_value=(["SLO3 KC3"], []))
     in_form_fill = AsyncMock(return_value=([], ["wrong route"]))
@@ -269,8 +336,13 @@ async def test_reflect_log_routes_curriculum_through_tag_modal(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_mini_cex_falls_back_to_tag_modal_when_inline_tree_missing(monkeypatch):
-    """Mini-CEX should not silently drop KCs when Kaizen exposes only tags."""
+async def test_mini_cex_routes_directly_to_tag_modal_no_inline_attempt(monkeypatch):
+    """Mini-CEX is tag-only (kzTreeElsAll=0, 2026-06-27): goes straight to Add Tags.
+
+    Previously in the fallback bucket (try inline first, then tags). Now confirmed
+    that no kz-tree element exists in the form body, so attempting the inline path
+    every time is wasteful and wrong. The inline writer must NOT be called.
+    """
     page = MagicMock()
     in_form_fill = AsyncMock(return_value=([], ["SLO expand failed: Higher SLO3:"]))
     tag_fill = AsyncMock(return_value=(["SLO3 KC3"], []))
@@ -287,7 +359,7 @@ async def test_mini_cex_falls_back_to_tag_modal_when_inline_tree_missing(monkeyp
 
     assert ticked == ["SLO3 KC3"]
     assert errors == []
-    in_form_fill.assert_awaited_once()
+    in_form_fill.assert_not_awaited()  # tag-only: inline path is never tried
     tag_fill.assert_awaited_once()
 
 
@@ -387,6 +459,8 @@ def test_every_curriculum_schema_has_a_declared_or_rescuable_route():
             _uses_tag_based_curriculum(form_type)
             or _can_fallback_to_tag_based_curriculum(form_type)
             or form_type in kaizen_form_filer.FORMS_WITH_VERIFIED_INLINE_CURRICULUM_TREE
+            # Aliases (e.g. ESLE_ASSESS → base ESLE_PART1_2) are in the set by base type.
+            or _curriculum_base_form_type(form_type) in kaizen_form_filer.FORMS_WITH_VERIFIED_INLINE_CURRICULUM_TREE
         ):
             unclassified.append(form_type)
 

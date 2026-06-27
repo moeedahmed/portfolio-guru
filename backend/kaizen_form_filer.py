@@ -432,39 +432,70 @@ TAG_TREE_CURRICULUM = {
 }
 
 
-# Forms that do NOT have an in-form curriculum tree and require tag-based mapping
-# (verified empirically from live Kaizen 2026-04-06)
+# Forms that do NOT have an in-form curriculum tree and require tag-based mapping.
+# Evidence source: read-only DOM scrape of /events/new-section/<uuid> on ACCS/
+# Intermediate Kaizen account (2026-06-27, docs/kc_route_evidence_20260627.json).
+# Signal used: kzTreeElsAll (count of [kz-tree] elements in page body, not dialog).
+# A form is ADD_TAGS_ONLY when kzTreeElsAll=0 — no [kz-tree] element present.
 FORMS_USING_TAG_BASED_CURRICULUM = {
+    # ── MGMT / admin forms — verified no in-form kz-tree (2026-04-06 & 2026-06-27)
     "CRIT_INCIDENT", "CLIN_GOV", "MGMT_REPORT", "MGMT_PROJECT",
     "MGMT_ROTA", "MGMT_RISK", "MGMT_RECRUIT", "MGMT_RISK_PROC",
     "MGMT_TRAINING_EVT", "MGMT_GUIDELINE", "MGMT_INFO", "MGMT_INDUCTION",
     "MGMT_EXPERIENCE", "MGMT_COMPLAINT", "BUSINESS_CASE",
     "COST_IMPROVE", "EQUIP_SERVICE", "APPRAISAL",
-    # Reflective entries that may also use tag-based linking:
-    "COMPLAINT", "SERIOUS_INC", "REFLECT_LOG",
-    # ── Procedural / core WPBA forms whose curriculum lives ONLY in the Add
-    # tags modal (no usable in-form KC tree). These were live-verified as
-    # modal-only on 2026-04-22/23 (see commit 395393e) and corroborated by the
-    # Kaizen domain skill README "Verified fields" lists, which show no in-form
-    # curriculum control on CBD or Procedural Log — only the toolbar "Add tags"
-    # picker. They were accidentally dropped by the 2026-05-22 file recovery
-    # (commit e9c5741), which silently regressed them to the in-form KC-tree
-    # path: that path ticks NOTHING when no [kz-tree] is present yet still
-    # reports "curriculum_links (N KCs)" success. Restored here.
-    #   CBD       — kzTreeAttr=1 but sloAnchors=0, tree lives in the modal.
-    #   DOPS      — inline kz-tree has no SLO/KC nodes (procedural multi-selects
-    #               on the page previously fooled the tree-ready check).
-    #   PROC_LOG  — no inline curriculum tree, only the modal.
-    # NOTE: US_CASE deliberately stays OUT — it has a genuine inline kz-tree
-    # where KCs must be ticked to count as curriculum evidence (verified
-    # 2026-04-23); routing it through tags would file KCs in the wrong place.
-    "CBD", "DOPS", "PROC_LOG",
+    # ── Reflective entries with no in-form kz-tree
+    "REFLECT_LOG",
+    # ── Core WPBA / assessment forms with no in-form kz-tree (kzTreeElsAll=0)
+    #   CBD      — 2026-06-27: kzTreeElsAll=0, addTagsText=True.
+    #              (Earlier Kaizen had kzTreeAttr=1 but sloAnchors=0 — empty element
+    #              since cleaned up by Kaizen; modal is the only curriculum surface.)
+    #   DOPS     — 2026-06-27: kzTreeElsAll=0, addTagsText=True.
+    #              No in-form kz-tree even though DOPS_ACCS (different form) has one.
+    #              Moeed's note that DOPS "has a KC tree" refers to DOPS_ACCS, not DOPS.
+    #   MINI_CEX — 2026-06-27: kzTreeElsAll=0, addTagsText=True. Previously in fallback;
+    #              moved here because inline tree writer would find nothing and fall back
+    #              every time. Pin to tag path directly.
+    #   RESEARCH — 2026-06-27: kzTreeElsAll=0, addTagsText=True.
+    #   PDP      — 2026-06-27: kzTreeElsAll=0, addTagsText=True.
+    # NOTE: PROC_LOG, COMPLAINT, SERIOUS_INC moved OUT of this set (2026-06-27 scrape
+    #       shows kzTreeElsAll=1, sloListItems≥4, kcCBs≥3 — inline tree now exists).
+    #       They fall into the FALLBACK bucket (try inline first, Add Tags if fails).
+    "CBD", "DOPS", "MINI_CEX", "RESEARCH", "PDP",
 }
 
 FORMS_WITH_VERIFIED_INLINE_CURRICULUM_TREE = {
-    # These forms have a real in-form KC tree or a form-specific tree path where
-    # the saved-draft curriculum evidence must be written in place.
-    "LAT", "QIAT", "STAT", "TEACH", "US_CASE",
+    # Forms with a confirmed in-form kz-tree where curriculum evidence MUST be
+    # written via the inline tree. No Add Tags fallback for these.
+    # Evidence: read-only DOM scrape 2026-06-27 (docs/kc_route_evidence_20260627.json)
+    # unless an earlier date is noted.
+    #
+    # Signals: kzTreeElsAll≥1 AND sloListItemsInTree≥4 AND kcCheckboxesInTree≥3.
+    #
+    # ── Previously verified (confirmed again 2026-06-27) ──────────────────────
+    "LAT",      # kzTreeElsAll=3, sloListItems=20, kcCBs=17
+    "QIAT",     # kzTreeElsAll=2, sloListItems=14, kcCBs=12
+    "STAT",     # kzTreeElsAll=1, sloListItems=4,  kcCBs=3
+    "TEACH",    # kzTreeElsAll=1, sloListItems=4,  kcCBs=3 (schema flag tag_based_curriculum=False)
+    "US_CASE",  # kzTreeElsAll=2, sloListItems=10, kcCBs=8
+    # ── Newly confirmed inline tree (2026-06-27) ───────────────────────────────
+    "ACAT",              # kzTreeElsAll=1, sloListItems=4,  kcCBs=3
+    "JCF",               # kzTreeElsAll=1, sloListItems=4,  kcCBs=3
+    "SDL",               # kzTreeElsAll=2, sloListItems=12, kcCBs=10
+    "ESLE_PART1_2",      # kzTreeElsAll=1, sloListItems=4,  kcCBs=3 (ESLE_ASSESS / ESLE_2021 alias)
+    "TEACH_OBS",         # kzTreeElsAll=1, sloListItems=4,  kcCBs=3
+    "TEACH_CONFID",      # kzTreeElsAll=1, sloListItems=4,  kcCBs=3
+    "EDU_ACT",           # kzTreeElsAll=1, sloListItems=4,  kcCBs=3
+    "FORMAL_COURSE",     # kzTreeElsAll=1, sloListItems=4,  kcCBs=3
+    "DOPS_ACCS",         # kzTreeElsAll=1, sloListItems=4,  kcCBs=3 (ACCS-specific; DOPS itself is tag-only)
+    "PROCEDURAL_LOG_ACCS",  # kzTreeElsAll=1, sloListItems=4, kcCBs=3
+    # NOTE: PROC_LOG, COMPLAINT, SERIOUS_INC not added here — inline tree is newly
+    #       discovered (contradicts 2026-04-22 evidence). They stay in the FALLBACK
+    #       bucket (try inline first, Add Tags rescue) until inline expansion is
+    #       confirmed working end-to-end.
+    # NOTE: AUDIT redirected to /events/list on ACCS/Intermediate profile (2026-06-27);
+    #       route unverified — keep in FALLBACK bucket.
+    # NOTE: DOPS_ACCS_2021 / PROCEDURAL_LOG_ACCS_2021 not inspected; keep in FALLBACK.
 }
 
 CURRICULUM_SCHEMA_ALIASES = {
