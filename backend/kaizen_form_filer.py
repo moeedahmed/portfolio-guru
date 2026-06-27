@@ -440,7 +440,7 @@ FORMS_USING_TAG_BASED_CURRICULUM = {
     "MGMT_EXPERIENCE", "MGMT_COMPLAINT", "BUSINESS_CASE",
     "COST_IMPROVE", "EQUIP_SERVICE", "APPRAISAL",
     # Reflective entries that may also use tag-based linking:
-    "COMPLAINT", "SERIOUS_INC",
+    "COMPLAINT", "SERIOUS_INC", "REFLECT_LOG",
 }
 
 
@@ -1604,6 +1604,48 @@ COUNT_TICKED_JS = """() => {
     return cbs.length;
 }"""
 
+TAG_COUNT_JS = """() => {
+    var maxCount = 0;
+    var nodes = document.querySelectorAll('a, button, span, div');
+    for (var i = 0; i < nodes.length; i++) {
+        var text = (nodes[i].textContent || '').replace(/\\s+/g, ' ').trim();
+        if (!/add tags/i.test(text)) continue;
+        var m = text.match(/add tags\\s*\\((\\d+)\\)/i);
+        if (m) maxCount = Math.max(maxCount, parseInt(m[1], 10) || 0);
+    }
+    return maxCount;
+}"""
+
+EXPAND_TAG_TREE_LINK_JS = """(wantedText) => {
+    function normalise(s) {
+        return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\\s+/g, ' ').trim();
+    }
+    var wanted = normalise(wantedText);
+    var nodes = document.querySelectorAll('a, button, [ng-click], .tree-node, .ng-binding, span, div');
+    for (var i = 0; i < nodes.length; i++) {
+        var text = normalise(nodes[i].textContent || '');
+        if (!text || text.indexOf(wanted) === -1) continue;
+        var clickable = nodes[i];
+        var hops = 0;
+        while (clickable && hops < 4) {
+            if (
+                clickable.tagName === 'A' ||
+                clickable.tagName === 'BUTTON' ||
+                clickable.getAttribute('ng-click') ||
+                clickable.getAttribute('role') === 'button'
+            ) {
+                clickable.click();
+                return true;
+            }
+            clickable = clickable.parentElement;
+            hops++;
+        }
+        nodes[i].click();
+        return true;
+    }
+    return false;
+}"""
+
 
 # ─── CDP connection ──────────────────────────────────────────────────────────
 
@@ -2409,6 +2451,141 @@ async def _fill_curriculum_links(
     return ticked, errors
 
 
+def _uses_tag_based_curriculum(form_type: str) -> bool:
+    """Return True when Kaizen exposes curriculum linkage via Add Tags."""
+    return canonical_form_type(form_type) in FORMS_USING_TAG_BASED_CURRICULUM
+
+
+async def _read_tag_count(page: Page) -> int:
+    try:
+        value = await page.evaluate(TAG_COUNT_JS)
+        return int(value or 0)
+    except Exception:
+        return 0
+
+
+async def _click_first_visible(page: Page, selectors: List[str]) -> bool:
+    for selector in selectors:
+        try:
+            locator = page.locator(selector).first
+            if await locator.count() > 0:
+                await locator.click()
+                return True
+        except Exception:
+            continue
+    return False
+
+
+async def _fill_curriculum_tags(
+    page: Page,
+    slo_codes: List[str],
+    kc_targets: List[str],
+    stage_label: str,
+) -> tuple:
+    """Use Kaizen's Add Tags modal for forms without an in-form KC tree."""
+    ticked = []
+    errors = []
+
+    if not kc_targets:
+        kc_targets = slo_codes
+    if not slo_codes and not kc_targets:
+        return ticked, errors
+
+    opened = await _click_first_visible(
+        page,
+        [
+            'button[ng-click*="addTags"]',
+            'a[ng-click*="addTags"]',
+            '[ng-click*="addTags"]',
+            'button:has-text("Add tags")',
+            'a:has-text("Add tags")',
+            '[role="button"]:has-text("Add tags")',
+        ],
+    )
+    if not opened:
+        return ticked, ["tag modal open failed"]
+
+    await asyncio.sleep(1)
+
+    for label in (
+        "2021 EM Curriculum (2025 Update)",
+        "Specialty Learning Outcomes",
+    ):
+        expanded = await page.evaluate(EXPAND_TAG_TREE_LINK_JS, label)
+        if expanded:
+            await asyncio.sleep(1)
+
+    slos = set()
+    for source in (slo_codes, kc_targets):
+        for entry in source:
+            m = re.search(r"SLO\s*(\d+)", str(entry), re.IGNORECASE)
+            if m:
+                slos.add(f"SLO{m.group(1)}")
+
+    stage_prefix = "Higher"
+    if stage_label:
+        for stage in ("Higher", "Intermediate", "ACCS", "PEM"):
+            if stage.lower() in stage_label.lower():
+                stage_prefix = stage
+                break
+
+    for slo in sorted(slos):
+        expanded = await page.evaluate(EXPAND_TAG_TREE_LINK_JS, f"{stage_prefix} {slo}:")
+        if not expanded:
+            expanded = await page.evaluate(EXPAND_TAG_TREE_LINK_JS, slo)
+        if expanded:
+            logger.info(f"Expanded tag tree: {slo}")
+        else:
+            logger.warning(f"Could not expand tag tree SLO: {slo}")
+            errors.append(f"tag SLO expand failed: {slo}")
+        await asyncio.sleep(2)
+
+    for target in kc_targets:
+        result = await page.evaluate(TICK_KC_JS, str(target))
+        if not (result.get("found") and result.get("checked")):
+            fallback = await page.evaluate(TICK_KC_FALLBACK_JS, str(target))
+            if fallback.get("found") and fallback.get("checked"):
+                result = fallback
+                logger.info(f"Tag KC ticked via fallback: {target}")
+        if result.get("found") and result.get("checked"):
+            ticked.append(target)
+            logger.info(f"Tag KC ticked: {target}")
+        elif result.get("found") and result.get("no_cb"):
+            errors.append(f"tag KC found but no checkbox: {target}")
+        else:
+            errors.append(f"tag KC not found: {target}")
+        await asyncio.sleep(0.5)
+
+    await _click_first_visible(
+        page,
+        [
+            'button:has-text("Close")',
+            'a:has-text("Close")',
+            'button.close',
+            '[aria-label="Close"]',
+            '.modal-header button',
+        ],
+    )
+    await asyncio.sleep(1)
+
+    tag_count = await _read_tag_count(page)
+    if ticked and tag_count == 0:
+        logger.info("Tag KCs ticked but Add tags count was not visible after closing modal")
+    return ticked, errors
+
+
+async def _fill_curriculum_for_form(
+    page: Page,
+    form_type: str,
+    slo_codes: List[str],
+    kc_targets: List[str],
+    stage_label: str,
+) -> tuple:
+    if _uses_tag_based_curriculum(form_type):
+        return await _fill_curriculum_tags(page, slo_codes, kc_targets, stage_label)
+    return await _fill_curriculum_links(page, slo_codes, kc_targets, stage_label)
+
+
 # ─── Save ─────────────────────────────────────────────────────────────────────
 
 async def _save_form(page: Page, as_draft: bool) -> bool:
@@ -2546,11 +2723,17 @@ async def _verify_fields(page: Page, fields: dict, field_map: dict, filled_keys:
         if not val or len(val) < 5:
             issues.append(f"{key} appears empty (dom_id={dom_id})")
 
-    # Check KCs
-    if fields.get("curriculum_links"):
-        ticked_count = await page.evaluate(COUNT_TICKED_JS)
-        if ticked_count == 0:
-            issues.append("No KCs ticked")
+    # Check curriculum linkage. Tag-based forms write KCs into Kaizen's Add
+    # Tags modal, so there may be no visible in-form checkboxes after closing.
+    if fields.get("curriculum_links") or fields.get("key_capabilities"):
+        if _uses_tag_based_curriculum(form_type):
+            tag_count = await _read_tag_count(page)
+            if tag_count == 0 and not any("curriculum_links" in key for key in filled_keys):
+                issues.append("No curriculum tags selected")
+        else:
+            ticked_count = await page.evaluate(COUNT_TICKED_JS)
+            if ticked_count == 0:
+                issues.append("No KCs ticked")
 
     return issues
 
@@ -2772,37 +2955,58 @@ async def _verify_filing_qa(
     )
     if isinstance(kc_targets, (str, bytes)):
         kc_targets = [kc_targets]
-    for target in kc_targets:
-        target_str = str(target)
-        try:
-            is_checked = await page.evaluate(_QA_READ_KC_JS, target_str)
-        except Exception as exc:
-            logger.warning(f"QA[{form_type}]: error reading KC {target_str}: {exc}")
-            is_checked = False
-        label = f"kc:{target_str}"
-        if is_checked:
-            filled.append(label)
+    if _uses_tag_based_curriculum(form_type):
+        tag_count = await _read_tag_count(page)
+        if tag_count > 0:
+            for target in kc_targets:
+                filled.append(f"tag:{target}")
         else:
-            empty_expected.append(label)
-            gap = {
-                "field": label,
-                "dom_id": None,
-                "form_type": form_type,
-                "kind": "kc_checkbox",
-                "missing_dom": False,
-                "expected_preview": target_str,
-                "reason": "kc_not_ticked",
-            }
-            gaps.append(gap)
-            if is_fixable_gap(gap):
-                record_gap(
-                    form_type=form_type,
-                    field_key=label,
-                    gap_kind="kc_checkbox",
-                    reason="kc_not_ticked",
-                    discovery_url=discovery_url,
-                    expected_preview=target_str,
-                )
+            for target in kc_targets:
+                target_str = str(target)
+                label = f"tag:{target_str}"
+                empty_expected.append(label)
+                gap = {
+                    "field": label,
+                    "dom_id": None,
+                    "form_type": form_type,
+                    "kind": "curriculum_tag",
+                    "missing_dom": False,
+                    "expected_preview": target_str,
+                    "reason": "tag_not_selected",
+                }
+                gaps.append(gap)
+    else:
+        for target in kc_targets:
+            target_str = str(target)
+            try:
+                is_checked = await page.evaluate(_QA_READ_KC_JS, target_str)
+            except Exception as exc:
+                logger.warning(f"QA[{form_type}]: error reading KC {target_str}: {exc}")
+                is_checked = False
+            label = f"kc:{target_str}"
+            if is_checked:
+                filled.append(label)
+            else:
+                empty_expected.append(label)
+                gap = {
+                    "field": label,
+                    "dom_id": None,
+                    "form_type": form_type,
+                    "kind": "kc_checkbox",
+                    "missing_dom": False,
+                    "expected_preview": target_str,
+                    "reason": "kc_not_ticked",
+                }
+                gaps.append(gap)
+                if is_fixable_gap(gap):
+                    record_gap(
+                        form_type=form_type,
+                        field_key=label,
+                        gap_kind="kc_checkbox",
+                        reason="kc_not_ticked",
+                        discovery_url=discovery_url,
+                        expected_preview=target_str,
+                    )
 
     score = score_qa_buckets(
         filled=filled,
@@ -3031,8 +3235,8 @@ async def fill_kaizen_form(
         slo_codes = fields.get("curriculum_links", [])
         kc_targets = fields.get("key_capabilities", []) or slo_codes
         if slo_codes or kc_targets:
-            ticked, kc_errors = await _fill_curriculum_links(
-                page, slo_codes, kc_targets,
+            ticked, kc_errors = await _fill_curriculum_for_form(
+                page, form_type, slo_codes, kc_targets,
                 _curriculum_stage_label(fields, telegram_user_id),
             )
             if ticked:
@@ -4016,8 +4220,8 @@ async def file_to_kaizen(
         kc_targets = fields.get("key_capabilities", []) or curriculum_links or []
         if curriculum_links or kc_targets:
             slo_codes = curriculum_links or []
-            ticked, kc_errors = await _fill_curriculum_links(
-                page, slo_codes, kc_targets,
+            ticked, kc_errors = await _fill_curriculum_for_form(
+                page, form_type, slo_codes, kc_targets,
                 _curriculum_stage_label(fields, telegram_user_id),
             )
             # Surface the KC writeback outcome — without this the ticks (and any

@@ -26,7 +26,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import kaizen_form_filer
 from kaizen_form_filer import (
     _curriculum_stage_label,
+    _fill_curriculum_for_form,
     _fill_curriculum_links,
+    _verify_filing_qa,
     file_to_kaizen,
 )
 
@@ -131,6 +133,59 @@ async def test_higher_stage_still_expands_higher_tree(monkeypatch):
     assert page.expanded_texts == ["Higher SLO6:"]
 
 
+@pytest.mark.asyncio
+async def test_reflect_log_routes_curriculum_through_tag_modal(monkeypatch):
+    """Reflective Practice Log has no reliable in-form KC tree; use Add Tags."""
+    page = MagicMock()
+    tag_fill = AsyncMock(return_value=(["SLO3 KC3"], []))
+    in_form_fill = AsyncMock(return_value=([], ["wrong route"]))
+    monkeypatch.setattr(kaizen_form_filer, "_fill_curriculum_tags", tag_fill)
+    monkeypatch.setattr(kaizen_form_filer, "_fill_curriculum_links", in_form_fill)
+
+    ticked, errors = await _fill_curriculum_for_form(
+        page,
+        "REFLECT_LOG",
+        ["SLO3"],
+        ["SLO3 KC3"],
+        "Higher",
+    )
+
+    assert ticked == ["SLO3 KC3"]
+    assert errors == []
+    tag_fill.assert_awaited_once()
+    in_form_fill.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_tag_based_qa_reads_tag_count_not_kc_checkbox(monkeypatch):
+    """Saved tag-based forms should not be reported as kc_not_ticked."""
+    page = MagicMock()
+    page.url = "https://kaizenep.com/events/fillin/test"
+
+    async def fake_evaluate(js, arg=None):
+        if js is kaizen_form_filer.TAG_COUNT_JS:
+            return 1
+        if js is kaizen_form_filer._QA_READ_KC_JS:
+            raise AssertionError("tag-based QA must not read in-form KC checkboxes")
+        return None
+
+    page.evaluate = AsyncMock(side_effect=fake_evaluate)
+
+    result = await _verify_filing_qa(
+        page,
+        "REFLECT_LOG",
+        {
+            "key_capabilities": [
+                "SLO3 KC3: manage life-threatening conditions (2025 Update)"
+            ]
+        },
+        {},
+    )
+
+    assert result["gaps"] == []
+    assert any(item.startswith("tag:SLO3 KC3") for item in result["filled"])
+
+
 # ─── file_to_kaizen surfaces (does not discard) the KC result ───────────────
 
 
@@ -145,13 +200,14 @@ async def test_reflect_log_intermediate_ticks_kcs_and_reports(monkeypatch):
 
     captured = {}
 
-    async def fake_fill_curriculum_links(page, slo_codes, kc_targets, stage_label):
+    async def fake_fill_curriculum_for_form(page, form_type, slo_codes, kc_targets, stage_label):
+        captured["form_type"] = form_type
         captured["stage_label"] = stage_label
         captured["kc_targets"] = list(kc_targets)
         return list(kc_targets), []
 
     monkeypatch.setattr(
-        kaizen_form_filer, "_fill_curriculum_links", fake_fill_curriculum_links
+        kaizen_form_filer, "_fill_curriculum_for_form", fake_fill_curriculum_for_form
     )
     monkeypatch.setattr(
         kaizen_form_filer, "connect_cdp_browser", AsyncMock(return_value=(MagicMock(), MagicMock()))
@@ -189,6 +245,7 @@ async def test_reflect_log_intermediate_ticks_kcs_and_reports(monkeypatch):
     )
 
     # Resolved the Intermediate tree from the profile, not the "Higher" default.
+    assert captured["form_type"] == "REFLECT_LOG"
     assert "intermediate" in captured["stage_label"].lower()
     assert captured["kc_targets"] == kcs
     # KC result is surfaced, not silently discarded.

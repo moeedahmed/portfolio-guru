@@ -474,6 +474,7 @@ FORM_SCHEMAS = {
     "REFLECT_LOG": {
         "name": "Reflective Practice Log",
         "filer_available": True,
+        "tag_based_curriculum": True,
         "fields": [
             {"key": "date_of_encounter",  "label": "Date",                            "type": "date",     "required": True},
             {"key": "reflection_title",   "label": "Title of Reflection",             "type": "text",     "required": False},
