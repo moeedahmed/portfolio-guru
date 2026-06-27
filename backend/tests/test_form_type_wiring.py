@@ -355,6 +355,47 @@ async def test_mini_cex_extracts_from_same_case_text_without_live_model_call():
     assert draft.uuid == FORM_UUIDS["MINI_CEX"]
     assert draft.fields["clinical_setting"] == "Emergency Department"
     assert draft.fields["reflection"]
+    assert len(draft.fields["key_capabilities"]) >= 3
+    assert any(kc.startswith("SLO3 KC3:") for kc in draft.fields["key_capabilities"])
+    assert any(kc.startswith("SLO6 KC2:") for kc in draft.fields["key_capabilities"])
+    assert set(draft.fields["curriculum_links"]) >= {"SLO2", "SLO3", "SLO6"}
+
+
+@pytest.mark.asyncio
+async def test_cbd_under_tagged_stemi_case_is_supplemented_to_three_kcs():
+    from extractor import extract_form_data
+
+    payload = {
+        "form_type": "CBD",
+        "date_of_encounter": "2026-05-21",
+        "patient_age": "58-year-old",
+        "patient_presentation": "STEMI with hypotension in resus.",
+        "clinical_setting": "Emergency Department - Resus",
+        "stage_of_training": "Higher/ST4-ST6",
+        "trainee_role": "Primary clinician with indirect supervision",
+        "clinical_reasoning": "I assessed the ECG, escalated to cardiology, activated the cath lab and managed circulatory risk.",
+        "reflection": "I learned to escalate early and coordinate the resus-to-cath-lab pathway.",
+        "level_of_supervision": "Indirect",
+        "supervisor_name": None,
+        "curriculum_links": ["SLO3"],
+        "key_capabilities": [
+            "SLO3 KC3: manage all the life-threatening conditions including peri-arrest & arrest situations in the ED (2025 Update)"
+        ],
+    }
+
+    source = (
+        "STEMI case in resus with hypotension. I escalated to cardiology, "
+        "activated the cath lab, coordinated the team and reflected on safer "
+        "early decision-making."
+    )
+
+    with patch("extractor._generate", new=AsyncMock(return_value=json.dumps(payload))):
+        draft = await extract_form_data(source, "CBD")
+
+    assert len(draft.fields["key_capabilities"]) >= 3
+    assert any(kc.startswith("SLO2 KC1:") for kc in draft.fields["key_capabilities"])
+    assert any(kc.startswith("SLO3 KC2:") for kc in draft.fields["key_capabilities"])
+    assert set(draft.fields["curriculum_links"]) >= {"SLO2", "SLO3"}
 
 
 @pytest.mark.asyncio

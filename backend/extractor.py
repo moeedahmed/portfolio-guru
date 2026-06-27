@@ -85,7 +85,22 @@ SLO12: Lead & Manage (2025 Update)
   KC6: demonstrate a positive impact on the culture of the Emergency Department through attitudes and behaviours that impact positively on colleagues, patients and their relatives (2025 Update)
 """
 
-KC_FULL_TEXT = {
+def _parse_rcem_kc_full_text() -> dict[str, str]:
+    full_text: dict[str, str] = {}
+    current_slo: str | None = None
+    for line in RCEM_KC_MAP.splitlines():
+        slo_match = re.match(r"\s*SLO(\d+):", line)
+        if slo_match:
+            current_slo = f"SLO{int(slo_match.group(1))}"
+            continue
+        kc_match = re.match(r"\s*KC(\d+):\s*(.+)", line)
+        if current_slo and kc_match:
+            code = f"{current_slo} KC{int(kc_match.group(1))}"
+            full_text[code] = f"{code}: {kc_match.group(2).strip()}"
+    return full_text
+
+
+KC_FULL_TEXT = _parse_rcem_kc_full_text() | {
     "SLO11 KC1": (
         "SLO11 KC1: be able to provide clinical leadership on effective "
         "Quality Improvement work (2025 Update)"
@@ -2324,6 +2339,112 @@ def _source_supports_qi_curriculum(case_description: str, schema_key: str) -> bo
     return schema_key == "QIAT" or any(term in f" {text} " for term in qi_terms)
 
 
+def _case_contains_any(source_text: str, terms: tuple[str, ...]) -> bool:
+    text = f" {source_text.lower()} "
+    return any(term in text for term in terms)
+
+
+def _add_supported_kc(
+    supplemented: list[str],
+    present_prefixes: set[str],
+    code: str,
+) -> None:
+    full_text = KC_FULL_TEXT.get(code)
+    if not full_text:
+        return
+    prefix = _kc_code_prefix(full_text)
+    if prefix in present_prefixes:
+        return
+    supplemented.append(full_text)
+    present_prefixes.add(prefix)
+
+
+def _clinical_kc_supplement_codes(case_description: str) -> list[str]:
+    text = f" {(case_description or '').lower()} "
+    codes: list[str] = []
+
+    def add(code: str) -> None:
+        if code not in codes:
+            codes.append(code)
+
+    if _case_contains_any(
+        text,
+        (
+            " decision", "decided", "plan", "management", "risk", "review",
+            "senior", "consultant", "registrar", "escalat", "referr",
+            "cardiology", "cath lab", "med reg", "itu", "icu", "handover",
+        ),
+    ):
+        add("SLO2 KC1")
+
+    if _case_contains_any(
+        text,
+        (
+            "stemi", " st elevation", "myocardial infarction", "cardiac arrest",
+            "peri-arrest", "shock", "hypotens", "sepsis", "septic",
+            "anaphylaxis", "major trauma", "resus", "critically ill",
+            "unstable", "arrhythmia", "pulmonary embol", "status epilepticus",
+            "dka",
+        ),
+    ):
+        add("SLO3 KC3")
+
+    if _case_contains_any(
+        text,
+        (
+            "procedure", "procedural", "sedation", "cardioversion",
+            "reduction", "chest drain", "intubat", "airway", "line",
+            "suture", "fascia iliaca", "nerve block",
+        ),
+    ):
+        add("SLO6 KC2")
+
+    if _case_contains_any(
+        text,
+        (
+            "fluid", "circulatory", "shock", "hypotens", "vasopressor",
+            "stemi", "myocardial infarction", "arrhythmia", "cardioversion",
+        ),
+    ):
+        add("SLO3 KC2")
+
+    if _case_contains_any(
+        text,
+        (
+            "led", "lead", "coordinat", "team", "resus team", "cath lab",
+            "trauma team", "allocated", "delegated",
+        ),
+    ):
+        add("SLO3 KC5")
+
+    if _case_contains_any(
+        text,
+        (
+            "communicat", "explain", "consent", "family", "relative",
+            "handover", "referr", "cardiology", "med reg", "icu", "itu",
+            "sbar", "safety net",
+        ),
+    ):
+        add("SLO7 KC3")
+
+    if _case_contains_any(text, ("teach", "supervis", "feedback", "debrief")):
+        add("SLO9 KC1")
+
+    is_paediatric = _case_contains_any(
+        text,
+        (
+            " child ", " children ", " paed", " paediatric", " pediatric",
+            " infant ", " toddler ", " teenager ", " adolescent ",
+        ),
+    )
+    if is_paediatric:
+        add("SLO5 KC1")
+    else:
+        add("SLO1 KC1")
+
+    return codes
+
+
 def _supplement_supported_key_capabilities(
     fields: dict,
     *,
@@ -2345,12 +2466,14 @@ def _supplement_supported_key_capabilities(
 
     if _source_supports_qi_curriculum(case_description, schema_key):
         for code in ("SLO11 KC1", "SLO11 KC2", "SLO12 KC2"):
-            full_text = KC_FULL_TEXT[code]
-            prefix = _kc_code_prefix(full_text)
-            if prefix in present_prefixes:
-                continue
-            supplemented.append(full_text)
-            present_prefixes.add(prefix)
+            _add_supported_kc(supplemented, present_prefixes, code)
+            if len(supplemented) >= 3:
+                break
+    else:
+        for code in _clinical_kc_supplement_codes(case_description):
+            _add_supported_kc(supplemented, present_prefixes, code)
+            if len(supplemented) >= 3:
+                break
 
     if supplemented != existing:
         fields["key_capabilities"] = supplemented
@@ -2561,9 +2684,9 @@ Return ONLY a JSON object with these exact fields:
   "curriculum_links": ["SLO1", "SLO3"],
   "key_capabilities": [
     "SLO1 KC1: to be expert in assessing and managing all adult patients attending the ED. These capabilities will apply to patients attending with both physical and psychological ill health (2025 Update)",
-    "SLO1 KC2: competent in the assessment and management of adult patients who present with undifferentiated conditions (2025 Update)",
-    "SLO3 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)",
-    "SLO3 KC3: able to formulate safe and appropriate management plans for adult patients (2025 Update)"
+    "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)",
+    "SLO3 KC2: be expert in fluid management and circulatory support in critically ill patients (2025 Update)",
+    "SLO3 KC3: manage all the life-threatening conditions including peri-arrest & arrest situations in the ED (2025 Update)"
   ]
 }}
 

@@ -154,13 +154,6 @@ fi
 PORTFOLIO_OUTBOUND_GATEWAY_TOKEN="${PORTFOLIO_OUTBOUND_GATEWAY_TOKEN:-${OPENCLAW_GATEWAY_TOKEN:-}}"
 export PORTFOLIO_OUTBOUND_GATEWAY_TOKEN
 
-# Persistent browser for Kaizen filing (login once, reuse session)
-export KAIZEN_USE_CDP="${KAIZEN_USE_CDP:-1}"
-export KAIZEN_CDP_URL="${KAIZEN_CDP_URL:-http://localhost:18800}"
-"$SCRIPT_DIR/ensure_chrome.sh" --verbose
-
-echo "Secrets loaded. Starting bot + webhook server..."
-
 PYTHON=""
 if [ -x "./.venv/bin/python3" ]; then
   PYTHON="./.venv/bin/python3"
@@ -170,6 +163,19 @@ else
   echo "Python venv not found (expected backend/venv or backend/.venv)." >&2
   exit 1
 fi
+
+# Playwright package upgrades can leave the local browser cache one revision
+# behind. Install is idempotent when the expected Chromium build is already
+# present, and prevents Kaizen filing from failing with the raw Playwright
+# "please run playwright install" message.
+"$PYTHON" -m playwright install chromium >/dev/null
+
+# Persistent browser for Kaizen filing (login once, reuse session)
+export KAIZEN_USE_CDP="${KAIZEN_USE_CDP:-1}"
+export KAIZEN_CDP_URL="${KAIZEN_CDP_URL:-http://localhost:18800}"
+"$SCRIPT_DIR/ensure_chrome.sh" --verbose
+
+echo "Secrets loaded. Starting bot + webhook server..."
 
 # Start Stripe webhook server in background (port 8099)
 WEBHOOK_PORT_PIDS="$(lsof -tiTCP:8099 -sTCP:LISTEN 2>/dev/null || true)"
