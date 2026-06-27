@@ -433,10 +433,11 @@ TAG_TREE_CURRICULUM = {
 
 
 # Forms that do NOT have an in-form curriculum tree and require tag-based mapping.
-# Evidence source: read-only DOM scrape of /events/new-section/<uuid> on ACCS/
-# Intermediate Kaizen account (2026-06-27, docs/kc_route_evidence_20260627.json).
-# Signal used: kzTreeElsAll (count of [kz-tree] elements in page body, not dialog).
-# A form is ADD_TAGS_ONLY when kzTreeElsAll=0 — no [kz-tree] element present.
+# Evidence source: read-only, stage-aware DOM scrape of /events/new-section/<uuid>
+# on ACCS, Intermediate, and HST Kaizen profiles (2026-06-27,
+# docs/kc_route_evidence_20260627.json).
+# Signal used: after selecting the relevant stage, no inline [kz-tree] with SLO/KC
+# nodes is rendered, while Add Tags is present.
 FORMS_USING_TAG_BASED_CURRICULUM = {
     # ── MGMT / admin forms — verified no in-form kz-tree (2026-04-06 & 2026-06-27)
     "CRIT_INCIDENT", "CLIN_GOV", "MGMT_REPORT", "MGMT_PROJECT",
@@ -446,22 +447,20 @@ FORMS_USING_TAG_BASED_CURRICULUM = {
     "COST_IMPROVE", "EQUIP_SERVICE", "APPRAISAL",
     # ── Reflective entries with no in-form kz-tree
     "REFLECT_LOG",
-    # ── Core WPBA / assessment forms with no in-form kz-tree (kzTreeElsAll=0)
-    #   CBD      — 2026-06-27: kzTreeElsAll=0, addTagsText=True.
-    #              (Earlier Kaizen had kzTreeAttr=1 but sloAnchors=0 — empty element
-    #              since cleaned up by Kaizen; modal is the only curriculum surface.)
-    #   DOPS     — 2026-06-27: kzTreeElsAll=0, addTagsText=True.
-    #              No in-form kz-tree even though DOPS_ACCS (different form) has one.
-    #              Moeed's note that DOPS "has a KC tree" refers to DOPS_ACCS, not DOPS.
-    #   MINI_CEX — 2026-06-27: kzTreeElsAll=0, addTagsText=True. Previously in fallback;
-    #              moved here because inline tree writer would find nothing and fall back
-    #              every time. Pin to tag path directly.
-    #   RESEARCH — 2026-06-27: kzTreeElsAll=0, addTagsText=True.
-    #   PDP      — 2026-06-27: kzTreeElsAll=0, addTagsText=True.
+    # ── Forms with no inline curriculum tree after stage-aware inspection.
+    #   REFLECT_LOG, RESEARCH, PDP — 2026-06-27: before/after kzTree=0 across
+    #   ACCS, Intermediate, and HST; Add Tags present.
+    # NOTE: CBD, DOPS and MINI_CEX deliberately stay OUT. A shallow pre-stage
+    # scrape saw kzTree=0, but selecting stage renders inline trees for CBD and
+    # MINI_CEX across ACCS/Intermediate/HST and for standard DOPS on
+    # Intermediate/HST. Standard DOPS remains fallback-safe because ACCS uses the
+    # separate DOPS_ACCS inline form while ACCS standard DOPS showed no tree.
+    #   RESEARCH — 2026-06-27: before/after kzTree=0, addTagsText=True.
+    #   PDP      — 2026-06-27: before/after kzTree=0, addTagsText=True.
     # NOTE: PROC_LOG, COMPLAINT, SERIOUS_INC moved OUT of this set (2026-06-27 scrape
     #       shows kzTreeElsAll=1, sloListItems≥4, kcCBs≥3 — inline tree now exists).
     #       They fall into the FALLBACK bucket (try inline first, Add Tags if fails).
-    "CBD", "DOPS", "MINI_CEX", "RESEARCH", "PDP",
+    "RESEARCH", "PDP",
 }
 
 FORMS_WITH_VERIFIED_INLINE_CURRICULUM_TREE = {
@@ -470,7 +469,8 @@ FORMS_WITH_VERIFIED_INLINE_CURRICULUM_TREE = {
     # Evidence: read-only DOM scrape 2026-06-27 (docs/kc_route_evidence_20260627.json)
     # unless an earlier date is noted.
     #
-    # Signals: kzTreeElsAll≥1 AND sloListItemsInTree≥4 AND kcCheckboxesInTree≥3.
+    # Signals: after any required stage selection, kzTreeElsAll≥1 AND
+    # sloListItemsInTree≥4 AND kcCheckboxesInTree≥3.
     #
     # ── Previously verified (confirmed again 2026-06-27) ──────────────────────
     "LAT",      # kzTreeElsAll=3, sloListItems=20, kcCBs=17
@@ -479,6 +479,8 @@ FORMS_WITH_VERIFIED_INLINE_CURRICULUM_TREE = {
     "TEACH",    # kzTreeElsAll=1, sloListItems=4,  kcCBs=3 (schema flag tag_based_curriculum=False)
     "US_CASE",  # kzTreeElsAll=2, sloListItems=10, kcCBs=8
     # ── Newly confirmed inline tree (2026-06-27) ───────────────────────────────
+    "CBD",               # pre-stage kzTree=0; post-stage inline tree on ACCS/Intermediate/HST
+    "MINI_CEX",          # pre-stage kzTree=0; post-stage inline tree on ACCS/Intermediate/HST
     "ACAT",              # kzTreeElsAll=1, sloListItems=4,  kcCBs=3
     "JCF",               # kzTreeElsAll=1, sloListItems=4,  kcCBs=3
     "SDL",               # kzTreeElsAll=2, sloListItems=12, kcCBs=10
@@ -487,8 +489,12 @@ FORMS_WITH_VERIFIED_INLINE_CURRICULUM_TREE = {
     "TEACH_CONFID",      # kzTreeElsAll=1, sloListItems=4,  kcCBs=3
     "EDU_ACT",           # kzTreeElsAll=1, sloListItems=4,  kcCBs=3
     "FORMAL_COURSE",     # kzTreeElsAll=1, sloListItems=4,  kcCBs=3
-    "DOPS_ACCS",         # kzTreeElsAll=1, sloListItems=4,  kcCBs=3 (ACCS-specific; DOPS itself is tag-only)
+    "DOPS_ACCS",         # kzTreeElsAll=1, sloListItems=4,  kcCBs=3 (ACCS-specific DOPS)
     "PROCEDURAL_LOG_ACCS",  # kzTreeElsAll=1, sloListItems=4, kcCBs=3
+    # NOTE: Standard DOPS is not tag-only, but is also not listed here:
+    # Intermediate/HST render inline trees after stage selection, while ACCS
+    # standard DOPS did not. ACCS has a separate DOPS_ACCS inline form. Keep
+    # standard DOPS in the fallback bucket: inline first, Add Tags rescue.
     # NOTE: PROC_LOG, COMPLAINT, SERIOUS_INC not added here — inline tree is newly
     #       discovered (contradicts 2026-04-22 evidence). They stay in the FALLBACK
     #       bucket (try inline first, Add Tags rescue) until inline expansion is

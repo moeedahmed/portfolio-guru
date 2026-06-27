@@ -138,11 +138,12 @@ async def test_higher_stage_still_expands_higher_tree(monkeypatch):
 
 # ─── _uses_tag_based_curriculum routing classification ──────────────────────
 #
-# Evidence source: read-only DOM scrape of /events/new-section/<uuid> on an
-# ACCS/Intermediate Kaizen account, 2026-06-27 (docs/kc_route_evidence_20260627.json).
+# Evidence source: read-only, stage-aware DOM scrape of /events/new-section/<uuid>
+# on ACCS, Intermediate, and HST Kaizen profiles, 2026-06-27
+# (docs/kc_route_evidence_20260627.json).
 #
 # Three buckets:
-#   TAG_ONLY   — kzTreeElsAll=0; curriculum lives exclusively in Add Tags modal.
+#   TAG_ONLY   — after stage selection, no inline tree; curriculum lives in Add Tags.
 #   FALLBACK   — kzTreeElsAll≥1 but inline tree unconfirmed for expansion; try
 #                inline first, rescue with Add Tags if KC ticks fail.
 #   VERIFIED   — kzTreeElsAll≥1, sloListItems≥4, kcCBs≥3; no Add Tags fallback.
@@ -151,19 +152,11 @@ async def test_higher_stage_still_expands_higher_tree(monkeypatch):
 @pytest.mark.parametrize(
     "form_type",
     [
-        # ── Confirmed TAG_ONLY (kzTreeElsAll=0, 2026-06-27 scrape) ─────────────
-        # CBD: kzTreeElsAll=0 (earlier Kaizen had empty kz-tree attr, now removed)
-        "CBD", "CBD_2021",
-        # DOPS: kzTreeElsAll=0. No inline kz-tree even on this ACCS profile.
-        # Moeed's note that DOPS "has a KC tree" refers to DOPS_ACCS (kzTree=1),
-        # not the standard DOPS Higher WPBA. Routing stays tag-only.
-        "DOPS", "DOPS_2021",
-        # MINI_CEX: kzTreeElsAll=0. Previously in fallback; pinned tag-only since
-        # inline writer always found nothing and fell back on every run.
-        "MINI_CEX", "MINI_CEX_2021",
-        # REFLECT_LOG: schema flag tag_based_curriculum=True; also kzTreeElsAll=0.
+        # ── Confirmed TAG_ONLY after stage-aware inspection ───────────────────
+        # REFLECT_LOG: schema flag tag_based_curriculum=True; before/after
+        # kzTree=0 across ACCS, Intermediate, and HST.
         "REFLECT_LOG", "REFLECT_LOG_2021",
-        # RESEARCH, PDP: kzTreeElsAll=0. Previously in fallback bucket; now pinned.
+        # RESEARCH, PDP: before/after kzTree=0 across inspected profiles.
         "RESEARCH",
         "PDP",
         # ── Management / governance family — no in-form curriculum tree ─────────
@@ -176,17 +169,21 @@ def test_tag_based_forms_route_through_add_tags(form_type):
     assert _uses_tag_based_curriculum(form_type) is True
 
 
-def test_dops_is_confirmed_add_tags_only_not_inline():
-    """DOPS (standard Higher WPBA) is tag-only per 2026-06-27 DOM scrape.
+def test_standard_dops_is_inline_first_with_tag_fallback():
+    """Standard DOPS is mixed across profiles, so it stays fallback-safe.
 
-    kzTreeElsAll=0 — no [kz-tree] in form body. DOPS_ACCS (a separate ACCS-specific
-    form, UUID fea13c0a) DOES have kzTreeElsAll=1. They must not be confused.
-    DOPS_ACCS routes via the inline tree; DOPS routes via Add Tags.
-    _can_fallback_to_tag_based_curriculum is not meaningful for tag-only forms
-    (they never attempt the inline path, so fallback semantics don't apply).
+    Stage-aware scrape showed:
+    - ACCS standard DOPS: post-stage no inline tree
+    - Intermediate/HST standard DOPS: post-stage inline tree
+    - ACCS-specific DOPS_ACCS: inline tree
+
+    Therefore standard DOPS must not be tag-only; it should try inline first and
+    rescue via Add Tags if the profile-specific page exposes no tree.
     """
-    assert _uses_tag_based_curriculum("DOPS") is True
-    assert _uses_tag_based_curriculum("DOPS_2021") is True
+    assert _uses_tag_based_curriculum("DOPS") is False
+    assert _uses_tag_based_curriculum("DOPS_2021") is False
+    assert _can_fallback_to_tag_based_curriculum("DOPS") is True
+    assert _can_fallback_to_tag_based_curriculum("DOPS_2021") is True
 
 
 def test_dops_accs_uses_inline_tree_not_add_tags():
@@ -208,6 +205,8 @@ def test_dops_accs_uses_inline_tree_not_add_tags():
         # schema flag tag_based_curriculum=False pins this deliberately.
         "TEACH", "TEACH_2021",
         # ── Newly confirmed VERIFIED_INLINE forms (2026-06-27 DOM scrape) ───────
+        "CBD", "CBD_2021",
+        "MINI_CEX", "MINI_CEX_2021",
         "ACAT", "ACAT_2021",
         "JCF", "JCF_2021",
         "SDL", "SDL_2021",
@@ -216,7 +215,7 @@ def test_dops_accs_uses_inline_tree_not_add_tags():
         "TEACH_CONFID", "TEACH_CONFID_2021",
         "EDU_ACT", "EDU_ACT_2021",
         "FORMAL_COURSE", "FORMAL_COURSE_2021",
-        "DOPS_ACCS",  # ACCS-specific form with kzTree=1
+        "DOPS_ACCS",  # ACCS-specific form with inline tree
     ],
 )
 def test_inline_tree_forms_do_not_route_through_add_tags(form_type):
@@ -226,6 +225,9 @@ def test_inline_tree_forms_do_not_route_through_add_tags(form_type):
 @pytest.mark.parametrize(
     "form_type",
     [
+        # Standard DOPS: Intermediate/HST render inline tree after stage selection,
+        # but ACCS standard DOPS does not. Try inline first, rescue with Add Tags.
+        "DOPS", "DOPS_2021",
         # PROC_LOG: 2026-06-27 scrape shows kzTreeElsAll=1, sloListItems=4, kcCBs=3.
         # Inline tree now exists — removed from tag-only set. Stays in FALLBACK until
         # inline expansion is confirmed working end-to-end (contradicts 2026-04-22).
@@ -268,7 +270,7 @@ def test_fallback_curriculum_forms_try_inline_then_add_tags(form_type):
         "TEACH_CONFID", "TEACH_CONFID_2021",
         "EDU_ACT", "EDU_ACT_2021",
         "FORMAL_COURSE", "FORMAL_COURSE_2021",
-        "DOPS_ACCS",  # ACCS-specific; standard DOPS is tag-only
+        "DOPS_ACCS",  # ACCS-specific inline form
     ],
 )
 def test_verified_inline_tree_forms_do_not_use_tag_fallback(form_type):
@@ -289,27 +291,6 @@ def test_schema_flag_overrides_default_set(monkeypatch):
     )
     assert _uses_tag_based_curriculum("CBD") is False
     assert _can_fallback_to_tag_based_curriculum("CBD") is False
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("form_type", ["CBD", "DOPS"])
-async def test_modal_only_forms_dispatch_to_tag_filler(monkeypatch, form_type):
-    """Tag-only forms (kzTreeElsAll=0, 2026-06-27) reach _fill_curriculum_tags only.
-    PROC_LOG removed — it now has an inline tree (kzTreeElsAll=1) and falls to FALLBACK.
-    """
-    page = MagicMock()
-    tag_fill = AsyncMock(return_value=(["SLO3 KC3"], []))
-    in_form_fill = AsyncMock(return_value=([], ["wrong route"]))
-    monkeypatch.setattr(kaizen_form_filer, "_fill_curriculum_tags", tag_fill)
-    monkeypatch.setattr(kaizen_form_filer, "_fill_curriculum_links", in_form_fill)
-
-    ticked, errors = await _fill_curriculum_for_form(
-        page, form_type, ["SLO3"], ["SLO3 KC3"], "Higher"
-    )
-
-    assert ticked == ["SLO3 KC3"]
-    tag_fill.assert_awaited_once()
-    in_form_fill.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -336,13 +317,31 @@ async def test_reflect_log_routes_curriculum_through_tag_modal(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_mini_cex_routes_directly_to_tag_modal_no_inline_attempt(monkeypatch):
-    """Mini-CEX is tag-only (kzTreeElsAll=0, 2026-06-27): goes straight to Add Tags.
+async def test_standard_dops_inline_miss_falls_back_to_tag_modal(monkeypatch):
+    """Standard DOPS tries inline first, then rescues via Add Tags if no tree."""
+    page = MagicMock()
+    tag_fill = AsyncMock(return_value=(["SLO3 KC3"], []))
+    in_form_fill = AsyncMock(return_value=([], ["SLO expand failed: ACCS SLO3:"]))
+    monkeypatch.setattr(kaizen_form_filer, "_fill_curriculum_tags", tag_fill)
+    monkeypatch.setattr(kaizen_form_filer, "_fill_curriculum_links", in_form_fill)
 
-    Previously in the fallback bucket (try inline first, then tags). Now confirmed
-    that no kz-tree element exists in the form body, so attempting the inline path
-    every time is wasteful and wrong. The inline writer must NOT be called.
-    """
+    ticked, errors = await _fill_curriculum_for_form(
+        page,
+        "DOPS",
+        ["SLO3"],
+        ["SLO3 KC3"],
+        "ACCS",
+    )
+
+    assert ticked == ["SLO3 KC3"]
+    assert errors == []
+    in_form_fill.assert_awaited_once()
+    tag_fill.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_mini_cex_uses_verified_inline_tree_without_tag_fallback(monkeypatch):
+    """Mini-CEX renders an inline KC tree after stage selection."""
     page = MagicMock()
     in_form_fill = AsyncMock(return_value=([], ["SLO expand failed: Higher SLO3:"]))
     tag_fill = AsyncMock(return_value=(["SLO3 KC3"], []))
@@ -357,10 +356,10 @@ async def test_mini_cex_routes_directly_to_tag_modal_no_inline_attempt(monkeypat
         "Higher",
     )
 
-    assert ticked == ["SLO3 KC3"]
-    assert errors == []
-    in_form_fill.assert_not_awaited()  # tag-only: inline path is never tried
-    tag_fill.assert_awaited_once()
+    assert ticked == []
+    assert errors == ["SLO expand failed: Higher SLO3:"]
+    in_form_fill.assert_awaited_once()
+    tag_fill.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -432,7 +431,7 @@ async def test_fallback_qa_accepts_tag_count_after_inline_kc_miss(monkeypatch):
 
     result = await _verify_filing_qa(
         page,
-        "MINI_CEX",
+        "DOPS",
         {
             "key_capabilities": [
                 "SLO3 KC3: manage life-threatening conditions (2025 Update)"
