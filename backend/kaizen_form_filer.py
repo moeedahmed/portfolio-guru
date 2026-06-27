@@ -461,6 +461,18 @@ FORMS_USING_TAG_BASED_CURRICULUM = {
     "CBD", "DOPS", "PROC_LOG",
 }
 
+FORMS_WITH_VERIFIED_INLINE_CURRICULUM_TREE = {
+    # These forms have a real in-form KC tree or a form-specific tree path where
+    # the saved-draft curriculum evidence must be written in place.
+    "LAT", "QIAT", "STAT", "TEACH", "US_CASE",
+}
+
+CURRICULUM_SCHEMA_ALIASES = {
+    "ESLE": "ESLE_ASSESS",
+    "ESLE_2021": "ESLE_ASSESS",
+    "ESLE_PART1_2": "ESLE_ASSESS",
+}
+
 
 
 # ─── File upload procedure (Attach files button) ─────────────────────────────
@@ -2493,10 +2505,43 @@ def _uses_tag_based_curriculum(form_type: str) -> bool:
     ``*_2021`` and other variant codes inherit their base form's routing.
     """
     base = _curriculum_base_form_type(form_type)
-    schema = FORM_SCHEMAS.get(base, {})
+    schema = _curriculum_schema_for_form(form_type)
     if "tag_based_curriculum" in schema:
         return bool(schema["tag_based_curriculum"])
     return base in FORMS_USING_TAG_BASED_CURRICULUM
+
+
+def _can_fallback_to_tag_based_curriculum(form_type: str) -> bool:
+    """Return True when an inline KC miss may be rescued via Add Tags.
+
+    Kaizen exposes curriculum linking in two shapes: an in-form tree on some
+    pages and the toolbar Add Tags modal on others. Several forms have drifted
+    between these shapes across Kaizen versions. For forms without a verified
+    inline tree, falling back to Add Tags is safer than silently dropping KCs
+    after the inline writer finds no checkboxes.
+    """
+    base = _curriculum_base_form_type(form_type)
+    schema = _curriculum_schema_for_form(form_type)
+    if "tag_based_curriculum" in schema:
+        return bool(schema["tag_based_curriculum"])
+    if base in FORMS_WITH_VERIFIED_INLINE_CURRICULUM_TREE:
+        return False
+    return _has_curriculum_fields(schema)
+
+
+def _curriculum_schema_for_form(form_type: str) -> Dict[str, Any]:
+    raw = (form_type or "").strip().upper()
+    base = _curriculum_base_form_type(raw)
+    for key in (
+        base,
+        CURRICULUM_SCHEMA_ALIASES.get(base, ""),
+        CURRICULUM_SCHEMA_ALIASES.get(raw, ""),
+        raw,
+        canonical_form_type(raw),
+    ):
+        if key and key in FORM_SCHEMAS:
+            return FORM_SCHEMAS[key]
+    return {}
 
 
 async def _read_tag_count(page: Page) -> int:
@@ -2626,7 +2671,30 @@ async def _fill_curriculum_for_form(
 ) -> tuple:
     if _uses_tag_based_curriculum(form_type):
         return await _fill_curriculum_tags(page, slo_codes, kc_targets, stage_label)
-    return await _fill_curriculum_links(page, slo_codes, kc_targets, stage_label)
+
+    ticked, errors = await _fill_curriculum_links(
+        page, slo_codes, kc_targets, stage_label
+    )
+    if ticked or not errors or not _can_fallback_to_tag_based_curriculum(form_type):
+        return ticked, errors
+
+    logger.warning(
+        "KC inline writeback found no checkboxes for %s; trying Add Tags fallback",
+        form_type,
+    )
+    tag_ticked, tag_errors = await _fill_curriculum_tags(
+        page, slo_codes, kc_targets, stage_label
+    )
+    if tag_ticked:
+        return tag_ticked, []
+    return ticked, errors + tag_errors
+
+
+def _has_curriculum_fields(schema: Dict[str, Any]) -> bool:
+    return any(
+        field.get("type") == "kc_tick" or field.get("key") == "key_capabilities"
+        for field in schema.get("fields", [])
+    )
 
 
 # ─── Save ─────────────────────────────────────────────────────────────────────
@@ -2775,7 +2843,10 @@ async def _verify_fields(page: Page, form_type: str, fields: dict, field_map: di
                 issues.append("No curriculum tags selected")
         else:
             ticked_count = await page.evaluate(COUNT_TICKED_JS)
-            if ticked_count == 0:
+            tag_count = 0
+            if ticked_count == 0 and _can_fallback_to_tag_based_curriculum(form_type):
+                tag_count = await _read_tag_count(page)
+            if ticked_count == 0 and tag_count == 0:
                 issues.append("No KCs ticked")
 
     return issues
@@ -3019,6 +3090,9 @@ async def _verify_filing_qa(
                 }
                 gaps.append(gap)
     else:
+        fallback_tag_count = 0
+        if _can_fallback_to_tag_based_curriculum(form_type):
+            fallback_tag_count = await _read_tag_count(page)
         for target in kc_targets:
             target_str = str(target)
             try:
@@ -3029,6 +3103,8 @@ async def _verify_filing_qa(
             label = f"kc:{target_str}"
             if is_checked:
                 filled.append(label)
+            elif fallback_tag_count > 0:
+                filled.append(f"tag:{target_str}")
             else:
                 empty_expected.append(label)
                 gap = {

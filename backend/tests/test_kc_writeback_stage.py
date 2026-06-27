@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import kaizen_form_filer
 from kaizen_form_filer import (
+    _can_fallback_to_tag_based_curriculum,
     _curriculum_stage_label,
     _fill_curriculum_for_form,
     _fill_curriculum_links,
@@ -178,6 +179,38 @@ def test_inline_tree_forms_do_not_route_through_add_tags(form_type):
     assert _uses_tag_based_curriculum(form_type) is False
 
 
+@pytest.mark.parametrize(
+    "form_type",
+    [
+        "MINI_CEX", "MINI_CEX_2021",
+        "ACAT", "ACAT_2021",
+        "ACAF", "ACAF_2021",
+        "JCF", "JCF_2021",
+        "SDL", "SDL_2021",
+        "EDU_ACT", "EDU_ACT_2021",
+        "FORMAL_COURSE", "FORMAL_COURSE_2021",
+        "ESLE_ASSESS", "ESLE_2021",
+        "TEACH_OBS", "TEACH_OBS_2021",
+        "AUDIT", "AUDIT_2021",
+        "RESEARCH",
+        "PDP",
+    ],
+)
+def test_ambiguous_curriculum_forms_can_fallback_to_add_tags(form_type):
+    """Forms without a verified inline tree get an Add Tags rescue path."""
+    assert _uses_tag_based_curriculum(form_type) is False
+    assert _can_fallback_to_tag_based_curriculum(form_type) is True
+
+
+@pytest.mark.parametrize(
+    "form_type",
+    ["US_CASE", "US_CASE_2021", "TEACH", "TEACH_2021", "QIAT", "QIAT_2021", "STAT", "STAT_2021", "LAT", "LAT_2021"],
+)
+def test_verified_inline_tree_forms_do_not_use_tag_fallback(form_type):
+    assert _uses_tag_based_curriculum(form_type) is False
+    assert _can_fallback_to_tag_based_curriculum(form_type) is False
+
+
 def test_schema_flag_overrides_default_set(monkeypatch):
     """An explicit tag_based_curriculum flag is authoritative over the set."""
     # Flag wins when the form is NOT in the default set.
@@ -190,6 +223,7 @@ def test_schema_flag_overrides_default_set(monkeypatch):
         kaizen_form_filer.FORM_SCHEMAS, "CBD", {"tag_based_curriculum": False}
     )
     assert _uses_tag_based_curriculum("CBD") is False
+    assert _can_fallback_to_tag_based_curriculum("CBD") is False
 
 
 @pytest.mark.asyncio
@@ -235,6 +269,51 @@ async def test_reflect_log_routes_curriculum_through_tag_modal(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_mini_cex_falls_back_to_tag_modal_when_inline_tree_missing(monkeypatch):
+    """Mini-CEX should not silently drop KCs when Kaizen exposes only tags."""
+    page = MagicMock()
+    in_form_fill = AsyncMock(return_value=([], ["SLO expand failed: Higher SLO3:"]))
+    tag_fill = AsyncMock(return_value=(["SLO3 KC3"], []))
+    monkeypatch.setattr(kaizen_form_filer, "_fill_curriculum_links", in_form_fill)
+    monkeypatch.setattr(kaizen_form_filer, "_fill_curriculum_tags", tag_fill)
+
+    ticked, errors = await _fill_curriculum_for_form(
+        page,
+        "MINI_CEX",
+        ["SLO3"],
+        ["SLO3 KC3"],
+        "Higher",
+    )
+
+    assert ticked == ["SLO3 KC3"]
+    assert errors == []
+    in_form_fill.assert_awaited_once()
+    tag_fill.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_verified_inline_form_does_not_fallback_to_tag_modal(monkeypatch):
+    page = MagicMock()
+    in_form_fill = AsyncMock(return_value=([], ["SLO expand failed: Higher SLO3:"]))
+    tag_fill = AsyncMock(return_value=(["SLO3 KC3"], []))
+    monkeypatch.setattr(kaizen_form_filer, "_fill_curriculum_links", in_form_fill)
+    monkeypatch.setattr(kaizen_form_filer, "_fill_curriculum_tags", tag_fill)
+
+    ticked, errors = await _fill_curriculum_for_form(
+        page,
+        "QIAT",
+        ["SLO3"],
+        ["SLO3 KC3"],
+        "Higher",
+    )
+
+    assert ticked == []
+    assert errors == ["SLO expand failed: Higher SLO3:"]
+    in_form_fill.assert_awaited_once()
+    tag_fill.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_tag_based_qa_reads_tag_count_not_kc_checkbox(monkeypatch):
     """Saved tag-based forms should not be reported as kc_not_ticked."""
     page = MagicMock()
@@ -262,6 +341,56 @@ async def test_tag_based_qa_reads_tag_count_not_kc_checkbox(monkeypatch):
 
     assert result["gaps"] == []
     assert any(item.startswith("tag:SLO3 KC3") for item in result["filled"])
+
+
+@pytest.mark.asyncio
+async def test_fallback_qa_accepts_tag_count_after_inline_kc_miss(monkeypatch):
+    """Fallback-routed forms should not be logged as kc_not_ticked."""
+    page = MagicMock()
+    page.url = "https://kaizenep.com/events/fillin/test"
+
+    async def fake_evaluate(js, arg=None):
+        if js is kaizen_form_filer.TAG_COUNT_JS:
+            return 1
+        if js is kaizen_form_filer._QA_READ_KC_JS:
+            return False
+        return None
+
+    page.evaluate = AsyncMock(side_effect=fake_evaluate)
+
+    result = await _verify_filing_qa(
+        page,
+        "MINI_CEX",
+        {
+            "key_capabilities": [
+                "SLO3 KC3: manage life-threatening conditions (2025 Update)"
+            ]
+        },
+        {},
+    )
+
+    assert result["gaps"] == []
+    assert any(item.startswith("tag:SLO3 KC3") for item in result["filled"])
+
+
+def test_every_curriculum_schema_has_a_declared_or_rescuable_route():
+    """New curriculum-bearing schemas must not inherit an unexamined default."""
+    from form_schemas import FORM_SCHEMAS
+
+    unclassified = []
+    for form_type, schema in FORM_SCHEMAS.items():
+        has_curriculum = any(
+            field.get("type") == "kc_tick" or field.get("key") == "key_capabilities"
+            for field in schema.get("fields", [])
+        )
+        if has_curriculum and not (
+            _uses_tag_based_curriculum(form_type)
+            or _can_fallback_to_tag_based_curriculum(form_type)
+            or form_type in kaizen_form_filer.FORMS_WITH_VERIFIED_INLINE_CURRICULUM_TREE
+        ):
+            unclassified.append(form_type)
+
+    assert unclassified == []
 
 
 # ─── file_to_kaizen surfaces (does not discard) the KC result ───────────────
