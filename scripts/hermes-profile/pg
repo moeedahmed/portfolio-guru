@@ -10,8 +10,8 @@ profile copy drifts or the profile is rebuilt.
 
 Resolution
 ----------
-1. Repo root: ``$PORTFOLIO_GURU_REPO`` if set, else
-   ``~/projects/portfolio-guru``.
+1. Repo root: ``$PORTFOLIO_GURU_REPO`` if set, else the first existing
+   Portfolio Guru checkout under ``~/Projects`` or ``~/projects``.
 2. Python interpreter: prefer ``backend/venv/bin/python3``; fall back to
    ``backend/.venv/bin/python3``; finally ``sys.executable``.
 3. Module: ``hermes_pg_cli`` run with ``PYTHONPATH`` rooted at
@@ -37,7 +37,13 @@ def _repo_root() -> Path:
     env = os.environ.get("PORTFOLIO_GURU_REPO")
     if env:
         return Path(env).expanduser()
-    return Path.home() / "projects" / "portfolio-guru"
+    for candidate in (
+        Path.home() / "Projects" / "portfolio-guru",
+        Path.home() / "projects" / "portfolio-guru",
+    ):
+        if candidate.exists():
+            return candidate
+    return Path.home() / "Projects" / "portfolio-guru"
 
 
 def _pick_python(repo: Path) -> Path:

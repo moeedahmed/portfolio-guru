@@ -116,6 +116,21 @@ The `channel_actions` module also provides `to_telegram_keyboard` and
 plain-text numbered lists — use these when the Hermes adapter is
 producing Telegram messages directly.
 
+For a user-visible draft preview, the Hermes profile must call the
+repo-owned preview command with the original case payload:
+
+```bash
+pg preview --payload "$ORIGINAL_CASE_PAYLOAD_JSON"
+```
+
+`pg shadow` remains metadata-only and must be used for shadow logs and
+engine-backed option discovery. Do not pass a numeric selection such as
+`1` through `pg shadow` as a fresh message; that loses the original case
+facts and produces the unhelpful "metadata only" failure mode. The
+preview command may return the user's own source-tied clinical facts
+because it is rendered back to the same user, but it still performs no
+Telegram send, Kaizen write, Stripe call, BWS read, or network operation.
+
 ---
 
 ## Shadow mode first

@@ -2467,3 +2467,45 @@ Runtime state:
 >   save and live Stripe-CLI legs remain `[live-gated]` foreground steps;
 >   the deterministic mocked fallback is the truthful demo path if either is
 >   not green on the day.
+
+---
+
+> **2026-06-27 — Hermes test-bot preview repair.**
+>
+> Moeed dogfooded the same STEMI case in the Hermes-backed
+> `@portfolio_guru_test_bot` and the live beta bot. The beta bot produced the
+> useful reflective-practice draft/save flow; the Hermes path correctly
+> recommended `CBD` but, after the user replied `1`, exposed an internal
+> "metadata only / no draft preview" failure. That is not acceptable for the
+> demo path.
+>
+> Fixes:
+>
+> - Added repo-owned `pg preview --payload ...` in `backend/hermes_pg_cli.py`.
+>   `pg shadow` stays metadata-only for logs; `pg preview` is the explicit
+>   user-visible preview path and still performs no Telegram send, Kaizen
+>   write, Stripe call, BWS read, or network operation.
+> - Added CLI regression coverage for preview success, refusal safety, and
+>   missing payload handling in `backend/tests/test_hermes_pg_cli.py`.
+> - Updated Hermes repo docs and profile source so numbered selection uses the
+>   stored original case payload with `pg preview`, rather than passing `1`
+>   through `pg shadow` as a fresh message.
+> - Updated the installed Hermes `portfolio-guru` profile files with the same
+>   instruction, and hardened the profile shim fallback to find the repo under
+>   `~/Projects/portfolio-guru` as well as `~/projects/portfolio-guru`.
+>
+> Verification:
+>
+> - Installed profile shim smoke with Moeed's STEMI case:
+>   `~/.hermes/profiles/portfolio-guru/scripts/portfolio-guru/bin/pg preview
+>   --payload '{...}'` → `status: ok`, `form_type: CBD`, `kaizen_writes: false`,
+>   and a source-tied local preview.
+> - `backend/venv/bin/python3 -m pytest backend/tests/test_hermes_pg_cli.py
+>   backend/tests/test_hermes_shadow_adapter.py
+>   backend/tests/test_vnext_draft_preview.py backend/tests/test_hermes_integration.py
+>   backend/tests/test_demo_assets.py -q` → 107 passed.
+>
+> Recording decision remains: use the live beta bot for the main hackathon demo
+> if it continues to produce the stronger Kaizen-style draft. Hermes can now be
+> shown only as a short behind-the-scenes proof layer without the broken
+> metadata-only turn.

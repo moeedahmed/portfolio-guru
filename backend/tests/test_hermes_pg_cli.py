@@ -6,6 +6,8 @@ These tests pin the contract the Hermes profile shim relies on:
   ``status`` field of ``ok|blocked|error``.
 * ``shadow`` runs the deterministic engine; output is JSON-safe shadow
   metadata and never contains raw clinical text.
+* ``preview`` returns a user-visible, source-tied local draft preview for
+  the same user conversation while still blocking Kaizen writes.
 * ``recommend`` / ``draft`` / ``health`` always return ``blocked`` so
   the test bot cannot drift away from the live engine via local
   heuristics.
@@ -76,6 +78,7 @@ def test_status_returns_ok_with_engine_identity():
     assert data["engine"]
     assert data["engine_version"]
     assert "shadow" in data["supported_commands"]
+    assert "preview" in data["supported_commands"]
     assert data["kaizen_writes"] is False
     assert data["shadow_only"] is True
 
@@ -174,6 +177,58 @@ def test_shadow_with_missing_conversation_id_returns_error_status():
 
 def test_shadow_without_payload_argument_returns_error():
     code, response = _run_cli("shadow")
+
+    assert code == 1
+    assert response["status"] == "error"
+
+
+# ---------------------------------------------------------------------------
+# preview — user-visible local draft path
+# ---------------------------------------------------------------------------
+
+
+def test_preview_with_inline_payload_returns_user_visible_draft():
+    payload = _valid_payload(
+        text=(
+            "55-year-old male in ED resus with central chest pain radiating "
+            "to left arm, sweating, and anterior ST elevation on ECG. "
+            "I assessed him, gave aspirin, arranged analgesia, escalated "
+            "early to cardiology for primary PCI, updated his wife, and "
+            "reflected that repeating the ECG sooner would have shortened "
+            "decision time."
+        )
+    )
+    code, response = _run_cli("preview", "--payload", json.dumps(payload))
+
+    assert code == 0
+    assert response["status"] == "ok"
+    data = response["data"]
+    assert data["kaizen_writes"] is False
+    assert data["source"] == "vnext_draft_preview"
+    assert data["form_type"] == "CBD"
+    assert data["confidence"] in {"high", "medium"}
+    preview = data["preview_text"]
+    assert "vNext local preview" in preview
+    assert "not a Kaizen draft" in preview
+    assert "55" in preview
+    assert "ED" in preview
+    assert "CBD" in preview
+
+
+def test_preview_with_refused_payload_returns_blocked_without_echoing_text():
+    secret = "ZZPREVIEWGROUPSECRETZZ"
+    payload = _valid_payload(scope="group", text=secret)
+    code, response = _run_cli("preview", "--payload", json.dumps(payload))
+
+    assert code == 0
+    assert response["status"] == "blocked"
+    blob = json.dumps(response)
+    assert secret not in blob
+    assert response["data"]["kaizen_writes"] is False
+
+
+def test_preview_without_payload_argument_returns_error():
+    code, response = _run_cli("preview")
 
     assert code == 1
     assert response["status"] == "error"
