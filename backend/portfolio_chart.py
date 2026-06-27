@@ -196,6 +196,86 @@ def _coverage_from_kcs(kc_coverage: dict[int, list[str]]) -> set[int]:
     return {slo for slo, kcs in kc_coverage.items() if kcs}
 
 
+def _format_count_list(items: list[tuple[str, int]], empty: str) -> str:
+    if not items:
+        return empty
+    return ", ".join(f"{label} {count}" for label, count in items)
+
+
+def format_health_activity_snapshot(
+    history_6mo: list[dict],
+    cases_this_month: int,
+    tier: str,
+    limit: int,
+    training_level: Optional[str],
+    kc_coverage: Optional[dict[int, list[str]]] = None,
+    kc_stats: Optional[dict] = None,
+) -> str:
+    """Text equivalent of the four-panel /health chart.
+
+    The /health command stays text-only, but still exposes the same useful
+    activity detail the chart used to show.
+    """
+    this_month = _filter_this_month(history_6mo)
+    form_counts = Counter(r["form_type"] for r in this_month if r.get("form_type"))
+    top_forms = [(_short_form_name(ft), count) for ft, count in form_counts.most_common(6)]
+    weekly = _weekly_buckets(this_month)
+
+    if kc_coverage and any(kc_coverage.values()):
+        coverage = _coverage_from_kcs(kc_coverage)
+        coverage_source = "KC evidence"
+    else:
+        coverage = _coverage_from_history(history_6mo)
+        coverage_source = "filed forms"
+
+    tier_pretty = (tier or "").strip().replace("_", " ").title() or "Plan"
+    if limit == -1:
+        plan_line = f"{tier_pretty}: unlimited"
+    else:
+        plan_line = f"{tier_pretty}: {cases_this_month}/{limit} cases this month"
+
+    coverage_line = f"{len(coverage)}/12 SLOs covered from {coverage_source}"
+    if coverage:
+        coverage_line += " (" + ", ".join(f"SLO {slo}" for slo in sorted(coverage)) + ")"
+
+    weekly_items = [(label, count) for label, count in weekly]
+    lines = [
+        "*Activity snapshot*",
+        f"- This month: {cases_this_month} case{'s' if cases_this_month != 1 else ''}",
+        f"- Form mix: {_format_count_list(top_forms, 'none yet this month')}",
+        f"- Curriculum coverage: {coverage_line}",
+        f"- Weekly filings: {_format_count_list(weekly_items, 'none yet this month')}",
+        f"- Plan: {plan_line}",
+        f"- Portfolio level: {training_level or 'not set'}",
+    ]
+
+    if kc_stats and kc_stats.get("total_kcs", 0) > 0:
+        lines.append(
+            "- KCs demonstrated: "
+            f"{kc_stats['total_kcs']} across "
+            f"{kc_stats['slos_covered']}/{kc_stats['slos_total']} SLOs"
+        )
+
+    return "\n".join(lines)
+
+
+async def format_health_activity_snapshot_async(
+    user_id: int,
+    history_6mo: Optional[list[dict]] = None,
+    training_level: Optional[str] = None,
+) -> str:
+    data = await _collect(user_id)
+    return format_health_activity_snapshot(
+        history_6mo=history_6mo if history_6mo is not None else data["history"],
+        cases_this_month=data["cases_this_month"],
+        tier=data["tier"],
+        limit=data["limit"],
+        training_level=training_level if training_level is not None else data["training_level"],
+        kc_coverage=data.get("kc_coverage"),
+        kc_stats=data.get("kc_stats"),
+    )
+
+
 def _render(
     user_id: int,
     history_6mo: list[dict],

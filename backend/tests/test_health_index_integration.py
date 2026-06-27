@@ -215,13 +215,19 @@ async def test_run_health_analysis_uses_indexed_source_when_history_empty(
     monkeypatch.setattr(bot, "get_training_level", lambda _uid: "ST6")
     monkeypatch.setattr(bot, "analyse_portfolio_health", AsyncMock())
 
-    async def generate_health_chart_async(_uid):
+    async def _chart(*_a, **_k):
         return None
+
+    async def _snapshot(*_a, **_k):
+        return ""
 
     monkeypatch.setitem(
         sys.modules,
         "portfolio_chart",
-        SimpleNamespace(generate_health_chart_async=generate_health_chart_async),
+        SimpleNamespace(
+            generate_health_chart_async=_chart,
+            format_health_activity_snapshot_async=_snapshot,
+        ),
     )
 
     sent: dict[str, str] = {}

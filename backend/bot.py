@@ -5010,12 +5010,6 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 reply_markup=reply_markup or back_markup,
             )
 
-        async def send_photo_fn(fh):
-            try:
-                await query.message.chat.send_photo(photo=fh)
-            except Exception:
-                pass
-
         async def fail_fn(text):
             await query.message.edit_text(text, reply_markup=back_markup)
 
@@ -5024,7 +5018,6 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             chat=query.message.chat,
             send_progress=send_progress,
             send_result=send_result,
-            send_photo_fn=send_photo_fn,
             fail_fn=fail_fn,
         )
         return ConversationHandler.END
@@ -5158,12 +5151,6 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 reply_markup=reply_markup or back_markup,
             )
 
-        async def send_photo_fn(fh):
-            try:
-                await query.message.chat.send_photo(photo=fh)
-            except Exception:
-                pass
-
         async def fail_fn(text):
             await query.message.edit_text(text, reply_markup=back_markup)
 
@@ -5172,7 +5159,6 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             chat=query.message.chat,
             send_progress=send_progress,
             send_result=send_result,
-            send_photo_fn=send_photo_fn,
             fail_fn=fail_fn,
         )
         return ConversationHandler.END
@@ -5915,8 +5901,8 @@ async def _run_health_analysis(
     chat,
     send_progress,
     send_result,
-    send_photo_fn,
     fail_fn,
+    send_photo_fn=None,
 ) -> None:
     """Shared portfolio health pipeline.
 
@@ -5925,7 +5911,6 @@ async def _run_health_analysis(
     Health button (morph the menu in place):
       - send_progress(): show the "analysing" status
       - send_result(text, reply_markup): render the final analysis text
-      - send_photo_fn(file_handle): send the chart image
       - fail_fn(text): render an error after the analysis call fails
     """
     logger.info("Portfolio Guru funnel event=health_viewed user_id=%s", user_id)
@@ -5972,8 +5957,8 @@ async def _run_health_analysis(
 
     if profile.pathway == Pathway.cesr_portfolio:
         msg = _format_cesr_health_message(snapshot, history, month_label)
+        msg = await _append_health_activity_snapshot(msg, user_id, history, training_level)
         await send_result(msg, _health_result_keyboard())
-        await _send_health_chart(user_id, send_photo_fn)
         return
 
     try:
@@ -5982,31 +5967,27 @@ async def _run_health_analysis(
         )
     except asyncio.TimeoutError:
         logger.warning("Portfolio health analysis timed out (45s)")
-        await send_result(
-            _format_arcp_deterministic_health_message(
-                snapshot,
-                history,
-                month_label,
-                level_note,
-                "AI ARCP narrative timed out; deterministic health is shown below.",
-            ),
-            _health_result_keyboard(),
+        msg = _format_arcp_deterministic_health_message(
+            snapshot,
+            history,
+            month_label,
+            level_note,
+            "AI ARCP narrative timed out; deterministic health is shown below.",
         )
-        await _send_health_chart(user_id, send_photo_fn)
+        msg = await _append_health_activity_snapshot(msg, user_id, history, training_level)
+        await send_result(msg, _health_result_keyboard())
         return
     except Exception as e:
         logger.error(f"Portfolio health analysis failed: {e}", exc_info=True)
-        await send_result(
-            _format_arcp_deterministic_health_message(
-                snapshot,
-                history,
-                month_label,
-                level_note,
-                "AI ARCP narrative is temporarily unavailable; deterministic health is shown below.",
-            ),
-            _health_result_keyboard(),
+        msg = _format_arcp_deterministic_health_message(
+            snapshot,
+            history,
+            month_label,
+            level_note,
+            "AI ARCP narrative is temporarily unavailable; deterministic health is shown below.",
         )
-        await _send_health_chart(user_id, send_photo_fn)
+        msg = await _append_health_activity_snapshot(msg, user_id, history, training_level)
+        await send_result(msg, _health_result_keyboard())
         return
 
     msg = _format_arcp_action_plan_message(
@@ -6016,33 +5997,27 @@ async def _run_health_analysis(
         level_note=level_note,
         analysis=analysis,
     )
+    msg = await _append_health_activity_snapshot(msg, user_id, history, training_level)
     await send_result(msg, _health_result_keyboard())
-    await _send_health_chart(user_id, send_photo_fn)
 
 
-async def _send_health_chart(user_id: int, send_photo_fn) -> None:
-    chart_path = None
+async def _append_health_activity_snapshot(
+    msg: str,
+    user_id: int,
+    history: list[dict],
+    training_level: str | None,
+) -> str:
     try:
-        from portfolio_chart import generate_health_chart_async
-        chart_path = await generate_health_chart_async(user_id)
-    except ImportError:
-        logger.info("matplotlib not installed; skipping portfolio chart image")
+        from portfolio_chart import format_health_activity_snapshot_async
+        snapshot = await format_health_activity_snapshot_async(
+            user_id,
+            history_6mo=history,
+            training_level=training_level,
+        )
     except Exception as e:
-        logger.warning(f"Portfolio chart generation failed: {e}", exc_info=True)
-
-    if not chart_path:
-        return
-
-    try:
-        with open(chart_path, "rb") as fh:
-            await send_photo_fn(fh)
-    except Exception as e:
-        logger.warning(f"Sending portfolio chart failed: {e}", exc_info=True)
-    finally:
-        try:
-            os.remove(chart_path)
-        except OSError:
-            pass
+        logger.warning("Portfolio health activity snapshot failed: %s", e, exc_info=True)
+        return msg
+    return f"{msg}\n\n{snapshot}"
 
 
 def _get_or_default_health_profile(user_id: int) -> HealthProfile:
@@ -6494,9 +6469,6 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 else:
                     raise
 
-    async def send_photo_fn(fh):
-        await update.message.reply_photo(photo=fh)
-
     async def fail_fn(text):
         msg = progress_holder.get("msg")
         if msg is not None:
@@ -6509,7 +6481,6 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         chat=update.effective_chat,
         send_progress=send_progress,
         send_result=send_result,
-        send_photo_fn=send_photo_fn,
         fail_fn=fail_fn,
     )
     return ConversationHandler.END

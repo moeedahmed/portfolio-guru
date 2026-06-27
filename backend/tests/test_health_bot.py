@@ -10,6 +10,21 @@ from health_models import HealthProfile, Pathway
 from tests.bot_simulator import BotSimulator
 
 
+def _make_pc_mock(snapshot_text: str = "") -> SimpleNamespace:
+    """Return a minimal portfolio_chart module stub for tests that do not
+    exercise the activity-snapshot text content."""
+    async def _chart(*_a, **_k):
+        return None
+
+    async def _snapshot(*_a, **_k):
+        return snapshot_text
+
+    return SimpleNamespace(
+        generate_health_chart_async=_chart,
+        format_health_activity_snapshot_async=_snapshot,
+    )
+
+
 def test_pathway_is_hidden_from_telegram_command_menu_but_still_typeable():
     import bot
 
@@ -269,14 +284,7 @@ async def test_cesr_health_output_uses_deterministic_engine_without_llm(monkeypa
     ]
     analysis = AsyncMock()
 
-    async def generate_health_chart_async(_user_id):
-        return None
-
-    monkeypatch.setitem(
-        sys.modules,
-        "portfolio_chart",
-        SimpleNamespace(generate_health_chart_async=generate_health_chart_async),
-    )
+    monkeypatch.setitem(sys.modules, "portfolio_chart", _make_pc_mock())
     monkeypatch.setattr(bot, "get_health_profile", lambda _user_id: _profile(user_id, Pathway.cesr_portfolio))
     monkeypatch.setattr(bot, "get_training_level", lambda _user_id: "ST6")
     monkeypatch.setattr(bot, "get_case_history", AsyncMock(return_value=history))
@@ -309,38 +317,45 @@ async def test_cesr_health_output_uses_deterministic_engine_without_llm(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_health_sends_verdict_before_chart(monkeypatch, tmp_path):
+async def test_health_includes_activity_snapshot_without_sending_photo(monkeypatch):
     import sys
     import bot
 
     user_id = 5152
-    chart_path = tmp_path / "health.png"
-    chart_path.write_bytes(b"fake chart")
     history = [
         {"form_type": "CBD", "filed_at": "2026-05-01 09:00:00", "status": "filed", "telegram_user_id": user_id},
         {"form_type": "DOPS", "filed_at": "2026-05-02 09:00:00", "status": "filed", "telegram_user_id": user_id},
     ]
 
-    async def generate_health_chart_async(_user_id):
-        return str(chart_path)
+    async def format_health_activity_snapshot_async(_user_id, history_6mo=None, training_level=None):
+        assert history_6mo == history
+        assert training_level == "ST6"
+        return (
+            "*Activity snapshot*\n"
+            "- This month: 2 cases\n"
+            "- Form mix: CBD 1, DOPS 1\n"
+            "- Curriculum coverage: 3/12 SLOs covered from filed forms\n"
+            "- Weekly filings: 1-7 2\n"
+            "- Plan: Beta: unlimited\n"
+            "- Portfolio level: ST6"
+        )
 
     monkeypatch.setitem(
         sys.modules,
         "portfolio_chart",
-        SimpleNamespace(generate_health_chart_async=generate_health_chart_async),
+        SimpleNamespace(format_health_activity_snapshot_async=format_health_activity_snapshot_async),
     )
     monkeypatch.setattr(bot, "get_health_profile", lambda _user_id: _profile(user_id, Pathway.cesr_portfolio))
     monkeypatch.setattr(bot, "get_training_level", lambda _user_id: "ST6")
     monkeypatch.setattr(bot, "get_case_history", AsyncMock(return_value=history))
     monkeypatch.setattr(bot, "analyse_portfolio_health", AsyncMock())
 
-    order: list[str] = []
+    sent: dict[str, str] = {}
 
-    async def send_result(_text, _reply_markup):
-        order.append("verdict")
+    async def send_result(text, _reply_markup):
+        sent["text"] = text
 
-    async def send_photo(_fh):
-        order.append("chart")
+    send_photo = AsyncMock()
 
     await bot._run_health_analysis(
         user_id=user_id,
@@ -351,8 +366,11 @@ async def test_health_sends_verdict_before_chart(monkeypatch, tmp_path):
         fail_fn=AsyncMock(),
     )
 
-    assert order == ["verdict", "chart"]
-    assert not chart_path.exists()
+    assert "*Portfolio Health — CESR / Portfolio Pathway*" in sent["text"]
+    assert "*Activity snapshot*" in sent["text"]
+    assert "Form mix: CBD 1, DOPS 1" in sent["text"]
+    assert "Curriculum coverage: 3/12" in sent["text"]
+    send_photo.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -367,17 +385,10 @@ async def test_arcp_health_falls_back_to_deterministic_output_when_llm_fails(mon
         {"form_type": "QIAT", "filed_at": "2026-05-03 09:00:00", "status": "filed", "telegram_user_id": user_id},
     ]
 
-    async def generate_health_chart_async(_user_id):
-        return None
-
     async def fail_analysis(*_args, **_kwargs):
         raise RuntimeError("provider 402")
 
-    monkeypatch.setitem(
-        sys.modules,
-        "portfolio_chart",
-        SimpleNamespace(generate_health_chart_async=generate_health_chart_async),
-    )
+    monkeypatch.setitem(sys.modules, "portfolio_chart", _make_pc_mock())
     monkeypatch.setattr(bot, "get_health_profile", lambda _user_id: _profile(user_id, Pathway.training_arcp))
     monkeypatch.setattr(bot, "get_training_level", lambda _user_id: "ST6")
     monkeypatch.setattr(bot, "get_case_history", AsyncMock(return_value=history))
@@ -420,14 +431,7 @@ async def test_arcp_health_output_prioritises_action_plan_when_llm_succeeds(monk
         {"form_type": "REFLECT_LOG", "filed_at": "2026-05-03 09:00:00", "status": "filed", "telegram_user_id": user_id},
     ]
 
-    async def generate_health_chart_async(_user_id):
-        return None
-
-    monkeypatch.setitem(
-        sys.modules,
-        "portfolio_chart",
-        SimpleNamespace(generate_health_chart_async=generate_health_chart_async),
-    )
+    monkeypatch.setitem(sys.modules, "portfolio_chart", _make_pc_mock())
     monkeypatch.setattr(bot, "get_health_profile", lambda _user_id: _profile(user_id, Pathway.training_arcp))
     monkeypatch.setattr(bot, "get_training_level", lambda _user_id: "ST6")
     monkeypatch.setattr(bot, "get_case_history", AsyncMock(return_value=history))
@@ -755,14 +759,7 @@ async def _run_health_capture(monkeypatch, user_id: int, pathway: Pathway) -> st
 
     history = _history_for_user(user_id)
 
-    async def generate_health_chart_async(_user_id):
-        return None
-
-    monkeypatch.setitem(
-        sys.modules,
-        "portfolio_chart",
-        SimpleNamespace(generate_health_chart_async=generate_health_chart_async),
-    )
+    monkeypatch.setitem(sys.modules, "portfolio_chart", _make_pc_mock())
     monkeypatch.setattr(bot, "get_health_profile", lambda _user_id: _profile(user_id, pathway))
     monkeypatch.setattr(bot, "get_training_level", lambda _user_id: "ST6")
     monkeypatch.setattr(bot, "get_case_history", AsyncMock(return_value=history))
@@ -1098,3 +1095,61 @@ def test_render_nudge_card_no_gap():
     assert path.endswith(".png")
     assert os.path.getsize(path) > 500
     os.unlink(path)
+
+
+# ── format_health_activity_snapshot: text-only chart-data coverage ─────────────
+
+
+def test_format_health_activity_snapshot_contains_all_chart_panel_fields():
+    """format_health_activity_snapshot must include the text equivalent of all
+    four chart panels: form types this month, SLO/curriculum coverage, weekly
+    filing distribution, and the activity/plan summary.
+
+    This is the invariant that keeps the text-only /health output as useful as
+    the chart image it replaced.
+    """
+    from datetime import datetime
+
+    import portfolio_chart
+
+    now = datetime.now()
+    this_month = now.strftime("%Y-%m")
+    prior_month = f"{now.year - 1}-12" if now.month == 1 else f"{now.year}-{now.month - 1:02d}"
+
+    # Mix of current-month and prior-month entries so the function can
+    # distinguish "this month" form types from the 6-month SLO coverage.
+    history = [
+        {"form_type": "CBD", "filed_at": f"{this_month}-10 09:00:00"},
+        {"form_type": "DOPS", "filed_at": f"{this_month}-15 09:00:00"},
+        {"form_type": "MINI_CEX", "filed_at": f"{prior_month}-20 09:00:00"},
+        {"form_type": "TEACH", "filed_at": f"{prior_month}-05 09:00:00"},
+    ]
+
+    text = portfolio_chart.format_health_activity_snapshot(
+        history_6mo=history,
+        cases_this_month=2,
+        tier="pro_plus",
+        limit=-1,
+        training_level="ST5",
+        kc_coverage={1: ["KC1.1"], 3: ["KC3.2"]},
+        kc_stats={"total_kcs": 2, "slos_covered": 2, "slos_total": 12, "recent_kcs": []},
+    )
+
+    # Panel 1: this month by form type
+    assert "Form mix" in text or "form" in text.lower()
+    assert "CBD" in text
+
+    # Panel 2: curriculum / SLO coverage (last 6 months)
+    assert "SLO" in text or "coverage" in text.lower()
+    assert "/12" in text
+
+    # Panel 3: weekly filing distribution
+    assert "Weekly" in text or "weekly" in text
+
+    # Panel 4: activity / plan summary
+    assert "2" in text  # cases this month
+    assert "Pro Plus" in text or "pro_plus" in text.lower() or "unlimited" in text
+    assert "ST5" in text
+
+    # KC stats row
+    assert "KC" in text or "KCs" in text
