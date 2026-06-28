@@ -12,7 +12,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
-from telegram.error import BadRequest
+from telegram.error import BadRequest, NetworkError
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     filters, ContextTypes, ConversationHandler, PicklePersistence,
@@ -10698,6 +10698,12 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     # Conflict error from dual bot instances — silent, self-resolving
     if "conflict" in error_msg and "terminated by other" in error_msg:
         logger.warning("409 Conflict — another bot instance running, will self-resolve")
+        return
+
+    # Polling transport blips are already retried by python-telegram-bot's
+    # network loop. They are operational noise, not user-handler failures.
+    if update is None and isinstance(context.error, NetworkError):
+        logger.warning("Telegram polling network error — PTB will retry without operator page")
         return
 
     # Real, unexpected error — page the operator (rate-limited) so failures
