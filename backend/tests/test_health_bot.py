@@ -117,6 +117,11 @@ def test_settings_shows_pathway_change_control(isolated_health_store, monkeypatc
     buttons = [(button.text, button.callback_data) for row in keyboard.inline_keyboard for button in row]
     assert "Training (CCT)" in text
     assert ("📋 Portfolio defaults", "ACTION|portfolio_defaults") in buttons
+    assert [[button.callback_data for button in row] for row in keyboard.inline_keyboard] == [
+        ["ACTION|setup"],
+        ["ACTION|voice", "ACTION|portfolio_defaults"],
+        ["ACTION|delete"],
+    ]
 
 
 @pytest.mark.asyncio

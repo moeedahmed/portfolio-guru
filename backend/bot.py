@@ -2559,8 +2559,10 @@ def _settings_view_components(
 
     buttons: list[list[InlineKeyboardButton]] = [
         [InlineKeyboardButton(setup_button_label, callback_data="ACTION|setup")],
-        [InlineKeyboardButton(voice_cta, callback_data="ACTION|voice")],
-        [InlineKeyboardButton("📋 Portfolio defaults", callback_data="ACTION|portfolio_defaults")],
+        [
+            InlineKeyboardButton(voice_cta, callback_data="ACTION|voice"),
+            InlineKeyboardButton("📋 Portfolio defaults", callback_data="ACTION|portfolio_defaults"),
+        ],
         [InlineKeyboardButton("🔄 Reset data", callback_data="ACTION|delete")],
     ]
     text = (

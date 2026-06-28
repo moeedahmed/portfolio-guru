@@ -511,6 +511,11 @@ def test_settings_makes_portfolio_health_primary_and_hides_manual_sync(
         "ACTION|portfolio_defaults",
         "ACTION|delete",
     ])
+    assert [[button.callback_data for button in row] for row in keyboard.inline_keyboard] == [
+        ["ACTION|setup"],
+        ["ACTION|voice", "ACTION|portfolio_defaults"],
+        ["ACTION|delete"],
+    ]
 
     assert "ACTION|health" not in flat
     assert "ACTION|refresh_portfolio" not in flat
