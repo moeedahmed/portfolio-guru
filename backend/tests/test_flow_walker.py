@@ -1860,7 +1860,7 @@ class TestFlowWalker:
             'uuid': thin_draft.uuid,
         }
 
-        recovery_line = "Try again, or open the form in Kaizen and fill it manually."
+        recovery_line = "Try again, or open Kaizen and fill the form manually."
 
         with patch('bot.get_credentials', return_value=('user', 'pass')), \
              patch('bot.route_filing', new_callable=AsyncMock, return_value={
@@ -1904,10 +1904,10 @@ class TestFlowWalker:
         assert "Kaizen session has expired" in text
         assert "Reconnect Kaizen" in text
         buttons = sim.get_last_buttons()
-        assert ('🔑 Reconnect Kaizen', 'ACTION|setup') in buttons
-        assert ('🔄 Try Again', 'ACTION|retry_filing') in buttons
-        assert ('🆕 Start fresh', 'ACTION|reset') in buttons
-        # Draft must be preserved so Try Again can pick it up
+        assert ('🔗 Reconnect Kaizen', 'ACTION|setup') in buttons
+        assert ('🔄 Try again', 'ACTION|retry_filing') in buttons
+        assert ('📋 File another case', 'ACTION|reset') in buttons
+        # Draft must be preserved so Try again can pick it up
         assert context.user_data.get('draft_data') is not None
         assert context.user_data.get('force_reconnect') is True
 
@@ -2139,7 +2139,7 @@ class TestFlowWalker:
         buttons = sim.get_last_buttons()
         assert ('🔄 Retry filing this draft', 'ACTION|retry_filing') in buttons
         assert ('✏️ Keep editing this draft', 'CASE|improve') in buttons
-        assert ('📋 Start new case', 'CASE|new') in buttons
+        assert ('📋 File another case', 'CASE|new') in buttons
         assert ('❌ Cancel current draft', 'ACTION|cancel') in buttons
 
     @pytest.mark.asyncio
@@ -2402,7 +2402,7 @@ class TestFlowWalker:
         assert 'update this draft or start a new case' in sim.get_last_text().lower()
         buttons = sim.get_last_buttons()
         assert ('✏️ Update this draft', 'AMEND|update_current') in buttons
-        assert ('📋 Start new case', 'AMEND|start_new') in buttons
+        assert ('📋 Start a case', 'AMEND|start_new') in buttons
 
         choice_update = sim._make_callback_update('AMEND|start_new')
         with patch('bot._process_case_text', new=AsyncMock(return_value=AWAIT_FORM_CHOICE)) as process_case:
@@ -3133,7 +3133,7 @@ class TestRecentPortfolioFixes:
             ]
 
             assert ('🔗 Open saved draft', saved_url) in labelled_urls
-            # No 'Open in Kaizen' label that falsely promises to open the draft.
+            # No stale "Open in Kaizen" label that falsely promises to open the draft.
             assert not any(text == '🔗 Open in Kaizen' for text, _ in labelled_urls)
             # The new-section URL (blank form) must not appear when we have a
             # real saved-draft URL.
@@ -4578,7 +4578,7 @@ class TestVoiceProfileTwoPathFlow:
 
         buttons = sim.get_last_buttons()
         button_data = {data for _, data in buttons}
-        # Start drafting → reuse the existing "file a case" action
+        # Start a case → reuse the existing "file a case" action
         assert 'ACTION|file' in button_data
         # Improve / rebuild → reuse the two-path voice setup entry point
         assert 'ACTION|voice' in button_data
@@ -4646,6 +4646,7 @@ class TestVoiceProfileTwoPathFlow:
         button_data = {data for _, data in buttons}
         # Old retry path must not reappear
         assert ('🔄 Try Again', 'VOICE|path_manual') not in buttons
+        assert ('🔄 Try again', 'VOICE|path_manual') not in buttons
         # Must offer a path back into voice setup without crashing
         assert 'ACTION|voice' in button_data
         # Must not echo the old "Does this sound like you?" framing

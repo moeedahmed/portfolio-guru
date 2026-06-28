@@ -3069,7 +3069,7 @@ def _active_draft_keyboard(context) -> InlineKeyboardMarkup:
 def _build_amend_new_case_choice_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✏️ Update this draft", callback_data="AMEND|update_current")],
-        [InlineKeyboardButton("📋 Start new case", callback_data="AMEND|start_new")],
+        [InlineKeyboardButton("📋 Start a case", callback_data="AMEND|start_new")],
         [InlineKeyboardButton("❌ Cancel", callback_data="AMEND|cancel_choice")],
     ])
 
@@ -3085,7 +3085,7 @@ def _build_failed_filing_input_gate_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 Retry filing this draft", callback_data="ACTION|retry_filing")],
         [InlineKeyboardButton("✏️ Keep editing this draft", callback_data="CASE|improve")],
-        [InlineKeyboardButton("📋 Start new case", callback_data="CASE|new")],
+        [InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="CASE|new")],
         [InlineKeyboardButton("❌ Cancel current draft", callback_data="ACTION|cancel")],
     ])
 
@@ -4816,7 +4816,7 @@ def _clean_voice_preview_text(text: str) -> str:
 
 def _voice_post_activation_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📋 Start drafting", callback_data="ACTION|file")],
+        [InlineKeyboardButton("📋 Start a case", callback_data="ACTION|file")],
         [InlineKeyboardButton("🔄 Update voice profile", callback_data="ACTION|voice")],
     ])
 
@@ -4875,7 +4875,7 @@ async def _build_voice_profile(update: Update, context: ContextTypes.DEFAULT_TYP
             update, context,
             "⚠️ Analysis took too long — please try again. This usually works on a second attempt.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|voice")],
+                [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|voice")],
             ]),
             flow_key="voice",
         )
@@ -4888,7 +4888,7 @@ async def _build_voice_profile(update: Update, context: ContextTypes.DEFAULT_TYP
             update, context,
             "⚠️ Couldn't analyse your writing style. Try again or send different examples.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|voice")],
+                [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|voice")],
             ]),
             flow_key="voice",
         )
@@ -6917,7 +6917,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
                 "Nothing left to recommend for this case — browse all types below.",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("📋 See all forms", callback_data="FORM|show_all")],
-                    [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_recommend")],
+                    [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_recommend")],
                 ]),
             )
             return AWAIT_FORM_CHOICE
@@ -6929,7 +6929,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
             message, context,
             render_message("ai_temporarily_unavailable"),
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_recommend")],
+                [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_recommend")],
                 [InlineKeyboardButton("📋 Pick form manually", callback_data="FORM|show_all")],
             ]),
         )
@@ -8981,12 +8981,12 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS.get(form_type, '')}" if FORM_UUIDS.get(form_type) else "https://kaizenep.com/activities"
         timeout_msg = (
             "⏱ Filing took too long — Kaizen may be slow right now. "
-            "Tap 'Open in Kaizen' to finish manually, or retry."
+            "Tap 'Open Kaizen' to finish manually, or retry."
         )
         retry_keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_filing")],
-            [InlineKeyboardButton("🔗 Open in Kaizen", url=kaizen_url)],
-            [InlineKeyboardButton("🆕 Start fresh", callback_data="ACTION|reset")],
+            [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")],
+            [InlineKeyboardButton("🔗 Open Kaizen", url=kaizen_url)],
+            [InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|reset")],
         ])
         try:
             await ack.edit_text(timeout_msg, reply_markup=retry_keyboard, parse_mode="Markdown")
@@ -9013,15 +9013,15 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         _track_funnel_event(context, "filing_failed", form_type=form_type, reason="exception")
         # Keep draft data for retry — do NOT clear user_data
         retry_keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_filing")],
-            [InlineKeyboardButton("🆕 Start fresh", callback_data="ACTION|reset")],
+            [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")],
+            [InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|reset")],
         ])
         try:
-            await ack.edit_text("❌ Filing failed. Try again or start fresh.", reply_markup=retry_keyboard)
+            await ack.edit_text("❌ Filing failed. Try again or file another case.", reply_markup=retry_keyboard)
         except Exception:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text="❌ Filing failed. Try again or start fresh.",
+                text="❌ Filing failed. Try again or file another case.",
                 reply_markup=retry_keyboard,
             )
         return AWAIT_APPROVAL  # Stay in approval state so retry can pick up draft
@@ -9341,9 +9341,9 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 "temporary issue."
             )
             end_keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔑 Reconnect Kaizen", callback_data="ACTION|setup")],
-                [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_filing")],
-                [InlineKeyboardButton("🆕 Start fresh", callback_data="ACTION|reset")],
+                [InlineKeyboardButton("🔗 Reconnect Kaizen", callback_data="ACTION|setup")],
+                [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")],
+                [InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|reset")],
             ])
             status_line = "❌ Filing stopped."
             context.user_data["last_filing_status"] = status
@@ -9385,9 +9385,9 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 "Tapping retry will try an alternative save method."
             )
             msg = f"❌ Filing didn't complete\n{form_name}\n\n{body}{details_suffix}"
-            rows = [[InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_filing")]]
+            rows = [[InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")]]
             if kaizen_url:
-                rows.append([InlineKeyboardButton("🔗 Open in Kaizen", url=kaizen_url)])
+                rows.append([InlineKeyboardButton("🔗 Open Kaizen", url=kaizen_url)])
             rows.append([
                 InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file"),
                 _BTN_CANCEL,
@@ -9406,9 +9406,9 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             )
             msg = f"❌ Filing didn't complete\n{form_name}\n\n{body}{details_suffix}"
             rows = _build_field_edit_buttons(skipped)
-            rows.append([InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_filing")])
+            rows.append([InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")])
             if kaizen_url:
-                rows.append([InlineKeyboardButton("🔗 Open in Kaizen", url=kaizen_url)])
+                rows.append([InlineKeyboardButton("🔗 Open Kaizen", url=kaizen_url)])
             rows.append([
                 InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file"),
                 _BTN_CANCEL,
@@ -9417,14 +9417,14 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             status_line = "❌ Some fields didn't fill."
         else:  # UNKNOWN
             body = (
-                "Try again, or open the form in Kaizen and fill it manually."
+                "Try again, or open Kaizen and fill the form manually."
                 if kaizen_url
                 else "Try again, or fill the form manually in your portfolio."
             )
             msg = f"❌ Filing didn't complete\n{form_name}\n\n{body}{details_suffix}"
-            rows = [[InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_filing")]]
+            rows = [[InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")]]
             if kaizen_url:
-                rows.append([InlineKeyboardButton("🔗 Open in Kaizen", url=kaizen_url)])
+                rows.append([InlineKeyboardButton("🔗 Open Kaizen", url=kaizen_url)])
             rows.append([
                 InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file"),
                 _BTN_CANCEL,
@@ -10318,7 +10318,7 @@ async def unsigned_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text(
             "🔗 Connect your Kaizen account first.\n\nOpen /settings to get started.",
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("⚙️ Connect Kaizen", callback_data="ACTION|setup")
+                InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")
             ]])
         )
         return
@@ -10722,13 +10722,13 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         if draft:
             # We have a draft — offer retry + start fresh
             retry_keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Try Again", callback_data="ACTION|retry_filing")],
-                [InlineKeyboardButton("🆕 Start fresh", callback_data="ACTION|reset")],
+                [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")],
+                [InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|reset")],
             ])
             await _edit_last_bot_msg(
                 context,
                 update.effective_message.chat_id,
-                "Something went wrong while filing. Try again or start fresh.",
+                "Something went wrong while filing. Try again or file another case.",
                 reply_markup=retry_keyboard,
             )
         else:
