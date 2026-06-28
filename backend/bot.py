@@ -1481,7 +1481,7 @@ async def _prompt_implicit_kaizen_username(update: Update, context: ContextTypes
 def _cancelled_next_step_text(user_id: int, scope: str = "Cancelled") -> str:
     if _setup_needs_finishing(user_id):
         return f"❌ {scope}. Connect Kaizen to start filing."
-    return f"↩️ {scope}.\n\n{render_message('welcome_connected')}"
+    return f"↩️ {scope}.\n\nSend an anonymised case when you're ready."
 
 
 def _expired_prompt_text(user_id: int) -> str:

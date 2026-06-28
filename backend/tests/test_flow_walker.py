@@ -1198,7 +1198,8 @@ class TestFlowWalker:
 
         assert result == ConversationHandler.END
         assert "Cancelled" in sim.get_last_text()
-        assert WELCOME_MSG_CONNECTED in sim.get_last_text()
+        assert WELCOME_MSG_CONNECTED not in sim.get_last_text()
+        assert "Send an anonymised case" in sim.get_last_text()
         assert "draft it" not in sim.get_last_text()
 
     @pytest.mark.asyncio

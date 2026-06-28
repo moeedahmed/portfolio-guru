@@ -1,15 +1,15 @@
 """Consistency test for the canonical "ready to file" intake message.
 
 The same intake copy (``WELCOME_MSG_CONNECTED`` — rendered from the
-``welcome_connected`` message-policy template) must appear in three flows so
-the user sees a stable greeting every time they return to a clean slate:
+``welcome_connected`` message-policy template) must appear in full-entry flows
+so the user sees a stable greeting when intentionally starting a filing route:
 
 1. ``/start`` after credentials are connected.
-2. ``/cancel`` (or ``ACTION|cancel`` / ``CANCEL|*``) mid-case for a connected user.
-3. ``ACTION|file`` — the "File another case" post-filing button.
+2. ``ACTION|file`` — the "File another case" post-filing button.
 
-This test pins the canonical body and verifies all three flows include it
-verbatim, so a future copy edit only has to update one template.
+``/cancel`` is deliberately different: it is an escape hatch, not another
+welcome screen, so it stays concise and avoids repeating the same full ready
+message shown by ``/start``.
 """
 
 from __future__ import annotations
@@ -61,25 +61,26 @@ async def _run_file_another() -> str:
     return sim.get_last_text() or ""
 
 
-async def test_three_flows_share_the_same_canonical_ready_body():
+async def test_entry_flows_share_the_same_canonical_ready_body():
     from bot import WELCOME_MSG_CONNECTED
 
     start_text = await _run_start_connected()
     cancel_text = await _run_cancel_connected()
     file_another_text = await _run_file_another()
 
-    # The canonical body must appear verbatim in every flow.
+    # Full-entry flows must show the canonical body verbatim.
     assert WELCOME_MSG_CONNECTED in start_text, start_text
-    assert WELCOME_MSG_CONNECTED in cancel_text, cancel_text
     assert WELCOME_MSG_CONNECTED in file_another_text, file_another_text
 
     # /start and ACTION|file have no prefix — the canonical text is the
-    # whole message. Cancel prepends "↩️ Cancelled." so users still get
-    # the acknowledgement, but the body afterwards is the same.
+    # whole message.
     assert start_text == WELCOME_MSG_CONNECTED
     assert file_another_text == WELCOME_MSG_CONNECTED
-    assert cancel_text.endswith(WELCOME_MSG_CONNECTED)
+
+    # /cancel is a concise state-clear acknowledgement, not a duplicate /start.
     assert "Cancelled" in cancel_text
+    assert WELCOME_MSG_CONNECTED not in cancel_text
+    assert "Send an anonymised case" in cancel_text
 
 
 async def test_canonical_message_matches_brief():
