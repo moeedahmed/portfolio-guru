@@ -907,7 +907,7 @@ async def test_inline_health_button_runs_immediately_when_stale(monkeypatch):
 
     send_result = run_health.await_args.kwargs["send_result"]
     await send_result("Health result", None)
-    assert ("✍️ File missing evidence", "ACTION|file") in sim.get_last_buttons()
+    assert ("📋 File another case", "ACTION|file") in sim.get_last_buttons()
     assert ("🔎 Evidence basis", "ACTION|health_detail|basis") in sim.get_last_buttons()
     assert ("🔙 Back", "ACTION|back_to_menu") not in sim.get_last_buttons()
     assert ("🔙 Back to settings", "ACTION|settings") not in sim.get_last_buttons()
@@ -921,10 +921,10 @@ def test_health_result_keyboard_offers_file_and_detail_sections():
         for row in bot._health_result_keyboard().inline_keyboard
         for button in row
     ]
-    assert ("✍️ File missing evidence", "ACTION|file") in buttons
     assert ("🔎 Evidence basis", "ACTION|health_detail|basis") in buttons
     assert ("📈 Activity snapshot", "ACTION|health_detail|activity") in buttons
     assert ("📋 Domain detail", "ACTION|health_detail|domains") in buttons
+    assert buttons[-1] == ("📋 File another case", "ACTION|file")
     assert ("📊 Change pathway", "ACTION|change_pathway") not in buttons
     assert ("🔙 Back to settings", "ACTION|settings") not in buttons
 
@@ -994,7 +994,7 @@ async def test_health_detail_buttons_restore_last_report(monkeypatch):
     )
 
     assert sim.get_last_text() == "Main health report"
-    assert ("✍️ File missing evidence", "ACTION|file") in sim.get_last_buttons()
+    assert ("📋 File another case", "ACTION|file") in sim.get_last_buttons()
 
 
 def test_health_refresh_confirm_back_returns_to_settings():

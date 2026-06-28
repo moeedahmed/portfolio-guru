@@ -2338,12 +2338,12 @@ def _health_refresh_confirm_keyboard() -> InlineKeyboardMarkup:
 
 def _health_result_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✍️ File missing evidence", callback_data="ACTION|file")],
         [
             InlineKeyboardButton("🔎 Evidence basis", callback_data="ACTION|health_detail|basis"),
             InlineKeyboardButton("📈 Activity snapshot", callback_data="ACTION|health_detail|activity"),
         ],
         [InlineKeyboardButton("📋 Domain detail", callback_data="ACTION|health_detail|domains")],
+        [InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file")],
     ])
 
 
