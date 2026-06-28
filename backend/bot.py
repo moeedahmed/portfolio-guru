@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import re
+import sys
 import tempfile
 import time
 from datetime import UTC, datetime, timedelta
@@ -2342,8 +2343,10 @@ def _health_result_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("🔎 Evidence basis", callback_data="ACTION|health_detail|basis"),
             InlineKeyboardButton("📈 Activity snapshot", callback_data="ACTION|health_detail|activity"),
         ],
-        [InlineKeyboardButton("📋 Domain detail", callback_data="ACTION|health_detail|domains")],
-        [InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file")],
+        [
+            InlineKeyboardButton("📋 Domain detail", callback_data="ACTION|health_detail|domains"),
+            InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file"),
+        ],
     ])
 
 

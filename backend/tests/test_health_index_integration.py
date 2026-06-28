@@ -916,10 +916,18 @@ async def test_inline_health_button_runs_immediately_when_stale(monkeypatch):
 def test_health_result_keyboard_offers_file_and_detail_sections():
     import bot
 
+    rows = [
+        [(button.text, button.callback_data) for button in row]
+        for row in bot._health_result_keyboard().inline_keyboard
+    ]
     buttons = [
         (button.text, button.callback_data)
         for row in bot._health_result_keyboard().inline_keyboard
         for button in row
+    ]
+    assert rows[-1] == [
+        ("📋 Domain detail", "ACTION|health_detail|domains"),
+        ("📋 File another case", "ACTION|file"),
     ]
     assert ("🔎 Evidence basis", "ACTION|health_detail|basis") in buttons
     assert ("📈 Activity snapshot", "ACTION|health_detail|activity") in buttons
