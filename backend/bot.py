@@ -29,7 +29,7 @@ from whisper import transcribe_voice
 from vision import extract_from_image
 from documents import extract_from_document, is_supported_document
 from profile_store import init_profile_db, store_training_level, get_training_level, get_voice_profile, store_voice_profile, clear_voice_profile, store_curriculum, get_curriculum, get_kaizen_role
-from health_models import HealthProfile, HealthDomain, Pathway
+from health_models import CORE_DOMAINS, HealthProfile, HealthDomain, Pathway
 from health_engine import case_history_to_evidence_items, compute_snapshot
 from health_profile_store import get_health_profile, save_health_profile, delete_health_profile
 from kaizen_index import (
@@ -6308,6 +6308,7 @@ _HEALTH_DOMAIN_LABELS = {
     HealthDomain.teaching: "teaching",
     HealthDomain.leadership: "leadership",
     HealthDomain.reflection: "reflection",
+    HealthDomain.unclassified: "unclassified",
 }
 
 
@@ -6456,7 +6457,7 @@ def _strong_domain_lines(snapshot) -> list[str]:
     return [
         f"{_HEALTH_DOMAIN_LABELS[domain]}: {count}"
         for domain, count in snapshot.domain_counts.items()
-        if count > 0
+        if count > 0 and domain in CORE_DOMAINS
     ]
 
 
@@ -6464,14 +6465,14 @@ def _strong_domain_labels(snapshot) -> list[str]:
     return [
         _HEALTH_DOMAIN_LABELS[domain]
         for domain, count in snapshot.domain_counts.items()
-        if count > 0
+        if count > 0 and domain in CORE_DOMAINS
     ]
 
 
 def _missing_domain_labels(snapshot) -> list[str]:
     return [
         _HEALTH_DOMAIN_LABELS[domain]
-        for domain in HealthDomain
+        for domain in CORE_DOMAINS
         if snapshot.domain_counts.get(domain, 0) == 0
     ]
 
@@ -6638,7 +6639,16 @@ def _health_score_label(score) -> str:
 
 
 def _format_domain_counts(domain_counts: dict) -> str:
-    return " · ".join(f"{_HEALTH_DOMAIN_LABELS[domain]} {domain_counts.get(domain, 0)}" for domain in HealthDomain)
+    parts = [
+        f"{_HEALTH_DOMAIN_LABELS[domain]} {domain_counts.get(domain, 0)}"
+        for domain in CORE_DOMAINS
+    ]
+    # Surface the unclassified/needs-review bucket only when it has evidence, so
+    # it stays out of the way for tidy portfolios but is visible when populated.
+    unclassified_count = domain_counts.get(HealthDomain.unclassified, 0)
+    if unclassified_count:
+        parts.append(f"{_HEALTH_DOMAIN_LABELS[HealthDomain.unclassified]} {unclassified_count}")
+    return " · ".join(parts)
 
 
 def _bullet_list(values: list[str]) -> str:

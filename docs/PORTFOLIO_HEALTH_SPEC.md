@@ -405,6 +405,11 @@ next_actions              3–5 concrete suggested actions
       manual entry as today. Index contract and schema live in
       `docs/roadmap/kaizen-mapping-sprint-2026-06.md` → "First build slice —
       Kaizen Portfolio Index v1".
+- [x] Real Kaizen display-name canonicalisation for Portfolio Health:
+      versioned/long labels such as DOPS, Mini-CEX, CBD, educational activity,
+      teaching, reflections, supervisor reports, documents and file uploads now
+      map deterministically; unknown labels fail closed into an unscored
+      `unclassified` bucket instead of inflating clinical evidence.
 - [ ] No write to Kaizen. The Index is read-only; ingestion stays consent-
       and session-scoped per `docs/roadmap/kaizen-mapping-sprint-2026-06.md`
       → "Safety boundaries (slice)".

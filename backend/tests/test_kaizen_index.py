@@ -210,11 +210,92 @@ def test_evidence_rows_to_health_items_preserves_order(kaizen_index):
     ]
 
 
-def test_evidence_row_with_unknown_event_type_defaults_to_clinical_other(kaizen_index):
+def test_evidence_row_with_unknown_event_type_is_unclassified_not_clinical(kaizen_index):
     row = _evidence_row(kaizen_index, event_type="SOMETHING_NEW", id="x")
     item = kaizen_index.evidence_row_to_health_item(row)
-    assert item.domain == HealthDomain.clinical
+    # Unknown event types must never default to clinical — they go to the
+    # visible-but-unscored unclassified bucket.
+    assert item.domain == HealthDomain.unclassified
     assert item.evidence_type == "other"
-    # Preserve unknown upstream form codes for audit/debug while keeping them
-    # in the generic evidence bucket.
+    # Preserve the unknown upstream code for audit/debug.
     assert item.form_type == "SOMETHING_NEW"
+
+
+# ── Real Kaizen display-name canonicalisation ────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "label, form_type, domain, evidence_type",
+    [
+        ("DOPS - (ST3-ST6 - 2025 update)", "DOPS", HealthDomain.clinical, "wpba"),
+        ("Mini-CEX (2025 Update)", "MINI_CEX", HealthDomain.clinical, "wpba"),
+        ("CBD - Case Based Discussion (2025 update)", "CBD", HealthDomain.clinical, "wpba"),
+        ("Procedural Log (ACCS)", "PROC_LOG", HealthDomain.clinical, "wpba"),
+        ("Procedural Log - ST3-ST6 (2025 Update)", "PROC_LOG", HealthDomain.clinical, "wpba"),
+        ("ACAT (2025 update)", "ACAT", HealthDomain.clinical, "wpba"),
+        ("ACAF", "ACAF", HealthDomain.clinical, "wpba"),
+        ("LAT", "LAT", HealthDomain.clinical, "wpba"),
+        ("ESLE - Extended Supervised Learning Event", "ESLE", HealthDomain.clinical, "wpba"),
+        ("Multi-Source Feedback (MSF)", "MSF", HealthDomain.clinical, "wpba"),
+        ("Multiple Consultant Report (MCR)", "MCR", HealthDomain.clinical, "wpba"),
+        ("QIAT - Quality Improvement Activity", "QIAT", HealthDomain.qi, "audit"),
+        ("Audit Activity", "AUDIT", HealthDomain.qi, "audit"),
+        ("Research Activity", "RESEARCH", HealthDomain.qi, "project"),
+        ("EDU_ACT", "EDU_ACT", HealthDomain.cpd, "course"),
+        ("FORMAL_COURSE", "FORMAL_COURSE", HealthDomain.cpd, "course"),
+        ("Educational Activity Attended", "EDU_ACT", HealthDomain.cpd, "course"),
+        ("Educational Meeting", "EDU_ACT", HealthDomain.cpd, "course"),
+        ("RCEM Learning", "EDU_ACT", HealthDomain.cpd, "course"),
+        ("Teaching Delivered By Trainee", "TEACH", HealthDomain.teaching, "teaching_session"),
+        ("Teaching Observation (TO)", "TEACH_OBS", HealthDomain.teaching, "teaching_session"),
+        ("STAT - Simulation Teaching", "STAT", HealthDomain.teaching, "teaching_session"),
+        ("TEACH_CONFID", "TEACH_CONFID", HealthDomain.teaching, "teaching_session"),
+        ("Reflective Practice Log", "REFLECT_LOG", HealthDomain.reflection, "reflection_log"),
+        ("Self-directed Learning Reflection", "REFLECT_LOG", HealthDomain.reflection, "reflection_log"),
+        ("PDP - Personal Development Plan", "PDP", HealthDomain.reflection, "reflection_log"),
+        ("JCF Form", "JCF", HealthDomain.reflection, "reflection_log"),
+        ("Complaint", "COMPLAINT", HealthDomain.leadership, "other"),
+        ("Serious Incident Investigation", "SERIOUS_INCIDENT", HealthDomain.leadership, "other"),
+        ("SERIOUS_INC", "SERIOUS_INCIDENT", HealthDomain.leadership, "other"),
+        ("MGMT_REPORT", "MGMT_REPORT", HealthDomain.leadership, "other"),
+        ("CLIN_GOV", "MGMT_REPORT", HealthDomain.leadership, "other"),
+        ("Management and Leadership Activity", "MGMT_REPORT", HealthDomain.leadership, "other"),
+        ("ARCP Form", "ARCP", HealthDomain.leadership, "other"),
+        ("ESR - Educational Supervisor Report", "ESR", HealthDomain.leadership, "other"),
+        ("End of Placement Report", "END_OF_PLACEMENT", HealthDomain.leadership, "other"),
+        ("FEGS", "STR", HealthDomain.leadership, "other"),
+    ],
+)
+def test_real_kaizen_labels_canonicalise(kaizen_index, label, form_type, domain, evidence_type):
+    row = _evidence_row(kaizen_index, event_type=label, id=f"id-{label[:8]}")
+    item = kaizen_index.evidence_row_to_health_item(row)
+    assert item.form_type == form_type
+    assert item.domain == domain
+    assert item.evidence_type == evidence_type
+
+
+def test_educational_supervisor_report_beats_generic_cpd_rule(kaizen_index):
+    # "Educational Supervisor Report" contains "EDUCATIONAL" but must classify as
+    # the supervisor/leadership report, not a CPD educational activity.
+    row = _evidence_row(kaizen_index, event_type="Educational Supervisor Report", id="esr-1")
+    item = kaizen_index.evidence_row_to_health_item(row)
+    assert item.form_type == "ESR"
+    assert item.domain == HealthDomain.leadership
+
+
+def test_file_upload_surface_is_unclassified_file_source(kaizen_index):
+    row = _evidence_row(
+        kaizen_index, surface="file", event_type="Some Uploaded Certificate.pdf", id="file-1"
+    )
+    item = kaizen_index.evidence_row_to_health_item(row)
+    assert item.domain == HealthDomain.unclassified
+    assert item.evidence_type == "other"
+    assert item.source == "file_upload"
+    assert item.form_type is None
+
+
+def test_document_upload_label_is_unclassified(kaizen_index):
+    row = _evidence_row(kaizen_index, event_type="Document Upload", id="doc-1")
+    item = kaizen_index.evidence_row_to_health_item(row)
+    assert item.domain == HealthDomain.unclassified
+    assert item.form_type is None

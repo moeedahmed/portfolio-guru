@@ -12,6 +12,23 @@ class HealthDomain(str, Enum):
     teaching = "teaching"
     leadership = "leadership"
     reflection = "reflection"
+    # Recognised-but-unscored bucket. Evidence we could not confidently map to a
+    # core training domain (unknown event types, raw file uploads). It is visible
+    # for review but never counts toward coverage, the health score, or missing
+    # required domains. See CORE_DOMAINS in health_engine.
+    unclassified = "unclassified"
+
+
+# The six domains that genuinely count toward training/CESR coverage and scoring.
+# unclassified is deliberately excluded.
+CORE_DOMAINS: tuple["HealthDomain", ...] = (
+    HealthDomain.clinical,
+    HealthDomain.cpd,
+    HealthDomain.qi,
+    HealthDomain.teaching,
+    HealthDomain.leadership,
+    HealthDomain.reflection,
+)
 
 
 class Pathway(str, Enum):

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
@@ -407,41 +408,252 @@ async def get_kaizen_sync_status(user_id: str | int) -> KaizenSyncStatus:
 # ── Pure conversion to health_models.EvidenceItem ───────────────────────────
 
 
-_FORM_TYPE_DOMAIN_LOOKUP: dict[str, tuple[HealthDomain, str]] = {
-    "CBD": (HealthDomain.clinical, "wpba"),
-    "CASE_BASED_DISCUSSION": (HealthDomain.clinical, "wpba"),
-    "DOPS": (HealthDomain.clinical, "wpba"),
-    "MINI_CEX": (HealthDomain.clinical, "wpba"),
-    "ACAT": (HealthDomain.clinical, "wpba"),
-    "ACAF": (HealthDomain.clinical, "wpba"),
-    "LAT": (HealthDomain.clinical, "wpba"),
-    "STAT": (HealthDomain.clinical, "wpba"),
-    "PROC_LOG": (HealthDomain.clinical, "wpba"),
-    "PROCEDURAL_LOG": (HealthDomain.clinical, "wpba"),
-    "US_CASE": (HealthDomain.clinical, "wpba"),
-    "ESLE": (HealthDomain.clinical, "wpba"),
-    "ESLE_ASSESS": (HealthDomain.clinical, "wpba"),
-    "ESLE_PART1_2": (HealthDomain.clinical, "wpba"),
-    "MSF": (HealthDomain.clinical, "wpba"),
-    "QIAT": (HealthDomain.qi, "audit"),
-    "AUDIT": (HealthDomain.qi, "audit"),
-    "TEACH": (HealthDomain.teaching, "teaching_session"),
-    "TEACH_OBS": (HealthDomain.teaching, "teaching_session"),
-    "TEACHING_SESSION": (HealthDomain.teaching, "teaching_session"),
-    "EDU_ACT": (HealthDomain.teaching, "teaching_session"),
-    "FORMAL_COURSE": (HealthDomain.cpd, "course"),
-    "REFLECT_LOG": (HealthDomain.reflection, "reflection_log"),
-    "REFLECTIVE_PRACTICE_LOG": (HealthDomain.reflection, "reflection_log"),
-    "JCF": (HealthDomain.reflection, "reflection_log"),
-    "PDP": (HealthDomain.reflection, "reflection_log"),
-    "COMPLAINT": (HealthDomain.leadership, "other"),
-    "SERIOUS_INCIDENT": (HealthDomain.leadership, "other"),
-    "MGMT_REPORT": (HealthDomain.leadership, "other"),
-}
+@dataclass(frozen=True)
+class _FormClass:
+    """Canonical classification for a recognised Kaizen event label."""
+
+    form_type: str
+    domain: HealthDomain
+    evidence_type: str
+
+
+# Recognised Kaizen event labels carry trailing curriculum/version qualifiers
+# such as "(2025 update)", "- ST3-ST6", "(ACCS)". Real display names therefore
+# never match a bare code like "DOPS" once naively upper/underscore-normalised,
+# which is why every unknown previously fell through to clinical/other. We match
+# on phrase/token membership of the cleaned label instead, in priority order.
+#
+# Each rule is (predicate, classification). The FIRST matching rule wins, so the
+# order below is significant: e.g. "Educational Supervisor Report" must be caught
+# by the supervisor rule before the generic "educational ... attended" CPD rule,
+# and reflection must win over the generic "learning" CPD rule.
+_FormRule = tuple["_LabelMatch", _FormClass]
+
+
+class _LabelMatch:
+    """Match a cleaned, upper-cased Kaizen label by phrase and/or whole token."""
+
+    def __init__(self, *, phrases: tuple[str, ...] = (), tokens: tuple[str, ...] = ()):
+        self._phrases = phrases
+        self._tokens = tokens
+
+    def __call__(self, label: str, tokens: frozenset[str]) -> bool:
+        if any(phrase in label for phrase in self._phrases):
+            return True
+        return any(token in tokens for token in self._tokens)
+
+
+_FORM_RULES: tuple[_FormRule, ...] = (
+    # ── Direct WPBA clinical encounters ──────────────────────────────────────
+    (
+        _LabelMatch(phrases=("MINI CEX", "MINICEX")),
+        _FormClass("MINI_CEX", HealthDomain.clinical, "wpba"),
+    ),
+    (
+        _LabelMatch(phrases=("CASE BASED DISCUSSION",), tokens=("CBD",)),
+        _FormClass("CBD", HealthDomain.clinical, "wpba"),
+    ),
+    (
+        _LabelMatch(tokens=("DOPS",)),
+        _FormClass("DOPS", HealthDomain.clinical, "wpba"),
+    ),
+    (
+        _LabelMatch(phrases=("PROCEDURAL LOG", "PROC LOG")),
+        _FormClass("PROC_LOG", HealthDomain.clinical, "wpba"),
+    ),
+    (
+        _LabelMatch(tokens=("ACAF",)),
+        _FormClass("ACAF", HealthDomain.clinical, "wpba"),
+    ),
+    (
+        _LabelMatch(tokens=("ACAT",)),
+        _FormClass("ACAT", HealthDomain.clinical, "wpba"),
+    ),
+    (
+        _LabelMatch(tokens=("LAT",)),
+        _FormClass("LAT", HealthDomain.clinical, "wpba"),
+    ),
+    (
+        _LabelMatch(phrases=("EXTENDED SUPERVISED",), tokens=("ESLE",)),
+        _FormClass("ESLE", HealthDomain.clinical, "wpba"),
+    ),
+    (
+        _LabelMatch(phrases=("ULTRASOUND",), tokens=("US",)),
+        _FormClass("US_CASE", HealthDomain.clinical, "wpba"),
+    ),
+    (
+        _LabelMatch(phrases=("MULTI-SOURCE FEEDBACK", "MULTI SOURCE FEEDBACK"), tokens=("MSF",)),
+        _FormClass("MSF", HealthDomain.clinical, "wpba"),
+    ),
+    (
+        _LabelMatch(
+            phrases=(
+                "MULTIPLE CONSULTANT REPORT",
+                "MULTI-CONSULTANT",
+                "MULTIPLE TRAINER REPORT",
+                "MULTI-TRAINER",
+            ),
+            tokens=("MCR", "MTR"),
+        ),
+        _FormClass("MCR", HealthDomain.clinical, "wpba"),
+    ),
+    # ── Reflection (must precede generic CPD "learning") ─────────────────────
+    (
+        _LabelMatch(phrases=("REFLECT", "REFLECTION")),
+        _FormClass("REFLECT_LOG", HealthDomain.reflection, "reflection_log"),
+    ),
+    (
+        _LabelMatch(phrases=("PERSONAL DEVELOPMENT PLAN",), tokens=("PDP",)),
+        _FormClass("PDP", HealthDomain.reflection, "reflection_log"),
+    ),
+    (
+        _LabelMatch(tokens=("JCF",)),
+        _FormClass("JCF", HealthDomain.reflection, "reflection_log"),
+    ),
+    # ── Teaching delivered / observed (incl. STAT) ───────────────────────────
+    (
+        _LabelMatch(tokens=("STAT",)),
+        _FormClass("STAT", HealthDomain.teaching, "teaching_session"),
+    ),
+    (
+        _LabelMatch(phrases=("TEACHING OBSERVATION", "TEACH OBS")),
+        _FormClass("TEACH_OBS", HealthDomain.teaching, "teaching_session"),
+    ),
+    (
+        _LabelMatch(phrases=("TEACH CONFID", "CONFIDENTIALITY")),
+        _FormClass("TEACH_CONFID", HealthDomain.teaching, "teaching_session"),
+    ),
+    (
+        _LabelMatch(
+            phrases=(
+                "TEACHING DELIVERED",
+                "DELIVERED BY TRAINEE",
+            ),
+            tokens=("TEACH", "TEACHING"),
+        ),
+        _FormClass("TEACH", HealthDomain.teaching, "teaching_session"),
+    ),
+    # ── QI / audit / research ────────────────────────────────────────────────
+    (
+        _LabelMatch(phrases=("QUALITY IMPROVEMENT",), tokens=("QIAT", "QIP")),
+        _FormClass("QIAT", HealthDomain.qi, "audit"),
+    ),
+    (
+        _LabelMatch(tokens=("AUDIT",)),
+        _FormClass("AUDIT", HealthDomain.qi, "audit"),
+    ),
+    (
+        _LabelMatch(phrases=("RESEARCH",)),
+        _FormClass("RESEARCH", HealthDomain.qi, "project"),
+    ),
+    # ── Supervisor / ARCP / governance reports (before generic CPD) ──────────
+    # Named summative reports. Explicitly classified so they are recognised
+    # rather than defaulting to clinical/other. Mapped to leadership (training
+    # oversight/governance) so they never inflate the clinical WPBA count.
+    (
+        _LabelMatch(
+            phrases=("EDUCATIONAL SUPERVISOR", "EDUCATIONAL SUPERVISION"),
+            tokens=("ESR", "ESLR"),
+        ),
+        _FormClass("ESR", HealthDomain.leadership, "other"),
+    ),
+    (
+        _LabelMatch(phrases=("END OF PLACEMENT",)),
+        _FormClass("END_OF_PLACEMENT", HealthDomain.leadership, "other"),
+    ),
+    (
+        _LabelMatch(tokens=("ARCP",)),
+        _FormClass("ARCP", HealthDomain.leadership, "other"),
+    ),
+    (
+        _LabelMatch(tokens=("FEGS", "STR")),
+        _FormClass("STR", HealthDomain.leadership, "other"),
+    ),
+    (
+        _LabelMatch(tokens=("COMPLAINT",)),
+        _FormClass("COMPLAINT", HealthDomain.leadership, "other"),
+    ),
+    (
+        _LabelMatch(
+            phrases=("SERIOUS INCIDENT", "SERIOUS INC", "SERIOUS UNTOWARD"),
+            tokens=("SUI", "DATIX"),
+        ),
+        _FormClass("SERIOUS_INCIDENT", HealthDomain.leadership, "other"),
+    ),
+    (
+        _LabelMatch(
+            phrases=("MANAGEMENT", "GOVERNANCE", "LEADERSHIP"),
+            tokens=("APPRAISAL", "GOV", "MGMT"),
+        ),
+        _FormClass("MGMT_REPORT", HealthDomain.leadership, "other"),
+    ),
+    # ── CPD: educational activity consumed / attended ────────────────────────
+    (
+        _LabelMatch(phrases=("FORMAL COURSE",)),
+        _FormClass("FORMAL_COURSE", HealthDomain.cpd, "course"),
+    ),
+    (
+        _LabelMatch(
+            phrases=(
+                "RCEM LEARNING",
+                "EDUCATIONAL ACTIVITY",
+                "EDUCATIONAL MEETING",
+                "CONFERENCE",
+            ),
+            tokens=("ATTENDED", "EDU", "EDU_ACT"),
+        ),
+        _FormClass("EDU_ACT", HealthDomain.cpd, "course"),
+    ),
+)
+
+
+def _clean_kaizen_label(event_type: Optional[str]) -> tuple[str, frozenset[str]]:
+    """Return a phrase-matchable label and its whole-token set.
+
+    Hyphens, underscores and slashes are flattened to spaces so a single phrase
+    (e.g. "MINI CEX") matches both raw display names ("Mini-CEX (2025 Update)")
+    and canonical codes ("MINI_CEX"). Tokens are alphanumeric runs for matching
+    short codes like DOPS, CBD or STAT regardless of surrounding punctuation.
+    """
+    raw = (event_type or "").strip().upper()
+    label = " ".join(re.sub(r"[-_/]+", " ", raw).split())
+    tokens = frozenset(part for part in re.split(r"[^A-Z0-9]+", raw) if part)
+    return label, tokens
 
 
 def _normalise_kaizen_form_type(event_type: Optional[str]) -> str:
-    return (event_type or "UNKNOWN").strip().upper().replace("-", "_").replace(" ", "_")
+    """Preserve an unrecognised label as a stable upper/underscore token.
+
+    Used only for audit visibility on unclassified rows; recognised labels are
+    mapped to canonical codes via ``_classify_kaizen_event``.
+    """
+    cleaned = (event_type or "UNKNOWN").strip().upper()
+    token = "_".join(part for part in re.split(r"[^A-Z0-9]+", cleaned) if part)
+    return token or "UNKNOWN"
+
+
+def _classify_kaizen_event(
+    event_type: Optional[str], surface: str
+) -> tuple[Optional[str], HealthDomain, str]:
+    """Map a raw Kaizen event label to (form_type, domain, evidence_type).
+
+    Unknown labels and raw file uploads land in the ``unclassified`` domain and
+    are never treated as clinical evidence. Unknown form codes are preserved for
+    audit/debug; file uploads carry no form code.
+    """
+    if surface == "file":
+        return None, HealthDomain.unclassified, "other"
+
+    label, tokens = _clean_kaizen_label(event_type)
+    if "UPLOAD" in tokens or "DOCUMENT" in tokens:
+        return None, HealthDomain.unclassified, "other"
+
+    for match, classification in _FORM_RULES:
+        if match(label, tokens):
+            return classification.form_type, classification.domain, classification.evidence_type
+
+    # Unrecognised: keep the raw token for audit, but never default to clinical.
+    return _normalise_kaizen_form_type(event_type), HealthDomain.unclassified, "other"
 
 
 def _kaizen_status_to_evidence_status(state: Optional[str], surface: str) -> str:
@@ -458,7 +670,11 @@ def _kaizen_status_to_evidence_status(state: Optional[str], surface: str) -> str
 
 
 def _kaizen_source_for_surface(surface: str) -> str:
-    return "pg_draft" if surface == "draft" else "kaizen_filed"
+    if surface == "draft":
+        return "pg_draft"
+    if surface == "file":
+        return "file_upload"
+    return "kaizen_filed"
 
 
 def _parse_kaizen_date(value: Optional[str]) -> date:
@@ -489,10 +705,7 @@ def evidence_row_to_health_item(row: EvidenceItemRow) -> EvidenceItem:
     Pure: no I/O, no time queries beyond a single ``datetime.now`` stamp for
     ``created_at``/``updated_at``.
     """
-    form_type = _normalise_kaizen_form_type(row.event_type)
-    domain, evidence_type = _FORM_TYPE_DOMAIN_LOOKUP.get(
-        form_type, (HealthDomain.clinical, "other")
-    )
+    form_type, domain, evidence_type = _classify_kaizen_event(row.event_type, row.surface)
     status = _kaizen_status_to_evidence_status(row.state, row.surface)
     source = _kaizen_source_for_surface(row.surface)
     now = datetime.now(UTC)
@@ -503,7 +716,7 @@ def evidence_row_to_health_item(row: EvidenceItemRow) -> EvidenceItem:
         user_id=row.user_id,
         domain=domain,
         evidence_type=evidence_type,  # type: ignore[arg-type]
-        form_type=form_type if form_type != "UNKNOWN" else None,
+        form_type=form_type if form_type and form_type != "UNKNOWN" else None,
         title=title[:200],
         summary=summary[:1000],
         event_date=_parse_kaizen_date(row.date_occurred_on),

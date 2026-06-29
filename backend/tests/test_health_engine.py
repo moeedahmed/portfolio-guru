@@ -130,11 +130,60 @@ def test_compute_snapshot_produces_valid_health_snapshot():
     assert 3 <= len(snapshot.next_actions) <= 5
 
 
+def test_unclassified_items_do_not_improve_health_score():
+    # One real clinical domain plus several unclassified rows must stay red:
+    # unclassified evidence cannot fake additional domain coverage.
+    items = [
+        _item(HealthDomain.clinical),
+        _item(HealthDomain.unclassified, evidence_id="unc-1"),
+        _item(HealthDomain.unclassified, evidence_id="unc-2"),
+        _item(HealthDomain.unclassified, evidence_id="unc-3"),
+    ]
+
+    assert compute_health_score(items) == HealthScore.red
+
+
+def test_unclassified_only_evidence_stays_grey():
+    items = [_item(HealthDomain.unclassified, evidence_id=f"unc-{i}") for i in range(5)]
+
+    # No core domains covered → grey, exactly as if there were no evidence at all.
+    # Unclassified rows must never push the score above the floor.
+    assert compute_health_score(items) == HealthScore.grey
+
+
+def test_unclassified_is_not_reported_as_a_missing_domain():
+    items = [_item(HealthDomain.clinical), _item(HealthDomain.unclassified, evidence_id="unc-1")]
+
+    gaps = compute_gap_summary(items)
+
+    assert not any("unclassified" in gap.lower() for gap in gaps)
+
+
+def test_unclassified_appears_in_domain_coverage_counts():
+    items = [
+        _item(HealthDomain.unclassified, evidence_id="unc-1"),
+        _item(HealthDomain.unclassified, evidence_id="unc-2"),
+    ]
+
+    coverage = compute_domain_coverage(items)
+
+    assert coverage[HealthDomain.unclassified] == 2
+
+
+def test_unclassified_is_not_offered_as_a_next_action():
+    items = [_item(HealthDomain.clinical), _item(HealthDomain.unclassified, evidence_id="unc-1")]
+
+    actions = compute_next_actions(items, Pathway.training_arcp)
+
+    assert not any("unclassified" in action.lower() for action in actions)
+
+
 def test_case_history_to_evidence_items_maps_form_domains_statuses_and_sources():
     history = [
         {"form_type": "CBD", "filed_at": "2026-05-20 10:15:00", "status": "filed", "telegram_user_id": 123},
         {"form_type": "QIAT", "filed_at": "2026-05-19", "status": "failed", "telegram_user_id": 123},
         {"form_type": "TEACH_OBS", "filed_at": "2026-05-18", "status": "draft", "telegram_user_id": 123},
+        {"form_type": "EDU_ACT", "filed_at": "2026-05-18", "status": "filed", "telegram_user_id": 123},
         {"form_type": "UNKNOWN_FORM", "filed_at": "2026-05-17", "status": "filed", "telegram_user_id": 123},
     ]
 
@@ -150,4 +199,6 @@ def test_case_history_to_evidence_items_maps_form_domains_statuses_and_sources()
     assert items[1].source == "pg_draft"
     assert items[2].domain == HealthDomain.teaching
     assert items[2].source == "pg_draft"
-    assert items[3].domain == HealthDomain.clinical
+    assert items[3].domain == HealthDomain.cpd
+    assert items[3].evidence_type == "course"
+    assert items[4].domain == HealthDomain.unclassified

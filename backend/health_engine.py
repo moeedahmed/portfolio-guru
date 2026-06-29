@@ -1,7 +1,15 @@
 from datetime import UTC, date, datetime
 from typing import Any
 
-from health_models import EvidenceItem, HealthDomain, HealthProfile, HealthScore, HealthSnapshot, Pathway
+from health_models import (
+    CORE_DOMAINS,
+    EvidenceItem,
+    HealthDomain,
+    HealthProfile,
+    HealthScore,
+    HealthSnapshot,
+    Pathway,
+)
 
 
 RECENT_DAYS = 365
@@ -14,6 +22,7 @@ FORM_TYPE_TO_DOMAIN = {
     "MINI_CEX": HealthDomain.clinical,
     "LAT": HealthDomain.clinical,
     "ACAT": HealthDomain.clinical,
+    "ACAF": HealthDomain.clinical,
     "PROC_LOG": HealthDomain.clinical,
     "US_CASE": HealthDomain.clinical,
     "ESLE": HealthDomain.clinical,
@@ -22,18 +31,24 @@ FORM_TYPE_TO_DOMAIN = {
     "MSF": HealthDomain.clinical,
     "QIAT": HealthDomain.qi,
     "AUDIT": HealthDomain.qi,
+    "STAT": HealthDomain.teaching,
     "TEACH_OBS": HealthDomain.teaching,
     "TEACH": HealthDomain.teaching,
-    "EDU_ACT": HealthDomain.teaching,
+    "TEACH_CONFID": HealthDomain.teaching,
+    "EDU_ACT": HealthDomain.cpd,
     "FORMAL_COURSE": HealthDomain.cpd,
+    "SDL": HealthDomain.reflection,
     "REFLECT_LOG": HealthDomain.reflection,
     "PDP": HealthDomain.reflection,
     "JCF": HealthDomain.reflection,
     "COMPLAINT": HealthDomain.leadership,
+    "SERIOUS_INC": HealthDomain.leadership,
     "SERIOUS_INCIDENT": HealthDomain.leadership,
+    "CLIN_GOV": HealthDomain.leadership,
+    "APPRAISAL": HealthDomain.leadership,
 }
 
-WPBA_FORM_TYPES = {"CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "PROC_LOG", "US_CASE", "ESLE", "ESLE_ASSESS", "ESLE_PART1_2"}
+WPBA_FORM_TYPES = {"CBD", "DOPS", "MINI_CEX", "LAT", "ACAT", "ACAF", "PROC_LOG", "US_CASE", "ESLE", "ESLE_ASSESS", "ESLE_PART1_2"}
 
 
 def compute_health_score(items: list[EvidenceItem]) -> HealthScore:
@@ -41,7 +56,9 @@ def compute_health_score(items: list[EvidenceItem]) -> HealthScore:
     if not items:
         return HealthScore.grey
 
-    covered_domains = {item.domain for item in items}
+    # Only core domains count toward coverage; unclassified evidence must never
+    # lift the score, otherwise unknown/file rows would fake portfolio breadth.
+    covered_domains = {item.domain for item in items if item.domain in CORE_DOMAINS}
     score = _score_from_domain_count(len(covered_domains))
 
     stale_count = sum(1 for item in items if _age_days(item) > STALE_DAYS)
@@ -68,7 +85,7 @@ def case_history_to_evidence_items(case_history: list[dict]) -> list[EvidenceIte
             EvidenceItem(
                 id=str(source_ref or f"case-{index + 1}-{form_type}-{event_date.isoformat()}"),
                 user_id=str(record.get("user_id") or record.get("telegram_user_id") or "unknown"),
-                domain=FORM_TYPE_TO_DOMAIN.get(form_type, HealthDomain.clinical),
+                domain=FORM_TYPE_TO_DOMAIN.get(form_type, HealthDomain.unclassified),
                 evidence_type=_evidence_type_for_form(form_type),
                 form_type=form_type,
                 title=str(record.get("title") or f"{form_type} evidence"),
@@ -126,11 +143,11 @@ def _evidence_type_for_form(form_type: str) -> str:
         return "wpba"
     if form_type in {"QIAT", "AUDIT"}:
         return "audit"
-    if form_type in {"TEACH_OBS", "TEACH", "EDU_ACT"}:
+    if form_type in {"STAT", "TEACH_OBS", "TEACH", "TEACH_CONFID"}:
         return "teaching_session"
-    if form_type == "FORMAL_COURSE":
+    if form_type in {"EDU_ACT", "FORMAL_COURSE"}:
         return "course"
-    if form_type in {"REFLECT_LOG", "PDP", "JCF"}:
+    if form_type in {"SDL", "REFLECT_LOG", "PDP", "JCF"}:
         return "reflection_log"
     return "other"
 
@@ -142,11 +159,11 @@ def compute_gap_summary(items: list[EvidenceItem]) -> list[str]:
 
     gaps: list[str] = []
     coverage = compute_domain_coverage(items)
-    for domain in HealthDomain:
+    for domain in CORE_DOMAINS:
         if coverage[domain] == 0:
             gaps.append(f"No {_domain_label(domain)} evidence")
 
-    for domain in HealthDomain:
+    for domain in CORE_DOMAINS:
         domain_items = [item for item in items if item.domain == domain]
         if domain_items and all(_age_days(item) > AGEING_DAYS for item in domain_items):
             gaps.append(f"{_domain_label(domain)} evidence is over 3 years old")
@@ -159,7 +176,7 @@ def compute_next_actions(items: list[EvidenceItem], pathway: Pathway) -> list[st
     coverage = compute_domain_coverage(items)
     actions: list[str] = []
 
-    missing_domains = [domain for domain in HealthDomain if coverage[domain] == 0]
+    missing_domains = [domain for domain in CORE_DOMAINS if coverage[domain] == 0]
     for domain in missing_domains[:3]:
         actions.append(_domain_action(domain))
 
