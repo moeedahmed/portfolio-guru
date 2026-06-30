@@ -1,7 +1,7 @@
 # Portfolio Health + Pathway Guidance — Product Spec v2
 
 **Status:** Product spec. Replaces the narrower ARCP Health design (now superseded).
-**Last updated:** 2026-06-27
+**Last updated:** 2026-06-30
 **Supersedes:** `docs/ARCP_HEALTH_DESIGN.md` — retained as historical design artefact.
 
 ---
@@ -156,6 +156,27 @@ Both RCEM pathways use the same Kaizen platform. Evidence comes from:
 4. **Future** — file upload/ingestion (PDFs, certificates)
 
 Evidence from paths 1 and 2 is source-tied (linked to the original case text/draft). Evidence from path 3 is user-entered.
+
+### Scan cadence and caching
+
+Product decision, 2026-06-30:
+
+- **Monthly automatic Portfolio Health** is the default proactive cadence.
+- **Manual `/health` remains available any time** and should reuse the cached
+  Kaizen index when it is fresh enough for the report.
+- **Weekly automatic health checks are reserved for deadline mode**, for
+  example 6–8 weeks before a known ARCP date or Portfolio Pathway application
+  target.
+- **Do not full-scan the same Kaizen portfolio on every health run.** Keep a
+  cached read-only Kaizen index, dedupe evidence by stable event identity, and
+  only trigger a full scan when the index is missing, stale, manually requested,
+  or deadline mode requires a newer view.
+- **After new Portfolio Guru filings**, update the local Portfolio Guru filing
+  history immediately; do not trigger a full Kaizen scrape unless the cached
+  index is stale or the user explicitly asks for a refresh.
+- The health report should show the last successful scan time and the source
+  used, so users can trust whether they are seeing a full Kaizen scan or a
+  limited local view.
 
 ### No pathway assumptions
 
