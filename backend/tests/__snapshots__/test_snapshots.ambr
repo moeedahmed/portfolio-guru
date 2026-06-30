@@ -40,6 +40,11 @@
       • *SLO3 — Clinical questions & decisions*
         ↳ KC1: able to support the pre-hospital, medical,…
       
+      🛡️ *AI reflection check*
+      • Source: text case note.
+      • Reflection fields: 1 AI-filled field for you to check.
+      • Source cue: “Clinical case text”
+      • Save as draft only runs after you review and tap *Save as draft*.
       💡 Reflection is short — Improve reflection can flesh it out.
       
       💬 Reply to refine this draft, or save/cancel before sending a new case.

@@ -1,3 +1,12 @@
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def default_to_non_vertex_extractor(monkeypatch):
+    monkeypatch.delenv("PG_USE_VERTEX", raising=False)
+    monkeypatch.delenv("GCP_PROJECT_ID", raising=False)
+
+
 def test_gemini_fallback_models_default_order(monkeypatch):
     monkeypatch.delenv("GEMINI_FAST_MODEL", raising=False)
     monkeypatch.delenv("GEMINI_STABLE_MODEL", raising=False)

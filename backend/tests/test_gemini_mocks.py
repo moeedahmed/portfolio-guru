@@ -8,6 +8,8 @@ def reset_extractor_client(monkeypatch):
     import extractor
 
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-api-key")
+    monkeypatch.delenv("PG_USE_VERTEX", raising=False)
+    monkeypatch.delenv("GCP_PROJECT_ID", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setattr(extractor, "_client", None)

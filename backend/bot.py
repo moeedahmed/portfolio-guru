@@ -1531,7 +1531,7 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
         await _send_latest_message(
             message,
             context,
-            _format_draft_preview(draft) + _REPLY_HINT_SUFFIX,
+            _format_draft_preview_for_context(draft, context) + _REPLY_HINT_SUFFIX,
             reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
             parse_mode="Markdown",
         )
@@ -3303,6 +3303,23 @@ def _chosen_form_reason(context, form_type: str) -> str | None:
     return None
 
 
+def _format_draft_preview_for_context(
+    draft,
+    context,
+    form_type: str | None = None,
+    *,
+    include_safety_layer: bool = True,
+) -> str:
+    resolved_form_type = form_type or _draft_form_type(draft)
+    return _format_draft_preview(
+        draft,
+        _chosen_form_reason(context, resolved_form_type),
+        source_text=context.user_data.get("case_text", ""),
+        input_source=context.user_data.get("case_input_source", "text"),
+        include_safety_layer=include_safety_layer,
+    )
+
+
 def _safe_markdown_text(text: str) -> str:
     return str(text).replace("_", " ").replace("*", "").replace("`", "").replace("[", "").replace("]", "")
 
@@ -3437,12 +3454,31 @@ def _draft_header(title: str) -> list[str]:
     ]
 
 
-def _format_draft_preview(draft, reason: str | None = None) -> str:
+def _format_draft_preview(
+    draft,
+    reason: str | None = None,
+    *,
+    source_text: str = "",
+    input_source: str | None = None,
+    include_safety_layer: bool = True,
+) -> str:
     """Format draft data as a preview message. Dispatches based on type."""
     if isinstance(draft, FormDraft):
         preview = _format_generic_draft(draft)
+        if include_safety_layer:
+            preview += _draft_transparency_layer(
+                draft,
+                source_text=source_text,
+                input_source=input_source,
+            )
         return preview + _draft_coach_note_suffix(draft)
     preview = _format_cbd_draft(draft)
+    if include_safety_layer:
+        preview += _draft_transparency_layer(
+            draft,
+            source_text=source_text,
+            input_source=input_source,
+        )
     return preview + _draft_coach_note_suffix(draft)
 
 
@@ -3584,6 +3620,111 @@ def _format_preview_text_value(key: str, value) -> str:
     return "\n\n".join(paragraphs) if paragraphs else text
 
 
+_SOURCE_LABELS = {
+    "text": "text case note",
+    "voice": "voice transcript",
+    "audio": "audio transcript",
+    "photo": "photo/OCR text",
+    "image": "photo/OCR text",
+    "document": "document text",
+    "same case": "previous case",
+}
+
+_REFLECTION_CUE_RE = re.compile(
+    r"\b("
+    r"reflect(?:ion|ed|ing)?|learn(?:ed|t|ing)?|differently|next time|"
+    r"improv(?:e|ed|ing)|handover|escalat(?:e|ed|ing|ion)?|senior|"
+    r"feedback|bias|uncertain(?:ty)?|challenge(?:d)?"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _source_label(input_source: str | None) -> str:
+    return _SOURCE_LABELS.get(str(input_source or "").strip().lower(), "case note")
+
+
+def _source_cue_snippet(source_text: str, *, max_words: int = 24) -> str:
+    """Return a short source-text cue for the transparency layer.
+
+    The snippet is display-only and kept Markdown-safe because draft previews
+    render with Telegram Markdown.
+    """
+    clean = _safe_markdown_text(" ".join(str(source_text or "").split())).strip()
+    if not clean:
+        return ""
+
+    match = _REFLECTION_CUE_RE.search(clean)
+    if match:
+        start = max(0, match.start() - 90)
+        end = min(len(clean), match.end() + 170)
+        snippet = clean[start:end].strip(" ,.;:")
+    else:
+        snippet = clean
+
+    words = snippet.split()
+    if len(words) <= max_words:
+        return snippet
+    return " ".join(words[:max_words]).rstrip(",;:.") + "..."
+
+
+def _reflection_review_line(draft) -> str:
+    fields = _draft_fields_for_review(draft)
+    form_type = _draft_form_type(draft)
+    keys = _find_reflection_keys(fields, form_type)
+
+    if not keys:
+        return "• AI-filled fields: review the wording; blank fields mean I could not safely infer detail."
+
+    present = [key for key in keys if not _is_missing_field_value(fields.get(key))]
+    missing = [key for key in keys if _is_missing_field_value(fields.get(key))]
+
+    if present and missing:
+        return (
+            f"• Reflection fields: {len(present)} AI-filled for review; "
+            f"{len(missing)} still needs your detail."
+        )
+    if present:
+        noun = "field" if len(present) == 1 else "fields"
+        return f"• Reflection fields: {len(present)} AI-filled {noun} for you to check."
+    return "• Reflection fields: no reflection text was safely found yet."
+
+
+def _missing_fields_review_line(draft) -> str:
+    form_type = _draft_form_type(draft)
+    missing_required, _, _ = _missing_template_fields(draft, form_type)
+    if not missing_required:
+        return ""
+    noun = "field" if len(missing_required) == 1 else "fields"
+    return f"• Gaps: {len(missing_required)} required {noun} still shows {_MISSING_MARKER}."
+
+
+def _draft_transparency_layer(
+    draft,
+    *,
+    source_text: str = "",
+    input_source: str | None = None,
+) -> str:
+    """Compact safety/transparency block shown before the approval keyboard."""
+    lines = [
+        "",
+        "🛡️ *AI reflection check*",
+        f"• Source: {_source_label(input_source)}.",
+        _reflection_review_line(draft),
+    ]
+
+    gap_line = _missing_fields_review_line(draft)
+    if gap_line:
+        lines.append(gap_line)
+
+    snippet = _source_cue_snippet(source_text)
+    if snippet:
+        lines.append(f"• Source cue: “{snippet}”")
+
+    lines.append("• Save as draft only runs after you review and tap *Save as draft*.")
+    return "\n".join(lines)
+
+
 def _template_requirements(form_type: str):
     schema = FORM_SCHEMAS.get(schema_form_type(form_type), {})
     required = []
@@ -3656,7 +3797,7 @@ async def _show_draft_review(
         has_missing=has_missing,
         update_last=False,
     )
-    preview = _format_draft_preview(draft, _chosen_form_reason(context, form_type))
+    preview = _format_draft_preview_for_context(draft, context, form_type)
     text = preview + _REPLY_HINT_SUFFIX
     keyboard = _build_approval_keyboard(
         improved_once=context.user_data.get("quick_improve_used", False),
@@ -7387,7 +7528,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             has_missing=True,
             update_last=False,
         )
-        preview = _format_draft_preview(draft, _chosen_form_reason(context, chosen_form))
+        preview = _format_draft_preview_for_context(draft, context, chosen_form)
         await _safe_edit_text(
             query.message,
             preview + _REPLY_HINT_SUFFIX,
@@ -7715,7 +7856,10 @@ async def _regenerate_active_draft_with_feedback(
     ack = await msg.reply_text("✏️ Regenerating draft with your extra information…")
     try:
         form_type = draft.form_type if isinstance(draft, FormDraft) else "CBD"
-        current_draft_text = _format_draft_preview(draft)
+        current_draft_text = _format_draft_preview(
+            draft,
+            include_safety_layer=False,
+        )
         vp = get_voice_profile(update.effective_user.id) or ""
 
         if form_type == "CBD":
@@ -7754,7 +7898,7 @@ async def _regenerate_active_draft_with_feedback(
         )
         return AWAIT_APPROVAL
 
-    preview = _format_draft_preview(updated)
+    preview = _format_draft_preview_for_context(updated, context)
     await _safe_edit_text(
         ack,
         preview + _REPLY_HINT_SUFFIX,
@@ -9228,7 +9372,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         logger.warning("Local draft JSON backup failed; continuing with Kaizen filing", exc_info=True)
 
     # Save draft preview and data for later restore + amend feature
-    draft_preview_text = _format_draft_preview(draft, _chosen_form_reason(context, form_type)) + _REPLY_HINT_SUFFIX
+    draft_preview_text = _format_draft_preview_for_context(draft, context, form_type) + _REPLY_HINT_SUFFIX
     amend_draft_data = _serialise_draft(draft)
     amend_case_text = context.user_data.get("case_text", "")
     amend_chosen_form_type = form_type
@@ -9983,7 +10127,12 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
 
     ack = await query.message.reply_text("💡 Improving the reflection only…")
     case_text = context.user_data.get("case_text", "")
-    current_draft_text = _format_draft_preview(draft, _chosen_form_reason(context, form_type))
+    current_draft_text = _format_draft_preview_for_context(
+        draft,
+        context,
+        form_type,
+        include_safety_layer=False,
+    )
     feedback = (
         "Improve only the reflection or reflection-like narrative fields. Keep the clinical facts, "
         "date, setting, curriculum links, and every non-reflection field unchanged. Make the "
@@ -10048,7 +10197,7 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
     # Edit the ORIGINAL draft message in place so the chat keeps a single
     # living draft instead of stacking a second full preview underneath. The
     # tiny status line is dismissed once the in-place edit lands.
-    preview = _format_draft_preview(updated, _chosen_form_reason(context, form_type))
+    preview = _format_draft_preview_for_context(updated, context, form_type)
     header = "💡 *Revised draft* — improved from the first version.\n\n"
     await _safe_edit_text(
         query.message,
@@ -10176,7 +10325,7 @@ async def handle_amend_draft(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     # Show the draft and enter approval state
     draft = _load_draft(context)
-    preview = _format_draft_preview(draft, _chosen_form_reason(context, amend_form))
+    preview = _format_draft_preview_for_context(draft, context, amend_form)
     await query.message.reply_text(
         "✏️ *Amending this draft.* Send changes, then tap *Save updated draft* or *Cancel amend*.\n\n"
         + preview,
@@ -10247,7 +10396,10 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     try:
         form_type = draft.form_type if isinstance(draft, FormDraft) else "CBD"
-        current_draft_text = _format_draft_preview(draft)
+        current_draft_text = _format_draft_preview(
+            draft,
+            include_safety_layer=False,
+        )
         vp = get_voice_profile(update.effective_user.id) or ""
 
         if form_type == "CBD":
@@ -10275,7 +10427,7 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await ack.edit_text("⚠️ Couldn't regenerate.", reply_markup=_active_draft_keyboard(context))
         return AWAIT_APPROVAL
 
-    preview = _format_draft_preview(updated)
+    preview = _format_draft_preview_for_context(updated, context)
     await _safe_edit_text(ack, preview + _REPLY_HINT_SUFFIX, reply_markup=_active_draft_keyboard(context), parse_mode="Markdown")
     return AWAIT_APPROVAL
 
@@ -10460,7 +10612,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
                 for field_name, new_value in updates.items():
                     draft.fields[field_name] = new_value
                 _store_draft(context, draft)
-                preview = _format_draft_preview(draft, _chosen_form_reason(context, chosen_form))
+                preview = _format_draft_preview_for_context(draft, context, chosen_form)
                 ack_line = f"✏️ Updated: {summary}\n\n" if summary else "✏️ Draft updated.\n\n"
                 await update.message.reply_text(
                     ack_line + preview + _REPLY_HINT_SUFFIX,

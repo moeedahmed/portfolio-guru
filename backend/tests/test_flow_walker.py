@@ -722,6 +722,30 @@ class TestFlowWalker:
         assert draft.fields['clinical_setting'] == ''
         assert draft.fields['procedural_skill'] == ''
 
+    def test_draft_preview_includes_reflection_safety_transparency(self, thin_draft):
+        from bot import _format_draft_preview
+
+        preview = _format_draft_preview(
+            thin_draft,
+            source_text=SAMPLE_CASES['valid'],
+            input_source='voice',
+        )
+
+        assert '🛡️ *AI reflection check*' in preview
+        assert 'Source: voice transcript.' in preview
+        assert 'Reflection fields: 1 AI-filled field for you to check.' in preview
+        assert 'Source cue:' in preview
+        assert 'reflected on escalation' in preview
+        assert 'Save as draft only runs after you review' in preview
+
+    def test_draft_preview_safety_layer_can_be_omitted_for_llm_feedback(self, thin_draft):
+        from bot import _format_draft_preview
+
+        preview = _format_draft_preview(thin_draft, include_safety_layer=False)
+
+        assert 'AI reflection check' not in preview
+        assert 'Source cue:' not in preview
+
     @pytest.mark.asyncio
     async def test_quick_improve_updates_reflection_only(self, thin_draft):
         from bot import AWAIT_APPROVAL, handle_quick_improve
