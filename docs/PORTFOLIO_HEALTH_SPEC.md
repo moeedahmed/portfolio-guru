@@ -76,9 +76,14 @@ contradict each other. The ARCP report merges the LLM narrative's free-text
 against the score before display (`bot._reconcile_action_severity`):
 
 - A **Green** (or not-enough-data **Grey**) report must not contain urgent /
-  urgently / critical missing-evidence phrasing. ESLE/SLO8 suggestions are
-  reframed as optional/confirmatory ("consider logging an ESLE if it isn't
-  already evidenced elsewhere"); other urgent phrasing has the urgency stripped.
+  urgently / critical missing-evidence phrasing. It must also never contain
+  crisis/remediation framing — "recovery plan", "severe lack" / "severe lack of
+  portfolio progression", "remediation", "crisis", or anything implying failing
+  progression. Such crisis suggestions are replaced wholesale with a neutral
+  confirmatory action ("keep your existing evidence recent and confirm coverage
+  before your next review"). ESLE/SLO8 suggestions are reframed as
+  optional/confirmatory ("consider logging an ESLE if it isn't already
+  evidenced elsewhere"); other urgent phrasing has the urgency stripped.
 - **Amber / Red** reports keep priority/urgent wording, because there the
   urgency matches the engine's verdict. If ESLE evidence is genuinely
   readiness-affecting, the engine's domain coverage already lands the score at

@@ -1061,6 +1061,61 @@ def test_green_arcp_report_softens_generic_urgent_suggestion():
     assert "Mini-CEX" in msg
 
 
+_CRISIS_PHRASES = (
+    "recovery plan",
+    "severe lack",
+    "severe lack of portfolio progression",
+    "crisis",
+    "remediation",
+    "remediate",
+    "failing",
+)
+
+
+def test_green_arcp_report_strips_crisis_remediation_language():
+    """A Green report must never imply failing progression. LLM crisis framing
+    like 'Start a recovery plan for the severe lack of portfolio progression'
+    must be replaced with a neutral confirmatory action so the status and copy
+    agree."""
+    import bot
+
+    snapshot = _snapshot_with_score(HealthScore.green)
+    msg = bot._format_arcp_action_plan_message(
+        snapshot=snapshot,
+        history=[],
+        month_label="June 2026",
+        analysis={
+            "suggestions": [
+                "Urgently start a recovery plan for the severe lack of portfolio progression",
+                "Immediate remediation required — you are failing progression",
+            ]
+        },
+        limited_view=False,
+    )
+
+    assert "🟢 Green" in msg
+    lowered = msg.lower()
+    for phrase in _CRISIS_PHRASES:
+        assert phrase not in lowered, f"Green report must not contain crisis copy: {phrase!r}"
+    for word in _URGENCY_WORDS:
+        assert word not in lowered, f"Green report must not contain urgent copy: {word!r}"
+    # The neutral confirmatory action takes its place.
+    assert "Keep your existing evidence recent" in msg
+
+
+def test_reconcile_action_severity_replaces_crisis_phrases_on_grey():
+    """Grey (not-enough-data) gets the same crisis-language guard as Green."""
+    import bot
+
+    reconciled = bot._reconcile_action_severity(
+        ["Begin a recovery plan to address severe lack of portfolio progression"],
+        HealthScore.grey,
+    )
+    assert reconciled == [
+        "Keep your existing evidence recent and confirm coverage before your next review"
+    ]
+
+
 def test_amber_arcp_report_keeps_urgent_esle_priority_wording():
     """When the status is Amber the engine has flagged a real gap, so priority
     ESLE wording matches the severity and must be preserved."""
@@ -1094,7 +1149,11 @@ def test_amber_arcp_report_keeps_urgent_esle_priority_wording():
 def test_reconcile_action_severity_is_noop_for_amber_and_red():
     import bot
 
-    actions = ["Urgently schedule an ESLE", "Critically review QI"]
+    actions = [
+        "Urgently schedule an ESLE",
+        "Critically review QI",
+        "Start a recovery plan for the severe lack of portfolio progression",
+    ]
     assert bot._reconcile_action_severity(actions, HealthScore.amber) == actions
     assert bot._reconcile_action_severity(actions, HealthScore.red) == actions
 

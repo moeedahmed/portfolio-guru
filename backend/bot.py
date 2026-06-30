@@ -6666,24 +6666,39 @@ _URGENT_ACTION_PATTERN = re.compile(
 )
 _ESLE_OR_SLO8_PATTERN = re.compile(r"\b(esle|slo\s?8)\b", re.IGNORECASE)
 _SOFT_ESLE_ACTION = "Consider logging an ESLE if it isn't already evidenced elsewhere"
+_CRISIS_ACTION_PATTERN = re.compile(
+    r"recovery plan|remediation|remediate|crisis|"
+    r"severe(?:ly)? lack|severe lack of portfolio progression|"
+    r"severe(?:ly)? (?:behind|lacking|deficient)|"
+    r"failing (?:progression|to progress)|"
+    r"lack of portfolio progression",
+    re.IGNORECASE,
+)
+_GREEN_SAFE_ACTION = "Keep your existing evidence recent and confirm coverage before your next review"
 
 
 def _reconcile_action_severity(actions: list[str], score) -> list[str]:
     """Keep filing-action urgency consistent with the deterministic health score.
 
     The LLM ARCP narrative can return free-text suggestions like "Urgently
-    schedule an ESLE for SLO8". A Green score means the engine sees no
-    readiness-affecting gap, so that urgency contradicts the verdict. On Green
-    (or the not-enough-data Grey state) urgent/critical phrasing is softened and
-    ESLE/SLO8 suggestions are reframed as optional/confirmatory. Amber and Red
-    keep priority wording, because there the urgency matches the status.
+    schedule an ESLE for SLO8" or "Start a recovery plan for the severe lack of
+    portfolio progression". A Green score means the engine sees no
+    readiness-affecting gap, so crisis/remediation framing and urgency
+    contradict the verdict. On Green (or the not-enough-data Grey state):
+    crisis/remediation phrasing (recovery plan, severe lack, failing
+    progression, etc.) is replaced with a neutral confirmatory action,
+    ESLE/SLO8 suggestions are reframed as optional/confirmatory, and remaining
+    urgent/critical phrasing is softened. Amber and Red keep priority wording,
+    because there the urgency matches the status.
     """
     value = getattr(score, "value", str(score))
     if value not in {"green", "grey"}:
         return actions
     reconciled: list[str] = []
     for action in actions:
-        if _ESLE_OR_SLO8_PATTERN.search(action):
+        if _CRISIS_ACTION_PATTERN.search(action):
+            reconciled.append(_GREEN_SAFE_ACTION)
+        elif _ESLE_OR_SLO8_PATTERN.search(action):
             reconciled.append(_SOFT_ESLE_ACTION)
         elif _URGENT_ACTION_PATTERN.search(action):
             reconciled.append(_soften_urgent_text(action))
