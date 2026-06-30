@@ -727,16 +727,39 @@ class TestFlowWalker:
 
         preview = _format_draft_preview(
             thin_draft,
-            source_text=SAMPLE_CASES['valid'],
             input_source='voice',
         )
 
+        # The trust block is kept: source type, reflection-needs-review,
+        # and review-before-save are all present.
         assert '🛡️ *AI reflection check*' in preview
         assert 'Source: voice transcript.' in preview
         assert 'Reflection fields: 1 AI-filled field for you to check.' in preview
-        assert 'Source cue:' in preview
-        assert 'reflected on escalation' in preview
         assert 'Save as draft only runs after you review' in preview
+
+    def test_draft_preview_never_quotes_raw_source_text(self, thin_draft):
+        """The preview must describe the source type but never quote raw case text."""
+        from bot import _format_draft_preview_for_context
+        from tests.bot_simulator import BotSimulator
+
+        # Source text deliberately mixes patient-identifying detail with the
+        # reflection language that the retired Source cue used to latch onto.
+        sensitive_source = (
+            "John Smith, NHS 943 476 5919, 45M with chest pain. "
+            "Troponin positive, managed as ACS and reflected on escalation next time."
+        )
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['case_text'] = sensitive_source
+        context.user_data['case_input_source'] = 'text'
+
+        preview = _format_draft_preview_for_context(thin_draft, context, 'CBD')
+
+        assert '🛡️ *AI reflection check*' in preview
+        assert 'Source cue' not in preview
+        assert 'John Smith' not in preview
+        assert '943 476 5919' not in preview
+        assert 'reflected on escalation' not in preview
 
     def test_draft_preview_safety_layer_can_be_omitted_for_llm_feedback(self, thin_draft):
         from bot import _format_draft_preview
@@ -744,7 +767,72 @@ class TestFlowWalker:
         preview = _format_draft_preview(thin_draft, include_safety_layer=False)
 
         assert 'AI reflection check' not in preview
-        assert 'Source cue:' not in preview
+        assert 'Source cue' not in preview
+        assert 'Save as draft only runs after you review' not in preview
+
+    @staticmethod
+    def _assert_no_transparency_copy(current_draft: str) -> None:
+        assert current_draft, 'current_draft was not passed to the extractor'
+        assert 'AI reflection check' not in current_draft
+        assert 'Source cue' not in current_draft
+        assert 'Save as draft only runs after you review' not in current_draft
+
+    @pytest.mark.asyncio
+    async def test_quick_improve_sends_clean_draft_to_extractor(self, thin_draft):
+        """Quick Improve must feed the LLM draft content only, no trust/safety UI copy."""
+        from bot import handle_quick_improve
+        from models import FormDraft
+
+        improved = FormDraft(
+            form_type='CBD',
+            uuid='uuid-cbd',
+            fields={**thin_draft.fields, 'reflection': 'I will escalate dynamic ECG changes earlier.'},
+        )
+
+        sim = BotSimulator()
+        update = sim._make_callback_update('IMPROVE|reflection')
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        context.user_data['case_input_source'] = 'voice'
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': 'CBD',
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+
+        extractor = AsyncMock(return_value=improved)
+        with patch('bot.get_voice_profile', return_value=''), \
+             patch('bot.extract_form_data', new=extractor):
+            await handle_quick_improve(update, context)
+
+        extractor.assert_awaited_once()
+        self._assert_no_transparency_copy(extractor.await_args.kwargs['current_draft'])
+
+    @pytest.mark.asyncio
+    async def test_regeneration_sends_clean_draft_to_extractor(self, thin_draft):
+        """Normal inline regeneration must feed draft content only to the LLM."""
+        from bot import _regenerate_active_draft_with_feedback
+
+        sim = BotSimulator()
+        update = sim._make_text_update('focus the reflection on leadership')
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        context.user_data['case_input_source'] = 'voice'
+        context.user_data['draft_data'] = {
+            '_type': 'FORM',
+            'form_type': 'CBD',
+            'fields': dict(thin_draft.fields),
+            'uuid': thin_draft.uuid,
+        }
+
+        extractor = AsyncMock(return_value=thin_draft)
+        with patch('bot.get_voice_profile', return_value=''), \
+             patch('bot.extract_cbd_data', new=extractor):
+            await _regenerate_active_draft_with_feedback(update, context, 'focus on leadership')
+
+        extractor.assert_awaited_once()
+        self._assert_no_transparency_copy(extractor.await_args.kwargs['current_draft'])
 
     @pytest.mark.asyncio
     async def test_quick_improve_updates_reflection_only(self, thin_draft):

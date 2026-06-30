@@ -3314,7 +3314,6 @@ def _format_draft_preview_for_context(
     return _format_draft_preview(
         draft,
         _chosen_form_reason(context, resolved_form_type),
-        source_text=context.user_data.get("case_text", ""),
         input_source=context.user_data.get("case_input_source", "text"),
         include_safety_layer=include_safety_layer,
     )
@@ -3458,7 +3457,6 @@ def _format_draft_preview(
     draft,
     reason: str | None = None,
     *,
-    source_text: str = "",
     input_source: str | None = None,
     include_safety_layer: bool = True,
 ) -> str:
@@ -3466,19 +3464,11 @@ def _format_draft_preview(
     if isinstance(draft, FormDraft):
         preview = _format_generic_draft(draft)
         if include_safety_layer:
-            preview += _draft_transparency_layer(
-                draft,
-                source_text=source_text,
-                input_source=input_source,
-            )
+            preview += _draft_transparency_layer(draft, input_source=input_source)
         return preview + _draft_coach_note_suffix(draft)
     preview = _format_cbd_draft(draft)
     if include_safety_layer:
-        preview += _draft_transparency_layer(
-            draft,
-            source_text=source_text,
-            input_source=input_source,
-        )
+        preview += _draft_transparency_layer(draft, input_source=input_source)
     return preview + _draft_coach_note_suffix(draft)
 
 
@@ -3630,42 +3620,8 @@ _SOURCE_LABELS = {
     "same case": "previous case",
 }
 
-_REFLECTION_CUE_RE = re.compile(
-    r"\b("
-    r"reflect(?:ion|ed|ing)?|learn(?:ed|t|ing)?|differently|next time|"
-    r"improv(?:e|ed|ing)|handover|escalat(?:e|ed|ing|ion)?|senior|"
-    r"feedback|bias|uncertain(?:ty)?|challenge(?:d)?"
-    r")\b",
-    re.IGNORECASE,
-)
-
-
 def _source_label(input_source: str | None) -> str:
     return _SOURCE_LABELS.get(str(input_source or "").strip().lower(), "case note")
-
-
-def _source_cue_snippet(source_text: str, *, max_words: int = 24) -> str:
-    """Return a short source-text cue for the transparency layer.
-
-    The snippet is display-only and kept Markdown-safe because draft previews
-    render with Telegram Markdown.
-    """
-    clean = _safe_markdown_text(" ".join(str(source_text or "").split())).strip()
-    if not clean:
-        return ""
-
-    match = _REFLECTION_CUE_RE.search(clean)
-    if match:
-        start = max(0, match.start() - 90)
-        end = min(len(clean), match.end() + 170)
-        snippet = clean[start:end].strip(" ,.;:")
-    else:
-        snippet = clean
-
-    words = snippet.split()
-    if len(words) <= max_words:
-        return snippet
-    return " ".join(words[:max_words]).rstrip(",;:.") + "..."
 
 
 def _reflection_review_line(draft) -> str:
@@ -3702,10 +3658,13 @@ def _missing_fields_review_line(draft) -> str:
 def _draft_transparency_layer(
     draft,
     *,
-    source_text: str = "",
     input_source: str | None = None,
 ) -> str:
-    """Compact safety/transparency block shown before the approval keyboard."""
+    """Compact safety/transparency block shown before the approval keyboard.
+
+    Names the source *type* only — it never quotes raw case text, so
+    patient-identifying detail in the source is not surfaced in the preview.
+    """
     lines = [
         "",
         "🛡️ *AI reflection check*",
@@ -3716,10 +3675,6 @@ def _draft_transparency_layer(
     gap_line = _missing_fields_review_line(draft)
     if gap_line:
         lines.append(gap_line)
-
-    snippet = _source_cue_snippet(source_text)
-    if snippet:
-        lines.append(f"• Source cue: “{snippet}”")
 
     lines.append("• Save as draft only runs after you review and tap *Save as draft*.")
     return "\n".join(lines)
