@@ -1,12 +1,12 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-06-14T11:28:36+00:00
+Generated: 2026-06-29T23:56:09+00:00
 Status: ready
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
-- Branch: fix/idle-chat-steering
-- Last commit: 09911c8 2026-06-13 feat(dogfood): add repair watch preflight
+- Branch: main
+- Last commit: e8c006f 2026-06-29 Fix Kaizen health evidence classification
 - Uncommitted changes: no
 
 ## Immediate read before restarting
@@ -27,17 +27,17 @@ Status: ready
 - Live/deploy signals: railway.json, render.yaml, .github/workflows/deploy-mac.yml
 
 ## Recent commits
-- 09911c8 2026-06-13 feat(dogfood): add repair watch preflight
-- a819610 2026-06-11 fix(bot): preserve case flow on image OCR failure
-- 946eb83 2026-06-08 fix(portfolio): steer idle chat away from drafting
-- f8fe06b 2026-06-08 fix(bot): tighten first-open welcome copy
-- e95d86d 2026-06-08 docs: record reset copy dogfood smoke
-- f5906d8 2026-06-08 fix(bot): tighten reset reconnect copy
-- cbddfe4 2026-06-08 fix(bot): prompt kaizen username after reset
-- 044c685 2026-06-08 Remove forced Kaizen setup cancel
+- e8c006f 2026-06-29 Fix Kaizen health evidence classification
+- 9d929c1 2026-06-28 fix: restore full-width settings buttons
+- 123e06e 2026-06-28 fix: compact settings panel actions
+- f525238 2026-06-28 fix: make cancel concise
+- b8a49b2 2026-06-28 fix: suppress transient telegram polling alerts
+- 21ba44b 2026-06-28 fix: standardise inline button labels across bot flows
+- 3e94529 2026-06-28 fix: compact health action buttons
+- b7f4cb6 2026-06-28 fix: align health filing button
 
 ## Repo context snapshot
-### AGENTS.md — present, 7 days old
+### AGENTS.md — present, 3 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
@@ -48,7 +48,7 @@ Key headings:
 - ## Safety
 - ## Supported Forms
 
-### CLAUDE.md — present, 7 days old
+### CLAUDE.md — present, 3 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
@@ -59,26 +59,27 @@ Key headings:
 - ## Safety
 - ## Supported Forms
 
-### TASK.md — present, 6 days old
+### TASK.md — present, 2 days old
 Key headings:
-- # Active Task — Kaizen Mapping Sprint
-- ## Active Sprint — Kaizen Mapping (2026-06-01)
-- ### Scorecard (definition of done)
-- ### Proof gate
-- ### Out of scope (carried forward)
-- ## Objective
-- ## Current Slice
-- ## Done
-- ## Verification
-- ## Guardrails (Carried Forward)
-- ## UX Polish Slice — Post-Filed Buttons (2026-05-26)
-- # 539 passed, 22 skipped, 13 deselected, 3 snapshots passed
+- # Active Task — Hermes Hackathon Production Cut
+- ## Hackathon Objective
+- ## Locked Product Decision
+- ## Sprint 1 — Onboarding And Trust Surface
+- ## Sprint 2 — Activation And Failure Telemetry
+- ## Sprint 3 — Dashboard, Portfolio Health, And Stripe Proof
+- ## Sprint 4 — Hackathon Business-Agent Ledger
+- ## Sprint 4b — Demo / Rehearsal Kit
+- ## Demo Case And Recording Plan
+- ## Day-By-Day Plan
+- ## Hackathon Done Criteria
+- # Previous Active Task — Kaizen Mapping Sprint
 
-### docs/plan.md — present, 7 days old
+### docs/plan.md — present, 4 days old
 Key headings:
 - # Portfolio Guru - Conversational Router Plan
 - ## Goal
 - ## Product Decision
+- ## Channel Architecture Decision
 - ## Architecture
 - ### Layer 1 - Natural conversation intake
 - ### Layer 2 - Intent router
@@ -87,11 +88,11 @@ Key headings:
 - ## Implementation Phases
 - ### Phase 0 - Checkpoint and branch
 - ### Phase 1 - Router contract and tests
-- ### Phase 2 - Passive shadow mode
 
-### WORKFLOWS.md — present, 7 days old
+### WORKFLOWS.md — present, 14 days old
 Key headings:
 - # Portfolio Guru — Agent Workflow Reference
+- ## Channel Boundary — EMGurus WhatsApp Gateway
 - ## Conversation States
 - ## Flow 1 — First-Time User
 - ## Flow 2 — Core Filing (Happy Path)
@@ -102,7 +103,6 @@ Key headings:
 - ## Flow 5 — Reset / Recovery
 - ## Form Type Decision Rules
 - ## Key Capabilities Selection Rules
-- ## Data Flow
 
 ## Recommended restart path
 Continuity context looks sufficient; proceed with normal product-docs workflow.

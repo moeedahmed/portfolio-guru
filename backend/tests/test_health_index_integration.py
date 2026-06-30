@@ -980,6 +980,97 @@ def test_health_compact_report_moves_audit_detail_behind_buttons():
     assert "Confidence: low" in summary
 
 
+def test_health_compact_report_no_index_leads_with_sync_needed():
+    """Compact no-index summary must lead with the sync-needed limited-view
+    framing and never present a red full-portfolio verdict."""
+    import bot
+    from health_engine import case_history_to_evidence_items, compute_snapshot
+
+    history = [
+        {"form_type": "CBD", "filed_at": "2026-05-01 09:00:00", "status": "filed"},
+        {"form_type": "DOPS", "filed_at": "2026-05-02 09:00:00", "status": "filed"},
+    ]
+    items = case_history_to_evidence_items(history)
+    snapshot = compute_snapshot(_profile(9500, Pathway.training_arcp), items)
+
+    full_text = bot._format_arcp_action_plan_message(
+        snapshot=snapshot,
+        history=history,
+        month_label="June 2026",
+        evidence_context=bot._format_health_evidence_context(
+            source="case_history",
+            evidence_count=len(items),
+            history_count=len(history),
+            profile_is_default=False,
+            sync_status=None,
+            pathway=Pathway.training_arcp,
+        ),
+        limited_view=True,
+    )
+
+    summary = bot._health_compact_report_text(full_text)
+
+    assert "Kaizen sync needed" in summary
+    assert "🔴" not in summary
+    assert "Evidence gap level:" not in summary
+    # Sync-needed framing must lead, ahead of any actions/gaps.
+    assert summary.index("Kaizen sync needed") < summary.index("Next 3 useful filing actions")
+
+
+@pytest.mark.asyncio
+async def test_health_arcp_index_present_shows_full_verdict(
+    kaizen_index, isolated_health_store, monkeypatch
+):
+    """With a Kaizen index present the ARCP path keeps the normal gap-level
+    verdict and must not show the no-index sync banner."""
+    import bot
+    import sys
+
+    user_id = 9404
+    await kaizen_index.upsert_evidence_item(
+        _evidence_row(kaizen_index, id="cbd-arcp", event_type="CBD", user_id=str(user_id))
+    )
+    monkeypatch.setattr(bot, "get_case_history", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        bot, "get_health_profile", lambda _uid: _profile(user_id, Pathway.training_arcp)
+    )
+    monkeypatch.setattr(bot, "get_training_level", lambda _uid: "ST6")
+    monkeypatch.setattr(
+        bot, "analyse_portfolio_health", AsyncMock(return_value={"suggestions": []})
+    )
+
+    async def _chart(*_a, **_k):
+        return None
+
+    async def _snapshot(*_a, **_k):
+        return ""
+
+    monkeypatch.setitem(
+        sys.modules,
+        "portfolio_chart",
+        SimpleNamespace(
+            generate_health_chart_async=_chart,
+            format_health_activity_snapshot_async=_snapshot,
+        ),
+    )
+
+    sent: dict[str, str] = {}
+
+    await bot._run_health_analysis(
+        user_id=user_id,
+        chat=SimpleNamespace(send_action=AsyncMock()),
+        send_progress=AsyncMock(),
+        send_result=AsyncMock(side_effect=lambda text, reply_markup: sent.setdefault("text", text)),
+        send_photo_fn=AsyncMock(),
+        fail_fn=AsyncMock(),
+    )
+
+    text = sent["text"]
+    assert "Read-only Kaizen index" in text
+    assert "Kaizen sync needed" not in text
+    assert "Evidence gap level:" in text
+
+
 @pytest.mark.asyncio
 async def test_health_detail_buttons_restore_last_report(monkeypatch):
     import bot

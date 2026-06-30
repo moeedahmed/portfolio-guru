@@ -6077,6 +6077,7 @@ async def _run_health_analysis(
         return
 
     snapshot = compute_snapshot(profile, evidence_items)
+    limited_view = evidence_source == "case_history"
     sync_status = await _safe_kaizen_sync_status(user_id)
     evidence_context = _format_health_evidence_context(
         source=evidence_source,
@@ -6093,7 +6094,9 @@ async def _run_health_analysis(
     month_label = _dt.now().strftime("%B %Y")
 
     if profile.pathway == Pathway.cesr_portfolio:
-        msg = _format_cesr_health_message(snapshot, history, month_label, evidence_context)
+        msg = _format_cesr_health_message(
+            snapshot, history, month_label, evidence_context, limited_view=limited_view
+        )
         msg = await _append_health_activity_snapshot(msg, user_id, history, training_level)
         await send_result(msg, _health_result_keyboard())
         return
@@ -6111,6 +6114,7 @@ async def _run_health_analysis(
             level_note,
             evidence_context,
             "AI ARCP narrative timed out; deterministic health is shown below.",
+            limited_view=limited_view,
         )
         msg = await _append_health_activity_snapshot(msg, user_id, history, training_level)
         await send_result(msg, _health_result_keyboard())
@@ -6124,6 +6128,7 @@ async def _run_health_analysis(
             level_note,
             evidence_context,
             "AI ARCP narrative is temporarily unavailable; deterministic health is shown below.",
+            limited_view=limited_view,
         )
         msg = await _append_health_activity_snapshot(msg, user_id, history, training_level)
         await send_result(msg, _health_result_keyboard())
@@ -6136,6 +6141,7 @@ async def _run_health_analysis(
         level_note=level_note,
         evidence_context=evidence_context,
         analysis=analysis,
+        limited_view=limited_view,
     )
     msg = await _append_health_activity_snapshot(msg, user_id, history, training_level)
     await send_result(msg, _health_result_keyboard())
@@ -6312,6 +6318,15 @@ _HEALTH_DOMAIN_LABELS = {
 }
 
 
+def _health_limited_view_banner() -> str:
+    return "\n".join([
+        "⚠️ *Kaizen sync needed*",
+        "This is a limited Portfolio Guru filing-history view, not a full "
+        "portfolio health verdict.",
+        "Refresh/sync Kaizen, then rerun /health.",
+    ])
+
+
 def _format_arcp_action_plan_message(
     *,
     snapshot,
@@ -6321,6 +6336,7 @@ def _format_arcp_action_plan_message(
     evidence_context: str = "",
     fallback_note: str = "",
     analysis: dict | None = None,
+    limited_view: bool = False,
 ) -> str:
     risk = _health_score_label(snapshot.health_score)
     reason = _format_arcp_risk_reason(snapshot)
@@ -6333,14 +6349,27 @@ def _format_arcp_action_plan_message(
         month_label,
         "",
     ]
+    if limited_view:
+        lines.extend([_health_limited_view_banner(), ""])
     if evidence_context:
         lines.extend([evidence_context, ""])
     if fallback_note:
         lines.extend([f"_{fallback_note}_", ""])
 
+    if limited_view:
+        lines.extend([
+            "*Filing-history snapshot (no full score)*",
+            "An evidence gap level isn't shown here because your Kaizen "
+            "portfolio hasn't been read yet. The items below are limited-view "
+            "suggestions from Portfolio Guru filings only.",
+        ])
+    else:
+        lines.extend([
+            f"*Evidence gap level:* {risk}",
+            f"*Why:* {reason}",
+        ])
+
     lines.extend([
-        f"*Evidence gap level:* {risk}",
-        f"*Why:* {reason}",
         "",
         "*Next 3 useful filing actions*",
         _numbered_list(actions),
@@ -6505,6 +6534,7 @@ def _format_cesr_health_message(
     history: list[dict],
     month_label: str,
     evidence_context: str = "",
+    limited_view: bool = False,
 ) -> str:
     gaps = snapshot.gap_summary or ["No major gaps yet"]
     actions = snapshot.next_actions or ["Keep adding recent evidence"]
@@ -6526,12 +6556,25 @@ def _format_cesr_health_message(
         month_label,
         "",
     ]
+    if limited_view:
+        lines.extend([_health_limited_view_banner(), ""])
     if evidence_context:
         lines.extend([evidence_context, ""])
+    if limited_view:
+        lines.extend([
+            "*Filing-history snapshot (no readiness verdict)*",
+            "A long-term CESR readiness verdict isn't shown here because your "
+            "Kaizen portfolio hasn't been read yet. The items below are "
+            "limited-view suggestions from Portfolio Guru filings only.",
+            "",
+        ])
+    else:
+        lines.extend([
+            f"*Long-term CESR readiness:* {readiness_label}",
+            f"*Why:* {readiness_reason}",
+            "",
+        ])
     lines.extend([
-        f"*Long-term CESR readiness:* {readiness_label}",
-        f"*Why:* {readiness_reason}",
-        "",
         f"*WPBA progress toward 36:* {wpba_count}/36 "
         f"(DOPS {wpba_breakdown['dops']}/12 · "
         f"Mini-CEX {wpba_breakdown['mini_cex']}/12 · "
@@ -6616,6 +6659,7 @@ def _format_arcp_deterministic_health_message(
     level_note: str,
     evidence_context: str,
     fallback_note: str,
+    limited_view: bool = False,
 ) -> str:
     return _format_arcp_action_plan_message(
         snapshot=snapshot,
@@ -6624,6 +6668,7 @@ def _format_arcp_deterministic_health_message(
         level_note=level_note,
         evidence_context=evidence_context,
         fallback_note=fallback_note,
+        limited_view=limited_view,
     )
 
 

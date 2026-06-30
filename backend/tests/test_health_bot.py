@@ -309,7 +309,11 @@ async def test_cesr_health_output_uses_deterministic_engine_without_llm(monkeypa
 
     text = sent["text"]
     assert "*Portfolio Health — CESR / Portfolio Pathway*" in text
-    assert "Long-term CESR readiness:" in text
+    # No Kaizen index → limited filing-history view, not a readiness verdict.
+    assert "Kaizen sync needed" in text
+    assert "limited Portfolio Guru filing-history view" in text
+    assert "Long-term CESR readiness:" not in text
+    assert "🔴 Early" not in text
     assert "WPBA progress toward 36" in text
     assert "2/36" in text
     assert "DOPS 1/12" in text
@@ -420,9 +424,12 @@ async def test_arcp_health_falls_back_to_deterministic_output_when_llm_fails(mon
     assert "Window: last 6 months of Portfolio Guru filings only; ARCP cycle month not set yet" in text
     assert "Confidence: low" in text
     assert "AI ARCP narrative is temporarily unavailable" in text
-    assert "Evidence gap level:" in text
+    # No Kaizen index → limited filing-history view, not a red gap-level verdict.
+    assert "Kaizen sync needed" in text
+    assert "limited Portfolio Guru filing-history view" in text
+    assert "Evidence gap level:" not in text
+    assert "🔴 Red" not in text
     assert "ARCP risk:" not in text
-    assert "Why:" in text
     assert "Next 3 useful filing actions" in text
     assert "before ARCP" not in text
     assert "Already strong" in text
@@ -470,9 +477,12 @@ async def test_arcp_health_output_prioritises_action_plan_when_llm_succeeds(monk
     assert "*Evidence basis*" in text
     assert "Scanned: Portfolio Guru filing history only: 3 case(s) in last 6 months" in text
     assert "Window: last 6 months of Portfolio Guru filings only; ARCP cycle month not set yet" in text
-    assert "Evidence gap level:" in text
+    # No Kaizen index → limited filing-history view, not a red gap-level verdict.
+    assert "Kaizen sync needed" in text
+    assert "limited Portfolio Guru filing-history view" in text
+    assert "Evidence gap level:" not in text
+    assert "🔴 Red" not in text
     assert "ARCP risk:" not in text
-    assert "Why:" in text
     assert "Next 3 useful filing actions" in text
     assert "before ARCP" not in text
     assert "Already strong" in text
@@ -834,20 +844,24 @@ async def test_health_default_pathway_is_labelled_as_assumed(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_arcp_and_cesr_pathway_outputs_diverge_in_lead_framing(monkeypatch):
-    """Same evidence, different pathway. The lead framing must diverge:
-    ARCP leads with evidence gap level and the next useful filing actions; CESR
-    leads with long-term readiness and a yearly evidence plan.
+    """Same evidence, different pathway. With no Kaizen index both lead with the
+    sync-needed banner, but their bodies still diverge: ARCP shows the next
+    useful filing actions; CESR shows a yearly evidence plan and WPBA progress.
     """
     arcp_text = await _run_health_capture(monkeypatch, 6001, Pathway.training_arcp)
     cesr_text = await _run_health_capture(monkeypatch, 6002, Pathway.cesr_portfolio)
+
+    # Both lead with the limited-view sync banner (no full verdict).
+    assert "Kaizen sync needed" in arcp_text
+    assert "Kaizen sync needed" in cesr_text
+    assert "Evidence gap level:" not in arcp_text
+    assert "Long-term CESR readiness:" not in cesr_text
 
     # Training (CCT) pathway framing — ARCP is a checkpoint inside this pathway,
     # not a standalone pathway label.
     assert "Training (CCT) evidence scan" in arcp_text
     assert "ARCP evidence review" not in arcp_text
     assert "Training (ARCP)" not in arcp_text
-    assert "Evidence gap level:" in arcp_text
-    assert "ARCP risk:" not in arcp_text
     assert "Next 3 useful filing actions" in arcp_text
     # ARCP must NOT carry CESR / yearly-plan framing
     assert "CESR" not in arcp_text
@@ -857,7 +871,6 @@ async def test_arcp_and_cesr_pathway_outputs_diverge_in_lead_framing(monkeypatch
 
     # CESR framing
     assert "CESR / Portfolio Pathway" in cesr_text
-    assert "Long-term CESR readiness:" in cesr_text
     assert "This year's evidence plan" in cesr_text
     assert "WPBA progress toward 36" in cesr_text
     assert "5-year evidence window" in cesr_text
