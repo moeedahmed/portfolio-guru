@@ -2480,6 +2480,23 @@ def _store_health_report_context(context, full_text: str) -> str:
     return summary
 
 
+def _health_sync_recovery_keyboard(status: str) -> InlineKeyboardMarkup:
+    """Recovery actions when an autonomous /health Kaizen scan cannot complete.
+
+    auth_required → reconnect; everything else → retry the autonomous scan or
+    fall back to the Portfolio-Guru-only limited view. Never instructs the user
+    to retype /health — the buttons drive the recovery.
+    """
+    if status == "auth_required":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔗 Reconnect Kaizen", callback_data="ACTION|setup")],
+        ])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Try scan again", callback_data="ACTION|health")],
+        [InlineKeyboardButton("📊 Show limited view", callback_data="ACTION|health_limited")],
+    ])
+
+
 def _refresh_portfolio_result_keyboard(status: str) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     if status in {"ok", "partial"}:
@@ -5111,9 +5128,11 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             return ConversationHandler.END
         await _show_unsigned_range_picker(query.message, context)
 
-    elif action == "health":
+    elif action in ("health", "health_limited"):
         # Inline pathway-aware health check — morphs the settings screen in
-        # place and returns there, not to the generic filing menu.
+        # place and returns there, not to the generic filing menu. ``health``
+        # runs the autonomous scan-to-report flow; ``health_limited`` is the
+        # recovery path that skips the Kaizen scan and shows the limited view.
         back_btn = InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")
         back_markup = InlineKeyboardMarkup([[back_btn]])
 
@@ -5134,6 +5153,12 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             )
             return ConversationHandler.END
 
+        async def show_scanning():
+            try:
+                await query.message.edit_text("📊 Scanning your Kaizen portfolio…")
+            except Exception:
+                pass
+
         async def send_progress():
             try:
                 await query.message.edit_text("🔍 Analysing your portfolio…")
@@ -5152,13 +5177,27 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         async def fail_fn(text):
             await query.message.edit_text(text, reply_markup=back_markup)
 
-        await _run_health_analysis(
-            user_id=user_id,
-            chat=query.message.chat,
-            send_progress=send_progress,
-            send_result=send_result,
-            fail_fn=fail_fn,
-        )
+        async def show_recovery(text, reply_markup):
+            await _safe_edit_text(query.message, text, reply_markup=reply_markup)
+
+        if action == "health_limited":
+            await _run_health_analysis(
+                user_id=user_id,
+                chat=query.message.chat,
+                send_progress=send_progress,
+                send_result=send_result,
+                fail_fn=fail_fn,
+            )
+        else:
+            await _run_health_with_optional_kaizen_sync(
+                user_id=user_id,
+                chat=query.message.chat,
+                show_scanning=show_scanning,
+                send_progress=send_progress,
+                send_result=send_result,
+                fail_fn=fail_fn,
+                show_recovery=show_recovery,
+            )
         return ConversationHandler.END
 
     elif action.startswith("health_detail|"):
@@ -6189,6 +6228,66 @@ async def _run_health_analysis(
     await send_result(msg, _health_result_keyboard())
 
 
+async def _run_health_with_optional_kaizen_sync(
+    *,
+    user_id: int,
+    chat,
+    show_scanning,
+    send_progress,
+    send_result,
+    fail_fn,
+    show_recovery,
+) -> None:
+    """Autonomous /health: read-only Kaizen scan first when the local index is
+    missing or stale, then the normal analysis — both rendered into the same
+    message.
+
+    Callbacks let the same logic drive both the /health command (a fresh
+    progress message) and the inline Portfolio Health button (morphing the
+    tapped message in place):
+      - show_scanning(): announce the Kaizen scan is running
+      - send_progress(): announce analysis is running
+      - send_result(text, reply_markup): render the final report
+      - fail_fn(text): render an analysis failure
+      - show_recovery(text, reply_markup): render a safe sync recovery state
+
+    When the index is already fresh — or no Kaizen credentials are saved — the
+    scan is skipped and analysis runs directly. The no-credentials path keeps
+    the existing limited-view behaviour inside ``_run_health_analysis`` rather
+    than pretending a full Kaizen scan ran.
+    """
+    if await _health_needs_kaizen_refresh(user_id):
+        await show_scanning()
+        try:
+            result = await sync_kaizen_portfolio_index_for_user(user_id)
+        except Exception as exc:
+            logger.warning("Autonomous /health Kaizen scan failed: %s", exc, exc_info=True)
+            result = SimpleNamespace(
+                status="failed",
+                rows_seen=0,
+                rows_written=0,
+                rows_drifted=0,
+                notes=[],
+            )
+
+        sync_run_status = getattr(result, "status", "failed")
+        if sync_run_status not in {"ok", "partial"}:
+            status = await _safe_kaizen_sync_status(user_id)
+            await show_recovery(
+                _format_refresh_portfolio_result(result, status),
+                _health_sync_recovery_keyboard(sync_run_status),
+            )
+            return
+
+    await _run_health_analysis(
+        user_id=user_id,
+        chat=chat,
+        send_progress=send_progress,
+        send_result=send_result,
+        fail_fn=fail_fn,
+    )
+
+
 async def _append_health_activity_snapshot(
     msg: str,
     user_id: int,
@@ -6837,8 +6936,18 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     progress_holder: dict = {}
 
+    async def _set_progress_text(text):
+        msg = progress_holder.get("msg")
+        if msg is None:
+            progress_holder["msg"] = await update.message.reply_text(text)
+        else:
+            await _safe_edit_text(msg, text)
+
+    async def show_scanning():
+        await _set_progress_text("📊 Scanning your Kaizen portfolio…")
+
     async def send_progress():
-        progress_holder["msg"] = await update.message.reply_text("📊 Analysing your portfolio...")
+        await _set_progress_text("📊 Analysing your portfolio...")
 
     async def send_result(text, reply_markup):
         text = _store_health_report_context(context, text)
@@ -6861,12 +6970,21 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         else:
             await update.message.reply_text(text)
 
-    await _run_health_analysis(
+    async def show_recovery(text, reply_markup):
+        msg = progress_holder.get("msg")
+        if msg is not None:
+            await _safe_edit_text(msg, text, reply_markup=reply_markup)
+        else:
+            await update.message.reply_text(text, reply_markup=reply_markup)
+
+    await _run_health_with_optional_kaizen_sync(
         user_id=user_id,
         chat=update.effective_chat,
+        show_scanning=show_scanning,
         send_progress=send_progress,
         send_result=send_result,
         fail_fn=fail_fn,
+        show_recovery=show_recovery,
     )
     return ConversationHandler.END
 

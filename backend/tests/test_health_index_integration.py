@@ -613,12 +613,20 @@ def test_settings_omits_kaizen_sync_row_when_unavailable(
 
 
 @pytest.mark.asyncio
-async def test_health_command_runs_immediately_when_kaizen_index_is_missing(monkeypatch):
+async def test_health_command_auto_scans_kaizen_when_index_is_missing(monkeypatch):
+    """Missing index + creds → /health runs the read-only scan itself, shows a
+    scanning message, then runs analysis without asking the user to rerun."""
     import bot
 
     monkeypatch.setattr(bot, "has_credentials", lambda _uid: True)
     monkeypatch.setattr(bot, "get_user_tier", AsyncMock(return_value="pro_plus"))
     monkeypatch.setattr(bot, "_safe_kaizen_sync_status", AsyncMock(return_value=None))
+    sync = AsyncMock(
+        return_value=SimpleNamespace(
+            status="ok", rows_seen=10, rows_written=10, rows_drifted=0, notes=[]
+        )
+    )
+    monkeypatch.setattr(bot, "sync_kaizen_portfolio_index_for_user", sync)
     run_health = AsyncMock()
     monkeypatch.setattr(bot, "_run_health_analysis", run_health)
 
@@ -627,7 +635,10 @@ async def test_health_command_runs_immediately_when_kaizen_index_is_missing(monk
 
     await bot.health_command(sim._make_text_update("/health"), context)
 
+    sync.assert_awaited_once_with(4242)
     run_health.assert_awaited_once()
+    texts = [text for _, text, _ in sim.messages_sent if text]
+    assert any("Scanning your Kaizen portfolio" in text for text in texts)
 
 
 @pytest.mark.asyncio
@@ -823,8 +834,8 @@ def _make_sync_status(finished_at: str, *, run_status: str = "ok", items_indexed
 
 
 @pytest.mark.asyncio
-async def test_health_command_runs_immediately_when_index_is_stale(monkeypatch):
-    """A stale sync should not block the primary quick /health journey."""
+async def test_health_command_auto_scans_kaizen_when_index_is_stale(monkeypatch):
+    """A stale index triggers the same autonomous scan-to-report flow."""
     import bot
 
     stale = (datetime.now(UTC) - __import__("datetime").timedelta(days=3)).isoformat()
@@ -835,6 +846,12 @@ async def test_health_command_runs_immediately_when_index_is_stale(monkeypatch):
         "_safe_kaizen_sync_status",
         AsyncMock(return_value=_make_sync_status(stale, run_status="ok", items_indexed=8)),
     )
+    sync = AsyncMock(
+        return_value=SimpleNamespace(
+            status="ok", rows_seen=8, rows_written=8, rows_drifted=0, notes=[]
+        )
+    )
+    monkeypatch.setattr(bot, "sync_kaizen_portfolio_index_for_user", sync)
     run_health = AsyncMock()
     monkeypatch.setattr(bot, "_run_health_analysis", run_health)
 
@@ -843,12 +860,13 @@ async def test_health_command_runs_immediately_when_index_is_stale(monkeypatch):
 
     await bot.health_command(sim._make_text_update("/health"), context)
 
+    sync.assert_awaited_once_with(4242)
     run_health.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_health_command_skips_refresh_prompt_when_index_is_fresh(monkeypatch):
-    """A recent successful sync should let /health run analysis directly."""
+async def test_health_command_skips_scan_when_index_is_fresh(monkeypatch):
+    """A recent successful sync lets /health run analysis directly — no scan."""
     import bot
 
     recent = datetime.now(UTC).isoformat()
@@ -859,6 +877,8 @@ async def test_health_command_skips_refresh_prompt_when_index_is_fresh(monkeypat
         "_safe_kaizen_sync_status",
         AsyncMock(return_value=_make_sync_status(recent, run_status="ok", items_indexed=12)),
     )
+    sync = AsyncMock()
+    monkeypatch.setattr(bot, "sync_kaizen_portfolio_index_for_user", sync)
     run_health = AsyncMock()
     monkeypatch.setattr(bot, "_run_health_analysis", run_health)
 
@@ -867,17 +887,21 @@ async def test_health_command_skips_refresh_prompt_when_index_is_fresh(monkeypat
 
     await bot.health_command(sim._make_text_update("/health"), context)
 
+    sync.assert_not_awaited()
     run_health.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_health_command_skips_refresh_prompt_when_not_connected(monkeypatch):
-    """Users without Kaizen credentials should fall through to the existing analysis path."""
+async def test_health_command_skips_scan_when_not_connected(monkeypatch):
+    """Without Kaizen credentials, /health does not pretend a scan ran; it falls
+    through to the existing (limited) analysis path."""
     import bot
 
     monkeypatch.setattr(bot, "has_credentials", lambda _uid: False)
     monkeypatch.setattr(bot, "get_user_tier", AsyncMock(return_value="pro_plus"))
     monkeypatch.setattr(bot, "_safe_kaizen_sync_status", AsyncMock(return_value=None))
+    sync = AsyncMock()
+    monkeypatch.setattr(bot, "sync_kaizen_portfolio_index_for_user", sync)
     run_health = AsyncMock()
     monkeypatch.setattr(bot, "_run_health_analysis", run_health)
 
@@ -886,18 +910,90 @@ async def test_health_command_skips_refresh_prompt_when_not_connected(monkeypatc
 
     await bot.health_command(sim._make_text_update("/health"), context)
 
+    sync.assert_not_awaited()
     run_health.assert_awaited_once()
+    texts = [text for _, text, _ in sim.messages_sent if text]
+    assert not any("Scanning your Kaizen portfolio" in text for text in texts)
 
 
 @pytest.mark.asyncio
-async def test_inline_health_button_runs_immediately_when_stale(monkeypatch):
-    """The inline ACTION|health entry point mirrors /health's quick path."""
+async def test_health_command_auth_required_shows_reconnect_without_running_health(monkeypatch):
+    """auth_required during the autonomous scan must show reconnect copy and not
+    run the analysis."""
+    import bot
+
+    monkeypatch.setattr(bot, "has_credentials", lambda _uid: True)
+    monkeypatch.setattr(bot, "get_user_tier", AsyncMock(return_value="pro_plus"))
+    monkeypatch.setattr(bot, "_safe_kaizen_sync_status", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        bot,
+        "sync_kaizen_portfolio_index_for_user",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                status="auth_required", rows_seen=0, rows_written=0, rows_drifted=0, notes=["login needed"]
+            )
+        ),
+    )
+    run_health = AsyncMock()
+    monkeypatch.setattr(bot, "_run_health_analysis", run_health)
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.health_command(sim._make_text_update("/health"), context)
+
+    text = sim.get_last_text()
+    assert "Kaizen needs reconnecting" in text
+    assert ("🔗 Reconnect Kaizen", "ACTION|setup") in sim.get_last_buttons()
+    run_health.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_health_command_scan_failure_shows_safe_recovery_without_traceback(monkeypatch):
+    """A raised sync exception must surface as plain copy (no traceback/secrets)
+    with retry + limited-view recovery, and must not run the analysis."""
+    import bot
+
+    monkeypatch.setattr(bot, "has_credentials", lambda _uid: True)
+    monkeypatch.setattr(bot, "get_user_tier", AsyncMock(return_value="pro_plus"))
+    monkeypatch.setattr(bot, "_safe_kaizen_sync_status", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        bot,
+        "sync_kaizen_portfolio_index_for_user",
+        AsyncMock(side_effect=RuntimeError("hidden internal detail")),
+    )
+    run_health = AsyncMock()
+    monkeypatch.setattr(bot, "_run_health_analysis", run_health)
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.health_command(sim._make_text_update("/health"), context)
+
+    text = sim.get_last_text()
+    assert "Sync did not complete" in text
+    assert "hidden internal detail" not in text
+    buttons = sim.get_last_buttons()
+    assert ("🔄 Try scan again", "ACTION|health") in buttons
+    assert ("📊 Show limited view", "ACTION|health_limited") in buttons
+    run_health.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_inline_health_button_auto_scans_when_stale(monkeypatch):
+    """The inline ACTION|health entry mirrors /health's autonomous scan-to-report."""
     import bot
 
     monkeypatch.setattr(bot, "has_credentials", lambda _uid: True)
     monkeypatch.setattr(bot, "get_user_tier", AsyncMock(return_value="pro_plus"))
     monkeypatch.setattr(bot, "is_beta_tester", AsyncMock(return_value=False))
     monkeypatch.setattr(bot, "_safe_kaizen_sync_status", AsyncMock(return_value=None))
+    sync = AsyncMock(
+        return_value=SimpleNamespace(
+            status="ok", rows_seen=9, rows_written=9, rows_drifted=0, notes=[]
+        )
+    )
+    monkeypatch.setattr(bot, "sync_kaizen_portfolio_index_for_user", sync)
     run_health = AsyncMock()
     monkeypatch.setattr(bot, "_run_health_analysis", run_health)
 
@@ -909,6 +1005,7 @@ async def test_inline_health_button_runs_immediately_when_stale(monkeypatch):
         context,
     )
 
+    sync.assert_awaited_once_with(4242)
     run_health.assert_awaited_once()
 
     send_result = run_health.await_args.kwargs["send_result"]
@@ -917,6 +1014,67 @@ async def test_inline_health_button_runs_immediately_when_stale(monkeypatch):
     assert ("🔎 Evidence basis", "ACTION|health_detail|basis") in sim.get_last_buttons()
     assert ("🔙 Back", "ACTION|back_to_menu") not in sim.get_last_buttons()
     assert ("🔙 Back to settings", "ACTION|settings") not in sim.get_last_buttons()
+
+
+@pytest.mark.asyncio
+async def test_inline_health_limited_skips_scan_and_runs_analysis(monkeypatch):
+    """ACTION|health_limited is the recovery fallback: it runs analysis directly
+    without attempting a Kaizen scan."""
+    import bot
+
+    monkeypatch.setattr(bot, "has_credentials", lambda _uid: True)
+    monkeypatch.setattr(bot, "get_user_tier", AsyncMock(return_value="pro_plus"))
+    monkeypatch.setattr(bot, "is_beta_tester", AsyncMock(return_value=False))
+    sync = AsyncMock()
+    monkeypatch.setattr(bot, "sync_kaizen_portfolio_index_for_user", sync)
+    run_health = AsyncMock()
+    monkeypatch.setattr(bot, "_run_health_analysis", run_health)
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_limited"),
+        context,
+    )
+
+    sync.assert_not_awaited()
+    run_health.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_inline_health_button_auth_required_shows_reconnect(monkeypatch):
+    """Inline autonomous health must also surface reconnect on auth_required."""
+    import bot
+
+    monkeypatch.setattr(bot, "has_credentials", lambda _uid: True)
+    monkeypatch.setattr(bot, "get_user_tier", AsyncMock(return_value="pro_plus"))
+    monkeypatch.setattr(bot, "is_beta_tester", AsyncMock(return_value=False))
+    monkeypatch.setattr(bot, "_safe_kaizen_sync_status", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        bot,
+        "sync_kaizen_portfolio_index_for_user",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                status="auth_required", rows_seen=0, rows_written=0, rows_drifted=0, notes=["login needed"]
+            )
+        ),
+    )
+    run_health = AsyncMock()
+    monkeypatch.setattr(bot, "_run_health_analysis", run_health)
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health"),
+        context,
+    )
+
+    text = sim.get_last_text()
+    assert "Kaizen needs reconnecting" in text
+    assert ("🔗 Reconnect Kaizen", "ACTION|setup") in sim.get_last_buttons()
+    run_health.assert_not_awaited()
 
 
 def test_health_result_keyboard_offers_file_and_detail_sections():
@@ -1312,3 +1470,29 @@ def test_sync_status_freshness_helper_recognises_stale_and_fresh_runs():
 
     empty = _make_sync_status(datetime.now(UTC).isoformat(), items_indexed=0)
     assert bot._sync_status_is_fresh(empty) is False
+
+
+def test_health_sync_recovery_keyboard_offers_retry_and_limited_view():
+    """Failure/drift recovery offers an autonomous retry and a limited-view
+    fallback — never a 'rerun /health' instruction button."""
+    import bot
+
+    for status in ("failed", "drift"):
+        buttons = [
+            (button.text, button.callback_data)
+            for row in bot._health_sync_recovery_keyboard(status).inline_keyboard
+            for button in row
+        ]
+        assert ("🔄 Try scan again", "ACTION|health") in buttons
+        assert ("📊 Show limited view", "ACTION|health_limited") in buttons
+
+
+def test_health_sync_recovery_keyboard_offers_reconnect_on_auth_required():
+    import bot
+
+    buttons = [
+        (button.text, button.callback_data)
+        for row in bot._health_sync_recovery_keyboard("auth_required").inline_keyboard
+        for button in row
+    ]
+    assert buttons == [("🔗 Reconnect Kaizen", "ACTION|setup")]
