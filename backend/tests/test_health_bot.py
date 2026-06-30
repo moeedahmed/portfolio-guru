@@ -440,7 +440,7 @@ async def test_arcp_health_falls_back_to_deterministic_output_when_llm_fails(mon
     assert "Training (ARCP)" not in text
     assert "*Evidence basis*" in text
     assert "Scanned: Portfolio Guru filing history only: 3 case(s) in last 6 months" in text
-    assert "Window: last 6 months of Portfolio Guru filings only; ARCP cycle month not set yet" in text
+    assert "Window: last 6 months of Portfolio Guru filings only; add your ARCP month to time this to your cycle" in text
     assert "Confidence: low" in text
     assert "AI ARCP narrative is temporarily unavailable" in text
     # No Kaizen index → limited scan, not a red gap-level verdict.
@@ -497,7 +497,7 @@ async def test_arcp_health_output_prioritises_action_plan_when_llm_succeeds(monk
     assert "Training (ARCP)" not in text
     assert "*Evidence basis*" in text
     assert "Scanned: Portfolio Guru filing history only: 3 case(s) in last 6 months" in text
-    assert "Window: last 6 months of Portfolio Guru filings only; ARCP cycle month not set yet" in text
+    assert "Window: last 6 months of Portfolio Guru filings only; add your ARCP month to time this to your cycle" in text
     # No Kaizen index → limited scan, not a red gap-level verdict.
     assert "Full Kaizen scan not available" in text
     assert "Filing-history snapshot (limited scan)" in text
@@ -1158,6 +1158,101 @@ def test_reconcile_action_severity_is_noop_for_amber_and_red():
     assert bot._reconcile_action_severity(actions, HealthScore.red) == actions
 
 
+# ── Evidence basis / Domain detail button-page copy ──────────────────────────
+
+
+def test_evidence_basis_shows_last_scanned_and_arcp_month_setup_prompt():
+    """The Evidence basis page must show a concise 'Last scanned' line when a
+    Kaizen index timestamp is available, and frame the missing ARCP month as a
+    setup prompt rather than a warning-like defect ('not set yet')."""
+    import bot
+    from kaizen_index import IndexRunRow, KaizenSyncStatus
+
+    status = KaizenSyncStatus(
+        last_run=IndexRunRow(
+            id=1,
+            user_id="4242",
+            started_at="2026-06-01T11:30:00",
+            finished_at="2026-06-01T11:38:00",
+            status="ok",
+            rows_seen=412,
+            rows_written=412,
+            rows_drifted=0,
+        ),
+        items_indexed=412,
+    )
+
+    context = bot._format_health_evidence_context(
+        source="kaizen_index",
+        evidence_count=412,
+        history_count=3,
+        profile_is_default=False,
+        sync_status=status,
+        pathway=Pathway.training_arcp,
+    )
+
+    assert context.startswith("*Evidence basis*")
+    assert "Last scanned: 2026-06-01 12:38 BST" in context
+    assert "add your ARCP month to time this to your cycle" in context
+    assert "not set yet" not in context
+
+
+def test_evidence_basis_omits_last_scanned_when_no_sync_run():
+    """Without a Kaizen index run there is nothing to date, so the Last scanned
+    line must be suppressed rather than printing a placeholder."""
+    import bot
+
+    context = bot._format_health_evidence_context(
+        source="case_history",
+        evidence_count=2,
+        history_count=2,
+        profile_is_default=False,
+        sync_status=None,
+        pathway=Pathway.training_arcp,
+    )
+
+    assert context.startswith("*Evidence basis*")
+    assert "Last scanned" not in context
+
+
+def test_arcp_domain_detail_uses_visible_coverage_heading_and_title_case():
+    """The non-limited Domain detail must use the neutral 'Visible domain
+    coverage' heading (not the verdict-style 'Already strong') and title-case
+    the domain labels while preserving acronyms."""
+    import bot
+
+    snapshot = _snapshot_with_score(
+        HealthScore.amber,
+        domain_counts={
+            HealthDomain.clinical: 2,
+            HealthDomain.cpd: 1,
+            HealthDomain.qi: 0,
+            HealthDomain.teaching: 0,
+            HealthDomain.leadership: 0,
+            HealthDomain.reflection: 0,
+            HealthDomain.unclassified: 0,
+        },
+    )
+
+    full_text = bot._format_arcp_action_plan_message(
+        snapshot=snapshot,
+        history=[],
+        month_label="June 2026",
+        limited_view=False,
+    )
+
+    assert "*Visible domain coverage*" in full_text
+    assert "Already strong" not in full_text
+    assert "• Clinical: 2" in full_text
+    assert "• CPD: 1" in full_text
+
+    sections = bot._health_report_sections(full_text)
+    domains = sections["domains"]
+    assert domains.startswith("📋 *Domain detail*")
+    assert "*Visible domain coverage*" in domains
+    assert "• Clinical: 2" in domains
+
+
 # ── Weekly digest: caption composition ────────────────────────────────────────
 
 
@@ -1385,10 +1480,13 @@ def test_format_health_activity_snapshot_contains_all_chart_panel_fields():
     # Panel 3: weekly filing distribution
     assert "Weekly" in text or "weekly" in text
 
-    # Panel 4: activity / plan summary
+    # Panel 4: activity summary — no plan/billing copy belongs here
     assert "2" in text  # cases this month
-    assert "Pro Plus" in text or "pro_plus" in text.lower() or "unlimited" in text
     assert "ST5" in text
+    assert "Plan:" not in text
+    # Curriculum coverage must clarify it is Portfolio Guru-linked evidence,
+    # not a measure of the user's full Kaizen portfolio strength.
+    assert "not your full Kaizen strength" in text
 
     # KC stats row
     assert "KC" in text or "KCs" in text

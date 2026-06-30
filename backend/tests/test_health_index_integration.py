@@ -1109,15 +1109,15 @@ def test_health_compact_report_moves_audit_detail_behind_buttons():
         "June 2026\n\n"
         "*Evidence basis*\n"
         "Scanned: Portfolio Guru filing history only: 3 case(s) in last 6 months\n"
-        "Window: last 6 months of Portfolio Guru filings only; ARCP cycle month not set yet\n"
+        "Window: last 6 months of Portfolio Guru filings only; add your ARCP month to time this to your cycle\n"
         "Assumed pathway: Training (CCT) — change if wrong\n"
         "Confidence: low — Kaizen index not available, so this cannot reflect your full portfolio\n\n"
         "*Evidence gap level:* 🔴 Red\n"
         "*Why:* Red because CPD evidence is missing.\n\n"
         "*Next 3 useful filing actions*\n"
         "1. Add a recent CPD course\n\n"
-        "*Already strong*\n"
-        "• clinical: 2\n\n"
+        "*Visible domain coverage*\n"
+        "• Clinical: 2\n\n"
         "*Missing domains*\n"
         "CPD · QI\n\n"
         "*Activity snapshot*\n"
@@ -1132,7 +1132,7 @@ def test_health_compact_report_moves_audit_detail_behind_buttons():
     assert "*Missing domains*" in summary
     assert "*Evidence basis*" not in summary
     assert "*Activity snapshot*" not in summary
-    assert "*Already strong*" not in summary
+    assert "*Visible domain coverage*" not in summary
     assert "*Scan confidence*" in summary
     assert "Scanned: Portfolio Guru filing history only" in summary
     assert "Confidence: low" in summary

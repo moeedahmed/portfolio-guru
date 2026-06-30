@@ -2417,7 +2417,7 @@ def _health_report_sections(full_text: str) -> dict[str, str]:
 
     domain_parts = [
         _extract_markdown_section(full_text, "Visible in this limited scan"),
-        _extract_markdown_section(full_text, "Already strong"),
+        _extract_markdown_section(full_text, "Visible domain coverage"),
         _extract_markdown_section(full_text, "Domain balance"),
         _extract_markdown_section(full_text, "Not seen in this limited scan"),
         _extract_markdown_section(full_text, "Missing domains"),
@@ -2437,7 +2437,7 @@ def _health_compact_report_text(full_text: str) -> str:
     lines = full_text.splitlines()
     skip_headings = {
         "Evidence basis",
-        "Already strong",
+        "Visible domain coverage",
         "Visible in this limited scan",
         "Domain balance",
         "Evidence gaps to close before applying",
@@ -6502,7 +6502,7 @@ def _format_arcp_action_plan_message(
     risk = _health_score_label(snapshot.health_score)
     reason = _format_arcp_risk_reason(snapshot)
     actions = _top_health_actions(snapshot, analysis)
-    strong = _strong_domain_lines(snapshot)
+    visible = _visible_domain_lines(snapshot)
     missing = _missing_domain_labels(snapshot)
 
     lines = [
@@ -6551,8 +6551,8 @@ def _format_arcp_action_plan_message(
         ])
     else:
         lines.extend([
-            "*Already strong*",
-            _bullet_list(strong) if strong else "• Not enough evidence yet",
+            "*Visible domain coverage*",
+            _bullet_list(visible) if visible else "• Not enough evidence yet",
             "",
             "*Missing domains*",
             " · ".join(missing) if missing else "None obvious from current evidence",
@@ -6598,13 +6598,34 @@ def _format_health_evidence_context(
     else:
         pathway_line = f"Pathway: {_pathway_label(pathway)}"
 
-    return "\n".join([
+    lines = [
         "*Evidence basis*",
         f"Scanned: {scanned}",
+    ]
+    last_scanned = _health_last_scanned_line(sync_status)
+    if last_scanned:
+        lines.append(last_scanned)
+    lines.extend([
         f"Window: {window}",
         f"{pathway_line}",
         f"Confidence: {confidence}",
     ])
+    return "\n".join(lines)
+
+
+def _health_last_scanned_line(sync_status: KaizenSyncStatus | None) -> str | None:
+    """Concise "Last scanned" line for the Evidence basis page.
+
+    Only shown when a real Kaizen index run exists, so the user can see how
+    fresh the scanned evidence is. Reuses the same local-time format as the
+    /settings sync row.
+    """
+    if sync_status is None or sync_status.last_run is None:
+        return None
+    when = (sync_status.last_run.finished_at or sync_status.last_run.started_at or "").strip()
+    if not when:
+        return None
+    return f"Last scanned: {_format_user_local_timestamp(when)}"
 
 
 def _health_window_label(pathway: Pathway, source: str) -> str:
@@ -6613,8 +6634,8 @@ def _health_window_label(pathway: Pathway, source: str) -> str:
             return "all indexed Kaizen evidence currently stored; CESR still needs a formal multi-year evidence map"
         return "last 6 months of Portfolio Guru filings only; not enough for a CESR judgement"
     if source == "kaizen_index":
-        return "all indexed Kaizen evidence currently stored; ARCP cycle month not set yet"
-    return "last 6 months of Portfolio Guru filings only; ARCP cycle month not set yet"
+        return "all indexed Kaizen evidence currently stored; add your ARCP month to time this to your cycle"
+    return "last 6 months of Portfolio Guru filings only; add your ARCP month to time this to your cycle"
 
 
 def _health_confidence_label(
@@ -6713,14 +6734,6 @@ def _soften_urgent_text(action: str) -> str:
     if softened:
         softened = softened[0].upper() + softened[1:]
     return softened or action
-
-
-def _strong_domain_lines(snapshot) -> list[str]:
-    return [
-        f"{_HEALTH_DOMAIN_LABELS[domain]}: {count}"
-        for domain, count in snapshot.domain_counts.items()
-        if count > 0 and domain in CORE_DOMAINS
-    ]
 
 
 def _visible_domain_lines(snapshot) -> list[str]:

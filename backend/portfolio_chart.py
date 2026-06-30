@@ -199,7 +199,7 @@ def _coverage_from_kcs(kc_coverage: dict[int, list[str]]) -> set[int]:
 def _format_count_list(items: list[tuple[str, int]], empty: str) -> str:
     if not items:
         return empty
-    return ", ".join(f"{label} {count}" for label, count in items)
+    return ", ".join(f"{label} ({count})" for label, count in items)
 
 
 def format_health_activity_snapshot(
@@ -228,13 +228,10 @@ def format_health_activity_snapshot(
         coverage = _coverage_from_history(history_6mo)
         coverage_source = "filed forms"
 
-    tier_pretty = (tier or "").strip().replace("_", " ").title() or "Plan"
-    if limit == -1:
-        plan_line = f"{tier_pretty}: unlimited"
-    else:
-        plan_line = f"{tier_pretty}: {cases_this_month}/{limit} cases this month"
-
-    coverage_line = f"{len(coverage)}/12 SLOs covered from {coverage_source}"
+    coverage_line = (
+        f"{len(coverage)}/12 SLOs touched by Portfolio Guru-linked evidence "
+        f"({coverage_source}) — not your full Kaizen strength"
+    )
     if coverage:
         coverage_line += " (" + ", ".join(f"SLO {slo}" for slo in sorted(coverage)) + ")"
 
@@ -245,7 +242,6 @@ def format_health_activity_snapshot(
         f"- Form mix: {_format_count_list(top_forms, 'none yet this month')}",
         f"- Curriculum coverage: {coverage_line}",
         f"- Weekly filings: {_format_count_list(weekly_items, 'none yet this month')}",
-        f"- Plan: {plan_line}",
         f"- Portfolio level: {training_level or 'not set'}",
     ]
 
