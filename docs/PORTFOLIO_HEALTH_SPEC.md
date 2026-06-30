@@ -68,6 +68,25 @@ Source checks on 2026-06-27:
   still need supporting information for practice outside training posts:
   https://www.gmc-uk.org/registration-and-licensing/managing-your-registration/revalidation/guidance-on-supporting-information-for-revalidation/guidance-on-supporting-information-for-revalidation
 
+## Status / copy consistency rule (2026-06-30)
+
+The deterministic health score and the report's action copy must never
+contradict each other. The ARCP report merges the LLM narrative's free-text
+`suggestions` into the "Next 3 useful filing actions"; that text is reconciled
+against the score before display (`bot._reconcile_action_severity`):
+
+- A **Green** (or not-enough-data **Grey**) report must not contain urgent /
+  urgently / critical missing-evidence phrasing. ESLE/SLO8 suggestions are
+  reframed as optional/confirmatory ("consider logging an ESLE if it isn't
+  already evidenced elsewhere"); other urgent phrasing has the urgency stripped.
+- **Amber / Red** reports keep priority/urgent wording, because there the
+  urgency matches the engine's verdict. If ESLE evidence is genuinely
+  readiness-affecting, the engine's domain coverage already lands the score at
+  Amber or below, which is where priority ESLE wording belongs.
+
+This keeps the rule deterministic: urgency is derived from the score, never from
+the non-deterministic LLM phrasing alone.
+
 Product consequence: `/health` should evolve into at least three profile
 templates, not one universal red/amber/green report:
 

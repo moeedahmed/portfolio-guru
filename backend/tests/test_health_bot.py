@@ -6,8 +6,27 @@ import pytest
 from telegram.error import BadRequest
 from telegram.ext import ConversationHandler
 
-from health_models import HealthProfile, Pathway
+from health_models import HealthDomain, HealthProfile, HealthScore, HealthSnapshot, Pathway
 from tests.bot_simulator import BotSimulator
+
+
+def _snapshot_with_score(
+    score: HealthScore,
+    *,
+    next_actions: list[str] | None = None,
+    domain_counts: dict[HealthDomain, int] | None = None,
+) -> HealthSnapshot:
+    counts = domain_counts or {domain: 5 for domain in HealthDomain}
+    return HealthSnapshot(
+        user_id="1",
+        computed_at=datetime.now(UTC),
+        pathway=Pathway.training_arcp,
+        health_score=score,
+        domain_counts=counts,
+        pathway_readiness={},
+        gap_summary=[],
+        next_actions=next_actions or ["File a CBD from a recent supervised case"],
+    )
 
 
 def _make_pc_mock(snapshot_text: str = "") -> SimpleNamespace:
@@ -988,6 +1007,96 @@ def test_pathway_for_detected_role_docstring_uses_training_cct_not_arcp():
     # Forbid framings that present ARCP as a pathway / destination label
     assert "→ ARCP" not in doc
     assert "ARCP pathway" not in doc
+
+
+# ── ESLE / urgency consistency with the deterministic health score ───────────
+
+
+_URGENCY_WORDS = ("urgent", "urgently", "critical", "critically", "immediately", "asap")
+
+
+def test_green_arcp_report_softens_urgent_esle_suggestion():
+    """A Green report must never carry urgent missing-evidence copy. An LLM
+    'Urgently schedule an ESLE for SLO8' suggestion must be reframed as an
+    optional/confirmatory ESLE action so the status and the copy agree."""
+    import bot
+
+    snapshot = _snapshot_with_score(HealthScore.green)
+    msg = bot._format_arcp_action_plan_message(
+        snapshot=snapshot,
+        history=[],
+        month_label="June 2026",
+        analysis={"suggestions": ["Urgently schedule an ESLE to cover SLO8"]},
+        limited_view=False,
+    )
+
+    assert "🟢 Green" in msg
+    lowered = msg.lower()
+    for word in _URGENCY_WORDS:
+        assert word not in lowered, f"Green report must not contain urgent copy: {word!r}"
+    # ESLE is still surfaced, but framed as optional/confirmatory.
+    assert "ESLE" in msg
+    assert "Consider" in msg
+    assert "already evidenced" in msg
+
+
+def test_green_arcp_report_softens_generic_urgent_suggestion():
+    """Non-ESLE urgent suggestions are softened too — Green leaves no urgency."""
+    import bot
+
+    snapshot = _snapshot_with_score(HealthScore.green)
+    msg = bot._format_arcp_action_plan_message(
+        snapshot=snapshot,
+        history=[],
+        month_label="June 2026",
+        analysis={"suggestions": ["Urgently add a Mini-CEX"]},
+        limited_view=False,
+    )
+
+    assert "🟢 Green" in msg
+    lowered = msg.lower()
+    for word in _URGENCY_WORDS:
+        assert word not in lowered
+    # The underlying action survives, just without the urgent qualifier.
+    assert "Mini-CEX" in msg
+
+
+def test_amber_arcp_report_keeps_urgent_esle_priority_wording():
+    """When the status is Amber the engine has flagged a real gap, so priority
+    ESLE wording matches the severity and must be preserved."""
+    import bot
+
+    snapshot = _snapshot_with_score(
+        HealthScore.amber,
+        next_actions=["Add leadership or management evidence"],
+        domain_counts={
+            HealthDomain.clinical: 5,
+            HealthDomain.cpd: 3,
+            HealthDomain.qi: 2,
+            HealthDomain.teaching: 0,
+            HealthDomain.leadership: 0,
+            HealthDomain.reflection: 1,
+            HealthDomain.unclassified: 0,
+        },
+    )
+    msg = bot._format_arcp_action_plan_message(
+        snapshot=snapshot,
+        history=[],
+        month_label="June 2026",
+        analysis={"suggestions": ["Urgently schedule an ESLE to cover SLO8"]},
+        limited_view=False,
+    )
+
+    assert "🟡 Amber" in msg
+    assert "Urgently schedule an ESLE" in msg
+
+
+def test_reconcile_action_severity_is_noop_for_amber_and_red():
+    import bot
+
+    actions = ["Urgently schedule an ESLE", "Critically review QI"]
+    assert bot._reconcile_action_severity(actions, HealthScore.amber) == actions
+    assert bot._reconcile_action_severity(actions, HealthScore.red) == actions
 
 
 # ── Weekly digest: caption composition ────────────────────────────────────────

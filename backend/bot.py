@@ -6656,7 +6656,48 @@ def _top_health_actions(snapshot, analysis: dict | None = None) -> list[str]:
         values.extend(analysis.get("suggestions", []) or [])
     if not values:
         values.append("Add evidence before your next ARCP review")
+    values = _reconcile_action_severity(values, snapshot.health_score)
     return _dedupe_text(values)[:3]
+
+
+_URGENT_ACTION_PATTERN = re.compile(
+    r"\b(urgent(?:ly)?|critical(?:ly)?|immediate(?:ly)?|asap|as soon as possible)\b",
+    re.IGNORECASE,
+)
+_ESLE_OR_SLO8_PATTERN = re.compile(r"\b(esle|slo\s?8)\b", re.IGNORECASE)
+_SOFT_ESLE_ACTION = "Consider logging an ESLE if it isn't already evidenced elsewhere"
+
+
+def _reconcile_action_severity(actions: list[str], score) -> list[str]:
+    """Keep filing-action urgency consistent with the deterministic health score.
+
+    The LLM ARCP narrative can return free-text suggestions like "Urgently
+    schedule an ESLE for SLO8". A Green score means the engine sees no
+    readiness-affecting gap, so that urgency contradicts the verdict. On Green
+    (or the not-enough-data Grey state) urgent/critical phrasing is softened and
+    ESLE/SLO8 suggestions are reframed as optional/confirmatory. Amber and Red
+    keep priority wording, because there the urgency matches the status.
+    """
+    value = getattr(score, "value", str(score))
+    if value not in {"green", "grey"}:
+        return actions
+    reconciled: list[str] = []
+    for action in actions:
+        if _ESLE_OR_SLO8_PATTERN.search(action):
+            reconciled.append(_SOFT_ESLE_ACTION)
+        elif _URGENT_ACTION_PATTERN.search(action):
+            reconciled.append(_soften_urgent_text(action))
+        else:
+            reconciled.append(action)
+    return reconciled
+
+
+def _soften_urgent_text(action: str) -> str:
+    softened = _URGENT_ACTION_PATTERN.sub("", action)
+    softened = re.sub(r"\s{2,}", " ", softened).strip(" ,;:-")
+    if softened:
+        softened = softened[0].upper() + softened[1:]
+    return softened or action
 
 
 def _strong_domain_lines(snapshot) -> list[str]:
