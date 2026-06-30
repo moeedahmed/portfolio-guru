@@ -2345,23 +2345,46 @@ def _health_result_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("📋 Domain detail", callback_data="ACTION|health_detail|domains"),
-            InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file"),
+            InlineKeyboardButton("➕ File another case", callback_data="ACTION|file"),
         ],
     ])
 
 
 def _health_detail_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔙 Back to health report", callback_data="ACTION|health_back_to_report")],
+        [InlineKeyboardButton("➕ File another case", callback_data="ACTION|file")],
+        [InlineKeyboardButton("↩️ Back to health report", callback_data="ACTION|health_back_to_report")],
     ])
+
+
+def _heading_key(line: str) -> str:
+    """Return the bold heading text of a line, ignoring any leading emoji.
+
+    ``"✅ *Visible in this limited scan*"`` → ``"Visible in this limited scan"``.
+    Lines that are not a single trailing bold span (e.g. ``"*Why:* reason"`` or
+    plain text) return ``""`` so inline bold is never treated as a section head.
+    """
+    stripped = line.strip()
+    if not stripped.endswith("*"):
+        return ""
+    first = stripped.find("*")
+    last = stripped.rfind("*")
+    if last <= first:
+        return ""
+    inner = stripped[first + 1:last]
+    if not inner or "*" in inner:
+        return ""
+    return inner.strip()
 
 
 def _extract_markdown_section(text: str, heading: str) -> str:
     lines = text.splitlines()
-    marker = f"*{heading}*"
-    try:
-        start = lines.index(marker)
-    except ValueError:
+    start = None
+    for index, line in enumerate(lines):
+        if _heading_key(line) == heading:
+            start = index
+            break
+    if start is None:
         return ""
 
     end = len(lines)
@@ -2373,39 +2396,58 @@ def _extract_markdown_section(text: str, heading: str) -> str:
     return "\n".join(lines[start:end]).strip()
 
 
+def _with_emoji_heading(section: str, emoji: str) -> str:
+    """Prefix the leading bold heading of an extracted section with ``emoji``."""
+    if not section:
+        return section
+    lines = section.splitlines()
+    key = _heading_key(lines[0])
+    if key:
+        lines[0] = f"{emoji} *{key}*"
+    return "\n".join(lines)
+
+
 def _health_report_sections(full_text: str) -> dict[str, str]:
-    basis = _extract_markdown_section(full_text, "Evidence basis")
-    activity = _extract_markdown_section(full_text, "Activity snapshot")
+    basis = _with_emoji_heading(
+        _extract_markdown_section(full_text, "Evidence basis"), "🔎"
+    )
+    activity = _with_emoji_heading(
+        _extract_markdown_section(full_text, "Activity snapshot"), "📈"
+    )
 
     domain_parts = [
+        _extract_markdown_section(full_text, "Visible in this limited scan"),
         _extract_markdown_section(full_text, "Already strong"),
         _extract_markdown_section(full_text, "Domain balance"),
+        _extract_markdown_section(full_text, "Not seen in this limited scan"),
         _extract_markdown_section(full_text, "Missing domains"),
         _extract_markdown_section(full_text, "Evidence gaps to close before applying"),
     ]
-    domain_detail = "\n\n".join(part for part in domain_parts if part)
+    domain_body = "\n\n".join(part for part in domain_parts if part)
+    domain_detail = f"📋 *Domain detail*\n\n{domain_body}" if domain_body else ""
 
     return {
-        "basis": basis or "*Evidence basis*\nNot available for this report.",
-        "activity": activity or "*Activity snapshot*\nNot available for this report.",
-        "domains": domain_detail or "*Domain detail*\nNot available for this report.",
+        "basis": basis or "🔎 *Evidence basis*\nNot available for this report.",
+        "activity": activity or "📈 *Activity snapshot*\nNot available for this report.",
+        "domains": domain_detail or "📋 *Domain detail*\nNot available for this report.",
     }
 
 
 def _health_compact_report_text(full_text: str) -> str:
     lines = full_text.splitlines()
     skip_headings = {
-        "*Evidence basis*",
-        "*Already strong*",
-        "*Domain balance*",
-        "*Evidence gaps to close before applying*",
-        "*Activity snapshot*",
+        "Evidence basis",
+        "Already strong",
+        "Visible in this limited scan",
+        "Domain balance",
+        "Evidence gaps to close before applying",
+        "Activity snapshot",
     }
     compact: list[str] = []
     skipping = False
     for line in lines:
         stripped = line.strip()
-        if stripped in skip_headings:
+        if _heading_key(line) in skip_headings:
             skipping = True
             continue
         if skipping:
@@ -6097,7 +6139,7 @@ async def _run_health_analysis(
         msg = _format_cesr_health_message(
             snapshot, history, month_label, evidence_context, limited_view=limited_view
         )
-        msg = await _append_health_activity_snapshot(msg, user_id, history, training_level)
+        msg = await _append_health_activity_snapshot(msg, user_id, history, training_level, limited_view=limited_view)
         await send_result(msg, _health_result_keyboard())
         return
 
@@ -6116,7 +6158,7 @@ async def _run_health_analysis(
             "AI ARCP narrative timed out; deterministic health is shown below.",
             limited_view=limited_view,
         )
-        msg = await _append_health_activity_snapshot(msg, user_id, history, training_level)
+        msg = await _append_health_activity_snapshot(msg, user_id, history, training_level, limited_view=limited_view)
         await send_result(msg, _health_result_keyboard())
         return
     except Exception as e:
@@ -6130,7 +6172,7 @@ async def _run_health_analysis(
             "AI ARCP narrative is temporarily unavailable; deterministic health is shown below.",
             limited_view=limited_view,
         )
-        msg = await _append_health_activity_snapshot(msg, user_id, history, training_level)
+        msg = await _append_health_activity_snapshot(msg, user_id, history, training_level, limited_view=limited_view)
         await send_result(msg, _health_result_keyboard())
         return
 
@@ -6143,7 +6185,7 @@ async def _run_health_analysis(
         analysis=analysis,
         limited_view=limited_view,
     )
-    msg = await _append_health_activity_snapshot(msg, user_id, history, training_level)
+    msg = await _append_health_activity_snapshot(msg, user_id, history, training_level, limited_view=limited_view)
     await send_result(msg, _health_result_keyboard())
 
 
@@ -6152,6 +6194,7 @@ async def _append_health_activity_snapshot(
     user_id: int,
     history: list[dict],
     training_level: str | None,
+    limited_view: bool = False,
 ) -> str:
     try:
         from portfolio_chart import format_health_activity_snapshot_async
@@ -6163,6 +6206,12 @@ async def _append_health_activity_snapshot(
     except Exception as e:
         logger.warning("Portfolio health activity snapshot failed: %s", e, exc_info=True)
         return msg
+    if limited_view:
+        snapshot = (
+            f"{snapshot}\n"
+            "- Confidence: low — based on Portfolio Guru filings only; "
+            "full Kaizen scan not available"
+        )
     return f"{msg}\n\n{snapshot}"
 
 
@@ -6317,13 +6366,26 @@ _HEALTH_DOMAIN_LABELS = {
     HealthDomain.unclassified: "unclassified",
 }
 
+# Title-cased domain names for the limited-scan "visible" list, preserving
+# acronyms (CPD/QI) that a naive .capitalize() would mangle.
+_HEALTH_DOMAIN_DISPLAY = {
+    HealthDomain.clinical: "Clinical",
+    HealthDomain.cpd: "CPD",
+    HealthDomain.qi: "QI",
+    HealthDomain.teaching: "Teaching",
+    HealthDomain.leadership: "Leadership",
+    HealthDomain.reflection: "Reflection",
+    HealthDomain.unclassified: "Unclassified",
+}
+
 
 def _health_limited_view_banner() -> str:
     return "\n".join([
-        "⚠️ *Kaizen sync needed*",
-        "This is a limited Portfolio Guru filing-history view, not a full "
-        "portfolio health verdict.",
-        "Refresh/sync Kaizen, then rerun /health.",
+        "⚠️ *Full Kaizen scan not available*",
+        "Portfolio Guru can only see cases filed through Portfolio Guru right "
+        "now. Your wider Kaizen portfolio has not been indexed for this health "
+        "scan.",
+        "Next step: refresh Kaizen, then rerun /health.",
     ])
 
 
@@ -6358,10 +6420,10 @@ def _format_arcp_action_plan_message(
 
     if limited_view:
         lines.extend([
-            "*Filing-history snapshot (no full score)*",
-            "An evidence gap level isn't shown here because your Kaizen "
-            "portfolio hasn't been read yet. The items below are limited-view "
-            "suggestions from Portfolio Guru filings only.",
+            "*Filing-history snapshot (limited scan)*",
+            "No overall evidence gap level is shown because your wider Kaizen "
+            "portfolio has not been indexed. The actions below are based only "
+            "on cases filed through Portfolio Guru.",
         ])
     else:
         lines.extend([
@@ -6374,15 +6436,31 @@ def _format_arcp_action_plan_message(
         "*Next 3 useful filing actions*",
         _numbered_list(actions),
         "",
-        "*Already strong*",
-        _bullet_list(strong) if strong else "• Not enough evidence yet",
-        "",
-        "*Missing domains*",
-        " · ".join(missing) if missing else "None obvious from current evidence",
-        "",
-        f"Cases filed in Portfolio Guru: {len(history)} in the last 6 months",
-        "_Missing domains are inferred from visible evidence in this scan; this is not an official ARCP outcome._",
     ])
+
+    if limited_view:
+        visible = _visible_domain_lines(snapshot)
+        lines.extend([
+            "✅ *Visible in this limited scan*",
+            _bullet_list(visible) if visible else "• Nothing filed through Portfolio Guru yet",
+            "",
+            "⚠️ *Not seen in this limited scan*",
+            " · ".join(missing) if missing else "All core domains have at least one Portfolio Guru filing",
+            "",
+            f"Cases filed in Portfolio Guru: {len(history)} in the last 6 months",
+            "_This limited scan only covers Portfolio Guru filings, not your full Kaizen portfolio._",
+        ])
+    else:
+        lines.extend([
+            "*Already strong*",
+            _bullet_list(strong) if strong else "• Not enough evidence yet",
+            "",
+            "*Missing domains*",
+            " · ".join(missing) if missing else "None obvious from current evidence",
+            "",
+            f"Cases filed in Portfolio Guru: {len(history)} in the last 6 months",
+            "_Missing domains are inferred from visible evidence in this scan; this is not an official ARCP outcome._",
+        ])
     if level_note:
         lines.append(level_note)
     return "\n".join(lines)
@@ -6490,6 +6568,14 @@ def _strong_domain_lines(snapshot) -> list[str]:
     ]
 
 
+def _visible_domain_lines(snapshot) -> list[str]:
+    return [
+        f"{_HEALTH_DOMAIN_DISPLAY[domain]}: {count}"
+        for domain, count in snapshot.domain_counts.items()
+        if count > 0 and domain in CORE_DOMAINS
+    ]
+
+
 def _strong_domain_labels(snapshot) -> list[str]:
     return [
         _HEALTH_DOMAIN_LABELS[domain]
@@ -6562,10 +6648,10 @@ def _format_cesr_health_message(
         lines.extend([evidence_context, ""])
     if limited_view:
         lines.extend([
-            "*Filing-history snapshot (no readiness verdict)*",
-            "A long-term CESR readiness verdict isn't shown here because your "
-            "Kaizen portfolio hasn't been read yet. The items below are "
-            "limited-view suggestions from Portfolio Guru filings only.",
+            "*Filing-history snapshot (limited scan)*",
+            "No long-term CESR readiness verdict is shown because your wider "
+            "Kaizen portfolio has not been indexed. The items below are based "
+            "only on cases filed through Portfolio Guru.",
             "",
         ])
     else:
@@ -6588,17 +6674,37 @@ def _format_cesr_health_message(
         "*Domain balance*",
         _format_domain_counts(snapshot.domain_counts),
         "",
-        "*Missing domains*",
-        " · ".join(missing) if missing else "None obvious from current evidence",
-        "",
+    ])
+
+    if limited_view:
+        lines.extend([
+            "⚠️ *Not seen in this limited scan*",
+            " · ".join(missing) if missing else "All core domains have at least one Portfolio Guru filing",
+            "",
+        ])
+    else:
+        lines.extend([
+            "*Missing domains*",
+            " · ".join(missing) if missing else "None obvious from current evidence",
+            "",
+        ])
+
+    lines.extend([
         "*Evidence gaps to close before applying*",
         _bullet_list(gaps),
         "",
         "Target: 36 WPBAs (12 DOPS · 12 Mini-CEX · 12 CBD) plus structured "
         "consultant reports, CPD, and SLO/CiP-level coverage within the 5-year "
         "evidence window. Build this as a multi-year portfolio, not an annual deadline.",
-        "_Missing domains are inferred from visible evidence in this scan; this is not an official CESR outcome._",
     ])
+    if limited_view:
+        lines.append(
+            "_This limited scan only covers Portfolio Guru filings, not your full Kaizen portfolio._"
+        )
+    else:
+        lines.append(
+            "_Missing domains are inferred from visible evidence in this scan; this is not an official CESR outcome._"
+        )
     return "\n".join(lines)
 
 

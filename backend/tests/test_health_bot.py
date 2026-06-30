@@ -309,9 +309,9 @@ async def test_cesr_health_output_uses_deterministic_engine_without_llm(monkeypa
 
     text = sent["text"]
     assert "*Portfolio Health — CESR / Portfolio Pathway*" in text
-    # No Kaizen index → limited filing-history view, not a readiness verdict.
-    assert "Kaizen sync needed" in text
-    assert "limited Portfolio Guru filing-history view" in text
+    # No Kaizen index → limited scan, not a readiness verdict.
+    assert "Full Kaizen scan not available" in text
+    assert "Filing-history snapshot (limited scan)" in text
     assert "Long-term CESR readiness:" not in text
     assert "🔴 Early" not in text
     assert "WPBA progress toward 36" in text
@@ -424,16 +424,18 @@ async def test_arcp_health_falls_back_to_deterministic_output_when_llm_fails(mon
     assert "Window: last 6 months of Portfolio Guru filings only; ARCP cycle month not set yet" in text
     assert "Confidence: low" in text
     assert "AI ARCP narrative is temporarily unavailable" in text
-    # No Kaizen index → limited filing-history view, not a red gap-level verdict.
-    assert "Kaizen sync needed" in text
-    assert "limited Portfolio Guru filing-history view" in text
+    # No Kaizen index → limited scan, not a red gap-level verdict.
+    assert "Full Kaizen scan not available" in text
+    assert "Filing-history snapshot (limited scan)" in text
     assert "Evidence gap level:" not in text
     assert "🔴 Red" not in text
     assert "ARCP risk:" not in text
     assert "Next 3 useful filing actions" in text
     assert "before ARCP" not in text
-    assert "Already strong" in text
-    assert "Missing domains" in text
+    assert "Visible in this limited scan" in text
+    assert "Not seen in this limited scan" in text
+    assert "Already strong" not in text
+    assert "Missing domains" not in text
     assert "Domain coverage:" not in text
     fail_fn.assert_not_called()
 
@@ -477,16 +479,18 @@ async def test_arcp_health_output_prioritises_action_plan_when_llm_succeeds(monk
     assert "*Evidence basis*" in text
     assert "Scanned: Portfolio Guru filing history only: 3 case(s) in last 6 months" in text
     assert "Window: last 6 months of Portfolio Guru filings only; ARCP cycle month not set yet" in text
-    # No Kaizen index → limited filing-history view, not a red gap-level verdict.
-    assert "Kaizen sync needed" in text
-    assert "limited Portfolio Guru filing-history view" in text
+    # No Kaizen index → limited scan, not a red gap-level verdict.
+    assert "Full Kaizen scan not available" in text
+    assert "Filing-history snapshot (limited scan)" in text
     assert "Evidence gap level:" not in text
     assert "🔴 Red" not in text
     assert "ARCP risk:" not in text
     assert "Next 3 useful filing actions" in text
     assert "before ARCP" not in text
-    assert "Already strong" in text
-    assert "Missing domains" in text
+    assert "Visible in this limited scan" in text
+    assert "Not seen in this limited scan" in text
+    assert "Already strong" not in text
+    assert "Missing domains" not in text
     assert "CPD" in text
     assert "QI" in text
     assert "Form types:" not in text
@@ -851,9 +855,9 @@ async def test_arcp_and_cesr_pathway_outputs_diverge_in_lead_framing(monkeypatch
     arcp_text = await _run_health_capture(monkeypatch, 6001, Pathway.training_arcp)
     cesr_text = await _run_health_capture(monkeypatch, 6002, Pathway.cesr_portfolio)
 
-    # Both lead with the limited-view sync banner (no full verdict).
-    assert "Kaizen sync needed" in arcp_text
-    assert "Kaizen sync needed" in cesr_text
+    # Both lead with the limited-scan banner (no full verdict).
+    assert "Full Kaizen scan not available" in arcp_text
+    assert "Full Kaizen scan not available" in cesr_text
     assert "Evidence gap level:" not in arcp_text
     assert "Long-term CESR readiness:" not in cesr_text
 
@@ -886,7 +890,9 @@ async def test_cesr_message_contains_long_term_and_domain_balance(monkeypatch):
     cesr_text = await _run_health_capture(monkeypatch, 6003, Pathway.cesr_portfolio)
 
     assert "Domain balance" in cesr_text
-    assert "Missing domains" in cesr_text
+    # Limited scan (no Kaizen index) → "Not seen", not full-portfolio "Missing domains".
+    assert "Not seen in this limited scan" in cesr_text
+    assert "Missing domains" not in cesr_text
     assert "consultant report" in cesr_text.lower()
     # Long-term framing wording
     assert "multi-year" in cesr_text or "long-term" in cesr_text.lower()

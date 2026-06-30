@@ -913,7 +913,7 @@ async def test_inline_health_button_runs_immediately_when_stale(monkeypatch):
 
     send_result = run_health.await_args.kwargs["send_result"]
     await send_result("Health result", None)
-    assert ("📋 File another case", "ACTION|file") in sim.get_last_buttons()
+    assert ("➕ File another case", "ACTION|file") in sim.get_last_buttons()
     assert ("🔎 Evidence basis", "ACTION|health_detail|basis") in sim.get_last_buttons()
     assert ("🔙 Back", "ACTION|back_to_menu") not in sim.get_last_buttons()
     assert ("🔙 Back to settings", "ACTION|settings") not in sim.get_last_buttons()
@@ -933,12 +933,12 @@ def test_health_result_keyboard_offers_file_and_detail_sections():
     ]
     assert rows[-1] == [
         ("📋 Domain detail", "ACTION|health_detail|domains"),
-        ("📋 File another case", "ACTION|file"),
+        ("➕ File another case", "ACTION|file"),
     ]
     assert ("🔎 Evidence basis", "ACTION|health_detail|basis") in buttons
     assert ("📈 Activity snapshot", "ACTION|health_detail|activity") in buttons
     assert ("📋 Domain detail", "ACTION|health_detail|domains") in buttons
-    assert buttons[-1] == ("📋 File another case", "ACTION|file")
+    assert buttons[-1] == ("➕ File another case", "ACTION|file")
     assert ("📊 Change pathway", "ACTION|change_pathway") not in buttons
     assert ("🔙 Back to settings", "ACTION|settings") not in buttons
 
@@ -1010,11 +1010,118 @@ def test_health_compact_report_no_index_leads_with_sync_needed():
 
     summary = bot._health_compact_report_text(full_text)
 
-    assert "Kaizen sync needed" in summary
+    assert "Full Kaizen scan not available" in summary
     assert "🔴" not in summary
     assert "Evidence gap level:" not in summary
-    # Sync-needed framing must lead, ahead of any actions/gaps.
-    assert summary.index("Kaizen sync needed") < summary.index("Next 3 useful filing actions")
+    # Limited-scan framing must lead, ahead of any actions/gaps.
+    assert summary.index("Full Kaizen scan not available") < summary.index("Next 3 useful filing actions")
+
+
+def _limited_arcp_full_text():
+    import bot
+    from health_engine import case_history_to_evidence_items, compute_snapshot
+
+    history = [
+        {"form_type": "CBD", "filed_at": "2026-05-01 09:00:00", "status": "filed"},
+        {"form_type": "REFLECT_LOG", "filed_at": "2026-05-02 09:00:00", "status": "filed"},
+    ]
+    items = case_history_to_evidence_items(history)
+    snapshot = compute_snapshot(_profile(9600, Pathway.training_arcp), items)
+    full_text = bot._format_arcp_action_plan_message(
+        snapshot=snapshot,
+        history=history,
+        month_label="June 2026",
+        evidence_context=bot._format_health_evidence_context(
+            source="case_history",
+            evidence_count=len(items),
+            history_count=len(history),
+            profile_is_default=False,
+            sync_status=None,
+            pathway=Pathway.training_arcp,
+        ),
+        limited_view=True,
+    )
+    return full_text
+
+
+def test_limited_banner_uses_clear_non_technical_wording():
+    """The limited banner must explain why the full Kaizen portfolio is not
+    visible without the old technical 'Kaizen sync needed' phrasing."""
+    import bot
+
+    banner = bot._health_limited_view_banner()
+    assert "⚠️ *Full Kaizen scan not available*" in banner
+    assert "filed through Portfolio Guru" in banner
+    assert "has not been indexed for this health scan" in banner
+    assert "refresh Kaizen, then rerun /health" in banner
+    assert "Kaizen sync needed" not in banner
+
+
+def test_limited_domain_detail_page_uses_limited_scan_headings():
+    """In limited mode the Domain detail button page must use the consistent
+    emoji/format and limited-scan language, not full-portfolio findings."""
+    import bot
+
+    sections = bot._health_report_sections(_limited_arcp_full_text())
+    domains = sections["domains"]
+
+    assert domains.startswith("📋 *Domain detail*")
+    assert "✅ *Visible in this limited scan*" in domains
+    assert "⚠️ *Not seen in this limited scan*" in domains
+    # Capitalised visible domains, acronyms preserved.
+    assert "• Clinical: 1" in domains
+    assert "• Reflection: 1" in domains
+    # Not-seen domains use the shared label format (CPD/QI uppercase).
+    assert "CPD" in domains and "QI" in domains
+    assert "teaching" in domains and "leadership" in domains
+    # Full-scan wording must not leak into the limited page.
+    assert "Already strong" not in domains
+    assert "Missing domains" not in domains
+    assert "official ARCP outcome" not in domains
+
+
+def test_limited_detail_pages_have_consistent_emoji_headings():
+    """Evidence basis, Activity snapshot, and Domain detail pages must each
+    lead with their consistent emoji heading."""
+    import bot
+
+    full_text = _limited_arcp_full_text()
+    full_text += "\n\n*Activity snapshot*\n- This month: 2 cases"
+    sections = bot._health_report_sections(full_text)
+
+    assert sections["basis"].startswith("🔎 *Evidence basis*")
+    assert sections["activity"].startswith("📈 *Activity snapshot*")
+    assert sections["domains"].startswith("📋 *Domain detail*")
+
+
+@pytest.mark.asyncio
+async def test_limited_activity_snapshot_notes_low_confidence(monkeypatch):
+    """The limited-mode activity snapshot must read like product UX and disclose
+    low confidence because the full Kaizen scan is unavailable."""
+    import bot
+
+    async def _snapshot(*_a, **_k):
+        return (
+            "*Activity snapshot*\n"
+            "- This month: 2 cases\n"
+            "- Form mix: CBD 1, Reflection 1"
+        )
+
+    monkeypatch.setattr(
+        "portfolio_chart.format_health_activity_snapshot_async", _snapshot
+    )
+
+    appended = await bot._append_health_activity_snapshot(
+        "BODY", 9700, [], "ST6", limited_view=True
+    )
+    assert "*Activity snapshot*" in appended
+    assert "Confidence: low" in appended
+    assert "full Kaizen scan not available" in appended
+
+    not_limited = await bot._append_health_activity_snapshot(
+        "BODY", 9700, [], "ST6", limited_view=False
+    )
+    assert "Confidence: low" not in not_limited
 
 
 @pytest.mark.asyncio
@@ -1067,7 +1174,8 @@ async def test_health_arcp_index_present_shows_full_verdict(
 
     text = sent["text"]
     assert "Read-only Kaizen index" in text
-    assert "Kaizen sync needed" not in text
+    assert "Full Kaizen scan not available" not in text
+    assert "limited scan" not in text
     assert "Evidence gap level:" in text
 
 
@@ -1091,7 +1199,8 @@ async def test_health_detail_buttons_restore_last_report(monkeypatch):
     )
 
     assert sim.get_last_text() == "*Evidence basis*\nScanned: Portfolio Guru only"
-    assert ("🔙 Back to health report", "ACTION|health_back_to_report") in sim.get_last_buttons()
+    assert ("➕ File another case", "ACTION|file") in sim.get_last_buttons()
+    assert ("↩️ Back to health report", "ACTION|health_back_to_report") in sim.get_last_buttons()
 
     await bot.handle_action_button(
         sim._make_callback_update("ACTION|health_back_to_report"),
@@ -1099,7 +1208,7 @@ async def test_health_detail_buttons_restore_last_report(monkeypatch):
     )
 
     assert sim.get_last_text() == "Main health report"
-    assert ("📋 File another case", "ACTION|file") in sim.get_last_buttons()
+    assert ("➕ File another case", "ACTION|file") in sim.get_last_buttons()
 
 
 def test_health_refresh_confirm_back_returns_to_settings():
