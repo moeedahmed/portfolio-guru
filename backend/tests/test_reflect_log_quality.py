@@ -323,6 +323,38 @@ def test_stemi_communication_avoids_absolute_no_phrasing():
     )
 
 
+def test_generic_scoring_tool_replaced_with_concrete_sepsis_action():
+    """A difficult sepsis/anchoring case must not leave generic 'tool-speak'
+    like 'risk-stratification tool' or 'standardised physiological scoring
+    systems' in the reflection — concrete supported actions are preferred."""
+    fields = {
+        "replay_differently": "I would apply a risk-stratification tool earlier.",
+        "focussing_on": "I am practising the use of standardised physiological scoring systems.",
+        "why": "",
+    }
+    polished = _polish_reflect_log_fields(
+        fields,
+        "Possible sepsis missed initially due to anchoring on a surgical cause; "
+        "escalation to my senior was delayed.",
+    )
+    combined = " ".join(str(v) for v in polished.values()).lower()
+    assert "risk-stratification tool" not in combined
+    assert "physiological scoring system" not in combined
+    assert "news2 and sepsis screen" in combined
+
+
+def test_generic_tool_phrasing_left_when_no_concrete_action_supported():
+    """If the case supports no specific concrete action, the generic wording is
+    left untouched rather than fabricated over with sepsis/escalation actions."""
+    fields = {
+        "replay_differently": "I would use a risk-stratification tool.",
+        "focussing_on": "",
+    }
+    polished = _polish_reflect_log_fields(fields, "Routine teaching session feedback reflection.")
+    # No sepsis/escalation context → no concrete substitution invented
+    assert polished["replay_differently"] == "I would use a risk-stratification tool."
+
+
 def test_communication_case_without_stemi_also_avoids_absolute_no():
     """The absolute-no guard applies to any case where communication is the
     focus, not only STEMI — e.g. a handover case where the patient outcome

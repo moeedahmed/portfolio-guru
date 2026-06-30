@@ -2468,6 +2468,39 @@ def _curriculum_stage_label(fields: dict, telegram_user_id: Optional[int]) -> st
     return "Higher"
 
 
+def canonical_kc_code(text: str) -> Optional[str]:
+    """Return the canonical ``"SLOn KCm"`` code embedded in a KC string.
+
+    Kaizen tag labels, our extracted KC strings, and the curriculum tree all
+    carry the same identity in different shapes — ``"SLO1 KC1: to be expert..."``,
+    ``"tag:SLO1 KC1: ..."``, ``"SLO 1 Key Capability 1"``. Matching on the
+    normalised code (case/spacing/prefix-insensitive) is far more robust than
+    comparing the verbose text, which drifts with the "(2025 Update)" suffix and
+    Royal-College wording tweaks. Returns ``None`` when no code is present.
+    """
+    if not text:
+        return None
+    m = re.search(r"SLO\s*(\d+).*?\bKC\s*(\d+)\b", str(text), re.IGNORECASE)
+    if not m:
+        return None
+    return f"SLO{int(m.group(1))} KC{int(m.group(2))}"
+
+
+def _unticked_kc_targets(kc_targets: List[str], ticked: List[str]) -> List[str]:
+    """Targets that did not tick, compared by canonical KC code first.
+
+    Falls back to the raw string when a target has no parseable code, so legacy
+    SLO-only targets ("SLO3") still compare correctly.
+    """
+    ticked_codes = {canonical_kc_code(t) or str(t).strip().lower() for t in ticked}
+    missed: List[str] = []
+    for target in kc_targets:
+        key = canonical_kc_code(target) or str(target).strip().lower()
+        if key not in ticked_codes:
+            missed.append(target)
+    return missed
+
+
 async def _fill_curriculum_links(
     page: Page,
     slo_codes: List[str],
@@ -4414,10 +4447,18 @@ async def file_to_kaizen(
             # `skipped`, which downgrades the filing status to "partial".
             if ticked:
                 filled.append(f"curriculum_links ({len(ticked)} KCs)")
+            # Count KCs that did not tick, not raw error strings. The tag-modal
+            # writer emits both an SLO-expand error and a per-KC error on a full
+            # miss, so len(kc_errors) double-counts (3 KCs -> "6 not ticked").
+            # Compare requested targets against what actually ticked instead.
+            not_ticked = _unticked_kc_targets(kc_targets, ticked)
             if kc_errors:
-                skipped.append(f"key_capabilities ({len(kc_errors)} not ticked)")
                 for kc_error in kc_errors:
                     logger.warning("KC writeback gap for %s: %s", form_type, kc_error)
+            if not_ticked:
+                skipped.append(f"key_capabilities ({len(not_ticked)} not ticked)")
+            elif kc_errors and not ticked:
+                skipped.append("key_capabilities (not ticked)")
 
         # Handle file attachment
         temp_attachment = None

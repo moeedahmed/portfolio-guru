@@ -42,10 +42,10 @@ def fixed_cbd_form_draft():
             "clinical_reasoning": "I treated the presentation as acute coronary syndrome and escalated early to cardiology.",
             "reflection": "I would involve the cath lab team earlier if the ECG remains dynamic.",
             "level_of_supervision": "Indirect",
-            "curriculum_links": ["SLO1", "SLO3"],
+            "curriculum_links": ["SLO1", "SLO2"],
             "key_capabilities": [
                 "SLO1 KC1: to be expert in assessing and managing all adult patients attending the ED. These capabilities will apply to patients attending with both physical and psychological ill health (2025 Update)",
-                "SLO3 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)",
+                "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)",
             ],
         },
     )

@@ -3880,30 +3880,114 @@ def _format_template_review(form_type: str, draft) -> str:
     ])
     return "\n".join(lines)
 
+# Concise, faithful one-line KC summaries for the draft preview, keyed by the
+# Kaizen 2025 "SLOn KCm" code. Summaries paraphrase the official KC text (they
+# are not verbatim quotes) so previews stay scannable without truncation noise.
+_KC_PREVIEW_TITLES = {
+    "SLO1 KC1": "assessing & managing adult patients",
+    "SLO2 KC1": "supporting the team's safe decisions",
+    "SLO2 KC2": "reviewing patients remotely or directly",
+    "SLO3 KC1": "airway & ventilatory support",
+    "SLO3 KC2": "fluid & circulatory support",
+    "SLO3 KC3": "life-threatening & peri-arrest conditions",
+    "SLO3 KC4": "end-of-life care in the ED",
+    "SLO3 KC5": "leading resuscitation teams",
+    "SLO4 KC1": "assessing & managing injuries",
+    "SLO4 KC2": "leading the major trauma team",
+    "SLO5 KC1": "assessing & managing children",
+    "SLO5 KC2": "paediatric airway & ventilation",
+    "SLO5 KC3": "leading paediatric resuscitation",
+    "SLO5 KC4": "paediatric fluid & circulatory support",
+    "SLO5 KC5": "life-threatening paediatric conditions",
+    "SLO5 KC6": "children with complex needs",
+    "SLO6 KC1": "knowing when EM skills are indicated",
+    "SLO6 KC2": "performing EM procedures safely",
+    "SLO6 KC3": "supervising procedural skills",
+    "SLO7 KC1": "expert communication in complex situations",
+    "SLO7 KC2": "professional conduct within the ED",
+    "SLO7 KC3": "working with teams outside the ED",
+    "SLO8 KC1": "supporting ED staff on shift",
+    "SLO8 KC2": "liaising as shift leader",
+    "SLO8 KC3": "maintaining situational awareness",
+    "SLO8 KC4": "leading decisions as shift lead",
+    "SLO9 KC1": "training & supervising the ED team",
+    "SLO9 KC2": "delivering teaching sessions",
+    "SLO9 KC3": "giving constructive feedback & debrief",
+    "SLO9 KC4": "mentoring & appraising juniors",
+    "SLO10 KC1": "appraising & using research evidence",
+    "SLO10 KC2": "participating in research",
+    "SLO11 KC1": "leading quality improvement work",
+    "SLO11 KC2": "developing departmental safety & governance",
+    "SLO12 KC1": "management & medicolegal awareness",
+    "SLO12 KC2": "investigating patient safety incidents",
+    "SLO12 KC3": "managing the staff rota",
+    "SLO12 KC4": "representing the ED at meetings",
+    "SLO12 KC5": "EM leadership & patient safety",
+    "SLO12 KC6": "positive impact on ED culture",
+}
+
+
+def _kc_preview_summary(kc: str) -> str:
+    """Return a short, scannable KC label for the draft preview.
+
+    Prefers a curated faithful summary keyed by the canonical "SLOn KCm"
+    code (robust to verbose-text drift). Falls back to a cleaned truncation
+    of the KC text when the code is unknown — leading curriculum filler and
+    the "(2025 Update)" suffix are stripped so the line never ends mid-list."""
+    import re as _re
+    code_match = _re.search(r'SLO\s*(\d+).*?KC\s*(\d+)', kc, _re.IGNORECASE)
+    if code_match:
+        code = f"SLO{int(code_match.group(1))} KC{int(code_match.group(2))}"
+        curated = _KC_PREVIEW_TITLES.get(code)
+        if curated:
+            return curated
+
+    kc_text = _re.sub(r'^SLO\w+\s+KC\d+:\s*', '', kc, flags=_re.IGNORECASE).strip()
+    kc_text = _re.sub(r'\s*\(2025 Update\)\s*$', '', kc_text, flags=_re.IGNORECASE).strip()
+    kc_text = _re.sub(
+        r'^(?:to be expert in|be expert in|be able to|able to|will be able to|will|have|provide|the)\s+',
+        '', kc_text, flags=_re.IGNORECASE,
+    ).strip()
+    words = kc_text.split()
+    summary = " ".join(words[:8])
+    summary = summary.rstrip(",;:")
+    summary = _re.sub(r'\s+(?:and|or|in|of|to|with|including)$', '', summary).rstrip(",;:")
+    if len(words) > 8 or summary != kc_text:
+        summary += "…"
+    return summary
+
+
 def _format_curriculum_hierarchy(curriculum_links, key_capabilities) -> str:
     """Render SLOs with their KCs nested underneath as a hierarchy."""
     import re as _re
     if not curriculum_links:
         return "  • None"
 
-    # Build a safe display label for each SLO (no underscores that break Markdown)
+    # Build a safe display label for each SLO (no underscores that break Markdown).
+    # Numbers follow the Kaizen 2025 checkbox scheme used throughout extraction
+    # (see RCEM_KC_MAP) — e.g. SLO2 = clinical questions, SLO3 = resuscitation.
     def slo_label(slo: str) -> str:
         labels = {
             "SLO1": "SLO1 — Stable adult patients",
-            "SLO3": "SLO3 — Clinical questions & decisions",
+            "SLO2": "SLO2 — Clinical questions & safe decisions",
+            "SLO3": "SLO3 — Resuscitation & stabilisation",
             "SLO4": "SLO4 — Injured patients",
-            "SLO5": "SLO5 — Resuscitation & stabilisation",
-            "SLO6_PAEDS": "SLO6 — Paediatric care",
-            "SLO6_PROC": "SLO6 — Procedural skills",
-            "SLO7": "SLO7 — Complex situations",
+            "SLO5": "SLO5 — Paediatric care",
+            "SLO6": "SLO6 — Procedural skills",
+            "SLO7": "SLO7 — Complex & challenging situations",
             "SLO8": "SLO8 — Lead the ED shift",
-            "SLO9_TEACH": "SLO9 — Teaching & supervision",
-            "SLO9_RESEARCH": "SLO9 — Research",
-            "SLO10": "SLO10 — Research",
+            "SLO9": "SLO9 — Teaching & supervision",
+            "SLO10": "SLO10 — Research & data",
             "SLO11": "SLO11 — Quality improvement & safety",
             "SLO12": "SLO12 — Lead & manage",
         }
-        return labels.get(slo.upper(), slo.replace("_", " "))
+        key = slo.upper()
+        if key in labels:
+            return labels[key]
+        num = _re.match(r'^(SLO\d+)', key)
+        if num and num.group(1) in labels:
+            return labels[num.group(1)]
+        return slo.replace("_", " ")
 
     # Group KCs by parent SLO — match on full key first, then numeric prefix
     slo_kcs: dict = {slo: [] for slo in curriculum_links}
@@ -3930,16 +4014,14 @@ def _format_curriculum_hierarchy(curriculum_links, key_capabilities) -> str:
     lines = []
     for slo in curriculum_links:
         lines.append(f"• *{slo_label(slo)}*")
+        seen_kc_nums: set[str] = set()
         for kc in slo_kcs.get(slo, []):
-            # Extract KC number
             num_match = _re.search(r'KC(\d+)', kc, _re.IGNORECASE)
             kc_num = f"KC{num_match.group(1)}" if num_match else "KC"
-            # Strip code prefix, get full description
-            kc_text = _re.sub(r'^SLO\w+\s+KC\d+:\s*', '', kc, flags=_re.IGNORECASE).strip()
-            # Summarise: first 6 words + ellipsis
-            words = kc_text.split()
-            summary = " ".join(words[:6]) + ("…" if len(words) > 6 else "")
-            lines.append(f"  ↳ {kc_num}: {summary}")
+            if kc_num in seen_kc_nums:
+                continue
+            seen_kc_nums.add(kc_num)
+            lines.append(f"  ↳ {kc_num}: {_kc_preview_summary(kc)}")
     return "\n".join(lines)
 
 
@@ -9151,9 +9233,55 @@ _FIELD_FRIENDLY = {
 }
 
 
+def _is_curriculum_skip_label(key_str: str) -> bool:
+    """True when a skipped/gap entry is an internal curriculum-linkage marker.
+
+    The filer reports KC/tag write-back misses with internal labels the doctor
+    must never see verbatim: ``tag:SLO1 KC1: to be expert...``, ``kc:SLO7 KC1:
+    ...`` and ``key_capabilities (6 not ticked)``. All of these are the same
+    real-world issue — curriculum links did not attach — so they collapse to a
+    single clinician-readable "Curriculum links" review line.
+    """
+    s = str(key_str).strip().lower()
+    return (
+        s.startswith("tag:")
+        or s.startswith("kc:")
+        or s.startswith("key_capabilities")
+        or s.startswith("curriculum_links")
+        or s.startswith("curriculum")
+    )
+
+
 def _friendly_field_name(key) -> str:
     key_str = str(key)
-    return _FIELD_FRIENDLY.get(key_str, key_str.replace("_", " ").capitalize())
+    if _is_curriculum_skip_label(key_str):
+        return "Curriculum links"
+    # Drop any trailing "(...)" annotation the filer appends to a field key
+    # (e.g. "key_capabilities (6 not ticked)") so it never leaks into copy.
+    base = re.sub(r"\s*\([^()]*\)\s*$", "", key_str).strip()
+    return _FIELD_FRIENDLY.get(
+        base, _FIELD_FRIENDLY.get(key_str, base.replace("_", " ").capitalize())
+    )
+
+
+def _friendly_skipped_names(skipped) -> list[str]:
+    """Friendly, de-duplicated field names for a skipped list.
+
+    Collapses the curriculum-linkage family into a single "Curriculum links"
+    entry so the confirmation never repeats raw internal labels (a tag-only
+    miss previously rendered as "Key capabilities (6 not ticked), Tag:slo1
+    kc1..., Tag:slo7 kc1... and 1 other"), and drops exact duplicates while
+    preserving order.
+    """
+    names: list[str] = []
+    seen: set[str] = set()
+    for s in skipped:
+        name = _friendly_field_name(s)
+        if name in seen:
+            continue
+        seen.add(name)
+        names.append(name)
+    return names
 
 
 def _is_session_failure_error(error: str | None) -> bool:
@@ -9223,7 +9351,14 @@ def _build_field_edit_buttons(skipped: list) -> list[list[InlineKeyboardButton]]
     seen: set[str] = set()
     for key in skipped:
         key_str = str(key)
-        if "attachment" in key_str.lower() or key_str in seen:
+        # Curriculum links aren't a free-text field — they're ticked on Kaizen,
+        # so an "Edit" button for them would dead-end (and carry a raw internal
+        # label in its callback). The user fixes these in Kaizen directly.
+        if (
+            "attachment" in key_str.lower()
+            or _is_curriculum_skip_label(key_str)
+            or key_str in seen
+        ):
             continue
         seen.add(key_str)
         label = f"✏️ Edit {_friendly_field_name(key_str)}"
@@ -9700,7 +9835,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         )
         status_line = "✅ Draft saved."
     elif status == "partial":
-        skipped_names = [_friendly_field_name(s) for s in skipped]
+        skipped_names = _friendly_skipped_names(skipped)
         if len(skipped_names) > 3:
             skipped_display = ", ".join(skipped_names[:3]) + f" and {len(skipped_names) - 3} other{'s' if len(skipped_names) - 3 != 1 else ''}"
         else:
@@ -9732,9 +9867,13 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             status_line = "⚠️ Filing needs attention."
         else:
             fields_filled_str = f"{len(filled)} field{'s' if len(filled) != 1 else ''} filled"
+            # Count the de-duplicated, collapsed review items (a tag-only miss
+            # is one curriculum issue, not six), so the headline number matches
+            # the readable list and never over-states the gaps.
+            review_count = len(skipped_names)
             review_clause = (
-                f"{len(skipped)} field{'s' if len(skipped) != 1 else ''} "
-                f"need{'s' if len(skipped) == 1 else ''} your review"
+                f"{review_count} field{'s' if review_count != 1 else ''} "
+                f"need{'s' if review_count == 1 else ''} your review"
             )
             # The action line tracks what the keyboard button actually does:
             # if we have the saved-draft URL, "Open saved draft" lands on the
@@ -9845,7 +9984,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             editable_skipped = [
                 s for s in skipped if "attachment" not in str(s).lower()
             ]
-            field_names = [_friendly_field_name(s) for s in editable_skipped[:5]]
+            field_names = _friendly_skipped_names(editable_skipped)[:5]
             field_list = ", ".join(field_names) if field_names else "some fields"
             body = (
                 f"Some fields need attention: {field_list}. "

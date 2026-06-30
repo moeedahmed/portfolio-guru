@@ -1997,6 +1997,49 @@ _REFLECT_LOG_ACUTE_ED_TERMS = (
 )
 
 
+# Generic "tool-speak" the polish layer rewrites into concrete, case-grounded
+# actions. Longer phrases first so the article-prefixed variants win.
+_GENERIC_TOOL_PHRASES = (
+    "standardised physiological scoring systems",
+    "standardized physiological scoring systems",
+    "standardised physiological scoring system",
+    "standardized physiological scoring system",
+    "a risk-stratification tool",
+    "a risk stratification tool",
+    "risk-stratification tool",
+    "risk stratification tool",
+    "a physiological scoring tool",
+    "physiological scoring tool",
+)
+
+
+def _concrete_action_substitution(combined: str) -> str | None:
+    """Pick a concrete action that the case genuinely supports to replace
+    generic tool-speak. Returns None when nothing specific is supported, so
+    the generic wording is left untouched rather than fabricated over."""
+    if any(t in combined for t in ("sepsis", "septic", "sirs")):
+        return "a NEWS2 and sepsis screen"
+    if any(t in combined for t in ("escalat", "senior", "registrar", "consultant")):
+        return "an explicit senior-review threshold"
+    return None
+
+
+def _replace_generic_tool_phrasing(polished: dict, combined: str) -> dict:
+    substitution = _concrete_action_substitution(combined)
+    if not substitution:
+        return polished
+    for key in ("replay_differently", "focussing_on", "different_outcome", "why", "learned"):
+        value = polished.get(key)
+        if not isinstance(value, str) or not value:
+            continue
+        new_value = value
+        for phrase in _GENERIC_TOOL_PHRASES:
+            new_value = re.sub(re.escape(phrase), substitution, new_value, flags=re.IGNORECASE)
+        if new_value != value:
+            polished[key] = new_value
+    return polished
+
+
 def _polish_reflect_log_fields(fields: dict, case_description: str) -> dict:
     """Keep Reflective Practice Log action fields distinct without inventing case facts.
 
@@ -2024,6 +2067,11 @@ def _polish_reflect_log_fields(fields: dict, case_description: str) -> dict:
             "The clinical escalation was appropriate, but clearer communication "
             "may have improved patient understanding and reduced anxiety."
         )
+
+    # Replace generic "tool-speak" with concrete actions the case actually
+    # supports (e.g. NEWS2/sepsis screen, senior-review threshold). Applies on
+    # every path so it catches the non-sepsis early return below too.
+    polished = _replace_generic_tool_phrasing(polished, combined)
 
     if not is_sepsis and not is_surgical_ref:
         replay = str(polished.get("replay_differently") or "").strip()
@@ -2417,12 +2465,28 @@ def _clinical_kc_supplement_codes(case_description: str) -> list[str]:
     ):
         add("SLO3 KC5")
 
+    # Complex/barrier communication — language barrier, interpreter need,
+    # distressed patients or relatives, capacity/safeguarding conflict. These
+    # belong to the SLO7 *communication* KC (KC1), not the external-team KC.
     if _case_contains_any(
         text,
         (
-            "communicat", "explain", "consent", "family", "relative",
-            "handover", "referr", "cardiology", "med reg", "icu", "itu",
-            "sbar", "safety net",
+            "interpreter", "language barrier", " language", " english ",
+            "non-english", "limited english", "anxious", "distress", "upset",
+            " family", "relative", "agitat", "aggressive", "breaking bad news",
+            "bereav", "capacity", "safeguard", "de-escalat", "conflict",
+        ),
+    ):
+        add("SLO7 KC1")
+
+    # Working with teams outside the ED — referrals and handovers to other
+    # specialties. Kept distinct from the communication KC above.
+    if _case_contains_any(
+        text,
+        (
+            "referr", "handover", "cardiology", "med reg", "medical registrar",
+            "surgical", "specialty registrar", "icu", "itu", "tertiary",
+            "transfer to", "outside the ed", "sbar",
         ),
     ):
         add("SLO7 KC3")
@@ -2430,6 +2494,11 @@ def _clinical_kc_supplement_codes(case_description: str) -> list[str]:
     if _case_contains_any(text, ("teach", "supervis", "feedback", "debrief")):
         add("SLO9 KC1")
 
+    # Core adult/paediatric assessment (SLO1/SLO5 KC1) is broad — it could be
+    # argued for almost any clinical case. Only offer it as a rounding-out KC
+    # when the case genuinely describes clinical assessment or management, and
+    # always last so specific KCs are preferred. It is never added purely to
+    # reach a target count: a sparse case with no other support stays sparse.
     is_paediatric = _case_contains_any(
         text,
         (
@@ -2437,10 +2506,18 @@ def _clinical_kc_supplement_codes(case_description: str) -> list[str]:
             " infant ", " toddler ", " teenager ", " adolescent ",
         ),
     )
-    if is_paediatric:
-        add("SLO5 KC1")
-    else:
-        add("SLO1 KC1")
+    has_clinical_assessment = _case_contains_any(
+        text,
+        (
+            "assess", "examined", "examination", "history", "diagnos",
+            "managed", "treated", "presented", "presentation",
+        ),
+    )
+    if has_clinical_assessment:
+        if is_paediatric:
+            add("SLO5 KC1")
+        else:
+            add("SLO1 KC1")
 
     return codes
 
@@ -2613,7 +2690,8 @@ Safety and privacy:
 Curriculum:
 - Select Key Capabilities first, then derive SLOs. Never select a broad KC just
   because it technically fits. Prefer leaf, specific KCs that the case actually
-  demonstrates. Aim for 3-6 KCs on substantive cases, but do not pad.
+  demonstrates. Aim for 3 appropriate KCs by default on substantive cases; use
+  fewer when fewer are genuinely supported, and never pad to reach 3.
 - Bias toward weaker portfolio domains such as leadership, QI/governance,
   research and management only when genuinely supported by the case.
 
@@ -2709,7 +2787,7 @@ INSTRUCTIONS:
 1. Read the full case description.
 2. For each SLO that is relevant to the case, read KC2, KC3, KC4... FIRST. Ask: does this case directly demonstrate THIS specific numbered capability?
 3. Only consider KC1 for an SLO after checking the higher KCs. KC1 is a broad fallback — only include it if the case demonstrates something KC2+ does not already cover for that SLO.
-4. Target at least 3 Key Capabilities per case. Most clinical cases demonstrate 3-6 KCs. Select exactly what fits — but aim for adequate curriculum coverage.
+4. Aim for 3 appropriate Key Capabilities by default — most substantive clinical cases genuinely demonstrate around 3. CAVEAT: select FEWER than 3 if fewer are genuinely supported, and NEVER pad with weak, broad or only-loosely-related KCs just to reach 3. Three strong KCs beat three including a filler.
 5. Use the FULL KC text exactly as written above (including the "(2025 Update)" suffix).
 6. Format each as: "SLO_CODE KC_NUM: full description text (2025 Update)"
 
@@ -2718,15 +2796,15 @@ Do NOT select KC1 just because it "could apply". Only select KC1 if:
 - The case specifically demonstrates something unique to KC1 that KC2+ does not cover, OR
 - KC1 is the only KC for that SLO
 
-Examples of KC1 being WRONG: selecting SLO1 KC1 just because a patient was assessed. Selecting SLO3 KC1 just because a decision was made. These are true of every case — they add no specificity.
-Examples of KC1 being RIGHT: selecting SLO5 KC1 when the trainee performed airway management (KC1 is specific here). Selecting SLO9_RESEARCH KC1 when the trainee critically appraised evidence (only KC for research).
+Examples of KC1 being WRONG: selecting SLO1 KC1 just because a patient was assessed. Selecting SLO2 KC1 just because a decision was made. These are true of every case — they add no specificity.
+Examples of KC1 being RIGHT: selecting SLO3 KC1 when the trainee performed airway management (KC1 is specific here). Selecting SLO10 KC1 when the trainee critically appraised evidence (only KC for research).
 
 HARD RULES — only select if DIRECTLY demonstrated:
-- Resuscitation KCs (SLO5): only if patient was actually resuscitated, intubated, arrested
-- Procedure KCs (SLO6_PROC): only if trainee personally performed a named procedure
-- Paediatric KCs (SLO6_PAEDS): only if patient was under 16
+- Resuscitation KCs (SLO3): only if patient was actually resuscitated, intubated, arrested
+- Procedure KCs (SLO6): only if trainee personally performed a named procedure
+- Paediatric KCs (SLO5): only if patient was under 16
 - Shift leadership KCs (SLO8): only if trainee explicitly led/coordinated the shift
-- Teaching KCs (SLO9_TEACH): only if trainee delivered teaching or supervised a junior
+- Teaching KCs (SLO9): only if trainee delivered teaching or supervised a junior
 - Trauma KCs (SLO4): only if patient had a traumatic injury the trainee managed
 
 For curriculum_links: derive the SLO codes from the KCs you selected (e.g. if you pick SLO1 KC1 and SLO3 KC2, curriculum_links = ["SLO1", "SLO3"])
@@ -2938,6 +3016,18 @@ Example for handover/referral reflections:
 - focussing_on: "I am practising a concise SBAR-style referral that states the working diagnosis, sepsis treatments already started, current instability, and the decision I need from the surgical team."
 
 Anti-repetition rule: if you find yourself writing the words "ECG", "atrial flutter", "fixation bias" (or any other case-specific term) in more than two fields — stop and redistribute. Each key concept appears in ONE field only.
+
+===== CONCRETE NEXT ACTIONS (prefer specifics over tool-speak) =====
+When the case supports it, name the concrete action, not a generic abstraction.
+For a difficult case with sepsis risk, anchoring, a communication barrier or
+delayed escalation, prefer wording such as:
+- "a NEWS2 and sepsis screen" rather than "a risk-stratification tool" or "a standardised physiological scoring system"
+- "a professional telephone interpreter" rather than "improving communication" when there is a language barrier
+- "an explicit senior-review threshold" / "escalating earlier to a senior" rather than "escalating appropriately"
+- "a deliberate re-evaluation pause to challenge my working diagnosis" rather than "avoiding cognitive bias"
+Only use an action the case genuinely supports — do not invent observations, scores
+or interventions that were not part of the encounter. If the source does not support
+a specific action, keep the field general rather than fabricating one.
 """ if schema_key == "REFLECT_LOG" else ""
 
     qiat_instruction = """
@@ -2991,8 +3081,8 @@ Rules:
 - For multi_select fields: return a list of values from the listed options. If none are explicit, return [].
 - For kc_tick fields (curriculum_links): return a list of SLO codes ONLY e.g. ["SLO1", "SLO8"].
   Separately, populate "key_capabilities" with FULL KC description strings for those SLOs.
-  KC SELECTION RULE: For each relevant SLO, check KC2, KC3, KC4... FIRST. Only include KC1 if no higher-numbered KC fits, or if KC1 captures something specific that the others do not. KC1 for SLO1 and SLO3 are extremely broad — do NOT select them just because a patient was assessed or a decision was made. That is true of every case and adds no value.
-  Do NOT pad to reach any minimum number. Do NOT include a KC unless the case explicitly demonstrates it. Quality over quantity.
+  KC SELECTION RULE: For each relevant SLO, check KC2, KC3, KC4... FIRST. Only include KC1 if no higher-numbered KC fits, or if KC1 captures something specific that the others do not. KC1 for SLO1 and SLO2 are extremely broad — do NOT select them just because a patient was assessed or a decision was made. That is true of every case and adds no value.
+  TARGET: aim for 3 appropriate KCs by default where the case genuinely supports them. CAVEAT: select FEWER than 3 if fewer are genuinely supported, and NEVER pad with weak, broad or only-loosely-related KCs to reach 3. Each KC must be explicitly demonstrated by the case. Quality over quantity — three strong KCs beat three including a filler.
   Format each KC as: "SLO8 KC1: will provide support to ED staff at all levels... (2025 Update)"
   Use EXACT text from the map. curriculum_links = codes only. key_capabilities = full strings.
   If the form has a kc_tick field, always include "key_capabilities" in the JSON too.
