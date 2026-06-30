@@ -37,6 +37,7 @@ from usage import (
     is_beta_tester,
 )
 from profile_store import get_training_level
+from kaizen_index import list_evidence_items, slo_coverage_from_evidence_rows
 
 # Brand palette
 COLOR_BG = "#F8FAFC"
@@ -210,6 +211,7 @@ def format_health_activity_snapshot(
     training_level: Optional[str],
     kc_coverage: Optional[dict[int, list[str]]] = None,
     kc_stats: Optional[dict] = None,
+    indexed_slo_coverage: Optional[set[int]] = None,
 ) -> str:
     """Text equivalent of the four-panel /health chart.
 
@@ -221,17 +223,24 @@ def format_health_activity_snapshot(
     top_forms = [(_short_form_name(ft), count) for ft, count in form_counts.most_common(6)]
     weekly = _weekly_buckets(this_month)
 
-    if kc_coverage and any(kc_coverage.values()):
-        coverage = _coverage_from_kcs(kc_coverage)
-        coverage_source = "KC evidence"
+    # When the read-only Kaizen index carries curriculum/KC tags we can report
+    # SLO coverage across the *whole indexed Kaizen portfolio*, not just the
+    # slice Portfolio Guru filed — so label it honestly as indexed Kaizen
+    # coverage. Otherwise keep the Portfolio Guru-linked fallback wording.
+    if indexed_slo_coverage:
+        coverage = set(indexed_slo_coverage)
+        coverage_line = f"{len(coverage)}/12 SLOs visible in indexed Kaizen KC links"
     else:
-        coverage = _coverage_from_history(history_6mo)
-        coverage_source = "filed forms"
-
-    coverage_line = (
-        f"{len(coverage)}/12 SLOs touched by Portfolio Guru-linked evidence "
-        f"({coverage_source}) — not your full Kaizen strength"
-    )
+        if kc_coverage and any(kc_coverage.values()):
+            coverage = _coverage_from_kcs(kc_coverage)
+            coverage_source = "KC evidence"
+        else:
+            coverage = _coverage_from_history(history_6mo)
+            coverage_source = "filed forms"
+        coverage_line = (
+            f"{len(coverage)}/12 SLOs touched by Portfolio Guru-linked evidence "
+            f"({coverage_source}) — not your full Kaizen strength"
+        )
     if coverage:
         coverage_line += " (" + ", ".join(f"SLO {slo}" for slo in sorted(coverage)) + ")"
 
@@ -269,6 +278,7 @@ async def format_health_activity_snapshot_async(
         training_level=training_level if training_level is not None else data["training_level"],
         kc_coverage=data.get("kc_coverage"),
         kc_stats=data.get("kc_stats"),
+        indexed_slo_coverage=data.get("indexed_slo_coverage"),
     )
 
 
@@ -484,6 +494,12 @@ async def _collect(user_id: int) -> dict:
     except Exception:
         kc_coverage = {}
         kc_stats = None
+    try:
+        # Read-only: reuse already-indexed Kaizen rows; never trigger a sync.
+        indexed_rows = await list_evidence_items(user_id)
+        indexed_slo_coverage = slo_coverage_from_evidence_rows(indexed_rows)
+    except Exception:
+        indexed_slo_coverage = set()
     return {
         "history": history,
         "cases_this_month": cases,
@@ -492,6 +508,7 @@ async def _collect(user_id: int) -> dict:
         "training_level": get_training_level(user_id),
         "kc_coverage": kc_coverage,
         "kc_stats": kc_stats,
+        "indexed_slo_coverage": indexed_slo_coverage,
     }
 
 

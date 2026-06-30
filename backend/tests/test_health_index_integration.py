@@ -1369,6 +1369,53 @@ async def test_health_detail_buttons_restore_last_report(monkeypatch):
     assert ("➕ File another case", "ACTION|file") in sim.get_last_buttons()
 
 
+@pytest.mark.asyncio
+async def test_activity_snapshot_derives_slos_from_indexed_kaizen_kc_tags(
+    kaizen_index, monkeypatch
+):
+    """End-to-end: indexed Kaizen rows carrying ``linked_kc_tags`` drive the
+    Activity snapshot's SLO coverage line via the read-only index — no sync,
+    no Portfolio Guru-linked-only caveat."""
+    import portfolio_chart
+
+    user_id = 9800
+    await kaizen_index.upsert_evidence_item(
+        _evidence_row(
+            kaizen_index,
+            id="cbd-1",
+            user_id=str(user_id),
+            event_type="CBD",
+            linked_kc_tags=["Higher SLO1 KC1", "Higher SLO8 KC2"],
+        )
+    )
+    await kaizen_index.upsert_evidence_item(
+        _evidence_row(
+            kaizen_index,
+            id="acat-1",
+            user_id=str(user_id),
+            event_type="ACAT",
+            linked_kc_tags=["SLO 12"],
+        )
+    )
+
+    monkeypatch.setattr(portfolio_chart, "list_evidence_items", kaizen_index.list_evidence_items)
+    monkeypatch.setattr(portfolio_chart, "get_case_history", AsyncMock(return_value=[]))
+    monkeypatch.setattr(portfolio_chart, "get_cases_this_month", AsyncMock(return_value=0))
+    monkeypatch.setattr(portfolio_chart, "get_user_tier", AsyncMock(return_value="pro_plus"))
+    monkeypatch.setattr(portfolio_chart, "is_beta_tester", AsyncMock(return_value=False))
+    monkeypatch.setattr(portfolio_chart, "get_kc_coverage", AsyncMock(return_value={}))
+    monkeypatch.setattr(portfolio_chart, "get_kc_stats", AsyncMock(return_value=None))
+    monkeypatch.setattr(portfolio_chart, "get_training_level", lambda _uid: "ST6")
+
+    text = await portfolio_chart.format_health_activity_snapshot_async(user_id)
+
+    assert "3/12 SLOs visible in indexed Kaizen KC links" in text
+    assert "SLO 1" in text
+    assert "SLO 8" in text
+    assert "SLO 12" in text
+    assert "not your full Kaizen strength" not in text
+
+
 def test_health_refresh_confirm_back_returns_to_settings():
     import bot
 

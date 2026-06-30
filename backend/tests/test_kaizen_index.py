@@ -299,3 +299,32 @@ def test_document_upload_label_is_unclassified(kaizen_index):
     item = kaizen_index.evidence_row_to_health_item(row)
     assert item.domain == HealthDomain.unclassified
     assert item.form_type is None
+
+
+# ── KC-tag → SLO coverage derivation ─────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "tag, expected",
+    [
+        ("Higher SLO1 KC1", {1}),
+        ("SLO 12", {12}),
+        ("Higher SLO8 KC2", {8}),
+        ("SLO1 KC1: chest pain assessment", {1}),
+        ("SLO01 KC3", {1}),
+        ("not a curriculum tag", set()),
+        ("SLO13 KC1", set()),  # outside the SLO1–12 EM curriculum range
+        ("", set()),
+    ],
+)
+def test_slo_numbers_from_kc_tag(kaizen_index, tag, expected):
+    assert kaizen_index.slo_numbers_from_kc_tag(tag) == expected
+
+
+def test_slo_coverage_from_evidence_rows_aggregates_across_rows(kaizen_index):
+    rows = [
+        _evidence_row(kaizen_index, id="a", linked_kc_tags=["Higher SLO1 KC1", "Higher SLO3 KC2"]),
+        _evidence_row(kaizen_index, id="b", linked_kc_tags=["SLO 12"]),
+        _evidence_row(kaizen_index, id="c", linked_kc_tags=[]),
+    ]
+    assert kaizen_index.slo_coverage_from_evidence_rows(rows) == {1, 3, 12}

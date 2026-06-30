@@ -1490,3 +1490,27 @@ def test_format_health_activity_snapshot_contains_all_chart_panel_fields():
 
     # KC stats row
     assert "KC" in text or "KCs" in text
+
+
+def test_format_health_activity_snapshot_uses_indexed_kaizen_coverage_when_present():
+    """When the read-only Kaizen index supplies SLO coverage, the snapshot must
+    report it as full indexed Kaizen coverage and drop the Portfolio
+    Guru-linked-only caveat — even if PG-linked KC data is also available."""
+    import portfolio_chart
+
+    text = portfolio_chart.format_health_activity_snapshot(
+        history_6mo=[],
+        cases_this_month=0,
+        tier="pro_plus",
+        limit=-1,
+        training_level="ST6",
+        kc_coverage={1: ["KC1.1"]},  # PG-linked data is also present...
+        kc_stats=None,
+        indexed_slo_coverage={1, 8},  # ...but indexed Kaizen coverage wins.
+    )
+
+    assert "2/12 SLOs visible in indexed Kaizen KC links" in text
+    assert "SLO 1" in text
+    assert "SLO 8" in text
+    assert "not your full Kaizen strength" not in text
+    assert "Portfolio Guru-linked" not in text

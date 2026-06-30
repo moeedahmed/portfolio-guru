@@ -730,3 +730,39 @@ def evidence_row_to_health_item(row: EvidenceItemRow) -> EvidenceItem:
 
 def evidence_rows_to_health_items(rows: Iterable[EvidenceItemRow]) -> list[EvidenceItem]:
     return [evidence_row_to_health_item(row) for row in rows]
+
+
+# ── KC-tag → SLO coverage derivation ────────────────────────────────────────
+
+# Kaizen KC tags name their parent SLO inline, e.g. "Higher SLO1 KC1",
+# "SLO 12", "SLO8 KC2: ...". We read the SLO index already stored in the
+# read-only index; this never triggers a sync or browser scrape.
+_SLO_TAG_RE = re.compile(r"SLO\s*0*(\d{1,2})", re.IGNORECASE)
+_MAX_SLO = 12
+
+
+def slo_numbers_from_kc_tag(tag: Optional[str]) -> set[int]:
+    """Return the SLO numbers (1–12) referenced in a single KC tag string.
+
+    Anything outside the EM curriculum's SLO1–12 range is ignored so a stray
+    "SLO13" or a digit inside a KC code never inflates coverage.
+    """
+    covered: set[int] = set()
+    for match in _SLO_TAG_RE.finditer(tag or ""):
+        number = int(match.group(1))
+        if 1 <= number <= _MAX_SLO:
+            covered.add(number)
+    return covered
+
+
+def slo_coverage_from_evidence_rows(rows: Iterable[EvidenceItemRow]) -> set[int]:
+    """Derive indexed SLO coverage from KC tags on existing index rows.
+
+    Read-only: iterates the already-stored ``linked_kc_tags`` across the
+    indexed Kaizen portfolio and never reaches out to Kaizen.
+    """
+    covered: set[int] = set()
+    for row in rows:
+        for tag in row.linked_kc_tags or []:
+            covered |= slo_numbers_from_kc_tag(tag)
+    return covered

@@ -201,6 +201,14 @@ Product decision, 2026-06-30:
 - The health report should show the last successful scan time and the source
   used, so users can trust whether they are seeing a full Kaizen scan or a
   limited local view.
+- **Activity snapshot SLO coverage is source-honest.** When the read-only
+  Kaizen index already carries curriculum/KC tags (`linked_kc_tags`), derive
+  SLO coverage from those indexed rows and label it as full indexed Kaizen
+  coverage ("`x/12 SLOs visible in indexed Kaizen KC links`"). Only when no
+  indexed KC tags exist does it fall back to the Portfolio Guru-linked wording
+  ("touched by Portfolio Guru-linked evidence … not your full Kaizen
+  strength"). This derivation reuses already-indexed rows and never triggers a
+  sync or scrape just to draw the line.
 
 ### No pathway assumptions
 
