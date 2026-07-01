@@ -139,6 +139,7 @@ Status:
 - Image extraction now uses a facts-only prompt and explicitly forbids extrapolating visible findings into management narrative.
 - Photo/image-derived recommendations and drafts now receive source-grounding guards.
 - Draft fields from image sources are sanitised to strip unsupported high-risk resuscitation/cardiac narrative while preserving doctor-authored text/voice resuscitation cases.
+- Image uploads now follow the same intent-first workflow as document uploads: use for drafting, attach only, use + attach, or ignore. Clinical images such as ECGs, ultrasound, X-rays, wounds, and procedure photos are attachable evidence, but the bot must ask for the doctor's own interpretation/context before drafting from image-only findings.
 - Phase 3 remains paused until this survives real image/photo usage.
 
 ### Phase 2.6 - Message and workflow hardening

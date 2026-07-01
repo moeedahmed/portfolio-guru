@@ -160,7 +160,18 @@ def get_supported_extensions() -> list:
     return [".pdf", ".pptx", ".ppt", ".docx", ".doc", ".txt", ".md"]
 
 
+def get_supported_attachment_extensions() -> list:
+    """Return file extensions Kaizen can receive as evidence attachments."""
+    return get_supported_extensions() + [".jpg", ".jpeg", ".png", ".gif", ".webp"]
+
+
 def is_supported_document(filename: str) -> bool:
     """Check if a filename has a supported extension."""
     suffix = Path(filename).suffix.lower()
     return suffix in get_supported_extensions()
+
+
+def is_supported_attachment(filename: str) -> bool:
+    """Check if a filename can be passed to the Kaizen attachment uploader."""
+    suffix = Path(filename).suffix.lower()
+    return suffix in get_supported_attachment_extensions()

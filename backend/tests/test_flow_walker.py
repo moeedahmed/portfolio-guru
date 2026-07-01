@@ -3933,9 +3933,10 @@ class TestImageOCRProgress:
 
     Background: the original implementation appended "Still reading…" to the
     initial ack on the same message, which read like the bot repeating itself.
-    The contract now is: a single ack ("Reading image…"), optionally replaced
-    by a single calm reassurance ("Still reading…") if OCR is slow, then
-    replaced again by the success/error message.
+    The helper still protects the image OCR surfaces that deliberately read an
+    image after a user action, such as draft feedback and image-intent choices.
+    It is not used for the first photo upload, which now asks for intent before
+    OCR starts.
     """
 
     @pytest.mark.asyncio
@@ -4020,8 +4021,8 @@ class TestImageOCRProgress:
         )
 
     @pytest.mark.asyncio
-    async def test_fast_photo_ocr_never_shows_still_reading_message(self):
-        from bot import handle_case_input
+    async def test_photo_upload_asks_for_intent_before_ocr(self):
+        from bot import AWAIT_DOC_INTENT, handle_case_input
 
         sim = BotSimulator()
         context = sim._make_context()
@@ -4036,19 +4037,24 @@ class TestImageOCRProgress:
 
         with patch('bot.has_credentials', return_value=True), \
              patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
-             patch('bot.extract_from_image', new=AsyncMock(return_value='Chest pain with ECG changes')), \
+             patch('bot.extract_from_image', new=AsyncMock(return_value='Chest pain with ECG changes')) as extract_mock, \
              patch('bot._process_case_text', new=AsyncMock()):
-            await handle_case_input(photo_update, context)
+            result = await handle_case_input(photo_update, context)
 
         ack_texts = [text for _, text, _ in sim.messages_sent if text]
-        assert any("Reading image" in t for t in ack_texts), (
-            f"Expected initial 'Reading image…' ack, got: {ack_texts}"
+        assert result == AWAIT_DOC_INTENT
+        extract_mock.assert_not_called()
+        assert any("Receiving image" in t for t in ack_texts), (
+            f"Expected initial 'Receiving image…' ack, got: {ack_texts}"
+        )
+        assert any("how would you like to use it" in t for t in ack_texts), (
+            f"Expected image intent prompt, got: {ack_texts}"
         )
         for text in ack_texts:
             assert "Still reading" not in text, (
-                f"Fast OCR must not emit 'Still reading…' — saw: {text!r}"
+                f"Intent-first image upload must not emit 'Still reading…' — saw: {text!r}"
             )
-            assert "Reading image…\n" not in text, (
+            assert "Receiving image…\n" not in text, (
                 f"Ack must not stack with extra lines — saw: {text!r}"
             )
 
@@ -4251,8 +4257,8 @@ class TestMessageStandardCopy:
         assert "describe the case in text" not in final, final
 
     @pytest.mark.asyncio
-    async def test_new_case_image_error_is_non_terminal(self):
-        """Photo OCR failure with no accumulated evidence stays in AWAIT_CASE_INPUT.
+    async def test_new_case_image_receive_error_is_non_terminal(self):
+        """Photo receive failure with no accumulated evidence stays in AWAIT_CASE_INPUT.
 
         The conversation must NOT end so a second photo (e.g. from the same
         Telegram album) or a follow-up text can still produce a draft.
@@ -4275,22 +4281,22 @@ class TestMessageStandardCopy:
         update.message.photo = [photo]
 
         with patch('bot.has_credentials', return_value=True), \
-             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
-             patch('bot.extract_from_image', new=AsyncMock(side_effect=RuntimeError('vision down'))):
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))):
+            file_obj.download_to_drive.side_effect = RuntimeError('download down')
             result = await handle_case_input(update, context)
 
         assert result == AWAIT_CASE_INPUT, f"Expected AWAIT_CASE_INPUT, got {result}"
         edits = [text for kind, text, _ in sim.messages_sent if kind == 'edit' and text]
         assert edits, f"Expected an error edit, got: {sim.messages_sent}"
         final = edits[-1]
-        assert "Couldn't read image" in final, final
+        assert "Couldn't receive image" in final, final
         assert "describe the case in text" in final, final
         # State must NOT be wiped — other inputs (or a second album photo) can continue
         assert context.user_data.get("sentinel") == "kept", "user_data must not be cleared"
 
     @pytest.mark.asyncio
-    async def test_gathering_image_error_preserves_evidence_and_stays_in_gathering(self):
-        """Photo OCR failure when a gathering case is active must not destroy evidence.
+    async def test_gathering_image_receive_error_preserves_evidence_and_stays_in_gathering(self):
+        """Photo receive failure when a gathering case is active must not destroy evidence.
 
         The bot must stay in AWAIT_GATHERING with a soft 'other inputs saved'
         message, so the user can tap Done and still produce a draft from the
@@ -4315,8 +4321,8 @@ class TestMessageStandardCopy:
         update.message.photo = [photo]
 
         with patch('bot.has_credentials', return_value=True), \
-             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
-             patch('bot.extract_from_image', new=AsyncMock(side_effect=RuntimeError('vision down'))):
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))):
+            file_obj.download_to_drive.side_effect = RuntimeError('download down')
             result = await handle_case_input(update, context)
 
         assert result == AWAIT_GATHERING, f"Expected AWAIT_GATHERING, got {result}"

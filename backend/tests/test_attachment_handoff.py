@@ -64,6 +64,46 @@ async def test_document_case_stores_attachment_path():
 
 
 @pytest.mark.asyncio
+async def test_photo_case_stores_pending_image_and_asks_intent():
+    """Photo uploads should ask how the image should be used before OCR/drafting."""
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_text_update('')
+
+    photo = MagicMock()
+    file_obj = MagicMock()
+    file_obj.download_to_drive = AsyncMock()
+    photo.get_file = AsyncMock(return_value=file_obj)
+
+    update.message.text = None
+    update.message.voice = None
+    update.message.audio = None
+    update.message.document = None
+    update.message.caption = None
+    update.message.photo = [photo]
+
+    with patch('bot.has_credentials', return_value=True), \
+         patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+         patch('bot.extract_from_image', new=AsyncMock(return_value="visible clinical text")) as extract_mock:
+        result = await handle_case_input(update, context)
+
+    assert result == AWAIT_DOC_INTENT
+    assert context.user_data["_pending_doc"]["kind"] == "image"
+    assert context.user_data["_pending_doc"]["name"] == "portfolio-image.jpg"
+    assert os.path.exists(context.user_data["_pending_doc"]["path"])
+    extract_mock.assert_not_called()
+    buttons = sim.get_last_buttons()
+    assert ("📝 Use for drafting", "DOCUSE|info") in buttons
+    assert ("📎 Attach only", "DOCUSE|attach") in buttons
+    assert ("📎 Use + attach", "DOCUSE|both") in buttons
+    assert ("❌ Remove image", "DOCUSE|ignore") in buttons
+
+    path = context.user_data["_pending_doc"]["path"]
+    if os.path.exists(path):
+        os.unlink(path)
+
+
+@pytest.mark.asyncio
 async def test_document_attach_only_does_not_extract_and_waits_for_case_details():
     sim = BotSimulator()
     context = sim._make_context()
@@ -83,6 +123,36 @@ async def test_document_attach_only_does_not_extract_and_waits_for_case_details(
     assert context.user_data["attachment_name"] == "evidence.pdf"
     assert "case_text" not in context.user_data
     assert "attached to the Kaizen draft" in sim.get_last_text()
+
+    if os.path.exists(temp_path):
+        os.unlink(temp_path)
+
+
+@pytest.mark.asyncio
+async def test_image_attach_only_does_not_extract_and_waits_for_case_details():
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_callback_update("DOCUSE|attach")
+
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+        temp_path = f.name
+        f.write(b"dummy image content")
+    context.user_data["_pending_doc"] = {
+        "path": temp_path,
+        "name": "portfolio-image.jpg",
+        "kind": "image",
+    }
+
+    with patch('bot.extract_from_image', new=AsyncMock()) as extract_mock:
+        result = await handle_document_intent(update, context)
+
+    assert result == AWAIT_CASE_INPUT
+    extract_mock.assert_not_called()
+    assert context.user_data["attachment_path"] == temp_path
+    assert context.user_data["attachment_name"] == "portfolio-image.jpg"
+    assert "case_text" not in context.user_data
+    assert "will be attached to the Kaizen draft" in sim.get_last_text()
+    assert "send your own interpretation/context" in sim.get_last_text()
 
     if os.path.exists(temp_path):
         os.unlink(temp_path)
@@ -112,6 +182,66 @@ async def test_document_read_and_attach_extracts_case_and_preserves_attachment()
 
     if os.path.exists(temp_path):
         os.unlink(temp_path)
+
+
+@pytest.mark.asyncio
+async def test_image_read_and_attach_extracts_case_and_preserves_attachment():
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_callback_update("DOCUSE|both")
+
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+        temp_path = f.name
+        f.write(b"dummy image content")
+    context.user_data["_pending_doc"] = {
+        "path": temp_path,
+        "name": "portfolio-image.jpg",
+        "kind": "image",
+    }
+    context.user_data["_pending_doc_context"] = "I performed and documented the ECG review."
+
+    async def fake_process(message, ctx, user_id, case_text, input_source):
+        ctx.user_data["processed_case_text"] = case_text
+        ctx.user_data["processed_input_source"] = input_source
+        return AWAIT_FORM_CHOICE
+
+    with patch('bot.extract_from_image', new=AsyncMock(return_value="Visible ECG text: sinus rhythm.")), \
+         patch('bot._process_case_text', new=AsyncMock(side_effect=fake_process)):
+        result = await handle_document_intent(update, context)
+
+    assert result == AWAIT_FORM_CHOICE
+    assert context.user_data["attachment_path"] == temp_path
+    assert context.user_data["attachment_name"] == "portfolio-image.jpg"
+    assert "I performed and documented" in context.user_data["processed_case_text"]
+    assert "Visible ECG text" in context.user_data["processed_case_text"]
+    assert context.user_data["processed_input_source"] == "photo"
+
+    if os.path.exists(temp_path):
+        os.unlink(temp_path)
+
+
+@pytest.mark.asyncio
+async def test_image_use_for_drafting_blocks_nonclinical_without_context():
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_callback_update("DOCUSE|info")
+
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+        temp_path = f.name
+        f.write(b"dummy image content")
+    context.user_data["_pending_doc"] = {
+        "path": temp_path,
+        "name": "portfolio-image.jpg",
+        "kind": "image",
+    }
+
+    with patch('bot.extract_from_image', new=AsyncMock(return_value="NOT_CLINICAL")):
+        result = await handle_document_intent(update, context)
+
+    assert result == AWAIT_CASE_INPUT
+    assert "case_text" not in context.user_data
+    assert "send your own interpretation/context" in sim.get_last_text()
+    assert not os.path.exists(temp_path)
 
 
 @pytest.mark.asyncio
@@ -207,6 +337,34 @@ async def test_text_while_document_choice_pending_is_captured_and_keeps_buttons_
     assert context.user_data["_pending_doc"]["name"] == "atls.pdf"
     assert context.user_data["_pending_doc_context"] == "I completed ATLS and have a certificate."
     assert "document choice is still pending" in sim.get_last_text()
+
+    if os.path.exists(temp_path):
+        os.unlink(temp_path)
+
+
+@pytest.mark.asyncio
+async def test_text_while_image_choice_pending_is_captured_and_keeps_buttons_valid():
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_text_update("This was an ECG I reviewed during a chest pain case.")
+
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+        temp_path = f.name
+        f.write(b"dummy image content")
+    context.user_data["_pending_doc"] = {
+        "path": temp_path,
+        "name": "portfolio-image.jpg",
+        "kind": "image",
+    }
+
+    with patch('bot.classify_intent', new=AsyncMock()) as classify_mock:
+        result = await handle_mid_conversation_text(update, context)
+
+    assert result == AWAIT_DOC_INTENT
+    classify_mock.assert_not_called()
+    assert context.user_data["_pending_doc"]["kind"] == "image"
+    assert context.user_data["_pending_doc_context"] == "This was an ECG I reviewed during a chest pain case."
+    assert "image choice is still pending" in sim.get_last_text()
 
     if os.path.exists(temp_path):
         os.unlink(temp_path)

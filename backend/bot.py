@@ -27,7 +27,7 @@ from form_display import public_form_name, sanitize_internal_form_codes
 from models import FormDraft, CBDData, FormTypeRecommendation
 from whisper import transcribe_voice
 from vision import extract_from_image
-from documents import extract_from_document, is_supported_document
+from documents import extract_from_document, is_supported_attachment, is_supported_document
 from profile_store import init_profile_db, store_training_level, get_training_level, get_voice_profile, store_voice_profile, clear_voice_profile, store_curriculum, get_curriculum, get_kaizen_role
 from health_models import CORE_DOMAINS, HealthProfile, HealthDomain, Pathway
 from health_engine import case_history_to_evidence_items, compute_snapshot
@@ -3115,6 +3115,19 @@ def _build_doc_intent_keyboard() -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton("📎 Read + attach", callback_data="DOCUSE|both"),
             InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|doc_intent"),
+        ],
+    ])
+
+
+def _build_image_intent_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📝 Use for drafting", callback_data="DOCUSE|info"),
+            InlineKeyboardButton("📎 Attach only", callback_data="DOCUSE|attach"),
+        ],
+        [
+            InlineKeyboardButton("📎 Use + attach", callback_data="DOCUSE|both"),
+            InlineKeyboardButton("❌ Remove image", callback_data="DOCUSE|ignore"),
         ],
     ])
 
@@ -7720,7 +7733,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Apply the user's explicit document intent: read, attach, or both."""
+    """Apply the user's explicit file/image intent: read, attach, both, or remove."""
     query = update.callback_query
     await query.answer()
     mode = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else ""
@@ -7728,10 +7741,24 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
     pending_doc_context = context.user_data.pop("_pending_doc_context", "")
     file_path = pending_doc.get("path")
     file_name = pending_doc.get("name") or "document"
+    attachment_kind = pending_doc.get("kind") or "document"
+    is_image_attachment = attachment_kind == "image"
+    attachment_label = "image" if is_image_attachment else "document"
+
+    if mode == "ignore":
+        if file_path and os.path.exists(file_path):
+            try:
+                os.unlink(file_path)
+            except OSError:
+                pass
+        await query.edit_message_text(
+            f"Removed that {attachment_label}. Send the anonymised case details when you're ready."
+        )
+        return AWAIT_CASE_INPUT
 
     if mode not in {"info", "attach", "both"} or not file_path or not os.path.exists(file_path):
         await query.edit_message_text(
-            "That document choice has expired. Send the file again when you're ready."
+            f"That {attachment_label} choice has expired. Send it again when you're ready."
         )
         return AWAIT_CASE_INPUT
 
@@ -7740,18 +7767,30 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
         context.user_data["attachment_name"] = file_name
 
     if mode == "attach":
+        extra_context = ""
+        if is_image_attachment:
+            extra_context = (
+                "\n\nIf this is an ECG, ultrasound, X-ray, wound or procedure image, "
+                "send your own interpretation/context before I draft from it."
+            )
         await query.edit_message_text(
             f"📎 *{file_name}* will be attached to the Kaizen draft.\n\n"
-            "Now send the anonymised case details you want drafted.",
+            f"Now send the anonymised case details you want drafted.{extra_context}",
             parse_mode="Markdown",
         )
         return AWAIT_CASE_INPUT
 
-    await query.edit_message_text(f"📄 Reading *{file_name}*…", parse_mode="Markdown")
+    read_icon = "📷" if is_image_attachment else "📄"
+    await query.edit_message_text(f"{read_icon} Reading *{file_name}*…", parse_mode="Markdown")
     try:
-        case_text = await extract_from_document(file_path)
+        if is_image_attachment:
+            case_text = await extract_from_image(file_path)
+            if case_text.strip() == "NOT_CLINICAL":
+                case_text = ""
+        else:
+            case_text = await extract_from_document(file_path)
     except Exception as exc:
-        logger.error("Document extraction failed after DOCUSE=%s: %s", mode, exc, exc_info=True)
+        logger.error("%s extraction failed after DOCUSE=%s: %s", attachment_label.title(), mode, exc, exc_info=True)
         case_text = ""
 
     if not case_text or not case_text.strip():
@@ -7765,11 +7804,30 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
             context.user_data["document_name"] = file_name
             await query.edit_message_text(CAPTURED_ACK, parse_mode="Markdown")
             _track_latest_message(context, query.message)
-            return await _process_case_text(query.message, context, update.effective_user.id, case_text, "document")
+            input_source = "photo" if is_image_attachment else "document"
+            return await _process_case_text(query.message, context, update.effective_user.id, case_text, input_source)
         if mode == "both":
+            if is_image_attachment:
+                await query.edit_message_text(
+                    f"📎 *{file_name}* will still be attached, but I won't draft from the image alone.\n\n"
+                    "For ECGs, ultrasound, X-rays, wounds or procedure photos, send your own interpretation/context and I'll draft from that.",
+                    parse_mode="Markdown",
+                )
+                return AWAIT_CASE_INPUT
             await query.edit_message_text(
                 f"📎 *{file_name}* will still be attached, but I couldn't read useful text from it.\n\n"
                 "Send the anonymised case details in text and I'll draft from that.",
+                parse_mode="Markdown",
+            )
+            return AWAIT_CASE_INPUT
+        if is_image_attachment:
+            try:
+                os.unlink(file_path)
+            except OSError:
+                pass
+            await query.edit_message_text(
+                f"I couldn't extract safe drafting information from *{file_name}*.\n\n"
+                "For ECGs, ultrasound, X-rays, wounds or procedure photos, send your own interpretation/context instead.",
                 parse_mode="Markdown",
             )
             return AWAIT_CASE_INPUT
@@ -7794,6 +7852,7 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
         except OSError:
             pass
     context.user_data["document_name"] = file_name
+    input_source = "photo" if is_image_attachment else "document"
 
     if _gathering_enabled(context) and not (context.user_data.get("chosen_form") and context.user_data.get("awaiting_detail")):
         if not _gathering_case_active(context):
@@ -7803,7 +7862,7 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
             if existing_attachment_path:
                 context.user_data["attachment_path"] = existing_attachment_path
                 context.user_data["attachment_name"] = existing_attachment_name
-        _append_gathering_case(context, case_text, "document")
+        _append_gathering_case(context, case_text, input_source)
         reply_text, reply_markup = _gathering_reply(context)
         await query.edit_message_text(reply_text, reply_markup=reply_markup)
         context.user_data["gathering_msg_id"] = query.message.message_id
@@ -7813,7 +7872,7 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
 
     await query.edit_message_text(CAPTURED_ACK, parse_mode="Markdown")
     _track_latest_message(context, query.message)
-    return await _process_case_text(query.message, context, update.effective_user.id, case_text, "document")
+    return await _process_case_text(query.message, context, update.effective_user.id, case_text, input_source)
 
 
 # === IMPLICIT CASE ACCUMULATION ===
@@ -8703,70 +8762,104 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     elif update.message.photo:
         bundling = bool(context.user_data.get("pending_case_bundle"))
-        ack_text = "📷 Reading images…" if bundling else "📷 Reading image…"
-        ack = await _send_pending_bundle_status(update.message, context, ack_text) if bundling else await update.message.reply_text(ack_text)
-        typing_stop = asyncio.Event()
-        typing_task = asyncio.create_task(_typing_until(update.effective_chat, typing_stop))
-        ocr_done = asyncio.Event()
-        progress_task = asyncio.create_task(
-            _run_image_progress(ack, ocr_done=ocr_done)
-        )
-        tmp_path = None
-        try:
-            photo = update.message.photo[-1]
-            photo_file = await photo.get_file()
-            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-                tmp_path = tmp.name
-                await photo_file.download_to_drive(tmp_path)
-                case_text = await extract_from_image(tmp_path)
-            ocr_done.set()
-            progress_task.cancel()
-            if case_text.strip() == "NOT_CLINICAL":
-                await ack.edit_text("This image doesn't look like a clinical case. Send a text description or a photo of clinical notes/findings.")
-                return ConversationHandler.END
-            caption = (update.message.caption or "").strip()
-            if caption:
-                case_text = f"{caption}\n\n{case_text}".strip()
-            if bundling:
-                # User said they'd send images — they just did. Auto-release.
+        if bundling:
+            ack = await _send_pending_bundle_status(update.message, context, "📷 Reading images…")
+            typing_stop = asyncio.Event()
+            typing_task = asyncio.create_task(_typing_until(update.effective_chat, typing_stop))
+            ocr_done = asyncio.Event()
+            progress_task = asyncio.create_task(
+                _run_image_progress(ack, ocr_done=ocr_done)
+            )
+            tmp_path = None
+            try:
+                photo = update.message.photo[-1]
+                photo_file = await photo.get_file()
+                with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                    tmp_path = tmp.name
+                    await photo_file.download_to_drive(tmp_path)
+                    case_text = await extract_from_image(tmp_path)
+                ocr_done.set()
+                progress_task.cancel()
+                if case_text.strip() == "NOT_CLINICAL":
+                    await ack.edit_text("This image doesn't look like a clinical case. Send a text description or a photo of clinical notes/findings.")
+                    return AWAIT_CASE_INPUT
+                caption = (update.message.caption or "").strip()
+                if caption:
+                    case_text = f"{caption}\n\n{case_text}".strip()
                 _append_pending_case_bundle(context, case_text, "photo")
                 case_text, input_source = _combined_pending_case_bundle(context)
                 _clear_pending_case_bundle(context)
                 await ack.edit_text("📷 Images read. Finding matching forms…")
                 _track_latest_message(context, ack)
                 return await _process_case_text(update.message, context, user_id, case_text, input_source)
-            else:
-                if _gathering_enabled(context) and not (context.user_data.get("chosen_form") and context.user_data.get("awaiting_detail")):
-                    reply_text, reply_markup = _gathering_reply(context)
-                    await ack.edit_text(reply_text, reply_markup=reply_markup)
-                    context.user_data["gathering_msg_id"] = ack.message_id
-                    context.user_data["gathering_chat_id"] = ack.chat_id
-                    context.user_data["_gathering_ack_used"] = True
-                else:
-                    await ack.edit_text("📷 Image read. Finding matching forms…")
-            _track_latest_message(context, ack)
-        except Exception as e:
-            ocr_done.set()
-            progress_task.cancel()
-            logger.warning("Photo OCR failed: %s", e)
-            if _gathering_case_active(context):
+            except Exception as e:
+                ocr_done.set()
+                progress_task.cancel()
+                logger.warning("Photo OCR failed in pending bundle: %s", e)
                 await ack.edit_text(
                     "⚠️ Couldn't read that image — your other inputs are still saved.\n"
+                    "Send another image or type `done` to draft from what I already have.",
+                    parse_mode="Markdown",
+                )
+                return AWAIT_CASE_INPUT
+            finally:
+                typing_stop.set()
+                typing_task.cancel()
+                progress_task.cancel()
+                if tmp_path and os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+
+        await _delete_previous_gathering_message(context)
+        ack = await update.message.reply_text("📷 Receiving image…")
+        tmp_path = None
+        try:
+            import shutil
+            photo = update.message.photo[-1]
+            photo_file = await photo.get_file()
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                tmp_path = tmp.name
+                await photo_file.download_to_drive(tmp_path)
+
+            cache_dir = os.path.join(tempfile.gettempdir(), "portfolio_guru_cache")
+            os.makedirs(cache_dir, exist_ok=True)
+            with tempfile.NamedTemporaryFile(dir=cache_dir, suffix=".jpg", delete=False) as cached_file:
+                cached_path = cached_file.name
+            shutil.copy2(tmp_path, cached_path)
+
+            context.user_data["_pending_doc"] = {
+                "path": cached_path,
+                "name": "portfolio-image.jpg",
+                "kind": "image",
+            }
+            caption = (update.message.caption or "").strip()
+            if caption:
+                context.user_data["_pending_doc_context"] = caption
+
+            await ack.edit_text(
+                "📷 Image received — how would you like to use it?\n\n"
+                "For ECGs, ultrasound, X-rays, wounds or procedure photos, "
+                "I won't interpret the image unless you add your own context.",
+                reply_markup=_build_image_intent_keyboard(),
+            )
+            _track_latest_message(context, ack)
+            return AWAIT_DOC_INTENT
+        except Exception as e:
+            logger.warning("Photo download/cache failed: %s", e)
+            if _gathering_case_active(context):
+                await ack.edit_text(
+                    "⚠️ Couldn't receive that image — your other inputs are still saved.\n"
                     "Send more or tap Done to draft.",
                     reply_markup=_gathering_done_keyboard(),
                 )
                 return AWAIT_GATHERING
             await ack.edit_text(
-                "⚠️ Couldn't read image. Try a clearer photo or describe the case in text.",
+                "⚠️ Couldn't receive image. Try again or describe the case in text.",
                 reply_markup=InlineKeyboardMarkup(
                     [[InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel")]]
                 ),
             )
             return AWAIT_CASE_INPUT
         finally:
-            typing_stop.set()
-            typing_task.cancel()
-            progress_task.cancel()
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
 
@@ -9518,7 +9611,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         if not os.path.exists(attachment_path):
             attachment_skipped_reason = "attachment (file missing)"
             attachment_path = None
-        elif not is_supported_document(context.user_data.get("attachment_name", "")):
+        elif not is_supported_attachment(context.user_data.get("attachment_name", "")):
             attachment_skipped_reason = "attachment (unsupported type)"
             attachment_path = None
         else:
@@ -10568,18 +10661,22 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
     in_flow = has_draft or has_pending or bool(case_text) or bool(context.user_data.get("_pending_doc"))
 
     if context.user_data.get("_pending_doc"):
+        pending_kind = (context.user_data.get("_pending_doc") or {}).get("kind") or "document"
+        pending_label = "image" if pending_kind == "image" else "document"
         existing = context.user_data.get("_pending_doc_context", "").strip()
         context.user_data["_pending_doc_context"] = (
             f"{existing}\n\n{raw_text}".strip() if existing else raw_text
         )
         await update.message.reply_text(
-            "I've kept that as extra context. Your document choice is still pending - use the buttons above to choose whether to read it, attach it, or both."
+            f"I've kept that as extra context. Your {pending_label} choice is still pending - use the buttons above to choose whether to use it for drafting, attach it, or both."
         )
         return AWAIT_DOC_INTENT
 
     if _is_submit_inquiry(raw_text):
         if context.user_data.get("_pending_doc"):
-            suffix = "\n\nYour document is still waiting above — choose how you want to use it."
+            pending_kind = (context.user_data.get("_pending_doc") or {}).get("kind") or "document"
+            pending_label = "image" if pending_kind == "image" else "document"
+            suffix = f"\n\nYour {pending_label} is still waiting above — choose how you want to use it."
             next_state = AWAIT_DOC_INTENT
         elif has_draft:
             suffix = "\n\nYour draft is still ready above — tap *Save as draft* when you have reviewed it."

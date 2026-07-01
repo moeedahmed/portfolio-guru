@@ -112,7 +112,7 @@ concepts.
 Portfolio Guru: no external write happens without an explicit human tap,
 and the agent never submits on a supervisor's behalf.
 
-- Evidence `[live]`: `backend/bot.py:9393` `handle_approval_approve` is
+- Evidence `[live]`: `backend/bot.py:9486` `handle_approval_approve` is
   the only path that proceeds to a Kaizen draft save, and it saves a draft
   only. The agent does not submit, sign, send, approve, reject, or delete
   on a supervisor's behalf — that boundary is the hard line.
