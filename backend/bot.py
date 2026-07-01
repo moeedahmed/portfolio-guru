@@ -7751,7 +7751,22 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
                 os.unlink(file_path)
             except OSError:
                 pass
-        await query.edit_message_text(
+        # Delete our prompt message
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+        # Delete the user's original image/document message
+        user_msg_id = pending_doc.get("user_msg_id")
+        if user_msg_id:
+            try:
+                await context.bot.delete_message(
+                    chat_id=query.message.chat_id,
+                    message_id=user_msg_id,
+                )
+            except Exception:
+                pass
+        await query.message.reply_text(
             f"Removed that {attachment_label}. Send the anonymised case details when you're ready."
         )
         return AWAIT_CASE_INPUT
@@ -8830,6 +8845,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 "path": cached_path,
                 "name": "portfolio-image.jpg",
                 "kind": "image",
+                "user_msg_id": update.message.message_id,
             }
             caption = (update.message.caption or "").strip()
             if caption:
@@ -8905,7 +8921,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
 
-        context.user_data["_pending_doc"] = {"path": cached_path, "name": file_name}
+        context.user_data["_pending_doc"] = {"path": cached_path, "name": file_name, "user_msg_id": update.message.message_id}
         await ack.edit_text(
             f"📄 *{file_name}* — how would you like to use this document?",
             reply_markup=_build_doc_intent_keyboard(),
