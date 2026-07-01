@@ -18,6 +18,8 @@ from kaizen_form_filer import (
     STAGE_SELECT_VALUES,
     apply_common_header_defaults,
     _attach_file,
+    _QA_READ_FIELD_JS,
+    _QA_READ_KC_JS,
     _session_cache_path,
     _default_non_applicable_procedural_selects,
     _is_kaizen_app_url,
@@ -73,7 +75,18 @@ def mock_page():
 
     page.locator = MagicMock(side_effect=make_locator)
     page.get_by_text = MagicMock(side_effect=make_locator)
-    page.evaluate = AsyncMock(return_value=False)
+    async def page_evaluate_mock(expr, *args):
+        if expr == _QA_READ_FIELD_JS:
+            return {"tag": "INPUT", "value": "mock persisted value"}
+        if expr == _QA_READ_KC_JS:
+            return True
+        if isinstance(expr, str) and "add tags" in expr.lower():
+            return 1
+        if isinstance(expr, str) and "document.body" in expr:
+            return "Stage of training Higher"
+        return False
+
+    page.evaluate = AsyncMock(side_effect=page_evaluate_mock)
     return page
 
 
@@ -156,6 +169,63 @@ async def test_attach_file_uses_kaizen_upload_button_file_chooser(tmp_path, monk
     page.get_by_text.return_value = confirmation
 
     assert await _attach_file(page, str(attachment)) is True
+    upload_button.click.assert_awaited_once()
+    chooser.set_files.assert_awaited_once_with(str(attachment))
+
+
+@pytest.mark.asyncio
+async def test_attach_file_without_visible_confirmation_returns_false(tmp_path, monkeypatch):
+    """The upload click+chooser can fire without Kaizen actually accepting the
+    file (e.g. wrong section, transient error). If nothing on the page shows
+    the filename, an "Uploaded" status, or Remove/Replace controls, this must
+    not be reported as a successful attachment."""
+    attachment = tmp_path / "Moeed KH A Kind Life.pdf"
+    attachment.write_text("synthetic attachment", encoding="utf-8")
+
+    async def _noop_sleep(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr("kaizen_form_filer.asyncio.sleep", _noop_sleep)
+
+    upload_button = MagicMock()
+    upload_button.is_visible = AsyncMock(return_value=True)
+    upload_button.click = AsyncMock()
+
+    upload_locator = MagicMock()
+    upload_locator.first = upload_button
+
+    chooser = MagicMock()
+    chooser.set_files = AsyncMock()
+
+    class ChooserInfo:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        @property
+        def value(self):
+            async def _value():
+                return chooser
+
+            return _value()
+
+    no_confirmation = MagicMock()
+    no_confirmation.is_visible = AsyncMock(return_value=False)
+    no_confirmation.first = no_confirmation
+
+    file_input = MagicMock()
+    file_input.count = AsyncMock(return_value=0)
+
+    page = MagicMock()
+    page.locator.side_effect = lambda selector, *a, **kw: (
+        file_input if selector == 'input[type="file"]' else upload_locator
+    )
+    page.expect_file_chooser.return_value = ChooserInfo()
+    page.get_by_text.return_value = no_confirmation
+
+    assert await _attach_file(page, str(attachment)) is False
     upload_button.click.assert_awaited_once()
     chooser.set_files.assert_awaited_once_with(str(attachment))
 
@@ -1152,6 +1222,131 @@ async def test_file_to_kaizen_qa_gap_downgrades_false_success(mock_playwright_ct
     assert result["status"] == "partial"
     assert "date_of_event" in result["skipped"]
     assert result["error"] is None
+
+
+@pytest.mark.asyncio
+async def test_file_to_kaizen_qa_gap_removes_field_from_filled_not_just_skipped(mock_playwright_ctx):
+    """A field that was filled pre-save but read back empty by post-save QA
+    must be dropped from `filled`, not merely appended to `skipped`.
+
+    Counting it in both lists is exactly how the bot reported "9 fields
+    completed" with a saved summary date while the real Kaizen draft had an
+    empty date field: `date_of_encounter` was filled before save, then QA
+    found it empty after save, but the old code only added it to `skipped`
+    and left the stale entry in `filled` — inflating the completed-field
+    count and the saved-summary text derived from it.
+    """
+    qa_gap = {
+        "field": "date_of_encounter",
+        "dom_id": "startDate",
+        "form_type": "MINI_CEX",
+        "kind": "text",
+        "missing_dom": False,
+        "expected_preview": "27/6/2026",
+        "reason": "value_not_persisted",
+    }
+    with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
+            with patch("kaizen_form_filer._verify_entry_saved", AsyncMock(return_value=True)):
+                with patch(
+                    "kaizen_form_filer._verify_filing_qa",
+                    AsyncMock(return_value={
+                        "filled": ["clinical_setting"],
+                        "empty_expected": ["date_of_encounter"],
+                        "empty_acceptable": [],
+                        "gaps": [qa_gap],
+                    }),
+                ):
+                    fields = {
+                        "date_of_encounter": "2026-06-27",
+                        "clinical_setting": "Emergency Department",
+                        "patient_presentation": "Central chest pain.",
+                        "reflection": "Repeat ECG earlier next time.",
+                    }
+                    result = await file_to_kaizen("MINI_CEX", fields, "user", "pass")
+
+    assert result["status"] == "partial"
+    assert "date_of_encounter" not in result["filled"]
+    assert result["skipped"].count("date_of_encounter") == 1
+
+
+@pytest.mark.asyncio
+async def test_file_to_kaizen_qa_gap_decrements_kc_count(mock_playwright_ctx):
+    """A `kc:` gap must decrement the ticked-KC count in the saved summary,
+    not just get appended to `skipped` alongside a stale higher count."""
+    with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
+            with patch("kaizen_form_filer._verify_entry_saved", AsyncMock(return_value=True)):
+                with patch(
+                    "kaizen_form_filer._fill_curriculum_for_form",
+                    AsyncMock(return_value=(["SLO12-KC6", "SLO12-KC7"], [])),
+                ):
+                    with patch(
+                        "kaizen_form_filer._verify_filing_qa",
+                        AsyncMock(return_value={
+                            "filled": [],
+                            "empty_expected": ["kc:SLO12-KC6"],
+                            "empty_acceptable": [],
+                            "gaps": [{
+                                "field": "kc:SLO12-KC6",
+                                "dom_id": None,
+                                "form_type": "CBD",
+                                "kind": "kc_checkbox",
+                                "missing_dom": False,
+                                "expected_preview": "SLO12-KC6",
+                                "reason": "kc_not_ticked",
+                            }],
+                        }),
+                    ):
+                        fields = {"stage_of_training": "Higher", "clinical_reasoning": "test"}
+                        result = await file_to_kaizen(
+                            "CBD", fields, "user", "pass",
+                            curriculum_links=["SLO12"],
+                        )
+
+    assert result["status"] == "partial"
+    assert "curriculum_links (1 KCs)" in result["filled"]
+    assert "curriculum_links (2 KCs)" not in result["filled"]
+    assert "kc:SLO12-KC6" in result["skipped"]
+
+
+@pytest.mark.asyncio
+async def test_file_to_kaizen_qa_gap_removes_kc_entry_when_none_remain(mock_playwright_ctx):
+    """If every ticked KC turns out empty on QA re-read, the curriculum_links
+    summary entry must be removed entirely rather than left at a false
+    positive count."""
+    with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
+            with patch("kaizen_form_filer._verify_entry_saved", AsyncMock(return_value=True)):
+                with patch(
+                    "kaizen_form_filer._fill_curriculum_for_form",
+                    AsyncMock(return_value=(["SLO12-KC6"], [])),
+                ):
+                    with patch(
+                        "kaizen_form_filer._verify_filing_qa",
+                        AsyncMock(return_value={
+                            "filled": [],
+                            "empty_expected": ["kc:SLO12-KC6"],
+                            "empty_acceptable": [],
+                            "gaps": [{
+                                "field": "kc:SLO12-KC6",
+                                "dom_id": None,
+                                "form_type": "CBD",
+                                "kind": "kc_checkbox",
+                                "missing_dom": False,
+                                "expected_preview": "SLO12-KC6",
+                                "reason": "kc_not_ticked",
+                            }],
+                        }),
+                    ):
+                        fields = {"stage_of_training": "Higher", "clinical_reasoning": "test"}
+                        result = await file_to_kaizen(
+                            "CBD", fields, "user", "pass",
+                            curriculum_links=["SLO12"],
+                        )
+
+    assert not any(entry.startswith("curriculum_links (") for entry in result["filled"])
+    assert "kc:SLO12-KC6" in result["skipped"]
 
 
 @pytest.mark.asyncio

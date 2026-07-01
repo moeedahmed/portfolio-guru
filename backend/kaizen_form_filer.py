@@ -4029,8 +4029,19 @@ async def _attach_file(page: Page, file_path: str) -> bool:
                     except Exception:
                         continue
 
-                logger.info(f"Attached file via upload button without visible confirmation: {file_path}")
-                return True
+                # The file chooser fired and a file was handed to it, but
+                # nothing on the page confirms Kaizen actually accepted it —
+                # no filename, no "Uploaded" status, no Remove/Replace
+                # controls. Reporting success here is exactly how a failed
+                # upload gets counted as a completed field: don't retry with a
+                # broader selector (that risks clicking an unrelated upload
+                # control and attaching to the wrong section) and don't claim
+                # the attachment filled.
+                logger.warning(
+                    f"Attach file click+chooser fired for {file_path} but no upload "
+                    "confirmation was visible — not counting as attached."
+                )
+                return False
             except Exception as e:
                 logger.debug(f"Upload button selector failed ({selector}): {e}")
                 continue
@@ -4524,10 +4535,38 @@ async def file_to_kaizen(
 
         qa_gaps = list((filing_qa or {}).get("gaps") or [])
         if saved and qa_gaps:
+            gap_fields = set()
+            kc_gap_count = 0
             for gap in qa_gaps:
                 field = str(gap.get("field") or "").strip()
-                if field and field not in skipped:
+                if not field:
+                    continue
+                if field not in skipped:
                     skipped.append(field)
+                if field.startswith("kc:"):
+                    kc_gap_count += 1
+                else:
+                    gap_fields.add(field)
+
+            # A field that post-save QA found empty must not also be counted
+            # as filled — otherwise the saved summary/field-count overstates
+            # what actually persisted (this is how a Kaizen date/curriculum
+            # field can read empty on the real draft while the bot reports a
+            # clean save with all fields completed).
+            if gap_fields:
+                filled = [f for f in filled if f not in gap_fields]
+            if kc_gap_count:
+                for idx, entry in enumerate(filled):
+                    if entry.startswith("curriculum_links ("):
+                        match = re.search(r"\((\d+) KCs?\)", entry)
+                        ticked_count = int(match.group(1)) if match else 0
+                        remaining = max(ticked_count - kc_gap_count, 0)
+                        if remaining:
+                            filled[idx] = f"curriculum_links ({remaining} KCs)"
+                        else:
+                            filled.pop(idx)
+                        break
+
             if status == "success":
                 status = "partial"
 

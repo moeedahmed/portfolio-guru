@@ -7,6 +7,7 @@ from bot import (
     AWAIT_CASE_INPUT,
     AWAIT_DOC_INTENT,
     AWAIT_FORM_CHOICE,
+    _attachment_path_with_original_name,
     handle_approval_approve,
     handle_case_input,
     handle_document_intent,
@@ -272,12 +273,68 @@ async def test_filing_call_receives_attachment_path():
          
         await handle_approval_approve(update, context)
 
-    # Verify route_filing was called with the correct attachment_path
+    # Verify route_filing was called with a path renamed to the original
+    # filename the user sent, not the random tempfile basename it was
+    # downloaded under.
     route_mock.assert_called_once()
-    assert route_mock.call_args[1].get("attachment_path") == temp_path
+    filed_path = route_mock.call_args[1].get("attachment_path")
+    assert filed_path is not None
+    assert os.path.basename(filed_path) == "clinical-notes.pdf"
+    assert filed_path != temp_path
+    with open(filed_path, "rb") as f:
+        assert f.read() == b"dummy pdf content"
 
     # Clean up
     if os.path.exists(temp_path):
+        os.unlink(temp_path)
+    if os.path.exists(filed_path):
+        os.unlink(filed_path)
+        os.rmdir(os.path.dirname(filed_path))
+
+
+def test_attachment_path_with_original_name_renames_to_original():
+    """Random tempfile basenames get replaced with the user's real filename."""
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+        temp_path = f.name
+        f.write(b"cert bytes")
+
+    try:
+        result = _attachment_path_with_original_name(temp_path, "Moeed KH A Kind Life.pdf")
+        assert result != temp_path
+        assert os.path.basename(result) == "Moeed KH A Kind Life.pdf"
+        with open(result, "rb") as f:
+            assert f.read() == b"cert bytes"
+    finally:
+        os.unlink(temp_path)
+        if result != temp_path and os.path.exists(result):
+            os.unlink(result)
+            os.rmdir(os.path.dirname(result))
+
+
+def test_attachment_path_with_original_name_noop_when_already_matching():
+    """No copy/rename happens if the path's basename already matches."""
+    tmpdir = tempfile.mkdtemp()
+    path = os.path.join(tmpdir, "clinical-notes.pdf")
+    with open(path, "wb") as f:
+        f.write(b"cert bytes")
+
+    try:
+        result = _attachment_path_with_original_name(path, "clinical-notes.pdf")
+        assert result == path
+    finally:
+        os.unlink(path)
+        os.rmdir(tmpdir)
+
+
+def test_attachment_path_with_original_name_blank_original_returns_input():
+    """A missing/blank original filename is a no-op, not an error."""
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+        temp_path = f.name
+
+    try:
+        assert _attachment_path_with_original_name(temp_path, "") == temp_path
+        assert _attachment_path_with_original_name(temp_path, None) == temp_path
+    finally:
         os.unlink(temp_path)
 
 

@@ -9368,6 +9368,28 @@ def _build_field_edit_buttons(skipped: list) -> list[list[InlineKeyboardButton]]
     return rows
 
 
+def _attachment_path_with_original_name(path: str, original_name: str) -> str:
+    """Return a path whose basename matches the user's original filename.
+
+    Documents are downloaded to a randomly-named tempfile so the case-text
+    extraction step can run before the user picks an intent. If that path is
+    handed straight to the Kaizen filer, the certificate/evidence attachment
+    uploads under the random tempfile name instead of what the user actually
+    sent (e.g. "Moeed KH A Kind Life.pdf"), which the assessor never sees.
+    """
+    safe_name = os.path.basename(original_name or "").replace("/", "_").replace("\\", "_").strip()
+    if not safe_name or os.path.basename(path) == safe_name:
+        return path
+    import shutil
+    named_dir = tempfile.mkdtemp()
+    named_path = os.path.join(named_dir, safe_name)
+    try:
+        shutil.copy2(path, named_path)
+    except OSError:
+        return path
+    return named_path
+
+
 async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle 'File this draft' approval."""
     query = update.callback_query
@@ -9499,6 +9521,10 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         elif not is_supported_document(context.user_data.get("attachment_name", "")):
             attachment_skipped_reason = "attachment (unsupported type)"
             attachment_path = None
+        else:
+            attachment_path = _attachment_path_with_original_name(
+                attachment_path, context.user_data.get("attachment_name", "")
+            )
 
     # Progress edits during the long filing wait so the user doesn't see a
     # static message for up to 5 minutes. Started here — immediately before
