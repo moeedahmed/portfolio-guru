@@ -10329,12 +10329,11 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             status_line = "❌ Some fields didn't fill."
         elif classification == "FORM_UNAVAILABLE":
             body = (
-                "Kaizen did not open this form for your current profile or "
-                "curriculum. Nothing was written. Try the other curriculum "
-                "variant, choose another form, or reconnect Kaizen if this "
-                "form should be available."
+                "This form isn't available on your Kaizen profile right now. "
+                "Nothing was written. Try a different form or reconnect Kaizen "
+                "if this one should be available."
             )
-            msg = f"❌ Filing didn't complete\n{form_name}\n\n{body}{details_suffix}"
+            msg = f"❌ Filing didn't complete\n{form_name}\n\n{body}"
             rows = [[InlineKeyboardButton("🔗 Open Kaizen forms", url="https://kaizenep.com/events/list")]]
             rows.append([
                 InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file"),
