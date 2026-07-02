@@ -4314,7 +4314,10 @@ async def _test_kaizen_login(username: str, password: str) -> bool | str:
     profile session when deciding which account was connected.
     """
     from engine.portfoliotypes.base import detect_portfolio_type
-    from engine.providers.kaizen import KaizenInfrastructureError
+    from engine.providers.kaizen import (
+        KAIZEN_DASHBOARD_BODY_PREVIEW_CHARS,
+        KaizenInfrastructureError,
+    )
     from kaizen_form_filer import _login, connect_cdp_browser
 
     page = None
@@ -4336,7 +4339,7 @@ async def _test_kaizen_login(username: str, password: str) -> bool | str:
             body = await page.locator("body").inner_text(timeout=5000)
         except Exception:
             body = ""
-        role = detect_portfolio_type(title, body[:2000])
+        role = detect_portfolio_type(title, body[:KAIZEN_DASHBOARD_BODY_PREVIEW_CHARS])
         return role if role != "unknown" else "unknown"
     except KaizenInfrastructureError:
         raise

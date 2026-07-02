@@ -196,6 +196,40 @@ async def test_dashboard_landing_classifies_as_success_per_shape(
     )
 
 
+@pytest.mark.asyncio
+async def test_setup_login_probe_uses_wide_dashboard_body_for_role_detection(monkeypatch):
+    """Setup must use the same broad dashboard read as the Kaizen provider.
+
+    Real Kaizen dashboards can render the profile signal well after the header,
+    nav and notices. If setup only scans the first couple of KB, a valid HST /
+    ACCS / Intermediate signal can be missed and the user is asked manually.
+    """
+    from bot import _test_kaizen_login
+
+    class _LateSignalLocator:
+        async def inner_text(self, timeout=5000):
+            return ("Dashboard chrome\n" * 300) + "Higher Trainee portfolio"
+
+    class _LateSignalPage(_FakeLoginPage):
+        async def title(self):
+            return "Portfolio dashboard"
+
+        def locator(self, _selector):
+            return _LateSignalLocator()
+
+    async def fake_connect():
+        return _LateSignalPage(), _FakeLoginPlaywright()
+
+    async def fake_login(_page, _username, _password):
+        return True
+
+    monkeypatch.setattr("kaizen_form_filer.connect_cdp_browser", fake_connect)
+    monkeypatch.setattr("kaizen_form_filer._login", fake_login)
+
+    result = await _test_kaizen_login("doctor@example.com", "pw")
+    assert result == "hst"
+
+
 # ─── auth_required per shape (the SAS / CESR 2026-06-02 reproducer) ────────
 
 
