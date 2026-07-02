@@ -4193,6 +4193,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         # Already handled this /start update — skip duplicate
         return ConversationHandler.END
 
+    # Capture an in-flight setup-to-consent continuation BEFORE we wipe transient
+    # state. Only a user who just cleared Steps 1-2 and is sitting on the
+    # pending Step 3 consent prompt should be resumed there; everyone else
+    # entering /start is a fresh/reset start and must begin at Step 1.
+    mid_setup_consent = bool(
+        context.user_data.get(_CONSENT_PROMPT_PENDING_KEY)
+        and context.user_data.get(_CONSENT_PROMPT_SOURCE_KEY) == "setup"
+    )
+
     context.user_data.clear()
     context.user_data[dedup_key] = update.update_id
 
@@ -4218,7 +4227,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         context.user_data["_setup_state_hint"] = "username"
         return AWAIT_USERNAME
     if not await consent.has_current_consent(user_id):
-        return await _prompt_consent(update, context, source="setup")
+        if mid_setup_consent:
+            # Legitimate continuation: they just finished Steps 1-2 and the
+            # consent prompt is still pending; resume it instead of restarting.
+            return await _prompt_consent(
+                update,
+                context,
+                source="setup",
+                lead_text="Kaizen is already connected. Finish setup with the final consent step.",
+            )
+        # Genuinely fresh/reset: credentials may linger from a prior session
+        # or a bot-level reset, but the user explicitly re-entered onboarding.
+        # Never drop them into "Step 3 of 3" they never navigated to; start
+        # from Step 1 so the flow is coherent.
+        await update.message.reply_text(_START_SETUP_PROMPT, parse_mode="Markdown")
+        context.user_data["_setup_state_hint"] = "username"
+        return AWAIT_USERNAME
 
     await update.message.reply_text(WELCOME_MSG_CONNECTED)
     return ConversationHandler.END
@@ -11208,7 +11232,7 @@ async def _prompt_consent(
 
     if source == "setup":
         text = (lead_text + "\n\n" if lead_text else "") + (
-            "Step 3 of 3: consent before your first case.\n\n"
+            "Step 3 of 3: Kaizen connected - consent before your first case.\n\n"
             f"{CONSENT_TEXT}"
         )
         await _flow_edit(update, context, text, reply_markup=keyboard, flow_key="setup")

@@ -231,19 +231,60 @@ async def test_setup_consent_accept_lands_on_ready_state(tmp_consent_db):
 
 @pytest.mark.consent_gate
 @pytest.mark.asyncio
-async def test_start_connected_without_consent_prompts_consent_not_ready(tmp_consent_db):
+async def test_start_fresh_without_consent_restarts_at_step_1(tmp_consent_db):
+    """Regression: a genuinely fresh/reset /start must land on Step 1, never be
+    dropped into 'Step 3 of 3' consent it never navigated to this session.
+
+    Reproduces the reported bug: after a bot-level reset (credentials may
+    linger while consent was wiped/version-bumped), the user typed /start and
+    saw 'Step 3 of 3' instead of Step 1. With no in-flight setup-to-consent
+    continuation in user_data, /start is a top-of-funnel entry to Step 1.
+    """
+    from telegram.ext import ConversationHandler as _CH
+
     import bot
 
     sim = BotSimulator()
     update = sim._make_text_update("/start")
     context = sim._make_context()
+    # No _consent_prompt_pending flag: not a mid-setup continuation.
+
+    with patch("bot.has_credentials", return_value=True):
+        result = await bot.start(update, context)
+
+    assert result == bot.AWAIT_USERNAME
+    assert result != _CH.END
+    text = sim.get_last_text() or ""
+    assert "Step 1 of 3" in text
+    assert "Step 3 of 3" not in text
+    assert "consent before your first case" not in text
+    assert context.user_data.get("_setup_state_hint") == "username"
+
+
+@pytest.mark.consent_gate
+@pytest.mark.asyncio
+async def test_start_continues_step_3_when_setup_consent_pending(tmp_consent_db):
+    """Intended continuation: a user who just cleared Steps 1-2 is sitting on
+    the pending Step 3 consent prompt. If they re-send /start, resume Step 3
+    rather than bouncing them back to Step 1."""
+    import bot
+
+    sim = BotSimulator()
+    update = sim._make_text_update("/start")
+    context = sim._make_context()
+    # The setup flow set these when it reached Step 3 (setup_password /
+    # setup_training_level to _prompt_consent(source="setup")).
+    context.user_data["_consent_prompt_pending"] = True
+    context.user_data["_consent_prompt_source"] = "setup"
 
     with patch("bot.has_credentials", return_value=True):
         result = await bot.start(update, context)
 
     assert result == ConversationHandler.END
     text = sim.get_last_text() or ""
+    assert "Kaizen is already connected" in text
     assert "Step 3 of 3" in text
+    assert "Kaizen connected - consent before your first case" in text
     assert "consent before your first case" in text
     assert "Portfolio Guru is ready" not in text
     assert ("✅ I consent", f"CONSENT|accept|{sim.user_id}") in sim.get_last_buttons()
