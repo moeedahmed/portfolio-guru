@@ -142,7 +142,7 @@ reset-state rehearsal path keep the demo and the product honest.
 - Evidence `[test]`: the Stripe checkout → webhook → tier-flip path is
   covered by `backend/tests/test_stripe_webhook_e2e.py`; the demo assets
   are copy-scanned by `backend/tests/test_demo_assets.py`.
-- Evidence `[live]`: `backend/bot.py:2818` `_track_funnel_event` emits
+- Evidence `[live]`: `backend/bot.py:2822` `_track_funnel_event` emits
   PHI-free funnel events (`draft_shown`, `checkout_started`,
   `checkout_completed`, `bot_linked`, `credentials_connected`) so beta
   friction is measurable; `voice_profile.py` improves drafts per user

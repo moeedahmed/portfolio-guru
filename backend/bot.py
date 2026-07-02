@@ -1385,10 +1385,7 @@ _KAIZEN_USERNAME_PROMPT = (
     "Step 1 of 3: what's your Kaizen username (email)?\n\n"
     f"{_KAIZEN_USERNAME_PRIVACY_NOTE}"
 )
-_START_SETUP_PROMPT = (
-    f"{render_message('welcome_disconnected')}\n\n"
-    f"{_KAIZEN_USERNAME_PROMPT}"
-)
+_START_SETUP_INTRO_TEXT = render_message("welcome_disconnected")
 
 
 def _nav_row(
@@ -1475,6 +1472,13 @@ def _build_next_step_keyboard(user_id: int) -> InlineKeyboardMarkup | None:
 
 def _build_data_clear_keyboard() -> None:
     return None
+
+
+async def _send_start_setup_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text(_START_SETUP_INTRO_TEXT)
+    await update.message.reply_text(_KAIZEN_USERNAME_PROMPT, parse_mode="Markdown")
+    context.user_data["_setup_state_hint"] = "username"
+    return AWAIT_USERNAME
 
 
 async def _prompt_implicit_kaizen_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -4223,9 +4227,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     connected = has_credentials(user_id)
     if not connected:
-        await update.message.reply_text(_START_SETUP_PROMPT, parse_mode="Markdown")
-        context.user_data["_setup_state_hint"] = "username"
-        return AWAIT_USERNAME
+        return await _send_start_setup_messages(update, context)
     if not await consent.has_current_consent(user_id):
         if mid_setup_consent:
             # Legitimate continuation: they just finished Steps 1-2 and the
@@ -4240,9 +4242,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         # or a bot-level reset, but the user explicitly re-entered onboarding.
         # Never drop them into "Step 3 of 3" they never navigated to; start
         # from Step 1 so the flow is coherent.
-        await update.message.reply_text(_START_SETUP_PROMPT, parse_mode="Markdown")
-        context.user_data["_setup_state_hint"] = "username"
-        return AWAIT_USERNAME
+        return await _send_start_setup_messages(update, context)
 
     await update.message.reply_text(WELCOME_MSG_CONNECTED)
     return ConversationHandler.END

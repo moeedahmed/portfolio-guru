@@ -62,8 +62,12 @@ async def test_start_message_snapshot(snapshot):
         result = await start(update, context)
 
     assert result == AWAIT_USERNAME
+    texts = [text for _, text, _ in sim.messages_sent]
+    assert len(texts) == 2
+    assert "Step 1 of 3" not in texts[0]
+    assert "Step 1 of 3" in texts[1]
     assert {
-        "text": sim.get_last_text(),
+        "texts": texts,
         "buttons": sim.get_last_buttons(),
     } == snapshot
 
