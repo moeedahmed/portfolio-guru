@@ -7767,6 +7767,23 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
                 os.unlink(file_path)
             except OSError:
                 pass
+        source_chat_id = pending_doc.get("source_chat_id")
+        source_message_id = pending_doc.get("source_message_id")
+        source_chat_type = pending_doc.get("source_chat_type")
+        original_removed = False
+        if source_chat_type == "private" and source_chat_id and source_message_id:
+            try:
+                await context.bot.delete_message(
+                    chat_id=source_chat_id,
+                    message_id=source_message_id,
+                )
+                original_removed = True
+            except Exception:
+                logger.info(
+                    "Could not delete ignored %s message from Telegram chat",
+                    attachment_label,
+                    exc_info=True,
+                )
         # Disarm our prompt buttons and show "✅ Removed" (reliable in any chat)
         await query.edit_message_text(
             f"✅ Removed that {attachment_label}.",
@@ -7777,9 +7794,14 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
             await query.message.delete()
         except Exception:
             pass
-        await query.message.reply_text(
-            f"Removed that {attachment_label}. Send the anonymised case details when you're ready."
-        )
+        if original_removed:
+            await query.message.reply_text(
+                f"Removed that {attachment_label}. Send the anonymised case details when you're ready."
+            )
+        else:
+            await query.message.reply_text(
+                f"Removed that {attachment_label} from the draft. Send the anonymised case details when you're ready."
+            )
         return AWAIT_CASE_INPUT
 
     if mode not in {"info", "attach", "both"} or not file_path or not os.path.exists(file_path):
@@ -8864,6 +8886,9 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 "path": cached_path,
                 "name": "portfolio-image.jpg",
                 "kind": "image",
+                "source_chat_id": update.message.chat_id,
+                "source_message_id": update.message.message_id,
+                "source_chat_type": getattr(update.message.chat, "type", None),
             }
             caption = (update.message.caption or "").strip()
             if caption:

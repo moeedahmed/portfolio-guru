@@ -90,6 +90,9 @@ async def test_photo_case_stores_pending_image_and_asks_intent():
     assert result == AWAIT_DOC_INTENT
     assert context.user_data["_pending_doc"]["kind"] == "image"
     assert context.user_data["_pending_doc"]["name"] == "portfolio-image.jpg"
+    assert context.user_data["_pending_doc"]["source_chat_id"] == update.message.chat_id
+    assert context.user_data["_pending_doc"]["source_message_id"] == update.message.message_id
+    assert context.user_data["_pending_doc"]["source_chat_type"] == "private"
     assert os.path.exists(context.user_data["_pending_doc"]["path"])
     extract_mock.assert_not_called()
     buttons = sim.get_last_buttons()
@@ -101,6 +104,58 @@ async def test_photo_case_stores_pending_image_and_asks_intent():
     path = context.user_data["_pending_doc"]["path"]
     if os.path.exists(path):
         os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_remove_image_deletes_private_chat_photo_message_and_cache():
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_callback_update("DOCUSE|ignore")
+
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+        temp_path = f.name
+        f.write(b"dummy image content")
+    context.user_data["_pending_doc"] = {
+        "path": temp_path,
+        "name": "portfolio-image.jpg",
+        "kind": "image",
+        "source_chat_id": sim.user_id,
+        "source_message_id": 123,
+        "source_chat_type": "private",
+    }
+
+    result = await handle_document_intent(update, context)
+
+    assert result == AWAIT_CASE_INPUT
+    assert not os.path.exists(temp_path)
+    context.bot.delete_message.assert_awaited_once_with(chat_id=sim.user_id, message_id=123)
+    assert "Removed that image. Send the anonymised case details" in sim.get_last_text()
+
+
+@pytest.mark.asyncio
+async def test_remove_image_clears_draft_without_delete_attempt_outside_private_chat():
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_callback_update("DOCUSE|ignore")
+
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+        temp_path = f.name
+        f.write(b"dummy image content")
+    context.user_data["_pending_doc"] = {
+        "path": temp_path,
+        "name": "portfolio-image.jpg",
+        "kind": "image",
+        "source_chat_id": -100123,
+        "source_message_id": 123,
+        "source_chat_type": "supergroup",
+    }
+
+    result = await handle_document_intent(update, context)
+
+    assert result == AWAIT_CASE_INPUT
+    assert not os.path.exists(temp_path)
+    context.bot.delete_message.assert_not_awaited()
+    assert "Removed that image from the draft" in sim.get_last_text()
 
 
 @pytest.mark.asyncio

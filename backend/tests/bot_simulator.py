@@ -28,6 +28,7 @@ class BotSimulator:
     def _make_chat(self):
         chat = MagicMock(spec=Chat)
         chat.id = self.user_id
+        chat.type = "private"
         chat.send_action = AsyncMock()
         chat.send_message = AsyncMock(side_effect=self._capture_send)
         return chat
