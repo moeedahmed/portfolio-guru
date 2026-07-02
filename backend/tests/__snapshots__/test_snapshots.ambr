@@ -93,7 +93,9 @@
       
       Connect Kaizen to start.
       
-      Step 1 of 3: please send your Kaizen username or email.
+      Step 1 of 3: what's your Kaizen username (email)?
+      
+      _I'll store it encrypted and use it only to connect to Kaizen and save your drafts._
     ''',
   })
 # ---

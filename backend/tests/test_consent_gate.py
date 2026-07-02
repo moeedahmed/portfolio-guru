@@ -91,6 +91,39 @@ async def test_accept_records_grant_and_opens_the_gate(tmp_consent_db):
 
 @pytest.mark.consent_gate
 @pytest.mark.asyncio
+async def test_privacy_reports_grant_after_accepting(tmp_consent_db):
+    """Regression: after a user accepts consent, /privacy must report the
+    recorded grant — never 'haven't been asked' / 'no consent recorded'. This
+    is the exact reported bug: bot said 'Consent recorded' then /privacy
+    claimed the user had never been asked."""
+    consent = tmp_consent_db
+    from bot import handle_consent_callback, privacy_command
+
+    sim = BotSimulator()
+    user_id = sim.user_id
+    context = sim._make_context()
+
+    # The setup flow showed the consent notice (step 3), then the user taps
+    # "I consent" — the exact flow from the reported bug.
+    context.user_data["_consent_prompt_pending"] = True
+    context.user_data["_consent_prompt_source"] = "setup"
+    accept = sim._make_callback_update(f"CONSENT|accept|{user_id}")
+    await handle_consent_callback(accept, context)
+    sim.clear_messages()
+
+    # Same user, same context/DB — /privacy must reflect the recorded grant.
+    await privacy_command(sim._make_text_update("/privacy"), context)
+
+    text = sim.get_last_text() or ""
+    assert "You consented to version" in text
+    assert consent.CONSENT_VERSION in text
+    assert "haven't been asked" not in text
+    assert "No consent has been recorded" not in text
+    assert "waiting for your choice" not in text  # pending flag was cleared
+
+
+@pytest.mark.consent_gate
+@pytest.mark.asyncio
 async def test_decline_keeps_the_gate_closed(tmp_consent_db):
     consent = tmp_consent_db
     from bot import handle_consent_callback

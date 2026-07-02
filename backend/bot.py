@@ -1378,13 +1378,16 @@ _DATA_CLEAR_TEXT = (
     "✅ Your Portfolio Guru data is clear.\n\n"
     "Your local Portfolio Guru details have been removed. Cases already saved in Kaizen are unaffected."
 )
+_KAIZEN_USERNAME_PRIVACY_NOTE = (
+    "_I'll store it encrypted and use it only to connect to Kaizen and save your drafts._"
+)
 _KAIZEN_USERNAME_PROMPT = (
     "Step 1 of 3: what's your Kaizen username (email)?\n\n"
-    "🔒 Stored encrypted. Used only to file your drafts on Kaizen — never shared."
+    f"{_KAIZEN_USERNAME_PRIVACY_NOTE}"
 )
 _START_SETUP_PROMPT = (
     f"{render_message('welcome_disconnected')}\n\n"
-    "Step 1 of 3: please send your Kaizen username or email."
+    f"{_KAIZEN_USERNAME_PROMPT}"
 )
 
 
@@ -1483,7 +1486,9 @@ async def _prompt_implicit_kaizen_username(update: Update, context: ContextTypes
     # keep their buttons.
     await update.message.reply_text(
         "Before I can save drafts to Kaizen, I need to connect your account.\n\n"
-        "Send your Kaizen username or email to start. Your details are stored encrypted and only used to save drafts.",
+        "Send your Kaizen username or email to start.\n\n"
+        f"{_KAIZEN_USERNAME_PRIVACY_NOTE}",
+        parse_mode="Markdown",
     )
     return AWAIT_USERNAME
 
@@ -4209,7 +4214,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     connected = has_credentials(user_id)
     if not connected:
-        await update.message.reply_text(_START_SETUP_PROMPT)
+        await update.message.reply_text(_START_SETUP_PROMPT, parse_mode="Markdown")
         context.user_data["_setup_state_hint"] = "username"
         return AWAIT_USERNAME
     if not await consent.has_current_consent(user_id):
@@ -4250,6 +4255,7 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     await _flow_msg(
         update, context,
         _KAIZEN_USERNAME_PROMPT,
+        parse_mode="Markdown",
         flow_key="setup",
     )
     return AWAIT_USERNAME
@@ -4269,7 +4275,7 @@ async def _prompt_kaizen_password(update: Update, context: ContextTypes.DEFAULT_
     await _flow_msg(
         update, context,
         "Step 2 of 3: what's your Kaizen password?\n\n"
-        "_I'll delete this message right after you send it._",
+        "_I'll delete your password message right after you send it._",
         parse_mode="Markdown",
         flow_key="setup",
     )
@@ -5848,7 +5854,7 @@ async def reset_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         _DATA_CLEAR_TEXT,
         reply_markup=_build_data_clear_keyboard(),
     )
-    await update.message.reply_text(_KAIZEN_USERNAME_PROMPT)
+    await update.message.reply_text(_KAIZEN_USERNAME_PROMPT, parse_mode="Markdown")
     return AWAIT_USERNAME
 
 
@@ -5863,7 +5869,7 @@ async def handle_reset_confirm(update: Update, context: ContextTypes.DEFAULT_TYP
         _DATA_CLEAR_TEXT,
         reply_markup=_build_data_clear_keyboard(),
     )
-    await query.message.reply_text(_KAIZEN_USERNAME_PROMPT)
+    await query.message.reply_text(_KAIZEN_USERNAME_PROMPT, parse_mode="Markdown")
     return AWAIT_USERNAME
 
 
