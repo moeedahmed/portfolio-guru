@@ -294,3 +294,15 @@ def test_form_unavailable_error_routes_to_specific_failure_copy():
 
     assert _is_session_failure_error(error) is False
     assert _classify_filing_failure(error, [], "failed", []) == "FORM_UNAVAILABLE"
+
+
+def test_legacy_events_list_redirect_routes_to_form_unavailable():
+    from bot import _classify_filing_failure, _is_session_failure_error
+
+    error = (
+        "Form page didn't load — redirected to "
+        "https://kaizenep.com/events/list"
+    )
+
+    assert _is_session_failure_error(error) is False
+    assert _classify_filing_failure(error, [], "failed", []) == "FORM_UNAVAILABLE"

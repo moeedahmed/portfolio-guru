@@ -9624,6 +9624,7 @@ def _classify_filing_failure(
     if any(token in err for token in (
         "not available on your kaizen profile",
         "kaizen redirected to https://kaizenep.com/events/list",
+        "redirected to https://kaizenep.com/events/list",
         "instead of opening the form",
     )):
         return "FORM_UNAVAILABLE"
