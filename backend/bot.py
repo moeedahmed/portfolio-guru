@@ -20,6 +20,12 @@ from telegram.ext import (
 from store import store_credentials, get_credentials, has_credentials, init
 from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, is_reuse_request, review_draft, analyse_portfolio_health, summarise_recent_activity, generate_nudge_copy, extract_field_updates, compose_filing_recovery_copy, combine_case_inputs, _has_qi_project_signal, schema_form_type
 from usage import record_case_filed, get_cases_this_month, check_can_file, get_user_tier, set_user_tier, get_case_history, TIER_LIMITS, get_all_active_users, get_cases_this_week, is_beta_tester, set_beta_tester, save_kc_coverage, delete_portfolio_evidence
+# Module-attribute access (consent.fn) rather than from-imports: test_smoke
+# pops `bot` from sys.modules, so multiple bot module objects can be alive in
+# one test run — resolving through the single consent module keeps the gate
+# patchable (and consistent) across all of them.
+import consent
+from consent import CONSENT_TEXT, CONSENT_VERSION
 from filer_router import route_filing
 from kaizen_form_filer import FORM_UUIDS
 from form_schemas import FORM_SCHEMAS
@@ -5770,6 +5776,16 @@ async def _perform_reset(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> No
     Cases already saved in Kaizen are never touched.
     """
     context.user_data.clear()
+
+    # Withdrawing consent is part of erasure (consent-copy.md Part B): append a
+    # 'withdrawn' record BEFORE clearing. The consent history itself is legal
+    # evidence of the lawful basis and is intentionally never deleted.
+    try:
+        from consent import record_withdrawal
+        await record_withdrawal(user_id)
+    except Exception:
+        logger.warning("Could not record consent withdrawal on reset", exc_info=True)
+
     await _clear_local_portfolio_account_data(user_id, reason="reset")
 
     # Clear credentials
@@ -8456,6 +8472,14 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 return await _prompt_kaizen_password(update, context, email)
         return await _prompt_implicit_kaizen_username(update, context)
 
+    # Explicit-consent gate (UK GDPR Art 9(2)(a)) — clinical content must not
+    # reach any processor (Vertex extraction, transcription, vision) until the
+    # current consent version is recorded. All four input types (text, voice,
+    # photo, document) route through this handler, so this single check gates
+    # them all before any LLM or transcription call.
+    if not await consent.has_current_consent(user_id):
+        return await _prompt_consent(update, context)
+
     # Tier enforcement — check usage limit
     allowed, used, limit, tier = await check_can_file(user_id)
     if not allowed:
@@ -11094,6 +11118,78 @@ async def handle_chase_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     )
 
 
+# === CONSENT GATE (UK GDPR Art 9(2)(a)) ===
+
+
+async def _prompt_consent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Show the versioned consent notice before the first clinical case.
+
+    The triggering message is deliberately NOT stashed or processed — nothing
+    the user sent reaches an LLM/processor until they accept, so the prompt
+    asks them to resend after consenting.
+    """
+    user_id = update.effective_user.id
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ I consent", callback_data=f"CONSENT|accept|{user_id}")],
+        [InlineKeyboardButton("❌ Not now", callback_data=f"CONSENT|decline|{user_id}")],
+    ])
+    await update.message.reply_text(
+        CONSENT_TEXT + "\n\n(Your message above has not been processed — send it again after consenting.)",
+        reply_markup=keyboard,
+    )
+    return ConversationHandler.END
+
+
+async def handle_consent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Record the consent decision. The prompted user's id is embedded in the
+    callback data so another group member's tap can't consent on their behalf."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    target_uid = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None
+    tapper_id = update.effective_user.id
+    if target_uid is not None and tapper_id != target_uid:
+        await query.answer("This consent prompt is for another account.", show_alert=True)
+        return
+    if action == "accept":
+        await consent.record_consent(tapper_id)
+        await query.answer("Consent recorded")
+        await query.edit_message_text(
+            f"✅ Consent recorded (version {CONSENT_VERSION}).\n\n"
+            "Send your case now — text, voice note, photo, or document. "
+            "You can view your consent with /privacy or withdraw it with /reset."
+        )
+    else:
+        await query.answer()
+        await query.edit_message_text(
+            "No problem — nothing was processed and nothing is stored.\n\n"
+            "Portfolio Guru needs your explicit consent before it can draft "
+            "entries from clinical cases. Send a case anytime to see the "
+            "consent notice again."
+        )
+
+
+async def privacy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/privacy — show consent status, processing summary, and withdrawal path."""
+    status = await consent.get_consent_status(update.effective_user.id)
+    if status and status["action"] in ("granted", "re-granted"):
+        status_line = f"✅ You consented to version {status['version']} on {status['at']} UTC."
+    elif status:
+        status_line = "❌ Consent withdrawn — your cases are not being processed."
+    else:
+        status_line = "You haven't been asked for consent yet — the notice appears before your first case."
+    await update.message.reply_text(
+        "🔐 Privacy & consent\n\n"
+        f"{status_line}\n\n"
+        "• Case content is processed by Google Gemini via Vertex AI in the EU (London) to draft entries.\n"
+        "• Kaizen credentials are stored encrypted and never shared with the AI model.\n"
+        "• Drafts only — nothing is ever submitted to a supervisor.\n"
+        "• You are responsible for anonymising patients before sending.\n"
+        "• /reset withdraws consent and erases your data (GDPR Art. 17).\n\n"
+        f"Current consent version: {CONSENT_VERSION}."
+    )
+
+
 # === APPLICATION BUILDER ===
 
 def build_application() -> Application:
@@ -11275,6 +11371,7 @@ def build_application() -> Application:
     # the command menu or /help.
     application.add_handler(CommandHandler("delete", reset_data))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("privacy", privacy_command))
     application.add_handler(CommandHandler("settings", settings_command))
     application.add_handler(CommandHandler("link", link_command))
     application.add_handler(CommandHandler("bulk", bulk_command))
@@ -11308,6 +11405,9 @@ def build_application() -> Application:
     # Inline reset confirmation. Accepts the legacy CONFIRM|delete payload so
     # reset buttons in old chat history still complete.
     application.add_handler(CallbackQueryHandler(handle_reset_confirm, pattern=r"^CONFIRM\|(?:reset|delete)$"))
+    # Consent decisions must work regardless of conversation state — the gate
+    # ends the conversation, so the accept/decline tap arrives outside it.
+    application.add_handler(CallbackQueryHandler(handle_consent_callback, pattern=r"^CONSENT\|"))
     application.add_handler(
         CallbackQueryHandler(
             handle_action_button,
@@ -11515,6 +11615,20 @@ def main():
             logger.info("Liveness heartbeat scheduled (every 300s)")
     except Exception:
         logger.warning("Could not schedule liveness heartbeat", exc_info=True)
+
+    # Daily retention purge — nulls clinical content on Supabase mirror rows
+    # older than PG_CLINICAL_RETENTION_DAYS (privacy-policy §7 / checklist 1.5).
+    # Best-effort and idempotent; the Supabase client is sync, so run off-loop.
+    try:
+        if getattr(application, "job_queue", None):
+            async def _retention_job(_context):
+                from retention import purge_expired_clinical_content
+                result = await asyncio.to_thread(purge_expired_clinical_content)
+                logger.info("Retention purge: %s", result)
+            application.job_queue.run_repeating(_retention_job, interval=86400, first=120, name="retention")
+            logger.info("Daily clinical-content retention purge scheduled")
+    except Exception:
+        logger.warning("Could not schedule retention purge", exc_info=True)
 
     # Daily Stripe reconciliation — repairs any tier a missed webhook left stale
     # so a paying user is never permanently stranded. Also surfaces the Stripe

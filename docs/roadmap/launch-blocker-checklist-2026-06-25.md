@@ -31,8 +31,10 @@
 - ✅ **2.x Stripe live** — real £9.99 purchase → upgrade proven; `invoice.paid` reactivation, reconciliation (redirect re-check + daily sweep), and mode guard in `stripe_handler.py`
 - ✅ **3.3 Filing admission control** — `PG_MAX_CONCURRENT_FILINGS` semaphore in `filer_router.route_filing` (2026-07-02)
 - ✅ **Deps pinned** — `backend/requirements.txt` pinned to the live venv versions (2026-07-02)
+- ✅ **1.2 (in-bot half) Consent gate** — versioned Art 9(2)(a) explicit-consent gate before first clinical ingest (`backend/consent.py`, append-only records, `/privacy`, withdrawal on `/reset`) (2026-07-02)
+- ✅ **1.5 Retention** — daily purge of encrypted clinical content older than `PG_CLINICAL_RETENTION_DAYS` (default 180) from the Supabase mirror (`backend/retention.py`) (2026-07-02)
 
-**Remaining / blocked:** solicitor review + publication of `docs/legal/` and the in-bot consent gate (1.2), retention job (1.5), key-isolation + RCEM ToS risk decision (1.4), webhook-down billing drill (2.1 acceptance), dead-man heartbeat (3.2), filing error-budget alert (3.4), SAS/CESR-or-scope decision (4.1), self-serve onboarding (4.3), Supabase source-of-truth flip (high-risk — touches live credentials).
+**Remaining / blocked:** solicitor review + web publication of `docs/legal/` (1.2 second half — pages on emgurus.com), key-isolation + RCEM ToS risk decision (1.4), webhook-down billing drill (2.1 acceptance), heartbeat monitor URL (3.2 — code live, founder must provision `PG_HEARTBEAT_URL`, e.g. a free healthchecks.io check, into BWS + `run_local.sh`), filing error-budget alert (3.4), SAS/CESR-or-scope decision (4.1), web↔bot loop (4.2), Supabase source-of-truth flip (high-risk — touches live credentials). Note: 4.3 self-serve onboarding is DONE on Telegram — no invite gating exists in code; /start→setup→file→upgrade is fully self-serve.
 
 ## How to read this
 
@@ -75,7 +77,7 @@ This is the hardest blocker and the one with real downside. Most items end with 
   - Files: `backend/extractor.py:114`, `backend/model_config.py`, `backend/whisper.py`, `backend/vision.py`, `backend/documents.py`
   - Options (pick one, document it): (a) route clinical data only to providers you have a DPA + acceptable transfer basis with (likely drop DeepSeek default); (b) add an automated redaction/de-identification pass before any third-party call; (c) explicit informed consent + Art. 9 condition covering each processor.
   - Acceptance: a written data-flow map naming every third party clinical data reaches, the legal basis for each, and code that matches the map (no silent DeepSeek default if it's not covered).
-- [ ] **1.2 (M) Publish privacy policy + terms + in-bot consent capture.** None exist in the repo. For special-category data this is mandatory.
+- [x] **1.2 (M) Publish privacy policy + terms + in-bot consent capture.** _(in-bot half ✅ shipped 2026-07-02: versioned Art 9(2)(a) consent gate before first clinical ingest — `backend/consent.py`, append-only records, /privacy command, withdrawal on /reset; wording archived in `docs/legal/consent-versions/`. Remaining: solicitor review + publish policy/terms pages on emgurus.com)_ None exist in the repo. For special-category data this is mandatory.
   - Files: web (`emgurus.com/portfolio`), new in-bot consent gate before first clinical ingest (`backend/bot.py` start/onboarding flow)
   - Acceptance: a new user cannot send a clinical case until they've accepted a versioned privacy notice + terms; acceptance (version + timestamp) is recorded.
 - [ ] **1.3 (L) DPIA + ROPA + processor DPAs.** Special-category processing with cross-border transfers ⇒ a DPIA is effectively required. Get DPAs from each processor (Google, OpenAI, DeepSeek-or-replacement, Telegram, Supabase, Stripe, and later Meta/WhatsApp).
@@ -83,7 +85,7 @@ This is the hardest blocker and the one with real downside. Most items end with 
 - [ ] **1.4 (M) Harden + scope the Kaizen credential store, and get a ToS read.** Encryption is sound but the Fernet key sits in env next to the data; and credential-based automation of `kaizenep.com` may breach RCEM/Kaizen ToS — no doc acknowledges this.
   - Files: `backend/credentials.py`, key handling in `run_local.sh:74`
   - Acceptance: documented key-isolation decision (e.g. key not co-resident with DB backups), and a written risk decision on the RCEM/Kaizen ToS question from the founder/legal.
-- [ ] **1.5 (S) Retention policy.** No time-based expiry today; clinical data persists forever.
+- [x] **1.5 (S) Retention policy.** _(✅ shipped 2026-07-02: daily job nulls encrypted clinical content on `portfolio_cases` rows older than `PG_CLINICAL_RETENTION_DAYS` (default 180); window documented in privacy-policy §7; temp media already deleted inline after processing)_ No time-based expiry today; clinical data persists forever.
   - Acceptance: a documented retention window and a scheduled job that deletes case data past it (encrypted text, fields, cached docs).
 
 > **Gate:** Do not flip Stripe to live mode for the public until 1.1, 1.2, 1.5 are done and 1.3/1.4 are at least underway with legal sign-off.

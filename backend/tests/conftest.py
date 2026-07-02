@@ -11,6 +11,7 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "e2e: end-to-end tests requiring Telegram credentials")
     config.addinivalue_line("markers", "live: live Telegram tests (requires personal account session)")
     config.addinivalue_line("markers", "kaizen: live Kaizen integration tests (requires credentials, manual only)")
+    config.addinivalue_line("markers", "consent_gate: exercise the real Art 9 consent gate (opts out of the autouse consent bypass)")
 
 
 @pytest.fixture(autouse=True)
@@ -47,6 +48,26 @@ def _default_gathering_mode_off(monkeypatch):
     """
     monkeypatch.setenv("PG_GATHERING_MODE", "off")
     yield
+
+@pytest.fixture(autouse=True)
+def _default_consent_granted(request, monkeypatch):
+    """Default the Art 9 consent gate open for legacy flow tests.
+
+    The consent gate in handle_case_input post-dates most of the suite; without
+    this, every case-flow test would stop at the consent prompt. Tests that
+    exercise the real gate opt out with @pytest.mark.consent_gate.
+    """
+    if request.node.get_closest_marker("consent_gate"):
+        yield
+        return
+    # Patch the consent module, not bot: test_smoke pops `bot` from
+    # sys.modules, so stale bot module objects can outlive a re-import —
+    # they all resolve the gate through this one consent module.
+    import consent
+
+    monkeypatch.setattr(consent, "has_current_consent", AsyncMock(return_value=True))
+    yield
+
 
 @pytest.fixture
 def mock_update():
