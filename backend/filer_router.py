@@ -18,10 +18,26 @@ Usage:
     )
 """
 
+import asyncio
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _max_concurrent_filings() -> int:
+    try:
+        return max(1, int(os.environ.get("PG_MAX_CONCURRENT_FILINGS", "2")))
+    except ValueError:
+        return 2
+
+
+# Admission control: one shared Chrome on one Mac Mini — without a cap, N users
+# approving at once spawn N browser contexts and starve each other (launch
+# checklist 3.3). Excess filings queue here; the caller's overall timeout
+# (bot.py wraps route_filing in wait_for) still bounds queue wait + filing.
+_filing_slots = asyncio.Semaphore(_max_concurrent_filings())
 
 
 # Registry of platforms with deterministic filers
@@ -89,6 +105,47 @@ def _get_kaizen_uuids():
 
 
 async def route_filing(
+    platform: str,
+    form_type: str,
+    fields: Dict[str, Any],
+    credentials: Dict[str, str],
+    curriculum_links: Optional[List[str]] = None,
+    form_name: Optional[str] = None,
+    platform_url: Optional[str] = None,
+    form_url: Optional[str] = None,
+    submit: bool = False,
+    reuse_draft: bool = False,
+    attachment_path: Optional[str] = None,
+    attachment_drive_url: Optional[str] = None,
+    telegram_user_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Admission-controlled filing entry point.
+
+    At most PG_MAX_CONCURRENT_FILINGS (default 2) filings run at once; the
+    rest queue on the semaphore. Routing behaviour and the result contract
+    are documented on _route_filing_unbounded.
+    """
+    if _filing_slots.locked():
+        logger.info("All filing slots busy — queuing %s/%s filing", platform, form_type)
+    async with _filing_slots:
+        return await _route_filing_unbounded(
+            platform=platform,
+            form_type=form_type,
+            fields=fields,
+            credentials=credentials,
+            curriculum_links=curriculum_links,
+            form_name=form_name,
+            platform_url=platform_url,
+            form_url=form_url,
+            submit=submit,
+            reuse_draft=reuse_draft,
+            attachment_path=attachment_path,
+            attachment_drive_url=attachment_drive_url,
+            telegram_user_id=telegram_user_id,
+        )
+
+
+async def _route_filing_unbounded(
     platform: str,
     form_type: str,
     fields: Dict[str, Any],

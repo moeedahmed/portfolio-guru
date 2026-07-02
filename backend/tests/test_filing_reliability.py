@@ -9,6 +9,7 @@ These guard the invariants of the active sprint:
 5. Tracked artefacts (filing_coverage.json, dom_learning_log.json,
    kaizen_form_filer.py) are not mutated by ordinary tests.
 6. Alias routing keeps ESLE / Mini-CEX style forms on the deterministic path.
+7. Concurrent filings are bounded by the admission-control semaphore.
 """
 
 from pathlib import Path
@@ -477,3 +478,69 @@ def test_fill_one_validate_accepts_draft_only_default():
         "save_as_draft": True,
     })
     assert save_as_draft is True
+
+
+# ─── Admission control on concurrent filings (launch checklist 3.3) ──────
+
+
+def test_max_concurrent_filings_env_parsing(monkeypatch):
+    from filer_router import _max_concurrent_filings
+
+    monkeypatch.delenv("PG_MAX_CONCURRENT_FILINGS", raising=False)
+    assert _max_concurrent_filings() == 2
+    monkeypatch.setenv("PG_MAX_CONCURRENT_FILINGS", "5")
+    assert _max_concurrent_filings() == 5
+    monkeypatch.setenv("PG_MAX_CONCURRENT_FILINGS", "0")
+    assert _max_concurrent_filings() == 1  # floor of 1 — never deadlock
+    monkeypatch.setenv("PG_MAX_CONCURRENT_FILINGS", "nonsense")
+    assert _max_concurrent_filings() == 2  # bad value falls back to default
+
+
+@pytest.mark.asyncio
+async def test_third_concurrent_filing_queues_until_a_slot_frees(monkeypatch):
+    """With 2 slots, a third simultaneous filing must queue rather than spawn
+    a third browser context, and must still complete once a slot frees."""
+    import asyncio
+
+    import filer_router
+
+    monkeypatch.setattr(filer_router, "_filing_slots", asyncio.Semaphore(2))
+
+    release = asyncio.Event()
+    active = 0
+    max_active = 0
+
+    async def slow_unbounded(**kwargs):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await release.wait()
+        active -= 1
+        return {
+            "status": "success",
+            "filled": [],
+            "skipped": [],
+            "error": None,
+            "method": "deterministic",
+        }
+
+    monkeypatch.setattr(filer_router, "_route_filing_unbounded", slow_unbounded)
+
+    kwargs = dict(
+        platform="kaizen",
+        form_type="CBD",
+        fields={"reflection": "Sample"},
+        credentials={"username": "u", "password": "p"},
+    )
+    tasks = [asyncio.create_task(filer_router.route_filing(**kwargs)) for _ in range(3)]
+    # Let the scheduler run the tasks up to their await points.
+    for _ in range(10):
+        await asyncio.sleep(0)
+
+    assert active == 2  # both slots taken; the third filing is queued
+
+    release.set()
+    results = await asyncio.gather(*tasks)
+
+    assert max_active == 2  # the cap was never exceeded
+    assert all(r["status"] == "success" for r in results)
