@@ -11575,15 +11575,20 @@ def build_application() -> Application:
     )
 
     application.add_handler(setup_conv)
-    # Register the global SETLEVEL handler AFTER setup_conv so the conv
-    # handler gets first crack at SETLEVEL|* clicks while the user is in
-    # AWAIT_TRAINING_LEVEL. Outside the conv state the conv handler returns
-    # None and PTB falls through to handle_set_level, preserving the
-    # /settings → change portfolio flow.
-    application.add_handler(CallbackQueryHandler(handle_set_level, pattern=r"^SETLEVEL\|"))
     application.add_handler(voice_conv)
     application.add_handler(pathway_conv)
     application.add_handler(case_conv)
+    # Register the global SETLEVEL handler AFTER every conversation handler that
+    # owns an AWAIT_TRAINING_LEVEL state — BOTH setup_conv AND case_conv. The
+    # reset→setup flow runs inside case_conv (handle_case_input is a case_conv
+    # entry point, and setup_password → AWAIT_TRAINING_LEVEL is a case_conv
+    # state), so a SETLEVEL|* tap during that flow must reach setup_training_level
+    # → consent step 3. handle_set_level matches ^SETLEVEL\| regardless of
+    # conversation state, so it has to be the LAST SETLEVEL handler in group 0:
+    # the conv handlers get first crack while the user is mid-setup, and only an
+    # idle /settings → change portfolio tap (no active conv) falls through to
+    # handle_set_level's "Back to settings" round-trip.
+    application.add_handler(CallbackQueryHandler(handle_set_level, pattern=r"^SETLEVEL\|"))
     # /start is handled by case_conv entry point (when not in a conversation) or
     # case_conv fallback (when in case_conv). Do NOT add a standalone handler at
     # group=1 — PTB fires ALL matching handler registrations across all groups,
