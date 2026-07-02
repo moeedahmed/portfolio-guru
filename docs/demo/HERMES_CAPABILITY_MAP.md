@@ -112,7 +112,7 @@ concepts.
 Portfolio Guru: no external write happens without an explicit human tap,
 and the agent never submits on a supervisor's behalf.
 
-- Evidence `[live]`: `backend/bot.py:9545` `handle_approval_approve` is
+- Evidence `[live]`: `backend/bot.py:9568` `handle_approval_approve` is
   the only path that proceeds to a Kaizen draft save, and it saves a draft
   only. The agent does not submit, sign, send, approve, reject, or delete
   on a supervisor's behalf — that boundary is the hard line.
@@ -142,7 +142,7 @@ reset-state rehearsal path keep the demo and the product honest.
 - Evidence `[test]`: the Stripe checkout → webhook → tier-flip path is
   covered by `backend/tests/test_stripe_webhook_e2e.py`; the demo assets
   are copy-scanned by `backend/tests/test_demo_assets.py`.
-- Evidence `[live]`: `backend/bot.py:2809` `_track_funnel_event` emits
+- Evidence `[live]`: `backend/bot.py:2813` `_track_funnel_event` emits
   PHI-free funnel events (`draft_shown`, `checkout_started`,
   `checkout_completed`, `bot_linked`, `credentials_connected`) so beta
   friction is measurable; `voice_profile.py` improves drafts per user

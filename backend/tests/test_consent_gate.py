@@ -145,6 +145,77 @@ async def test_another_users_tap_cannot_grant_consent(tmp_consent_db):
     update.callback_query.edit_message_text.assert_not_called()
 
 
+@pytest.mark.consent_gate
+@pytest.mark.asyncio
+async def test_successful_setup_prompts_consent_before_ready_state(tmp_consent_db):
+    import bot
+
+    sim = BotSimulator()
+    update = sim._make_text_update("safe-password")
+    update.message.delete = AsyncMock()
+    context = sim._make_context()
+    context.user_data["setup_username"] = "doctor@example.com"
+
+    with patch("bot._test_kaizen_login", new=AsyncMock(return_value="hst")), \
+         patch("bot.get_credentials", return_value=None), \
+         patch("bot.store_credentials"), \
+         patch("bot.store_training_level"), \
+         patch("bot.store_curriculum"), \
+         patch("bot._autoset_health_pathway_from_role", return_value=None), \
+         patch("supervisor_workflow.set_role_if_better"):
+        result = await bot.setup_password(update, context)
+
+    assert result == ConversationHandler.END
+    text = sim.get_last_text() or ""
+    assert "Kaizen connected" in text
+    assert "Step 3 of 3" in text
+    assert "consent before your first case" in text
+    assert "has not been processed" not in text
+    assert context.user_data["_consent_prompt_pending"] is True
+    assert context.user_data["_consent_prompt_source"] == "setup"
+    assert ("✅ I consent", f"CONSENT|accept|{sim.user_id}") in sim.get_last_buttons()
+
+
+@pytest.mark.consent_gate
+@pytest.mark.asyncio
+async def test_setup_consent_accept_lands_on_ready_state(tmp_consent_db):
+    consent = tmp_consent_db
+    from bot import WELCOME_MSG_CONNECTED, handle_consent_callback
+
+    sim = BotSimulator()
+    update = sim._make_callback_update(f"CONSENT|accept|{sim.user_id}")
+    context = sim._make_context()
+    context.user_data["_consent_prompt_pending"] = True
+    context.user_data["_consent_prompt_source"] = "setup"
+
+    await handle_consent_callback(update, context)
+
+    assert await consent.has_current_consent(sim.user_id) is True
+    edited = update.callback_query.edit_message_text.call_args.args[0]
+    assert WELCOME_MSG_CONNECTED in edited
+    assert "send it again" not in edited.lower()
+
+
+@pytest.mark.consent_gate
+@pytest.mark.asyncio
+async def test_start_connected_without_consent_prompts_consent_not_ready(tmp_consent_db):
+    import bot
+
+    sim = BotSimulator()
+    update = sim._make_text_update("/start")
+    context = sim._make_context()
+
+    with patch("bot.has_credentials", return_value=True):
+        result = await bot.start(update, context)
+
+    assert result == ConversationHandler.END
+    text = sim.get_last_text() or ""
+    assert "Step 3 of 3" in text
+    assert "consent before your first case" in text
+    assert "Portfolio Guru is ready" not in text
+    assert ("✅ I consent", f"CONSENT|accept|{sim.user_id}") in sim.get_last_buttons()
+
+
 # ─── Record semantics ─────────────────────────────────────────────────────
 
 

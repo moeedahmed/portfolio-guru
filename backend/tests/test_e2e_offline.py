@@ -283,8 +283,8 @@ def _prepare_update(update, bot):
 @pytest.mark.asyncio
 class TestOfflineE2E:
 
-    async def test_start_no_credentials_shows_setup(self, offline_app, monkeypatch):
-        """Send /start to a user with no stored credentials → bot sends Connect Kaizen button."""
+    async def test_start_no_credentials_enters_setup(self, offline_app, monkeypatch):
+        """Send /start with no credentials → bot asks for Kaizen username immediately."""
         app, collector = offline_app
         monkeypatch.setattr("bot.has_credentials", lambda uid: False)
         monkeypatch.setattr("bot.get_training_level", lambda uid: None)
@@ -296,13 +296,10 @@ class TestOfflineE2E:
         assert len(collector.texts) >= 1
         text = collector.texts[0]
         assert "Portfolio Guru" in text
-        # Should have a Connect Kaizen button (via reply_markup)
+        assert "Step 1 of 3" in text
+        assert "username" in text.lower()
         sent = collector.sent[0]
-        markup = sent.get("reply_markup")
-        assert markup is not None
-        # Check inline keyboard contains setup button
-        buttons = [btn.callback_data for row in markup.inline_keyboard for btn in row]
-        assert "ACTION|setup" in buttons
+        assert sent.get("reply_markup") is None
 
     async def test_start_with_credentials_shows_file(self, offline_app, monkeypatch):
         """Send /start to a connected user → welcome text only, no inline keyboard.

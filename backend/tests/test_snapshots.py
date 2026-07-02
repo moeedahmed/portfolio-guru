@@ -1,7 +1,6 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from telegram.ext import ConversationHandler
 
 from tests.bot_simulator import BotSimulator
 
@@ -53,7 +52,7 @@ def fixed_cbd_form_draft():
 
 @pytest.mark.asyncio
 async def test_start_message_snapshot(snapshot):
-    from bot import start
+    from bot import AWAIT_USERNAME, start
 
     sim = BotSimulator()
     update = sim._make_text_update("/start")
@@ -62,7 +61,7 @@ async def test_start_message_snapshot(snapshot):
     with patch("bot.has_credentials", return_value=False):
         result = await start(update, context)
 
-    assert result == ConversationHandler.END
+    assert result == AWAIT_USERNAME
     assert {
         "text": sim.get_last_text(),
         "buttons": sim.get_last_buttons(),

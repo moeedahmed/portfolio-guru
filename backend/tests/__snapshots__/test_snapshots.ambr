@@ -83,10 +83,6 @@
 # name: test_start_message_snapshot
   dict({
     'buttons': list([
-      tuple(
-        '🔗 Connect Kaizen',
-        'ACTION|setup',
-      ),
     ]),
     'text': '''
       👋 Welcome to Portfolio Guru
@@ -96,6 +92,8 @@
       🔒 Your Kaizen login is stored encrypted and only used to save approved drafts.
       
       Connect Kaizen to start.
+      
+      Step 1 of 3: please send your Kaizen username or email.
     ''',
   })
 # ---

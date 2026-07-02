@@ -1379,8 +1379,12 @@ _DATA_CLEAR_TEXT = (
     "Your local Portfolio Guru details have been removed. Cases already saved in Kaizen are unaffected."
 )
 _KAIZEN_USERNAME_PROMPT = (
-    "📧 What's your Kaizen username (email)?\n\n"
+    "Step 1 of 3: what's your Kaizen username (email)?\n\n"
     "🔒 Stored encrypted. Used only to file your drafts on Kaizen — never shared."
+)
+_START_SETUP_PROMPT = (
+    f"{render_message('welcome_disconnected')}\n\n"
+    "Step 1 of 3: please send your Kaizen username or email."
 )
 
 
@@ -4202,9 +4206,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
                 await update.message.reply_text(FILE_CASE_PROMPT)
                 return AWAIT_CASE_INPUT
 
-    connected = has_credentials(update.effective_user.id)
-    msg = WELCOME_MSG_CONNECTED if connected else WELCOME_MSG
-    await update.message.reply_text(msg, reply_markup=_build_welcome_keyboard(connected=connected))
+    user_id = update.effective_user.id
+    connected = has_credentials(user_id)
+    if not connected:
+        await update.message.reply_text(_START_SETUP_PROMPT)
+        context.user_data["_setup_state_hint"] = "username"
+        return AWAIT_USERNAME
+    if not await consent.has_current_consent(user_id):
+        return await _prompt_consent(update, context, source="setup")
+
+    await update.message.reply_text(WELCOME_MSG_CONNECTED)
     return ConversationHandler.END
 
 
@@ -4257,7 +4268,7 @@ async def _prompt_kaizen_password(update: Update, context: ContextTypes.DEFAULT_
     context.user_data["_setup_state_hint"] = "password"
     await _flow_msg(
         update, context,
-        "🔒 What's your Kaizen password?\n\n"
+        "Step 2 of 3: what's your Kaizen password?\n\n"
         "_I'll delete this message right after you send it._",
         parse_mode="Markdown",
         flow_key="setup",
@@ -4494,6 +4505,11 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             if auto_pathway is not None
             else ""
         )
+        if not await consent.has_current_consent(user_id):
+            lead_text = f"✅ Kaizen connected — detected as {role_name}."
+            if auto_pathway is not None:
+                lead_text += f"\n\n📊 Portfolio Health pathway: {_pathway_label(auto_pathway)} (change with /pathway)."
+            return await _prompt_consent(update, context, source="setup", lead_text=lead_text)
         await _flow_edit(
             update, context,
             f"✅ Kaizen connected — detected as *{role_name}*.\n\n"
@@ -4536,6 +4552,13 @@ async def setup_training_level(update: Update, context: ContextTypes.DEFAULT_TYP
     if not get_curriculum(user_id):
         store_curriculum(user_id, _default_curriculum_for_training_level(level))
     context.user_data.pop("_setup_state_hint", None)
+    if not await consent.has_current_consent(user_id):
+        return await _prompt_consent(
+            update,
+            context,
+            source="setup",
+            lead_text=f"✅ Kaizen connected — {_training_level_label(level)}.",
+        )
     await _safe_edit_text(
         query.message,
         f"✅ Kaizen connected — *{_training_level_label(level)}*.\n\n"
@@ -11146,21 +11169,42 @@ async def handle_chase_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 # === CONSENT GATE (UK GDPR Art 9(2)(a)) ===
 
 _CONSENT_PROMPT_PENDING_KEY = "_consent_prompt_pending"
+_CONSENT_PROMPT_SOURCE_KEY = "_consent_prompt_source"
 
 
-async def _prompt_consent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Show the versioned consent notice before the first clinical case.
-
-    The triggering message is deliberately NOT stashed or processed — nothing
-    the user sent reaches an LLM/processor until they accept, so the prompt
-    asks them to resend after consenting.
-    """
-    user_id = update.effective_user.id
-    keyboard = InlineKeyboardMarkup([
+def _build_consent_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ I consent", callback_data=f"CONSENT|accept|{user_id}")],
         [InlineKeyboardButton("❌ Not now", callback_data=f"CONSENT|decline|{user_id}")],
     ])
+
+
+async def _prompt_consent(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    source: str = "case",
+    lead_text: str | None = None,
+) -> int:
+    """Show the versioned consent notice before clinical content is processed.
+
+    During setup this is step 3 after Kaizen credentials have been verified.
+    The case fallback is deliberately conservative: the triggering message is
+    not stashed or processed until the user accepts, so it asks them to resend.
+    """
+    user_id = update.effective_user.id
+    keyboard = _build_consent_keyboard(user_id)
     context.user_data[_CONSENT_PROMPT_PENDING_KEY] = True
+    context.user_data[_CONSENT_PROMPT_SOURCE_KEY] = source
+
+    if source == "setup":
+        text = (lead_text + "\n\n" if lead_text else "") + (
+            "Step 3 of 3: consent before your first case.\n\n"
+            f"{CONSENT_TEXT}"
+        )
+        await _flow_edit(update, context, text, reply_markup=keyboard, flow_key="setup")
+        return ConversationHandler.END
+
     await update.message.reply_text(
         CONSENT_TEXT + "\n\n(Your message above has not been processed — send it again after consenting.)",
         reply_markup=keyboard,
@@ -11180,22 +11224,39 @@ async def handle_consent_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.answer("This consent prompt is for another account.", show_alert=True)
         return
     context.user_data.pop(_CONSENT_PROMPT_PENDING_KEY, None)
+    source = context.user_data.pop(_CONSENT_PROMPT_SOURCE_KEY, None)
+    if source == "setup":
+        _flow_done(context, "setup")
     if action == "accept":
         await consent.record_consent(tapper_id)
         await query.answer("Consent recorded")
-        await query.edit_message_text(
-            f"✅ Consent recorded (version {CONSENT_VERSION}).\n\n"
-            "Send your case now — text, voice note, photo, or document. "
-            "You can view your consent with /privacy or withdraw it with /reset."
-        )
+        if source == "setup":
+            await query.edit_message_text(
+                f"✅ Consent recorded (version {CONSENT_VERSION}).\n\n"
+                f"{WELCOME_MSG_CONNECTED}\n\n"
+                "You can view your consent with /privacy or withdraw it with /reset."
+            )
+        else:
+            await query.edit_message_text(
+                f"✅ Consent recorded (version {CONSENT_VERSION}).\n\n"
+                "Send your case now — text, voice note, photo, or document. "
+                "You can view your consent with /privacy or withdraw it with /reset."
+            )
     else:
         await query.answer()
-        await query.edit_message_text(
-            "No problem — nothing was processed and nothing is stored.\n\n"
-            "Portfolio Guru needs your explicit consent before it can draft "
-            "entries from clinical cases. Send a case anytime to see the "
-            "consent notice again."
-        )
+        if source == "setup":
+            await query.edit_message_text(
+                "No problem — Kaizen is connected, but Portfolio Guru cannot draft "
+                "cases until you give consent.\n\n"
+                "Use /privacy to review the notice when you're ready."
+            )
+        else:
+            await query.edit_message_text(
+                "No problem — nothing was processed and nothing is stored.\n\n"
+                "Portfolio Guru needs your explicit consent before it can draft "
+                "entries from clinical cases. Send a case anytime to see the "
+                "consent notice again."
+            )
 
 
 async def privacy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -11212,7 +11273,7 @@ async def privacy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "enable drafting, or Not now to leave your case unprocessed."
         )
     else:
-        status_line = "No consent has been recorded yet — the notice appears before your first case."
+        status_line = "No consent has been recorded yet — the notice appears during setup, before your first case."
     await update.message.reply_text(
         "🔐 Privacy & consent\n\n"
         f"{status_line}\n\n"

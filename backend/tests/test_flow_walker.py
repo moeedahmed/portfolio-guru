@@ -61,7 +61,7 @@ def thin_draft():
 class TestFlowWalker:
     @pytest.mark.asyncio
     async def test_start_paths_offer_next_step(self):
-        from bot import start
+        from bot import AWAIT_USERNAME, start
 
         sim = BotSimulator()
         update = sim._make_text_update('/start')
@@ -70,8 +70,10 @@ class TestFlowWalker:
         with patch('bot.has_credentials', return_value=False):
             result = await start(update, context)
 
-        assert result == ConversationHandler.END
-        assert any(data == 'ACTION|setup' for _, data in sim.get_last_buttons())
+        assert result == AWAIT_USERNAME
+        assert "Step 1 of 3" in sim.get_last_text()
+        assert "username" in sim.get_last_text().lower()
+        assert sim.get_last_buttons() == []
 
         sim = BotSimulator()
         update = sim._make_text_update('/start')
