@@ -1379,10 +1379,11 @@ _DATA_CLEAR_TEXT = (
     "Your local Portfolio Guru details have been removed. Cases already saved in Kaizen are unaffected."
 )
 _KAIZEN_USERNAME_PRIVACY_NOTE = (
-    "_I'll store it encrypted and use it only to connect to Kaizen and save your drafts._"
+    "🔒 _I'll store it encrypted and use it only to connect to Kaizen and save drafts you approve._"
 )
 _KAIZEN_USERNAME_PROMPT = (
-    "Step 1 of 3: what's your Kaizen username (email)?\n\n"
+    "🔗 Step 1 of 3: connect Kaizen\n\n"
+    "What's your Kaizen username (email)?\n\n"
     f"{_KAIZEN_USERNAME_PRIVACY_NOTE}"
 )
 _START_SETUP_INTRO_TEXT = render_message("welcome_disconnected")
@@ -4298,7 +4299,8 @@ async def _prompt_kaizen_password(update: Update, context: ContextTypes.DEFAULT_
     context.user_data["_setup_state_hint"] = "password"
     await _flow_msg(
         update, context,
-        "Step 2 of 3: what's your Kaizen password?\n\n"
+        "🔐 Step 2 of 3: verify your login\n\n"
+        "What's your Kaizen password?\n\n"
         "_I'll delete your password message right after you send it._",
         parse_mode="Markdown",
         flow_key="setup",
@@ -11232,7 +11234,7 @@ async def _prompt_consent(
 
     if source == "setup":
         text = (lead_text + "\n\n" if lead_text else "") + (
-            "Step 3 of 3: Kaizen connected - consent before your first case.\n\n"
+            "✅ Step 3 of 3: consent before your first case\n\n"
             f"{CONSENT_TEXT}"
         )
         await _flow_edit(update, context, text, reply_markup=keyboard, flow_key="setup")

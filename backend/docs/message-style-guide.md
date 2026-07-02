@@ -80,10 +80,16 @@ Welcome (disconnected):
 Send rough case notes as text, voice, photo or document. I'll turn them into
 RCEM portfolio drafts across 45 forms, then ask you to approve before anything
 is saved to Kaizen.
+```
 
-🔒 Your Kaizen login is stored encrypted and only used to save approved drafts.
+Step 1:
 
-Connect Kaizen to start.
+```
+🔗 Step 1 of 3: connect Kaizen
+
+What's your Kaizen username (email)?
+
+🔒 _I'll store it encrypted and use it only to connect to Kaizen and save drafts you approve._
 ```
 
 Connected welcome:

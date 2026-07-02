@@ -53,9 +53,7 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
             "👋 Welcome to Portfolio Guru\n\n"
             "Send rough case notes as text, voice, photo or document. I’ll turn them into "
             "RCEM portfolio drafts across 45 forms, then ask you to approve before anything "
-            "is saved to Kaizen.\n\n"
-            "🔒 Your Kaizen login is stored encrypted and only used to save approved drafts.\n\n"
-            "Connect Kaizen to start."
+            "is saved to Kaizen."
         ),
         safety_critical=True,
     ),

@@ -293,9 +293,10 @@ class TestOfflineE2E:
         _prepare_update(update, app.bot)
         await app.process_update(update)
 
-        assert len(collector.texts) >= 1
-        text = collector.texts[0]
-        assert "Portfolio Guru" in text
+        assert len(collector.texts) >= 2
+        assert "Portfolio Guru" in collector.texts[0]
+        assert "Step 1 of 3" not in collector.texts[0]
+        text = collector.texts[1]
         assert "Step 1 of 3" in text
         assert "username" in text.lower()
         sent = collector.sent[0]

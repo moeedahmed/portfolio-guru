@@ -284,7 +284,6 @@ async def test_start_continues_step_3_when_setup_consent_pending(tmp_consent_db)
     text = sim.get_last_text() or ""
     assert "Kaizen is already connected" in text
     assert "Step 3 of 3" in text
-    assert "Kaizen connected - consent before your first case" in text
     assert "consent before your first case" in text
     assert "Portfolio Guru is ready" not in text
     assert ("✅ I consent", f"CONSENT|accept|{sim.user_id}") in sim.get_last_buttons()

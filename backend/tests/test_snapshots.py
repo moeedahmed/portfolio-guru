@@ -65,7 +65,11 @@ async def test_start_message_snapshot(snapshot):
     texts = [text for _, text, _ in sim.messages_sent]
     assert len(texts) == 2
     assert "Step 1 of 3" not in texts[0]
+    assert "Kaizen login is stored encrypted" not in texts[0]
+    assert "Connect Kaizen to start" not in texts[0]
     assert "Step 1 of 3" in texts[1]
+    assert "🔗" in texts[1]
+    assert "🔒" in texts[1]
     assert {
         "texts": texts,
         "buttons": sim.get_last_buttons(),
