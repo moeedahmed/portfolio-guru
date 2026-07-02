@@ -198,6 +198,43 @@ async def test_persistent_events_list_bounce_invalidates_cache_and_classifies_se
 
 
 @pytest.mark.asyncio
+async def test_fresh_login_events_list_bounce_reports_form_unavailable(bounce_ctx):
+    """A fresh-login /events/list bounce is a form/profile availability failure,
+    not a raw URL error or retry loop."""
+    page = bounce_ctx
+
+    async def _goto(url, *args, **kwargs):
+        page.url = EVENTS_LIST_URL
+
+    page.goto = AsyncMock(side_effect=_goto)
+
+    with patch("kaizen_form_filer.use_cached_session", AsyncMock(return_value=False)), \
+         patch("kaizen_form_filer._login", AsyncMock(return_value=True)), \
+         patch("kaizen_form_filer.save_session_state", AsyncMock()), \
+         patch("kaizen_form_filer.invalidate_session_cache") as invalidate, \
+         patch("filing_result_logger.log_filing_result") as log:
+        result = await file_to_kaizen(
+            "REFLECT_LOG_2021",
+            {"reflection": "test reflection", "reflection_title": "test"},
+            "doctor@example.com",
+            "pass",
+            telegram_user_id=12345,
+        )
+
+    invalidate.assert_not_called()
+    assert result["status"] == "failed"
+    assert "Reflective Practice Log" in result["error"]
+    assert "not available on your Kaizen profile" in result["error"]
+    assert "Form page didn't load" not in result["error"]
+    log.assert_called()
+    assert any(
+        call.kwargs.get("status") == "failed"
+        and "not available on your Kaizen profile" in (call.kwargs.get("error_hint") or "")
+        for call in log.call_args_list
+    )
+
+
+@pytest.mark.asyncio
 async def test_failed_initial_login_emits_telemetry(bounce_ctx):
     """A flat login failure (no cached session) must also emit telemetry —
     this early return used to exit before the filing-result log."""
@@ -245,3 +282,15 @@ def test_session_failure_helper_ignores_field_failures():
     assert _is_session_failure_error("Save button not found") is False
     assert _is_session_failure_error("Form page didn't load — redirected to /dashboard") is False
     assert _is_session_failure_error(None) is False
+
+
+def test_form_unavailable_error_routes_to_specific_failure_copy():
+    from bot import _classify_filing_failure, _is_session_failure_error
+
+    error = (
+        "Reflective Practice Log is not available on your Kaizen profile or "
+        "curriculum right now; Kaizen redirected to https://kaizenep.com/events/list."
+    )
+
+    assert _is_session_failure_error(error) is False
+    assert _classify_filing_failure(error, [], "failed", []) == "FORM_UNAVAILABLE"

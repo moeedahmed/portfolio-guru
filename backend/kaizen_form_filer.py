@@ -289,6 +289,21 @@ def _is_form_navigation_bounce(url: str, form_marker: str = "new-section") -> bo
     return form_marker not in url
 
 
+def _form_navigation_unavailable_error(form_type: str, landed_url: str) -> str:
+    base_form_type = form_type[:-5] if form_type.endswith("_2021") else form_type
+    display_name = (
+        FORM_DISPLAY_NAMES.get(form_type)
+        or FORM_DISPLAY_NAMES.get(base_form_type)
+        or form_type
+    )
+    return (
+        f"{display_name} is not available on your Kaizen profile or curriculum "
+        f"right now; Kaizen redirected to {landed_url} instead of opening the form. "
+        "No draft was written. Try the other curriculum variant, choose another "
+        "form, or reconnect Kaizen from /settings if this form should be available."
+    )
+
+
 # ─── Kaizen quirks observed in live forms ────────────────────────────────────
 # 1. When you re-open an existing draft, Kaizen sometimes RESETS startDate and
 #    endDate to today's date. The script must always re-fill these fields when
@@ -4408,10 +4423,10 @@ async def file_to_kaizen(
                         ),
                     )
 
-            if "new-section" not in page.url:
+            if _is_form_navigation_bounce(page.url):
                 return _early_filing_failure(
                     form_type,
-                    f"Form page didn't load — redirected to {page.url}",
+                    _form_navigation_unavailable_error(form_type, page.url),
                 )
 
         # Fill stage_of_training FIRST

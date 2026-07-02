@@ -3182,6 +3182,35 @@ def _build_failed_filing_input_gate_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def _build_open_case_new_case_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📋 Start new case", callback_data="CASE|new")],
+        [InlineKeyboardButton("✏️ Add to current draft", callback_data="CASE|improve")],
+        [InlineKeyboardButton("❌ Cancel current draft", callback_data="ACTION|cancel")],
+    ])
+
+
+async def _show_open_case_new_case_gate(
+    target,
+    context,
+    incoming_text: str,
+    *,
+    edit: bool = False,
+) -> int:
+    """Hold explicit new-case input when an unresolved draft/case is open."""
+    context.user_data["pending_new_case_text"] = (incoming_text or "").strip()
+    prompt_text = (
+        "This looks like a new case, but your current draft is still open.\n\n"
+        "Start a separate case, or add this detail to the current draft?"
+    )
+    markup = _build_open_case_new_case_keyboard()
+    if edit:
+        await target.edit_text(prompt_text, reply_markup=markup)
+    else:
+        await target.reply_text(prompt_text, reply_markup=markup)
+    return AWAIT_TEMPLATE_REVIEW
+
+
 async def _show_failed_filing_input_gate(
     target,
     context,
@@ -7991,6 +8020,8 @@ async def _accumulate_and_refresh(update: Update, context: ContextTypes.DEFAULT_
 
     if not chosen_form or not initial_case:
         return await handle_case_input(update, context)
+    if _looks_like_explicit_new_case_request(new_text):
+        return await _show_open_case_new_case_gate(update.message, context, new_text)
 
     # Track accumulation additions
     additions = context.user_data.get("accumulation_additions", [])
@@ -8340,6 +8371,9 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
     raw_text = update.message.text.strip()
     case_text = context.user_data.get("case_text", "")
     current_form = context.user_data.get("chosen_form", "")
+
+    if _looks_like_explicit_new_case_request(raw_text):
+        return await _show_open_case_new_case_gate(update.message, context, raw_text)
 
     try:
         intent = await classify_intent(raw_text, case_context=case_text)
@@ -9036,6 +9070,13 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text("💬 Send a text message, voice note, photo, or document.")
         return ConversationHandler.END
 
+    if (
+        context.user_data.get("awaiting_detail")
+        and context.user_data.get("chosen_form")
+        and _looks_like_explicit_new_case_request(case_text)
+    ):
+        return await _show_open_case_new_case_gate(update.message, context, case_text)
+
     # If the user is refining a chosen template, keep the original wording and append the new detail.
     if context.user_data.get("awaiting_detail") and context.user_data.get("chosen_form"):
         previous_case = context.user_data.get("case_text", "").strip()
@@ -9131,12 +9172,52 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def _delete_previous_gathering_message(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Remove the prior gathering bubble so only one is on screen at a time."""
+    """Retire the prior gathering bubble so only one prompt is actionable."""
     old_msg_id = context.user_data.pop("gathering_msg_id", None)
     old_chat_id = context.user_data.pop("gathering_chat_id", None)
     if old_msg_id and old_chat_id:
         try:
+            await context.bot.edit_message_text(
+                chat_id=old_chat_id,
+                message_id=old_msg_id,
+                text="📥 Added to this case. Use the latest prompt below.",
+                reply_markup=None,
+            )
+        except Exception:
+            try:
+                await context.bot.edit_message_reply_markup(
+                    chat_id=old_chat_id,
+                    message_id=old_msg_id,
+                    reply_markup=None,
+                )
+            except Exception:
+                pass
+        try:
             await context.bot.delete_message(chat_id=old_chat_id, message_id=old_msg_id)
+        except Exception:
+            pass
+
+
+def _gathering_callback_matches_current_prompt(query, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    expected_msg_id = context.user_data.get("gathering_msg_id")
+    expected_chat_id = context.user_data.get("gathering_chat_id")
+    if not expected_msg_id or not expected_chat_id:
+        return True
+    message = getattr(query, "message", None)
+    return bool(
+        message
+        and getattr(message, "message_id", None) == expected_msg_id
+        and getattr(message, "chat_id", None) == expected_chat_id
+    )
+
+
+async def _retire_stale_gathering_callback(query) -> None:
+    text = "⏳ That earlier Draft now button is no longer active. Use the latest capture prompt below."
+    try:
+        await query.edit_message_text(text)
+    except Exception:
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
         except Exception:
             pass
 
@@ -9189,6 +9270,9 @@ async def gather_done_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                 "⚠️ I do not have a case captured for that button. Send case details when you are ready to draft."
             )
         return ConversationHandler.END
+    if not _gathering_callback_matches_current_prompt(query, context):
+        await _retire_stale_gathering_callback(query)
+        return AWAIT_GATHERING
     return await _finish_gathering_case(update, context)
 
 
@@ -9537,6 +9621,12 @@ def _classify_filing_failure(
         "session expired", "auth.kaizenep.com", "redirected to https://auth",
     )):
         return "LOGIN_FAILED"
+    if any(token in err for token in (
+        "not available on your kaizen profile",
+        "kaizen redirected to https://kaizenep.com/events/list",
+        "instead of opening the form",
+    )):
+        return "FORM_UNAVAILABLE"
     save_markers = (
         "save button", "save may have failed", "save was clicked",
         "could not confirm",
@@ -10237,6 +10327,21 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             ])
             end_keyboard = InlineKeyboardMarkup(rows)
             status_line = "❌ Some fields didn't fill."
+        elif classification == "FORM_UNAVAILABLE":
+            body = (
+                "Kaizen did not open this form for your current profile or "
+                "curriculum. Nothing was written. Try the other curriculum "
+                "variant, choose another form, or reconnect Kaizen if this "
+                "form should be available."
+            )
+            msg = f"❌ Filing didn't complete\n{form_name}\n\n{body}{details_suffix}"
+            rows = [[InlineKeyboardButton("🔗 Open Kaizen forms", url="https://kaizenep.com/events/list")]]
+            rows.append([
+                InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file"),
+                _BTN_CANCEL,
+            ])
+            end_keyboard = InlineKeyboardMarkup(rows)
+            status_line = "❌ Form not available."
         else:  # UNKNOWN
             body = (
                 "Try again, or open Kaizen and fill the form manually."
@@ -11434,6 +11539,7 @@ def build_application() -> Application:
                 CallbackQueryHandler(handle_approval_edit, pattern=r"^EDIT\|"),
                 CallbackQueryHandler(handle_edit_field, pattern=r"^FIELD\|"),
                 CallbackQueryHandler(handle_amend_draft, pattern=r"^AMEND\|"),
+                CallbackQueryHandler(handle_callback, pattern=r"^CASE\|"),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|retry_filing$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),

@@ -6,6 +6,7 @@ import bot
 from bot import (
     AWAIT_FORM_CHOICE,
     AWAIT_GATHERING,
+    AWAIT_TEMPLATE_REVIEW,
     gather_done_callback,
     handle_callback,
     handle_case_input,
@@ -237,6 +238,29 @@ async def test_gather_done_callback_finishes_case(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_stale_gather_done_callback_keeps_current_case(monkeypatch):
+    """Old Draft now buttons must not finish the latest gathering case."""
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+    bot._append_gathering_case(context, _FIRST_CASE, "text")
+    context.user_data["gathering_msg_id"] = 999
+    context.user_data["gathering_chat_id"] = sim.user_id
+    update = sim._make_callback_update("GATHER|done")
+
+    process_case = AsyncMock(return_value=AWAIT_FORM_CHOICE)
+    with patch("bot._process_case_text", new=process_case):
+        result = await gather_done_callback(update, context)
+
+    assert result == AWAIT_GATHERING
+    process_case.assert_not_awaited()
+    assert "gathering_case" in context.user_data
+    assert context.user_data["gathering_msg_id"] == 999
+    update.callback_query.answer.assert_awaited()
+    assert "earlier Draft now button" in sim.get_last_text()
+
+
+@pytest.mark.asyncio
 async def test_stale_gather_done_callback_does_not_draft(monkeypatch):
     monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
     sim = BotSimulator()
@@ -279,6 +303,30 @@ async def test_second_text_addition_keeps_both_buttons(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_second_text_addition_disarms_previous_gathering_prompt(monkeypatch):
+    """A new capture prompt must retire the previous prompt's inline keyboard."""
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+    bot._append_gathering_case(context, _FIRST_CASE, "text")
+    context.user_data["gathering_msg_id"] = 123
+    context.user_data["gathering_chat_id"] = sim.user_id
+
+    update = sim._make_text_update("I also arranged urgent cardiology review.")
+    result = await handle_gathering_input(update, context)
+
+    assert result == AWAIT_GATHERING
+    context.bot.edit_message_text.assert_awaited()
+    assert context.bot.edit_message_text.await_args.kwargs["message_id"] == 123
+    assert context.bot.edit_message_text.await_args.kwargs["reply_markup"] is None
+    assert context.user_data["gathering_msg_id"] != 123
+    assert sim.get_last_buttons() == [
+        ("✅ Draft now", "GATHER|done"),
+        ("❌ Cancel", "ACTION|cancel"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_gathering_prompt_idempotent_across_repeated_additions(monkeypatch):
     """Every new text addition must produce the same two-button surface — idempotency."""
     monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
@@ -303,3 +351,35 @@ async def test_gathering_prompt_idempotent_across_repeated_additions(monkeypatch
         assert sim.get_last_buttons() == expected_buttons, (
             f"Both buttons missing after addition: {text!r}"
         )
+
+
+@pytest.mark.asyncio
+async def test_explicit_new_case_during_thin_detail_state_prompts_choice(monkeypatch):
+    """An unresolved thin-detail draft must not silently absorb a new case."""
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["chosen_form"] = "REFLECT_LOG"
+    context.user_data["awaiting_detail"] = True
+    context.user_data["case_text"] = "Initial reflective practice log notes."
+
+    update = sim._make_text_update(
+        "This is a new case: 70M patient presented to ED resus with sepsis and hypotension."
+    )
+
+    analyse = AsyncMock()
+    with patch("bot.has_credentials", return_value=True), \
+         patch("bot.consent.has_current_consent", new=AsyncMock(return_value=True)), \
+         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 0, 10, "free"))), \
+         patch("bot._analyse_selected_form", new=analyse):
+        result = await handle_case_input(update, context)
+
+    assert result == AWAIT_TEMPLATE_REVIEW
+    analyse.assert_not_awaited()
+    assert context.user_data["pending_new_case_text"].startswith("This is a new case")
+    assert "current draft is still open" in sim.get_last_text()
+    assert sim.get_last_buttons() == [
+        ("📋 Start new case", "CASE|new"),
+        ("✏️ Add to current draft", "CASE|improve"),
+        ("❌ Cancel current draft", "ACTION|cancel"),
+    ]

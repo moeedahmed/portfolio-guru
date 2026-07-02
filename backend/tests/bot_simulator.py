@@ -23,6 +23,8 @@ class BotSimulator:
         context.bot = AsyncMock()
         context.bot.send_message = AsyncMock(side_effect=self._capture_send)
         context.bot.edit_message_text = AsyncMock(side_effect=self._capture_bot_edit)
+        context.bot.edit_message_reply_markup = AsyncMock(side_effect=self._capture_bot_edit_markup)
+        context.bot.delete_message = AsyncMock(side_effect=self._capture_bot_delete)
         return context
 
     def _make_chat(self):
@@ -110,6 +112,15 @@ class BotSimulator:
         markup = kwargs.get("reply_markup")
         self.messages_sent.append(("bot_edit", text, markup))
         return self._mock_message()
+
+    async def _capture_bot_edit_markup(self, *args, **kwargs):
+        markup = kwargs.get("reply_markup")
+        self.messages_sent.append(("bot_markup", None, markup))
+        return self._mock_message()
+
+    async def _capture_bot_delete(self, *args, **kwargs):
+        self.messages_sent.append(("bot_delete", None, None))
+        return True
 
     async def _capture_edit_markup(self, *args, **kwargs):
         markup = kwargs.get("reply_markup")
