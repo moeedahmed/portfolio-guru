@@ -11145,6 +11145,8 @@ async def handle_chase_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 # === CONSENT GATE (UK GDPR Art 9(2)(a)) ===
 
+_CONSENT_PROMPT_PENDING_KEY = "_consent_prompt_pending"
+
 
 async def _prompt_consent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Show the versioned consent notice before the first clinical case.
@@ -11158,6 +11160,7 @@ async def _prompt_consent(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         [InlineKeyboardButton("✅ I consent", callback_data=f"CONSENT|accept|{user_id}")],
         [InlineKeyboardButton("❌ Not now", callback_data=f"CONSENT|decline|{user_id}")],
     ])
+    context.user_data[_CONSENT_PROMPT_PENDING_KEY] = True
     await update.message.reply_text(
         CONSENT_TEXT + "\n\n(Your message above has not been processed — send it again after consenting.)",
         reply_markup=keyboard,
@@ -11176,6 +11179,7 @@ async def handle_consent_callback(update: Update, context: ContextTypes.DEFAULT_
     if target_uid is not None and tapper_id != target_uid:
         await query.answer("This consent prompt is for another account.", show_alert=True)
         return
+    context.user_data.pop(_CONSENT_PROMPT_PENDING_KEY, None)
     if action == "accept":
         await consent.record_consent(tapper_id)
         await query.answer("Consent recorded")
@@ -11197,12 +11201,18 @@ async def handle_consent_callback(update: Update, context: ContextTypes.DEFAULT_
 async def privacy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/privacy — show consent status, processing summary, and withdrawal path."""
     status = await consent.get_consent_status(update.effective_user.id)
+    has_pending_prompt = bool(context.user_data.get(_CONSENT_PROMPT_PENDING_KEY))
     if status and status["action"] in ("granted", "re-granted"):
         status_line = f"✅ You consented to version {status['version']} on {status['at']} UTC."
     elif status:
         status_line = "❌ Consent withdrawn — your cases are not being processed."
+    elif has_pending_prompt:
+        status_line = (
+            "Consent notice shown — waiting for your choice. Tap I consent to "
+            "enable drafting, or Not now to leave your case unprocessed."
+        )
     else:
-        status_line = "You haven't been asked for consent yet — the notice appears before your first case."
+        status_line = "No consent has been recorded yet — the notice appears before your first case."
     await update.message.reply_text(
         "🔐 Privacy & consent\n\n"
         f"{status_line}\n\n"

@@ -109,6 +109,26 @@ async def test_decline_keeps_the_gate_closed(tmp_consent_db):
 
 @pytest.mark.consent_gate
 @pytest.mark.asyncio
+async def test_privacy_reports_pending_consent_prompt(tmp_consent_db):
+    from bot import _prompt_consent, privacy_command
+
+    sim = BotSimulator()
+    context = sim._make_context()
+
+    await _prompt_consent(sim._make_text_update("Chest pain case"), context)
+    assert context.user_data["_consent_prompt_pending"] is True
+    sim.clear_messages()
+
+    await privacy_command(sim._make_text_update("/privacy"), context)
+
+    text = sim.get_last_text() or ""
+    assert "Consent notice shown" in text
+    assert "waiting for your choice" in text
+    assert "haven't been asked" not in text
+
+
+@pytest.mark.consent_gate
+@pytest.mark.asyncio
 async def test_another_users_tap_cannot_grant_consent(tmp_consent_db):
     consent = tmp_consent_db
     from bot import handle_consent_callback
