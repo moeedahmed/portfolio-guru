@@ -22,6 +22,22 @@ _FIRST_CASE = (
 )
 
 
+def _make_voice_update(sim: BotSimulator):
+    update = sim._make_text_update("")
+    message = update.message
+    message.text = None
+    voice = AsyncMock()
+    voice.file_name = "voice.ogg"
+    voice.mime_type = "audio/ogg"
+    voice_file = AsyncMock()
+    voice.get_file = AsyncMock(return_value=voice_file)
+    voice_file.download_to_drive = AsyncMock()
+    message.voice = voice
+    message.audio = None
+    message.document = None
+    return update
+
+
 @pytest.mark.asyncio
 async def test_gathering_mode_starts_collection_instead_of_recommending(monkeypatch):
     monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
@@ -324,6 +340,64 @@ async def test_second_text_addition_disarms_previous_gathering_prompt(monkeypatc
         ("✅ Draft now", "GATHER|done"),
         ("❌ Cancel", "ACTION|cancel"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_voice_addition_disarms_previous_gathering_prompt(monkeypatch):
+    """A second voice note must not leave the previous Draft now button visible."""
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+    bot._append_gathering_case(context, _FIRST_CASE, "voice")
+    bot._track_gathering_prompt(context, 123, sim.user_id)
+
+    update = _make_voice_update(sim)
+
+    with patch("bot.has_credentials", return_value=True), \
+         patch("bot.consent.has_current_consent", new=AsyncMock(return_value=True)), \
+         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 0, 10, "free"))), \
+         patch("bot.transcribe_voice", new=AsyncMock(return_value="Reflection: I should escalate earlier.")):
+        result = await handle_case_input(update, context)
+
+    assert result == AWAIT_GATHERING
+    context.bot.edit_message_text.assert_awaited()
+    assert context.bot.edit_message_text.await_args.kwargs["message_id"] == 123
+    assert context.bot.edit_message_text.await_args.kwargs["reply_markup"] is None
+    assert context.user_data["gathering_msg_id"] != 123
+    assert context.user_data["gathering_prompt_refs"] == [{
+        "message_id": context.user_data["gathering_msg_id"],
+        "chat_id": sim.user_id,
+    }]
+    assert sim.get_last_buttons() == [
+        ("✅ Draft now", "GATHER|done"),
+        ("❌ Cancel", "ACTION|cancel"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_gather_done_disarms_all_tracked_prompts(monkeypatch):
+    """Finishing a gathered case must strip any duplicate prompt buttons."""
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+    bot._append_gathering_case(context, _FIRST_CASE, "voice")
+    bot._track_gathering_prompt(context, 111, sim.user_id)
+    bot._track_gathering_prompt(context, 222, sim.user_id)
+    update = sim._make_callback_update("GATHER|done")
+    update.callback_query.message.message_id = 222
+    update.callback_query.message.chat_id = sim.user_id
+
+    process_case = AsyncMock(return_value=AWAIT_FORM_CHOICE)
+    with patch("bot._process_case_text", new=process_case):
+        result = await gather_done_callback(update, context)
+
+    assert result == AWAIT_FORM_CHOICE
+    process_case.assert_awaited_once()
+    context.bot.edit_message_text.assert_awaited()
+    assert context.bot.edit_message_text.await_args.kwargs["message_id"] == 222
+    context.bot.edit_message_reply_markup.assert_awaited()
+    assert context.bot.edit_message_reply_markup.await_args.kwargs["message_id"] == 111
+    assert "gathering_prompt_refs" not in context.user_data
 
 
 @pytest.mark.asyncio

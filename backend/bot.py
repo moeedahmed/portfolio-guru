@@ -1294,6 +1294,7 @@ def _combined_pending_case_bundle(context) -> tuple[str, str]:
 
 _GATHERING_MODE_FALSE_VALUES = {"0", "false", "no", "off", "disabled"}
 _GATHERING_CASE_KEY = "gathering_case"
+_GATHERING_PROMPTS_KEY = "gathering_prompt_refs"
 
 
 def _gathering_env_enabled() -> bool:
@@ -1356,6 +1357,28 @@ def _gathering_done_keyboard() -> InlineKeyboardMarkup:
 
 def _gathering_reply(context) -> tuple[str, InlineKeyboardMarkup]:
     return render_message("gathering_captured"), _gathering_done_keyboard()
+
+
+def _track_gathering_prompt(context, message_id, chat_id) -> None:
+    if not message_id or not chat_id:
+        return
+    context.user_data["gathering_msg_id"] = message_id
+    context.user_data["gathering_chat_id"] = chat_id
+    refs = context.user_data.setdefault(_GATHERING_PROMPTS_KEY, [])
+    ref = {"message_id": message_id, "chat_id": chat_id}
+    if ref not in refs:
+        refs.append(ref)
+
+
+def _pop_gathering_prompt_refs(context) -> list[dict]:
+    refs = list(context.user_data.pop(_GATHERING_PROMPTS_KEY, []) or [])
+    msg_id = context.user_data.pop("gathering_msg_id", None)
+    chat_id = context.user_data.pop("gathering_chat_id", None)
+    if msg_id and chat_id:
+        ref = {"message_id": msg_id, "chat_id": chat_id}
+        if ref not in refs:
+            refs.append(ref)
+    return refs
 
 # ConversationHandler states
 (AWAIT_USERNAME, AWAIT_PASSWORD,
@@ -8000,8 +8023,7 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
         _append_gathering_case(context, case_text, input_source)
         reply_text, reply_markup = _gathering_reply(context)
         await query.edit_message_text(reply_text, reply_markup=reply_markup)
-        context.user_data["gathering_msg_id"] = query.message.message_id
-        context.user_data["gathering_chat_id"] = query.message.chat_id
+        _track_gathering_prompt(context, query.message.message_id, query.message.chat_id)
         context.user_data["_gathering_ack_used"] = True
         return AWAIT_GATHERING
 
@@ -8887,10 +8909,10 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 await voice_file.download_to_drive(tmp_path)
                 case_text = await transcribe_voice(tmp_path)
             if _gathering_enabled(context) and not (context.user_data.get("chosen_form") and context.user_data.get("awaiting_detail")):
+                await _delete_previous_gathering_message(context)
                 reply_text, reply_markup = _gathering_reply(context)
                 await ack.edit_text(reply_text, reply_markup=reply_markup)
-                context.user_data["gathering_msg_id"] = ack.message_id
-                context.user_data["gathering_chat_id"] = ack.chat_id
+                _track_gathering_prompt(context, ack.message_id, ack.chat_id)
                 context.user_data["_gathering_ack_used"] = True
             else:
                 await ack.edit_text("🎙️ Voice note read. Finding matching forms…")
@@ -9121,8 +9143,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await _delete_previous_gathering_message(context)
         reply_text, reply_markup = _gathering_reply(context)
         gathering_msg = await update.message.reply_text(reply_text, reply_markup=reply_markup)
-        context.user_data["gathering_msg_id"] = gathering_msg.message_id
-        context.user_data["gathering_chat_id"] = gathering_msg.chat_id
+        _track_gathering_prompt(context, gathering_msg.message_id, gathering_msg.chat_id)
         return AWAIT_GATHERING
 
     if chosen_form and context.user_data.get("awaiting_detail"):
@@ -9172,10 +9193,17 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def _delete_previous_gathering_message(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Retire the prior gathering bubble so only one prompt is actionable."""
-    old_msg_id = context.user_data.pop("gathering_msg_id", None)
-    old_chat_id = context.user_data.pop("gathering_chat_id", None)
-    if old_msg_id and old_chat_id:
+    """Retire every prior gathering bubble so only one prompt is actionable."""
+    seen: set[tuple[int, int]] = set()
+    for ref in _pop_gathering_prompt_refs(context):
+        old_msg_id = ref.get("message_id")
+        old_chat_id = ref.get("chat_id")
+        if not old_msg_id or not old_chat_id:
+            continue
+        key = (old_chat_id, old_msg_id)
+        if key in seen:
+            continue
+        seen.add(key)
         try:
             await context.bot.edit_message_text(
                 chat_id=old_chat_id,
@@ -9225,29 +9253,52 @@ async def _retire_stale_gathering_callback(query) -> None:
 async def _finish_gathering_case(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     case_text, input_source = _combined_gathering_case(context)
-    gathering_msg_id = context.user_data.pop("gathering_msg_id", None)
-    gathering_chat_id = context.user_data.pop("gathering_chat_id", None)
+    current_ref = {
+        "message_id": context.user_data.get("gathering_msg_id"),
+        "chat_id": context.user_data.get("gathering_chat_id"),
+    }
+    prompt_refs = _pop_gathering_prompt_refs(context)
     _clear_gathering_case(context)
     message = update.effective_message
     if not case_text:
         await message.reply_text("⚠️ I was gathering the case, but nothing readable came through.\n\nSend it again when ready.")
         return AWAIT_CASE_INPUT
     edited_in_place = False
-    if gathering_msg_id and gathering_chat_id:
+    seen: set[tuple[int, int]] = set()
+    for ref in prompt_refs:
+        gathering_msg_id = ref.get("message_id")
+        gathering_chat_id = ref.get("chat_id")
+        if not gathering_msg_id or not gathering_chat_id:
+            continue
+        key = (gathering_chat_id, gathering_msg_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        is_current = (
+            gathering_msg_id == current_ref.get("message_id")
+            and gathering_chat_id == current_ref.get("chat_id")
+        )
         try:
-            await context.bot.edit_message_text(
-                chat_id=gathering_chat_id,
-                message_id=gathering_msg_id,
-                text=CAPTURED_ACK,
-                parse_mode="Markdown",
-            )
-            context.user_data["last_bot_msg_id"] = gathering_msg_id
-            context.user_data["last_bot_chat_id"] = gathering_chat_id
-            context.user_data["status_msg_id"] = gathering_msg_id
-            context.user_data["status_msg_chat"] = gathering_chat_id
-            edited_in_place = True
+            if is_current and not edited_in_place:
+                await context.bot.edit_message_text(
+                    chat_id=gathering_chat_id,
+                    message_id=gathering_msg_id,
+                    text=CAPTURED_ACK,
+                    parse_mode="Markdown",
+                )
+                context.user_data["last_bot_msg_id"] = gathering_msg_id
+                context.user_data["last_bot_chat_id"] = gathering_chat_id
+                context.user_data["status_msg_id"] = gathering_msg_id
+                context.user_data["status_msg_chat"] = gathering_chat_id
+                edited_in_place = True
+            else:
+                await context.bot.edit_message_reply_markup(
+                    chat_id=gathering_chat_id,
+                    message_id=gathering_msg_id,
+                    reply_markup=None,
+                )
         except Exception:
-            edited_in_place = False
+            pass
     if not edited_in_place:
         ack = await message.reply_text(CAPTURED_ACK, parse_mode="Markdown")
         _track_latest_message(context, ack)
@@ -9259,8 +9310,7 @@ async def gather_done_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     if not _gathering_case_active(context):
         _clear_gathering_case(context)
-        context.user_data.pop("gathering_msg_id", None)
-        context.user_data.pop("gathering_chat_id", None)
+        _pop_gathering_prompt_refs(context)
         try:
             await query.edit_message_text(
                 "⚠️ I do not have a case captured for that button. Send case details when you are ready to draft."
@@ -9308,8 +9358,7 @@ async def handle_gathering_input(update: Update, context: ContextTypes.DEFAULT_T
     _append_gathering_case(context, raw_text, "text")
     await _delete_previous_gathering_message(context)
     gathering_msg = await update.message.reply_text(reply.full_text(), reply_markup=_gathering_done_keyboard())
-    context.user_data["gathering_msg_id"] = gathering_msg.message_id
-    context.user_data["gathering_chat_id"] = gathering_msg.chat_id
+    _track_gathering_prompt(context, gathering_msg.message_id, gathering_msg.chat_id)
     return AWAIT_GATHERING
 
 
