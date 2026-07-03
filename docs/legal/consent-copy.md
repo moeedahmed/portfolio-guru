@@ -10,18 +10,15 @@ This screen must appear **before** the user can send their first case, must requ
 
 **Consent before your first case**
 
-Your case notes count as health data, so Portfolio Guru needs your consent before it drafts from them.
+Case notes are health data. Please confirm before Portfolio Guru drafts from them:
 
-Please confirm:
+- You will only send anonymised case details.
+- Portfolio Guru may use your case notes to draft portfolio entries with Google Gemini via Vertex AI in the EU (London).
+- Your Kaizen login is stored encrypted and is not sent to the AI model.
+- Portfolio Guru saves drafts only. It never submits to a supervisor.
+- You can withdraw consent and erase your data any time with `/reset`.
 
-- I will only send anonymised case details.
-- Portfolio Guru can use my case notes to draft portfolio entries.
-- Case content is processed by Google Gemini via Vertex AI in the EU (London).
-- My Kaizen login is stored encrypted and is not sent to the AI model.
-- Portfolio Guru saves drafts only. Nothing is submitted to a supervisor.
-- I can withdraw consent and erase my data any time with `/reset`.
-
-Tap **"I consent"** to continue. This confirms you are a **GMC-registered doctor** using this for your own training record.
+Tap **"I consent"** to continue. This also confirms you are a **GMC-registered doctor** using this for your own training record.
 
 [ I consent ] [ Not now ]
 

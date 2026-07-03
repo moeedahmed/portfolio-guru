@@ -186,6 +186,28 @@ async def test_privacy_reports_pending_consent_prompt(tmp_consent_db):
 
 @pytest.mark.consent_gate
 @pytest.mark.asyncio
+async def test_setup_review_button_opens_full_consent_notice(tmp_consent_db):
+    from bot import handle_consent_callback
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["_consent_prompt_pending"] = True
+    context.user_data["_consent_prompt_source"] = "setup"
+    update = sim._make_callback_update(f"CONSENT|review|{sim.user_id}")
+
+    await handle_consent_callback(update, context)
+
+    edited = update.callback_query.edit_message_text.call_args.args[0]
+    assert "Consent before your first case" in edited
+    assert "Step 3 of 3" not in edited
+    assert context.user_data["_consent_prompt_pending"] is True
+    assert context.user_data["_consent_prompt_source"] == "setup"
+    assert ("✅ I consent", f"CONSENT|accept|{sim.user_id}") in sim.get_last_buttons()
+    assert ("🔐 Review consent", f"CONSENT|review|{sim.user_id}") not in sim.get_last_buttons()
+
+
+@pytest.mark.consent_gate
+@pytest.mark.asyncio
 async def test_another_users_tap_cannot_grant_consent(tmp_consent_db):
     consent = tmp_consent_db
     from bot import handle_consent_callback
@@ -226,12 +248,14 @@ async def test_successful_setup_prompts_consent_before_ready_state(tmp_consent_d
     texts = [text for _, text, _ in sim.messages_sent if text]
     assert any("Kaizen connected" in text and "Step 3 of 3" in text for text in texts)
     text = sim.get_last_text() or ""
-    assert "Consent before your first case" in text
-    assert "Step 3 of 3" not in text
+    assert "Step 3 of 3" in text
+    assert "Review the consent notice" in text
+    assert "Consent before your first case" not in text
     assert "has not been processed" not in text
     assert context.user_data["_consent_prompt_pending"] is True
     assert context.user_data["_consent_prompt_source"] == "setup"
-    assert ("✅ I consent", f"CONSENT|accept|{sim.user_id}") in sim.get_last_buttons()
+    assert ("🔐 Review consent", f"CONSENT|review|{sim.user_id}") in sim.get_last_buttons()
+    assert ("✅ I consent", f"CONSENT|accept|{sim.user_id}") not in sim.get_last_buttons()
 
 
 @pytest.mark.consent_gate
@@ -345,10 +369,12 @@ async def test_start_continues_step_3_when_setup_consent_pending(tmp_consent_db)
     texts = [text for _, text, _ in sim.messages_sent if text]
     assert any("Kaizen is already connected" in text and "Step 3 of 3" in text for text in texts)
     text = sim.get_last_text() or ""
-    assert "Consent before your first case" in text
-    assert "Step 3 of 3" not in text
+    assert "Step 3 of 3" in text
+    assert "Review the consent notice" in text
+    assert "Consent before your first case" not in text
     assert "Portfolio Guru is ready" not in text
-    assert ("✅ I consent", f"CONSENT|accept|{sim.user_id}") in sim.get_last_buttons()
+    assert ("🔐 Review consent", f"CONSENT|review|{sim.user_id}") in sim.get_last_buttons()
+    assert ("✅ I consent", f"CONSENT|accept|{sim.user_id}") not in sim.get_last_buttons()
 
 
 # ─── Record semantics ─────────────────────────────────────────────────────

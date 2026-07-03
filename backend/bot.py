@@ -11381,6 +11381,13 @@ def _build_consent_keyboard(user_id: int) -> InlineKeyboardMarkup:
     ])
 
 
+def _build_consent_review_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔐 Review consent", callback_data=f"CONSENT|review|{user_id}")],
+        [InlineKeyboardButton("❌ Not now", callback_data=f"CONSENT|decline|{user_id}")],
+    ])
+
+
 async def _prompt_consent(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -11402,10 +11409,15 @@ async def _prompt_consent(
     if source == "setup":
         setup_text = (lead_text + "\n\n" if lead_text else "") + (
             "✅ Step 3 of 3: consent\n\n"
-            "One final check before your first case. The consent notice is below."
+            "Review the consent notice before your first case."
         )
-        await _flow_edit(update, context, setup_text, flow_key="setup")
-        await _flow_msg(update, context, CONSENT_TEXT, reply_markup=keyboard, flow_key="setup")
+        await _flow_edit(
+            update,
+            context,
+            setup_text,
+            reply_markup=_build_consent_review_keyboard(user_id),
+            flow_key="setup",
+        )
         return ConversationHandler.END
 
     await update.message.reply_text(
@@ -11425,6 +11437,13 @@ async def handle_consent_callback(update: Update, context: ContextTypes.DEFAULT_
     tapper_id = update.effective_user.id
     if target_uid is not None and tapper_id != target_uid:
         await query.answer("This consent prompt is for another account.", show_alert=True)
+        return
+    if action == "review":
+        await query.answer()
+        await query.edit_message_text(
+            CONSENT_TEXT,
+            reply_markup=_build_consent_keyboard(tapper_id),
+        )
         return
     context.user_data.pop(_CONSENT_PROMPT_PENDING_KEY, None)
     source = context.user_data.pop(_CONSENT_PROMPT_SOURCE_KEY, None)
