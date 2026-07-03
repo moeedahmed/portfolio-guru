@@ -87,19 +87,18 @@ async def test_canonical_message_matches_brief():
     """Pin the wording requirements from the product brief.
 
     The canonical message must:
-    - announce that Portfolio Guru is ready,
+    - stay short because the Telegram profile already explains the product,
     - invite case evidence in any supported modality,
     - stay lean enough to work as the central idempotent ready state,
-    - preserve approval-before-save safety framing,
     - not tell the user to say "draft it".
     """
     from bot import WELCOME_MSG_CONNECTED
 
     text = WELCOME_MSG_CONNECTED
-    assert "Portfolio Guru is ready" in text
+    assert "Ready." in text
     for modality in ("text", "voice", "photo", "document"):
         assert modality in text.lower(), f"missing modality in canonical copy: {modality}"
-    assert "before saving to Kaizen" in text
+    assert "Kaizen" not in text
     assert "buttons" not in text.lower()
-    assert len(text.splitlines()) <= 5
+    assert len(text.splitlines()) <= 3
     assert "draft it" not in text.lower()

@@ -86,11 +86,6 @@
     ]),
     'texts': list([
       '''
-        👋 Welcome to Portfolio Guru
-        
-        Send rough case notes as text, voice, photo or document. I’ll turn them into RCEM portfolio drafts across 45 forms, then ask you to approve before anything is saved to Kaizen.
-      ''',
-      '''
         🔗 Step 1 of 3: connect Kaizen
         
         What's your Kaizen username (email)?

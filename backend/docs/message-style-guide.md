@@ -72,14 +72,12 @@ Completion prompt (when user says "done" or taps button):
 
 ## Example Existing Messages
 
-Welcome (disconnected):
+Ready prompt (connected):
 
 ```
-👋 Welcome to Portfolio Guru
+🩺 Ready.
 
-Send rough case notes as text, voice, photo or document. I'll turn them into
-RCEM portfolio drafts across 45 forms, then ask you to approve before anything
-is saved to Kaizen.
+Send an anonymised case as text, voice, photo, or document.
 ```
 
 Step 1:

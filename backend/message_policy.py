@@ -61,9 +61,8 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         key="welcome_connected",
         message_class=MessageClass.FIXED,
         text=(
-            "🩺 Portfolio Guru is ready.\n\n"
-            "Send an anonymised case: text, voice, photo, or document.\n\n"
-            "I’ll suggest the form, prepare the draft, and ask before saving to Kaizen."
+            "🩺 Ready.\n\n"
+            "Send an anonymised case as text, voice, photo, or document."
         ),
         safety_critical=True,
     ),

@@ -1409,9 +1409,6 @@ _KAIZEN_USERNAME_PROMPT = (
     "What's your Kaizen username (email)?\n\n"
     f"{_KAIZEN_USERNAME_PRIVACY_NOTE}"
 )
-_START_SETUP_INTRO_TEXT = render_message("welcome_disconnected")
-
-
 def _nav_row(
     back_text: str,
     back_callback: str,
@@ -1499,7 +1496,6 @@ def _build_data_clear_keyboard() -> None:
 
 
 async def _send_start_setup_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text(_START_SETUP_INTRO_TEXT)
     await update.message.reply_text(_KAIZEN_USERNAME_PROMPT, parse_mode="Markdown")
     context.user_data["_setup_state_hint"] = "username"
     return AWAIT_USERNAME

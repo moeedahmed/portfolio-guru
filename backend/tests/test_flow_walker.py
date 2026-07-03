@@ -82,8 +82,9 @@ class TestFlowWalker:
             result = await start(update, context)
 
         assert result == ConversationHandler.END
-        # Connected user: the welcome message tells them to send a case. The
-        # keyboard is intentionally empty — no inline buttons, no re-prompt.
+        # Connected user: /start responds with a lean action prompt. The
+        # Telegram bot profile already carries the fuller positioning.
+        # The keyboard is intentionally empty — no inline buttons, no re-prompt.
         # Settings/Health/Help are reachable via the Telegram Menu (☰).
         assert 'send' in sim.get_last_text().lower()
         assert sim.get_last_buttons() == []
@@ -1249,9 +1250,10 @@ class TestFlowWalker:
 
         assert result == AWAIT_CASE_INPUT
         assert context.user_data == {}
-        # Must use the standard "Portfolio Guru is ready" intake copy, not the
-        # shorter FILE_CASE_PROMPT, so the UX matches a normal /start.
-        assert 'Portfolio Guru is ready' in sim.get_last_text()
+        # Must use the standard lean ready prompt, not the legacy fuller pitch;
+        # Telegram's bot profile already explains the product.
+        assert sim.get_last_text().startswith("🩺 Ready.")
+        assert "Portfolio Guru is ready" not in sim.get_last_text()
         # The post-filing report keyboard must NOT be stripped — the saved-draft
         # report should remain intact after clicking "File another case".
         stripped_keyboard_events = [
@@ -1278,7 +1280,8 @@ class TestFlowWalker:
         assert result == AWAIT_CASE_INPUT
         assert sim.get_last_text() == WELCOME_MSG_CONNECTED
         assert "show buttons for what to do next" not in sim.get_last_text()
-        assert "before saving to Kaizen" in sim.get_last_text()
+        assert "Kaizen" not in sim.get_last_text()
+        assert "anonymised case" in sim.get_last_text()
         assert "draft it" not in sim.get_last_text()
 
     @pytest.mark.asyncio
