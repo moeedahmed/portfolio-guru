@@ -137,7 +137,31 @@ async def test_decline_keeps_the_gate_closed(tmp_consent_db):
 
     assert await consent.has_current_consent(user_id) is False
     edited = update.callback_query.edit_message_text.call_args.args[0]
-    assert "nothing was processed" in edited.lower()
+    assert "didn't process or store" in edited.lower()
+    assert "whenever you want to review the consent notice" in edited
+
+
+@pytest.mark.consent_gate
+@pytest.mark.asyncio
+async def test_setup_consent_decline_is_calm_and_reversible(tmp_consent_db):
+    consent = tmp_consent_db
+    from bot import handle_consent_callback
+
+    sim = BotSimulator()
+    user_id = sim.user_id
+    update = sim._make_callback_update(f"CONSENT|decline|{user_id}")
+    context = sim._make_context()
+    context.user_data["_consent_prompt_pending"] = True
+    context.user_data["_consent_prompt_source"] = "setup"
+
+    await handle_consent_callback(update, context)
+
+    assert await consent.has_current_consent(user_id) is False
+    edited = update.callback_query.edit_message_text.call_args.args[0]
+    assert "Kaizen is connected" in edited
+    assert "I won't draft from cases unless you choose to consent" in edited
+    assert "send your first anonymised case" in edited
+    assert "cannot draft" not in edited
 
 
 @pytest.mark.consent_gate

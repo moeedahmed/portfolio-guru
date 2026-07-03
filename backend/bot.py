@@ -11438,16 +11438,16 @@ async def handle_consent_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.answer()
         if source == "setup":
             await query.edit_message_text(
-                "No problem — Kaizen is connected, but Portfolio Guru cannot draft "
-                "cases until you give consent.\n\n"
-                "Use /privacy to review the notice when you're ready."
+                "That's fine. Kaizen is connected, and I won't draft from cases "
+                "unless you choose to consent.\n\n"
+                "When you're ready, send your first anonymised case and I'll show "
+                "the consent notice again. Use /privacy any time to review how "
+                "your data is handled."
             )
         else:
             await query.edit_message_text(
-                "No problem — nothing was processed and nothing is stored.\n\n"
-                "Portfolio Guru needs your explicit consent before it can draft "
-                "entries from clinical cases. Send a case anytime to see the "
-                "consent notice again."
+                "That's fine. I didn't process or store that case.\n\n"
+                "Send a case again whenever you want to review the consent notice."
             )
 
 
@@ -11458,14 +11458,18 @@ async def privacy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if status and status["action"] in ("granted", "re-granted"):
         status_line = f"✅ You consented to version {status['version']} on {status['at']} UTC."
     elif status:
-        status_line = "❌ Consent withdrawn — your cases are not being processed."
+        status_line = (
+            "Consent withdrawn. I won't draft from cases unless you consent again."
+        )
     elif has_pending_prompt:
         status_line = (
             "Consent notice shown — waiting for your choice. Tap I consent to "
             "enable drafting, or Not now to leave your case unprocessed."
         )
     else:
-        status_line = "No consent has been recorded yet — the notice appears during setup, before your first case."
+        status_line = (
+            "No consent recorded yet. The notice appears before your first case."
+        )
     await update.message.reply_text(
         "🔐 Privacy & consent\n\n"
         f"{status_line}\n\n"
