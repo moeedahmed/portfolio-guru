@@ -86,7 +86,8 @@ async def test_accept_records_grant_and_opens_the_gate(tmp_consent_db):
     assert status["action"] == "granted"
     assert status["at"]  # timestamped
     edited = update.callback_query.edit_message_text.call_args.args[0]
-    assert consent.CONSENT_VERSION in edited
+    assert edited.startswith("✅ Consent recorded.")
+    assert consent.CONSENT_VERSION not in edited
 
 
 @pytest.mark.consent_gate
@@ -115,8 +116,8 @@ async def test_privacy_reports_grant_after_accepting(tmp_consent_db):
     await privacy_command(sim._make_text_update("/privacy"), context)
 
     text = sim.get_last_text() or ""
-    assert "You consented to version" in text
-    assert consent.CONSENT_VERSION in text
+    assert "Consent recorded on" in text
+    assert consent.CONSENT_VERSION not in text
     assert "haven't been asked" not in text
     assert "No consent has been recorded" not in text
     assert "waiting for your choice" not in text  # pending flag was cleared

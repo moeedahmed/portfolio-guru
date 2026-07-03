@@ -11454,13 +11454,13 @@ async def handle_consent_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.answer("Consent recorded")
         if source == "setup":
             await query.edit_message_text(
-                f"✅ Consent recorded (version {CONSENT_VERSION}).\n\n"
+                "✅ Consent recorded.\n\n"
                 f"{WELCOME_MSG_CONNECTED}\n\n"
                 "You can view your consent with /privacy or withdraw it with /reset."
             )
         else:
             await query.edit_message_text(
-                f"✅ Consent recorded (version {CONSENT_VERSION}).\n\n"
+                "✅ Consent recorded.\n\n"
                 "Send your case now — text, voice note, photo, or document. "
                 "You can view your consent with /privacy or withdraw it with /reset."
             )
@@ -11486,7 +11486,7 @@ async def privacy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     status = await consent.get_consent_status(update.effective_user.id)
     has_pending_prompt = bool(context.user_data.get(_CONSENT_PROMPT_PENDING_KEY))
     if status and status["action"] in ("granted", "re-granted"):
-        status_line = f"✅ You consented to version {status['version']} on {status['at']} UTC."
+        status_line = f"✅ Consent recorded on {status['at']} UTC."
     elif status:
         status_line = (
             "Consent withdrawn. I won't draft from cases unless you consent again."
@@ -11507,8 +11507,7 @@ async def privacy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         "• Kaizen credentials are stored encrypted and never shared with the AI model.\n"
         "• Drafts only — nothing is ever submitted to a supervisor.\n"
         "• You are responsible for anonymising patients before sending.\n"
-        "• /reset withdraws consent and erases your data (GDPR Art. 17).\n\n"
-        f"Current consent version: {CONSENT_VERSION}."
+        "• /reset withdraws consent and erases your data (GDPR Art. 17)."
     )
 
 
