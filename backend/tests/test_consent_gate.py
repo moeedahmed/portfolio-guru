@@ -122,6 +122,10 @@ async def test_privacy_reports_grant_after_accepting(tmp_consent_db):
     assert "haven't been asked" not in text
     assert "No consent has been recorded" not in text
     assert "waiting for your choice" not in text  # pending flag was cleared
+    assert "may use your case notes" not in text
+    assert "EU (London)" not in text
+    assert "Vertex AI in the UK (London region)" in text
+    assert "Portfolio Guru's stored data" in text
 
 
 @pytest.mark.consent_gate
@@ -464,3 +468,14 @@ def test_shipped_consent_text_matches_immutable_archive():
         "requires a NEW CONSENT_VERSION (and a new archive file), never an edit"
     )
     assert hashlib.sha256(archived.encode("utf-8")).hexdigest() == consent.consent_text_hash()
+
+
+def test_current_consent_copy_uses_precise_ai_processing_wording():
+    import consent
+
+    assert "may use your case notes" not in consent.CONSENT_TEXT
+    assert "EU (London)" not in consent.CONSENT_TEXT
+    assert "When drafting" in consent.CONSENT_TEXT
+    assert "anonymised case details you provide" in consent.CONSENT_TEXT
+    assert "Vertex AI in the UK (London region)" in consent.CONSENT_TEXT
+    assert "Portfolio Guru's stored data" in consent.CONSENT_TEXT

@@ -13,10 +13,10 @@ This screen must appear **before** the user can send their first case, must requ
 Case notes are health data. Please confirm before Portfolio Guru drafts from them:
 
 - You will only send anonymised case details.
-- Portfolio Guru may use your case notes to draft portfolio entries with Google Gemini via Vertex AI in the EU (London).
+- When drafting, Portfolio Guru sends the anonymised case details you provide to Google Gemini via Vertex AI in the UK (London region).
 - Your Kaizen login is stored encrypted and is not sent to the AI model.
 - Portfolio Guru saves drafts only. It never submits to a supervisor.
-- You can withdraw consent and erase your data any time with `/reset`.
+- You can withdraw consent and erase Portfolio Guru's stored data any time with `/reset`.
 
 By tapping **"I consent"**, you confirm you're a **GMC-registered doctor** using this for your own training record.
 

@@ -11609,11 +11609,11 @@ async def privacy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await update.message.reply_text(
         "🔐 Privacy & consent\n\n"
         f"{status_line}\n\n"
-        "• Case content is processed by Google Gemini via Vertex AI in the EU (London) to draft entries.\n"
+        "• When drafting, the anonymised case details you provide are processed by Google Gemini via Vertex AI in the UK (London region).\n"
         "• Kaizen credentials are stored encrypted and never shared with the AI model.\n"
         "• Drafts only — nothing is ever submitted to a supervisor.\n"
         "• You are responsible for anonymising patients before sending.\n"
-        "• /reset withdraws consent and erases your data (GDPR Art. 17)."
+        "• /reset withdraws consent and erases Portfolio Guru's stored data (UK GDPR Art. 17)."
     )
 
 

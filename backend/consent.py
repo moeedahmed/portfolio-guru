@@ -17,7 +17,7 @@ import aiosqlite
 
 import usage  # consent records live in the same DB; tests patch usage.DB_PATH
 
-CONSENT_VERSION = "2026-07-03.v3"
+CONSENT_VERSION = "2026-07-03.v4"
 LAWFUL_BASIS = "art9_2a_explicit_consent"
 
 CONSENT_BODY = (
@@ -25,14 +25,15 @@ CONSENT_BODY = (
     "\n"
     "• You will only send anonymised case details.\n"
     "\n"
-    "• Portfolio Guru may use your case notes to draft portfolio entries with "
-    "Google Gemini via Vertex AI in the EU (London).\n"
+    "• When drafting, Portfolio Guru sends the anonymised case details you "
+    "provide to Google Gemini via Vertex AI in the UK (London region).\n"
     "\n"
     "• Your Kaizen login is stored encrypted and is not sent to the AI model.\n"
     "\n"
     "• Portfolio Guru saves drafts only. It never submits to a supervisor.\n"
     "\n"
-    "• You can withdraw consent and erase your data any time with /reset.\n"
+    "• You can withdraw consent and erase Portfolio Guru's stored data any "
+    "time with /reset.\n"
     "\n"
     "By tapping I consent, you confirm you're a GMC-registered doctor using "
     "this for your own training record.\n"
