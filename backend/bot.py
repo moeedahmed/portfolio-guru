@@ -8579,6 +8579,18 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await _run_unsigned_scan(update.message, context, user_id, from_date, to_date, label)
         return ConversationHandler.END
 
+    # Setup recovery guard: if /start or an implicit reconnect prompt asked for
+    # Kaizen details, that next text belongs to setup even when PTB's persisted
+    # ConversationHandler state is stale/lost. This must run before the
+    # clinical consent gate; otherwise an email typed after Step 1 can be
+    # misread as a first "case" and show the consent notice too early.
+    if update.message and update.message.text:
+        setup_state = context.user_data.get("_setup_state_hint")
+        if setup_state == "username":
+            return await setup_username(update, context)
+        if setup_state == "password" and context.user_data.get("setup_username"):
+            return await setup_password(update, context)
+
     # Reuse-last-case intent: "use the same case for DOPS", "file as Mini-CEX
     # too", etc. We must route this BEFORE extraction — otherwise the LLM
     # would try to extract clinical fields from the instruction text and

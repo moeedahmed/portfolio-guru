@@ -288,6 +288,42 @@ async def test_start_fresh_without_consent_restarts_at_step_1(tmp_consent_db):
 
 @pytest.mark.consent_gate
 @pytest.mark.asyncio
+async def test_email_after_step_1_routes_to_password_not_consent(tmp_consent_db):
+    """Regression: after a consent-version bump, a user may still have Kaizen
+    credentials but no current consent. /start deliberately restarts at Step 1
+    so the flow is coherent. The email typed after that Step 1 prompt must be
+    treated as setup input, not as a clinical case that triggers consent."""
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+
+    with patch("bot.has_credentials", return_value=True):
+        result = await bot.start(sim._make_text_update("/start"), context)
+
+    assert result == bot.AWAIT_USERNAME
+    assert context.user_data.get("_setup_state_hint") == "username"
+    assert "Step 1 of 3" in (sim.get_last_text() or "")
+
+    sim.clear_messages()
+    with patch("bot.has_credentials", return_value=True):
+        result = await bot.handle_case_input(
+            sim._make_text_update("doctor@example.com"),
+            context,
+        )
+
+    assert result == bot.AWAIT_PASSWORD
+    assert context.user_data["setup_username"] == "doctor@example.com"
+    assert context.user_data["_setup_state_hint"] == "password"
+    text = sim.get_last_text() or ""
+    assert "Step 2 of 3" in text
+    assert "Kaizen password" in text
+    assert "Consent before your first case" not in text
+    assert "has not been processed" not in text
+
+
+@pytest.mark.consent_gate
+@pytest.mark.asyncio
 async def test_start_continues_step_3_when_setup_consent_pending(tmp_consent_db):
     """Intended continuation: a user who just cleared Steps 1-2 is sitting on
     the pending Step 3 consent prompt. If they re-send /start, resume Step 3
