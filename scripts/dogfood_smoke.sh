@@ -124,8 +124,8 @@ ask 4 "Reham path: first-run setup and consent feels calm on phone" \
 you are deliberately re-running onboarding.
 Expect:
   - Step 1, Step 2 and Step 3 are short and visually consistent.
-  - Step 3 is only a checkpoint with Review consent / Not now.
-  - The full consent notice appears only after Review consent.
+  - Step 3 shows the concise consent summary with I consent / Not now.
+  - No forced Review consent hop appears before the user can consent.
   - Consent success says '✅ Consent recorded.' with no version string.
   - Not now is calm, reversible and does not make the user feel blocked.
 Pass if the whole setup journey feels natural on a phone and has one obvious

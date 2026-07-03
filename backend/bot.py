@@ -25,7 +25,7 @@ from usage import record_case_filed, get_cases_this_month, check_can_file, get_u
 # one test run — resolving through the single consent module keeps the gate
 # patchable (and consistent) across all of them.
 import consent
-from consent import CONSENT_TEXT, CONSENT_VERSION
+from consent import CONSENT_BODY, CONSENT_TEXT
 from filer_router import route_filing
 from kaizen_form_filer import FORM_UUIDS
 from form_schemas import FORM_SCHEMAS
@@ -11493,11 +11493,9 @@ def _build_consent_keyboard(user_id: int) -> InlineKeyboardMarkup:
     ])
 
 
-def _build_consent_review_keyboard(user_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔐 Review consent", callback_data=f"CONSENT|review|{user_id}")],
-        [InlineKeyboardButton("❌ Not now", callback_data=f"CONSENT|decline|{user_id}")],
-    ])
+def _setup_consent_text(lead_text: str | None = None) -> str:
+    prefix = (lead_text + "\n\n") if lead_text else ""
+    return prefix + "✅ Step 3 of 3: consent\n\n" + CONSENT_BODY
 
 
 async def _prompt_consent(
@@ -11519,15 +11517,11 @@ async def _prompt_consent(
     context.user_data[_CONSENT_PROMPT_SOURCE_KEY] = source
 
     if source == "setup":
-        setup_text = (lead_text + "\n\n" if lead_text else "") + (
-            "✅ Step 3 of 3: consent\n\n"
-            "Review the consent notice before your first case."
-        )
         await _flow_edit(
             update,
             context,
-            setup_text,
-            reply_markup=_build_consent_review_keyboard(user_id),
+            _setup_consent_text(lead_text),
+            reply_markup=keyboard,
             flow_key="setup",
         )
         return ConversationHandler.END

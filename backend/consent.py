@@ -17,12 +17,10 @@ import aiosqlite
 
 import usage  # consent records live in the same DB; tests patch usage.DB_PATH
 
-CONSENT_VERSION = "2026-07-03.v2"
+CONSENT_VERSION = "2026-07-03.v3"
 LAWFUL_BASIS = "art9_2a_explicit_consent"
 
-CONSENT_TEXT = (
-    "🔐 Consent before your first case\n"
-    "\n"
+CONSENT_BODY = (
     "Case notes are health data. Please confirm before I draft from them:\n"
     "\n"
     "• You will only send anonymised case details.\n"
@@ -36,10 +34,16 @@ CONSENT_TEXT = (
     "\n"
     "• You can withdraw consent and erase your data any time with /reset.\n"
     "\n"
-    "Tap \"I consent\" to continue. This also confirms you are a "
-    "GMC-registered doctor using this for your own training record.\n"
+    "By tapping I consent, you confirm you're a GMC-registered doctor using "
+    "this for your own training record.\n"
     "\n"
-    f"Full details: /privacy · Consent version {CONSENT_VERSION}\n"
+    "Full details: /privacy\n"
+)
+
+CONSENT_TEXT = (
+    "🔐 Consent before your first case\n"
+    "\n"
+    f"{CONSENT_BODY}"
 )
 
 

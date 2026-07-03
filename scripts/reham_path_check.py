@@ -28,6 +28,7 @@ def main() -> int:
     failures: list[str] = []
 
     bot = read("backend/bot.py")
+    consent = read("backend/consent.py")
     dogfood = read("scripts/dogfood_smoke.sh")
     preflight = read("scripts/preflight.sh")
     dev_workflow = read("docs/dev-workflow.md")
@@ -50,9 +51,10 @@ def main() -> int:
         failures,
     )
     require(
-        "Review the consent notice before your first case." in bot
-        and "🔐 Review consent" in bot,
-        "Setup Step 3 must stay a short checkpoint with a separate Review consent action.",
+        "✅ Step 3 of 3: consent" in bot
+        and "By tapping I consent" in consent
+        and "🔐 Review consent" not in bot,
+        "Setup Step 3 must show concise consent with direct I consent / Not now actions.",
         failures,
     )
 

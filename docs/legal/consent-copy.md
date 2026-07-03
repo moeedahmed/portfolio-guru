@@ -18,11 +18,11 @@ Case notes are health data. Please confirm before Portfolio Guru drafts from the
 - Portfolio Guru saves drafts only. It never submits to a supervisor.
 - You can withdraw consent and erase your data any time with `/reset`.
 
-Tap **"I consent"** to continue. This also confirms you are a **GMC-registered doctor** using this for your own training record.
+By tapping **"I consent"**, you confirm you're a **GMC-registered doctor** using this for your own training record.
 
 [ I consent ] [ Not now ]
 
-_Full details: `/privacy` · Consent version «REVIEW: vX.Y»._
+_Full details: `/privacy`._
 
 ---
 
