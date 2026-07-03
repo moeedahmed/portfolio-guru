@@ -84,12 +84,12 @@ What it wires (reusing existing pieces, not reimplementing them):
    `.github/workflows/deploy-mac.yml` → `scripts/deploy_mac.sh` on the Mac Mini.
 5. Dogfood checkpoint — `scripts/dogfood_smoke.sh`.
 
-Telegram workflow fixes also carry the **Reham path** gate. Treat the reported
+Telegram workflow fixes also carry the **setup consent path** gate. Treat the reported
 bug as a symptom of the whole phone journey, not just the line that failed:
 the adjacent prompts must read naturally on a phone, expose one obvious next
 action, hide internal audit/runtime detail, keep stale buttons safe, and prove
 the real launchd bot is running the committed code. `scripts/preflight.sh`
-runs `scripts/reham_path_check.py` for deterministic regressions; the manual
+runs `scripts/setup_consent_path_check.py` for deterministic regressions; the manual
 phone journey is captured in `scripts/dogfood_smoke.sh`.
 
 `ship` checks approval **before** any live or mutating action, so an unapproved

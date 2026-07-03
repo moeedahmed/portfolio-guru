@@ -57,8 +57,8 @@ if [[ "$untracked_count" != "0" ]]; then
 fi
 
 echo
-echo "Running Reham path static guardrail"
-python3 scripts/reham_path_check.py
+echo "Running setup consent path static guardrail"
+python3 scripts/setup_consent_path_check.py
 
 echo
 if [[ -d backend ]]; then

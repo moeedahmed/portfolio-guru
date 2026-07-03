@@ -119,7 +119,7 @@ Expect: '🩺 Ready. Send an anonymised case as text, voice, photo, or
 document.' for a connected user, with no duplicate welcome card and no errors.
 Pass if the ready bubble arrives within a few seconds."
 
-ask 4 "Reham path: first-run setup and consent feels calm on phone" \
+ask 4 "setup consent path: first-run setup and consent feels calm on phone" \
 "Use a fresh/disconnected test account, or clear your own test state only if
 you are deliberately re-running onboarding.
 Expect:
@@ -131,7 +131,7 @@ Expect:
 Pass if the whole setup journey feels natural on a phone and has one obvious
 next action at each step."
 
-ask 5 "Reham path: adjacent command copy stays consistent" \
+ask 5 "setup consent path: adjacent command copy stays consistent" \
 "In Telegram, inspect /privacy and /pathway after the setup/consent checks.
 Expect:
   - Each message starts with a clear status emoji.

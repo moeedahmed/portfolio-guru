@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Static guardrails for the beta-user phone journey.
+"""Static guardrails for the setup and consent phone journey.
 
-The "Reham path" is the sanity check for user-facing Telegram workflow fixes:
-do not close a change just because the reported line is patched. Check the
-adjacent phone journey, hide implementation detail, and prove the real bot is
-running the committed code.
+This check protects user-facing Telegram workflow fixes: do not close a change
+just because the reported line is patched. Check the adjacent phone journey,
+hide implementation detail, and prove the real bot is running the committed
+code.
 """
 from __future__ import annotations
 
@@ -64,28 +64,28 @@ def main() -> int:
         failures,
     )
     require(
-        "Reham path" in dogfood,
+        "setup consent path" in dogfood,
         "Dogfood smoke must include the beta-user phone journey check.",
         failures,
     )
     require(
-        "scripts/reham_path_check.py" in preflight,
-        "Preflight must run the Reham path static guardrail.",
+        "scripts/setup_consent_path_check.py" in preflight,
+        "Preflight must run the setup consent path static guardrail.",
         failures,
     )
     require(
-        "Reham path" in dev_workflow,
-        "Developer workflow docs must name the Reham path closure gate.",
+        "setup consent path" in dev_workflow,
+        "Developer workflow docs must name the setup consent path closure gate.",
         failures,
     )
 
     if failures:
-        print("REHAM_PATH_CHECK_FAILED")
+        print("SETUP_CONSENT_PATH_CHECK_FAILED")
         for failure in failures:
             print(f"- {failure}")
         return 1
 
-    print("REHAM_PATH_CHECK_OK")
+    print("SETUP_CONSENT_PATH_CHECK_OK")
     return 0
 
 
