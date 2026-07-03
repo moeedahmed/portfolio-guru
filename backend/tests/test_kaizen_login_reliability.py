@@ -317,9 +317,53 @@ async def test_test_kaizen_login_propagates_infrastructure_error(monkeypatch):
     async def fake_connect():
         raise KaizenInfrastructureError("cdp died")
 
-    monkeypatch.setattr("kaizen_form_filer.connect_cdp_browser", fake_connect)
+    monkeypatch.setattr("kaizen_form_filer._connect_cdp", fake_connect)
     with pytest.raises(KaizenInfrastructureError):
         await _test_kaizen_login("u", "p")
+
+
+@pytest.mark.asyncio
+async def test_setup_login_uses_resilient_browser_opener_not_cdp_only_helper(monkeypatch):
+    """Setup login must use the same CDP-with-headless-fallback opener as
+    filing. The CDP-only helper caused live setup to fail whenever managed
+    Chrome was temporarily unavailable."""
+    from bot import _test_kaizen_login
+
+    class FakeContext:
+        async def close(self):
+            pass
+
+    class FakePW:
+        async def stop(self):
+            pass
+
+    class FakeLocator:
+        async def inner_text(self, timeout=5000):
+            return "Higher Trainee Dashboard"
+
+    class FakePage:
+        context = FakeContext()
+
+        async def title(self):
+            return "Kaizen"
+
+        def locator(self, _selector):
+            return FakeLocator()
+
+    async def fake_resilient_connect():
+        return FakePage(), FakePW()
+
+    async def fake_login(_page, _username, _password):
+        return True
+
+    async def cdp_only_helper_must_not_be_used():
+        raise AssertionError("setup login used CDP-only helper")
+
+    monkeypatch.setattr("kaizen_form_filer._connect_cdp", fake_resilient_connect)
+    monkeypatch.setattr("kaizen_form_filer.connect_cdp_browser", cdp_only_helper_must_not_be_used)
+    monkeypatch.setattr("kaizen_form_filer._login", fake_login)
+
+    assert await _test_kaizen_login("doctor@example.com", "secret") == "hst"
 
 
 @pytest.mark.asyncio
@@ -350,7 +394,7 @@ async def test_test_kaizen_login_returns_false_on_credential_rejection(monkeypat
     async def fake_login(_page, _username, _password):
         return False
 
-    monkeypatch.setattr("kaizen_form_filer.connect_cdp_browser", fake_connect)
+    monkeypatch.setattr("kaizen_form_filer._connect_cdp", fake_connect)
     monkeypatch.setattr("kaizen_form_filer._login", fake_login)
     result = await _test_kaizen_login("u", "bad")
     assert result is False
@@ -390,10 +434,53 @@ async def test_test_kaizen_login_detects_role_from_isolated_logged_in_page(monke
         assert (username, password) == ("sana@example.com", "secret")
         return True
 
-    monkeypatch.setattr("kaizen_form_filer.connect_cdp_browser", fake_connect)
+    monkeypatch.setattr("kaizen_form_filer._connect_cdp", fake_connect)
     monkeypatch.setattr("kaizen_form_filer._login", fake_login)
 
     assert await _test_kaizen_login("sana@example.com", "secret") == "non_training_higher"
+
+
+@pytest.mark.asyncio
+async def test_connect_cdp_falls_back_to_headless_when_managed_cdp_is_down(monkeypatch):
+    from kaizen_form_filer import _connect_cdp
+
+    class FakeContext:
+        async def new_page(self):
+            return "headless-page"
+
+    class FakeBrowser:
+        async def new_context(self):
+            return FakeContext()
+
+    class FakeChromium:
+        def __init__(self):
+            self.launch_called = False
+
+        async def connect_over_cdp(self, *_args, **_kwargs):
+            raise OSError("managed CDP down")
+
+        async def launch(self, **kwargs):
+            assert kwargs == {"headless": True}
+            self.launch_called = True
+            return FakeBrowser()
+
+    class FakePlaywright:
+        def __init__(self):
+            self.chromium = FakeChromium()
+
+    fake_pw = FakePlaywright()
+
+    class FakePlaywrightFactory:
+        async def start(self):
+            return fake_pw
+
+    monkeypatch.setattr("kaizen_form_filer.async_playwright", lambda: FakePlaywrightFactory())
+
+    page, pw = await _connect_cdp()
+
+    assert page == "headless-page"
+    assert pw is fake_pw
+    assert fake_pw.chromium.launch_called
 
 
 # ─── password-message delete + visible testing feedback ──────────────────────

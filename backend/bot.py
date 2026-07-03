@@ -4403,13 +4403,13 @@ async def _test_kaizen_login(username: str, password: str) -> bool | str:
         KAIZEN_DASHBOARD_BODY_PREVIEW_CHARS,
         KaizenInfrastructureError,
     )
-    from kaizen_form_filer import _login, connect_cdp_browser
+    from kaizen_form_filer import _connect_cdp, _login
 
     page = None
     pw = None
     context = None
     try:
-        page, pw = await connect_cdp_browser()
+        page, pw = await _connect_cdp()
         if page is None:
             raise KaizenInfrastructureError("Could not open isolated Kaizen login context")
         context = getattr(page, "context", None)

@@ -466,7 +466,7 @@ async def test_form_page_redirect_returns_failed(mock_playwright_ctx):
         mock_page.url = "https://kaizenep.com/dashboard"
         result = await file_to_kaizen("CBD", {"clinical_reasoning": "test"}, "user", "pass")
         assert result["status"] == "failed"
-        assert "Form page didn't load" in result["error"]
+        assert "not available on your Kaizen profile or curriculum" in result["error"]
 
 
 # ─── Section D: Field filling — core paths ──────────────────────────────────────

@@ -131,7 +131,7 @@ async def test_credential_failure_classifies_as_login_failed_per_shape(
     async def fake_login(_page, _username, _password):
         return False
 
-    monkeypatch.setattr("kaizen_form_filer.connect_cdp_browser", _fake_login_page)
+    monkeypatch.setattr("kaizen_form_filer._connect_cdp", _fake_login_page)
     monkeypatch.setattr("kaizen_form_filer._login", fake_login)
     result = await _test_kaizen_login("doctor@example.com", "wrong-pw")
     assert result is False, (
@@ -158,7 +158,7 @@ async def test_infra_failure_classifies_as_infrastructure_error_per_shape(
     async def fake_connect():
         raise KaizenInfrastructureError(f"{shape}: subprocess died")
 
-    monkeypatch.setattr("kaizen_form_filer.connect_cdp_browser", fake_connect)
+    monkeypatch.setattr("kaizen_form_filer._connect_cdp", fake_connect)
     with pytest.raises(KaizenInfrastructureError):
         await _test_kaizen_login("doctor@example.com", "pw")
 
@@ -186,7 +186,7 @@ async def test_dashboard_landing_classifies_as_success_per_shape(
     async def fake_login(_page, _username, _password):
         return True
 
-    monkeypatch.setattr("kaizen_form_filer.connect_cdp_browser", _fake_login_page)
+    monkeypatch.setattr("kaizen_form_filer._connect_cdp", _fake_login_page)
     monkeypatch.setattr("kaizen_form_filer._login", fake_login)
     monkeypatch.setattr("engine.portfoliotypes.base.detect_portfolio_type", lambda *_args: expected_role)
     result = await _test_kaizen_login("doctor@example.com", "pw")
@@ -223,7 +223,7 @@ async def test_setup_login_probe_uses_wide_dashboard_body_for_role_detection(mon
     async def fake_login(_page, _username, _password):
         return True
 
-    monkeypatch.setattr("kaizen_form_filer.connect_cdp_browser", fake_connect)
+    monkeypatch.setattr("kaizen_form_filer._connect_cdp", fake_connect)
     monkeypatch.setattr("kaizen_form_filer._login", fake_login)
 
     result = await _test_kaizen_login("doctor@example.com", "pw")
