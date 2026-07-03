@@ -130,7 +130,7 @@ def test_token_redaction_without_env_token():
 def test_token_redaction_preserves_mapping_log_args(monkeypatch):
     import logging
 
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ12345678")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token-not-real")
     monkeypatch.setenv("GOOGLE_API_KEY", "test-google-key")
     monkeypatch.setenv("FERNET_SECRET_KEY", Fernet.generate_key().decode())
 
