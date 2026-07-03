@@ -1442,6 +1442,11 @@ _KB_RETRY_TEMPLATE = InlineKeyboardMarkup([
 ])
 
 _KB_RETRY_SETUP = InlineKeyboardMarkup([
+    [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_setup_login")],
+    [_BTN_CANCEL],
+])
+
+_KB_RETYPE_SETUP = InlineKeyboardMarkup([
     [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|setup")],
     [_BTN_CANCEL],
 ])
@@ -4438,10 +4443,46 @@ async def _test_kaizen_login(username: str, password: str) -> bool | str:
                 pass
 
 
+_SETUP_RETRY_USERNAME_KEY = "_setup_retry_username_enc"
+_SETUP_RETRY_PASSWORD_KEY = "_setup_retry_password_enc"
+
+
+def _stash_setup_retry_credentials(context: ContextTypes.DEFAULT_TYPE, username: str, password: str) -> None:
+    """Keep retry credentials encrypted in conversation state after a Kaizen outage."""
+    from credentials import _fernet
+
+    f = _fernet()
+    context.user_data[_SETUP_RETRY_USERNAME_KEY] = f.encrypt(username.encode())
+    context.user_data[_SETUP_RETRY_PASSWORD_KEY] = f.encrypt(password.encode())
+    context.user_data["setup_username"] = username
+    context.user_data["_setup_state_hint"] = "password"
+
+
+def _load_setup_retry_credentials(context: ContextTypes.DEFAULT_TYPE) -> tuple[str, str] | None:
+    from credentials import _fernet
+
+    username_enc = context.user_data.get(_SETUP_RETRY_USERNAME_KEY)
+    password_enc = context.user_data.get(_SETUP_RETRY_PASSWORD_KEY)
+    if not username_enc or not password_enc:
+        return None
+    f = _fernet()
+    try:
+        username = f.decrypt(username_enc).decode()
+        password = f.decrypt(password_enc).decode()
+    except Exception:
+        _clear_setup_retry_credentials(context)
+        return None
+    return username, password
+
+
+def _clear_setup_retry_credentials(context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data.pop(_SETUP_RETRY_USERNAME_KEY, None)
+    context.user_data.pop(_SETUP_RETRY_PASSWORD_KEY, None)
+
+
 async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     username = context.user_data.get("setup_username", "")
     password = update.message.text.strip()
-    user_id = update.effective_user.id
 
     # Delete password message for security
     try:
@@ -4495,16 +4536,15 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
     except asyncio.TimeoutError:
         progress_task.cancel()
+        _stash_setup_retry_credentials(context, username, password)
         await _flow_edit(
             update, context,
             "⏱ Kaizen took too long to respond. This is usually a brief outage on their side.\n\n"
-            "Tap Try again, or send the case anyway and connect later.",
+            "Tap Try again to check the same login, or Cancel and connect later.",
             reply_markup=_KB_RETRY_SETUP,
             flow_key="setup",
         )
-        context.user_data.pop("setup_username", None)
-        _flow_done(context, "setup")
-        return ConversationHandler.END
+        return AWAIT_PASSWORD
     except Exception as exc:
         # Browser-harness / CDP / subprocess failures land here (raised as
         # KaizenInfrastructureError by the provider). They are *not* bad
@@ -4512,15 +4552,15 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # path below or users will retype passwords that are actually fine.
         progress_task.cancel()
         logger.warning("Credential test errored: %s", exc, exc_info=True)
+        _stash_setup_retry_credentials(context, username, password)
         await _flow_edit(
             update, context,
             "⚠️ Couldn't reach Kaizen to verify the login. Try again in a moment.\n\n"
-            "Tap Try again, or type your Kaizen email below.",
+            "Tap Try again to check the same login, or Cancel and connect later.",
             reply_markup=_KB_RETRY_SETUP,
             flow_key="setup",
         )
-        context.user_data.pop("setup_username", None)
-        return AWAIT_USERNAME
+        return AWAIT_PASSWORD
     finally:
         progress_task.cancel()
 
@@ -4529,12 +4569,24 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             update, context,
             "❌ Login failed — please check your username and password.\n\n"
             "Tap Try again, or type your Kaizen email below.",
-            reply_markup=_KB_RETRY_SETUP,
+            reply_markup=_KB_RETYPE_SETUP,
             flow_key="setup",
         )
+        _clear_setup_retry_credentials(context)
         context.user_data.pop("setup_username", None)
         return AWAIT_USERNAME
 
+    return await _complete_setup_login(update, context, username, password, login_ok)
+
+
+async def _complete_setup_login(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    username: str,
+    password: str,
+    login_ok: bool | str,
+) -> int:
+    user_id = update.effective_user.id
     previous_creds = get_credentials(user_id)
     previous_username = (previous_creds[0] if previous_creds else "").strip().lower()
     new_username = username.strip().lower()
@@ -4544,6 +4596,7 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     store_credentials(user_id, username, password)
     _track_funnel_event(context, "credentials_connected")
+    _clear_setup_retry_credentials(context)
     context.user_data.pop("setup_username", None)
     context.user_data.pop("_setup_state_hint", None)
 
@@ -4623,6 +4676,65 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     _flow_done(context, "setup")
     return ConversationHandler.END
+
+
+async def setup_retry_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+
+    pending = _load_setup_retry_credentials(context)
+    if pending is None:
+        await _flow_msg(
+            update,
+            context,
+            _KAIZEN_USERNAME_PROMPT,
+            parse_mode="Markdown",
+            flow_key="setup",
+        )
+        return AWAIT_USERNAME
+
+    username, password = pending
+    await _flow_edit(update, context, "🔄 Testing your Kaizen login…", flow_key="setup")
+    try:
+        login_ok = await asyncio.wait_for(
+            _test_kaizen_login(username, password), timeout=60
+        )
+    except asyncio.TimeoutError:
+        await _flow_edit(
+            update,
+            context,
+            "⏱ Kaizen still isn't responding.\n\n"
+            "Tap Try again to check the same login, or Cancel and connect later.",
+            reply_markup=_KB_RETRY_SETUP,
+            flow_key="setup",
+        )
+        return AWAIT_PASSWORD
+    except Exception as exc:
+        logger.warning("Credential retry errored: %s", exc, exc_info=True)
+        await _flow_edit(
+            update,
+            context,
+            "⚠️ Still couldn't reach Kaizen to verify the login.\n\n"
+            "Tap Try again to check the same login, or Cancel and connect later.",
+            reply_markup=_KB_RETRY_SETUP,
+            flow_key="setup",
+        )
+        return AWAIT_PASSWORD
+
+    if not login_ok:
+        await _flow_edit(
+            update,
+            context,
+            "❌ Login failed — please check your username and password.\n\n"
+            "Tap Try again, or type your Kaizen email below.",
+            reply_markup=_KB_RETYPE_SETUP,
+            flow_key="setup",
+        )
+        _clear_setup_retry_credentials(context)
+        context.user_data.pop("setup_username", None)
+        return AWAIT_USERNAME
+
+    return await _complete_setup_login(update, context, username, password, login_ok)
 
 
 async def setup_training_level(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -11562,10 +11674,13 @@ def build_application() -> Application:
             ],
             AWAIT_USERNAME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, setup_username),
+                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|cancel$"),
                 MessageHandler(~filters.TEXT & ~filters.COMMAND, _setup_wrong_input),
             ],
             AWAIT_PASSWORD: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, setup_password),
+                CallbackQueryHandler(setup_retry_login, pattern=r"^ACTION\|retry_setup_login$"),
+                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|cancel$"),
                 MessageHandler(~filters.TEXT & ~filters.COMMAND, _setup_wrong_input),
             ],
             AWAIT_TRAINING_LEVEL: [CallbackQueryHandler(setup_training_level, pattern=r"^SETLEVEL\|")],
@@ -11672,10 +11787,13 @@ def build_application() -> Application:
         states={
             AWAIT_USERNAME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, setup_username),
+                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|cancel$"),
                 MessageHandler(~filters.TEXT & ~filters.COMMAND, _setup_wrong_input),
             ],
             AWAIT_PASSWORD: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, setup_password),
+                CallbackQueryHandler(setup_retry_login, pattern=r"^ACTION\|retry_setup_login$"),
+                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|cancel$"),
                 MessageHandler(~filters.TEXT & ~filters.COMMAND, _setup_wrong_input),
             ],
             AWAIT_TRAINING_LEVEL: [CallbackQueryHandler(setup_training_level, pattern=r"^SETLEVEL\|")],

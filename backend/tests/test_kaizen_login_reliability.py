@@ -227,7 +227,7 @@ async def test_setup_password_infra_failure_does_not_show_login_failed(monkeypat
     see the "couldn't reach Kaizen" copy and credentials must NOT be stored.
     The "Login failed" wording must not appear — it would train the doctor to
     retype a password that is actually fine."""
-    from bot import setup_password, AWAIT_USERNAME
+    from bot import setup_password, AWAIT_PASSWORD
     from engine.providers.kaizen import KaizenInfrastructureError
 
     sim, update, context = _make_setup_password_harness()
@@ -239,13 +239,72 @@ async def test_setup_password_infra_failure_does_not_show_login_failed(monkeypat
          patch("bot.store_credentials") as store_creds:
         result = await setup_password(update, context)
 
-    assert result == AWAIT_USERNAME
+    assert result == AWAIT_PASSWORD
     store_creds.assert_not_called()
     last = sim.get_last_text().lower()
     assert "couldn't reach kaizen" in last
     assert "login failed" not in last  # the exact regression we're guarding
-    assert ("🔄 Try again", "ACTION|setup") in sim.get_last_buttons()
+    assert "same login" in last
+    assert ("🔄 Try again", "ACTION|retry_setup_login") in sim.get_last_buttons()
     assert ("❌ Cancel", "ACTION|cancel") in sim.get_last_buttons()
+
+
+@pytest.mark.asyncio
+async def test_setup_password_timeout_retry_keeps_same_login(monkeypatch):
+    """The screenshot path: a Kaizen timeout must not wire Try again to Step 1."""
+    from bot import setup_password, AWAIT_PASSWORD
+
+    sim, update, context = _make_setup_password_harness()
+
+    async def timeout_wait_for(coro, timeout):
+        coro.close()
+        raise TimeoutError()
+
+    monkeypatch.setattr("bot.asyncio.wait_for", timeout_wait_for)
+
+    with patch("bot.store_credentials") as store_creds:
+        result = await setup_password(update, context)
+
+    assert result == AWAIT_PASSWORD
+    store_creds.assert_not_called()
+    last = sim.get_last_text().lower()
+    assert "took too long" in last
+    assert "same login" in last
+    assert ("🔄 Try again", "ACTION|retry_setup_login") in sim.get_last_buttons()
+    assert ("❌ Cancel", "ACTION|cancel") in sim.get_last_buttons()
+
+
+@pytest.mark.asyncio
+async def test_setup_retry_login_reuses_captured_credentials_after_infra_failure(monkeypatch):
+    """The outage retry button must retry the username/password already sent,
+    not restart setup from Step 1."""
+    from bot import setup_password, setup_retry_login, AWAIT_PASSWORD
+    from engine.providers.kaizen import KaizenInfrastructureError
+
+    sim, update, context = _make_setup_password_harness()
+
+    async def infra_boom(u, p):
+        raise KaizenInfrastructureError("CDP unreachable on localhost:18800")
+
+    with patch("bot._test_kaizen_login", new=infra_boom), \
+         patch("bot.store_credentials") as store_creds:
+        result = await setup_password(update, context)
+
+    assert result == AWAIT_PASSWORD
+    store_creds.assert_not_called()
+    assert ("🔄 Try again", "ACTION|retry_setup_login") in sim.get_last_buttons()
+    sim.clear_messages()
+
+    retry_update = sim._make_callback_update("ACTION|retry_setup_login")
+    login_probe = AsyncMock(return_value="hst")
+    with patch("bot._test_kaizen_login", new=login_probe), \
+         patch("bot.store_credentials") as store_creds:
+        await setup_retry_login(retry_update, context)
+
+    login_probe.assert_awaited_once_with("doctor@example.com", "safe-password")
+    store_creds.assert_called_once_with(sim.user_id, "doctor@example.com", "safe-password")
+    texts = [t for _, t, _ in sim.messages_sent if t]
+    assert not any("step 1 of 3" in t.lower() for t in texts)
 
 
 @pytest.mark.asyncio
