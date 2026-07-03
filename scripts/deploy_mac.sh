@@ -160,6 +160,7 @@ smoke_ok() {
   if ! lsof -tiTCP:8099 -sTCP:LISTEN >/dev/null 2>&1; then
     echo "SMOKE WARN: webhook server not listening on 8099 (billing webhook down)"
   fi
+  "$APP_DIR/scripts/verify_live_runtime.py"
   echo "SMOKE OK: service pid ${pid2} stable"; return 0
 }
 

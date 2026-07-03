@@ -125,3 +125,28 @@ def test_token_redaction_without_env_token():
 
     assert token not in redacted
     assert "bot<REDACTED_TELEGRAM_TOKEN>/getUpdates" in redacted
+
+
+def test_token_redaction_preserves_mapping_log_args(monkeypatch):
+    import logging
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ12345678")
+    monkeypatch.setenv("GOOGLE_API_KEY", "test-google-key")
+    monkeypatch.setenv("FERNET_SECRET_KEY", Fernet.generate_key().decode())
+
+    sys.modules.pop("bot", None)
+    import bot  # noqa: F401
+
+    records = []
+
+    class CaptureHandler(logging.Handler):
+        def emit(self, record):
+            records.append(record.getMessage())
+
+    logger = logging.getLogger("test_mapping_redact")
+    logger.setLevel(logging.INFO)
+    logger.addHandler(CaptureHandler())
+
+    logger.info("Retention purge: %(status)s", {"status": "ok"})
+
+    assert records == ["Retention purge: ok"]

@@ -52,6 +52,7 @@ from conversational_router import ConversationalIntent, route_message
 from channel_actions import to_telegram_keyboard
 from conversation_supervisor import GatheringTurnKind, decide_gathering_turn
 from message_policy import render_message, safety_redirect_text, style_grounded_answer
+from runtime_identity import write_runtime_identity
 import chase_guard
 
 from dotenv import load_dotenv
@@ -77,7 +78,12 @@ def _redacted_handle(self, record):
     try:
         if isinstance(record.msg, str):
             record.msg = _redact_token_string(record.msg)
-        if record.args:
+        if isinstance(record.args, dict):
+            record.args = {
+                key: _redact_token_string(value) if isinstance(value, str) else value
+                for key, value in record.args.items()
+            }
+        elif record.args:
             new_args = []
             for arg in record.args:
                 if isinstance(arg, str):
@@ -11864,7 +11870,6 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 def main():
     """Entry point for local development - runs in polling mode."""
     import requests as _req
-    import subprocess as _subprocess
     import portalocker
 
     # Process lock to prevent duplicate instances/polling conflicts
@@ -11990,17 +11995,14 @@ def main():
 
     try:
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        commit = _subprocess.check_output(
-            ["git", "-C", repo_root, "rev-parse", "--short", "HEAD"],
-            text=True,
-            stderr=_subprocess.DEVNULL,
-        ).strip()
-        branch = _subprocess.check_output(
-            ["git", "-C", repo_root, "branch", "--show-current"],
-            text=True,
-            stderr=_subprocess.DEVNULL,
-        ).strip() or "detached"
-        logger.info("Portfolio Guru live commit: %s (%s)", commit, branch)
+        identity = write_runtime_identity(repo_root)
+        logger.info(
+            "Portfolio Guru live commit: %s (%s) pid=%s identity=%s",
+            identity["commit"],
+            identity["branch"],
+            identity["pid"],
+            os.environ.get("PORTFOLIO_GURU_RUNTIME_IDENTITY", "/tmp/portfolio-guru-runtime.json"),
+        )
     except Exception:
         logger.info("Portfolio Guru live commit: unavailable")
 

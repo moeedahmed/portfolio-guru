@@ -101,7 +101,8 @@ INTRO
 ask 1 "launchd service is up" \
 "On the Mac Mini, run:
   launchctl print gui/\$(id -u)/com.portfolioguru.bot | head -25
-Expect: a recent pid, no last-exit-code loop, log paths reachable.
+  scripts/verify_live_runtime.py
+Expect: a recent pid, LIVE_RUNTIME_OK, no last-exit-code loop, log paths reachable.
 Pass if the service is running and not crash-looping."
 
 ask 2 "logs reachable and clean" \
@@ -114,9 +115,9 @@ Pass if logs are clean."
 
 ask 3 "/start replies for connected operator" \
 "In Telegram, send /start to the bot from your operator account.
-Expect: welcome message, Connect Kaizen / What is this? / File a case
-keyboard, no errors.
-Pass if welcome bubble arrives within a few seconds."
+Expect: '🩺 Ready. Send an anonymised case as text, voice, photo, or
+document.' for a connected user, with no duplicate welcome card and no errors.
+Pass if the ready bubble arrives within a few seconds."
 
 ask 4 "text case → recommendation → draft" \
 "Send a text case describing a clinical encounter (real or synthetic, do
