@@ -8,22 +8,24 @@ This screen must appear **before** the user can send their first case, must requ
 
 ---
 
-**Before you send your first case — your consent**
+**Consent before your first case**
 
-Portfolio Guru helps you draft RCEM Kaizen ePortfolio entries. Because your cases concern health, the law treats them as sensitive personal data, so we need your **explicit consent** first. Please read and confirm:
+Your case notes count as health data, so Portfolio Guru needs your consent before it drafts from them.
 
-- **Health data.** I understand my case notes (text, voice, photos, documents) describe clinical work and count as **health-related data**, and I consent to Portfolio Guru processing them to draft my portfolio entries.
-- **AI processing.** I understand my case content is sent to an **AI model (Google) to extract the entry**, processed in the **EU**. «REVIEW: only state "EU" once Vertex AI EU residency is verified in code; otherwise describe the actual location truthfully.»
-- **Anonymise patients.** I understand **I am responsible for removing patient-identifiable details** before sending. Portfolio Guru does not guarantee to redact them. «REVIEW: update if automated redaction is built.»
-- **Saving my credentials.** I consent to Portfolio Guru securely storing my **Kaizen login (encrypted)** so it can save drafts for me. It is never shared with the AI model.
-- **Drafts only.** I understand Portfolio Guru **only saves drafts** — it **never** submits to my supervisor — and that **I must review every entry** before it counts.
-- **My control.** I understand I can **withdraw consent and delete my data at any time** via «REVIEW: command/route, e.g. /forgetme», and that withdrawing stops future processing.
+Please confirm:
 
-By tapping **"I consent"** I give my explicit consent to the above. I confirm I am a **GMC-registered doctor** using this for my own training record.
+- I will only send anonymised case details.
+- Portfolio Guru can use my case notes to draft portfolio entries.
+- Case content is processed by Google Gemini via Vertex AI in the EU (London).
+- My Kaizen login is stored encrypted and is not sent to the AI model.
+- Portfolio Guru saves drafts only. Nothing is submitted to a supervisor.
+- I can withdraw consent and erase my data any time with `/reset`.
+
+Tap **"I consent"** to continue. This confirms you are a **GMC-registered doctor** using this for your own training record.
 
 [ I consent ] [ Not now ]
 
-_Full details: [Privacy Policy] · [Terms of Service]. Consent version «REVIEW: vX.Y»._
+_Full details: `/privacy` · Consent version «REVIEW: vX.Y»._
 
 ---
 

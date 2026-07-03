@@ -11389,11 +11389,12 @@ async def _prompt_consent(
     context.user_data[_CONSENT_PROMPT_SOURCE_KEY] = source
 
     if source == "setup":
-        text = (lead_text + "\n\n" if lead_text else "") + (
-            "✅ Step 3 of 3: consent before your first case\n\n"
-            f"{CONSENT_TEXT}"
+        setup_text = (lead_text + "\n\n" if lead_text else "") + (
+            "✅ Step 3 of 3: consent\n\n"
+            "One final check before your first case. The consent notice is below."
         )
-        await _flow_edit(update, context, text, reply_markup=keyboard, flow_key="setup")
+        await _flow_edit(update, context, setup_text, flow_key="setup")
+        await _flow_msg(update, context, CONSENT_TEXT, reply_markup=keyboard, flow_key="setup")
         return ConversationHandler.END
 
     await update.message.reply_text(

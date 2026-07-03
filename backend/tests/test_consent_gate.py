@@ -199,10 +199,11 @@ async def test_successful_setup_prompts_consent_before_ready_state(tmp_consent_d
         result = await bot.setup_password(update, context)
 
     assert result == ConversationHandler.END
+    texts = [text for _, text, _ in sim.messages_sent if text]
+    assert any("Kaizen connected" in text and "Step 3 of 3" in text for text in texts)
     text = sim.get_last_text() or ""
-    assert "Kaizen connected" in text
-    assert "Step 3 of 3" in text
-    assert "consent before your first case" in text
+    assert "Consent before your first case" in text
+    assert "Step 3 of 3" not in text
     assert "has not been processed" not in text
     assert context.user_data["_consent_prompt_pending"] is True
     assert context.user_data["_consent_prompt_source"] == "setup"
@@ -281,10 +282,11 @@ async def test_start_continues_step_3_when_setup_consent_pending(tmp_consent_db)
         result = await bot.start(update, context)
 
     assert result == ConversationHandler.END
+    texts = [text for _, text, _ in sim.messages_sent if text]
+    assert any("Kaizen is already connected" in text and "Step 3 of 3" in text for text in texts)
     text = sim.get_last_text() or ""
-    assert "Kaizen is already connected" in text
-    assert "Step 3 of 3" in text
-    assert "consent before your first case" in text
+    assert "Consent before your first case" in text
+    assert "Step 3 of 3" not in text
     assert "Portfolio Guru is ready" not in text
     assert ("✅ I consent", f"CONSENT|accept|{sim.user_id}") in sim.get_last_buttons()
 
