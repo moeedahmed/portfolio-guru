@@ -6711,12 +6711,11 @@ async def pathway_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user_id = update.effective_user.id
     profile = _get_or_default_health_profile(user_id)
     await update.message.reply_text(
-        f"Current Portfolio Health pathway: {_pathway_label(profile.pathway)}\n\n"
-        "Pick the pathway /health should follow:\n"
-        "• Training (CCT) — the training programme; ARCP is the yearly review "
-        "checkpoint inside it.\n"
-        "• Portfolio (CESR) — the long-term Portfolio Pathway to specialist "
-        "registration; yearly evidence plan, no ARCP deadline.",
+        "📊 Portfolio Health pathway\n\n"
+        f"Current view: {_pathway_label(profile.pathway)}\n\n"
+        "Choose how /health should read your evidence:\n"
+        "• Training (CCT): includes ARCP review planning.\n"
+        "• Portfolio (CESR): long-term specialist-registration evidence.",
         reply_markup=_build_pathway_keyboard(),
     )
     return AWAIT_PATHWAY

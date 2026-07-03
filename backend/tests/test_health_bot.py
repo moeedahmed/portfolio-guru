@@ -104,6 +104,11 @@ async def test_pathway_command_saves_selected_pathway(isolated_health_store):
     result = await bot.pathway_command(sim._make_text_update("/pathway"), context)
 
     assert result == bot.AWAIT_PATHWAY
+    text = sim.get_last_text()
+    assert text.startswith("📊 Portfolio Health pathway")
+    assert "Current view: Training (CCT)" in text
+    assert "Choose how /health should read your evidence" in text
+    assert "Pick the pathway" not in text
     assert ("Training (CCT)", "PATHWAY|training_arcp") in sim.get_last_buttons()
     assert ("Portfolio (CESR)", "PATHWAY|cesr_portfolio") in sim.get_last_buttons()
 
@@ -951,6 +956,7 @@ async def test_pathway_command_describes_arcp_as_checkpoint_not_pathway(isolated
     buttons = sim.get_last_buttons()
 
     # Pathways: Training (CCT) and Portfolio (CESR)
+    assert text.startswith("📊 Portfolio Health pathway")
     assert "Training (CCT)" in text
     assert ("CESR" in text) or ("Portfolio Pathway" in text)
     assert ("Training (CCT)", "PATHWAY|training_arcp") in buttons
