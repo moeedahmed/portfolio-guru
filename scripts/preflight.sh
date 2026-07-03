@@ -57,6 +57,10 @@ if [[ "$untracked_count" != "0" ]]; then
 fi
 
 echo
+echo "Running Reham path static guardrail"
+python3 scripts/reham_path_check.py
+
+echo
 if [[ -d backend ]]; then
   cd backend
   if [[ -x venv/bin/python3 ]]; then

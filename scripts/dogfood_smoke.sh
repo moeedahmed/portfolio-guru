@@ -119,20 +119,41 @@ Expect: '🩺 Ready. Send an anonymised case as text, voice, photo, or
 document.' for a connected user, with no duplicate welcome card and no errors.
 Pass if the ready bubble arrives within a few seconds."
 
-ask 4 "text case → recommendation → draft" \
+ask 4 "Reham path: first-run setup and consent feels calm on phone" \
+"Use a fresh/disconnected test account, or clear your own test state only if
+you are deliberately re-running onboarding.
+Expect:
+  - Step 1, Step 2 and Step 3 are short and visually consistent.
+  - Step 3 is only a checkpoint with Review consent / Not now.
+  - The full consent notice appears only after Review consent.
+  - Consent success says '✅ Consent recorded.' with no version string.
+  - Not now is calm, reversible and does not make the user feel blocked.
+Pass if the whole setup journey feels natural on a phone and has one obvious
+next action at each step."
+
+ask 5 "Reham path: adjacent command copy stays consistent" \
+"In Telegram, inspect /privacy and /pathway after the setup/consent checks.
+Expect:
+  - Each message starts with a clear status emoji.
+  - No internal audit details, consent versions, redirect URLs, stack traces,
+    file paths, raw error markers, or duplicated explanation.
+  - The next action is obvious and the tone matches the onboarding copy.
+Pass if these adjacent messages feel like the same product as Steps 1-3."
+
+ask 6 "text case → recommendation → draft" \
 "Send a text case describing a clinical encounter (real or synthetic, do
 not include PHI in a synthetic case).
 Expect: form recommendation (up to 3 forms + Cancel), then on tapping a
 form, a draft preview with File / Edit / Cancel.
 Pass if you reach a draft preview."
 
-ask 5 "voice case → recommendation → draft" \
+ask 7 "voice case → recommendation → draft" \
 "Send a voice note describing the same kind of case.
 Expect: 'Transcribing voice note…' ack → 'voice note read' → form
 recommendation → draft preview.
 Pass if you reach a draft preview from a voice note."
 
-ask 6 "photo case → recommendation → draft" \
+ask 8 "photo case → recommendation → draft" \
 "Send a photo of clinical notes (or a synthetic / placeholder image of
 text). Use the dev account if you don't want to share real notes.
 Expect: 'Reading image…' ack → 'image read' → form recommendation →
@@ -140,26 +161,26 @@ draft preview. NOT_CLINICAL responses are acceptable for placeholder
 images; rerun with a clinical photo or skip.
 Pass if a clinical photo reaches a draft preview."
 
-ask 7 "edit a draft field" \
+ask 9 "edit a draft field" \
 "From the draft preview, tap Edit, pick one field (e.g. Reflection),
 send a new value.
 Expect: updated preview, original keyboard reappears.
 Pass if the field is updated and the preview redraws cleanly."
 
-ask 8 "cancel returns to idle" \
+ask 10 "cancel returns to idle" \
 "From any active state (draft preview / edit prompt), tap Cancel or send
 /reset.
 Expect: 'Cancelled.' or reset confirmation, no orphan keyboards.
 Pass if the next /start works cleanly."
 
-ask 9 "stale-button recovery" \
+ask 11 "stale-button recovery" \
 "Trigger a stale callback: open a draft preview, wait ~45s without
 tapping, then tap one of the original buttons.
 Expect: 'That earlier button is no longer active.' (or similar) with a
 fresh recovery keyboard — never a dead end.
 Pass if the bot recovers without crashing."
 
-ask 10 "save as draft to Kaizen (operator-only)" \
+ask 12 "save as draft to Kaizen (operator-only)" \
 "From a fresh draft preview on a disposable form, tap Save as draft.
 Expect: 'Saving … as a Kaizen draft…' progress edits, then '✅ … saved.'
 with the post-save keyboard. Open Kaizen and confirm the draft exists in
@@ -167,7 +188,7 @@ your activities list. Do NOT submit / sign / send it.
 Pass if a draft appears in Kaizen and the bot reported success.
 Skip if you do not want to write a live draft on this run."
 
-ask 11 "supervisor save-draft confirmation boundary (operator-only)" \
+ask 13 "supervisor save-draft confirmation boundary (operator-only)" \
 "Only do this if you have a disposable / unfilled CBD ticket on a
 supervisor account. Otherwise skip.
 Steps:
@@ -186,7 +207,7 @@ Pass if the confirmation step appears and Cancel leaves Kaizen
 untouched.
 Skip if you do not have a disposable supervisor CBD ticket."
 
-ask 12 "no submit / sign / send happened" \
+ask 14 "no submit / sign / send happened" \
 "Open Kaizen in the browser. Inspect the activity log / drafts list for
 the account(s) used above.
 Expect: no events submitted, signed, sent for review, approved,
