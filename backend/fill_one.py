@@ -86,6 +86,7 @@ sys.path.insert(0, str(_BACKEND_DIR))
 try:
     from filer_router import route_filing
     from kaizen_form_filer import FORM_UUIDS, FORM_FIELD_MAP
+    from privacy_guard import privacy_summary
 except Exception as e:
     print(json.dumps({
         "status": "failed",
@@ -107,6 +108,56 @@ def _die(code: int, message: str) -> None:
         "screenshot": None,
     }, indent=2))
     sys.exit(code)
+
+
+_NARRATIVE_FIELD_HINTS = (
+    "case",
+    "circumstances",
+    "clinical",
+    "comment",
+    "description",
+    "discussion",
+    "different",
+    "event",
+    "feedback",
+    "focussing",
+    "learned",
+    "learning",
+    "outcome",
+    "patient",
+    "presentation",
+    "reasoning",
+    "reflection",
+    "replay",
+    "why",
+)
+_NARRATIVE_EXCLUDE_HINTS = (
+    "assessor",
+    "curriculum",
+    "date",
+    "email",
+    "stage",
+    "supervisor",
+)
+
+
+def _clinical_narrative_values(fields: dict) -> list[str]:
+    values: list[str] = []
+    for key, value in fields.items():
+        lowered = str(key).lower()
+        if any(hint in lowered for hint in _NARRATIVE_EXCLUDE_HINTS):
+            continue
+        if not any(hint in lowered for hint in _NARRATIVE_FIELD_HINTS):
+            continue
+        if isinstance(value, str) and len(value.strip()) >= 10:
+            values.append(value)
+        elif isinstance(value, list):
+            values.extend(item for item in value if isinstance(item, str) and len(item.strip()) >= 10)
+    return values
+
+
+def _run_clinical_text_preflight(fields: dict) -> dict:
+    return privacy_summary(_clinical_narrative_values(fields))
 
 
 def _load_ticket() -> dict:
@@ -221,6 +272,20 @@ def main() -> None:
     ticket = _load_ticket()
     form_type, fields, draft_uuid, save_as_draft, attachment_drive_url, attachment_path = _validate(ticket)
     reuse_draft = bool(ticket.get("reuse_draft", False))
+    clinical_text_preflight = _run_clinical_text_preflight(fields)
+    if clinical_text_preflight["status"] == "blocked":
+        print(json.dumps({
+            "status": "failed",
+            "filled": [],
+            "skipped": [],
+            "errors": [
+                "Clinical text preflight found high-risk identifiers in narrative fields. "
+                "De-identify the case text before filing."
+            ],
+            "screenshot": None,
+            "clinical_text_preflight": clinical_text_preflight,
+        }, indent=2))
+        sys.exit(2)
 
     if "--dry-run" in sys.argv[1:]:
         # Validation-only path: confirm ticket shape without touching Chrome
@@ -238,6 +303,7 @@ def main() -> None:
             "save_as_draft": save_as_draft,
             "reuse_draft": reuse_draft,
             "draft_uuid": draft_uuid,
+            "clinical_text_preflight": clinical_text_preflight,
         }, indent=2))
         sys.exit(0)
 
@@ -269,6 +335,7 @@ def main() -> None:
         "errors": errors,
         "screenshot": result.get("screenshot") or result.get("screenshot_path"),
         "method": result.get("method"),
+        "clinical_text_preflight": clinical_text_preflight,
     }
     print(json.dumps(output, indent=2))
     sys.exit({"success": 0, "partial": 1, "failed": 2}.get(output.get("status"), 2))

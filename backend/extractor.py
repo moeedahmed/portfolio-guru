@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+from collections import Counter
 from datetime import date, datetime, timedelta
 from typing import List
 import httpx
@@ -13,6 +14,7 @@ from models import CBDData, FormTypeRecommendation, FormDraft
 from form_schemas import FORM_SCHEMAS
 from form_display import public_form_name, sanitize_internal_form_codes
 from model_config import gemini_three_five_flash_model
+from privacy_guard import deidentify_clinical_text
 import ai_telemetry
 
 # RCEM Higher EM Curriculum (2025 Update) — Exact Kaizen checkbox labels
@@ -1291,7 +1293,7 @@ def _deidentify_portfolio_text(text: str) -> str:
     if not text or len(text) < 10:
         return text
 
-    result = text
+    result, _findings = deidentify_clinical_text(text)
     # Names of clinicians/third parties should not appear in portfolio prose.
     result = re.sub(
         r"\bDr\.?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}\b",
@@ -1323,6 +1325,15 @@ def _deidentify_portfolio_text(text: str) -> str:
     )
     result = re.sub(r"  +", " ", result)
     return result.strip()
+
+
+def _prepare_case_description_for_model(case_description: str) -> str:
+    """Strip high-risk identifiers before any model-facing portfolio prompt."""
+    cleaned, findings = deidentify_clinical_text(case_description or "")
+    if findings:
+        labels = sorted(Counter(finding.label for finding in findings).items())
+        logger.info("clinical_privacy_guard deidentified labels=%s", labels)
+    return cleaned
 
 
 def _humanize_reflection(text: str) -> str:
@@ -1629,6 +1640,7 @@ async def recommend_form_types(case_description: str, input_source: str = "text"
     recommendations toward procedure/reflection forms rather than CBD — image
     evidence is usually a procedure or imaging finding, not a managed case.
     """
+    case_description = _prepare_case_description_for_model(case_description)
     deterministic = _deterministic_recommend_form_types(case_description, input_source)
     if deterministic is not None:
         logger.info(
@@ -2720,6 +2732,7 @@ async def extract_cbd_data(
     advanced-imaging narrative the LLM tries to inject is stripped before the
     user sees the draft.
     """
+    case_description = _prepare_case_description_for_model(case_description)
     missing_text_instruction = (
         'If a field cannot be filled from the case description, return an empty string "" for text/date/dropdown fields, null for nullable fields, and [] for list fields.'
         if leave_missing_blank
@@ -2943,6 +2956,7 @@ async def extract_form_data(
     prompt block forbidding fabrication and have their narrative fields
     sanitised by enforce_image_source_grounding before returning.
     """
+    case_description = _prepare_case_description_for_model(case_description)
     form_type = canonical_form_type(form_type)
     # _2021 variants share draft schemas with their current-curriculum base
     # forms, except where the user-facing code needs an explicit schema alias.
