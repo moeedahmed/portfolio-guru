@@ -3279,7 +3279,7 @@ class TestRecentPortfolioFixes:
 
         text = _format_attachment_status_line(['attachment (unsupported type)'])
 
-        assert text == '\n\nAttachment not added\nUnsupported file type. Draft saved without the attachment.'
+        assert text == '\n\n📎 Attachment not added\nUnsupported file type. Draft saved without the attachment.'
         assert 'Attachment skipped' not in text
 
     def test_post_filing_keyboard_offers_same_case_for_clean_partial(self):

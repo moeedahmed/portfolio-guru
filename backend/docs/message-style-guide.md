@@ -11,6 +11,7 @@
 - **No raw errors** — error details are logged server-side. The user sees a plain-English explanation and a recovery action.
 - **Draft-only framing** — all entries are described as saved to Kaizen as drafts, never as filed or submitted. Supervisor submission is never automatic.
 - **Professional emoji only** — avoid decorative/consumer emoji (✨ sparkles, 🤖 robot, ⭐⭐ stars, 🎉 party). Prefer functional emoji that signal message type (✅, ⚠️, 📋, 📤).
+- **Emoji headings, plain rows** — use one functional emoji on the message header, and on secondary section headings only when the section changes meaning. Do not put emojis on every row, sentence, metadata label, or body line.
 
 ## Emoji Categories
 
@@ -110,7 +111,7 @@ Curriculum: {SLO/KC}
 {field count} fields completed
 {case count} case(s) this month
 
-Attachment not added
+📎 Attachment not added
 {reason}. Draft saved without the attachment.
 ```
 

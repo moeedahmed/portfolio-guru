@@ -10326,7 +10326,7 @@ def _format_attachment_status_line(skipped: list) -> str:
             reason = "Unsupported file type"
         else:
             reason = "Kaizen could not add the attachment"
-        return f"\n\nAttachment not added\n{reason}. Draft saved without the attachment."
+        return f"\n\n📎 Attachment not added\n{reason}. Draft saved without the attachment."
     return ""
 
 
