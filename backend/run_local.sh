@@ -126,7 +126,7 @@ export STRIPE_WEBHOOK_SECRET
 # edit). Falls back to the current test-mode prices when the BWS key is unset.
 # IMPORTANT: live secret key + live webhook secret MUST be paired with LIVE
 # price IDs, or the webhook can't map the price and the customer is charged but
-# not upgraded (log_stripe_mode() warns on a mismatch at startup).
+# not upgraded (log_stripe_mode() fails startup on a mismatch).
 export STRIPE_PRO_PRICE_ID="$(get_secret_by_key STRIPE_PRO_PRICE_ID)"
 export STRIPE_PRO_PRICE_ID="${STRIPE_PRO_PRICE_ID:-price_1TKY11FtxKHU39UdHFXn1yur}"
 export STRIPE_PRO_PLUS_PRICE_ID="$(get_secret_by_key STRIPE_PRO_PLUS_PRICE_ID)"

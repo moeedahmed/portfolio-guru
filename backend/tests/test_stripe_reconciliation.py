@@ -78,6 +78,33 @@ def test_stripe_mode_from_key(monkeypatch):
     assert stripe_handler.stripe_mode() == "unknown"
 
 
+def test_billing_config_absent_is_allowed_when_stripe_disabled(monkeypatch):
+    monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
+    monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
+    monkeypatch.setattr(stripe_handler, "PRO_PLUS_PRICE_ID", None)
+
+    stripe_handler.validate_stripe_billing_config()
+
+
+def test_live_billing_config_fails_fast_when_price_missing(monkeypatch):
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_abc")
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_live")
+    monkeypatch.setattr(stripe_handler, "PRO_PLUS_PRICE_ID", None)
+
+    with pytest.raises(stripe_handler.StripeBillingConfigError, match="STRIPE_PRO_PLUS_PRICE_ID"):
+        stripe_handler.validate_stripe_billing_config()
+
+
+def test_live_billing_config_rejects_obvious_test_price(monkeypatch):
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_abc")
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_live")
+    monkeypatch.setattr(stripe_handler, "PRO_PRICE_ID", "price_pro_test")
+    monkeypatch.setattr(stripe_handler, "PRO_PLUS_PRICE_ID", "price_unlimited_test")
+
+    with pytest.raises(stripe_handler.StripeBillingConfigError, match="non-live price"):
+        stripe_handler.validate_stripe_billing_config()
+
+
 # --- helpers ---------------------------------------------------------------
 
 def _async(value):

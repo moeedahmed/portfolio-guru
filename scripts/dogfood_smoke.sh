@@ -153,34 +153,50 @@ Expect: 'Transcribing voice note…' ack → 'voice note read' → form
 recommendation → draft preview.
 Pass if you reach a draft preview from a voice note."
 
-ask 8 "photo case → recommendation → draft" \
-"Send a photo of clinical notes (or a synthetic / placeholder image of
-text). Use the dev account if you don't want to share real notes.
-Expect: 'Reading image…' ack → 'image read' → form recommendation →
-draft preview. NOT_CLINICAL responses are acceptable for placeholder
-images; rerun with a clinical photo or skip.
-Pass if a clinical photo reaches a draft preview."
+ask 8 "document/PDF case intent choices" \
+"Send a small synthetic PDF or document. Do not include PHI.
+Expect the document choice buttons before any extraction:
+  - Read as case info
+  - Attach only
+  - Read + attach
+  - Cancel
+Tap Read as case info or Read + attach.
+Pass if extraction starts only after the button tap and then reaches the
+usual form recommendation / draft path for a clinical document."
 
-ask 9 "edit a draft field" \
+ask 9 "image case intent choices" \
+"Send a photo of clinical notes, or a synthetic image of clinical text. Do
+not include PHI.
+Expect the image choice buttons before any extraction:
+  - Use for drafting
+  - Attach only
+  - Use + attach
+  - Remove image
+Tap Use for drafting or Use + attach. NOT_CLINICAL responses are acceptable
+for placeholder images; rerun with a clinical image or skip.
+Pass if extraction starts only after the button tap and then reaches the
+usual form recommendation / draft path for a clinical image."
+
+ask 10 "edit a draft field" \
 "From the draft preview, tap Edit, pick one field (e.g. Reflection),
 send a new value.
 Expect: updated preview, original keyboard reappears.
 Pass if the field is updated and the preview redraws cleanly."
 
-ask 10 "cancel returns to idle" \
+ask 11 "cancel returns to idle" \
 "From any active state (draft preview / edit prompt), tap Cancel or send
 /reset.
 Expect: 'Cancelled.' or reset confirmation, no orphan keyboards.
 Pass if the next /start works cleanly."
 
-ask 11 "stale-button recovery" \
+ask 12 "stale-button recovery" \
 "Trigger a stale callback: open a draft preview, wait ~45s without
 tapping, then tap one of the original buttons.
 Expect: 'That earlier button is no longer active.' (or similar) with a
 fresh recovery keyboard — never a dead end.
 Pass if the bot recovers without crashing."
 
-ask 12 "save as draft to Kaizen (operator-only)" \
+ask 13 "save as draft to Kaizen (operator-only)" \
 "From a fresh draft preview on a disposable form, tap Save as draft.
 Expect: 'Saving … as a Kaizen draft…' progress edits, then '✅ … saved.'
 with the post-save keyboard. Open Kaizen and confirm the draft exists in
@@ -188,7 +204,7 @@ your activities list. Do NOT submit / sign / send it.
 Pass if a draft appears in Kaizen and the bot reported success.
 Skip if you do not want to write a live draft on this run."
 
-ask 13 "supervisor save-draft confirmation boundary (operator-only)" \
+ask 14 "supervisor save-draft confirmation boundary (operator-only)" \
 "Only do this if you have a disposable / unfilled CBD ticket on a
 supervisor account. Otherwise skip.
 Steps:
@@ -207,7 +223,7 @@ Pass if the confirmation step appears and Cancel leaves Kaizen
 untouched.
 Skip if you do not have a disposable supervisor CBD ticket."
 
-ask 14 "no submit / sign / send happened" \
+ask 15 "no submit / sign / send happened" \
 "Open Kaizen in the browser. Inspect the activity log / drafts list for
 the account(s) used above.
 Expect: no events submitted, signed, sent for review, approved,

@@ -25,6 +25,10 @@ ACTIVE_SUBSCRIPTION_STATUSES = {"active", "trialing"}
 INACTIVE_SUBSCRIPTION_STATUSES = {"past_due", "unpaid", "canceled", "incomplete_expired"}
 
 
+class StripeBillingConfigError(RuntimeError):
+    """Raised when billing is configured in a mode that can charge users incorrectly."""
+
+
 def _get(obj, key, default=None):
     """Read a key from Stripe objects or plain mocked dicts."""
     if obj is None:
@@ -292,22 +296,50 @@ def stripe_mode() -> str:
     return "unknown"
 
 
-def log_stripe_mode() -> None:
-    """Log the Stripe mode + warn on missing billing config at startup.
+def stripe_billing_config_errors() -> list[str]:
+    """Return startup-blocking Stripe config errors.
 
-    A mismatched key/price/secret (e.g. live key + unset price) otherwise fails
-    silently as a charged-but-unupgraded customer. Surface it loudly instead.
+    Billing can be absent in local/non-billing runs, but once a real Stripe key
+    is present the price ids and webhook secret must be coherent. Failing fast
+    is safer than allowing a user to pay without receiving the upgraded tier.
     """
     mode = stripe_mode()
-    missing = [
-        name for name, val in (
+    if mode == "unknown":
+        return []
+
+    values = {
+        "STRIPE_PRO_PLUS_PRICE_ID": PRO_PLUS_PRICE_ID,
+        "STRIPE_WEBHOOK_SECRET": os.environ.get("STRIPE_WEBHOOK_SECRET"),
+    }
+    errors = [f"{name} is required when STRIPE_SECRET_KEY is {mode}" for name, val in values.items() if not val]
+
+    if mode == "live":
+        for name, value in (
+            ("STRIPE_PRO_PRICE_ID", PRO_PRICE_ID),
             ("STRIPE_PRO_PLUS_PRICE_ID", PRO_PLUS_PRICE_ID),
-            ("STRIPE_WEBHOOK_SECRET", os.environ.get("STRIPE_WEBHOOK_SECRET")),
-        ) if not val
-    ]
+        ):
+            normalised = (value or "").lower()
+            if "test" in normalised or "placeholder" in normalised:
+                errors.append(f"{name} looks like a non-live price id while STRIPE_SECRET_KEY is live")
+
+    return errors
+
+
+def validate_stripe_billing_config() -> None:
+    errors = stripe_billing_config_errors()
+    if errors:
+        raise StripeBillingConfigError("; ".join(errors))
+
+
+def log_stripe_mode() -> None:
+    """Log the Stripe mode and fail on charge-risk billing config at startup.
+
+    A mismatched key/price/secret (e.g. live key + unset price) otherwise fails
+    silently as a charged-but-unupgraded customer. Stop startup instead.
+    """
+    mode = stripe_mode()
     if mode == "unknown":
         logger.warning("Stripe: secret key missing or unrecognized prefix — billing is effectively disabled")
     else:
         logger.info("Stripe mode: %s", mode)
-    if missing:
-        logger.warning("Stripe: missing billing config %s — purchases may not upgrade users", missing)
+    validate_stripe_billing_config()

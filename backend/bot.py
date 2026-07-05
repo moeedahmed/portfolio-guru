@@ -12078,7 +12078,12 @@ def main():
             _rec_tz = _RecZone("Europe/London")
         except Exception:
             _rec_tz = None
-        from stripe_handler import log_stripe_mode, reconcile_all_subscriptions, stripe_mode
+        from stripe_handler import (
+            StripeBillingConfigError,
+            log_stripe_mode,
+            reconcile_all_subscriptions,
+            stripe_mode,
+        )
         log_stripe_mode()
         if stripe_mode() != "unknown" and getattr(application, "job_queue", None):
             async def _reconcile_job(_context):
@@ -12087,6 +12092,9 @@ def main():
                 _reconcile_job, time=_rec_time(hour=4, minute=0, tzinfo=_rec_tz), name="stripe_reconcile",
             )
             logger.info("Daily Stripe reconciliation scheduled (04:00 UK)")
+    except StripeBillingConfigError:
+        logger.exception("Stripe billing config is unsafe; refusing to start")
+        raise
     except Exception:
         logger.warning("Could not schedule Stripe reconciliation", exc_info=True)
 
