@@ -1445,6 +1445,28 @@ def _gathering_reply(context) -> tuple[str, InlineKeyboardMarkup]:
     return render_message("gathering_captured"), _gathering_done_keyboard()
 
 
+def _attachment_captured_reply(attachment_label: str, *, is_image: bool, is_video: bool) -> tuple[str, InlineKeyboardMarkup]:
+    context_note = ""
+    if is_image:
+        context_note = (
+            "\n\nFor ECGs, ultrasound, X-rays, wounds or procedure images, "
+            "send your own interpretation/context before drafting."
+        )
+    elif is_video:
+        context_note = (
+            "\n\nSend your own text or voice context for the case. "
+            "I won't interpret clinical videos."
+        )
+    return (
+        render_message(
+            "attachment_captured",
+            attachment_label=attachment_label.capitalize(),
+            context_note=context_note,
+        ),
+        _gathering_done_keyboard(),
+    )
+
+
 def _track_gathering_prompt(context, message_id, chat_id) -> None:
     if not message_id or not chat_id:
         return
@@ -8324,21 +8346,17 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
         context.user_data["attachment_kind"] = attachment_kind
 
     if mode == "attach":
-        extra_context = ""
-        if is_image_attachment:
-            extra_context = (
-                "\n\nIf this is an ECG, ultrasound, X-ray, wound or procedure image, "
-                "send your own interpretation/context before I draft from it."
-            )
-        elif is_video_attachment:
-            extra_context = (
-                "\n\nSend your own text or voice context for the case. I won't interpret clinical videos."
-            )
-        await query.edit_message_text(
-            f"📎 This {attachment_label} will be attached to the Kaizen draft.\n\n"
-            f"Now send the anonymised case details you want drafted.{extra_context}"
+        reply_text, reply_markup = _attachment_captured_reply(
+            attachment_label,
+            is_image=is_image_attachment,
+            is_video=is_video_attachment,
         )
-        return AWAIT_CASE_INPUT
+        await query.edit_message_text(
+            reply_text,
+            reply_markup=reply_markup,
+        )
+        _track_gathering_prompt(context, query.message.message_id, query.message.chat_id)
+        return AWAIT_GATHERING
 
     if is_video_attachment:
         if mode == "both":
@@ -9865,6 +9883,18 @@ async def gather_done_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if not _gathering_case_active(context):
         _clear_gathering_case(context)
         _pop_gathering_prompt_refs(context)
+        if context.user_data.get("attachment_path"):
+            try:
+                await query.edit_message_text(
+                    "📋 Case details needed\n\n"
+                    "The attachment is saved for this draft. Send anonymised text or voice context before drafting."
+                )
+            except Exception:
+                await update.effective_message.reply_text(
+                    "📋 Case details needed\n\n"
+                    "The attachment is saved for this draft. Send anonymised text or voice context before drafting."
+                )
+            return AWAIT_CASE_INPUT
         try:
             await query.edit_message_text(
                 "⚠️ I do not have a case captured for that button. Send case details when you are ready to draft."

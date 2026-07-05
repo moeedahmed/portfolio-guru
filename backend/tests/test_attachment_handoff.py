@@ -7,14 +7,23 @@ from bot import (
     AWAIT_CASE_INPUT,
     AWAIT_DOC_INTENT,
     AWAIT_FORM_CHOICE,
+    AWAIT_GATHERING,
     _attachment_path_with_original_name,
     handle_approval_approve,
     handle_case_input,
     handle_document_intent,
+    gather_done_callback,
+    handle_gathering_input,
     handle_mid_conversation_text,
 )
 from tests.bot_simulator import BotSimulator
 from extractor import FormDraft
+from channel_actions import ChannelReply
+from conversation_supervisor import (
+    GatheringDecision,
+    GatheringTurnKind,
+)
+from conversational_router import ConversationalIntent
 
 
 def _all_visible_text(sim: BotSimulator) -> str:
@@ -314,12 +323,18 @@ async def test_document_attach_only_does_not_extract_and_waits_for_case_details(
     with patch('bot.extract_from_document', new=AsyncMock()) as extract_mock:
         result = await handle_document_intent(update, context)
 
-    assert result == AWAIT_CASE_INPUT
+    assert result == AWAIT_GATHERING
     extract_mock.assert_not_called()
     assert context.user_data["attachment_path"] == temp_path
     assert context.user_data["attachment_name"] == "evidence.pdf"
     assert "case_text" not in context.user_data
-    assert "attached to the Kaizen draft" in sim.get_last_text()
+    assert sim.get_last_text().startswith("📎 Document attached.")
+    assert "Add anonymised case details before I draft this." in sim.get_last_text()
+    assert sim.get_last_buttons() == [
+        ("✅ Draft now", "GATHER|done"),
+        ("❌ Cancel", "ACTION|cancel"),
+    ]
+    assert context.user_data["gathering_msg_id"] == update.callback_query.message.message_id
     assert "evidence.pdf" not in _all_visible_text(sim)
 
     if os.path.exists(temp_path):
@@ -344,14 +359,99 @@ async def test_image_attach_only_does_not_extract_and_waits_for_case_details():
     with patch('bot.extract_from_image', new=AsyncMock()) as extract_mock:
         result = await handle_document_intent(update, context)
 
-    assert result == AWAIT_CASE_INPUT
+    assert result == AWAIT_GATHERING
     extract_mock.assert_not_called()
     assert context.user_data["attachment_path"] == temp_path
     assert context.user_data["attachment_name"] == "portfolio-image.jpg"
     assert "case_text" not in context.user_data
-    assert "will be attached to the Kaizen draft" in sim.get_last_text()
+    assert sim.get_last_text().startswith("📎 Image attached.")
     assert "send your own interpretation/context" in sim.get_last_text()
+    assert sim.get_last_buttons() == [
+        ("✅ Draft now", "GATHER|done"),
+        ("❌ Cancel", "ACTION|cancel"),
+    ]
+    assert context.user_data["gathering_msg_id"] == update.callback_query.message.message_id
     assert "portfolio-image.jpg" not in _all_visible_text(sim)
+
+    if os.path.exists(temp_path):
+        os.unlink(temp_path)
+
+
+@pytest.mark.asyncio
+async def test_image_attach_only_prompt_rejoins_gathering_loop_on_next_text(monkeypatch):
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+    attach_update = sim._make_callback_update("DOCUSE|attach")
+
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+        temp_path = f.name
+        f.write(b"dummy image content")
+    context.user_data["_pending_doc"] = {
+        "path": temp_path,
+        "name": "portfolio-image.jpg",
+        "kind": "image",
+    }
+
+    attach_result = await handle_document_intent(attach_update, context)
+    assert attach_result == AWAIT_GATHERING
+    attached_prompt_id = context.user_data["gathering_msg_id"]
+
+    text_update = sim._make_text_update("I also performed a 12-lead ECG and arranged urgent cardiology review.")
+
+    decision = GatheringDecision(
+        kind=GatheringTurnKind.CONTINUE_GATHERING,
+        intent=ConversationalIntent.NEW_CASE,
+        add_to_case=True,
+        reply=ChannelReply(body="📥 Captured. Add anything else before I draft this?"),
+    )
+    with patch("bot.decide_gathering_turn", new=AsyncMock(return_value=decision)):
+        result = await handle_gathering_input(text_update, context)
+
+    assert result == AWAIT_GATHERING
+    context.bot.edit_message_text.assert_awaited()
+    assert context.bot.edit_message_text.await_args.kwargs["message_id"] == attached_prompt_id
+    assert context.bot.edit_message_text.await_args.kwargs["reply_markup"] is None
+    assert context.user_data["gathering_msg_id"] != attached_prompt_id
+    assert context.user_data["attachment_path"] == temp_path
+    assert sim.get_last_text() == "📥 Captured. Add anything else before I draft this?"
+    assert sim.get_last_buttons() == [
+        ("✅ Draft now", "GATHER|done"),
+        ("❌ Cancel", "ACTION|cancel"),
+    ]
+
+    if os.path.exists(temp_path):
+        os.unlink(temp_path)
+
+
+@pytest.mark.asyncio
+async def test_attach_only_draft_now_before_case_context_keeps_attachment_and_asks_for_details():
+    sim = BotSimulator()
+    context = sim._make_context()
+    attach_update = sim._make_callback_update("DOCUSE|attach")
+
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+        temp_path = f.name
+        f.write(b"dummy image content")
+    context.user_data["_pending_doc"] = {
+        "path": temp_path,
+        "name": "portfolio-image.jpg",
+        "kind": "image",
+    }
+
+    attach_result = await handle_document_intent(attach_update, context)
+    assert attach_result == AWAIT_GATHERING
+
+    draft_update = sim._make_callback_update("GATHER|done")
+    draft_update.callback_query.message.message_id = context.user_data["gathering_msg_id"]
+    draft_update.callback_query.message.chat_id = context.user_data["gathering_chat_id"]
+
+    result = await gather_done_callback(draft_update, context)
+
+    assert result == AWAIT_CASE_INPUT
+    assert context.user_data["attachment_path"] == temp_path
+    assert "Case details needed" in sim.get_last_text()
+    assert "attachment is saved" in sim.get_last_text()
 
     if os.path.exists(temp_path):
         os.unlink(temp_path)
@@ -376,15 +476,20 @@ async def test_video_attach_only_waits_for_user_context_without_extracting():
          patch('bot.extract_from_image', new=AsyncMock()) as image_extract:
         result = await handle_document_intent(update, context)
 
-    assert result == AWAIT_CASE_INPUT
+    assert result == AWAIT_GATHERING
     document_extract.assert_not_called()
     image_extract.assert_not_called()
     assert context.user_data["attachment_path"] == temp_path
     assert context.user_data["attachment_name"] == "portfolio-video.mp4"
     assert context.user_data["attachment_kind"] == "video"
     assert "case_text" not in context.user_data
-    assert "will be attached to the Kaizen draft" in sim.get_last_text()
+    assert sim.get_last_text().startswith("📎 Video attached.")
     assert "won't interpret clinical videos" in sim.get_last_text()
+    assert sim.get_last_buttons() == [
+        ("✅ Draft now", "GATHER|done"),
+        ("❌ Cancel", "ACTION|cancel"),
+    ]
+    assert context.user_data["gathering_msg_id"] == update.callback_query.message.message_id
     assert "portfolio-video.mp4" not in _all_visible_text(sim)
 
     if os.path.exists(temp_path):
@@ -407,7 +512,7 @@ async def test_video_attach_blocks_symptom_fragments_before_drafting():
     }
 
     attach_result = await handle_document_intent(attach_update, context)
-    assert attach_result == AWAIT_CASE_INPUT
+    assert attach_result == AWAIT_GATHERING
 
     text_update = sim._make_text_update(
         "Okay, so I saw a case that I was surprised with: chest pain, "

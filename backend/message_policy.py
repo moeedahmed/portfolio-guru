@@ -181,6 +181,14 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         message_class=MessageClass.FIXED,
         text="📥 Captured. Add anything else before I draft this?",
     ),
+    "attachment_captured": MessageTemplate(
+        key="attachment_captured",
+        message_class=MessageClass.TEMPLATED,
+        text=(
+            "📎 {attachment_label} attached.\n\n"
+            "Add anonymised case details before I draft this.{context_note}"
+        ),
+    ),
     "gathering_continuation": MessageTemplate(
         key="gathering_continuation",
         message_class=MessageClass.FIXED,

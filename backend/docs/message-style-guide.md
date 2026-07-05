@@ -63,6 +63,22 @@ First capture:
 
 Buttons: `✅ Draft now` · `❌ Cancel`
 
+Attachment-only capture:
+
+```
+📎 Image attached.
+
+Add anonymised case details before I draft this.
+
+For ECGs, ultrasound, X-rays, wounds or procedure images, send your own interpretation/context before drafting.
+```
+
+Buttons: `✅ Draft now` · `❌ Cancel`
+
+If the user taps `✅ Draft now` before sending any readable case context, keep
+the attachment saved and ask for anonymised text or voice context instead of
+drafting from the attachment alone.
+
 When user taps ✅ Draft now, this message is edited in place to the full CAPTURED_ACK
 ("📥 Captured. I'll turn this into portfolio evidence…") and the keyboard is
 removed; the form recommendation arrives as a new message.
