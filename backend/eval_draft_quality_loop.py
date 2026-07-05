@@ -256,6 +256,8 @@ def _scenario_text(form_type: str, form_name: str, input_source: str) -> str:
             "to my training, and I reflected that I need to document the outcome and learning "
             "more clearly next time."
         )
+    elif not _contains_date_signal(base):
+        base = f"The activity happened yesterday. {base}"
     base = f"I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. {base}"
     if input_source == "voice":
         return f"Voice transcript: {base}"
@@ -535,9 +537,18 @@ def _contains_term(text: str, term: str) -> bool:
 
 def _is_reflection_key(key: str) -> bool:
     lower = str(key).lower()
+    if lower in {
+        "number_of_learners",
+        "learner_group",
+        "learning_outcomes",
+        "learning_activity_type",
+    }:
+        return False
     exact = {
         "reflection",
+        "reflective_comments",
         "learned",
+        "learning_points",
         "replay_differently",
         "different_outcome",
         "focussing_on",
@@ -545,10 +556,28 @@ def _is_reflection_key(key: str) -> bool:
         "why",
         "next_pdp",
         "pdp_summary",
+        "further_action",
+        "action_plan",
+        "personal_learning",
+        "personal_reflection",
     }
     if lower in exact:
         return True
-    return lower.endswith("_reflection") or lower.startswith("reflection_")
+    return (
+        lower.endswith("_reflection")
+        or lower.startswith("reflection_")
+        or lower.endswith("_learning")
+        or lower.startswith("learning_")
+    )
+
+
+def _contains_date_signal(text: str) -> bool:
+    lower = f" {text or ''} ".lower()
+    return bool(
+        re.search(r"\b(today|yesterday|this morning|this afternoon|this evening)\b", lower)
+        or re.search(r"\b\d{1,2}\s+[a-z]+\s+\d{4}\b", lower)
+        or re.search(r"\b\d{4}-\d{2}-\d{2}\b", lower)
+    )
 
 
 async def run_evaluation(

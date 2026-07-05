@@ -6,6 +6,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import eval_draft_quality_loop as loop  # noqa: E402
+import extractor  # noqa: E402
 from models import FormDraft, FormTypeRecommendation  # noqa: E402
 
 
@@ -72,6 +73,187 @@ def test_score_draft_does_not_treat_learner_count_as_reflection():
 
     assert score.reflection == 1.0
     assert not any("first-person" in issue for issue in score.issues)
+
+
+def test_score_draft_recognises_complaint_learning_fields_as_reflection():
+    scenario = loop.SyntheticScenario(
+        case_id="synthetic-complaint",
+        form_type="COMPLAINT",
+        form_name="Reflection on Complaints",
+        input_source="text",
+        source_text="I reflected on a complaint and learned to assign family updates explicitly.",
+    )
+    fields = {
+        "reflection_title": "Communication complaint",
+        "date_of_complaint": "2026-07-05",
+        "key_features": "Complaint about delayed family communication.",
+        "key_aspects": "I did not allocate a clear update role.",
+        "learning_points": "I learned to explicitly assign a team member to update relatives during resus.",
+        "further_action": "I will document family updates more clearly in future.",
+    }
+
+    score = loop.score_draft(
+        scenario=scenario,
+        fields=fields,
+        recommended_forms=["COMPLAINT"],
+    )
+
+    assert score.reflection == 1.0
+    assert not any("No reflection" in issue for issue in score.issues)
+
+
+def test_scenario_hints_include_realistic_date_signal():
+    scenario = loop.generate_scenarios(forms=["EDU_ACT"], limit=1)[0]
+
+    assert "yesterday" in scenario.source_text.lower()
+
+
+def test_deterministic_recommender_handles_explicit_niche_form_request():
+    recs = extractor._deterministic_recommend_form_types(
+        "I need to create a Management: Procedure to Reduce Risk entry after reviewing a new risk process."
+    )
+
+    assert recs is not None
+    assert recs[0].form_type == "MGMT_RISK_PROC"
+
+
+def test_deterministic_recommender_handles_punctuation_heavy_form_name():
+    recs = extractor._deterministic_recommend_form_types(
+        "I need to create a Higher Progression Form (ST4-ST6) entry for my ARCP evidence."
+    )
+
+    assert recs is not None
+    assert recs[0].form_type == "HIGHER_PROG"
+
+
+def test_deterministic_recommender_handles_accs_procedure_forms():
+    recs = extractor._deterministic_recommend_form_types(
+        "On ACCS I performed a lumbar puncture under supervision and reflected on positioning."
+    )
+
+    assert recs is not None
+    assert recs[0].form_type == "PROCEDURAL_LOG_ACCS"
+
+
+def test_deterministic_recommender_prefers_accs_dops_over_generic_dops():
+    recs = extractor._deterministic_recommend_form_types(
+        "During my ACCS anaesthetic placement I inserted a chest drain using "
+        "Seldinger technique as an observed DOPS. My supervisor watched the procedure."
+    )
+
+    assert recs is not None
+    assert recs[0].form_type == "DOPS_ACCS"
+
+
+def test_deterministic_recommender_no_formal_dops_stays_procedure_log():
+    recs = extractor._deterministic_recommend_form_types(
+        "I performed a shoulder reduction in ED with senior advice available but no formal DOPS."
+    )
+
+    assert recs is not None
+    assert recs[0].form_type == "PROC_LOG"
+
+
+def test_deterministic_recommender_distinguishes_attended_teaching_from_delivered():
+    recs = extractor._deterministic_recommend_form_types(
+        "I attended a regional paediatric emergency medicine teaching day yesterday."
+    )
+
+    assert recs is not None
+    assert recs[0].form_type == "EDU_ACT"
+
+
+def test_exact_form_request_does_not_match_teach_inside_teaching():
+    recs = extractor._deterministic_recommend_form_types(
+        "I need a portfolio entry after attending a safeguarding teaching day."
+    )
+
+    assert recs is not None
+    assert recs[0].form_type != "TEACH"
+
+
+def test_deterministic_recommender_distinguishes_observed_teaching():
+    recs = extractor._deterministic_recommend_form_types(
+        "A consultant observed me teaching an F2 doctor how to assess ankle injuries."
+    )
+
+    assert recs is not None
+    assert recs[0].form_type == "TEACH_OBS"
+
+
+def test_deterministic_recommender_handles_research_and_pdp():
+    research = extractor._deterministic_recommend_form_types(
+        "I recruited patients to an ED research study after GCP training."
+    )
+    image_research = extractor._deterministic_recommend_form_types(
+        "Context supplied with image: the image is supporting evidence only; "
+        "I recruited patients to an ED research study after GCP training.",
+        input_source="image",
+    )
+    pdp = extractor._deterministic_recommend_form_types(
+        "My PDP goal is to improve paediatric safeguarding confidence."
+    )
+
+    assert research is not None
+    assert research[0].form_type == "RESEARCH"
+    assert image_research is not None
+    assert image_research[0].form_type == "RESEARCH"
+    assert pdp is not None
+    assert pdp[0].form_type == "PDP"
+
+
+def test_deterministic_recommender_keeps_plain_audit_out_of_qiat():
+    recs = extractor._deterministic_recommend_form_types(
+        "I completed an audit of capacity documentation and presented the results."
+    )
+
+    assert recs is not None
+    assert recs[0].form_type == "AUDIT"
+
+
+def test_deterministic_date_fill_uses_explicit_relative_date_only():
+    fields = {"date_of_activity": "", "brief_description": "Lumbar puncture"}
+    schema = extractor.FORM_SCHEMAS["PROCEDURAL_LOG_ACCS"]
+
+    filled = extractor._fill_blank_date_fields_from_source(
+        fields,
+        schema,
+        "I performed this yesterday.",
+    )
+    unchanged = extractor._fill_blank_date_fields_from_source(
+        fields,
+        schema,
+        "I performed this during ACCS.",
+    )
+
+    assert filled["date_of_activity"]
+    assert unchanged["date_of_activity"] == ""
+
+
+def test_clinical_setting_fill_maps_ed_majors_only_when_blank():
+    blank = extractor._fill_blank_clinical_setting_from_source(
+        {"clinical_setting": ""},
+        "Yesterday in ED majors I assessed chest pain.",
+    )
+    existing = extractor._fill_blank_clinical_setting_from_source(
+        {"clinical_setting": "Intensive Care Unit"},
+        "Yesterday in ED majors I assessed chest pain.",
+    )
+
+    assert blank["clinical_setting"] == "Emergency Department"
+    assert existing["clinical_setting"] == "Intensive Care Unit"
+
+
+def test_acaf_polish_moves_existing_learning_into_reflection():
+    fields = {
+        "communicate_to_patient": "I learned to explain the limits of the evidence clearly.",
+        "apply_to_practice": "Use age-adjusted D-dimer in low-risk patients.",
+        "reflection": "",
+    }
+
+    polished = extractor._polish_acaf_fields(fields, "I learned to document limitations.")
+
+    assert polished["reflection"] == "I learned to explain the limits of the evidence clearly."
 
 
 def test_configure_eval_runtime_materialises_vertex_credentials(monkeypatch):

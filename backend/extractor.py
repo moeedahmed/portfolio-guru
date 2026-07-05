@@ -353,6 +353,9 @@ FORM_TYPE_ALIASES = {
     # User-facing "ESLE" should create the formal ESLE WPBA. The separate
     # reflection-on-ESLE Kaizen form is not exposed as a selectable draft flow.
     "ESLE": "ESLE_ASSESS",
+    # The LLM sometimes invents a "MGMT_" prefix for the equipment/service
+    # management form because the surrounding management forms use that prefix.
+    "MGMT_EQUIP_SERVICE": "EQUIP_SERVICE",
 }
 
 FORM_SCHEMA_ALIASES = {
@@ -366,7 +369,8 @@ FORM_SCHEMA_ALIASES = {
 
 def canonical_form_type(form_type: str) -> str:
     """Return the Portfolio Guru canonical form code for user-facing aliases."""
-    return FORM_TYPE_ALIASES.get((form_type or "").strip().upper(), form_type)
+    cleaned = (form_type or "").strip().upper()
+    return FORM_TYPE_ALIASES.get(cleaned, cleaned or form_type)
 
 
 def schema_form_type(form_type: str) -> str:
@@ -1433,6 +1437,7 @@ def _prefer_qiat_for_qi_project(
 _OBSERVED_PROCEDURE_TERMS = (
     "procedural sedation",
     "closed reduction",
+    "shoulder reduction",
     "fracture reduction",
     "reduction and plaster",
     "reduction and backslab",
@@ -1526,19 +1531,42 @@ def _deterministic_recommend_form_types(
     unambiguous procedural/QI/course signal. General clinical cases continue to
     the AI recommender.
     """
-    if _is_image_source(input_source):
-        return None
-
     text = f" {case_description or ''} ".lower()
     recommendations: list[FormTypeRecommendation] = []
 
     def add(form_type: str, rationale: str) -> None:
+        form_type = canonical_form_type(form_type)
         if form_type not in {rec.form_type for rec in recommendations}:
             recommendations.append(FormTypeRecommendation(
                 form_type=form_type,
                 rationale=rationale,
                 uuid=FORM_UUIDS.get(form_type),
             ))
+
+    explicit_form = _deterministic_explicit_form_request(case_description)
+    if explicit_form:
+        add(
+            explicit_form,
+            f"The user explicitly asked for {public_form_name(explicit_form)}.",
+        )
+        return recommendations
+
+    image_source_has_text_context = (
+        _is_image_source(input_source)
+        and "context supplied with image" in text
+    )
+    if _is_image_source(input_source) and not image_source_has_text_context:
+        return None
+
+    accs_recommendation = _deterministic_accs_procedure_recommendation(case_description)
+    if accs_recommendation:
+        for form_type, rationale in accs_recommendation:
+            add(form_type, rationale)
+        return recommendations
+
+    if re.search(r"\b(completed|performed|undertook|conducted)\s+(an?\s+)?audit\b", text) and not _source_describes_qi_cycle(case_description):
+        add("AUDIT", "Audit activity is stated without a full QI change/re-audit cycle.")
+        return recommendations
 
     if _has_qi_project_signal(case_description):
         add(
@@ -1578,6 +1606,53 @@ def _deterministic_recommend_form_types(
 
     if any(term in text for term in ("pocus", "fast scan", "lung ultrasound", "cardiac echo", "ivc ultrasound")):
         add("US_CASE", "Point-of-care ultrasound case is stated explicitly.")
+        return recommendations
+
+    if any(term in text for term in ("pdp goal", "personal development plan", "development plan")):
+        add("PDP", "Personal development plan goal and actions are stated explicitly.")
+        return recommendations
+
+    if any(
+        term in text
+        for term in (
+            "research study",
+            "research project",
+            "recruited patients",
+            "checked eligibility",
+            "obtained consent",
+            "gcp training",
+        )
+    ):
+        add("RESEARCH", "Research activity with recruitment/consent/study participation is stated explicitly.")
+        return recommendations
+
+    if re.search(r"\b(attended|attending|participated in|went to)\b", text) and any(
+        term in text
+        for term in (
+            "teaching day",
+            "teaching session",
+            "education day",
+            "educational activity",
+            "regional teaching",
+            "grand round",
+            "simulation day",
+        )
+    ):
+        add("EDU_ACT", "The trainee attended an educational activity as a learner.")
+        return recommendations
+
+    if any(
+        term in text
+        for term in (
+            "observed me teaching",
+            "observed my teaching",
+            "feedback on my teaching",
+            "teaching observation",
+            "consultant observed me teaching",
+        )
+    ):
+        add("TEACH_OBS", "Teaching was observed for feedback on the trainee's teaching skill.")
+        add("TEACH", "The same activity can also be recorded as teaching delivered.")
         return recommendations
 
     if _has_directly_observed_procedure_signal(case_description):
@@ -1630,6 +1705,97 @@ def _deterministic_recommend_form_types(
         return recommendations
 
     return None
+
+
+def _deterministic_explicit_form_request(case_description: str) -> str | None:
+    """Return a form code when the user clearly names the target form.
+
+    This handles niche forms that are hard for the recommender to infer from
+    broad prose alone, such as management portfolio forms, progress reviews,
+    absences, OOP and file upload records. It requires portfolio/drafting intent
+    so incidental words like "absence" do not hijack ordinary clinical cases.
+    """
+    text = f" {case_description or ''} ".lower()
+    intent = (
+        "form",
+        "entry",
+        "draft",
+        "portfolio",
+        "wpba",
+        "kaizen",
+        "create",
+        "file",
+        "log",
+        "save",
+        "record",
+        "target portfolio form",
+    )
+    if not any(term in text for term in intent):
+        return None
+
+    aliases: list[tuple[str, str]] = []
+    for form_type in FORM_SCHEMAS:
+        canonical = canonical_form_type(form_type)
+        names = {
+            public_form_name(canonical),
+            FORM_SCHEMAS[form_type].get("name", ""),
+        }
+        for name in names:
+            cleaned = str(name or "").strip().lower()
+            if len(cleaned) >= 5:
+                aliases.append((canonical, cleaned))
+
+    # Prefer longest names first so "management: risk register" wins before
+    # shorter overlapping labels.
+    aliases.sort(key=lambda item: len(item[1]), reverse=True)
+    for form_type, name in aliases:
+        if name and name in text:
+            return form_type
+
+    return None
+
+
+def _deterministic_accs_procedure_recommendation(
+    case_description: str,
+) -> list[tuple[str, str]] | None:
+    """Route clearly ACCS-framed procedure cases to ACCS-specific forms."""
+    text = f" {case_description or ''} ".lower()
+    if "accs" not in text:
+        return None
+    accs_procedure = any(
+        term in text
+        for term in (
+            "lumbar puncture",
+            "chest drain",
+            "seldinger",
+            "pleural aspiration",
+            "vascular access",
+            "procedural sedation",
+        )
+    )
+    if not accs_procedure:
+        return None
+
+    observed = any(term in text for term in _DIRECT_OBSERVER_TERMS) or any(
+        term in text for term in ("observed dops", "formal dops", "assessed dops")
+    )
+    if observed:
+        return [
+            (
+                "DOPS_ACCS",
+                "ACCS procedural skill with direct observation; use the ACCS DOPS form.",
+            ),
+            (
+                "PROCEDURAL_LOG_ACCS",
+                "The same ACCS procedure can also be recorded in the ACCS procedural log.",
+            ),
+        ]
+    return [
+        (
+            "PROCEDURAL_LOG_ACCS",
+            "ACCS procedural skill without a clear direct-assessment signal; use the ACCS procedural log.",
+        )
+    ]
 
 
 async def recommend_form_types(case_description: str, input_source: str = "text") -> List[FormTypeRecommendation]:
@@ -2363,11 +2529,94 @@ def _polish_qiat_fields(fields: dict, case_description: str) -> dict:
     return out
 
 
+def _polish_acaf_fields(fields: dict, case_description: str) -> dict:
+    """Move source-grounded learning into ACAF reflection when left blank."""
+    out = dict(fields or {})
+    if str(out.get("reflection") or "").strip():
+        return out
+
+    candidates = [
+        str(out.get("communicate_to_patient") or "").strip(),
+        str(out.get("apply_to_practice") or "").strip(),
+    ]
+    for candidate in candidates:
+        if re.search(r"\b(I learned|I reflected|I will|I need|I should)\b", candidate, re.IGNORECASE):
+            out["reflection"] = candidate
+            return out
+
+    learning_match = re.search(
+        r"\b(I learned[^.]+(?:\.|$)|I reflected[^.]+(?:\.|$)|I will[^.]+(?:\.|$)|I should[^.]+(?:\.|$))",
+        case_description,
+        flags=re.IGNORECASE,
+    )
+    if learning_match:
+        out["reflection"] = learning_match.group(1).strip()
+    return out
+
+
 def _normalise_dropdown_field(value, options: list, leave_missing_blank: bool):
     cleaned = _normalise_text_field(value, leave_missing_blank, "")
     if cleaned in options:
         return cleaned
     return "" if leave_missing_blank else (options[0] if options else "")
+
+
+def _infer_relative_date_from_source(case_description: str) -> str | None:
+    """Infer an event date only from explicit relative-date wording."""
+    text = f" {case_description or ''} ".lower()
+    today = date.today()
+    if re.search(r"\b(today|this morning|this afternoon|this evening|earlier today)\b", text):
+        return today.strftime("%Y-%m-%d")
+    if re.search(r"\byesterday\b", text):
+        return (today - timedelta(days=1)).strftime("%Y-%m-%d")
+    return None
+
+
+def _fill_blank_date_fields_from_source(
+    fields: dict,
+    schema: dict,
+    case_description: str,
+) -> dict:
+    """Fill blank date fields when the source states a clear event date.
+
+    The model prompt already asks for this, but niche forms use varied date
+    field names (`date_of_activity`, `date_of_complaint`, `date_of_education`).
+    This deterministic pass prevents those forms from losing an explicitly
+    supplied "today"/"yesterday" date while still leaving truly missing dates
+    blank for the user to complete.
+    """
+    inferred = _infer_relative_date_from_source(case_description)
+    if not inferred:
+        return fields
+    out = dict(fields)
+    for field in schema.get("fields", []):
+        if field.get("type") == "date" and not _normalise_text_field(out.get(field["key"]), True, ""):
+            out[field["key"]] = inferred
+    return out
+
+
+def _fill_blank_clinical_setting_from_source(fields: dict, case_description: str) -> dict:
+    """Fill common ED setting wording into the dropdown when explicit."""
+    if str(fields.get("clinical_setting") or "").strip():
+        return fields
+    text = f" {case_description or ''} ".lower()
+    if any(
+        term in text
+        for term in (
+            " emergency department",
+            " ed ",
+            " ed majors",
+            " majors",
+            " resus",
+            " minors",
+            " paediatric ed",
+            " paediatric emergency",
+        )
+    ):
+        out = dict(fields)
+        out["clinical_setting"] = "Emergency Department"
+        return out
+    return fields
 
 
 def _kc_code_prefix(kc_string: str) -> str:
@@ -2922,6 +3171,10 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
         "curriculum_links": _normalise_list_field(data.get("curriculum_links")),
         "key_capabilities": _normalise_list_field(data.get("key_capabilities")),
     }
+    normalised = _fill_blank_clinical_setting_from_source(
+        normalised,
+        case_description,
+    )
 
     # Apply humanizer to ALL narrative fields before user sees the draft
     normalised = _humanize_all_fields(normalised)
@@ -3193,6 +3446,16 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
     if has_kc_tick:
         normalised["key_capabilities"] = _normalise_list_field(data.get("key_capabilities"))
 
+    normalised = _fill_blank_date_fields_from_source(
+        normalised,
+        schema,
+        case_description,
+    )
+    normalised = _fill_blank_clinical_setting_from_source(
+        normalised,
+        case_description,
+    )
+
     if schema_key == "DOPS" and has_kc_tick:
         # The LLM tends to pick SLO6 KC1 ("knowledge to identify when …") and
         # stop there. For unstable AF / cardioversion / sedation cases, that
@@ -3217,6 +3480,8 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
     )
     if schema_key == "QIAT":
         normalised = _polish_qiat_fields(normalised, case_description)
+    if schema_key == "ACAF":
+        normalised = _polish_acaf_fields(normalised, case_description)
 
     # Apply humanizer to ALL narrative fields before user sees the draft
     normalised = _humanize_all_fields(normalised)
