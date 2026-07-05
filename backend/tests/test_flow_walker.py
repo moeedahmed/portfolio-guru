@@ -1513,7 +1513,9 @@ class TestFlowWalker:
         # final report edits that progress message (1 edit). The original
         # draft preview survives in the chat history above.
         assert sim.messages_sent[-1][0] == 'edit'
-        assert 'case-based discussion saved' in sim.get_last_text().lower()
+        text = sim.get_last_text().lower()
+        assert 'draft saved in kaizen' in text
+        assert 'case-based discussion' in text
         assert 'filing finished' not in sim.get_last_text().lower()
         buttons = sim.get_last_buttons()
         # First button may be File another case or the amend button row
@@ -1549,7 +1551,9 @@ class TestFlowWalker:
             result = await handle_case_input(update, context)
 
         assert result == ConversationHandler.END
-        assert 'case-based discussion saved' in sim.get_last_text().lower()
+        text = sim.get_last_text().lower()
+        assert 'draft saved in kaizen' in text
+        assert 'case-based discussion' in text
         assert context.user_data['last_filing_status'] == 'success'
 
     @pytest.mark.asyncio
@@ -1852,7 +1856,7 @@ class TestFlowWalker:
         assert '⚠️ Needs your review' in text
         assert '8 fields filled' in text
         assert 'needs your review: Placement' in text
-        assert '10 cases this month (Unlimited)' in text
+        assert '10 cases this month' in text
         # The old single-line wording must NOT come back — that's the merged
         # look the user reported.
         assert 'saved as a draft, but needs manual review' not in text
@@ -2197,7 +2201,7 @@ class TestFlowWalker:
         assert second == ConversationHandler.END
         assert route_filing.await_args_list[1].kwargs['reuse_draft'] is True
         assert any(kind == 'edit' and 'Retrying Kaizen filing' in text for kind, text, _ in retry_messages)
-        assert any(kind == 'edit' and 'Kaizen draft saved' in text for kind, text, _ in retry_messages)
+        assert any(kind == 'edit' and 'Draft saved in Kaizen' in text for kind, text, _ in retry_messages)
         assert not any(kind in {'reply', 'send'} for kind, _, _ in retry_messages)
 
     @pytest.mark.asyncio
@@ -2272,7 +2276,7 @@ class TestFlowWalker:
 
         assert result == ConversationHandler.END
         assert any(kind == 'reply' and 'Retrying Kaizen filing' in text for kind, text, _ in sim.messages_sent)
-        assert any(kind == 'edit' and 'Kaizen draft saved' in text for kind, text, _ in sim.messages_sent)
+        assert any(kind == 'edit' and 'Draft saved in Kaizen' in text for kind, text, _ in sim.messages_sent)
 
     @pytest.mark.asyncio
     async def test_failed_filing_new_text_shows_intent_gate(self, thin_draft):
@@ -3275,7 +3279,7 @@ class TestRecentPortfolioFixes:
 
         text = _format_attachment_status_line(['attachment (unsupported type)'])
 
-        assert text == '\n\n📎 Attachment not added: unsupported file type. Draft saved without it.'
+        assert text == '\n\nAttachment not added\nUnsupported file type. Draft saved without the attachment.'
         assert 'Attachment skipped' not in text
 
     def test_post_filing_keyboard_offers_same_case_for_clean_partial(self):
@@ -3569,8 +3573,8 @@ class TestRecentPortfolioFixes:
         assert ('💾 Save as another WBA', 'ACTION|same_case_another') in buttons, (
             f"Success should surface 'Same case' button. Got: {buttons!r}"
         )
-        """Successful save also reads as a new step: 'Kaizen draft saved' on top, then
-        the form-name subhead, then summary lines — distinct from the draft."""
+        """Successful save reads as a calm completion report with row-based
+        metadata instead of an emoji-heavy sentence block."""
         from bot import handle_approval_approve
         from models import FormDraft
 
@@ -3613,13 +3617,16 @@ class TestRecentPortfolioFixes:
 
         text = sim.get_last_text()
         first_line = text.split('\n', 1)[0]
-        assert '✅ Kaizen draft saved' in first_line, (
-            f"First line should be the 'Kaizen draft saved' header. Got: {first_line!r}"
+        assert '✅ Draft saved in Kaizen' in first_line, (
+            f"First line should be the 'Draft saved in Kaizen' header. Got: {first_line!r}"
         )
-        # The subhead mentions the form was saved as a Kaizen draft so the
-        # user knows nothing was submitted/signed.
-        assert 'saved as a Kaizen draft' in text
-        assert '📊 1 case this month (Unlimited)' in text
+        assert 'Case-Based Discussion' in text
+        assert 'Date: 17 Mar 2026' in text
+        assert 'Curriculum: SLO1' in text
+        assert '3 fields completed' in text
+        assert '1 case this month' in text
+        assert '📊' not in text
+        assert '📅' not in text
         assert '1 cases this month' not in text
         assert _DRAFT_DIVIDER not in text
 
@@ -3668,7 +3675,7 @@ class TestRecentPortfolioFixes:
             await handle_approval_approve(update, context)
 
         text = sim.get_last_text()
-        assert "I used today's date (2026-05-26) because no case date was given." in text
+        assert "Date defaulted to today (2026-05-26) because no case date was given." in text
 
     def test_post_filing_keyboard_flag_missed_field_button_removed_from_primary(self):
         """The '🚩 Flag a missed field' button is removed from the primary

@@ -884,5 +884,5 @@ async def test_filing_handles_missing_attachment_gracefully():
     
     # Verify that the user was notified without making the saved draft feel failed.
     final_text = _all_visible_text(sim)
-    assert "📎 Attachment not added: file was no longer available. Draft saved without it." in final_text
+    assert "Attachment not added\nFile was no longer available. Draft saved without the attachment." in final_text
     assert "Attachment skipped" not in final_text

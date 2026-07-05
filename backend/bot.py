@@ -10294,11 +10294,24 @@ def _attachment_path_with_original_name(path: str, original_name: str) -> str:
     return named_path
 
 
-def _format_usage_line(used: int, limit: int, tier_label: str) -> str:
+def _format_usage_line(used: int, limit: int, _tier_label: str) -> str:
     case_word = "case" if used == 1 else "cases"
     if limit == -1:
-        return f"\n\n📊 {used} {case_word} this month ({tier_label})"
-    return f"\n\n📊 {used}/{limit} {case_word} this month ({tier_label})"
+        return f"{used} {case_word} this month"
+    return f"{used}/{limit} {case_word} this month"
+
+
+def _format_receipt_date(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+        try:
+            parsed = datetime.strptime(raw, fmt)
+            return parsed.strftime("%d %b %Y").lstrip("0")
+        except ValueError:
+            continue
+    return raw
 
 
 def _format_attachment_status_line(skipped: list) -> str:
@@ -10308,12 +10321,12 @@ def _format_attachment_status_line(skipped: list) -> str:
         if "attachment" not in item_text:
             continue
         if "file missing" in item_text:
-            reason = "file was no longer available"
+            reason = "File was no longer available"
         elif "unsupported type" in item_text:
-            reason = "unsupported file type"
+            reason = "Unsupported file type"
         else:
-            reason = "Kaizen could not add it"
-        return f"\n\n📎 Attachment not added: {reason}. Draft saved without it."
+            reason = "Kaizen could not add the attachment"
+        return f"\n\nAttachment not added\n{reason}. Draft saved without the attachment."
     return ""
 
 
@@ -10659,7 +10672,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         # Suppress the note when today's date is already shown in the header
         if default_date != _today.today().isoformat():
             date_default_note = (
-                f"\n📅 I used today's date"
+                f"\nDate defaulted to today"
                 f"{f' ({default_date})' if default_date else ''} because no case date was given."
             )
     required_labels = {field["label"] for field in _template_requirements(form_type)[0]}
@@ -10781,20 +10794,27 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     if status == "success":
         date_val = result.get("activity_date") or fields.get("date_of_encounter", fields.get("date_of_event", ""))
         slo_str = ", ".join(curriculum_links) if curriculum_links else ""
-        summary = f"\n📅 {date_val}" if date_val else ""
+        receipt_lines = [form_name]
+        date_display = _format_receipt_date(date_val)
+        if date_display:
+            receipt_lines.append(f"Date: {date_display}")
         if slo_str:
-            summary += f"  ·  📚 {slo_str}"
+            receipt_lines.append(f"Curriculum: {slo_str}")
         # Clean success message — no verbose proof report. Lead with a step
         # header so the confirmation reads as a new phase, distinct from the
         # draft preview the user just approved.
         filled_count = len(filled)
-        fields_summary = f"\n{filled_count} field{'s' if filled_count != 1 else ''} completed." if filled_count > 0 else ""
+        if filled_count > 0:
+            receipt_lines.append(f"{filled_count} field{'s' if filled_count != 1 else ''} completed")
+        if usage_line:
+            receipt_lines.append(usage_line)
+        receipt_body = "\n".join(receipt_lines)
         attachment_status_line = _format_attachment_status_line(skipped)
         msg = (
-            f"✅ Kaizen draft saved\n"
-            f"{form_name} saved as a Kaizen draft.{summary}{fields_summary}"
+            f"✅ Draft saved in Kaizen\n"
+            f"{receipt_body}"
             f"{date_default_note}"
-            f"{usage_line}{observation_line}"
+            f"{observation_line}"
             f"{attachment_status_line}"
         )
         status_line = "✅ Draft saved."
@@ -10821,12 +10841,13 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 "Fields filled but save wasn't confirmed. "
                 "The draft may not have saved — open Kaizen to verify before retrying."
             )
+            usage_block = f"\n\n{usage_line}" if usage_line else ""
             msg = (
                 f"⚠️ Filing had issues — check Kaizen\n"
                 f"{form_name}\n\n"
                 f"{fields_filled_str}.\n\n"
                 f"{_DRAFT_DIVIDER}\n\n"
-                f"{recovery_block}{link_text}{usage_line}"
+                f"{recovery_block}{link_text}{usage_block}"
             )
             status_line = "⚠️ Filing needs attention."
         else:
@@ -10858,13 +10879,14 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             # above it, and keep the review guidance in its own block so it
             # reads as guidance, not as draft content.
             attachment_status_line = _format_attachment_status_line(skipped)
+            usage_block = f"\n\n{usage_line}" if usage_line else ""
             msg = (
                 f"📥 Draft saved in Kaizen\n"
                 f"{form_name}\n\n"
                 f"⚠️ Needs your review\n"
                 f"{fields_filled_str} from your case. "
                 f"{review_clause}: {skipped_display}.\n\n"
-                f"{action_line}{date_default_note}{usage_line}"
+                f"{action_line}{date_default_note}{usage_block}"
                 f"{attachment_status_line}"
             )
             status_line = "⚠️ Filing needs manual review."

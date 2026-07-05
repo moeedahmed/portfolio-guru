@@ -103,11 +103,15 @@ I'll suggest the form, prepare the draft, and ask before saving to Kaizen.
 Draft saved:
 
 ```
-✅ Kaizen draft saved
-{Form name} saved as a Kaizen draft. 📅 {date}
-{field count} fields completed.
-📊 {case count} case(s) this month ({tier})
-📎 Attachment not added: {reason}. Draft saved without it.
+✅ Draft saved in Kaizen
+{Form name}
+Date: {date}
+Curriculum: {SLO/KC}
+{field count} fields completed
+{case count} case(s) this month
+
+Attachment not added
+{reason}. Draft saved without the attachment.
 ```
 
 Help:
