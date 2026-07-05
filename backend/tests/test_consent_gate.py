@@ -23,6 +23,10 @@ from telegram.ext import ConversationHandler
 from tests.bot_simulator import BotSimulator
 
 
+def _all_visible_text(sim: BotSimulator) -> str:
+    return "\n".join(text for _, text, _ in sim.messages_sent if isinstance(text, str))
+
+
 @pytest.fixture
 def tmp_consent_db(tmp_path, monkeypatch):
     import usage
@@ -206,6 +210,54 @@ async def test_video_that_triggered_consent_resumes_to_video_intent(tmp_consent_
     assert ("📎 Attach video", "DOCUSE|attach") in buttons
     assert ("❌ Remove video", "DOCUSE|ignore") in buttons
     assert "_consent_pending_input" not in context.user_data
+
+    Path(pending_doc["path"]).unlink(missing_ok=True)
+
+
+@pytest.mark.consent_gate
+@pytest.mark.asyncio
+async def test_document_that_triggered_consent_resumes_without_showing_filename(tmp_consent_db):
+    from bot import AWAIT_DOC_INTENT, handle_case_input, handle_consent_callback
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_text_update("")
+    document = MagicMock()
+    document.file_id = "telegram-document-file-id"
+    document.file_name = "patient-name-ecg-result.pdf"
+    document.mime_type = "application/pdf"
+    update.message.text = None
+    update.message.voice = None
+    update.message.audio = None
+    update.message.photo = []
+    update.message.video = None
+    update.message.document = document
+    update.message.caption = None
+
+    with patch("bot.has_credentials", return_value=True):
+        result = await handle_case_input(update, context)
+
+    assert result == ConversationHandler.END
+    assert context.user_data["_consent_pending_input"]["kind"] == "document"
+    assert "patient-name-ecg-result.pdf" not in _all_visible_text(sim)
+
+    async def fake_download(path):
+        Path(path).write_bytes(b"document bytes")
+
+    file_obj = MagicMock()
+    file_obj.download_to_drive = AsyncMock(side_effect=fake_download)
+    context.bot.get_file = AsyncMock(return_value=file_obj)
+
+    accept = sim._make_callback_update(f"CONSENT|accept|{sim.user_id}")
+    result = await handle_consent_callback(accept, context)
+
+    assert result == AWAIT_DOC_INTENT
+    context.bot.get_file.assert_awaited_once_with("telegram-document-file-id")
+    pending_doc = context.user_data["_pending_doc"]
+    assert pending_doc["name"] == "patient-name-ecg-result.pdf"
+    assert Path(pending_doc["path"]).exists()
+    assert "patient-name-ecg-result.pdf" not in _all_visible_text(sim)
+    assert "How would you like to use this document?" in sim.get_last_text()
 
     Path(pending_doc["path"]).unlink(missing_ok=True)
 

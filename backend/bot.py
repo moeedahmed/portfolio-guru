@@ -8070,18 +8070,16 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
                 "\n\nSend your own text or voice context for the case. I won't interpret clinical videos."
             )
         await query.edit_message_text(
-            f"📎 *{file_name}* will be attached to the Kaizen draft.\n\n"
-            f"Now send the anonymised case details you want drafted.{extra_context}",
-            parse_mode="Markdown",
+            f"📎 This {attachment_label} will be attached to the Kaizen draft.\n\n"
+            f"Now send the anonymised case details you want drafted.{extra_context}"
         )
         return AWAIT_CASE_INPUT
 
     if is_video_attachment:
         if mode == "both":
             await query.edit_message_text(
-                f"📎 *{file_name}* will still be attached, but I won't draft from the video alone.\n\n"
-                "Send your own clinical context or findings in text/voice and I'll draft from that.",
-                parse_mode="Markdown",
+                "📎 This video will still be attached, but I won't draft from the video alone.\n\n"
+                "Send your own clinical context or findings in text/voice and I'll draft from that."
             )
         else:
             try:
@@ -8089,14 +8087,13 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
             except OSError:
                 pass
             await query.edit_message_text(
-                f"I won't interpret *{file_name}* as clinical evidence by itself.\n\n"
-                "Send your own clinical context or findings in text/voice instead.",
-                parse_mode="Markdown",
+                "I won't interpret this video as clinical evidence by itself.\n\n"
+                "Send your own clinical context or findings in text/voice instead."
             )
         return AWAIT_CASE_INPUT
 
     read_icon = "📷" if is_image_attachment else "📄"
-    await query.edit_message_text(f"{read_icon} Reading *{file_name}*…", parse_mode="Markdown")
+    await query.edit_message_text(f"{read_icon} Reading {attachment_label}…")
     try:
         if is_image_attachment:
             case_text = await extract_from_image(file_path)
@@ -8124,15 +8121,13 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
         if mode == "both":
             if is_image_attachment:
                 await query.edit_message_text(
-                    f"📎 *{file_name}* will still be attached, but I won't draft from the image alone.\n\n"
-                    "For ECGs, ultrasound, X-rays, wounds or procedure photos, send your own interpretation/context and I'll draft from that.",
-                    parse_mode="Markdown",
+                    "📎 This image will still be attached, but I won't draft from the image alone.\n\n"
+                    "For ECGs, ultrasound, X-rays, wounds or procedure photos, send your own interpretation/context and I'll draft from that."
                 )
                 return AWAIT_CASE_INPUT
             await query.edit_message_text(
-                f"📎 *{file_name}* will still be attached, but I couldn't read useful text from it.\n\n"
-                "Send the anonymised case details in text and I'll draft from that.",
-                parse_mode="Markdown",
+                "📎 This document will still be attached, but I couldn't read useful text from it.\n\n"
+                "Send the anonymised case details in text and I'll draft from that."
             )
             return AWAIT_CASE_INPUT
         if is_image_attachment:
@@ -8141,16 +8136,14 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
             except OSError:
                 pass
             await query.edit_message_text(
-                f"I couldn't extract safe drafting information from *{file_name}*.\n\n"
-                "For ECGs, ultrasound, X-rays, wounds or procedure photos, send your own interpretation/context instead.",
-                parse_mode="Markdown",
+                "I couldn't extract safe drafting information from this image.\n\n"
+                "For ECGs, ultrasound, X-rays, wounds or procedure photos, send your own interpretation/context instead."
             )
             return AWAIT_CASE_INPUT
         await query.edit_message_text(
-            f"⚠️ Couldn't extract text from *{file_name}*. "
+            "⚠️ Couldn't extract text from this document. "
             "The file may be scanned or password-protected.\n\n"
-            "Send the case details in text, or upload again and choose Attach only.",
-            parse_mode="Markdown",
+            "Send the case details in text, or upload again and choose Attach only."
         )
         return AWAIT_CASE_INPUT
 
@@ -8388,7 +8381,7 @@ async def handle_template_review_media(update: Update, context: ContextTypes.DEF
         if not is_supported_document(file_name):
             await msg.reply_text("Got it — added to your case.")
             return AWAIT_TEMPLATE_REVIEW
-        ack = await msg.reply_text(f"📄 Reading *{file_name}*…", parse_mode="Markdown")
+        ack = await msg.reply_text("📄 Reading document…")
         tmp_path = None
         try:
             doc_file = await doc.get_file()
@@ -8496,7 +8489,7 @@ async def handle_approval_media_feedback(update: Update, context: ContextTypes.D
         if not is_supported_document(file_name):
             await msg.reply_text("I can only read PDF, PowerPoint, Word, and text files here.")
             return AWAIT_APPROVAL
-        ack = await msg.reply_text(f"📄 Reading *{file_name}*…", parse_mode="Markdown")
+        ack = await msg.reply_text("📄 Reading document…")
         tmp_path = None
         try:
             doc_file = await doc.get_file()
@@ -9270,14 +9263,13 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
         if not is_supported_document(file_name):
             await update.message.reply_text(
-                f"📄 *{file_name}*\n\nI can read PDF, PowerPoint (.pptx), Word (.docx), and text files. "
-                "This file type isn't supported yet.",
-                parse_mode="Markdown"
+                "📄 I can read PDF, PowerPoint (.pptx), Word (.docx), and text files. "
+                "This file type isn't supported yet."
             )
             return ConversationHandler.END
 
         await _delete_previous_gathering_message(context)
-        ack = await update.message.reply_text(f"📄 Receiving *{file_name}*…", parse_mode="Markdown")
+        ack = await update.message.reply_text("📄 Receiving document…")
         tmp_path = None
         try:
             import shutil
@@ -9297,8 +9289,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             logger.error(f"Document download failed: {e}", exc_info=True)
             context.user_data.clear()
             await ack.edit_text(
-                f"⚠️ Couldn't receive *{file_name}*. Try again or describe the case in text.",
-                parse_mode="Markdown"
+                "⚠️ Couldn't receive that document. Try again or describe the case in text."
             )
             return ConversationHandler.END
         finally:
@@ -9307,9 +9298,8 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
         context.user_data["_pending_doc"] = {"path": cached_path, "name": file_name}
         await ack.edit_text(
-            f"📄 *{file_name}* — how would you like to use this document?",
+            "📄 How would you like to use this document?",
             reply_markup=_build_doc_intent_keyboard(),
-            parse_mode="Markdown",
         )
         _track_latest_message(context, ack)
         return AWAIT_DOC_INTENT
@@ -11771,13 +11761,12 @@ async def _resume_pending_consent_input(
         file_name = pending_input.get("file_name") or "document"
         if not is_supported_document(file_name):
             await query.edit_message_text(
-                f"✅ Consent recorded.\n\n📄 *{file_name}*\n\n"
+                "✅ Consent recorded.\n\n📄 "
                 "I can read PDF, PowerPoint (.pptx), Word (.docx), and text files. "
-                "This file type isn't supported yet.",
-                parse_mode="Markdown",
+                "This file type isn't supported yet."
             )
             return ConversationHandler.END
-        await query.edit_message_text(f"✅ Consent recorded.\n\n📄 Receiving *{file_name}*…", parse_mode="Markdown")
+        await query.edit_message_text("✅ Consent recorded.\n\n📄 Receiving document…")
         try:
             cached_path = await _download_pending_consent_file(
                 context,
@@ -11787,15 +11776,13 @@ async def _resume_pending_consent_input(
         except Exception as exc:
             logger.warning("Could not resume pending consent document: %s", exc, exc_info=True)
             await query.edit_message_text(
-                f"✅ Consent recorded, but I couldn't recover *{file_name}*. Send it again when you're ready.",
-                parse_mode="Markdown",
+                "✅ Consent recorded, but I couldn't recover that document. Send it again when you're ready."
             )
             return AWAIT_CASE_INPUT
         context.user_data["_pending_doc"] = {"path": cached_path, "name": file_name}
         await query.edit_message_text(
-            f"📄 *{file_name}* — how would you like to use this document?",
+            "📄 How would you like to use this document?",
             reply_markup=_build_doc_intent_keyboard(),
-            parse_mode="Markdown",
         )
         _track_latest_message(context, query.message)
         return AWAIT_DOC_INTENT

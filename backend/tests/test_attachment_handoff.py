@@ -16,6 +16,11 @@ from bot import (
 from tests.bot_simulator import BotSimulator
 from extractor import FormDraft
 
+
+def _all_visible_text(sim: BotSimulator) -> str:
+    return "\n".join(text for _, text, _ in sim.messages_sent if isinstance(text, str))
+
+
 @pytest.mark.asyncio
 async def test_document_case_stores_attachment_path():
     """Document uploads first ask how the file should be used."""
@@ -56,6 +61,7 @@ async def test_document_case_stores_attachment_path():
     assert ("📝 Read as case info", "DOCUSE|info") in buttons
     assert ("📎 Attach only", "DOCUSE|attach") in buttons
     assert ("📎 Read + attach", "DOCUSE|both") in buttons
+    assert "clinical-notes.pdf" not in _all_visible_text(sim)
     
     # Clean up the cached file
     path = context.user_data["_pending_doc"]["path"]
@@ -222,6 +228,7 @@ async def test_document_attach_only_does_not_extract_and_waits_for_case_details(
     assert context.user_data["attachment_name"] == "evidence.pdf"
     assert "case_text" not in context.user_data
     assert "attached to the Kaizen draft" in sim.get_last_text()
+    assert "evidence.pdf" not in _all_visible_text(sim)
 
     if os.path.exists(temp_path):
         os.unlink(temp_path)
@@ -252,6 +259,7 @@ async def test_image_attach_only_does_not_extract_and_waits_for_case_details():
     assert "case_text" not in context.user_data
     assert "will be attached to the Kaizen draft" in sim.get_last_text()
     assert "send your own interpretation/context" in sim.get_last_text()
+    assert "portfolio-image.jpg" not in _all_visible_text(sim)
 
     if os.path.exists(temp_path):
         os.unlink(temp_path)
@@ -284,6 +292,7 @@ async def test_video_attach_only_waits_for_user_context_without_extracting():
     assert "case_text" not in context.user_data
     assert "will be attached to the Kaizen draft" in sim.get_last_text()
     assert "won't interpret clinical videos" in sim.get_last_text()
+    assert "portfolio-video.mp4" not in _all_visible_text(sim)
 
     if os.path.exists(temp_path):
         os.unlink(temp_path)
