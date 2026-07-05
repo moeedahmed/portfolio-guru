@@ -3270,6 +3270,14 @@ class TestRecentPortfolioFixes:
         assert rows[1] == [('💾 Save as another WBA', 'ACTION|same_case_another', None)]
         assert rows[2] == [('📋 File another case', 'ACTION|file', None)]
 
+    def test_attachment_skip_receipt_reads_as_secondary_status(self):
+        from bot import _format_attachment_status_line
+
+        text = _format_attachment_status_line(['attachment (unsupported type)'])
+
+        assert text == '\n\n📎 Attachment not added: unsupported file type. Draft saved without it.'
+        assert 'Attachment skipped' not in text
+
     def test_post_filing_keyboard_offers_same_case_for_clean_partial(self):
         """Clean partial (no error) should also surface the 'Same case,
         another WPBA' button when same_case_available is true, so the user
@@ -3611,6 +3619,8 @@ class TestRecentPortfolioFixes:
         # The subhead mentions the form was saved as a Kaizen draft so the
         # user knows nothing was submitted/signed.
         assert 'saved as a Kaizen draft' in text
+        assert '📊 1 case this month (Unlimited)' in text
+        assert '1 cases this month' not in text
         assert _DRAFT_DIVIDER not in text
 
     @pytest.mark.asyncio

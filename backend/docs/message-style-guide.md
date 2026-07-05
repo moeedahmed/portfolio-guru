@@ -106,6 +106,8 @@ Draft saved:
 ✅ Kaizen draft saved
 {Form name} saved as a Kaizen draft. 📅 {date}
 {field count} fields completed.
+📊 {case count} case(s) this month ({tier})
+📎 Attachment not added: {reason}. Draft saved without it.
 ```
 
 Help:

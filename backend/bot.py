@@ -10294,6 +10294,29 @@ def _attachment_path_with_original_name(path: str, original_name: str) -> str:
     return named_path
 
 
+def _format_usage_line(used: int, limit: int, tier_label: str) -> str:
+    case_word = "case" if used == 1 else "cases"
+    if limit == -1:
+        return f"\n\n📊 {used} {case_word} this month ({tier_label})"
+    return f"\n\n📊 {used}/{limit} {case_word} this month ({tier_label})"
+
+
+def _format_attachment_status_line(skipped: list) -> str:
+    """Return a post-save attachment note without making the save look failed."""
+    for item in skipped:
+        item_text = str(item).lower()
+        if "attachment" not in item_text:
+            continue
+        if "file missing" in item_text:
+            reason = "file was no longer available"
+        elif "unsupported type" in item_text:
+            reason = "unsupported file type"
+        else:
+            reason = "Kaizen could not add it"
+        return f"\n\n📎 Attachment not added: {reason}. Draft saved without it."
+    return ""
+
+
 async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle 'File this draft' approval."""
     query = update.callback_query
@@ -10704,10 +10727,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             await record_case_filed(user_id, form_type, "filed")
             allowed, used, limit, tier = await check_can_file(user_id)
             tier_label = {"free": "Free tier", "pro": "Pro", "pro_plus": "Unlimited"}.get(tier, tier)
-            if limit == -1:
-                usage_line = f"\n\n📊 {used} cases this month ({tier_label})"
-            else:
-                usage_line = f"\n\n📊 {used}/{limit} cases this month ({tier_label})"
+            usage_line = _format_usage_line(used, limit, tier_label)
         except Exception:
             logger.warning("Usage tracking failed", exc_info=True)
 
@@ -10769,17 +10789,13 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         # draft preview the user just approved.
         filled_count = len(filled)
         fields_summary = f"\n{filled_count} field{'s' if filled_count != 1 else ''} completed." if filled_count > 0 else ""
-        attachment_skipped_msg = ""
-        for s in skipped:
-            if "attachment" in str(s).lower():
-                attachment_skipped_msg = f"\n\n⚠️ Attachment skipped: {str(s).replace('attachment (', '').replace(')', '')}."
-                break
+        attachment_status_line = _format_attachment_status_line(skipped)
         msg = (
             f"✅ Kaizen draft saved\n"
             f"{form_name} saved as a Kaizen draft.{summary}{fields_summary}"
             f"{date_default_note}"
             f"{usage_line}{observation_line}"
-            f"{attachment_skipped_msg}"
+            f"{attachment_status_line}"
         )
         status_line = "✅ Draft saved."
     elif status == "partial":
@@ -10841,11 +10857,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             # confirmation doesn't visually merge with the approved draft
             # above it, and keep the review guidance in its own block so it
             # reads as guidance, not as draft content.
-            attachment_skipped_msg = ""
-            for s in skipped:
-                if "attachment" in str(s).lower():
-                    attachment_skipped_msg = f"\n\n⚠️ Attachment skipped: {str(s).replace('attachment (', '').replace(')', '')}."
-                    break
+            attachment_status_line = _format_attachment_status_line(skipped)
             msg = (
                 f"📥 Draft saved in Kaizen\n"
                 f"{form_name}\n\n"
@@ -10853,7 +10865,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 f"{fields_filled_str} from your case. "
                 f"{review_clause}: {skipped_display}.\n\n"
                 f"{action_line}{date_default_note}{usage_line}"
-                f"{attachment_skipped_msg}"
+                f"{attachment_status_line}"
             )
             status_line = "⚠️ Filing needs manual review."
     else:

@@ -882,6 +882,7 @@ async def test_filing_handles_missing_attachment_gracefully():
     route_mock.assert_called_once()
     assert route_mock.call_args[1].get("attachment_path") is None
     
-    # Verify that the user was notified about the skipped attachment in the final message
-    any_missing_msg = any("Attachment skipped: file missing" in str(msg) for msg in sim.messages_sent)
-    assert any_missing_msg
+    # Verify that the user was notified without making the saved draft feel failed.
+    final_text = _all_visible_text(sim)
+    assert "📎 Attachment not added: file was no longer available. Draft saved without it." in final_text
+    assert "Attachment skipped" not in final_text
