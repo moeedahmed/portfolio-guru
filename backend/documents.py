@@ -162,7 +162,19 @@ def get_supported_extensions() -> list:
 
 def get_supported_attachment_extensions() -> list:
     """Return file extensions Kaizen can receive as evidence attachments."""
-    return get_supported_extensions() + [".jpg", ".jpeg", ".png", ".gif", ".webp"]
+    return get_supported_extensions() + [
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".webp",
+        ".mp4",
+        ".m4v",
+        ".mov",
+        ".webm",
+        ".3gp",
+        ".3gpp",
+    ]
 
 
 def is_supported_document(filename: str) -> bool:

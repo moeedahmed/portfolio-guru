@@ -271,7 +271,7 @@ async def test_remove_image_deletes_private_chat_photo_message_and_cache():
     assert result == AWAIT_CASE_INPUT
     assert not os.path.exists(temp_path)
     context.bot.delete_message.assert_awaited_once_with(chat_id=sim.user_id, message_id=123)
-    assert "Removed that image. Send the anonymised case details" in sim.get_last_text()
+    assert "↩️ Removed that image. Send the anonymised case details" in sim.get_last_text()
 
 
 @pytest.mark.asyncio
@@ -297,7 +297,7 @@ async def test_remove_image_clears_draft_without_delete_attempt_outside_private_
     assert result == AWAIT_CASE_INPUT
     assert not os.path.exists(temp_path)
     context.bot.delete_message.assert_not_awaited()
-    assert "Removed that image from the draft" in sim.get_last_text()
+    assert "↩️ Removed that image from the draft" in sim.get_last_text()
 
 
 @pytest.mark.asyncio
@@ -381,10 +381,55 @@ async def test_video_attach_only_waits_for_user_context_without_extracting():
     image_extract.assert_not_called()
     assert context.user_data["attachment_path"] == temp_path
     assert context.user_data["attachment_name"] == "portfolio-video.mp4"
+    assert context.user_data["attachment_kind"] == "video"
     assert "case_text" not in context.user_data
     assert "will be attached to the Kaizen draft" in sim.get_last_text()
     assert "won't interpret clinical videos" in sim.get_last_text()
     assert "portfolio-video.mp4" not in _all_visible_text(sim)
+
+    if os.path.exists(temp_path):
+        os.unlink(temp_path)
+
+
+@pytest.mark.asyncio
+async def test_video_attach_blocks_symptom_fragments_before_drafting():
+    sim = BotSimulator()
+    context = sim._make_context()
+    attach_update = sim._make_callback_update("DOCUSE|attach")
+
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
+        temp_path = f.name
+        f.write(b"dummy video content")
+    context.user_data["_pending_doc"] = {
+        "path": temp_path,
+        "name": "portfolio-video.mp4",
+        "kind": "video",
+    }
+
+    attach_result = await handle_document_intent(attach_update, context)
+    assert attach_result == AWAIT_CASE_INPUT
+
+    text_update = sim._make_text_update(
+        "Okay, so I saw a case that I was surprised with: chest pain, "
+        "shortness of breath, fever, fall. Turn that into a case"
+    )
+
+    with patch('bot.has_credentials', return_value=True), \
+         patch('bot.consent.has_current_consent', new=AsyncMock(return_value=True)), \
+         patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+         patch('bot.classify_intent', new=AsyncMock(return_value="case")), \
+         patch('bot.recommend_form_types', new=AsyncMock()) as recommend_mock:
+        result = await handle_case_input(text_update, context)
+
+    assert result == AWAIT_CASE_INPUT
+    recommend_mock.assert_not_awaited()
+    assert context.user_data["attachment_path"] == temp_path
+    assert context.user_data["attachment_name"] == "portfolio-video.mp4"
+    assert context.user_data["attachment_kind"] == "video"
+    text = _all_visible_text(sim)
+    assert "what the video shows" in text
+    assert "what you did or decided" in text
+    assert "Drafted" not in text
 
     if os.path.exists(temp_path):
         os.unlink(temp_path)
@@ -678,6 +723,47 @@ async def test_filing_call_receives_attachment_path():
     if os.path.exists(temp_path):
         os.unlink(temp_path)
     if os.path.exists(filed_path):
+        os.unlink(filed_path)
+        os.rmdir(os.path.dirname(filed_path))
+
+
+@pytest.mark.asyncio
+async def test_filing_call_accepts_video_attachment_path():
+    """MP4 video attachments should reach the Kaizen filer instead of being skipped."""
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_callback_update("ACTION|approve")
+
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
+        temp_path = f.name
+        f.write(b"dummy video content")
+
+    context.user_data["attachment_path"] = temp_path
+    context.user_data["attachment_name"] = "portfolio-video.mp4"
+    context.user_data["attachment_kind"] = "video"
+    context.user_data["chosen_form"] = "CBD"
+
+    draft = FormDraft(form_type="CBD", fields={
+        "date_of_encounter": "2026-05-27",
+        "reflection": "I learned to document my own interpretation before attaching clinical videos.",
+    })
+
+    with patch('bot.get_credentials', return_value=("testuser", "testpass")), \
+         patch('bot._load_draft', return_value=draft), \
+         patch('bot.route_filing', new=AsyncMock(return_value={"status": "success", "filled": ["reflection", "attachment"], "skipped": []})) as route_mock, \
+         patch('bot.record_case_filed', new=AsyncMock()), \
+         patch('bot.check_can_file', new=AsyncMock(return_value=(True, 1, 10, 'free'))):
+        await handle_approval_approve(update, context)
+
+    route_mock.assert_called_once()
+    filed_path = route_mock.call_args[1].get("attachment_path")
+    assert filed_path is not None
+    assert os.path.basename(filed_path) == "portfolio-video.mp4"
+    assert "Attachment skipped" not in _all_visible_text(sim)
+
+    if os.path.exists(temp_path):
+        os.unlink(temp_path)
+    if filed_path and os.path.exists(filed_path):
         os.unlink(filed_path)
         os.rmdir(os.path.dirname(filed_path))
 

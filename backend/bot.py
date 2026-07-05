@@ -883,6 +883,7 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
             "last_bot_chat_id",
             "attachment_path",
             "attachment_name",
+            "attachment_kind",
             "needs_reflection_detail",
         ):
             context.user_data.pop(key, None)
@@ -7733,6 +7734,67 @@ def _looks_like_clinical_case(case_text: str) -> bool:
     return len(case_text.split()) >= _MIN_CASE_WORDS
 
 
+_VIDEO_CONTEXT_ACTION_MARKERS = (
+    "assessed",
+    "assessment",
+    "examined",
+    "reviewed",
+    "interpreted",
+    "found",
+    "showed",
+    "demonstrated",
+    "performed",
+    "scanned",
+    "discussed",
+    "escalated",
+    "referred",
+    "arranged",
+    "requested",
+    "treated",
+    "managed",
+    "gave",
+    "admitted",
+    "discharged",
+    "safety net",
+    "safety-net",
+    "diagnosed",
+    "documented",
+    "learned",
+    "learnt",
+    "reflected",
+    "next time",
+    "in future",
+    "outcome",
+)
+
+
+def _has_video_attachment_for_drafting(context) -> bool:
+    if context.user_data.get("attachment_kind") == "video":
+        return True
+    attachment_name = str(context.user_data.get("attachment_name") or "").lower()
+    return attachment_name.endswith(_VIDEO_DOCUMENT_EXTENSIONS)
+
+
+def _video_context_has_user_grounding(case_text: str) -> bool:
+    text = " ".join(str(case_text or "").lower().split())
+    words = text.split()
+    if len(words) < 12:
+        return False
+    return any(marker in text for marker in _VIDEO_CONTEXT_ACTION_MARKERS)
+
+
+def _video_context_detail_request() -> str:
+    return (
+        "📋 I need your own clinical context before drafting from a video attachment.\n\n"
+        "Send rough notes with: what the video shows, what you did or decided, the outcome, "
+        "and what you learned. I won't interpret the video myself."
+    )
+
+
+def _attached_video_context_needs_more_detail(context, case_text: str) -> bool:
+    return _has_video_attachment_for_drafting(context) and not _video_context_has_user_grounding(case_text)
+
+
 async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: int, case_text: str, form_type: str):
     """Create an explicit-only draft snapshot for the selected form.
 
@@ -7838,6 +7900,14 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
 
     explicit_form = extract_explicit_form_type(case_text)
     if explicit_form:
+        if _attached_video_context_needs_more_detail(context, case_text):
+            await _send_latest_message(
+                message,
+                context,
+                _video_context_detail_request(),
+                reply_markup=_KB_CANCEL,
+            )
+            return AWAIT_CASE_INPUT
         context.user_data["chosen_form"] = explicit_form
         prompt_text = (
             f"I’ll use *{_form_display_name(explicit_form)}* for this entry.\n\n"
@@ -7855,9 +7925,20 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
 
     if not _looks_like_clinical_case(case_text):
         await message.reply_text(
-            render_message("thin_case_detail_request")
+            _video_context_detail_request()
+            if _has_video_attachment_for_drafting(context)
+            else render_message("thin_case_detail_request")
         )
-        return ConversationHandler.END
+        return AWAIT_CASE_INPUT if _has_video_attachment_for_drafting(context) else ConversationHandler.END
+
+    if _attached_video_context_needs_more_detail(context, case_text):
+        await _send_latest_message(
+            message,
+            context,
+            _video_context_detail_request(),
+            reply_markup=_KB_CANCEL,
+        )
+        return AWAIT_CASE_INPUT
 
     training_level = get_training_level(user_id)
     allowed_forms = _allowed_forms_for_training_level(training_level)
@@ -8223,11 +8304,11 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
             pass
         if original_removed:
             await query.message.reply_text(
-                f"Removed that {attachment_label}. Send the anonymised case details when you're ready."
+                f"↩️ Removed that {attachment_label}. Send the anonymised case details when you're ready."
             )
         else:
             await query.message.reply_text(
-                f"Removed that {attachment_label} from the draft. Send the anonymised case details when you're ready."
+                f"↩️ Removed that {attachment_label} from the draft. Send the anonymised case details when you're ready."
             )
         return AWAIT_CASE_INPUT
 
@@ -8240,6 +8321,7 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
     if mode in {"attach", "both"}:
         context.user_data["attachment_path"] = file_path
         context.user_data["attachment_name"] = file_name
+        context.user_data["attachment_kind"] = attachment_kind
 
     if mode == "attach":
         extra_context = ""
@@ -8351,10 +8433,12 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
         if not _gathering_case_active(context):
             existing_attachment_path = context.user_data.get("attachment_path")
             existing_attachment_name = context.user_data.get("attachment_name")
+            existing_attachment_kind = context.user_data.get("attachment_kind")
             _clear_case_review_state(context, keep_case=False)
             if existing_attachment_path:
                 context.user_data["attachment_path"] = existing_attachment_path
                 context.user_data["attachment_name"] = existing_attachment_name
+                context.user_data["attachment_kind"] = existing_attachment_kind
         _append_gathering_case(context, case_text, input_source)
         reply_text, reply_markup = _gathering_reply(context)
         await query.edit_message_text(reply_text, reply_markup=reply_markup)
@@ -8389,6 +8473,15 @@ async def _accumulate_and_refresh(update: Update, context: ContextTypes.DEFAULT_
     # Combine all inputs
     combined = combine_case_inputs(initial_case, additions)
     context.user_data["case_text"] = combined
+
+    if _attached_video_context_needs_more_detail(context, combined):
+        await _send_latest_message(
+            update.message,
+            context,
+            _video_context_detail_request(),
+            reply_markup=_KB_CANCEL,
+        )
+        return AWAIT_CASE_INPUT
 
     form_name = _form_display_name(chosen_form)
     await update.effective_chat.send_action(constants.ChatAction.TYPING)
@@ -9578,14 +9671,17 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if _gathering_enabled(context) and not (chosen_form and context.user_data.get("awaiting_detail")):
         existing_attachment_path = context.user_data.get("attachment_path")
         existing_attachment_name = context.user_data.get("attachment_name")
+        existing_attachment_kind = context.user_data.get("attachment_kind")
         if not _gathering_case_active(context):
             _clear_case_review_state(context, keep_case=False)
         if attachment_path_to_save:
             context.user_data["attachment_path"] = attachment_path_to_save
             context.user_data["attachment_name"] = attachment_name_to_save
+            context.user_data["attachment_kind"] = "document"
         elif existing_attachment_path:
             context.user_data["attachment_path"] = existing_attachment_path
             context.user_data["attachment_name"] = existing_attachment_name
+            context.user_data["attachment_kind"] = existing_attachment_kind
         _append_gathering_case(context, case_text, input_source)
         if context.user_data.pop("_gathering_ack_used", False):
             return AWAIT_GATHERING
@@ -9598,6 +9694,12 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if chosen_form and context.user_data.get("awaiting_detail"):
         context.user_data["case_text"] = case_text
         context.user_data["case_input_source"] = input_source
+        if _attached_video_context_needs_more_detail(context, case_text):
+            await update.message.reply_text(
+                _video_context_detail_request(),
+                reply_markup=_KB_CANCEL,
+            )
+            return AWAIT_CASE_INPUT
         await update.effective_chat.send_action(constants.ChatAction.TYPING)
         ack = await update.message.reply_text(f"🧩 Updating {_form_display_name(chosen_form)} draft…")
         context.user_data["last_bot_msg_id"] = ack.message_id
@@ -9622,13 +9724,16 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     active_status_chat = context.user_data.get("status_msg_chat")
     existing_attachment_path = context.user_data.get("attachment_path")
     existing_attachment_name = context.user_data.get("attachment_name")
+    existing_attachment_kind = context.user_data.get("attachment_kind")
     _clear_case_review_state(context, keep_case=False)
     if attachment_path_to_save:
         context.user_data["attachment_path"] = attachment_path_to_save
         context.user_data["attachment_name"] = attachment_name_to_save
+        context.user_data["attachment_kind"] = "document"
     elif existing_attachment_path:
         context.user_data["attachment_path"] = existing_attachment_path
         context.user_data["attachment_name"] = existing_attachment_name
+        context.user_data["attachment_kind"] = existing_attachment_kind
     if active_msg_id and active_chat_id:
         context.user_data["last_bot_msg_id"] = active_msg_id
         context.user_data["last_bot_chat_id"] = active_chat_id
