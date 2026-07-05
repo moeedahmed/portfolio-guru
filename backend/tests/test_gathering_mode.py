@@ -171,6 +171,58 @@ async def test_gathering_reply_offers_done_button(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_weak_first_text_gets_context_gate_not_draft_button(monkeypatch):
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_text_update("I saw a dog and cat fight and the cat died.")
+
+    with patch("bot.has_credentials", return_value=True), \
+         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 0, 10, "free"))), \
+         patch("bot._process_case_text", new=AsyncMock()) as process_case:
+        result = await handle_case_input(update, context)
+
+    assert result == AWAIT_GATHERING
+    process_case.assert_not_awaited()
+    assert "More clinical context needed" in sim.get_last_text()
+    assert "patient/presentation" in sim.get_last_text()
+    assert ("✅ Draft now", "GATHER|done") not in sim.get_last_buttons()
+    assert context.user_data["gathering_case"]["parts"][0]["text"].startswith("I saw a dog")
+
+
+@pytest.mark.asyncio
+async def test_gathering_switches_to_draft_button_once_context_is_grounded(monkeypatch):
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+
+    first = sim._make_text_update("I saw a dog and cat fight and the cat died.")
+    with patch("bot.has_credentials", return_value=True), \
+         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 0, 10, "free"))):
+        result = await handle_case_input(first, context)
+
+    assert result == AWAIT_GATHERING
+    assert "More clinical context needed" in sim.get_last_text()
+    first_prompt_id = context.user_data["last_bot_msg_id"]
+
+    second = sim._make_text_update(
+        "A patient presented to ED after a dog bite to the face with airway swelling. "
+        "I assessed the airway, gave antibiotics and tetanus cover, called anaesthetics, "
+        "and the patient was intubated in resus before ICU transfer. My learning was "
+        "to escalate facial animal bites early because swelling can progress quickly."
+    )
+    result = await handle_gathering_input(second, context)
+
+    assert result == AWAIT_GATHERING
+    assert context.user_data["last_bot_msg_id"] == first_prompt_id
+    assert "Captured" in sim.get_last_text()
+    assert sim.get_last_buttons() == [
+        ("✅ Draft now", "GATHER|done"),
+        ("❌ Cancel", "ACTION|cancel"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_capability_question_does_not_start_gathering_or_show_draft_button(monkeypatch):
     monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
     sim = BotSimulator()
@@ -273,8 +325,8 @@ async def test_voice_transcript_fragment_asks_for_grounding_before_recommendatio
     assert result == AWAIT_CASE_INPUT
     recommend.assert_not_awaited()
     assert context.user_data["awaiting_source_detail"] is True
-    assert "voice transcript" in sim.get_last_text()
-    assert "isn't enough grounded detail to draft safely" in sim.get_last_text()
+    assert "More clinical context needed" in sim.get_last_text()
+    assert "patient/presentation" in sim.get_last_text()
 
 
 @pytest.mark.asyncio
@@ -296,7 +348,8 @@ async def test_voice_transcript_explicit_procedural_log_fragment_does_not_open_d
     recommend.assert_not_awaited()
     assert context.user_data.get("chosen_form") is None
     assert ("✅ Draft Procedural Log", "FORM|PROC_LOG") not in sim.get_last_buttons()
-    assert "isn't enough grounded detail to draft safely" in sim.get_last_text()
+    assert "More clinical context needed" in sim.get_last_text()
+    assert "patient/presentation" in sim.get_last_text()
 
 
 @pytest.mark.asyncio
@@ -583,8 +636,11 @@ async def test_second_text_addition_disarms_previous_gathering_prompt(monkeypatc
 
     assert result == AWAIT_GATHERING
     context.bot.edit_message_text.assert_awaited()
-    assert context.bot.edit_message_text.await_args.kwargs["message_id"] == 123
-    assert context.bot.edit_message_text.await_args.kwargs["reply_markup"] is None
+    assert any(
+        call.kwargs.get("message_id") == 123
+        and call.kwargs.get("reply_markup") is None
+        for call in context.bot.edit_message_text.await_args_list
+    )
     assert context.user_data["gathering_msg_id"] != 123
     assert sim.get_last_buttons() == [
         ("✅ Draft now", "GATHER|done"),
@@ -611,8 +667,11 @@ async def test_voice_addition_disarms_previous_gathering_prompt(monkeypatch):
 
     assert result == AWAIT_GATHERING
     context.bot.edit_message_text.assert_awaited()
-    assert context.bot.edit_message_text.await_args.kwargs["message_id"] == 123
-    assert context.bot.edit_message_text.await_args.kwargs["reply_markup"] is None
+    assert any(
+        call.kwargs.get("message_id") == 123
+        and call.kwargs.get("reply_markup") is None
+        for call in context.bot.edit_message_text.await_args_list
+    )
     assert context.user_data["gathering_msg_id"] != 123
     assert context.user_data["gathering_prompt_refs"] == [{
         "message_id": context.user_data["gathering_msg_id"],

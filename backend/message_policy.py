@@ -128,8 +128,7 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         message_class=MessageClass.TEMPLATED,
         text=(
             "📋 More clinical context needed\n\n"
-            "I read {source_label}, but there isn't enough grounded detail to draft safely.\n\n"
-            "Send rough notes with: patient/presentation, what you did or decided, outcome, and what you learned."
+            "Send rough notes with: patient/presentation, what you did, outcome, and learning."
         ),
         safety_critical=True,
     ),

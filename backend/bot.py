@@ -1504,6 +1504,39 @@ def _gathering_reply(context) -> tuple[str, InlineKeyboardMarkup]:
     return render_message("gathering_captured"), _gathering_done_keyboard()
 
 
+def _gathering_case_has_draftable_context(context) -> bool:
+    case_text, _ = _combined_gathering_case(context)
+    return _case_context_has_user_grounding(case_text)
+
+
+async def _show_gathering_context_request(message, context, input_source: str) -> int:
+    """Keep gathering active, but do not expose Draft now until context is credible."""
+    await _delete_previous_gathering_message(context)
+    prompt_msg = await _send_latest_message(
+        message,
+        context,
+        _source_context_detail_request(input_source),
+        reply_markup=_KB_CANCEL,
+    )
+    _track_source_detail_prompt(context, prompt_msg.message_id, prompt_msg.chat_id)
+    return AWAIT_GATHERING
+
+
+async def _show_gathering_ready_prompt(message, context) -> int:
+    """Switch the active context prompt into the normal ready-to-draft prompt."""
+    await _delete_previous_gathering_message(context)
+    context.user_data.pop(_SOURCE_DETAIL_PROMPTS_KEY, None)
+    reply_text, reply_markup = _gathering_reply(context)
+    gathering_msg = await _send_latest_message(
+        message,
+        context,
+        reply_text,
+        reply_markup=reply_markup,
+    )
+    _track_gathering_prompt(context, gathering_msg.message_id, gathering_msg.chat_id)
+    return AWAIT_GATHERING
+
+
 def _attachment_captured_reply(attachment_label: str, *, is_image: bool, is_video: bool) -> tuple[str, InlineKeyboardMarkup]:
     context_note = ""
     if is_image:
@@ -9561,22 +9594,17 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 tmp_path = tmp.name
                 await voice_file.download_to_drive(tmp_path)
                 case_text = await transcribe_voice(tmp_path)
-            if (
-                _gathering_enabled(context)
-                and not source_detail_retry
-                and not (context.user_data.get("chosen_form") and context.user_data.get("awaiting_detail"))
-            ):
-                await _delete_previous_gathering_message(context)
-                reply_text, reply_markup = _gathering_reply(context)
-                await ack.edit_text(reply_text, reply_markup=reply_markup)
-                _track_gathering_prompt(context, ack.message_id, ack.chat_id)
-                context.user_data["_gathering_ack_used"] = True
-            else:
-                await ack.edit_text(
-                    "🎙️ Voice note read. Checking clinical detail…"
-                    if source_detail_retry
-                    else "🎙️ Voice note read. Finding matching forms…"
+            await ack.edit_text(
+                "🎙️ Voice note read. Checking clinical detail…"
+                if (
+                    source_detail_retry
+                    or (
+                        _gathering_enabled(context)
+                        and not (context.user_data.get("chosen_form") and context.user_data.get("awaiting_detail"))
+                    )
                 )
+                else "🎙️ Voice note read. Finding matching forms…"
+            )
             if source_detail_retry:
                 await _retire_active_source_detail_message(context)
             _track_latest_message(context, ack)
@@ -9920,13 +9948,12 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             context.user_data["attachment_name"] = existing_attachment_name
             context.user_data["attachment_kind"] = existing_attachment_kind
         _append_gathering_case(context, case_text, input_source)
-        if context.user_data.pop("_gathering_ack_used", False):
-            return AWAIT_GATHERING
-        await _delete_previous_gathering_message(context)
-        reply_text, reply_markup = _gathering_reply(context)
-        gathering_msg = await update.message.reply_text(reply_text, reply_markup=reply_markup)
-        _track_gathering_prompt(context, gathering_msg.message_id, gathering_msg.chat_id)
-        return AWAIT_GATHERING
+        combined_case_text, combined_source = _combined_gathering_case(context)
+        context.user_data["case_text"] = combined_case_text
+        context.user_data["case_input_source"] = combined_source
+        if not _gathering_case_has_draftable_context(context):
+            return await _show_gathering_context_request(update.message, context, combined_source)
+        return await _show_gathering_ready_prompt(update.message, context)
 
     if chosen_form and context.user_data.get("awaiting_detail"):
         context.user_data["case_text"] = case_text
@@ -10159,10 +10186,12 @@ async def handle_gathering_input(update: Update, context: ContextTypes.DEFAULT_T
         return AWAIT_GATHERING
 
     _append_gathering_case(context, raw_text, "text")
-    await _delete_previous_gathering_message(context)
-    gathering_msg = await update.message.reply_text(reply.full_text(), reply_markup=_gathering_done_keyboard())
-    _track_gathering_prompt(context, gathering_msg.message_id, gathering_msg.chat_id)
-    return AWAIT_GATHERING
+    combined_case_text, combined_source = _combined_gathering_case(context)
+    context.user_data["case_text"] = combined_case_text
+    context.user_data["case_input_source"] = combined_source
+    if not _gathering_case_has_draftable_context(context):
+        return await _show_gathering_context_request(update.message, context, combined_source)
+    return await _show_gathering_ready_prompt(update.message, context)
 
 
 async def handle_form_search_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
