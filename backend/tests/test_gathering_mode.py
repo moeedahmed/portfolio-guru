@@ -335,6 +335,101 @@ async def test_grounded_voice_transcript_can_reach_recommendations(monkeypatch):
     assert ("✅ Use best fit: Procedural Log", "FORM|best") in sim.get_last_buttons()
 
 
+def test_source_grounding_accepts_detailed_dog_bite_case_not_animal_story():
+    assert not bot._case_context_has_user_grounding(
+        "I saw a dog and cat fight and the cat died. Other cats came to take revenge."
+    )
+    assert not bot._case_context_has_user_grounding(
+        "There was a patient who was bitten by that injured dog."
+    )
+    assert bot._case_context_has_user_grounding(
+        "A patient presented to ED after being bitten on the face by an injured dog. "
+        "They had facial wounds and airway swelling, so I assessed the airway, called "
+        "anaesthetics, gave antibiotics and tetanus cover, and the patient was intubated "
+        "in resus before transfer to ICU. I learned to escalate facial animal bites early "
+        "because airway compromise can evolve quickly."
+    )
+
+
+@pytest.mark.asyncio
+async def test_source_detail_voice_retry_retires_previous_prompt(monkeypatch):
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["case_text"] = "I saw a dog and cat fight and the cat died."
+    context.user_data["case_input_source"] = "voice"
+    context.user_data["awaiting_source_detail"] = True
+    context.user_data["last_bot_msg_id"] = 123
+    context.user_data["last_bot_chat_id"] = sim.user_id
+    context.user_data["status_msg_id"] = 123
+    context.user_data["status_msg_chat"] = sim.user_id
+
+    update = _make_voice_update(sim)
+
+    with patch("bot.has_credentials", return_value=True), \
+         patch("bot.consent.has_current_consent", new=AsyncMock(return_value=True)), \
+         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 0, 10, "free"))), \
+         patch("bot.transcribe_voice", new=AsyncMock(return_value="Other cats came to take revenge and killed the dog.")), \
+         patch("bot.recommend_form_types", new=AsyncMock()) as recommend:
+        result = await handle_case_input(update, context)
+
+    assert result == AWAIT_CASE_INPUT
+    recommend.assert_not_awaited()
+    assert "Other cats came to take revenge" in context.user_data["case_text"]
+    edit_calls = context.bot.edit_message_text.await_args_list
+    assert any(call.kwargs.get("message_id") == 123 for call in edit_calls)
+    assert any("Added to this case" in call.kwargs.get("text", "") for call in edit_calls)
+    context.bot.delete_message.assert_awaited()
+    assert "More clinical context needed" in sim.get_last_text()
+
+
+@pytest.mark.asyncio
+async def test_source_detail_retry_dog_bite_case_can_reach_recommendations(monkeypatch):
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["case_text"] = (
+        "I saw a dog and cat fight and the cat died.\n\n"
+        "Other cats came to take revenge and killed the dog.\n\n"
+        "There was a patient who was bitten by that injured dog."
+    )
+    context.user_data["case_input_source"] = "mixed"
+    context.user_data["awaiting_source_detail"] = True
+    context.user_data["last_bot_msg_id"] = 123
+    context.user_data["last_bot_chat_id"] = sim.user_id
+    context.user_data["status_msg_id"] = 123
+    context.user_data["status_msg_chat"] = sim.user_id
+
+    update = sim._make_text_update(
+        "The patient presented to ED with bites on the face and airway swelling. "
+        "I assessed the airway, gave antibiotics and tetanus cover, called anaesthetics, "
+        "and the patient was intubated in resus before transfer to ICU. My learning was "
+        "to escalate facial animal bites early because swelling can progress quickly."
+    )
+
+    from extractor import FORM_UUIDS
+    from models import FormTypeRecommendation
+
+    recommendations = [
+        FormTypeRecommendation(
+            form_type="CBD",
+            rationale="Grounded dog-bite airway case.",
+            uuid=FORM_UUIDS.get("CBD"),
+        )
+    ]
+    with patch("bot.has_credentials", return_value=True), \
+         patch("bot.consent.has_current_consent", new=AsyncMock(return_value=True)), \
+         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 0, 10, "free"))), \
+         patch("bot.recommend_form_types", new=AsyncMock(return_value=recommendations)) as recommend, \
+         patch("bot.get_training_level", return_value="ST5"), \
+         patch("bot.get_curriculum", return_value="2025"):
+        result = await handle_case_input(update, context)
+
+    assert result == AWAIT_FORM_CHOICE
+    recommend.assert_awaited_once()
+    assert context.user_data.get("awaiting_source_detail") is None
+    assert "intubated in resus" in context.user_data["case_text"]
+    assert ("✅ Use best fit: CBD", "FORM|best") in sim.get_last_buttons()
+
+
 @pytest.mark.asyncio
 async def test_stale_gather_done_callback_keeps_current_case(monkeypatch):
     """Old Draft now buttons must not finish the latest gathering case."""

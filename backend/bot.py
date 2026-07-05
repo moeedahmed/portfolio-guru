@@ -709,6 +709,36 @@ async def _send_latest_message(message, context, text, reply_markup=None, parse_
     return msg
 
 
+async def _retire_active_source_detail_message(context) -> None:
+    """Remove the previous source-detail prompt before a new voice ack becomes active."""
+    msg_id = context.user_data.get("last_bot_msg_id")
+    chat_id = context.user_data.get("last_bot_chat_id")
+    if not msg_id or not chat_id:
+        return
+    try:
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=msg_id,
+            text="📥 Added to this case. Use the latest prompt below.",
+            reply_markup=None,
+        )
+    except Exception:
+        try:
+            await context.bot.edit_message_reply_markup(
+                chat_id=chat_id,
+                message_id=msg_id,
+                reply_markup=None,
+            )
+        except Exception:
+            pass
+    try:
+        await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+    except Exception:
+        pass
+    for key in ("last_bot_msg_id", "last_bot_chat_id", "status_msg_id", "status_msg_chat"):
+        context.user_data.pop(key, None)
+
+
 async def _send_pending_bundle_status(message, context, text, reply_markup=None, parse_mode=None):
     """Edit the current bundle status only, otherwise send a fresh bundle status."""
     chat_id = getattr(message, "chat_id", None) or getattr(getattr(message, "chat", None), "id", None)
@@ -1191,6 +1221,21 @@ _RICH_CLINICAL_EVIDENCE_KEYWORDS = (
     "analgesia",
     "anticoagulation",
     "safety-netting",
+    "antibiotic",
+    "tetanus",
+    "wound",
+    "bite",
+    "bitten",
+    "injury",
+    "injured",
+    "facial",
+    "face",
+    "airway",
+    "intubat",
+    "ventilat",
+    "hospital",
+    "icu",
+    "anaesthetic",
     "senior",
     "supervisor",
     "reflection",
@@ -7787,6 +7832,11 @@ _VIDEO_CONTEXT_ACTION_MARKERS = (
     "next time",
     "in future",
     "outcome",
+    "intubat",
+    "airway",
+    "ventilat",
+    "called",
+    "led",
 )
 
 
@@ -7838,6 +7888,10 @@ _SOURCE_OUTCOME_OR_REFLECTION_MARKERS = (
     "in future",
     "would do",
     "will do",
+    "learning",
+    "realised",
+    "realized",
+    "changed my practice",
 )
 
 
@@ -9147,9 +9201,12 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     # Clear post_reset flag if set (belt and braces)
     context.user_data.pop("post_reset", None)
 
-    # Clear stale status state from previous sessions, but keep the active
-    # bundle message editable while the user is sending multiple files.
-    if not context.user_data.get("pending_case_bundle"):
+    # Clear stale status state from previous sessions, but keep active prompts
+    # editable while the user is adding bundle/source-detail context.
+    if not (
+        context.user_data.get("pending_case_bundle")
+        or context.user_data.get("awaiting_source_detail")
+    ):
         context.user_data.pop("status_msg_id", None)
         context.user_data.pop("status_msg_chat", None)
         context.user_data.pop("last_bot_msg_id", None)
@@ -9485,6 +9542,8 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     if source_detail_retry
                     else "🎙️ Voice note read. Finding matching forms…"
                 )
+            if source_detail_retry:
+                await _retire_active_source_detail_message(context)
             _track_latest_message(context, ack)
         except Exception as e:
             await ack.edit_text(
