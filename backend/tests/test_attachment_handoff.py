@@ -157,6 +157,57 @@ async def test_video_case_stores_pending_video_and_asks_attach_intent():
 
 
 @pytest.mark.asyncio
+async def test_video_sent_as_document_uses_video_intent_not_voice_transcription():
+    """Android/file-picker MP4 uploads can arrive as Telegram documents."""
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_text_update('')
+
+    document = MagicMock()
+    document.file_name = "PXL_20260705_130629103.TS.mp4"
+    document.mime_type = "video/mp4"
+    file_obj = MagicMock()
+
+    async def fake_download(path):
+        with open(path, "wb") as handle:
+            handle.write(b"dummy video content")
+
+    file_obj.download_to_drive = AsyncMock(side_effect=fake_download)
+    document.get_file = AsyncMock(return_value=file_obj)
+
+    update.message.text = None
+    update.message.voice = None
+    update.message.audio = None
+    update.message.photo = []
+    update.message.video = None
+    update.message.document = document
+    update.message.caption = "POCUS clip with my findings in text."
+
+    with patch('bot.has_credentials', return_value=True), \
+         patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+         patch('bot.transcribe_voice', new=AsyncMock()) as transcribe_mock, \
+         patch('bot.extract_from_document', new=AsyncMock()) as document_extract:
+        result = await handle_case_input(update, context)
+
+    assert result == AWAIT_DOC_INTENT
+    transcribe_mock.assert_not_called()
+    document_extract.assert_not_called()
+    pending_doc = context.user_data["_pending_doc"]
+    assert pending_doc["kind"] == "video"
+    assert pending_doc["name"] == "portfolio-video.mp4"
+    assert context.user_data["_pending_doc_context"] == update.message.caption
+    buttons = sim.get_last_buttons()
+    assert ("📎 Attach video", "DOCUSE|attach") in buttons
+    assert ("❌ Remove video", "DOCUSE|ignore") in buttons
+    assert "Couldn't transcribe voice note" not in _all_visible_text(sim)
+    assert "PXL_20260705_130629103.TS.mp4" not in _all_visible_text(sim)
+
+    path = pending_doc["path"]
+    if os.path.exists(path):
+        os.unlink(path)
+
+
+@pytest.mark.asyncio
 async def test_remove_image_deletes_private_chat_photo_message_and_cache():
     sim = BotSimulator()
     context = sim._make_context()

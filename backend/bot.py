@@ -564,6 +564,39 @@ def _track_pending_bundle_message(context, msg):
     context.user_data["pending_bundle_chat_id"] = msg.chat_id
 
 
+_VOICE_DOCUMENT_EXTENSIONS = (".oga", ".ogg", ".opus", ".mp3", ".m4a", ".wav")
+_VIDEO_DOCUMENT_EXTENSIONS = (
+    ".mp4",
+    ".m4v",
+    ".mov",
+    ".webm",
+    ".avi",
+    ".mkv",
+    ".3gp",
+    ".3gpp",
+    ".mpeg",
+    ".mpg",
+)
+
+
+def _document_looks_like_video(document) -> bool:
+    file_name = (getattr(document, "file_name", None) or "").lower()
+    mime_type = (getattr(document, "mime_type", None) or "").lower()
+    return mime_type.startswith("video/") or file_name.endswith(_VIDEO_DOCUMENT_EXTENSIONS)
+
+
+def _video_media_from_message(message):
+    """Return a video attachment, including MP4s Telegram sends as documents."""
+    video = getattr(message, "video", None)
+    if video:
+        return video
+
+    document = getattr(message, "document", None)
+    if document and _document_looks_like_video(document):
+        return document
+    return None
+
+
 def _voice_media_from_message(message):
     """Return a voice-like Telegram attachment, including forwarded audio."""
     voice = getattr(message, "voice", None) or getattr(message, "audio", None)
@@ -571,13 +604,12 @@ def _voice_media_from_message(message):
         return voice
 
     document = getattr(message, "document", None)
-    if not document:
+    if not document or _document_looks_like_video(document):
         return None
 
     file_name = (getattr(document, "file_name", None) or "").lower()
     mime_type = (getattr(document, "mime_type", None) or "").lower()
-    voice_extensions = (".oga", ".ogg", ".opus", ".mp3", ".m4a", ".mp4", ".wav")
-    if mime_type.startswith("audio/") or file_name.endswith(voice_extensions):
+    if mime_type.startswith("audio/") or file_name.endswith(_VOICE_DOCUMENT_EXTENSIONS):
         return document
     return None
 
@@ -9320,13 +9352,13 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
 
-    elif getattr(update.message, "video", None):
+    elif _video_media_from_message(update.message):
         await _delete_previous_gathering_message(context)
         ack = await update.message.reply_text("🎞️ Receiving video…")
         tmp_path = None
         try:
             import shutil
-            video = update.message.video
+            video = _video_media_from_message(update.message)
             video_file = await video.get_file()
             suffix = _video_media_suffix(video)
             with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
@@ -11757,16 +11789,6 @@ def _pending_consent_input_from_update(update: Update) -> dict | None:
         text = message.text.strip()
         return {"kind": "text", "text": text} if text else None
 
-    voice_media = _voice_media_from_message(message)
-    if voice_media:
-        file_id = getattr(voice_media, "file_id", None)
-        if isinstance(file_id, str) and file_id:
-            return {
-                "kind": "voice",
-                "file_id": file_id,
-                "suffix": _voice_media_suffix(voice_media),
-            }
-
     photos = getattr(message, "photo", None) or []
     if photos:
         photo = photos[-1]
@@ -11781,7 +11803,7 @@ def _pending_consent_input_from_update(update: Update) -> dict | None:
                 "source_chat_type": getattr(getattr(message, "chat", None), "type", None),
             }
 
-    video = getattr(message, "video", None)
+    video = _video_media_from_message(message)
     if video:
         file_id = getattr(video, "file_id", None)
         if isinstance(file_id, str) and file_id:
@@ -11793,6 +11815,16 @@ def _pending_consent_input_from_update(update: Update) -> dict | None:
                 "source_chat_id": getattr(message, "chat_id", None),
                 "source_message_id": getattr(message, "message_id", None),
                 "source_chat_type": getattr(getattr(message, "chat", None), "type", None),
+            }
+
+    voice_media = _voice_media_from_message(message)
+    if voice_media:
+        file_id = getattr(voice_media, "file_id", None)
+        if isinstance(file_id, str) and file_id:
+            return {
+                "kind": "voice",
+                "file_id": file_id,
+                "suffix": _voice_media_suffix(voice_media),
             }
 
     document = getattr(message, "document", None)
