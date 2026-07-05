@@ -416,7 +416,7 @@ def _static_nudge_text(stats: dict) -> str:
     if cases > 0:
         lines.append("Keep the momentum going \u2014 just send me what happened.")
     else:
-        lines.append("One case takes 2 minutes. Just send me what happened \u2014 text, voice, photo, or document.")
+        lines.append("One case takes 2 minutes. Just send me what happened \u2014 text, voice, photo, video, or document.")
     return "\n".join(lines)
 
 
@@ -443,7 +443,7 @@ def _build_weekly_digest_text(stats: dict) -> str:
     if cases == 0:
         return (
             "No Portfolio Guru cases filed this week. "
-            "One takes 2 minutes — send text, voice, photo, or document. "
+            "One takes 2 minutes — send text, voice, photo, video, or document. "
             "Tap /health for your full breakdown."
         )
 
@@ -593,6 +593,17 @@ def _voice_media_suffix(media) -> str:
     if "mp4" in mime_type or "m4a" in mime_type:
         return ".m4a"
     return ".ogg"
+
+
+def _video_media_suffix(media) -> str:
+    file_name = getattr(media, "file_name", None) or ""
+    suffix = os.path.splitext(file_name)[1]
+    if suffix:
+        return suffix
+    mime_type = (getattr(media, "mime_type", None) or "").lower()
+    if "quicktime" in mime_type:
+        return ".mov"
+    return ".mp4"
 
 
 async def _send_latest_message(message, context, text, reply_markup=None, parse_mode=None):
@@ -934,7 +945,7 @@ _IDLE_CHAT_RE = re.compile(
 
 _IDLE_CHAT_NUDGE = (
     "🩺 Hi! I'm here when you have case notes ready. "
-    "Send text, voice, photo, or document and I'll turn it into a portfolio draft."
+    "Send text, voice, photo, video, or document and I'll turn it into a portfolio draft."
 )
 
 
@@ -3178,6 +3189,15 @@ def _build_image_intent_keyboard() -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton("📎 Use + attach", callback_data="DOCUSE|both"),
             InlineKeyboardButton("❌ Remove image", callback_data="DOCUSE|ignore"),
+        ],
+    ])
+
+
+def _build_video_intent_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📎 Attach video", callback_data="DOCUSE|attach"),
+            InlineKeyboardButton("❌ Remove video", callback_data="DOCUSE|ignore"),
         ],
     ])
 
@@ -6099,7 +6119,7 @@ async def _clear_local_portfolio_account_data(user_id: int, *, reason: str) -> d
 
 HELP_MSG = f"""📖 *Portfolio Guru help*
 
-Send an anonymised case as text, voice, photo, or document.
+Send an anonymised case as text, voice, photo, video, or document.
 
 Portfolio Guru will suggest the best portfolio form, prepare a draft, and ask before saving anything to Kaizen.
 
@@ -7599,7 +7619,7 @@ async def _handle_reuse_request(update: Update, context: ContextTypes.DEFAULT_TY
     if not last_case:
         await update.message.reply_text(
             "I don't have a previous case to reuse here. Send the case details "
-            "(text, voice, photo, or document) and I'll draft it for you."
+            "(text, voice, photo, video, or document) and I'll draft it for you."
         )
         return ConversationHandler.END
 
@@ -7982,7 +8002,8 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
     file_name = pending_doc.get("name") or "document"
     attachment_kind = pending_doc.get("kind") or "document"
     is_image_attachment = attachment_kind == "image"
-    attachment_label = "image" if is_image_attachment else "document"
+    is_video_attachment = attachment_kind == "video"
+    attachment_label = "image" if is_image_attachment else "video" if is_video_attachment else "document"
 
     if mode == "ignore":
         if file_path and os.path.exists(file_path):
@@ -8044,11 +8065,34 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
                 "\n\nIf this is an ECG, ultrasound, X-ray, wound or procedure image, "
                 "send your own interpretation/context before I draft from it."
             )
+        elif is_video_attachment:
+            extra_context = (
+                "\n\nSend your own text or voice context for the case. I won't interpret clinical videos."
+            )
         await query.edit_message_text(
             f"📎 *{file_name}* will be attached to the Kaizen draft.\n\n"
             f"Now send the anonymised case details you want drafted.{extra_context}",
             parse_mode="Markdown",
         )
+        return AWAIT_CASE_INPUT
+
+    if is_video_attachment:
+        if mode == "both":
+            await query.edit_message_text(
+                f"📎 *{file_name}* will still be attached, but I won't draft from the video alone.\n\n"
+                "Send your own clinical context or findings in text/voice and I'll draft from that.",
+                parse_mode="Markdown",
+            )
+        else:
+            try:
+                os.unlink(file_path)
+            except OSError:
+                pass
+            await query.edit_message_text(
+                f"I won't interpret *{file_name}* as clinical evidence by itself.\n\n"
+                "Send your own clinical context or findings in text/voice instead.",
+                parse_mode="Markdown",
+            )
         return AWAIT_CASE_INPUT
 
     read_icon = "📷" if is_image_attachment else "📄"
@@ -8663,7 +8707,7 @@ async def handle_edit_value_with_intent(update: Update, context: ContextTypes.DE
 # === CASE INPUT HANDLER ===
 
 async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle text, voice, photo, or document input for case description."""
+    """Handle text, voice, photo, video, or document input for case description."""
     user_id = update.effective_user.id
     _start_conversational_router_shadow(update, "handle_case_input")
     attachment_path_to_save = None
@@ -8735,8 +8779,8 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     # Explicit-consent gate (UK GDPR Art 9(2)(a)) — clinical content must not
     # reach any processor (Vertex extraction, transcription, vision) until the
-    # current consent version is recorded. All four input types (text, voice,
-    # photo, document) route through this handler, so this single check gates
+    # current consent version is recorded. Text, voice, photo, video and
+    # document route through this handler, so this single check gates
     # them all before any LLM or transcription call.
     if not await consent.has_current_consent(user_id):
         return await _prompt_consent(update, context)
@@ -8982,7 +9026,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 except Exception:
                     await update.message.reply_text(
                         style_grounded_answer(
-                            "I help draft portfolio evidence from anonymised text, voice, photos, or documents. Send a case when you want me to start."
+                            "I help draft portfolio evidence from anonymised text, voice, photos, videos, or documents. Send a case when you want me to start."
                         )
                     )
                 return ConversationHandler.END
@@ -9017,7 +9061,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 except Exception:
                     await update.message.reply_text(
                         "I help you file clinical cases to your Kaizen e-portfolio. "
-                        "Send me a case description by text, voice note, photo, or document."
+                        "Send me a case description by text, voice note, photo, video, or document."
                     )
                 return ConversationHandler.END
 
@@ -9161,6 +9205,64 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
 
+    elif getattr(update.message, "video", None):
+        await _delete_previous_gathering_message(context)
+        ack = await update.message.reply_text("🎞️ Receiving video…")
+        tmp_path = None
+        try:
+            import shutil
+            video = update.message.video
+            video_file = await video.get_file()
+            suffix = _video_media_suffix(video)
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                tmp_path = tmp.name
+                await video_file.download_to_drive(tmp_path)
+
+            cache_dir = os.path.join(tempfile.gettempdir(), "portfolio_guru_cache")
+            os.makedirs(cache_dir, exist_ok=True)
+            with tempfile.NamedTemporaryFile(dir=cache_dir, suffix=suffix, delete=False) as cached_file:
+                cached_path = cached_file.name
+            shutil.copy2(tmp_path, cached_path)
+
+            context.user_data["_pending_doc"] = {
+                "path": cached_path,
+                "name": f"portfolio-video{suffix}",
+                "kind": "video",
+                "source_chat_id": update.message.chat_id,
+                "source_message_id": update.message.message_id,
+                "source_chat_type": getattr(update.message.chat, "type", None),
+            }
+            caption = (update.message.caption or "").strip()
+            if caption:
+                context.user_data["_pending_doc_context"] = caption
+
+            await ack.edit_text(
+                "🎞️ Video received — would you like to attach it to the Kaizen draft?\n\n"
+                "I won't interpret clinical videos. Send your own context or findings in text/voice.",
+                reply_markup=_build_video_intent_keyboard(),
+            )
+            _track_latest_message(context, ack)
+            return AWAIT_DOC_INTENT
+        except Exception as e:
+            logger.warning("Video download/cache failed: %s", e)
+            if _gathering_case_active(context):
+                await ack.edit_text(
+                    "⚠️ Couldn't receive that video — your other inputs are still saved.\n"
+                    "Send more or tap Done to draft.",
+                    reply_markup=_gathering_done_keyboard(),
+                )
+                return AWAIT_GATHERING
+            await ack.edit_text(
+                "⚠️ Couldn't receive video. Try again or describe the case in text.",
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel")]]
+                ),
+            )
+            return AWAIT_CASE_INPUT
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
     elif update.message.document:
         # Handle document files (PDF, PPTX, DOCX)
         doc = update.message.document
@@ -9214,7 +9316,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if not case_text:
         context.user_data.clear()
-        await update.message.reply_text("💬 Send a text message, voice note, photo, or document.")
+        await update.message.reply_text("💬 Send a text message, voice note, photo, video, or document.")
         return ConversationHandler.END
 
     if (
@@ -10945,7 +11047,7 @@ async def handle_amend_draft(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle text, voice, photo, or document feedback — regenerate draft using original case + feedback."""
+    """Handle text, voice, photo, video, or document feedback — regenerate draft using original case + feedback."""
     draft = _load_draft(context)
     case_text = context.user_data.get("case_text", "")
 
@@ -11199,7 +11301,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
         except Exception:
             await update.message.reply_text(
                 "I help you file clinical cases to your Kaizen e-portfolio. "
-                "Send me a case description by text, voice note, photo, or document."
+                "Send me a case description by text, voice note, photo, video, or document."
             )
         return AWAIT_CASE_INPUT
 
@@ -11537,6 +11639,20 @@ def _pending_consent_input_from_update(update: Update) -> dict | None:
                 "source_chat_type": getattr(getattr(message, "chat", None), "type", None),
             }
 
+    video = getattr(message, "video", None)
+    if video:
+        file_id = getattr(video, "file_id", None)
+        if isinstance(file_id, str) and file_id:
+            return {
+                "kind": "video",
+                "file_id": file_id,
+                "caption": (getattr(message, "caption", None) or "").strip(),
+                "suffix": _video_media_suffix(video),
+                "source_chat_id": getattr(message, "chat_id", None),
+                "source_message_id": getattr(message, "message_id", None),
+                "source_chat_type": getattr(getattr(message, "chat", None), "type", None),
+            }
+
     document = getattr(message, "document", None)
     if document:
         file_id = getattr(document, "file_id", None)
@@ -11617,6 +11733,40 @@ async def _resume_pending_consent_input(
         _track_latest_message(context, query.message)
         return AWAIT_DOC_INTENT
 
+    if kind == "video":
+        await query.edit_message_text("✅ Consent recorded.\n\n🎞️ Receiving video…")
+        try:
+            cached_path = await _download_pending_consent_file(
+                context,
+                pending_input["file_id"],
+                suffix=pending_input.get("suffix") or ".mp4",
+            )
+        except Exception as exc:
+            logger.warning("Could not resume pending consent video: %s", exc, exc_info=True)
+            await query.edit_message_text(
+                "✅ Consent recorded, but I couldn't recover that video. Send it again when you're ready."
+            )
+            return AWAIT_CASE_INPUT
+
+        context.user_data["_pending_doc"] = {
+            "path": cached_path,
+            "name": "portfolio-video.mp4",
+            "kind": "video",
+            "source_chat_id": pending_input.get("source_chat_id"),
+            "source_message_id": pending_input.get("source_message_id"),
+            "source_chat_type": pending_input.get("source_chat_type"),
+        }
+        caption = (pending_input.get("caption") or "").strip()
+        if caption:
+            context.user_data["_pending_doc_context"] = caption
+        await query.edit_message_text(
+            "🎞️ Video received — would you like to attach it to the Kaizen draft?\n\n"
+            "I won't interpret clinical videos. Send your own context or findings in text/voice.",
+            reply_markup=_build_video_intent_keyboard(),
+        )
+        _track_latest_message(context, query.message)
+        return AWAIT_DOC_INTENT
+
     if kind == "document":
         file_name = pending_input.get("file_name") or "document"
         if not is_supported_document(file_name):
@@ -11674,7 +11824,7 @@ async def _resume_pending_consent_input(
         return await _process_case_text(query.message, context, user_id, case_text, "voice")
 
     await query.edit_message_text(
-        "✅ Consent recorded.\n\nSend your case now — text, voice note, photo, or document. "
+        "✅ Consent recorded.\n\nSend your case now — text, voice note, photo, video, or document. "
         "You can view your consent with /privacy or withdraw it with /reset."
     )
     return AWAIT_CASE_INPUT
@@ -11691,7 +11841,7 @@ async def _prompt_consent(
 
     During setup this is step 3 after Kaizen credentials have been verified.
     For case input, the triggering message is held unprocessed so accepting
-    consent can continue the same text, voice note, photo, or document.
+    consent can continue the same text, voice note, photo, video, or document.
     """
     user_id = update.effective_user.id
     keyboard = _build_consent_keyboard(user_id)
@@ -11759,7 +11909,7 @@ async def handle_consent_callback(update: Update, context: ContextTypes.DEFAULT_
         else:
             await query.edit_message_text(
                 "✅ Consent recorded.\n\n"
-                "Send your case now — text, voice note, photo, or document. "
+                "Send your case now — text, voice note, photo, video, or document. "
                 "You can view your consent with /privacy or withdraw it with /reset."
             )
     else:
@@ -11847,6 +11997,7 @@ def build_application() -> Application:
             MessageHandler(filters.VOICE, handle_case_input),
             MessageHandler(filters.AUDIO, handle_case_input),
             MessageHandler(filters.PHOTO, handle_case_input),
+            MessageHandler(filters.VIDEO, handle_case_input),
             MessageHandler(filters.Document.ALL, handle_case_input),
         ],
         states={
@@ -11855,6 +12006,7 @@ def build_application() -> Application:
                 MessageHandler(filters.VOICE, handle_case_input),
                 MessageHandler(filters.AUDIO, handle_case_input),
                 MessageHandler(filters.PHOTO, handle_case_input),
+                MessageHandler(filters.VIDEO, handle_case_input),
                 MessageHandler(filters.Document.ALL, handle_case_input),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|continue_thin$"),
             ],
@@ -11876,6 +12028,7 @@ def build_application() -> Application:
                 MessageHandler(filters.VOICE, handle_case_input),
                 MessageHandler(filters.AUDIO, handle_case_input),
                 MessageHandler(filters.PHOTO, handle_case_input),
+                MessageHandler(filters.VIDEO, handle_case_input),
                 MessageHandler(filters.Document.ALL, handle_case_input),
                 CallbackQueryHandler(gather_done_callback, pattern=r"^GATHER\|done$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|cancel$"),
@@ -11894,6 +12047,7 @@ def build_application() -> Application:
                 MessageHandler(filters.VOICE, handle_case_input),
                 MessageHandler(filters.AUDIO, handle_case_input),
                 MessageHandler(filters.PHOTO, handle_case_input),
+                MessageHandler(filters.VIDEO, handle_case_input),
                 MessageHandler(filters.Document.ALL, handle_case_input),
             ],
             AWAIT_FORM_SEARCH: [
@@ -11901,6 +12055,7 @@ def build_application() -> Application:
                 MessageHandler(filters.VOICE, handle_case_input),
                 MessageHandler(filters.AUDIO, handle_case_input),
                 MessageHandler(filters.PHOTO, handle_case_input),
+                MessageHandler(filters.VIDEO, handle_case_input),
                 MessageHandler(filters.Document.ALL, handle_case_input),
                 CallbackQueryHandler(handle_form_choice, pattern=r"^FORM\|"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),

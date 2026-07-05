@@ -107,6 +107,50 @@ async def test_photo_case_stores_pending_image_and_asks_intent():
 
 
 @pytest.mark.asyncio
+async def test_video_case_stores_pending_video_and_asks_attach_intent():
+    """Video uploads should ask whether to attach, without attempting interpretation."""
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_text_update('')
+
+    video = MagicMock()
+    video.mime_type = "video/mp4"
+    file_obj = MagicMock()
+
+    async def fake_download(path):
+        with open(path, "wb") as handle:
+            handle.write(b"dummy video content")
+
+    file_obj.download_to_drive = AsyncMock(side_effect=fake_download)
+    video.get_file = AsyncMock(return_value=file_obj)
+
+    update.message.text = None
+    update.message.voice = None
+    update.message.audio = None
+    update.message.photo = []
+    update.message.video = video
+    update.message.document = None
+    update.message.caption = "POCUS clip with my findings in text."
+
+    with patch('bot.has_credentials', return_value=True), \
+         patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))):
+        result = await handle_case_input(update, context)
+
+    assert result == AWAIT_DOC_INTENT
+    assert context.user_data["_pending_doc"]["kind"] == "video"
+    assert context.user_data["_pending_doc"]["name"] == "portfolio-video.mp4"
+    assert context.user_data["_pending_doc_context"] == update.message.caption
+    assert os.path.exists(context.user_data["_pending_doc"]["path"])
+    buttons = sim.get_last_buttons()
+    assert ("📎 Attach video", "DOCUSE|attach") in buttons
+    assert ("❌ Remove video", "DOCUSE|ignore") in buttons
+
+    path = context.user_data["_pending_doc"]["path"]
+    if os.path.exists(path):
+        os.unlink(path)
+
+
+@pytest.mark.asyncio
 async def test_remove_image_deletes_private_chat_photo_message_and_cache():
     sim = BotSimulator()
     context = sim._make_context()
@@ -208,6 +252,38 @@ async def test_image_attach_only_does_not_extract_and_waits_for_case_details():
     assert "case_text" not in context.user_data
     assert "will be attached to the Kaizen draft" in sim.get_last_text()
     assert "send your own interpretation/context" in sim.get_last_text()
+
+    if os.path.exists(temp_path):
+        os.unlink(temp_path)
+
+
+@pytest.mark.asyncio
+async def test_video_attach_only_waits_for_user_context_without_extracting():
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_callback_update("DOCUSE|attach")
+
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
+        temp_path = f.name
+        f.write(b"dummy video content")
+    context.user_data["_pending_doc"] = {
+        "path": temp_path,
+        "name": "portfolio-video.mp4",
+        "kind": "video",
+    }
+
+    with patch('bot.extract_from_document', new=AsyncMock()) as document_extract, \
+         patch('bot.extract_from_image', new=AsyncMock()) as image_extract:
+        result = await handle_document_intent(update, context)
+
+    assert result == AWAIT_CASE_INPUT
+    document_extract.assert_not_called()
+    image_extract.assert_not_called()
+    assert context.user_data["attachment_path"] == temp_path
+    assert context.user_data["attachment_name"] == "portfolio-video.mp4"
+    assert "case_text" not in context.user_data
+    assert "will be attached to the Kaizen draft" in sim.get_last_text()
+    assert "won't interpret clinical videos" in sim.get_last_text()
 
     if os.path.exists(temp_path):
         os.unlink(temp_path)

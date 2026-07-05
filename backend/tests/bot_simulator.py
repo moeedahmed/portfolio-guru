@@ -47,6 +47,7 @@ class BotSimulator:
         message.voice = None
         message.audio = None
         message.photo = []
+        message.video = None
         message.document = None
         message.caption = None
         message.chat = chat

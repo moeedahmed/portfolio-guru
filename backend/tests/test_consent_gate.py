@@ -161,6 +161,57 @@ async def test_photo_that_triggered_consent_resumes_to_image_intent(tmp_consent_
 
 @pytest.mark.consent_gate
 @pytest.mark.asyncio
+async def test_video_that_triggered_consent_resumes_to_video_intent(tmp_consent_db):
+    from bot import AWAIT_DOC_INTENT, handle_case_input, handle_consent_callback
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_text_update("")
+    video = MagicMock()
+    video.file_id = "telegram-video-file-id"
+    video.mime_type = "video/mp4"
+    update.message.text = None
+    update.message.voice = None
+    update.message.audio = None
+    update.message.photo = []
+    update.message.video = video
+    update.message.document = None
+    update.message.caption = "POCUS clip; I documented my interpretation separately."
+
+    with patch("bot.has_credentials", return_value=True):
+        result = await handle_case_input(update, context)
+
+    assert result == ConversationHandler.END
+    assert context.user_data["_consent_pending_input"]["kind"] == "video"
+    assert context.user_data["_consent_pending_input"]["caption"] == update.message.caption
+
+    async def fake_download(path):
+        Path(path).write_bytes(b"video bytes")
+
+    file_obj = MagicMock()
+    file_obj.download_to_drive = AsyncMock(side_effect=fake_download)
+    context.bot.get_file = AsyncMock(return_value=file_obj)
+
+    accept = sim._make_callback_update(f"CONSENT|accept|{sim.user_id}")
+    result = await handle_consent_callback(accept, context)
+
+    assert result == AWAIT_DOC_INTENT
+    context.bot.get_file.assert_awaited_once_with("telegram-video-file-id")
+    pending_doc = context.user_data["_pending_doc"]
+    assert pending_doc["kind"] == "video"
+    assert pending_doc["name"] == "portfolio-video.mp4"
+    assert Path(pending_doc["path"]).exists()
+    assert context.user_data["_pending_doc_context"] == update.message.caption
+    buttons = sim.get_last_buttons()
+    assert ("📎 Attach video", "DOCUSE|attach") in buttons
+    assert ("❌ Remove video", "DOCUSE|ignore") in buttons
+    assert "_consent_pending_input" not in context.user_data
+
+    Path(pending_doc["path"]).unlink(missing_ok=True)
+
+
+@pytest.mark.consent_gate
+@pytest.mark.asyncio
 async def test_accept_records_grant_and_opens_the_gate(tmp_consent_db):
     consent = tmp_consent_db
     from bot import handle_consent_callback

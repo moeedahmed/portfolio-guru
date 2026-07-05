@@ -168,7 +168,7 @@ async def test_connected_idle_greeting_gets_workflow_nudge_not_case_pipeline():
     text = _last_text(sim)
     assert text.startswith(f"{HOUSE_EMOJI} ")
     assert "case notes ready" in text
-    assert "text, voice, photo, or document" in text
+    assert "text, voice, photo, video, or document" in text
     assert "Draft now" not in text
     assert "portfolio/admin work" not in text
     assert "gathering_case" not in context.user_data
