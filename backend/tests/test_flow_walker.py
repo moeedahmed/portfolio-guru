@@ -274,12 +274,14 @@ class TestFlowWalker:
         assert result == AWAIT_APPROVAL
         button_data = {data for _, data in sim.get_last_buttons()}
         assert {'APPROVE|draft', 'IMPROVE|reflection', 'CANCEL|draft'} <= button_data
+        assert 'ACTION|add_reflection_detail' not in button_data
         assert 'ACTION|continue_thin' not in button_data
         assert 'ACTION|back_to_missing' not in button_data
         assert 'EDIT|draft' not in button_data
         assert 'APPROVE|submit' not in button_data
         text = sim.get_last_text()
         assert 'Case-Based Discussion draft ready' in text
+        assert 'Review needed before saving' not in text
         # Required-but-missing fields surface inline with the missing marker
         # next to each field label; the universal gate at file-time catches
         # them too. The verbose "🧩 Missing details" block has been removed.
@@ -725,7 +727,7 @@ class TestFlowWalker:
         assert draft.fields['clinical_setting'] == ''
         assert draft.fields['procedural_skill'] == ''
 
-    def test_draft_preview_includes_reflection_safety_transparency(self, thin_draft):
+    def test_draft_preview_omits_ai_reflection_check_by_default(self, thin_draft):
         from bot import _format_draft_preview
 
         preview = _format_draft_preview(
@@ -733,12 +735,9 @@ class TestFlowWalker:
             input_source='voice',
         )
 
-        # The trust block is kept: source type, reflection-needs-review,
-        # and review-before-save are all present.
-        assert '🛡️ *AI reflection check*' in preview
-        assert 'Source: voice transcript.' in preview
-        assert 'Reflection fields: 1 AI-filled field for you to check.' in preview
-        assert 'Save as draft only runs after you review' in preview
+        assert 'AI reflection check' not in preview
+        assert 'Review needed before saving' not in preview
+        assert 'Save as draft only runs after you review' not in preview
 
     def test_draft_preview_never_quotes_raw_source_text(self, thin_draft):
         """The preview must describe the source type but never quote raw case text."""
@@ -755,14 +754,69 @@ class TestFlowWalker:
         context = sim._make_context()
         context.user_data['case_text'] = sensitive_source
         context.user_data['case_input_source'] = 'text'
+        context.user_data['needs_reflection_detail'] = True
 
         preview = _format_draft_preview_for_context(thin_draft, context, 'CBD')
 
-        assert '🛡️ *AI reflection check*' in preview
+        assert 'Review needed before saving' in preview
+        assert 'AI reflection check' not in preview
         assert 'Source cue' not in preview
         assert 'John Smith' not in preview
         assert '943 476 5919' not in preview
         assert 'reflected on escalation' not in preview
+
+    def test_image_only_draft_requires_user_reflection_before_save(self, thin_draft):
+        from bot import _build_approval_keyboard, _format_draft_preview_for_context, _set_reflection_detail_gate
+        from tests.bot_simulator import BotSimulator
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['case_input_source'] = 'photo'
+        context.user_data['case_has_user_context'] = False
+
+        assert _set_reflection_detail_gate(context, thin_draft) is True
+        preview = _format_draft_preview_for_context(thin_draft, context, 'CBD')
+        buttons = {
+            button.callback_data
+            for row in _build_approval_keyboard(needs_reflection_detail=True).inline_keyboard
+            for button in row
+        }
+
+        assert 'Review needed before saving' in preview
+        assert 'Add your own interpretation/reflection' in preview
+        assert 'ACTION|add_reflection_detail' in buttons
+        assert 'APPROVE|draft' not in buttons
+
+    def test_image_with_user_context_can_show_save_when_reflection_is_useful(self, thin_draft):
+        from bot import _build_approval_keyboard, _set_reflection_detail_gate
+        from models import FormDraft
+        from tests.bot_simulator import BotSimulator
+
+        strong_draft = FormDraft(
+            form_type='CBD',
+            uuid=thin_draft.uuid,
+            fields={
+                **thin_draft.fields,
+                'reflection': (
+                    'I learned to combine ECG changes with serial symptoms and senior discussion earlier. '
+                    'I will document my uncertainty and escalation plan more clearly next time.'
+                ),
+            },
+        )
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['case_input_source'] = 'photo'
+        context.user_data['case_has_user_context'] = True
+
+        assert _set_reflection_detail_gate(context, strong_draft) is False
+        buttons = {
+            button.callback_data
+            for row in _build_approval_keyboard(needs_reflection_detail=False).inline_keyboard
+            for button in row
+        }
+
+        assert 'APPROVE|draft' in buttons
+        assert 'ACTION|add_reflection_detail' not in buttons
 
     def test_draft_preview_safety_layer_can_be_omitted_for_llm_feedback(self, thin_draft):
         from bot import _format_draft_preview
@@ -845,7 +899,13 @@ class TestFlowWalker:
         improved = FormDraft(
             form_type='CBD',
             uuid='uuid-cbd',
-            fields={**thin_draft.fields, 'reflection': 'I will escalate dynamic ECG changes earlier and document the decision-making more clearly.'},
+            fields={
+                **thin_draft.fields,
+                'reflection': (
+                    'I will escalate dynamic ECG changes earlier and document the decision-making more clearly. '
+                    'I learned to record uncertainty, senior advice and the follow-up plan in the same note.'
+                ),
+            },
         )
 
         sim = BotSimulator()

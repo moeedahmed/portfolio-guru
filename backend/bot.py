@@ -781,6 +781,7 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
     for key in (
         "awaiting_detail",
         "case_input_source",
+        "case_has_user_context",
         "chosen_form",
         "paused_flow_rebuild",
         "pending_draft_data",
@@ -816,6 +817,7 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
             "last_bot_chat_id",
             "attachment_path",
             "attachment_name",
+            "needs_reflection_detail",
         ):
             context.user_data.pop(key, None)
 
@@ -3140,9 +3142,21 @@ def _store_explicit_form_choice_state(
     context.user_data["explicit_form_choice"] = form_type
 
 
-def _build_approval_keyboard(improved_once: bool = False, can_back_to_missing: bool = False):
+def _build_approval_keyboard(
+    improved_once: bool = False,
+    can_back_to_missing: bool = False,
+    needs_reflection_detail: bool = False,
+):
     rows = []
-    if improved_once:
+    if needs_reflection_detail:
+        rows.append([
+            InlineKeyboardButton("✍️ Add reflection/context", callback_data="ACTION|add_reflection_detail"),
+        ])
+        if not improved_once:
+            rows.append([
+                InlineKeyboardButton("💡 Improve reflection", callback_data="IMPROVE|reflection"),
+            ])
+    elif improved_once:
         # After Quick Improve is used, remove the improve button entirely
         rows.append([
             InlineKeyboardButton("📤 Save as draft", callback_data="APPROVE|draft"),
@@ -3205,7 +3219,10 @@ def _build_video_intent_keyboard() -> InlineKeyboardMarkup:
 def _active_draft_keyboard(context) -> InlineKeyboardMarkup:
     if context.user_data.get("amend_mode"):
         return _build_amend_keyboard(improved_once=context.user_data.get("quick_improve_used", False))
-    return _build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False))
+    return _build_approval_keyboard(
+        improved_once=context.user_data.get("quick_improve_used", False),
+        needs_reflection_detail=context.user_data.get("needs_reflection_detail", False),
+    )
 
 
 def _build_amend_new_case_choice_keyboard() -> InlineKeyboardMarkup:
@@ -3428,6 +3445,7 @@ def _format_draft_preview_for_context(
         _chosen_form_reason(context, resolved_form_type),
         input_source=context.user_data.get("case_input_source", "text"),
         include_safety_layer=include_safety_layer,
+        needs_reflection_detail=context.user_data.get("needs_reflection_detail", False),
     )
 
 
@@ -3557,6 +3575,71 @@ def _draft_coach_note(draft) -> str:
     return ""
 
 
+def _draft_reflection_needs_user_detail(draft) -> bool:
+    fields = _draft_fields_for_review(draft)
+    if not _find_reflection_keys(fields, _draft_form_type(draft)):
+        return False
+    reflection = _draft_reflection_text(draft).strip()
+    if not reflection:
+        return True
+    words = reflection.split()
+    if len(words) < 18:
+        return True
+    lowered = reflection.lower()
+    learning_markers = (
+        "i learned",
+        "i learnt",
+        "i will",
+        "next time",
+        "in future",
+        "i would",
+        "i need",
+        "i realised",
+        "i reflected",
+        "this taught me",
+    )
+    return not any(marker in lowered for marker in learning_markers)
+
+
+def _image_source_without_user_context(context) -> bool:
+    source = str(context.user_data.get("case_input_source") or "").strip().lower()
+    if source not in {"photo", "image"}:
+        return False
+    return not bool(context.user_data.get("case_has_user_context"))
+
+
+def _draft_needs_reflection_detail_before_save(context, draft) -> bool:
+    source = str(context.user_data.get("case_input_source") or "").strip().lower()
+    if source not in {"photo", "image"}:
+        return False
+    return _image_source_without_user_context(context) or _draft_reflection_needs_user_detail(draft)
+
+
+def _remember_case_context_source(
+    context,
+    input_source: str | None,
+    *,
+    has_user_context: bool | None = None,
+) -> None:
+    source = str(input_source or "").strip().lower()
+    if has_user_context is not None:
+        context.user_data["case_has_user_context"] = bool(has_user_context)
+        return
+    if source in {"text", "voice", "audio", "document", "mixed", "same case"}:
+        context.user_data["case_has_user_context"] = True
+    elif source in {"photo", "image"} and "case_has_user_context" not in context.user_data:
+        context.user_data["case_has_user_context"] = False
+
+
+def _set_reflection_detail_gate(context, draft) -> bool:
+    needs_reflection_detail = _draft_needs_reflection_detail_before_save(context, draft)
+    if needs_reflection_detail:
+        context.user_data["needs_reflection_detail"] = True
+    else:
+        context.user_data.pop("needs_reflection_detail", None)
+    return needs_reflection_detail
+
+
 def _draft_header(title: str) -> list[str]:
     """Compact status header before the draft body."""
     return [
@@ -3571,16 +3654,25 @@ def _format_draft_preview(
     *,
     input_source: str | None = None,
     include_safety_layer: bool = True,
+    needs_reflection_detail: bool = False,
 ) -> str:
     """Format draft data as a preview message. Dispatches based on type."""
     if isinstance(draft, FormDraft):
         preview = _format_generic_draft(draft)
         if include_safety_layer:
-            preview += _draft_transparency_layer(draft, input_source=input_source)
+            preview += _draft_transparency_layer(
+                draft,
+                input_source=input_source,
+                needs_reflection_detail=needs_reflection_detail,
+            )
         return preview + _draft_coach_note_suffix(draft)
     preview = _format_cbd_draft(draft)
     if include_safety_layer:
-        preview += _draft_transparency_layer(draft, input_source=input_source)
+        preview += _draft_transparency_layer(
+            draft,
+            input_source=input_source,
+            needs_reflection_detail=needs_reflection_detail,
+        )
     return preview + _draft_coach_note_suffix(draft)
 
 
@@ -3771,24 +3863,30 @@ def _draft_transparency_layer(
     draft,
     *,
     input_source: str | None = None,
+    needs_reflection_detail: bool = False,
 ) -> str:
-    """Compact safety/transparency block shown before the approval keyboard.
+    """Compact review note shown before the approval keyboard.
 
     Names the source *type* only — it never quotes raw case text, so
     patient-identifying detail in the source is not surfaced in the preview.
     """
-    lines = [
-        "",
-        "🛡️ *AI reflection check*",
-        f"• Source: {_source_label(input_source)}.",
-        _reflection_review_line(draft),
-    ]
+    if not needs_reflection_detail:
+        return ""
+
+    source_label = _source_label(input_source)
+    lines = ["", "⚠️ *Review needed before saving*"]
+
+    if str(input_source or "").strip().lower() in {"photo", "image"}:
+        lines.append(
+            f"• Source: {source_label}. Add your own interpretation/reflection before saving."
+        )
+    else:
+        lines.append("• Add what you learned or what you would do differently before saving.")
 
     gap_line = _missing_fields_review_line(draft)
     if gap_line:
         lines.append(gap_line)
 
-    lines.append("• Save as draft only runs after you review and tap *Save as draft*.")
     return "\n".join(lines)
 
 
@@ -3854,6 +3952,7 @@ async def _show_draft_review(
     edit: bool = True,
 ) -> int:
     _store_draft(context, draft)
+    needs_reflection_detail = _set_reflection_detail_gate(context, draft)
     missing_required, missing_optional, _ = _missing_template_fields(draft, form_type)
     has_missing = bool(missing_required or missing_optional)
     _track_funnel_event(context, "draft_shown", form_type=form_type, has_missing=has_missing)
@@ -3868,6 +3967,7 @@ async def _show_draft_review(
     text = preview + _REPLY_HINT_SUFFIX
     keyboard = _build_approval_keyboard(
         improved_once=context.user_data.get("quick_improve_used", False),
+        needs_reflection_detail=needs_reflection_detail,
     )
     if edit:
         await _safe_edit_text(
@@ -7668,6 +7768,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
     # clinical details. Better to ask the user for more.
     context.user_data["case_text"] = case_text
     context.user_data["case_input_source"] = input_source
+    _remember_case_context_source(context, input_source)
 
     explicit_form = extract_explicit_form_type(case_text)
     if explicit_form:
@@ -7817,6 +7918,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("Send the missing detail as text, voice, or another image.")
         return AWAIT_TEMPLATE_REVIEW
 
+    elif data == "ACTION|add_reflection_detail":
+        context.user_data["awaiting_reflection_detail"] = True
+        await query.answer("Send your interpretation or learning point.")
+        await query.message.reply_text(
+            "Send your own interpretation, learning point, or what you would do differently. I’ll update the same draft."
+        )
+        return AWAIT_APPROVAL
+
     elif data == "ACTION|continue_thin":
         await query.answer()
         draft = _load_pending_draft(context)
@@ -7829,6 +7938,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         _store_draft(context, draft)
         context.user_data.pop("awaiting_detail", None)
+        needs_reflection_detail = _set_reflection_detail_gate(context, draft)
         _track_funnel_event(context, "draft_shown", form_type=chosen_form, has_missing=True)
         _track_funnel_event(
             context,
@@ -7844,6 +7954,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=_build_approval_keyboard(
                 improved_once=context.user_data.get("quick_improve_used", False),
                 can_back_to_missing=True,
+                needs_reflection_detail=needs_reflection_detail,
             ),
             parse_mode="Markdown",
         )
@@ -8004,6 +8115,12 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
     is_image_attachment = attachment_kind == "image"
     is_video_attachment = attachment_kind == "video"
     attachment_label = "image" if is_image_attachment else "video" if is_video_attachment else "document"
+    if is_image_attachment:
+        _remember_case_context_source(
+            context,
+            "photo",
+            has_user_context=bool(pending_doc_context.strip()),
+        )
 
     if mode == "ignore":
         if file_path and os.path.exists(file_path):
@@ -8153,6 +8270,8 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
 
     if pending_doc_context.strip():
         case_text = f"{pending_doc_context.strip()}\n\nDocument text:\n{case_text}".strip()
+        if is_image_attachment:
+            context.user_data["case_has_user_context"] = True
 
     if mode == "info":
         try:
@@ -8257,6 +8376,8 @@ async def _regenerate_active_draft_with_feedback(
         context.user_data["case_text"] = case_text
         previous_source = context.user_data.get("case_input_source", "text")
         context.user_data["case_input_source"] = previous_source if previous_source == input_source else "mixed"
+    if input_source in {"text", "voice", "audio"}:
+        context.user_data["case_has_user_context"] = True
 
     ack = await msg.reply_text("✏️ Regenerating draft with your extra information…")
     try:
@@ -8289,8 +8410,9 @@ async def _regenerate_active_draft_with_feedback(
                     input_source=context.user_data.get("case_input_source", "text"),
                 ),
                 timeout=45,
-            )
+        )
         _store_draft(context, updated)
+        _set_reflection_detail_gate(context, updated)
     except asyncio.TimeoutError:
         await ack.edit_text(
             "⏳ That took too long. Your previous draft is still ready above — try again or use the buttons.",
@@ -10004,6 +10126,24 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             context,
             "That earlier draft is no longer active.",
         )
+    if _set_reflection_detail_gate(context, draft):
+        context.user_data.pop("filing_in_progress", None)
+        context.user_data.pop("retry_filing_requested", None)
+        review_text = _format_draft_preview_for_context(draft, context) + _REPLY_HINT_SUFFIX
+        if query:
+            await _safe_edit_text(
+                source_message,
+                review_text,
+                reply_markup=_active_draft_keyboard(context),
+                parse_mode="Markdown",
+            )
+        else:
+            await source_message.reply_text(
+                review_text,
+                reply_markup=_active_draft_keyboard(context),
+                parse_mode="Markdown",
+            )
+        return AWAIT_APPROVAL
     _track_funnel_event(context, "save_attempted", has_draft=True)
 
     # Handle FormDraft (non-CBD forms)
@@ -10895,6 +11035,7 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
         await ack.edit_text("⚠️ Improve reflection failed. Your original draft is still ready.")
         return AWAIT_APPROVAL
 
+    _set_reflection_detail_gate(context, updated)
     # Edit the ORIGINAL draft message in place so the chat keeps a single
     # living draft instead of stacking a second full preview underneath. The
     # tiny status line is dismissed once the in-place edit lands.
@@ -11160,6 +11301,16 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
         )
         return AWAIT_DOC_INTENT
 
+    if context.user_data.pop("awaiting_reflection_detail", False) and has_draft and case_text:
+        context.user_data["case_has_user_context"] = True
+        return await _regenerate_active_draft_with_feedback(
+            update,
+            context,
+            raw_text,
+            append_to_case=True,
+            input_source="text",
+        )
+
     if _is_submit_inquiry(raw_text):
         if context.user_data.get("_pending_doc"):
             pending_kind = (context.user_data.get("_pending_doc") or {}).get("kind") or "document"
@@ -11317,6 +11468,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
                 for field_name, new_value in updates.items():
                     draft.fields[field_name] = new_value
                 _store_draft(context, draft)
+                _set_reflection_detail_gate(context, draft)
                 preview = _format_draft_preview_for_context(draft, context, chosen_form)
                 ack_line = f"✏️ Updated: {summary}\n\n" if summary else "✏️ Draft updated.\n\n"
                 await update.message.reply_text(
@@ -12068,7 +12220,7 @@ def build_application() -> Application:
                 CallbackQueryHandler(handle_edit_field, pattern=r"^FIELD\|"),
                 CallbackQueryHandler(handle_amend_draft, pattern=r"^AMEND\|"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CASE\|"),
-                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|retry_filing$"),
+                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:add_reflection_detail|retry_filing)$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
                 MessageHandler(filters.VOICE, handle_approval_media_feedback),
