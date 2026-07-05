@@ -1,6 +1,7 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from telegram.error import BadRequest
 
 import bot
 from bot import (
@@ -380,6 +381,78 @@ async def test_source_detail_voice_retry_retires_previous_prompt(monkeypatch):
     assert any("Added to this case" in call.kwargs.get("text", "") for call in edit_calls)
     context.bot.delete_message.assert_awaited()
     assert "More clinical context needed" in sim.get_last_text()
+
+
+@pytest.mark.asyncio
+async def test_repeated_weak_voice_notes_replace_source_detail_prompt(monkeypatch):
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["gathering_mode"] = False
+    weak_transcripts = [
+        "I saw a dog and cat fight and the cat died.",
+        "Other cats came to take revenge and killed the dog.",
+        "The cats gathered again and made more noise near the road.",
+    ]
+
+    with patch("bot.has_credentials", return_value=True), \
+         patch("bot.consent.has_current_consent", new=AsyncMock(return_value=True)), \
+         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 0, 10, "free"))), \
+         patch("bot.transcribe_voice", new=AsyncMock(side_effect=weak_transcripts)), \
+         patch("bot.recommend_form_types", new=AsyncMock()) as recommend:
+        previous_prompt_ids: list[int] = []
+        for index, _ in enumerate(weak_transcripts):
+            result = await handle_case_input(_make_voice_update(sim), context)
+            assert result == AWAIT_CASE_INPUT
+            assert "More clinical context needed" in sim.get_last_text()
+            active_prompt_id = context.user_data["last_bot_msg_id"]
+            if index:
+                previous_id = previous_prompt_ids[-1]
+                edit_calls = context.bot.edit_message_text.await_args_list
+                assert any(
+                    call.kwargs.get("message_id") == previous_id
+                    and "Added to this case" in call.kwargs.get("text", "")
+                    and call.kwargs.get("reply_markup") is None
+                    for call in edit_calls
+                )
+                delete_calls = context.bot.delete_message.await_args_list
+                assert any(call.kwargs.get("message_id") == previous_id for call in delete_calls)
+            previous_prompt_ids.append(active_prompt_id)
+            assert context.user_data["source_detail_prompt_refs"] == [{
+                "message_id": active_prompt_id,
+                "chat_id": sim.user_id,
+            }]
+
+    recommend.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_repeating_same_source_detail_prompt_does_not_duplicate_on_not_modified(monkeypatch):
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["last_bot_msg_id"] = 123
+    context.user_data["last_bot_chat_id"] = sim.user_id
+
+    async def not_modified_once(*args, **kwargs):
+        raise BadRequest("Message is not modified: specified new message content and reply markup are exactly the same")
+
+    context.bot.edit_message_text.side_effect = not_modified_once
+    update = sim._make_text_update("done")
+
+    result = await bot._process_case_text(
+        update.message,
+        context,
+        update.effective_user.id,
+        "test case adult sedation chest pain maybe procedural log",
+        "voice",
+    )
+
+    assert result == AWAIT_CASE_INPUT
+    assert sim.messages_sent == []
+    assert context.user_data["last_bot_msg_id"] == 123
+    assert context.user_data["source_detail_prompt_refs"] == [{
+        "message_id": 123,
+        "chat_id": sim.user_id,
+    }]
 
 
 @pytest.mark.asyncio

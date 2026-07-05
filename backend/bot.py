@@ -615,6 +615,10 @@ def _telegram_file_too_big_error(exc: Exception) -> bool:
     return isinstance(exc, BadRequest) and "file is too big" in str(exc).lower()
 
 
+def _telegram_message_not_modified_error(exc: Exception) -> bool:
+    return isinstance(exc, BadRequest) and "message is not modified" in str(exc).lower()
+
+
 def _oversized_video_text(*, gathering: bool = False) -> str:
     if gathering:
         return (
@@ -677,6 +681,21 @@ async def _send_latest_message(message, context, text, reply_markup=None, parse_
     chat_id = getattr(message, "chat_id", None) or getattr(getattr(message, "chat", None), "id", None)
     msg_id = context.user_data.get("last_bot_msg_id")
     if chat_id and msg_id:
+        class _TrackedMessage:
+            def __init__(self, bot, chat_id, message_id):
+                self._bot = bot
+                self.chat_id = chat_id
+                self.message_id = message_id
+                self.chat = getattr(message, "chat", None)
+
+            async def edit_text(self, text, **kwargs):
+                return await self._bot.edit_message_text(
+                    chat_id=self.chat_id,
+                    message_id=self.message_id,
+                    text=text,
+                    **kwargs,
+                )
+
         try:
             await context.bot.edit_message_text(
                 chat_id=chat_id,
@@ -686,23 +705,11 @@ async def _send_latest_message(message, context, text, reply_markup=None, parse_
                 parse_mode=parse_mode,
             )
             context.user_data["last_bot_chat_id"] = chat_id
-            class _TrackedMessage:
-                def __init__(self, bot, chat_id, message_id):
-                    self._bot = bot
-                    self.chat_id = chat_id
-                    self.message_id = message_id
-                    self.chat = getattr(message, "chat", None)
-
-                async def edit_text(self, text, **kwargs):
-                    return await self._bot.edit_message_text(
-                        chat_id=self.chat_id,
-                        message_id=self.message_id,
-                        text=text,
-                        **kwargs,
-                    )
-
             return _TrackedMessage(context.bot, chat_id, msg_id)
-        except Exception:
+        except Exception as exc:
+            if _telegram_message_not_modified_error(exc):
+                context.user_data["last_bot_chat_id"] = chat_id
+                return _TrackedMessage(context.bot, chat_id, msg_id)
             pass
     msg = await message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
     _track_latest_message(context, msg)
@@ -711,30 +718,36 @@ async def _send_latest_message(message, context, text, reply_markup=None, parse_
 
 async def _retire_active_source_detail_message(context) -> None:
     """Remove the previous source-detail prompt before a new voice ack becomes active."""
-    msg_id = context.user_data.get("last_bot_msg_id")
-    chat_id = context.user_data.get("last_bot_chat_id")
-    if not msg_id or not chat_id:
-        return
-    try:
-        await context.bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=msg_id,
-            text="📥 Added to this case. Use the latest prompt below.",
-            reply_markup=None,
-        )
-    except Exception:
+    seen: set[tuple[int, int]] = set()
+    for ref in _pop_source_detail_prompt_refs(context):
+        msg_id = ref.get("message_id")
+        chat_id = ref.get("chat_id")
+        if not msg_id or not chat_id:
+            continue
+        key = (chat_id, msg_id)
+        if key in seen:
+            continue
+        seen.add(key)
         try:
-            await context.bot.edit_message_reply_markup(
+            await context.bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=msg_id,
+                text="📥 Added to this case. Use the latest prompt below.",
                 reply_markup=None,
             )
         except Exception:
+            try:
+                await context.bot.edit_message_reply_markup(
+                    chat_id=chat_id,
+                    message_id=msg_id,
+                    reply_markup=None,
+                )
+            except Exception:
+                pass
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+        except Exception:
             pass
-    try:
-        await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
-    except Exception:
-        pass
     for key in ("last_bot_msg_id", "last_bot_chat_id", "status_msg_id", "status_msg_chat"):
         context.user_data.pop(key, None)
 
@@ -1426,6 +1439,7 @@ def _combined_pending_case_bundle(context) -> tuple[str, str]:
 _GATHERING_MODE_FALSE_VALUES = {"0", "false", "no", "off", "disabled"}
 _GATHERING_CASE_KEY = "gathering_case"
 _GATHERING_PROMPTS_KEY = "gathering_prompt_refs"
+_SOURCE_DETAIL_PROMPTS_KEY = "source_detail_prompt_refs"
 
 
 def _gathering_env_enabled() -> bool:
@@ -1527,6 +1541,26 @@ def _pop_gathering_prompt_refs(context) -> list[dict]:
     refs = list(context.user_data.pop(_GATHERING_PROMPTS_KEY, []) or [])
     msg_id = context.user_data.pop("gathering_msg_id", None)
     chat_id = context.user_data.pop("gathering_chat_id", None)
+    if msg_id and chat_id:
+        ref = {"message_id": msg_id, "chat_id": chat_id}
+        if ref not in refs:
+            refs.append(ref)
+    return refs
+
+
+def _track_source_detail_prompt(context, message_id, chat_id) -> None:
+    if not message_id or not chat_id:
+        return
+    refs = context.user_data.setdefault(_SOURCE_DETAIL_PROMPTS_KEY, [])
+    ref = {"message_id": message_id, "chat_id": chat_id}
+    if ref not in refs:
+        refs.append(ref)
+
+
+def _pop_source_detail_prompt_refs(context) -> list[dict]:
+    refs = list(context.user_data.pop(_SOURCE_DETAIL_PROMPTS_KEY, []) or [])
+    msg_id = context.user_data.get("last_bot_msg_id")
+    chat_id = context.user_data.get("last_bot_chat_id")
     if msg_id and chat_id:
         ref = {"message_id": msg_id, "chat_id": chat_id}
         if ref not in refs:
@@ -8061,12 +8095,13 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
 
     if _source_context_needs_more_detail(input_source, case_text):
         context.user_data["awaiting_source_detail"] = True
-        await _send_latest_message(
+        prompt_msg = await _send_latest_message(
             message,
             context,
             _source_context_detail_request(input_source),
             reply_markup=_KB_CANCEL,
         )
+        _track_source_detail_prompt(context, prompt_msg.message_id, prompt_msg.chat_id)
         return AWAIT_CASE_INPUT
     context.user_data.pop("awaiting_source_detail", None)
 
@@ -9851,6 +9886,8 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             previous_source = context.user_data.get("case_input_source", input_source)
             input_source = previous_source if previous_source == input_source else "mixed"
         context.user_data.pop("awaiting_source_detail", None)
+        if not _voice_media_from_message(update.message):
+            await _retire_active_source_detail_message(context)
 
     if context.user_data.get("pending_case_bundle"):
         _append_pending_case_bundle(context, case_text, input_source)
