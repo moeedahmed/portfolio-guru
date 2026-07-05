@@ -15,7 +15,7 @@ Invariants pinned here:
 """
 
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from telegram.ext import ConversationHandler
@@ -66,6 +66,97 @@ async def test_unconsented_case_is_blocked_before_any_processing(tmp_consent_db)
     button_data = [data for _, data in sim.get_last_buttons()]
     assert any(d.startswith("CONSENT|accept|") for d in button_data)
     assert any(d.startswith("CONSENT|decline|") for d in button_data)
+
+
+@pytest.mark.consent_gate
+@pytest.mark.asyncio
+async def test_case_that_triggered_consent_resumes_after_accept(tmp_consent_db):
+    import bot
+    from bot import AWAIT_FORM_CHOICE, handle_case_input, handle_consent_callback
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    case_text = "45M chest pain, ECG reviewed, troponins negative, discharged with safety netting."
+    update = sim._make_text_update(case_text)
+
+    async def fake_process(message, ctx, user_id, text, input_source):
+        ctx.user_data["resumed_case_text"] = text
+        ctx.user_data["resumed_input_source"] = input_source
+        return AWAIT_FORM_CHOICE
+
+    with patch("bot.has_credentials", return_value=True), \
+         patch("bot._process_case_text", new=AsyncMock(side_effect=fake_process)) as process:
+        result = await handle_case_input(update, context)
+
+    assert result == ConversationHandler.END
+    assert context.user_data["_consent_prompt_pending"] is True
+    assert context.user_data["_consent_pending_input"]["kind"] == "text"
+    assert "continue from it automatically" in (sim.get_last_text() or "")
+    process.assert_not_awaited()
+
+    accept = sim._make_callback_update(f"CONSENT|accept|{sim.user_id}")
+    with patch("bot._process_case_text", new=AsyncMock(side_effect=fake_process)) as process:
+        result = await handle_consent_callback(accept, context)
+
+    assert result == AWAIT_FORM_CHOICE
+    assert await tmp_consent_db.has_current_consent(sim.user_id) is True
+    assert context.user_data["resumed_case_text"] == case_text
+    assert context.user_data["resumed_input_source"] == "text"
+    assert "_consent_pending_input" not in context.user_data
+    process.assert_awaited_once()
+
+
+@pytest.mark.consent_gate
+@pytest.mark.asyncio
+async def test_photo_that_triggered_consent_resumes_to_image_intent(tmp_consent_db):
+    import bot
+    from bot import AWAIT_DOC_INTENT, handle_case_input, handle_consent_callback
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_text_update("")
+    photo = MagicMock()
+    photo.file_id = "telegram-photo-file-id"
+    update.message.text = None
+    update.message.voice = None
+    update.message.audio = None
+    update.message.document = None
+    update.message.caption = "I reviewed this ECG and documented my interpretation."
+    update.message.photo = [photo]
+
+    with patch("bot.has_credentials", return_value=True), \
+         patch("bot.extract_from_image", new=AsyncMock()) as extract:
+        result = await handle_case_input(update, context)
+
+    assert result == ConversationHandler.END
+    assert context.user_data["_consent_pending_input"]["kind"] == "photo"
+    assert context.user_data["_consent_pending_input"]["caption"] == update.message.caption
+    extract.assert_not_awaited()
+
+    async def fake_download(path):
+        Path(path).write_bytes(b"image bytes")
+
+    file_obj = MagicMock()
+    file_obj.download_to_drive = AsyncMock(side_effect=fake_download)
+    context.bot.get_file = AsyncMock(return_value=file_obj)
+
+    accept = sim._make_callback_update(f"CONSENT|accept|{sim.user_id}")
+    result = await handle_consent_callback(accept, context)
+
+    assert result == AWAIT_DOC_INTENT
+    context.bot.get_file.assert_awaited_once_with("telegram-photo-file-id")
+    pending_doc = context.user_data["_pending_doc"]
+    assert pending_doc["kind"] == "image"
+    assert pending_doc["name"] == "portfolio-image.jpg"
+    assert Path(pending_doc["path"]).exists()
+    assert context.user_data["_pending_doc_context"] == update.message.caption
+    buttons = sim.get_last_buttons()
+    assert ("📝 Use for drafting", "DOCUSE|info") in buttons
+    assert ("📎 Attach only", "DOCUSE|attach") in buttons
+    assert ("📎 Use + attach", "DOCUSE|both") in buttons
+    assert "_consent_pending_input" not in context.user_data
+
+    Path(pending_doc["path"]).unlink(missing_ok=True)
 
 
 @pytest.mark.consent_gate

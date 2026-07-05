@@ -11484,6 +11484,7 @@ async def handle_chase_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 _CONSENT_PROMPT_PENDING_KEY = "_consent_prompt_pending"
 _CONSENT_PROMPT_SOURCE_KEY = "_consent_prompt_source"
+_CONSENT_PENDING_INPUT_KEY = "_consent_pending_input"
 
 
 def _build_consent_keyboard(user_id: int) -> InlineKeyboardMarkup:
@@ -11498,6 +11499,187 @@ def _setup_consent_text(lead_text: str | None = None) -> str:
     return prefix + "✅ Step 3 of 3: consent\n\n" + CONSENT_BODY
 
 
+def _pending_consent_input_from_update(update: Update) -> dict | None:
+    """Capture enough of the triggering input to resume after consent.
+
+    This deliberately stores metadata/raw text only; extraction, transcription,
+    OCR, tier counting, and drafting still wait until consent is granted.
+    """
+    message = getattr(update, "message", None)
+    if not message:
+        return None
+
+    if getattr(message, "text", None):
+        text = message.text.strip()
+        return {"kind": "text", "text": text} if text else None
+
+    voice_media = _voice_media_from_message(message)
+    if voice_media:
+        file_id = getattr(voice_media, "file_id", None)
+        if isinstance(file_id, str) and file_id:
+            return {
+                "kind": "voice",
+                "file_id": file_id,
+                "suffix": _voice_media_suffix(voice_media),
+            }
+
+    photos = getattr(message, "photo", None) or []
+    if photos:
+        photo = photos[-1]
+        file_id = getattr(photo, "file_id", None)
+        if isinstance(file_id, str) and file_id:
+            return {
+                "kind": "photo",
+                "file_id": file_id,
+                "caption": (getattr(message, "caption", None) or "").strip(),
+                "source_chat_id": getattr(message, "chat_id", None),
+                "source_message_id": getattr(message, "message_id", None),
+                "source_chat_type": getattr(getattr(message, "chat", None), "type", None),
+            }
+
+    document = getattr(message, "document", None)
+    if document:
+        file_id = getattr(document, "file_id", None)
+        file_name = getattr(document, "file_name", None) or "document"
+        if isinstance(file_id, str) and file_id:
+            return {
+                "kind": "document",
+                "file_id": file_id,
+                "file_name": file_name,
+                "suffix": os.path.splitext(file_name)[1] or ".tmp",
+            }
+
+    return None
+
+
+async def _download_pending_consent_file(
+    context: ContextTypes.DEFAULT_TYPE,
+    file_id: str,
+    *,
+    suffix: str,
+) -> str:
+    cache_dir = os.path.join(tempfile.gettempdir(), "portfolio_guru_cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=cache_dir, suffix=suffix, delete=False) as cached_file:
+        cached_path = cached_file.name
+    telegram_file = await context.bot.get_file(file_id)
+    await telegram_file.download_to_drive(cached_path)
+    return cached_path
+
+
+async def _resume_pending_consent_input(
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    pending_input: dict,
+) -> int:
+    kind = pending_input.get("kind")
+
+    if kind == "text":
+        case_text = (pending_input.get("text") or "").strip()
+        if case_text:
+            await query.edit_message_text(CAPTURED_ACK, parse_mode="Markdown")
+            _track_latest_message(context, query.message)
+            return await _process_case_text(query.message, context, user_id, case_text, "text")
+
+    if kind == "photo":
+        await query.edit_message_text("✅ Consent recorded.\n\n📷 Receiving image…")
+        try:
+            cached_path = await _download_pending_consent_file(
+                context,
+                pending_input["file_id"],
+                suffix=".jpg",
+            )
+        except Exception as exc:
+            logger.warning("Could not resume pending consent image: %s", exc, exc_info=True)
+            await query.edit_message_text(
+                "✅ Consent recorded, but I couldn't recover that image. Send it again when you're ready."
+            )
+            return AWAIT_CASE_INPUT
+
+        context.user_data["_pending_doc"] = {
+            "path": cached_path,
+            "name": "portfolio-image.jpg",
+            "kind": "image",
+            "source_chat_id": pending_input.get("source_chat_id"),
+            "source_message_id": pending_input.get("source_message_id"),
+            "source_chat_type": pending_input.get("source_chat_type"),
+        }
+        caption = (pending_input.get("caption") or "").strip()
+        if caption:
+            context.user_data["_pending_doc_context"] = caption
+        await query.edit_message_text(
+            "📷 Image received — how would you like to use it?\n\n"
+            "For ECGs, ultrasound, X-rays, wounds or procedure photos, "
+            "I won't interpret the image unless you add your own context.",
+            reply_markup=_build_image_intent_keyboard(),
+        )
+        _track_latest_message(context, query.message)
+        return AWAIT_DOC_INTENT
+
+    if kind == "document":
+        file_name = pending_input.get("file_name") or "document"
+        if not is_supported_document(file_name):
+            await query.edit_message_text(
+                f"✅ Consent recorded.\n\n📄 *{file_name}*\n\n"
+                "I can read PDF, PowerPoint (.pptx), Word (.docx), and text files. "
+                "This file type isn't supported yet.",
+                parse_mode="Markdown",
+            )
+            return ConversationHandler.END
+        await query.edit_message_text(f"✅ Consent recorded.\n\n📄 Receiving *{file_name}*…", parse_mode="Markdown")
+        try:
+            cached_path = await _download_pending_consent_file(
+                context,
+                pending_input["file_id"],
+                suffix=pending_input.get("suffix") or os.path.splitext(file_name)[1] or ".tmp",
+            )
+        except Exception as exc:
+            logger.warning("Could not resume pending consent document: %s", exc, exc_info=True)
+            await query.edit_message_text(
+                f"✅ Consent recorded, but I couldn't recover *{file_name}*. Send it again when you're ready.",
+                parse_mode="Markdown",
+            )
+            return AWAIT_CASE_INPUT
+        context.user_data["_pending_doc"] = {"path": cached_path, "name": file_name}
+        await query.edit_message_text(
+            f"📄 *{file_name}* — how would you like to use this document?",
+            reply_markup=_build_doc_intent_keyboard(),
+            parse_mode="Markdown",
+        )
+        _track_latest_message(context, query.message)
+        return AWAIT_DOC_INTENT
+
+    if kind == "voice":
+        await query.edit_message_text("✅ Consent recorded.\n\n🎙️ Transcribing voice note…")
+        tmp_path = None
+        try:
+            tmp_path = await _download_pending_consent_file(
+                context,
+                pending_input["file_id"],
+                suffix=pending_input.get("suffix") or ".ogg",
+            )
+            case_text = await transcribe_voice(tmp_path)
+        except Exception as exc:
+            logger.warning("Could not resume pending consent voice note: %s", exc, exc_info=True)
+            await query.edit_message_text(
+                "✅ Consent recorded, but I couldn't transcribe that voice note. Try again or describe the case in text."
+            )
+            return AWAIT_CASE_INPUT
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        await query.edit_message_text("🎙️ Voice note read. Finding matching forms…")
+        _track_latest_message(context, query.message)
+        return await _process_case_text(query.message, context, user_id, case_text, "voice")
+
+    await query.edit_message_text(
+        "✅ Consent recorded.\n\nSend your case now — text, voice note, photo, or document. "
+        "You can view your consent with /privacy or withdraw it with /reset."
+    )
+    return AWAIT_CASE_INPUT
+
+
 async def _prompt_consent(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -11508,8 +11690,8 @@ async def _prompt_consent(
     """Show the versioned consent notice before clinical content is processed.
 
     During setup this is step 3 after Kaizen credentials have been verified.
-    The case fallback is deliberately conservative: the triggering message is
-    not stashed or processed until the user accepts, so it asks them to resend.
+    For case input, the triggering message is held unprocessed so accepting
+    consent can continue the same text, voice note, photo, or document.
     """
     user_id = update.effective_user.id
     keyboard = _build_consent_keyboard(user_id)
@@ -11526,8 +11708,15 @@ async def _prompt_consent(
         )
         return ConversationHandler.END
 
+    pending_input = _pending_consent_input_from_update(update)
+    if pending_input:
+        context.user_data[_CONSENT_PENDING_INPUT_KEY] = pending_input
+        suffix = "\n\n(Your message above has not been processed yet. If you consent, I'll continue from it automatically; if not, I'll discard it.)"
+    else:
+        context.user_data.pop(_CONSENT_PENDING_INPUT_KEY, None)
+        suffix = "\n\n(Your message above has not been processed — send it again after consenting.)"
     await update.message.reply_text(
-        CONSENT_TEXT + "\n\n(Your message above has not been processed — send it again after consenting.)",
+        CONSENT_TEXT + suffix,
         reply_markup=keyboard,
     )
     return ConversationHandler.END
@@ -11553,11 +11742,14 @@ async def handle_consent_callback(update: Update, context: ContextTypes.DEFAULT_
         return
     context.user_data.pop(_CONSENT_PROMPT_PENDING_KEY, None)
     source = context.user_data.pop(_CONSENT_PROMPT_SOURCE_KEY, None)
+    pending_input = context.user_data.pop(_CONSENT_PENDING_INPUT_KEY, None)
     if source == "setup":
         _flow_done(context, "setup")
     if action == "accept":
         await consent.record_consent(tapper_id)
         await query.answer("Consent recorded")
+        if source != "setup" and pending_input:
+            return await _resume_pending_consent_input(query, context, tapper_id, pending_input)
         if source == "setup":
             await query.edit_message_text(
                 "✅ Consent recorded.\n\n"
