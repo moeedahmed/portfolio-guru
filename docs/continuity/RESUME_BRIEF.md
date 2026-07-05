@@ -1,22 +1,19 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-07-02T22:09:57+00:00
-Status: stale_or_needs_review
+Generated: 2026-07-05T12:27:58+00:00
+Status: ready
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
 - Branch: main
-- Last commit: f8de580 2026-07-02 Fix Telegram gathering state and Kaizen form bounces
-- Uncommitted changes: yes
+- Last commit: db1a7a5 2026-07-05 Add video attachment intent workflow
+- Uncommitted changes: no
 
 ## Immediate read before restarting
 1. `AGENTS.md` for durable repo context
 2. Product hub Status + Brief in Notion only for human-facing status, positioning, launch, or risk context
 3. `TASK.md` for active sprint state, if present
 4. This resume brief for drift warnings and repo state
-
-## Warnings
-- Repo has uncommitted changes — capture/commit or summarise before switching context
 
 ## Practical AGENTS.md check
 - Useful for coding-agent/ACP work: yes
@@ -30,20 +27,17 @@ Status: stale_or_needs_review
 - Live/deploy signals: railway.json, render.yaml, .github/workflows/deploy-mac.yml
 
 ## Recent commits
-- f8de580 2026-07-02 Fix Telegram gathering state and Kaizen form bounces
-- b36360b 2026-07-02 fix: polish Kaizen setup onboarding copy
-- 777d8e6 2026-07-02 fix: split start setup prompt
-- ea2f3de 2026-07-02 Fix Portfolio Guru reset onboarding start flow
-- bf33df3 2026-07-02 fix: widen setup portfolio detection scan
-- 9082797 2026-07-02 fix setup manual profile consent continuation
-- 2c2f24f 2026-07-02 polish setup credential prompts
-- 489edbb 2026-07-02 fix: move consent into first login setup
-
-## Uncommitted change summary
-- M docs/continuity/RESUME_BRIEF.md
+- db1a7a5 2026-07-05 Add video attachment intent workflow
+- caefccf 2026-07-05 Fix consent resume for pending inputs
+- d7c43ae 2026-07-05 Harden beta readiness gates
+- 6fb0683 2026-07-04 Add clinical text privacy preflight
+- d63720f 2026-07-03 Correct consent AI processing wording
+- 44c7b98 2026-07-03 Anonymise setup consent guardrail
+- 4d0d8cc 2026-07-03 Simplify setup consent step
+- 77fdfad 2026-07-03 fix: keep Kaizen setup login resilient
 
 ## Repo context snapshot
-### AGENTS.md — present, 6 days old
+### AGENTS.md — present, 0 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
@@ -54,7 +48,7 @@ Key headings:
 - ## Safety
 - ## Supported Forms
 
-### CLAUDE.md — present, 6 days old
+### CLAUDE.md — present, 0 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
@@ -65,7 +59,7 @@ Key headings:
 - ## Safety
 - ## Supported Forms
 
-### TASK.md — present, 5 days old
+### TASK.md — present, 8 days old
 Key headings:
 - # Active Task — Hermes Hackathon Production Cut
 - ## Hackathon Objective
@@ -80,7 +74,7 @@ Key headings:
 - ## Hackathon Done Criteria
 - # Previous Active Task — Kaizen Mapping Sprint
 
-### docs/plan.md — present, 1 days old
+### docs/plan.md — present, 3 days old
 Key headings:
 - # Portfolio Guru - Conversational Router Plan
 - ## Goal
@@ -95,7 +89,7 @@ Key headings:
 - ### Phase 0 - Checkpoint and branch
 - ### Phase 1 - Router contract and tests
 
-### WORKFLOWS.md — present, 17 days old
+### WORKFLOWS.md — present, 19 days old
 Key headings:
 - # Portfolio Guru — Agent Workflow Reference
 - ## Channel Boundary — EMGurus WhatsApp Gateway
@@ -111,6 +105,6 @@ Key headings:
 - ## Key Capabilities Selection Rules
 
 ## Recommended restart path
-Refresh the product hub/Brief and repo context before a new build sprint.
+Continuity context looks sufficient; proceed with normal product-docs workflow.
 
 If this product has been idle for weeks, do not start implementation from memory. Refresh the product hub Status/Brief first, then create or update `TASK.md` for the next sprint.
