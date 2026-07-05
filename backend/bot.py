@@ -2388,7 +2388,7 @@ def _format_kaizen_sync_row(status: KaizenSyncStatus | None) -> str | None:
     if status is None:
         return None
     if status.last_run is None:
-        return "🔄 Kaizen evidence: not synced yet"
+        return "Kaizen evidence: not synced yet"
     last_run = status.last_run
     if last_run.status == "running":
         started_at = (last_run.started_at or "").strip()
@@ -2396,18 +2396,18 @@ def _format_kaizen_sync_row(status: KaizenSyncStatus | None) -> str | None:
         started_dt = _parse_sync_timestamp(started_at)
         if started_dt and datetime.now(UTC) - started_dt > _KAIZEN_SYNC_RUNNING_STALE_AFTER:
             return (
-                f"🔄 Kaizen evidence: sync timed out after starting {pretty_started}. "
+                f"Kaizen evidence: sync timed out after starting {pretty_started}. "
                 f"Items indexed: {status.items_indexed}"
             )
         return (
-            f"🔄 Kaizen evidence: syncing now, started {pretty_started}. "
+            f"Kaizen evidence: syncing now, started {pretty_started}. "
             f"Items indexed: {status.items_indexed}"
         )
     when = (last_run.finished_at or last_run.started_at or "").strip()
     pretty_when = _format_user_local_timestamp(when)
     status_label = _KAIZEN_SYNC_STATUS_LABELS.get(last_run.status, last_run.status)
     return (
-        f"🔄 Kaizen evidence: {status_label} {pretty_when}. "
+        f"Kaizen evidence: {status_label} {pretty_when}. "
         f"Items indexed: {status.items_indexed}"
     )
 
@@ -2723,20 +2723,20 @@ def _settings_view_components(
 
     plan_lines = []
     if connected is False:
-        plan_lines.append("🔗 Kaizen: not connected")
+        plan_lines.append("Kaizen: not connected")
     if is_beta:
-        plan_lines.append("⭐ Plan: Beta (unlimited)")
+        plan_lines.append("Plan: Beta (unlimited)")
         if used is not None:
-            plan_lines.append(f"📋 Cases filed: {used} this month")
+            plan_lines.append(f"Cases filed: {used} this month")
     elif tier is not None:
         tier_pretty = {"free": "Free", "pro": "Pro", "pro_plus": "Unlimited"}.get(tier, tier.title())
-        plan_lines.append(f"⭐ Plan: {tier_pretty}")
+        plan_lines.append(f"Plan: {tier_pretty}")
         if used is not None:
             limit = TIER_LIMITS.get(tier, 5)
             if limit == -1:
-                plan_lines.append(f"📋 Cases filed: {used} this month")
+                plan_lines.append(f"Cases filed: {used} this month")
             else:
-                plan_lines.append(f"📋 Usage: {used}/{limit} cases this month")
+                plan_lines.append(f"Usage: {used}/{limit} cases this month")
     kaizen_row = _format_kaizen_sync_row(kaizen_sync)
     if kaizen_row:
         plan_lines.append(kaizen_row)
@@ -2755,9 +2755,9 @@ def _settings_view_components(
     text = (
         f"⚙️ Settings\n\n"
         f"{plan_block}"
-        f"✍️ Writing style: {voice_status}\n"
+        f"Writing style: {voice_status}\n"
         f"   {voice_hint}\n\n"
-        f"📋 Portfolio defaults: {portfolio_defaults_summary}\n\n"
+        f"Portfolio defaults: {portfolio_defaults_summary}\n\n"
         f"Pick what you want to change."
     )
     return text, InlineKeyboardMarkup(buttons)
@@ -6432,7 +6432,7 @@ async def handle_upgrade_button(update: Update, context: ContextTypes.DEFAULT_TY
         _track_funnel_event(context, "checkout_started", tier=tier)
         await _flow_edit(
             update, context,
-            f"⭐ Upgrade to {tier_label}\n\nTap below to complete payment:",
+            f"💳 Upgrade to {tier_label}\n\nTap below to complete payment:",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("💳 Complete payment", url=url)],
             ]),
@@ -6566,7 +6566,7 @@ async def listusers_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             creds = session.exec(select(UserCredential).order_by(UserCredential.telegram_user_id)).all()
         for c in creds:
             b = await is_beta_tester(c.telegram_user_id)
-            badge = "⭐ " if b else ""
+            badge = "Beta: " if b else ""
             lines.append(f"{badge}ID: `{c.telegram_user_id}`")
         if not lines:
             lines.append("No users have connected Kaizen credentials yet.")
@@ -11133,23 +11133,22 @@ async def handle_review_draft(update: Update, context: ContextTypes.DEFAULT_TYPE
         "weak": "🔴 Needs work before filing",
     }
 
-    star = "⭐"
     lines = [f"📝 *Draft Review — {form_name}*", ""]
-    lines.append(f"Overall: {star * round(overall)} ({overall}/5)")
+    lines.append(f"Overall: {overall}/5")
     lines.append("")
 
     criteria = [
-        ("🔍 Reflection", "reflection_depth"),
-        ("🧠 Clinical reasoning", "clinical_reasoning"),
-        ("📚 SLO coverage", "slo_coverage"),
-        ("👨\u200d⚕️ Assessor readiness", "assessor_readiness"),
-        ("✍️ Language", "language_quality"),
+        ("Reflection", "reflection_depth"),
+        ("Clinical reasoning", "clinical_reasoning"),
+        ("SLO coverage", "slo_coverage"),
+        ("Assessor readiness", "assessor_readiness"),
+        ("Language", "language_quality"),
     ]
     for label, key in criteria:
         entry = scores.get(key, {})
         s = entry.get("score", 0)
         fb = entry.get("feedback", "")
-        lines.append(f"{label}: {star * s}/5 — {fb}")
+        lines.append(f"{label}: {s}/5 — {fb}")
 
     lines.append("")
     lines.append(f"💡 {top_suggestion}")

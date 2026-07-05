@@ -4,14 +4,15 @@
 
 - **Mobile-first** — messages render on small screens. Keep paragraphs short (2-4 lines).
 - **One action per message** — each bot message should have at most one primary action the user can take.
-- **Emoji header** — every substantive bot message starts with an emoji that signals the message type.
+- **Emoji header** — every substantive bot message starts with one functional emoji that signals the message type.
 - **Structure** — header line, then detail/summary, then action instruction. Separated by blank lines.
 - **No Markdown tables** — they don't render well on mobile.
 - **No raw internal codes** — user-facing text never contains implementation codes like "PROC_LOG" or "MINI_CEX". Common clinician-facing acronyms such as CBD, DOPS, Mini-CEX and ACAT may appear in compact explanatory lists when they are clearer for RCEM users.
 - **No raw errors** — error details are logged server-side. The user sees a plain-English explanation and a recovery action.
 - **Draft-only framing** — all entries are described as saved to Kaizen as drafts, never as filed or submitted. Supervisor submission is never automatic.
-- **Professional emoji only** — avoid decorative/consumer emoji (✨ sparkles, 🤖 robot, ⭐⭐ stars, 🎉 party). Prefer functional emoji that signal message type (✅, ⚠️, 📋, 📤).
+- **Professional emoji only** — avoid decorative/consumer emoji (✨ sparkles, 🤖 robot, ⭐ stars, 🎉 party). Prefer functional emoji that signal message type (✅, ⚠️, 📋, 📤).
 - **Emoji headings, plain rows** — use one functional emoji on the message header, and on secondary section headings only when the section changes meaning. Do not put emojis on every row, sentence, metadata label, or body line.
+- **Button icons are separate** — button labels may use a compact functional emoji when it helps recognition. This does not mean the surrounding body rows also need emoji.
 
 ## Emoji Categories
 
@@ -23,12 +24,22 @@
 | ❌    | Error or failure                            |
 | ✅    | Success / complete                          |
 | 🔑    | Credentials / login / setup                 |
+| 🔗    | Link, reconnect or open external account    |
+| 🔒    | Privacy / security note                     |
+| 🔄    | Retry, reset, sync or refresh               |
+| ⏳    | Waiting / in progress                       |
 | 📤    | Saving / uploading / filing in progress     |
+| 📎    | Attachment                                  |
 | ✏️    | Edit / refine                               |
+| ✍️    | Writing style                               |
 | 📋    | Form / WPBA reference                       |
 | 💬    | Reply / chat action hint                    |
 | 💡    | Tip / improvement suggestion                |
+| ⚙️    | Settings                                    |
 | 🔙    | Back navigation                             |
+| 🔎    | Evidence basis / inspect                    |
+| 📈    | Activity snapshot                           |
+| 💳    | Payment / upgrade                           |
 | 📖    | Reading / learning from evidence            |
 | 🗣️    | Voice profile / voice input                 |
 
@@ -113,6 +124,23 @@ Curriculum: {SLO/KC}
 
 📎 Attachment not added
 {reason}. Draft saved without the attachment.
+```
+
+Settings:
+
+```
+⚙️ Settings
+
+Plan: Unlimited
+Cases filed: 10 this month
+Kaizen evidence: synced 5 Jul 2026 18:30 BST. Items indexed: 412
+
+Writing style: Active
+Drafts already use your writing style.
+
+Portfolio defaults: HST Profile · CCT · 2025 Update
+
+Pick what you want to change.
 ```
 
 Help:

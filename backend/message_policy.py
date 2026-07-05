@@ -29,6 +29,8 @@ _LEADING_EMOJI = re.compile(
     "]"
 )
 
+_DECORATIVE_EMOJI_RE = re.compile("[✨🤖🎉⭐]")
+
 
 class MessageClass(str, Enum):
     FIXED = "fixed"
@@ -146,7 +148,7 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         key="photo_privacy_nudge",
         message_class=MessageClass.FIXED,
         text=(
-            "\n\nPrivacy check: I extracted this from a photo. Remove names, NHS numbers, "
+            "\n\n🔒 Privacy check\nI extracted this from a photo. Remove names, NHS numbers, "
             "DOBs or addresses before drafting."
         ),
         safety_critical=True,
@@ -279,3 +281,12 @@ def plain_text_policy_violations() -> list[str]:
         if any(marker in template.text for marker in ("*", "`", "[")):
             violations.append(key)
     return violations
+
+
+def decorative_emoji_policy_violations() -> list[str]:
+    """Return template keys that use decorative emoji instead of functional markers."""
+    return [
+        key
+        for key, template in MESSAGE_TEMPLATES.items()
+        if _DECORATIVE_EMOJI_RE.search(template.text)
+    ]

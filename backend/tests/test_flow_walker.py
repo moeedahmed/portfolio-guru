@@ -3979,6 +3979,22 @@ class TestTrainingStageGroups:
         assert 'Plan: Unlimited' in text
         assert 'Cases filed: 10 this month' in text
         assert 'Usage: 10 cases this month' not in text
+        assert '⭐ Plan:' not in text
+        assert '📋 Cases filed:' not in text
+
+    def test_settings_body_rows_are_plain_under_single_heading(self):
+        from bot import _settings_view_components
+
+        with patch('bot.get_curriculum', return_value='2025'), \
+             patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_voice_profile', return_value=None):
+            text, _ = _settings_view_components(123, tier='pro_plus', used=10)
+
+        assert text.startswith('⚙️ Settings\n\n')
+        assert '\n✍️ Writing style:' not in text
+        assert '\n📋 Portfolio defaults:' not in text
+        assert '\nWriting style: Not set' in text
+        assert '\nPortfolio defaults:' in text
 
     @pytest.mark.asyncio
     async def test_training_level_options_use_kaizen_stage_groups(self):

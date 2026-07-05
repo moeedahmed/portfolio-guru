@@ -81,6 +81,11 @@ class TestMessagePolicy:
 
         assert plain_text_policy_violations() == []
 
+    def test_policy_has_no_decorative_emoji_in_templates(self):
+        from message_policy import decorative_emoji_policy_violations
+
+        assert decorative_emoji_policy_violations() == []
+
     def test_policy_classifies_fixed_templated_and_llm_assisted(self):
         from message_policy import MessageClass, message_audit_summary
 
