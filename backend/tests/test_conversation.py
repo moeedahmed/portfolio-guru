@@ -475,7 +475,13 @@ class TestExplicitFormRouting:
             message,
             context,
             99999,
-            "Add this case as procedural log for adult procedural sedation\n\nSedation notes.",
+            (
+                "Add this case as procedural log for adult procedural sedation\n\n"
+                "A 45M patient attended ED with a shoulder dislocation. I assessed "
+                "analgesia and neurovascular status, performed reduction under sedation "
+                "with senior support, monitored observations, and reflected on using a "
+                "clearer pre-sedation checklist next time."
+            ),
             "voice",
         )
 

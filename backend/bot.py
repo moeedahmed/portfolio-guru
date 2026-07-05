@@ -7805,6 +7805,91 @@ def _video_context_has_user_grounding(case_text: str) -> bool:
     return any(marker in text for marker in _VIDEO_CONTEXT_ACTION_MARKERS)
 
 
+_SOURCE_GROUNDING_REQUIRED_SOURCES = {"voice", "audio", "mixed"}
+
+_SOURCE_PATIENT_MARKERS = (
+    "patient",
+    "pt",
+    "presented",
+    "attended",
+    "came in",
+    "brought in",
+    "history",
+    "symptom",
+    "triage",
+    "resus",
+    "ed",
+    "department",
+)
+
+_SOURCE_OUTCOME_OR_REFLECTION_MARKERS = (
+    "outcome",
+    "discharged",
+    "admitted",
+    "referred",
+    "transferred",
+    "improved",
+    "deteriorated",
+    "learned",
+    "learnt",
+    "reflection",
+    "reflected",
+    "next time",
+    "in future",
+    "would do",
+    "will do",
+)
+
+
+def _source_grounding_required(input_source: str | None) -> bool:
+    return str(input_source or "").strip().lower() in _SOURCE_GROUNDING_REQUIRED_SOURCES
+
+
+def _case_context_has_user_grounding(case_text: str) -> bool:
+    """True when voice/mixed notes contain enough user-owned facts to draft.
+
+    Voice transcripts are noisier than typed case notes. A word-count gate lets
+    fragments such as "procedure log sedation chest pain" reach the extractor,
+    where the model can create a plausible but unsupported story. This gate
+    requires both a clinical anchor and user-owned action/outcome/reflection
+    detail before voice/mixed input is allowed to drive recommendations.
+    """
+    text = " ".join(str(case_text or "").lower().split())
+    words = text.split()
+    if len(words) < 10:
+        return False
+
+    has_demographic = bool(
+        re.search(
+            r"\b\d{1,3}\s*(?:[mf]|male|female)\b|\b\d{1,3}[-\s]?year[-\s]?old\b",
+            text,
+        )
+    )
+    has_patient_context = has_demographic or any(marker in text for marker in _SOURCE_PATIENT_MARKERS)
+    clinical_hits = sum(1 for keyword in _RICH_CLINICAL_EVIDENCE_KEYWORDS if keyword in text)
+    action_hits = sum(1 for marker in _VIDEO_CONTEXT_ACTION_MARKERS if marker in text)
+    outcome_hits = sum(1 for marker in _SOURCE_OUTCOME_OR_REFLECTION_MARKERS if marker in text)
+
+    if has_patient_context and clinical_hits >= 1 and (action_hits >= 1 or outcome_hits >= 1):
+        return True
+    return clinical_hits >= 3 and action_hits >= 1 and len(words) >= 25
+
+
+def _source_context_needs_more_detail(input_source: str | None, case_text: str) -> bool:
+    return _source_grounding_required(input_source) and not _case_context_has_user_grounding(case_text)
+
+
+def _source_context_detail_request(input_source: str | None) -> str:
+    source = str(input_source or "").strip().lower()
+    if source == "voice":
+        source_label = "the voice transcript"
+    elif source == "audio":
+        source_label = "the audio transcript"
+    else:
+        source_label = "what you sent"
+    return render_message("source_grounding_detail_request", source_label=source_label)
+
+
 def _video_context_detail_request() -> str:
     return (
         "📋 I need your own clinical context before drafting from a video attachment.\n\n"
@@ -7919,6 +8004,17 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
     context.user_data["case_text"] = case_text
     context.user_data["case_input_source"] = input_source
     _remember_case_context_source(context, input_source)
+
+    if _source_context_needs_more_detail(input_source, case_text):
+        context.user_data["awaiting_source_detail"] = True
+        await _send_latest_message(
+            message,
+            context,
+            _source_context_detail_request(input_source),
+            reply_markup=_KB_CANCEL,
+        )
+        return AWAIT_CASE_INPUT
+    context.user_data.pop("awaiting_source_detail", None)
 
     explicit_form = extract_explicit_form_type(case_text)
     if explicit_form:
@@ -9092,6 +9188,10 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     # Determine input type and extract text
     case_text = None
+    source_detail_retry = bool(
+        context.user_data.get("awaiting_source_detail")
+        and context.user_data.get("case_text")
+    )
 
     if update.message.text:
         raw_text = update.message.text.strip()
@@ -9369,14 +9469,22 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 tmp_path = tmp.name
                 await voice_file.download_to_drive(tmp_path)
                 case_text = await transcribe_voice(tmp_path)
-            if _gathering_enabled(context) and not (context.user_data.get("chosen_form") and context.user_data.get("awaiting_detail")):
+            if (
+                _gathering_enabled(context)
+                and not source_detail_retry
+                and not (context.user_data.get("chosen_form") and context.user_data.get("awaiting_detail"))
+            ):
                 await _delete_previous_gathering_message(context)
                 reply_text, reply_markup = _gathering_reply(context)
                 await ack.edit_text(reply_text, reply_markup=reply_markup)
                 _track_gathering_prompt(context, ack.message_id, ack.chat_id)
                 context.user_data["_gathering_ack_used"] = True
             else:
-                await ack.edit_text("🎙️ Voice note read. Finding matching forms…")
+                await ack.edit_text(
+                    "🎙️ Voice note read. Checking clinical detail…"
+                    if source_detail_retry
+                    else "🎙️ Voice note read. Finding matching forms…"
+                )
             _track_latest_message(context, ack)
         except Exception as e:
             await ack.edit_text(
@@ -9674,6 +9782,17 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     else:
         input_source = "text"
 
+    if (
+        source_detail_retry
+        and not (context.user_data.get("awaiting_detail") and context.user_data.get("chosen_form"))
+    ):
+        previous_case = context.user_data.get("case_text", "").strip()
+        if previous_case:
+            case_text = combine_case_inputs(previous_case, [case_text])
+            previous_source = context.user_data.get("case_input_source", input_source)
+            input_source = previous_source if previous_source == input_source else "mixed"
+        context.user_data.pop("awaiting_source_detail", None)
+
     if context.user_data.get("pending_case_bundle"):
         _append_pending_case_bundle(context, case_text, input_source)
         if input_source != "photo":
@@ -9686,7 +9805,11 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return AWAIT_CASE_INPUT
 
     chosen_form = context.user_data.get("chosen_form")
-    if _gathering_enabled(context) and not (chosen_form and context.user_data.get("awaiting_detail")):
+    if (
+        _gathering_enabled(context)
+        and not source_detail_retry
+        and not (chosen_form and context.user_data.get("awaiting_detail"))
+    ):
         existing_attachment_path = context.user_data.get("attachment_path")
         existing_attachment_name = context.user_data.get("attachment_name")
         existing_attachment_kind = context.user_data.get("attachment_kind")

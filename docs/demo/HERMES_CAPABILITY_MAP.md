@@ -54,7 +54,7 @@ Hermes framing: one agent reachable across many channels.
 Portfolio Guru: a single Telegram agent accepts text, voice note, audio,
 photo, and document for the same case-capture flow.
 
-- Evidence `[live]`: `backend/bot.py:10197-10201` registers
+- Evidence `[live]`: `backend/bot.py:12553-12558` registers
   `MessageHandler`s for `TEXT`, `VOICE`, `AUDIO`, `PHOTO`, and
   `Document.ALL`, all routed into one `handle_case_input` entry point.
 - Honesty: WhatsApp and other surfaces are later routed convenience, not a
@@ -83,7 +83,7 @@ Portfolio Guru: vision reads a photographed note; deterministic browser
 automation drives the third-party Kaizen form.
 
 - Evidence `[live]`: photo/document capture feeds the same extraction
-  path (`backend/bot.py:10200-10201`); `backend/browser_filer.py` fills
+  path (`backend/bot.py:12556-12558`); `backend/browser_filer.py` fills
   the Kaizen form via Playwright over CDP; `backend/filer_router.py`
   selects the filing method per form type.
 - Honesty: deterministic DOM mapping is preferred over generic browser
@@ -112,7 +112,7 @@ concepts.
 Portfolio Guru: no external write happens without an explicit human tap,
 and the agent never submits on a supervisor's behalf.
 
-- Evidence `[live]`: `backend/bot.py:10363` `handle_approval_approve` is
+- Evidence `[live]`: `backend/bot.py:10486` `handle_approval_approve` is
   the only path that proceeds to a Kaizen draft save, and it saves a draft
   only. The agent does not submit, sign, send, approve, reject, or delete
   on a supervisor's behalf — that boundary is the hard line.
@@ -204,7 +204,7 @@ trainee-facing automation commands are not switched on in this cut.
 ## How a judge can verify in two minutes
 
 1. Multi-surface and approval gate: open `backend/bot.py`, jump to lines
-   10197 and 8594.
+   12553 and 10486.
 2. Model-agnostic slots: open `backend/model_config.py`, line 35.
 3. Earn path proof: run
    `cd backend && venv/bin/python3 -m pytest tests/test_stripe_webhook_e2e.py -v`.

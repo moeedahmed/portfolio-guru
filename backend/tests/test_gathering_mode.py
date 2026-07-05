@@ -4,6 +4,7 @@ import pytest
 
 import bot
 from bot import (
+    AWAIT_CASE_INPUT,
     AWAIT_FORM_CHOICE,
     AWAIT_GATHERING,
     AWAIT_TEMPLATE_REVIEW,
@@ -251,6 +252,87 @@ async def test_gather_done_callback_finishes_case(monkeypatch):
     process_case.assert_awaited_once()
     assert "gathering_case" not in context.user_data
     update.callback_query.answer.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_voice_transcript_fragment_asks_for_grounding_before_recommendation(monkeypatch):
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_text_update("done")
+
+    with patch("bot.recommend_form_types", new=AsyncMock()) as recommend:
+        result = await bot._process_case_text(
+            update.message,
+            context,
+            update.effective_user.id,
+            "test case adult sedation chest pain maybe procedural log",
+            "voice",
+        )
+
+    assert result == AWAIT_CASE_INPUT
+    recommend.assert_not_awaited()
+    assert context.user_data["awaiting_source_detail"] is True
+    assert "voice transcript" in sim.get_last_text()
+    assert "isn't enough grounded detail to draft safely" in sim.get_last_text()
+
+
+@pytest.mark.asyncio
+async def test_voice_transcript_explicit_procedural_log_fragment_does_not_open_draft_button(monkeypatch):
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_text_update("done")
+
+    with patch("bot.recommend_form_types", new=AsyncMock()) as recommend:
+        result = await bot._process_case_text(
+            update.message,
+            context,
+            update.effective_user.id,
+            "please make this a procedural log adult sedation chest pain",
+            "voice",
+        )
+
+    assert result == AWAIT_CASE_INPUT
+    recommend.assert_not_awaited()
+    assert context.user_data.get("chosen_form") is None
+    assert ("✅ Draft Procedural Log", "FORM|PROC_LOG") not in sim.get_last_buttons()
+    assert "isn't enough grounded detail to draft safely" in sim.get_last_text()
+
+
+@pytest.mark.asyncio
+async def test_grounded_voice_transcript_can_reach_recommendations(monkeypatch):
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_text_update("done")
+    case_text = (
+        "A 70-year-old patient attended ED with a shoulder dislocation. "
+        "I assessed analgesia and neurovascular status, performed reduction under procedural sedation "
+        "with senior support, monitored observations, and reflected that next time I should use a "
+        "clearer pre-sedation checklist."
+    )
+    from extractor import FORM_UUIDS
+    from models import FormTypeRecommendation
+
+    recommendations = [
+        FormTypeRecommendation(
+            form_type="PROC_LOG",
+            rationale="Grounded procedural sedation case.",
+            uuid=FORM_UUIDS.get("PROC_LOG"),
+        )
+    ]
+    with patch("bot.recommend_form_types", new=AsyncMock(return_value=recommendations)), \
+         patch("bot.get_training_level", return_value="ST5"), \
+         patch("bot.get_curriculum", return_value="2025"):
+        result = await bot._process_case_text(
+            update.message,
+            context,
+            update.effective_user.id,
+            case_text,
+            "voice",
+        )
+
+    assert result == AWAIT_FORM_CHOICE
+    assert context.user_data.get("awaiting_source_detail") is None
+    assert ("✅ Use best fit: Procedural Log", "FORM|best") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio

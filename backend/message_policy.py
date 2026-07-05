@@ -123,6 +123,16 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         ),
         safety_critical=True,
     ),
+    "source_grounding_detail_request": MessageTemplate(
+        key="source_grounding_detail_request",
+        message_class=MessageClass.TEMPLATED,
+        text=(
+            "📋 More clinical context needed\n\n"
+            "I read {source_label}, but there isn't enough grounded detail to draft safely.\n\n"
+            "Send rough notes with: patient/presentation, what you did or decided, outcome, and what you learned."
+        ),
+        safety_critical=True,
+    ),
     "thin_sdl_detail_request": MessageTemplate(
         key="thin_sdl_detail_request",
         message_class=MessageClass.FIXED,
