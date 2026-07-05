@@ -269,6 +269,51 @@ async def test_video_document_that_triggered_consent_resumes_to_video_intent(tmp
 
 @pytest.mark.consent_gate
 @pytest.mark.asyncio
+async def test_oversized_video_document_after_consent_explains_limit_without_download(tmp_consent_db):
+    from bot import AWAIT_CASE_INPUT, handle_case_input, handle_consent_callback
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_text_update("")
+    document = MagicMock()
+    document.file_id = "telegram-large-video-document-file-id"
+    document.file_name = "PXL_20260705_130629103.TS.mp4"
+    document.mime_type = "video/mp4"
+    document.file_size = 24_900_000
+    update.message.text = None
+    update.message.voice = None
+    update.message.audio = None
+    update.message.photo = []
+    update.message.video = None
+    update.message.document = document
+    update.message.caption = "POCUS clip; I documented my interpretation separately."
+
+    with patch("bot.has_credentials", return_value=True):
+        result = await handle_case_input(update, context)
+
+    assert result == ConversationHandler.END
+    pending = context.user_data["_consent_pending_input"]
+    assert pending["kind"] == "video"
+    assert pending["file_size"] == 24_900_000
+
+    context.bot.get_file = AsyncMock()
+    accept = sim._make_callback_update(f"CONSENT|accept|{sim.user_id}")
+    result = await handle_consent_callback(accept, context)
+
+    assert result == AWAIT_CASE_INPUT
+    context.bot.get_file.assert_not_awaited()
+    assert "_pending_doc" not in context.user_data
+    text = _all_visible_text(sim)
+    assert "Consent recorded" in text
+    assert "over Telegram's 20 MB bot download limit" in text
+    assert "under 20 MB" in text
+    assert "couldn't recover" not in text.lower()
+    assert "PXL_20260705_130629103.TS.mp4" not in text
+    assert "_consent_pending_input" not in context.user_data
+
+
+@pytest.mark.consent_gate
+@pytest.mark.asyncio
 async def test_document_that_triggered_consent_resumes_without_showing_filename(tmp_consent_db):
     from bot import AWAIT_DOC_INTENT, handle_case_input, handle_consent_callback
 

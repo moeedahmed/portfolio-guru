@@ -577,6 +577,8 @@ _VIDEO_DOCUMENT_EXTENSIONS = (
     ".mpeg",
     ".mpg",
 )
+TELEGRAM_BOT_API_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024
+TELEGRAM_BOT_API_DOWNLOAD_LIMIT_MB = 20
 
 
 def _document_looks_like_video(document) -> bool:
@@ -595,6 +597,38 @@ def _video_media_from_message(message):
     if document and _document_looks_like_video(document):
         return document
     return None
+
+
+def _media_file_size_bytes(media) -> int | None:
+    size = getattr(media, "file_size", None)
+    if isinstance(size, (int, float)):
+        return int(size)
+    return None
+
+
+def _media_exceeds_telegram_download_limit(media) -> bool:
+    size = _media_file_size_bytes(media)
+    return bool(size and size > TELEGRAM_BOT_API_DOWNLOAD_LIMIT_BYTES)
+
+
+def _telegram_file_too_big_error(exc: Exception) -> bool:
+    return isinstance(exc, BadRequest) and "file is too big" in str(exc).lower()
+
+
+def _oversized_video_text(*, gathering: bool = False) -> str:
+    if gathering:
+        return (
+            f"⚠️ This video is over Telegram's {TELEGRAM_BOT_API_DOWNLOAD_LIMIT_MB} MB bot download limit, "
+            "so I can't attach it here yet. Your other inputs are still saved.\n\n"
+            f"Send a shorter/compressed clip under {TELEGRAM_BOT_API_DOWNLOAD_LIMIT_MB} MB, "
+            "or tap Done to draft from what I already have."
+        )
+    return (
+        f"⚠️ This video is over Telegram's {TELEGRAM_BOT_API_DOWNLOAD_LIMIT_MB} MB bot download limit, "
+        "so I can't attach it here yet.\n\n"
+        f"Send a shorter/compressed clip under {TELEGRAM_BOT_API_DOWNLOAD_LIMIT_MB} MB, "
+        "or describe the ultrasound/video findings in text or voice and I'll draft from that."
+    )
 
 
 def _voice_media_from_message(message):
@@ -9359,6 +9393,20 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         try:
             import shutil
             video = _video_media_from_message(update.message)
+            if _media_exceeds_telegram_download_limit(video):
+                if _gathering_case_active(context):
+                    await ack.edit_text(
+                        _oversized_video_text(gathering=True),
+                        reply_markup=_gathering_done_keyboard(),
+                    )
+                    return AWAIT_GATHERING
+                await ack.edit_text(
+                    _oversized_video_text(),
+                    reply_markup=InlineKeyboardMarkup(
+                        [[InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel")]]
+                    ),
+                )
+                return AWAIT_CASE_INPUT
             video_file = await video.get_file()
             suffix = _video_media_suffix(video)
             with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
@@ -9390,6 +9438,36 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
             _track_latest_message(context, ack)
             return AWAIT_DOC_INTENT
+        except BadRequest as e:
+            logger.warning("Video download/cache failed: %s", e)
+            if _telegram_file_too_big_error(e):
+                if _gathering_case_active(context):
+                    await ack.edit_text(
+                        _oversized_video_text(gathering=True),
+                        reply_markup=_gathering_done_keyboard(),
+                    )
+                    return AWAIT_GATHERING
+                await ack.edit_text(
+                    _oversized_video_text(),
+                    reply_markup=InlineKeyboardMarkup(
+                        [[InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel")]]
+                    ),
+                )
+                return AWAIT_CASE_INPUT
+            if _gathering_case_active(context):
+                await ack.edit_text(
+                    "⚠️ Couldn't receive that video — your other inputs are still saved.\n"
+                    "Send more or tap Done to draft.",
+                    reply_markup=_gathering_done_keyboard(),
+                )
+                return AWAIT_GATHERING
+            await ack.edit_text(
+                "⚠️ Couldn't receive video. Try again or describe the case in text.",
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel")]]
+                ),
+            )
+            return AWAIT_CASE_INPUT
         except Exception as e:
             logger.warning("Video download/cache failed: %s", e)
             if _gathering_case_active(context):
@@ -11812,6 +11890,7 @@ def _pending_consent_input_from_update(update: Update) -> dict | None:
                 "file_id": file_id,
                 "caption": (getattr(message, "caption", None) or "").strip(),
                 "suffix": _video_media_suffix(video),
+                "file_size": _media_file_size_bytes(video),
                 "source_chat_id": getattr(message, "chat_id", None),
                 "source_message_id": getattr(message, "message_id", None),
                 "source_chat_type": getattr(getattr(message, "chat", None), "type", None),
@@ -11909,12 +11988,28 @@ async def _resume_pending_consent_input(
 
     if kind == "video":
         await query.edit_message_text("✅ Consent recorded.\n\n🎞️ Receiving video…")
+        if (pending_input.get("file_size") or 0) > TELEGRAM_BOT_API_DOWNLOAD_LIMIT_BYTES:
+            await query.edit_message_text(
+                "✅ Consent recorded.\n\n" + _oversized_video_text()
+            )
+            return AWAIT_CASE_INPUT
         try:
             cached_path = await _download_pending_consent_file(
                 context,
                 pending_input["file_id"],
                 suffix=pending_input.get("suffix") or ".mp4",
             )
+        except BadRequest as exc:
+            logger.warning("Could not resume pending consent video: %s", exc, exc_info=True)
+            if _telegram_file_too_big_error(exc):
+                await query.edit_message_text(
+                    "✅ Consent recorded.\n\n" + _oversized_video_text()
+                )
+                return AWAIT_CASE_INPUT
+            await query.edit_message_text(
+                "✅ Consent recorded, but I couldn't recover that video. Send it again when you're ready."
+            )
+            return AWAIT_CASE_INPUT
         except Exception as exc:
             logger.warning("Could not resume pending consent video: %s", exc, exc_info=True)
             await query.edit_message_text(

@@ -208,6 +208,47 @@ async def test_video_sent_as_document_uses_video_intent_not_voice_transcription(
 
 
 @pytest.mark.asyncio
+async def test_oversized_video_document_explains_telegram_limit_without_download():
+    """Files over Telegram's hosted Bot API download limit need clear guidance."""
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_text_update('')
+
+    document = MagicMock()
+    document.file_id = "telegram-large-video-document-file-id"
+    document.file_name = "PXL_20260705_130629103.TS.mp4"
+    document.mime_type = "video/mp4"
+    document.file_size = 24_900_000
+    document.get_file = AsyncMock()
+
+    update.message.text = None
+    update.message.voice = None
+    update.message.audio = None
+    update.message.photo = []
+    update.message.video = None
+    update.message.document = document
+    update.message.caption = "POCUS clip with my findings in text."
+
+    with patch('bot.has_credentials', return_value=True), \
+         patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+         patch('bot.transcribe_voice', new=AsyncMock()) as transcribe_mock, \
+         patch('bot.extract_from_document', new=AsyncMock()) as document_extract:
+        result = await handle_case_input(update, context)
+
+    assert result == AWAIT_CASE_INPUT
+    document.get_file.assert_not_awaited()
+    transcribe_mock.assert_not_called()
+    document_extract.assert_not_called()
+    assert "_pending_doc" not in context.user_data
+    text = _all_visible_text(sim)
+    assert "over Telegram's 20 MB bot download limit" in text
+    assert "under 20 MB" in text
+    assert "Couldn't transcribe voice note" not in text
+    assert "Try again" not in text
+    assert "PXL_20260705_130629103.TS.mp4" not in text
+
+
+@pytest.mark.asyncio
 async def test_remove_image_deletes_private_chat_photo_message_and_cache():
     sim = BotSimulator()
     context = sim._make_context()
