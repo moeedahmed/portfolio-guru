@@ -238,8 +238,40 @@ async def test_gathering_switches_to_draft_button_once_context_is_grounded(monke
     result = await handle_gathering_input(second, context)
 
     assert result == AWAIT_GATHERING
-    assert context.user_data["last_bot_msg_id"] == first_prompt_id
+    assert context.user_data["last_bot_msg_id"] != first_prompt_id
+    assert "source_detail_prompt_refs" not in context.user_data
+    assert any(kind == "bot_delete" for kind, _, _ in sim.messages_sent)
     assert "Captured" in sim.get_last_text()
+    assert sim.messages_sent[-1][0] == "reply"
+    assert sim.get_last_buttons() == [
+        ("✅ Draft now", "GATHER|done"),
+        ("❌ Cancel", "ACTION|cancel"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_gathering_ready_prompt_is_resent_below_new_case_detail(monkeypatch):
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+
+    first = sim._make_text_update(_FIRST_CASE)
+    with patch("bot.has_credentials", return_value=True), \
+         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 0, 10, "free"))):
+        result = await handle_case_input(first, context)
+
+    assert result == AWAIT_GATHERING
+    first_ready_id = context.user_data["last_bot_msg_id"]
+    assert "Captured" in sim.get_last_text()
+
+    second = sim._make_text_update("I also documented consultant discussion and safety-netting.")
+    result = await handle_gathering_input(second, context)
+
+    assert result == AWAIT_GATHERING
+    assert context.user_data["last_bot_msg_id"] != first_ready_id
+    assert any(kind == "bot_delete" for kind, _, _ in sim.messages_sent)
+    assert sim.messages_sent[-1][0] == "reply"
+    assert sim.get_last_text() == "📥 Captured. Add anything else before I draft this?"
     assert sim.get_last_buttons() == [
         ("✅ Draft now", "GATHER|done"),
         ("❌ Cancel", "ACTION|cancel"),

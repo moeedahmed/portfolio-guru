@@ -1512,6 +1512,7 @@ def _gathering_case_has_draftable_context(context) -> bool:
 async def _show_gathering_context_request(message, context, input_source: str) -> int:
     """Keep gathering active, but do not expose Draft now until context is credible."""
     await _delete_previous_gathering_message(context)
+    await _retire_active_source_detail_message(context)
     prompt_msg = await _send_latest_message(
         message,
         context,
@@ -1523,9 +1524,9 @@ async def _show_gathering_context_request(message, context, input_source: str) -
 
 
 async def _show_gathering_ready_prompt(message, context) -> int:
-    """Switch the active context prompt into the normal ready-to-draft prompt."""
+    """Send a fresh ready-to-draft prompt under the latest case detail."""
     await _delete_previous_gathering_message(context)
-    context.user_data.pop(_SOURCE_DETAIL_PROMPTS_KEY, None)
+    await _retire_active_source_detail_message(context)
     reply_text, reply_markup = _gathering_reply(context)
     gathering_msg = await _send_latest_message(
         message,
@@ -10042,6 +10043,15 @@ async def _delete_previous_gathering_message(context: ContextTypes.DEFAULT_TYPE)
             await context.bot.delete_message(chat_id=old_chat_id, message_id=old_msg_id)
         except Exception:
             pass
+    for msg_key, chat_key in (
+        ("last_bot_msg_id", "last_bot_chat_id"),
+        ("status_msg_id", "status_msg_chat"),
+    ):
+        msg_id = context.user_data.get(msg_key)
+        chat_id = context.user_data.get(chat_key)
+        if msg_id and chat_id and (chat_id, msg_id) in seen:
+            context.user_data.pop(msg_key, None)
+            context.user_data.pop(chat_key, None)
 
 
 def _gathering_callback_matches_current_prompt(query, context: ContextTypes.DEFAULT_TYPE) -> bool:
