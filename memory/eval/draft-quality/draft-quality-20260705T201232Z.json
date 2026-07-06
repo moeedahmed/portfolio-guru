@@ -1,0 +1,2282 @@
+{
+  "generated_at": "2026-07-05T20:12:32.262188+00:00",
+  "synthetic_only": true,
+  "storage": "local_eval_artifact",
+  "scenarios_requested": 52,
+  "completed": 52,
+  "errors": 0,
+  "average_score": 0.993,
+  "weak_count": 0,
+  "results": [
+    {
+      "scenario": {
+        "case_id": "synthetic-001-cbd",
+        "form_type": "CBD",
+        "form_name": "Case-Based Discussion",
+        "input_source": "text",
+        "source_text": "I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. Yesterday in ED majors I assessed a 62-year-old man with pleuritic chest pain. I considered ACS, PE and pneumonia, used Wells score, reviewed ECG and CXR, discussed with my consultant, and arranged CTPA. I learned to state my risk assessment more clearly when escalating.",
+        "synthetic": true
+      },
+      "selected_form_type": "CBD",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "CBD",
+          "rationale": "The trainee managed a 62-year-old with pleuritic chest pain, formulated a differential diagnosis, used a decision tool (Wells score), reviewed investigations, and discussed the management plan (CTPA) with a consultant."
+        },
+        {
+          "form_type": "REFLECT_LOG",
+          "rationale": "The trainee includes a specific reflection on their communication style, noting a key personal learning point to state their risk assessment more clearly when escalating cases to senior colleagues."
+        }
+      ],
+      "draft_fields": {
+        "form_type": "CBD",
+        "date_of_encounter": "2026-07-04",
+        "patient_age": "62-year-old",
+        "patient_presentation": "pleuritic chest pain",
+        "clinical_setting": "",
+        "stage_of_training": "Higher/ST4-ST6",
+        "trainee_role": "Primary clinician with indirect supervision",
+        "clinical_reasoning": "I assessed a 62-year-old man presenting with pleuritic chest pain. My differential diagnosis included acute coronary syndrome (ACS), pulmonary embolism (PE), and pneumonia.\n\nTo risk-stratify the patient, I calculated a Wells score, reviewed the electrocardiogram (ECG), and examined the chest X-ray (CXR). I discussed my findings and clinical reasoning with the ED consultant, after which I arranged a CT pulmonary angiogram (CTPA) to definitively rule out a PE.",
+        "reflection": "This case of structured communication during clinical escalation. I learned that when discussing suspected PE cases with seniors or radiology, I need to state my risk assessment and objective score more clearly from the outset.\n\nIn future cases, I will explicitly lead with the formal risk score (such as the Wells score) and objective criteria when escalating or discussing imaging requests to clear clinical reasoning is shared immediately.",
+        "level_of_supervision": "Indirect",
+        "supervisor_name": "",
+        "curriculum_links": [
+          "SLO1"
+        ],
+        "key_capabilities": [
+          "SLO1 KC1: to be expert in assessing and managing all adult patients attending the ED. These capabilities will apply to patients attending with both physical and psychological ill health (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 0.956,
+        "required_coverage": 0.875,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": [
+          "Missing required fields: Clinical Setting"
+        ]
+      },
+      "elapsed_s": 3.53
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-002-dops",
+        "form_type": "DOPS",
+        "form_name": "Direct Observation of Procedural Skills",
+        "input_source": "voice",
+        "source_text": "Voice transcript: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. Today I performed DC cardioversion for unstable atrial fibrillation as a formal DOPS. My consultant observed each step directly. I checked consent, monitoring and sedation plan, delivered a synchronised shock, and reflected on calling for airway support earlier.",
+        "synthetic": true
+      },
+      "selected_form_type": "DOPS",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "DOPS",
+          "rationale": "Directly observed hands-on procedure with senior supervision; DOPS is the specific assessed-procedure form."
+        },
+        {
+          "form_type": "PROC_LOG",
+          "rationale": "The performed procedure can also be recorded in the procedural log."
+        },
+        {
+          "form_type": "REFLECT_LOG",
+          "rationale": "Feedback/reflection was included alongside the procedural assessment."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-05",
+        "procedure_name": "DC cardioversion",
+        "clinical_setting": "Emergency Department",
+        "stage_of_training": "Higher/ST4-ST6",
+        "procedural_skill": "DC cardioversion",
+        "indication": "Unstable atrial fibrillation.",
+        "trainee_performance": "I performed a synchronised DC cardioversion under direct observation of my consultant. Prior to the procedure, I verified patient consent, ensured appropriate continuous monitoring was in place, and established a clear sedation plan. I then safely delivered the synchronised shock.",
+        "reflection": "The procedure was successful, but on reflection, I should have called for senior airway support earlier in the planning phase to maximum safety during sedation.",
+        "curriculum_links": [
+          "SLO6",
+          "SLO3"
+        ],
+        "key_capabilities": [
+          "SLO6 KC2: the knowledge and psychomotor skills to perform EM procedural skills safely and in a timely fashion (2025 Update)",
+          "SLO3 KC2: be expert in fluid management and circulatory support in critically ill patients (2025 Update)",
+          "SLO3 KC3: manage all the life-threatening conditions including peri-arrest & arrest situations in the ED (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 1.46
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-003-dops_accs",
+        "form_type": "DOPS_ACCS",
+        "form_name": "Direct Observation of Procedural Skills - ACCS",
+        "input_source": "document",
+        "source_text": "Document extract from a portfolio note: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. During my ACCS anaesthetic placement I inserted a chest drain using Seldinger technique as an observed DOPS on 5 July 2026. My supervisor watched the procedure. I confirmed landmarks, used sterile technique and reflected on slowing down before dilating.",
+        "synthetic": true
+      },
+      "selected_form_type": "DOPS_ACCS",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "DOPS_ACCS",
+          "rationale": "ACCS procedural skill with direct observation; use the ACCS DOPS form."
+        },
+        {
+          "form_type": "PROCEDURAL_LOG_ACCS",
+          "rationale": "The same ACCS procedure can also be recorded in the ACCS procedural log."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-05",
+        "placement": "Anaesthetics",
+        "date_of_event": "2026-07-05",
+        "case_observed": "I inserted a chest drain using Seldinger technique. My supervisor watched the procedure and I confirmed landmarks and used sterile technique.",
+        "accs_procedural_skill": "Chest drain: Seldinger technique",
+        "reflection": "I need to I slow down and take my time before dilating during the procedure.",
+        "curriculum_links": [
+          "SLO6",
+          "SLO9"
+        ],
+        "key_capabilities": [
+          "SLO6 KC2: the knowledge and psychomotor skills to perform EM procedural skills safely and in a timely fashion (2025 Update)",
+          "SLO9 KC1: be able to undertake training and supervision of members of the ED team in the clinical environment (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 0.948,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 0.65,
+        "language": 1.0,
+        "issues": [
+          "Reflection appears too thin"
+        ]
+      },
+      "elapsed_s": 1.17
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-004-mini_cex",
+        "form_type": "MINI_CEX",
+        "form_name": "Mini-Clinical Evaluation Exercise",
+        "input_source": "image",
+        "source_text": "Context supplied with image: the image is supporting evidence only; do not infer findings beyond this text. I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. The activity happened yesterday. A consultant directly observed me taking a focused history and examination from a 7-year-old with wheeze in paediatric ED. I explained the plan to the parent and received feedback on structuring my assessment.",
+        "synthetic": true
+      },
+      "selected_form_type": "MINI_CEX",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "MINI_CEX",
+          "rationale": "The trainee was directly observed by a consultant while performing a clinical encounter (focused history and examination of a paediatric patient) and received immediate feedback on their assessment structure."
+        },
+        {
+          "form_type": "REFLECT_LOG",
+          "rationale": "The trainee is reflecting on the feedback received regarding their assessment structure and communication with the parent to guide their future clinical practice."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "clinical_setting": "Paediatric Emergency Department",
+        "patient_presentation": "7-year-old with wheeze",
+        "stage_of_training": "Higher/ST4-ST6",
+        "complexity": "",
+        "clinical_reasoning": "I took a focused history and performed a clinical examination on a 7-year-old presenting with a wheeze in the paediatric emergency department.",
+        "reflection": "A consultant directly observed my assessment and gave me feedback on how I structured my history taking and physical examination. I explained the clinical management plan to the child's parent during this observed interaction. I will use the consultant's feedback to further refine and structure my clinical assessments of paediatric patients presenting with respiratory symptoms.",
+        "curriculum_links": [
+          "SLO5",
+          "SLO2",
+          "SLO9"
+        ],
+        "key_capabilities": [
+          "SLO5 KC1: be expert in assessing and managing all children and young adult patients attending the ED (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)",
+          "SLO9 KC1: be able to undertake training and supervision of members of the ED team in the clinical environment (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 2.49
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-005-acat",
+        "form_type": "ACAT",
+        "form_name": "Acute Care Assessment Tool",
+        "input_source": "text",
+        "source_text": "I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. The activity happened yesterday. On an evening acute take I managed six patients across majors and resus, including sepsis, chest pain and a frail fall. My consultant observed my prioritisation, handover and escalation decisions over the shift.",
+        "synthetic": true
+      },
+      "selected_form_type": "ACAT",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "ACAT",
+          "rationale": "The trainee managed a cohort of six acute patients across majors and resus, with a consultant observing their prioritisation, clinical decision-making, and escalation over the shift."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "placement": "Emergency Medicine",
+        "clinical_setting": "Emergency Department",
+        "cases_observed": "During an evening acute take, I managed six patients across majors and resus. The cases included presentations of sepsis, chest pain, and a frail elderly patient following a fall.",
+        "reflection": "Managing multiple high-acuity patients simultaneously across different areas of the department required structured prioritization. I focused on early senior escalation for the unstable cases and structured my handovers to continuity of care. \n\nMy consultant observed my decision-making and flow management. This shift of maintaining an active overview of the board to dynamically re-prioritize when new investigations or sick patients arrive.",
+        "curriculum_links": [
+          "SLO8",
+          "SLO2"
+        ],
+        "key_capabilities": [
+          "SLO8 KC3: will maintain situational awareness throughout the shift to ensure safety is optimised (2025 Update)",
+          "SLO8 KC4: will anticipate challenges, generate options, make decisions and communicate these effectively to the team as lead clinician (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 2.58
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-006-lat",
+        "form_type": "LAT",
+        "form_name": "Leadership Assessment Tool",
+        "input_source": "voice",
+        "source_text": "Voice transcript: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. The activity happened yesterday. I acted as EPIC for a crowded evening ED shift. I allocated junior doctors, held a safety huddle, escalated capacity concerns to site management and reflected on protecting time for re-review of high-risk patients.",
+        "synthetic": true
+      },
+      "selected_form_type": "LAT",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "LAT",
+          "rationale": "The trainee acted in the EPIC (Emergency Physician in Charge) leadership role during a crowded shift, coordinating juniors, holding safety huddles, and managing departmental capacity."
+        },
+        {
+          "form_type": "REFLECT_LOG",
+          "rationale": "The trainee includes a specific reflection on the clinical challenge of protecting time for the re-review of high-risk patients during a busy, crowded shift."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "clinical_setting": "Emergency Department",
+        "leadership_context": "I acted as EPIC (Emergency Physician in Charge) during a crowded evening shift. The department was under significant capacity pressure, requiring active coordination of the junior medical team and ongoing liaisons with hospital site management.",
+        "stage_of_training": "Higher/ST4-ST6",
+        "clinical_reasoning": "I took on the role of EPIC to manage flow, safety, and staff allocation during a high-pressure evening shift. My main activities included allocating junior doctors to appropriate clinical areas based on department demand and individual skill levels, and holding a safety huddle to align the team on immediate priorities and high-risk patients.\n\nTo address severe crowding, I actively escalated capacity concerns to site management to hospital-wide flow. I also focused on maintaining oversight of the department, that I protected time to assist with and oversee the re-review of high-risk patients who remained in the department.",
+        "reflection": "Managing a crowded department as EPIC requires balancing high-level operational flow with clinical safety. The safety huddle was an effective tool to focus the team, but when crowding increases, it becomes challenging to maintain situational awareness of every high-risk patient.\n\nI realised the importance of actively protecting time in my coordinator role specifically for clinical oversight and re-reviews, rather than becoming entirely absorbed by administrative flow tasks. On future shifts, I will establish clear triggers for escalation to site management early and delegate specific junior supervision tasks to no high-risk patient reviews are delayed.",
+        "curriculum_links": [
+          "SLO8"
+        ],
+        "key_capabilities": [
+          "SLO8 KC1: will provide support to ED staff at all levels and disciplines on the ED shift (2025 Update)",
+          "SLO8 KC3: will maintain situational awareness throughout the shift to ensure safety is optimised (2025 Update)",
+          "SLO8 KC4: will anticipate challenges, generate options, make decisions and communicate these effectively to the team as lead clinician (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 4.14
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-007-acaf",
+        "form_type": "ACAF",
+        "form_name": "Applied Critical Appraisal Form",
+        "input_source": "document",
+        "source_text": "Document extract from a portfolio note: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. The activity happened yesterday. I appraised evidence on using age-adjusted D-dimer for suspected PE. I framed a PICO question, searched NICE and a recent meta-analysis, and discussed how I would apply the evidence safely in low-risk patients. I learned to document the limits of the evidence when explaining risk to patients.",
+        "synthetic": true
+      },
+      "selected_form_type": "ACAF",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "ACAF",
+          "rationale": "The trainee framed a clinical question using PICO, searched the literature (NICE and a meta-analysis) for evidence on age-adjusted D-dimer, and evaluated how to apply this to practice."
+        },
+        {
+          "form_type": "REFLECT_LOG",
+          "rationale": "The trainee reflects on their learning ('I learned to document the limits...') and how they will change their future clinical practice when explaining risks to patients."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "situation": "I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I appraised evidence on using age-adjusted D-dimer for suspected PE.",
+        "pico_population": "Patients with suspected pulmonary embolism",
+        "pico_intervention": "Age-adjusted D-dimer",
+        "pico_comparison": "",
+        "pico_outcome": "",
+        "search_methodology": "I searched NICE guidelines and a recent meta-analysis.",
+        "evidence_evaluation": "",
+        "apply_to_practice": "Applying the evidence safely in low-risk patients.",
+        "communicate_to_patient": "I learned to document the limits of the evidence when explaining risk to patients.",
+        "future_research": "",
+        "reflection": "I appraised evidence on using age-adjusted D-dimer for suspected PE. I framed a PICO question, searched NICE and a recent meta-analysis, and discussed how I would apply the evidence safely in low-risk patients.\n\nI learned to document the limits of the evidence when explaining risk to patients.",
+        "curriculum_links": [
+          "SLO10",
+          "SLO2"
+        ],
+        "key_capabilities": [
+          "SLO10 KC1: be able to appraise, synthesise, communicate and use research evidence to develop EM care (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 2.7
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-008-stat",
+        "form_type": "STAT",
+        "form_name": "Structured Teaching Assessment Tool",
+        "input_source": "image",
+        "source_text": "Context supplied with image: the image is supporting evidence only; do not infer findings beyond this text. I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. The activity happened yesterday. I delivered a 25-minute teaching session to four junior doctors on ECGs in chest pain. A consultant observed the session and gave feedback on pacing and checking understanding.",
+        "synthetic": true
+      },
+      "selected_form_type": "STAT",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "STAT",
+          "rationale": "Formal teaching session with observation/assessment stated explicitly."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "stage_of_training": "Higher/ST4-ST6",
+        "learner_group": "Junior doctors",
+        "setting": "Local",
+        "delivery": "Face to Face",
+        "number_of_learners": "Less than 5",
+        "session_length": "25 minutes",
+        "session_title": "ECGs in chest pain",
+        "curriculum_links": [
+          "SLO9",
+          "SLO2"
+        ],
+        "key_capabilities": [
+          "SLO9 KC2: be able to prepare and deliver teaching sessions outside of the clinical environment, including simulation, small group work, and didactic presentations (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)",
+          "SLO9 KC1: be able to undertake training and supervision of members of the ED team in the clinical environment (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 1.12
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-009-msf",
+        "form_type": "MSF",
+        "form_name": "Multi-Source Feedback",
+        "input_source": "text",
+        "source_text": "I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. The activity happened yesterday. I reviewed feedback from nurses, juniors and consultants. Themes were calm leadership and clear explanations, with a development point around documenting senior discussions more consistently.",
+        "synthetic": true
+      },
+      "selected_form_type": "MSF",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "MSF",
+          "rationale": "The trainee has gathered and reviewed feedback from multiple professional groups (nurses, juniors, consultants) regarding their clinical practice, communication, and leadership, which is the core purpose of a Multi-Source Feedback round."
+        },
+        {
+          "form_type": "REFLECT_LOG",
+          "rationale": "The trainee is actively reflecting on specific feedback themes (calm leadership, explanations) and identifying a professional development action point (documenting senior discussions more consistently)."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "stage_of_training": "Higher/ST4-ST6",
+        "context": "I reviewed the compiled feedback from my Multi-Source Feedback (MSF), which included responses from nursing staff, junior doctors, and consultants during my ST5 placement.",
+        "reflection": "The feedback was reassuring, particularly the positive themes around my calm leadership style and ability to provide clear explanations to both patients and team members. This suggests my communication and approach during busy shifts are supportive and effective.\n\nAn important development point raised was the need to document senior discussions more consistently in the patient notes. I recognise that while these conversations happen regularly, they are not always clearly recorded, which is vital for clinical governance and continuity of care.\n\nTo address this, I will make a conscious effort to record the name of the consultant and the specific details of our discussion in the medical records immediately after any senior escalation or advice-seeking conversation."
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 2.9
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-010-qiat",
+        "form_type": "QIAT",
+        "form_name": "Quality Improvement Assessment Tool",
+        "input_source": "voice",
+        "source_text": "Voice transcript: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. The activity happened yesterday. I led a QI project on time to antibiotics in adult sepsis. Baseline audit was 42 cases, we introduced a triage prompt and re-audit showed improvement from 58 to 39 minutes. I presented it at governance. My PDP summary this year is to improve quality improvement leadership. Next year I will focus on embedding the prompt and supporting re-audit.",
+        "synthetic": true
+      },
+      "selected_form_type": "QIAT",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "QIAT",
+          "rationale": "QI/audit project with measurement and change; QIAT is the specific assessment form."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "stage_of_training": "ST5",
+        "placement": "Emergency Medicine",
+        "pdp_summary": "To improve quality improvement leadership.",
+        "qi_engagement": "I led a QI project on time to antibiotics in adult sepsis. I presented the findings at the departmental governance meeting.",
+        "qi_understanding": "This developed my practical understanding of using baseline measurement, an intervention and re-audit to assess change in an ED quality improvement project.",
+        "involved_in_project": "Yes",
+        "qi_journey_aspects": [
+          "Measurement",
+          "Testing Changes",
+          "Implement"
+        ],
+        "reflection": "I led a QI project focusing on reducing the time to antibiotics for adult patients with sepsis. We completed a baseline audit of 42 cases, implemented a new triage prompt intervention, and completed a re-audit cycle.\n\nThe re-audit demonstrated an improvement in the time to antibiotics, reducing the average from 58 minutes to 39 minutes. Presenting these findings at the departmental governance meeting allowed me to share the positive impact of this system change with the wider team.\n\nThis project demonstrated that a simple, targeted triage prompt can improve clinical delivery times for time-critical therapies. It of engaging clinical staff at the front door to secure buy-in for new pathways.",
+        "next_pdp": "Next year I will focus on embedding the prompt and supporting further re-audit to sustainability.",
+        "curriculum_links": [
+          "SLO11",
+          "SLO12"
+        ],
+        "key_capabilities": [
+          "SLO11 KC1: be able to provide clinical leadership on effective Quality Improvement work (2025 Update)",
+          "SLO11 KC2: be able to support and develop a culture of departmental safety, and good clinical governance (2025 Update)",
+          "SLO12 KC2: be able to investigate a patient safety incident, participate and contribute effectively to department clinical governance activities and risk reduction processes (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 2.08
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-011-jcf",
+        "form_type": "JCF",
+        "form_name": "Journal Club / Presentation Form",
+        "input_source": "document",
+        "source_text": "Document extract from a portfolio note: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. The activity happened yesterday. I presented a journal club on CT coronary angiography in low-risk chest pain. I summarised the paper, discussed validity and explored how it might change local ED pathways.",
+        "synthetic": true
+      },
+      "selected_form_type": "JCF",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "JCF",
+          "rationale": "Journal club presentation or discussion described explicitly."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "learner_group": "",
+        "setting": "",
+        "delivery": "",
+        "number_of_learners": "",
+        "session_length": "",
+        "paper_title": "CT coronary angiography in low-risk chest pain",
+        "curriculum_links": [
+          "SLO10",
+          "SLO2",
+          "SLO1"
+        ],
+        "key_capabilities": [
+          "SLO10 KC1: be able to appraise, synthesise, communicate and use research evidence to develop EM care (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)",
+          "SLO1 KC1: to be expert in assessing and managing all adult patients attending the ED. These capabilities will apply to patients attending with both physical and psychological ill health (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 0.98
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-012-teach",
+        "form_type": "TEACH",
+        "form_name": "Teaching Delivered By Trainee",
+        "input_source": "image",
+        "source_text": "Context supplied with image: the image is supporting evidence only; do not infer findings beyond this text. I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. The activity happened yesterday. I taught two F1 doctors and a medical student a structured approach to ECG interpretation using five anonymised ECGs from the teaching file. I collected verbal feedback afterwards.",
+        "synthetic": true
+      },
+      "selected_form_type": "TEACH",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "TEACH",
+          "rationale": "The trainee delivered an informal ECG teaching session to juniors/students in the clinical environment without formal assessor observation."
+        },
+        {
+          "form_type": "REFLECT_LOG",
+          "rationale": "The trainee collected verbal feedback on their teaching and can reflect on their teaching style, delivery, and areas for development."
+        }
+      ],
+      "draft_fields": {
+        "date_of_teaching": "2026-07-04",
+        "title_of_session": "Structured approach to ECG interpretation",
+        "recognised_courses": "",
+        "learning_outcomes": "How to apply a structured approach to ECG interpretation using anonymised ECGs.",
+        "accs_procedural_skill": "",
+        "intermediate_procedural_skill": "",
+        "higher_procedural_skill": "",
+        "curriculum_links": [
+          "SLO9"
+        ],
+        "key_capabilities": [
+          "SLO9 KC2: be able to prepare and deliver teaching sessions outside of the clinical environment, including simulation, small group work, and didactic presentations (2025 Update)",
+          "SLO9 KC1: be able to undertake training and supervision of members of the ED team in the clinical environment (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 2.08
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-013-proc_log",
+        "form_type": "PROC_LOG",
+        "form_name": "Procedural Log",
+        "input_source": "text",
+        "source_text": "I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. The activity happened yesterday. I performed a shoulder reduction in ED with senior advice available but no formal DOPS. I documented neurovascular status before and after and reflected on analgesia planning.",
+        "synthetic": true
+      },
+      "selected_form_type": "PROC_LOG",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "PROC_LOG",
+          "rationale": "Trainee-performed procedure without a clear direct-assessment signal."
+        }
+      ],
+      "draft_fields": {
+        "date_of_activity": "2026-07-04",
+        "stage_of_training": "Higher/ST4-ST6",
+        "year_of_training": "ST5",
+        "higher_procedural_skill": "Fracture / Dislocation manipulation",
+        "higher_procedural_skill_other": "",
+        "intermediate_procedural_skill": "",
+        "accs_procedural_skill": "",
+        "age_of_patient": "",
+        "reflective_comments": "I performed a shoulder reduction in the emergency department with senior advice available. I that I documented the patient's neurovascular status both before and after the manipulation to manage risk and identify any immediate complications.\n\nPerforming this procedure made me think about the timing and selection of analgesia and sedation. Planning the appropriate level of pain relief beforehand is essential for a successful, controlled reduction and to minimise patient distress.\n\nIn future cases, I will continue to systematically document pre- and post-procedure neurovascular examinations and formulate a structured analgesia plan before starting any joint manipulation.",
+        "curriculum_links": [
+          "SLO6",
+          "SLO2"
+        ],
+        "key_capabilities": [
+          "SLO6 KC2: the knowledge and psychomotor skills to perform EM procedural skills safely and in a timely fashion (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 0.938,
+        "required_coverage": 1.0,
+        "grounding": 0.75,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": [
+          "Potential unsupported high-risk claims: sedation"
+        ]
+      },
+      "elapsed_s": 1.93
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-014-procedural_log_accs",
+        "form_type": "PROCEDURAL_LOG_ACCS",
+        "form_name": "Procedural Log - ACCS",
+        "input_source": "voice",
+        "source_text": "Voice transcript: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. The activity happened yesterday. On ACCS I performed a lumbar puncture under supervision. I checked contraindications, used sterile technique, obtained CSF samples and reflected on patient positioning.",
+        "synthetic": true
+      },
+      "selected_form_type": "PROCEDURAL_LOG_ACCS",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "PROCEDURAL_LOG_ACCS",
+          "rationale": "ACCS procedural skill without a clear direct-assessment signal; use the ACCS procedural log."
+        }
+      ],
+      "draft_fields": {
+        "date_of_activity": "2026-07-04",
+        "accs_procedural_skill": "Lumbar puncture",
+        "brief_description": "I performed a lumbar puncture under supervision. Prior to the procedure, I systematically checked for any contraindications, ensured a strict sterile technique was maintained throughout, and successfully obtained the necessary CSF samples for analysis.",
+        "reflective_comments": "The procedure went well, but it highlighted the critical importance of patient positioning. The patient is fully flexed and their spine is aligned parallel to the edge of the bed improves the ease of identifying the landmarks and accessing the subarachnoid space.\n\nIn future procedures, I will spend more time optimizing the patient's position and explaining how they can help maintain this posture before inserting the needle, as this is key to a successful first-pass attempt.",
+        "curriculum_links": [
+          "SLO6",
+          "SLO9"
+        ],
+        "key_capabilities": [
+          "SLO6 KC2: the knowledge and psychomotor skills to perform EM procedural skills safely and in a timely fashion (2025 Update)",
+          "SLO9 KC1: be able to undertake training and supervision of members of the ED team in the clinical environment (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 1.67
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-015-sdl",
+        "form_type": "SDL",
+        "form_name": "Self-directed Learning Reflection",
+        "input_source": "document",
+        "source_text": "Document extract from a portfolio note: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. The activity happened yesterday. I completed a self-directed learning module on paediatric fever pathways, then applied the learning by reviewing our local traffic-light guidance and changing my safety-netting.",
+        "synthetic": true
+      },
+      "selected_form_type": "SDL",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "SDL",
+          "rationale": "The trainee independently completed an online self-directed learning module on paediatric fever pathways to update their knowledge."
+        },
+        {
+          "form_type": "REFLECT_LOG",
+          "rationale": "The trainee reflects on how they applied this new learning to local clinical guidance and modified their personal safety-netting practice."
+        }
+      ],
+      "draft_fields": {
+        "reflection_title": "Self-directed learning: Paediatric fever pathways and local traffic-light guidance",
+        "learning_activity_type": [
+          "Other"
+        ],
+        "resource_details": "Completed a self-directed learning module on paediatric fever pathways and reviewed our local departmental traffic-light guidance.",
+        "reflection": "Yesterday, I completed a self-directed learning module on paediatric fever pathways to refresh my clinical knowledge. Following this, I reviewed our local ED traffic-light guidance for febrile children to my clinical practice aligns with regional protocols.\n\nI reflected on how I communicate risk to parents and carers. As a result of this learning, I have updated and structured my safety-netting advice for families of febrile children. I now that specific, objective red-flag triggers based on the traffic-light system are explicitly discussed and documented in the patient notes.\n\nIn future shifts, I will consistently apply this updated safety-netting framework to improve parental understanding and safer discharge planning for paediatric patients presenting with fever.",
+        "curriculum_links": [
+          "SLO5",
+          "SLO2"
+        ],
+        "key_capabilities": [
+          "SLO5 KC1: be expert in assessing and managing all children and young adult patients attending the ED (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 2.84
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-016-us_case",
+        "form_type": "US_CASE",
+        "form_name": "Ultrasound Case Reflection",
+        "input_source": "image",
+        "source_text": "Context supplied with image: the image is supporting evidence only; do not infer findings beyond this text. I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. The activity happened yesterday. I performed lung ultrasound on a breathless patient with suspected pulmonary oedema. I identified bilateral B-lines, discussed images with my consultant and reflected on integrating ultrasound with clinical assessment.",
+        "synthetic": true
+      },
+      "selected_form_type": "US_CASE",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "US_CASE",
+          "rationale": "Point-of-care ultrasound case is stated explicitly."
+        }
+      ],
+      "draft_fields": {
+        "case_reflection_title": "Lung ultrasound in acute breathlessness",
+        "date_of_case": "2026-07-04",
+        "location": "Emergency Department",
+        "patient_gender": "",
+        "patient_age": "",
+        "equipment_used": "",
+        "us_application": [
+          "ELS"
+        ],
+        "clinical_scenario": "I assessed a breathless patient with suspected pulmonary oedema.",
+        "how_used": "I performed a lung ultrasound to look for signs of pulmonary congestion.",
+        "usable_images": "I was able to obtain usable images and identified bilateral B-lines.",
+        "interpret_images": "I identified bilateral B-lines, which supported the clinical suspicion of pulmonary oedema, and discussed these imaging findings with my consultant.",
+        "changed_management": "",
+        "learning_points": "I reflected on the value of integrating ultrasound findings directly with my clinical assessment to aid decision-making in the acutely breathless patient.",
+        "other_comments": "",
+        "curriculum_links": [
+          "SLO6",
+          "SLO2",
+          "SLO1"
+        ],
+        "key_capabilities": [
+          "SLO6 KC2: the knowledge and psychomotor skills to perform EM procedural skills safely and in a timely fashion (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)",
+          "SLO1 KC1: to be expert in assessing and managing all adult patients attending the ED. These capabilities will apply to patients attending with both physical and psychological ill health (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 1.76
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-017-complaint",
+        "form_type": "COMPLAINT",
+        "form_name": "Reflection on Complaints",
+        "input_source": "text",
+        "source_text": "I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. The activity happened yesterday. I reflected on a complaint about delayed communication with a family during a busy resus shift. The clinical care was appropriate, but I should have allocated a clearer update role and documented conversations better.",
+        "synthetic": true
+      },
+      "selected_form_type": "COMPLAINT",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "COMPLAINT",
+          "rationale": "The trainee is directly reflecting on a patient/family complaint about communication delays during a resuscitation scenario, focusing on personal learning and future practice adjustments."
+        },
+        {
+          "form_type": "REFLECT_LOG",
+          "rationale": "The trainee is reflecting on non-technical skills, cognitive load management, and communication processes during a high-pressure resuscitation shift to improve future practice."
+        }
+      ],
+      "draft_fields": {
+        "reflection_title": "Reflection on delayed family communication during a busy resuscitation shift",
+        "date_of_complaint": "2026-07-04",
+        "key_features": "I received a complaint regarding delayed communication with a patient's family during a highly active resuscitation shift.",
+        "key_aspects": "The clinical care provided to the patient was appropriate. However, during a busy resus shift, I did not clearly delegate the role of updating the family, nor did I sufficiently document our communication and conversations.",
+        "learning_points": "I learned that during high-pressure resuscitation scenarios, maintaining clear communication with families is as critical as active clinical management. I need to explicitly designate a team member to act as the liaison for family updates when I am focused on clinical tasks. \n\nI also learned the importance of prompt and thorough documentation of all family discussions in the medical records to a clear timeline of communication is maintained.",
+        "further_action": "I will that during future resuscitation cases, I nominate a specific staff member to provide regular updates to relatives. I will also make it a habit to document the timing and content of all family updates directly in the patient notes.",
+        "curriculum_links": [
+          "SLO7",
+          "SLO12",
+          "SLO3"
+        ],
+        "key_capabilities": [
+          "SLO7 KC1: have expert communication skills to negotiate, manage complicated or evolving interactions (2025 Update)",
+          "SLO12 KC6: demonstrate a positive impact on the culture of the Emergency Department through attitudes and behaviours that impact positively on colleagues, patients and their relatives (2025 Update)",
+          "SLO3 KC3: manage all the life-threatening conditions including peri-arrest & arrest situations in the ED (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 3.51
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-018-serious_inc",
+        "form_type": "SERIOUS_INC",
+        "form_name": "Serious Incident Reflection",
+        "input_source": "voice",
+        "source_text": "Voice transcript: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. The activity happened yesterday. I contributed to a serious incident review after delayed recognition of sepsis in majors. I reviewed the timeline, identified handover gaps and learned to use an explicit trigger for senior review.",
+        "synthetic": true
+      },
+      "selected_form_type": "SERIOUS_INC",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "SERIOUS_INC",
+          "rationale": "The trainee actively contributed to a formal serious incident review regarding delayed sepsis recognition and is reflecting on the clinical and system-level learning points."
+        },
+        {
+          "form_type": "REFLECT_LOG",
+          "rationale": "The entry contains strong reflective elements regarding personal learning, identifying handover gaps, and changing future practice using an explicit senior review trigger."
+        }
+      ],
+      "draft_fields": {
+        "reflection_title": "Serious Incident Review: Delayed Recognition of Sepsis",
+        "date_of_incident": "2026-07-04",
+        "stage_of_training": "Higher/ST4-ST6",
+        "description": "I contributed to a serious incident review following the delayed recognition of sepsis in a patient who was located in the majors area of the Emergency Department.",
+        "root_causes": "After reviewing the timeline of the patient's care, I identified handover gaps as a root cause of the delay in recognising the patient's deteriorating clinical picture.",
+        "contributing_factors": "Contributing factors included communication failures during shift handovers and the lack of a structured, explicit trigger to prompt an immediate senior review for patients with suspected deteriorating sepsis.",
+        "learning_points": "I learned the critical importance of complete and communication during handovers to prevent clinical deterioration from being missed.\n\nI also learned that relying on unstructured clinical assessments is insufficient, and that we must use explicit, objective triggers to mandate a senior review when sepsis is suspected or worsening.",
+        "further_action": "I will change my practice by utilising explicit triggers for senior reviews in patients with suspected sepsis and that handover documentation is . I will also share the findings of this serious incident review with the wider departmental team to improve awareness of handover safety.",
+        "curriculum_links": [
+          "SLO11",
+          "SLO12",
+          "SLO2"
+        ],
+        "key_capabilities": [
+          "SLO11 KC2: be able to support and develop a culture of departmental safety, and good clinical governance (2025 Update)",
+          "SLO12 KC2: be able to investigate a patient safety incident, participate and contribute effectively to department clinical governance activities and risk reduction processes (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 3.35
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-019-edu_act",
+        "form_type": "EDU_ACT",
+        "form_name": "Educational Activity",
+        "input_source": "document",
+        "source_text": "Document extract from a portfolio note: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. The activity happened yesterday. I attended a regional paediatric emergency medicine teaching day covering safeguarding, sepsis and non-accidental injury. I reflected on using the learning in future paediatric assessments.",
+        "synthetic": true
+      },
+      "selected_form_type": "EDU_ACT",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "EDU_ACT",
+          "rationale": "The trainee attended an educational activity as a learner."
+        }
+      ],
+      "draft_fields": {
+        "date_of_education": "2026-07-04",
+        "title_of_education": "Regional paediatric emergency medicine teaching day",
+        "delivered_by": "",
+        "learning_points": "I attended a regional paediatric emergency medicine teaching day covering safeguarding, sepsis and non-accidental injury. \n\nI reflected on how to apply this learning to my future paediatric assessments in the Emergency Department.",
+        "curriculum_links": [
+          "SLO5",
+          "SLO3",
+          "SLO7"
+        ],
+        "key_capabilities": [
+          "SLO5 KC1: be expert in assessing and managing all children and young adult patients attending the ED (2025 Update)",
+          "SLO3 KC3: manage all the life-threatening conditions including peri-arrest & arrest situations in the ED (2025 Update)",
+          "SLO7 KC1: have expert communication skills to negotiate, manage complicated or evolving interactions (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 1.11
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-020-formal_course",
+        "form_type": "FORMAL_COURSE",
+        "form_name": "Formal Course",
+        "input_source": "image",
+        "source_text": "Context supplied with image: the image is supporting evidence only; do not infer findings beyond this text. I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I completed ATLS today. The course refreshed my trauma team approach, primary survey and communication with the team leader. I will apply the structured handover in resus.",
+        "synthetic": true
+      },
+      "selected_form_type": "FORMAL_COURSE",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "FORMAL_COURSE",
+          "rationale": "Formal course attendance/completion is stated explicitly."
+        }
+      ],
+      "draft_fields": {
+        "stage_of_training": "Higher/ST4-ST6",
+        "project_description": "I completed the Advanced Trauma Life Support (ATLS) course today.",
+        "reflective_notes": "The course refreshed my trauma team approach, the systematic primary survey, and effective communication with the team leader. I reflected on how a structured approach is vital during high-pressure trauma resuscitations to no life-threatening injuries are missed.",
+        "resources_used": "Advanced Trauma Life Support (ATLS) course",
+        "lessons_learned": "I learned the importance of maintaining a structured approach to trauma care. I will apply the structured handover in resus to improve communication and patient safety during trauma team handovers.",
+        "curriculum_links": [
+          "SLO4",
+          "SLO2",
+          "SLO3"
+        ],
+        "key_capabilities": [
+          "SLO4 KC1: be expert in assessment, investigation and clinical management of patients attending with all injuries, regardless of complexity (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)",
+          "SLO3 KC3: manage all the life-threatening conditions including peri-arrest & arrest situations in the ED (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 1.46
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-021-esle_assess",
+        "form_type": "ESLE_ASSESS",
+        "form_name": "ESLE",
+        "input_source": "text",
+        "source_text": "I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. The activity happened yesterday. My consultant assessed me during a three-hour evening ED shift. I managed flow in majors, supported juniors, reviewed two unwell patients and reflected on maintaining situational awareness under pressure.",
+        "synthetic": true
+      },
+      "selected_form_type": "ESLE_ASSESS",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "ESLE_ASSESS",
+          "rationale": "Directly matches a formal, three-hour shift-level observation by a consultant, assessing flow, supporting juniors, and non-technical skills like situational awareness."
+        },
+        {
+          "form_type": "ACAT",
+          "rationale": "Suitable for evaluating the clinical management and prioritisation of multiple patients in majors alongside department flow management during an acute shift."
+        },
+        {
+          "form_type": "REFLECT_LOG",
+          "rationale": "Appropriate to capture the trainee's personal reflection on maintaining situational awareness and managing cognitive load under pressure during a busy shift."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "stage_of_training": "Higher/ST4-ST6",
+        "reflection": "During this three-hour evening shift, I acted as the lead clinician managing flow in the majors area. I focused on maintaining situational awareness of the department's footprint while simultaneously supporting junior colleagues with clinical queries and directly reviewing two unwell patients who required urgent escalation.\n\nBalancing oversight of the department with hands-on clinical care of high-acuity patients is a constant challenge under pressure. I had to consciously step back from individual tasks to I retained a broad overview of majors, preventing bottlenecks and junior staff felt supported.\n\nIn future shifts, I will continue to practice this deliberate shifting of focus between micro-level clinical management and macro-level departmental oversight. Regular, brief check-ins with the nurse in charge helps maintain this situational awareness and keeps the department moving safely.",
+        "curriculum_links": [
+          "SLO8"
+        ],
+        "key_capabilities": [
+          "SLO8 KC1: will provide support to ED staff at all levels and disciplines on the ED shift (2025 Update)",
+          "SLO8 KC3: will maintain situational awareness throughout the shift to ensure safety is optimised (2025 Update)",
+          "SLO8 KC4: will anticipate challenges, generate options, make decisions and communicate these effectively to the team as lead clinician (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 3.1
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-022-reflect_log",
+        "form_type": "REFLECT_LOG",
+        "form_name": "Reflective Practice Log",
+        "input_source": "voice",
+        "source_text": "Voice transcript: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. The activity happened yesterday. I managed a breathless patient where I initially anchored on COPD. Senior review prompted a PE workup. I learned to pause when the story does not fit and to document my differential more explicitly.",
+        "synthetic": true
+      },
+      "selected_form_type": "REFLECT_LOG",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "CBD",
+          "rationale": "The trainee managed a patient with acute breathlessness, requiring clinical reasoning, differential diagnosis, and retrospectively discussing cognitive bias (anchoring) with a senior."
+        },
+        {
+          "form_type": "REFLECT_LOG",
+          "rationale": "The trainee explicitly reflects on a clinical error (anchoring on COPD), identifying key lessons about pausing when a clinical picture is inconsistent and improving future documentation of differentials."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection_title": "Reflecting on anchoring bias in a breathless patient",
+        "date_of_event": "2026-07-04",
+        "event_type": "ED patient",
+        "reflection": "I managed a breathless patient where I initially anchored on COPD. I focused on the patient's history of respiratory disease and treated them accordingly, assuming an acute exacerbation was the primary driver of their presentation.",
+        "replay_differently": "I would perform a deliberate re-evaluation pause to challenge my working diagnosis before finalizing the management plan.",
+        "why": "I anchored prematurely on a known chronic condition, which narrowed my diagnostic focus and led me to overlook alternative causes for the patient's breathlessness.",
+        "different_outcome": "The clinical outcome was appropriate due to senior intervention, but considering a broader differential earlier would have led to a more timely diagnostic pathway.",
+        "focussing_on": "I am focussing on actively listing and ruling out life-threatening alternatives, such as pulmonary embolism, whenever a patient presents with acute breathlessness, rather than settling on the most obvious chronic diagnosis.",
+        "learned": "I have learned that having a history of COPD does not preclude other acute pathology. I must explicitly document a differential diagnosis and remain open to revising my working diagnosis when the clinical picture is not fully explained by a single condition.",
+        "curriculum_links": [
+          "SLO1",
+          "SLO2"
+        ],
+        "key_capabilities": [
+          "SLO1 KC1: to be expert in assessing and managing all adult patients attending the ED. These capabilities will apply to patients attending with both physical and psychological ill health (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 3.43
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-023-teach_obs",
+        "form_type": "TEACH_OBS",
+        "form_name": "Teaching Observation",
+        "input_source": "document",
+        "source_text": "Document extract from a portfolio note: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. The activity happened yesterday. A consultant observed me teaching an F2 doctor how to assess ankle injuries. They fed back that my explanations were clear but I should check the learner's baseline knowledge first.",
+        "synthetic": true
+      },
+      "selected_form_type": "TEACH_OBS",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "TEACH_OBS",
+          "rationale": "Teaching was observed for feedback on the trainee's teaching skill."
+        },
+        {
+          "form_type": "TEACH",
+          "rationale": "The same activity can also be recorded as teaching delivered."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "stage_of_training": "Higher/ST4-ST6",
+        "reflection": "An Emergency Medicine consultant observed me teaching an F2 doctor how to assess ankle injuries.\n\nMy explanations were clear, but the consultant fed back that I should check the learner's baseline knowledge first.\n\nIn future teaching sessions, I will actively assess the learner's existing knowledge and experience at the outset. This will allow me to tailor my teaching to their specific needs and make the session more effective.",
+        "curriculum_links": [
+          "SLO9",
+          "SLO2"
+        ],
+        "key_capabilities": [
+          "SLO9 KC1: be able to undertake training and supervision of members of the ED team in the clinical environment (2025 Update)",
+          "SLO9 KC3: be able to provide effective constructive feedback to colleagues, including debrief (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 1.32
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-024-teach_confid",
+        "form_type": "TEACH_CONFID",
+        "form_name": "Teaching Confidentiality",
+        "input_source": "image",
+        "source_text": "Context supplied with image: the image is supporting evidence only; do not infer findings beyond this text. I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a Teaching Confidentiality entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "TEACH_CONFID",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "TEACH_CONFID",
+          "rationale": "The user explicitly asked for Teaching Confidentiality."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "Yesterday in the Emergency Department, I delivered a teaching session on confidentiality. Reflecting on this activity, I realised that I need to document the outcome and learning more clearly next time.",
+        "curriculum_links": [
+          "SLO9"
+        ],
+        "key_capabilities": [
+          "SLO9 KC2: be able to prepare and deliver teaching sessions outside of the clinical environment, including simulation, small group work, and didactic presentations (2025 Update)",
+          "SLO9 KC1: be able to undertake training and supervision of members of the ED team in the clinical environment (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 0.98
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-025-mgmt_rota",
+        "form_type": "MGMT_ROTA",
+        "form_name": "Management: Rota",
+        "input_source": "text",
+        "source_text": "I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a Management: Rota entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "MGMT_ROTA",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "MGMT_ROTA",
+          "rationale": "The user explicitly asked for Management: Rota."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "Yesterday I was involved in managing the staff rota within the Emergency Department. This activity was highly relevant to my ST5 training as it provided practical experience in operational leadership and rota management. \n\nOn reflection, I managed the task successfully but realized I need to document the outcomes and key decisions more clearly next time. A transparent audit trail of rota adjustments is essential for departmental communication and maintaining safe staffing levels.",
+        "curriculum_links": [
+          "SLO12",
+          "SLO2"
+        ],
+        "key_capabilities": [
+          "SLO12 KC3: be able to manage the staff rota being aware of relevant employment law and recruitment activities (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 1.2
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-026-mgmt_risk",
+        "form_type": "MGMT_RISK",
+        "form_name": "Management: Risk Register",
+        "input_source": "voice",
+        "source_text": "Voice transcript: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a Management: Risk Register entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "MGMT_RISK",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "MGMT_RISK",
+          "rationale": "The user explicitly asked for Management: Risk Register."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "I participated in a risk management activity by contributing to the departmental risk register. This allowed me to engage with clinical governance and understand how operational risks are identified, graded, and mitigated within the Emergency Department.\n\nThis activity highlighted the administrative processes required to maintain patient safety at a departmental level. I realised that identifying a risk is only the first step; formalising it on the register is necessary to secure resources or implement systemic changes.\n\nNext time, I need to document the outcome and learning more clearly to there is a transparent record of how the risk was addressed and what preventative measures were established.",
+        "curriculum_links": [
+          "SLO11",
+          "SLO12",
+          "SLO2"
+        ],
+        "key_capabilities": [
+          "SLO11 KC2: be able to support and develop a culture of departmental safety, and good clinical governance (2025 Update)",
+          "SLO12 KC2: be able to investigate a patient safety incident, participate and contribute effectively to department clinical governance activities and risk reduction processes (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 0.938,
+        "required_coverage": 1.0,
+        "grounding": 0.75,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": [
+          "Potential unsupported high-risk claims: pci"
+        ]
+      },
+      "elapsed_s": 1.71
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-027-mgmt_recruit",
+        "form_type": "MGMT_RECRUIT",
+        "form_name": "Management: Recruitment",
+        "input_source": "document",
+        "source_text": "Document extract from a portfolio note: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a Management: Recruitment entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "MGMT_RECRUIT",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "MGMT_RECRUIT",
+          "rationale": "The user explicitly asked for Management: Recruitment."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "Yesterday I was involved in recruitment activities in the Emergency Department. \n\nThis was a relevant management experience for my training as an ST5. However, I reflected that I need to document the outcome and learning more clearly next time.",
+        "curriculum_links": [
+          "SLO12",
+          "SLO2"
+        ],
+        "key_capabilities": [
+          "SLO12%20KC3:%20be%20able%20to%20manage%20the%20staff%20rota%20being%20aware%20of%20relevant%20employment%20law%20and%20recruitment%20activities%20(2025%20Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 1.15
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-028-mgmt_project",
+        "form_type": "MGMT_PROJECT",
+        "form_name": "Management: Project Record",
+        "input_source": "image",
+        "source_text": "Context supplied with image: the image is supporting evidence only; do not infer findings beyond this text. I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a Management: Project Record entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "MGMT_PROJECT",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "MGMT_PROJECT",
+          "rationale": "The user explicitly asked for Management: Project Record."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "This management activity was highly relevant to my training as an ST5 Emergency Medicine trainee. Reflecting on my involvement, I realised that I need to document the outcome and learning more clearly next time.",
+        "curriculum_links": [
+          "SLO12",
+          "SLO2"
+        ],
+        "key_capabilities": [
+          "SLO12 KC1: be able to demonstrate their involvement in a range of management activities and show an understanding of the relevant medicolegal directives (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 0.99
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-029-mgmt_risk_proc",
+        "form_type": "MGMT_RISK_PROC",
+        "form_name": "Management: Procedure to Reduce Risk",
+        "input_source": "text",
+        "source_text": "I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a Management: Procedure to Reduce Risk entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "MGMT_RISK_PROC",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "MGMT_RISK_PROC",
+          "rationale": "The user explicitly asked for Management: Procedure to Reduce Risk."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "I was involved in a procedure to reduce risk in the Emergency Department. Reflecting on this activity, I realised that I need to I document both the outcome and my learning more clearly in the future to there is a record of the risk reduction process.\n\nGoing forward, I will make it a priority to immediately and clearly document the specifics of any risk-reduction procedures I participate in, focusing on the direct outcomes and the clinical learning points identified during the event.",
+        "curriculum_links": [
+          "SLO12",
+          "SLO2",
+          "SLO6"
+        ],
+        "key_capabilities": [
+          "SLO12 KC2: be able to investigate a patient safety incident, participate and contribute effectively to department clinical governance activities and risk reduction processes (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)",
+          "SLO6 KC2: the knowledge and psychomotor skills to perform EM procedural skills safely and in a timely fashion (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 1.32
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-030-mgmt_training_evt",
+        "form_type": "MGMT_TRAINING_EVT",
+        "form_name": "Management: Organising a Training Event",
+        "input_source": "voice",
+        "source_text": "Voice transcript: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a Management: Organising a Training Event entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "MGMT_TRAINING_EVT",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "MGMT_TRAINING_EVT",
+          "rationale": "The user explicitly asked for Management: Organising a Training Event."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "I organised a training event within the Emergency Department. The activity was directly relevant to my training as an ST5. \n\nOn reflection, while the event was completed successfully, I realised I need to document the outcome and learning more clearly next time to the educational impact is properly captured and evaluated.",
+        "curriculum_links": [
+          "SLO12",
+          "SLO2"
+        ],
+        "key_capabilities": [
+          "SLO12 KC1: be able to demonstrate their involvement in a range of management activities and show an understanding of the relevant medicolegal directives (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 1.17
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-031-mgmt_guideline",
+        "form_type": "MGMT_GUIDELINE",
+        "form_name": "Management: Introduction of Guideline",
+        "input_source": "document",
+        "source_text": "Document extract from a portfolio note: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a Management: Introduction of Guideline entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "MGMT_GUIDELINE",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "MGMT_GUIDELINE",
+          "rationale": "The user explicitly asked for Management: Introduction of Guideline."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "Yesterday in the Emergency Department, I worked on introducing a guideline as part of my management activities. I was the trainee involved, and this activity was highly relevant to my training as an ST5.\n\nI reflected on the process of implementing this guideline. I realised that I need to document the outcome and learning more clearly next time to track its effectiveness and formalise the educational impact on the department.",
+        "curriculum_links": [
+          "SLO11",
+          "SLO12",
+          "SLO2"
+        ],
+        "key_capabilities": [
+          "SLO11 KC2: be able to support and develop a culture of departmental safety, and good clinical governance (2025 Update)",
+          "SLO12 KC1: be able to demonstrate their involvement in a range of management activities and show an understanding of the relevant medicolegal directives (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 1.42
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-032-mgmt_info",
+        "form_type": "MGMT_INFO",
+        "form_name": "Management: Information Management",
+        "input_source": "image",
+        "source_text": "Context supplied with image: the image is supporting evidence only; do not infer findings beyond this text. I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a Management: Information Management entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "MGMT_INFO",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "MGMT_INFO",
+          "rationale": "The user explicitly asked for Management: Information Management."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "Yesterday in the Emergency Department, I engaged in an information management activity relevant to my training as an ST5 Emergency Medicine trainee. Reflecting on this activity, I realised that I need to document the outcome and my learning more clearly next time to there is a record of the management process.",
+        "curriculum_links": [
+          "SLO12",
+          "SLO2"
+        ],
+        "key_capabilities": [
+          "SLO12 KC1: be able to demonstrate their involvement in a range of management activities and show an understanding of the relevant medicolegal directives (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 1.16
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-033-mgmt_induction",
+        "form_type": "MGMT_INDUCTION",
+        "form_name": "Management: Induction Programme",
+        "input_source": "text",
+        "source_text": "I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a Management: Induction Programme entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "MGMT_INDUCTION",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "MGMT_INDUCTION",
+          "rationale": "The user explicitly asked for Management: Induction Programme."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "Yesterday, I participated in the induction programme for our department. As an ST5 trainee, this was an opportunity to engage with the operational and clinical management structures of the Emergency Department, alignment with local guidelines and safety protocols for my placement.\n\nI realised that while the session was informative, I need to document the outcome and learning more clearly next time. Having a structured record of induction learning points helps all safety and administrative updates are integrated into daily clinical practice.",
+        "curriculum_links": [
+          "SLO12",
+          "SLO2"
+        ],
+        "key_capabilities": [
+          "SLO12 KC1: be able to demonstrate their involvement in a range of management activities and show an understanding of the relevant medicolegal directives (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 1.52
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-034-mgmt_experience",
+        "form_type": "MGMT_EXPERIENCE",
+        "form_name": "Management Experience",
+        "input_source": "voice",
+        "source_text": "Voice transcript: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a Management Experience entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "MGMT_EXPERIENCE",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "MGMT_EXPERIENCE",
+          "rationale": "The user explicitly asked for Management Experience."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "Yesterday in the Emergency Department, I engaged in a management activity as part of my ST5 training. I was the trainee involved in this operational task, which provided valuable experience relevant to my stage of training.\n\nI reflected on my performance during this management activity. While the task was completed, I realised that I need to document the outcome and my learning more clearly next time to there is a record of the decisions made and the leadership skills developed.",
+        "curriculum_links": [
+          "SLO12",
+          "SLO2"
+        ],
+        "key_capabilities": [
+          "SLO12 KC1: be able to demonstrate their involvement in a range of management activities and show an understanding of the relevant medicolegal directives (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 1.45
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-035-mgmt_report",
+        "form_type": "MGMT_REPORT",
+        "form_name": "Management: Writing a Report",
+        "input_source": "document",
+        "source_text": "Document extract from a portfolio note: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a Management: Writing a Report entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "MGMT_REPORT",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "MGMT_REPORT",
+          "rationale": "The user explicitly asked for Management: Writing a Report."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "Yesterday in the Emergency Department, I engaged in a management activity involving writing a report. This administrative and leadership task was highly relevant to my training as an ST5 Emergency Medicine trainee. \n\nI reflected that I need to document the outcome and learning more clearly next time to the process is fully captured and can be utilized for departmental improvement.",
+        "curriculum_links": [
+          "SLO12",
+          "SLO2"
+        ],
+        "key_capabilities": [
+          "SLO12 KC1: be able to demonstrate their involvement in a range of management activities and show an understanding of the relevant medicolegal directives (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 1.17
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-036-appraisal",
+        "form_type": "APPRAISAL",
+        "form_name": "Appraisal of Others",
+        "input_source": "image",
+        "source_text": "Context supplied with image: the image is supporting evidence only; do not infer findings beyond this text. I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a Appraisal of Others entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "APPRAISAL",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "APPRAISAL",
+          "rationale": "The user explicitly asked for Appraisal of Others."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "Yesterday in the Emergency Department, I engaged in an appraisal of another colleague. This activity was highly relevant to my training as an ST5 Emergency Medicine trainee, allowing me to participate in supporting and reviewing others. Upon reflecting on this process, I realised that I need to document the outcome and learning more clearly next time.",
+        "curriculum_links": [
+          "SLO9"
+        ],
+        "key_capabilities": [
+          "SLO9 KC4: understand the principles necessary to mentor and appraise junior doctors (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 1.33
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-037-business_case",
+        "form_type": "BUSINESS_CASE",
+        "form_name": "Business Case",
+        "input_source": "text",
+        "source_text": "I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a Business Case entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "BUSINESS_CASE",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "BUSINESS_CASE",
+          "rationale": "The user explicitly asked for Business Case."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "Yesterday, I worked on developing a business case within the Emergency Department. This activity was highly relevant to my training as an ST5 Emergency Medicine registrar, allowing me to engage with the operational and managerial aspects of running a department. \n\nUpon reflecting on this process, I realised that I need to document the outcomes and the specific learning points more clearly in my future submissions. Improving my documentation of these management tasks will help demonstrate my progress in administrative leadership and service development more effectively.",
+        "curriculum_links": [
+          "SLO12"
+        ],
+        "key_capabilities": [
+          "SLO12 KC1: be able to demonstrate their involvement in a range of management activities and show an understanding of the relevant medicolegal directives (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 1.34
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-038-clin_gov",
+        "form_type": "CLIN_GOV",
+        "form_name": "Clinical Governance",
+        "input_source": "voice",
+        "source_text": "Voice transcript: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a Clinical Governance entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "CLIN_GOV",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "CLIN_GOV",
+          "rationale": "The user explicitly asked for Clinical Governance."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "Yesterday, I participated in clinical governance activities within the Emergency Department. Reflecting on this involvement, I identified a clear need to improve how I document outcomes and learning points from these sessions.\n\nIn future, I will that the specific lessons and action plans generated during governance reviews are recorded more clearly. This will help embed the learning within my own practice and support departmental safety.",
+        "curriculum_links": [
+          "SLO11",
+          "SLO12"
+        ],
+        "key_capabilities": [
+          "SLO11 KC2: be able to support and develop a culture of departmental safety, and good clinical governance (2025 Update)",
+          "SLO12 KC2: be able to investigate a patient safety incident, participate and contribute effectively to department clinical governance activities and risk reduction processes (2025 Update)",
+          "SLO11 KC1: be able to provide clinical leadership on effective Quality Improvement work (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 1.42
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-039-mgmt_complaint",
+        "form_type": "MGMT_COMPLAINT",
+        "form_name": "Complaint (Management)",
+        "input_source": "document",
+        "source_text": "Document extract from a portfolio note: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a Complaint (Management) entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "MGMT_COMPLAINT",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "MGMT_COMPLAINT",
+          "rationale": "The user explicitly asked for Complaint (Management)."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "Yesterday I was involved in managing a complaint in the Emergency Department. This was directly relevant to my training as an ST5 Emergency Medicine trainee on my current placement.\n\nI reflected that I need to document the outcome and learning more clearly next time.",
+        "curriculum_links": [
+          "SLO12",
+          "SLO2"
+        ],
+        "key_capabilities": [
+          "SLO12 KC2: be able to investigate a patient safety incident, participate and contribute effectively to department clinical governance activities and risk reduction processes (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 0.97
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-040-cost_improve",
+        "form_type": "COST_IMPROVE",
+        "form_name": "Cost Improvement",
+        "input_source": "image",
+        "source_text": "Context supplied with image: the image is supporting evidence only; do not infer findings beyond this text. I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a Cost Improvement entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "COST_IMPROVE",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "COST_IMPROVE",
+          "rationale": "The user explicitly asked for Cost Improvement."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "I participated in a Cost Improvement Plan activity within the Emergency Department. Reflecting on this involvement, I identified that while the exercise was relevant to my development as an ST5 trainee, I need to that I document both the final outcome and my personal learning points more clearly in future governance and cost-saving initiatives.",
+        "curriculum_links": [
+          "SLO12"
+        ],
+        "key_capabilities": [
+          "SLO12 KC1: be able to demonstrate their involvement in a range of management activities and show an understanding of the relevant medicolegal directives (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 1.27
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-041-crit_incident",
+        "form_type": "CRIT_INCIDENT",
+        "form_name": "Critical Incident",
+        "input_source": "text",
+        "source_text": "I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a Critical Incident entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "CRIT_INCIDENT",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "CRIT_INCIDENT",
+          "rationale": "The user explicitly asked for Critical Incident."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "A critical incident occurred during my shift in the Emergency Department yesterday. While the immediate situation was managed, I realized during my review of the event that I need to the final clinical outcome and the subsequent learning points are documented much more clearly in the medical record and department logs.\n\nGoing forward, I will make it a priority to write detailed, structured entries following any critical event. This will a clear audit trail for the department and preserve valuable learning points for the wider team.",
+        "curriculum_links": [
+          "SLO11"
+        ],
+        "key_capabilities": [
+          "SLO11 KC2: be able to support and develop a culture of departmental safety, and good clinical governance (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 1.47
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-042-equip_service",
+        "form_type": "EQUIP_SERVICE",
+        "form_name": "Equipment or Service Introduction",
+        "input_source": "voice",
+        "source_text": "Voice transcript: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a Equipment or Service Introduction entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "EQUIP_SERVICE",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "EQUIP_SERVICE",
+          "rationale": "The user explicitly asked for Equipment or Service Introduction."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "Yesterday, I participated in the introduction of a new piece of equipment or service within the Emergency Department. As an ST5 Emergency Medicine trainee, this activity was highly relevant to my training, particularly in understanding how departmental systems and clinical support tools are integrated into active practice.\n\nUpon reflecting on this process, I realised that I need to document the outcomes and specific learning points more clearly in the future. Clear documentation of the training process and its direct impact on patient safety is essential when embedding new equipment or services into the clinical environment.",
+        "curriculum_links": [
+          "SLO11"
+        ],
+        "key_capabilities": [
+          "SLO11_KC2: be able to support and develop a culture of departmental safety, and good clinical governance (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 1.39
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-043-audit",
+        "form_type": "AUDIT",
+        "form_name": "Audit Assessment Tool",
+        "input_source": "document",
+        "source_text": "Document extract from a portfolio note: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. The activity happened yesterday. I completed an audit of documentation of capacity assessments in ED mental health presentations. I reviewed 30 notes, presented results and proposed a documentation prompt.",
+        "synthetic": true
+      },
+      "selected_form_type": "AUDIT",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "QIAT",
+          "rationale": "The trainee completed a documentation audit (problem analysis, baseline measurement of 30 notes, and proposing an intervention), which directly aligns with the Quality Improvement Assessment Tool."
+        },
+        {
+          "form_type": "MGMT_PROJECT",
+          "rationale": "An ST5 trainee is required to complete management portfolio assignments; completing and presenting an audit of department capacity documentation fits the criteria for a completed management project."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "I completed an audit of documentation of capacity assessments in ED mental health presentations, reviewing 30 patient notes.\n\nThis review demonstrated a clear need for more consistent and structured recording of capacity when mental health patients present to the department. To address this gap, I presented the results to the department and proposed a documentation prompt to support clinical staff in their practice.\n\nThis project of clinical governance and the role of structured tools in improving patient safety and documentation standards. I will monitor the uptake of the proposed prompt to evaluate its impact on compliance.",
+        "curriculum_links": [
+          "SLO11",
+          "SLO12"
+        ],
+        "key_capabilities": [
+          "SLO11 KC2: be able to support and develop a culture of departmental safety, and good clinical governance (2025 Update)",
+          "SLO11 KC1: be able to provide clinical leadership on effective Quality Improvement work (2025 Update)",
+          "SLO12 KC2: be able to investigate a patient safety incident, participate and contribute effectively to department clinical governance activities and risk reduction processes (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 0.902,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 0.35,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": [
+          "Target form AUDIT not in recommendations: QIAT, MGMT_PROJECT"
+        ]
+      },
+      "elapsed_s": 2.44
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-044-research",
+        "form_type": "RESEARCH",
+        "form_name": "Research Activity",
+        "input_source": "image",
+        "source_text": "Context supplied with image: the image is supporting evidence only; do not infer findings beyond this text. I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. The activity happened yesterday. I recruited patients to an ED research study after completing GCP training. I checked eligibility, explained the study, obtained consent and reflected on protecting clinical flow.",
+        "synthetic": true
+      },
+      "selected_form_type": "RESEARCH",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "RESEARCH",
+          "rationale": "Research activity with recruitment/consent/study participation is stated explicitly."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "Yesterday, as an ST5 EM trainee, I recruited patients to an ED research study. During the shift, I checked patient eligibility against the study criteria, explained the trial process clearly to suitable candidates, and obtained formal informed consent. This required balancing research recruitment with maintaining clinical flow in a busy department.",
+        "curriculum_links": [
+          "SLO10"
+        ],
+        "key_capabilities": [
+          "SLO10 KC2: be able to actively participate in research (2025 Update)"
+        ],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 1.88
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-045-edu_meeting",
+        "form_type": "EDU_MEETING",
+        "form_name": "Educational Meeting",
+        "input_source": "text",
+        "source_text": "I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a Educational Meeting entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "EDU_MEETING",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "EDU_MEETING",
+          "rationale": "The user explicitly asked for Educational Meeting."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "I participated in an educational meeting during my EM placement. The session was highly relevant to my ST5 training and clinical development.\n\nReflecting on the meeting, I need to I document the specific outcomes and learning points more clearly in my portfolio next time to better track my progress and consolidate the educational value.",
+        "curriculum_links": [],
+        "key_capabilities": [],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 0.93
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-046-edu_meeting_supp",
+        "form_type": "EDU_MEETING_SUPP",
+        "form_name": "Educational Meeting Supplementary",
+        "input_source": "voice",
+        "source_text": "Voice transcript: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a Educational Meeting Supplementary entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "EDU_MEETING_SUPP",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "EDU_MEETING_SUPP",
+          "rationale": "The user explicitly asked for Educational Meeting Supplementary."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "This meeting was highly relevant to my training as an ST5 Emergency Medicine trainee. Reflecting on our discussion, I recognise that I need to document the outcome and my specific learning points more clearly in my portfolio next time to the educational value is fully captured.",
+        "curriculum_links": [],
+        "key_capabilities": [],
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 0.88
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-047-pdp",
+        "form_type": "PDP",
+        "form_name": "Personal Development Plan",
+        "input_source": "document",
+        "source_text": "Document extract from a portfolio note: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. The activity happened yesterday. My PDP goal is to improve paediatric safeguarding confidence. I will attend local safeguarding teaching, discuss one case monthly with my supervisor and review progress before ARCP.",
+        "synthetic": true
+      },
+      "selected_form_type": "PDP",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "PDP",
+          "rationale": "Personal development plan goal and actions are stated explicitly."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "My PDP goal is to improve paediatric safeguarding confidence.\n\nI will attend local safeguarding teaching, discuss one case monthly with my supervisor and review progress before ARCP.",
+        "curriculum_links": [
+          "SLO5",
+          "SLO2",
+          "SLO7"
+        ],
+        "key_capabilities": [
+          "SLO5 KC6: be able to assess and formulate a management plan for children and young adults who present with complex medical and social needs (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)",
+          "SLO7 KC1: have expert communication skills to negotiate, manage complicated or evolving interactions (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 0.9
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-048-higher_prog",
+        "form_type": "HIGHER_PROG",
+        "form_name": "Higher Progression Form (ST4-ST6)",
+        "input_source": "image",
+        "source_text": "Context supplied with image: the image is supporting evidence only; do not infer findings beyond this text. I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a Higher Progression Form (ST4-ST6) entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "HIGHER_PROG",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "HIGHER_PROG",
+          "rationale": "The user explicitly asked for Higher Progression Form (ST4-ST6)."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "stage_of_training": "Higher/ST4-ST6",
+        "reflection": "I need to document the outcome and learning more clearly next time.",
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 0.948,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 0.65,
+        "language": 1.0,
+        "issues": [
+          "Reflection appears too thin"
+        ]
+      },
+      "elapsed_s": 0.67
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-049-absence",
+        "form_type": "ABSENCE",
+        "form_name": "Absences",
+        "input_source": "text",
+        "source_text": "I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a Absences entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "ABSENCE",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "ABSENCE",
+          "rationale": "The user explicitly asked for Absences."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. This entry documents my absence from the department. The event was relevant to my training, and I have reflected that I need to document the outcome and learning more clearly next time.",
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 0.74
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-050-cct",
+        "form_type": "CCT",
+        "form_name": "RCEM CCT Application",
+        "input_source": "voice",
+        "source_text": "Voice transcript: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a RCEM CCT Application entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "CCT",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "CCT",
+          "rationale": "The user explicitly asked for RCEM CCT Application."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 0.53
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-051-file_upload",
+        "form_type": "FILE_UPLOAD",
+        "form_name": "File Upload - Miscellaneous",
+        "input_source": "document",
+        "source_text": "Document extract from a portfolio note: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a File Upload - Miscellaneous entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "FILE_UPLOAD",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "FILE_UPLOAD",
+          "rationale": "The user explicitly asked for File Upload - Miscellaneous."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 0.53
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-052-oop",
+        "form_type": "OOP",
+        "form_name": "Out of Programme (OOP/OOPT/R)",
+        "input_source": "image",
+        "source_text": "Context supplied with image: the image is supporting evidence only; do not infer findings beyond this text. I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I need to create a Out of Programme (OOP/OOPT/R) entry. The activity happened yesterday in the Emergency Department. I was the trainee involved, the event was relevant to my training, and I reflected that I need to document the outcome and learning more clearly next time.",
+        "synthetic": true
+      },
+      "selected_form_type": "OOP",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "OOP",
+          "rationale": "The user explicitly asked for Out of Programme (OOP/OOPT/R)."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-04",
+        "reflection": "This out of programme activity was highly relevant to my training, but I reflected that I need to document the outcome and learning more clearly next time.",
+        "clinical_setting": "Emergency Department"
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 0.73
+    }
+  ]
+}

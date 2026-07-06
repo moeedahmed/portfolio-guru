@@ -1,0 +1,182 @@
+{
+  "generated_at": "2026-07-05T19:31:14.981240+00:00",
+  "synthetic_only": true,
+  "storage": "local_eval_artifact",
+  "scenarios_requested": 10,
+  "completed": 0,
+  "errors": 10,
+  "average_score": 0.0,
+  "weak_count": 0,
+  "results": [
+    {
+      "scenario": {
+        "case_id": "synthetic-001-cbd",
+        "form_type": "CBD",
+        "form_name": "Case-Based Discussion",
+        "input_source": "text",
+        "source_text": "Yesterday in ED majors I assessed a 62-year-old man with pleuritic chest pain. I considered ACS, PE and pneumonia, used Wells score, reviewed ECG and CXR, discussed with my consultant, and arranged CTPA. I learned to state my risk assessment more clearly when escalating.",
+        "synthetic": true
+      },
+      "selected_form_type": "CBD",
+      "status": "error",
+      "recommended_forms": [],
+      "draft_fields": {},
+      "quality": null,
+      "error": "Your default credentials were not found. To set up Application Default Credentials, see https://cloud.google.com/docs/authentication/external/set-up-adc for more information.",
+      "elapsed_s": 9.16
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-002-dops",
+        "form_type": "DOPS",
+        "form_name": "Direct Observation of Procedural Skills",
+        "input_source": "voice",
+        "source_text": "Voice transcript: Today I performed DC cardioversion for unstable atrial fibrillation under direct consultant supervision. I checked consent, monitoring and sedation plan, delivered a synchronised shock, and reflected on calling for airway support earlier.",
+        "synthetic": true
+      },
+      "selected_form_type": "DOPS",
+      "status": "error",
+      "recommended_forms": [],
+      "draft_fields": {},
+      "quality": null,
+      "error": "Your default credentials were not found. To set up Application Default Credentials, see https://cloud.google.com/docs/authentication/external/set-up-adc for more information.",
+      "elapsed_s": 2.93
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-003-dops_accs",
+        "form_type": "DOPS_ACCS",
+        "form_name": "Direct Observation of Procedural Skills - ACCS",
+        "input_source": "document",
+        "source_text": "Document extract from a portfolio note: During my ACCS anaesthetic placement I inserted a chest drain using Seldinger technique under direct supervision. I confirmed landmarks, used sterile technique and reflected on slowing down before dilating.",
+        "synthetic": true
+      },
+      "selected_form_type": "DOPS_ACCS",
+      "status": "error",
+      "recommended_forms": [],
+      "draft_fields": {},
+      "quality": null,
+      "error": "Your default credentials were not found. To set up Application Default Credentials, see https://cloud.google.com/docs/authentication/external/set-up-adc for more information.",
+      "elapsed_s": 3.07
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-004-mini_cex",
+        "form_type": "MINI_CEX",
+        "form_name": "Mini-Clinical Evaluation Exercise",
+        "input_source": "image",
+        "source_text": "Context supplied with image: the image is supporting evidence only; do not infer findings beyond this text. A consultant directly observed me taking a focused history and examination from a 7-year-old with wheeze in paediatric ED. I explained the plan to the parent and received feedback on structuring my assessment.",
+        "synthetic": true
+      },
+      "selected_form_type": "MINI_CEX",
+      "status": "error",
+      "recommended_forms": [],
+      "draft_fields": {},
+      "quality": null,
+      "error": "Your default credentials were not found. To set up Application Default Credentials, see https://cloud.google.com/docs/authentication/external/set-up-adc for more information.",
+      "elapsed_s": 3.23
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-005-acat",
+        "form_type": "ACAT",
+        "form_name": "Acute Care Assessment Tool",
+        "input_source": "text",
+        "source_text": "On an evening acute take I managed six patients across majors and resus, including sepsis, chest pain and a frail fall. My consultant observed my prioritisation, handover and escalation decisions over the shift.",
+        "synthetic": true
+      },
+      "selected_form_type": "ACAT",
+      "status": "error",
+      "recommended_forms": [],
+      "draft_fields": {},
+      "quality": null,
+      "error": "Your default credentials were not found. To set up Application Default Credentials, see https://cloud.google.com/docs/authentication/external/set-up-adc for more information.",
+      "elapsed_s": 2.92
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-006-lat",
+        "form_type": "LAT",
+        "form_name": "Leadership Assessment Tool",
+        "input_source": "voice",
+        "source_text": "Voice transcript: I acted as EPIC for a crowded evening ED shift. I allocated junior doctors, held a safety huddle, escalated capacity concerns to site management and reflected on protecting time for re-review of high-risk patients.",
+        "synthetic": true
+      },
+      "selected_form_type": "LAT",
+      "status": "error",
+      "recommended_forms": [],
+      "draft_fields": {},
+      "quality": null,
+      "error": "Your default credentials were not found. To set up Application Default Credentials, see https://cloud.google.com/docs/authentication/external/set-up-adc for more information.",
+      "elapsed_s": 2.93
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-007-acaf",
+        "form_type": "ACAF",
+        "form_name": "Applied Critical Appraisal Form",
+        "input_source": "document",
+        "source_text": "Document extract from a portfolio note: I appraised evidence on using age-adjusted D-dimer for suspected PE. I framed a PICO question, searched NICE and a recent meta-analysis, and discussed how I would apply the evidence safely in low-risk patients.",
+        "synthetic": true
+      },
+      "selected_form_type": "ACAF",
+      "status": "error",
+      "recommended_forms": [],
+      "draft_fields": {},
+      "quality": null,
+      "error": "Your default credentials were not found. To set up Application Default Credentials, see https://cloud.google.com/docs/authentication/external/set-up-adc for more information.",
+      "elapsed_s": 6.05
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-008-stat",
+        "form_type": "STAT",
+        "form_name": "Structured Teaching Assessment Tool",
+        "input_source": "image",
+        "source_text": "Context supplied with image: the image is supporting evidence only; do not infer findings beyond this text. I delivered a 25-minute teaching session to four junior doctors on ECGs in chest pain. A consultant observed the session and gave feedback on pacing and checking understanding.",
+        "synthetic": true
+      },
+      "selected_form_type": "STAT",
+      "status": "error",
+      "recommended_forms": [],
+      "draft_fields": {},
+      "quality": null,
+      "error": "Your default credentials were not found. To set up Application Default Credentials, see https://cloud.google.com/docs/authentication/external/set-up-adc for more information.",
+      "elapsed_s": 6.18
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-009-msf",
+        "form_type": "MSF",
+        "form_name": "Multi-Source Feedback",
+        "input_source": "text",
+        "source_text": "I reviewed feedback from nurses, juniors and consultants. Themes were calm leadership and clear explanations, with a development point around documenting senior discussions more consistently.",
+        "synthetic": true
+      },
+      "selected_form_type": "MSF",
+      "status": "error",
+      "recommended_forms": [],
+      "draft_fields": {},
+      "quality": null,
+      "error": "Your default credentials were not found. To set up Application Default Credentials, see https://cloud.google.com/docs/authentication/external/set-up-adc for more information.",
+      "elapsed_s": 3.1
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-010-qiat",
+        "form_type": "QIAT",
+        "form_name": "Quality Improvement Assessment Tool",
+        "input_source": "voice",
+        "source_text": "Voice transcript: I led a QI project on time to antibiotics in adult sepsis. Baseline audit was 42 cases, we introduced a triage prompt and re-audit showed improvement from 58 to 39 minutes. I presented it at governance.",
+        "synthetic": true
+      },
+      "selected_form_type": "QIAT",
+      "status": "error",
+      "recommended_forms": [],
+      "draft_fields": {},
+      "quality": null,
+      "error": "Your default credentials were not found. To set up Application Default Credentials, see https://cloud.google.com/docs/authentication/external/set-up-adc for more information.",
+      "elapsed_s": 3.16
+    }
+  ]
+}

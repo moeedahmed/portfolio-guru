@@ -1,0 +1,507 @@
+{
+  "generated_at": "2026-07-05T19:37:47.378262+00:00",
+  "synthetic_only": true,
+  "storage": "local_eval_artifact",
+  "scenarios_requested": 10,
+  "completed": 10,
+  "errors": 0,
+  "average_score": 0.981,
+  "weak_count": 0,
+  "results": [
+    {
+      "scenario": {
+        "case_id": "synthetic-001-cbd",
+        "form_type": "CBD",
+        "form_name": "Case-Based Discussion",
+        "input_source": "text",
+        "source_text": "I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. Yesterday in ED majors I assessed a 62-year-old man with pleuritic chest pain. I considered ACS, PE and pneumonia, used Wells score, reviewed ECG and CXR, discussed with my consultant, and arranged CTPA. I learned to state my risk assessment more clearly when escalating.",
+        "synthetic": true
+      },
+      "selected_form_type": "CBD",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "CBD",
+          "rationale": "The trainee managed a 62-year-old with pleuritic chest pain, formulated a differential diagnosis, reviewed investigations, and discussed the clinical reasoning and diagnostic pathway (CTPA) with a consultant."
+        },
+        {
+          "form_type": "REFLECT_LOG",
+          "rationale": "The trainee includes a clear reflective learning point about improving their communication and risk-stratification framing when escalating cases to senior colleagues."
+        }
+      ],
+      "draft_fields": {
+        "form_type": "CBD",
+        "date_of_encounter": "2026-07-04",
+        "patient_age": "62-year-old",
+        "patient_presentation": "pleuritic chest pain",
+        "clinical_setting": "",
+        "stage_of_training": "Higher/ST4-ST6",
+        "trainee_role": "Primary clinician with indirect supervision",
+        "clinical_reasoning": "I assessed a 62-year-old man presenting with pleuritic chest pain. My differential diagnosis included acute coronary syndrome (ACS), pulmonary embolism (PE), and pneumonia. \n\nI calculated a Wells score to risk-stratify for PE and reviewed the patient's ECG and chest X-ray. After discussing the case and my clinical findings with the ED consultant, we agreed to arrange a CT pulmonary angiogram (CTPA) to definitively rule out a pulmonary embolism.",
+        "reflection": "During this case, I discussed my assessment and plan with the ED consultant. I realized that I need to state my risk assessment and clinical reasoning more clearly when escalating cases or discussing management plans with senior colleagues.\n\nIn future, I will explicitly lead with the formal risk score and my specific clinical concern at the start of the referral or escalation conversation to clear communication.",
+        "level_of_supervision": "Indirect",
+        "supervisor_name": "",
+        "curriculum_links": [
+          "SLO1"
+        ],
+        "key_capabilities": [
+          "SLO1 KC1: to be expert in assessing and managing all adult patients attending the ED. These capabilities will apply to patients attending with both physical and psychological ill health (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 0.956,
+        "required_coverage": 0.875,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": [
+          "Missing required fields: Clinical Setting"
+        ]
+      },
+      "elapsed_s": 3.57
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-002-dops",
+        "form_type": "DOPS",
+        "form_name": "Direct Observation of Procedural Skills",
+        "input_source": "voice",
+        "source_text": "Voice transcript: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. Today I performed DC cardioversion for unstable atrial fibrillation as a formal DOPS. My consultant observed each step directly. I checked consent, monitoring and sedation plan, delivered a synchronised shock, and reflected on calling for airway support earlier.",
+        "synthetic": true
+      },
+      "selected_form_type": "DOPS",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "DOPS",
+          "rationale": "Directly observed hands-on procedure with senior supervision; DOPS is the specific assessed-procedure form."
+        },
+        {
+          "form_type": "PROC_LOG",
+          "rationale": "The performed procedure can also be recorded in the procedural log."
+        },
+        {
+          "form_type": "REFLECT_LOG",
+          "rationale": "Feedback/reflection was included alongside the procedural assessment."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-05",
+        "procedure_name": "DC cardioversion",
+        "clinical_setting": "Emergency Department",
+        "stage_of_training": "Higher/ST4-ST6",
+        "procedural_skill": "DC cardioversion",
+        "indication": "Unstable atrial fibrillation",
+        "trainee_performance": "I performed a synchronised DC cardioversion under the direct observation of my consultant for a formal DOPS. I checked the patient's consent, ensured appropriate monitoring was in place, and confirmed the sedation plan before delivering the synchronised shock.",
+        "reflection": "The procedure was successful and synchronised shock was delivered safely. On reflection, I should have called for airway support earlier in the process to optimal preparation and team readiness during the sedation phase.",
+        "curriculum_links": [
+          "SLO6",
+          "SLO3"
+        ],
+        "key_capabilities": [
+          "SLO6 KC2: the knowledge and psychomotor skills to perform EM procedural skills safely and in a timely fashion (2025 Update)",
+          "SLO3 KC2: be expert in fluid management and circulatory support in critically ill patients (2025 Update)",
+          "SLO3 KC3: manage all the life-threatening conditions including peri-arrest & arrest situations in the ED (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 1.67
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-003-dops_accs",
+        "form_type": "DOPS_ACCS",
+        "form_name": "Direct Observation of Procedural Skills - ACCS",
+        "input_source": "document",
+        "source_text": "Document extract from a portfolio note: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. During my ACCS anaesthetic placement I inserted a chest drain using Seldinger technique as an observed DOPS on 5 July 2026. My supervisor watched the procedure. I confirmed landmarks, used sterile technique and reflected on slowing down before dilating.",
+        "synthetic": true
+      },
+      "selected_form_type": "DOPS_ACCS",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "PROC_LOG",
+          "rationale": "Trainee-performed procedure without a clear direct-assessment signal."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-05",
+        "placement": "Anaesthetics",
+        "date_of_event": "2026-07-05",
+        "case_observed": "Insertion of a chest drain using the Seldinger technique.",
+        "accs_procedural_skill": "Chest drain: Seldinger technique",
+        "reflection": "I carried out the procedure under direct supervision, I confirmed landmarks and maintained a strict sterile technique. During the procedure, I reflected on the importance of slowing down and control before dilating.",
+        "curriculum_links": [
+          "SLO6",
+          "SLO9"
+        ],
+        "key_capabilities": [
+          "SLO6 KC2: the knowledge and psychomotor skills to perform EM procedural skills safely and in a timely fashion (2025 Update)",
+          "SLO9 KC1: be able to undertake training and supervision of members of the ED team in the clinical environment (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 0.902,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 0.35,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": [
+          "Target form DOPS_ACCS not in recommendations: PROC_LOG"
+        ]
+      },
+      "elapsed_s": 1.21
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-004-mini_cex",
+        "form_type": "MINI_CEX",
+        "form_name": "Mini-Clinical Evaluation Exercise",
+        "input_source": "image",
+        "source_text": "Context supplied with image: the image is supporting evidence only; do not infer findings beyond this text. I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. A consultant directly observed me taking a focused history and examination from a 7-year-old with wheeze in paediatric ED. I explained the plan to the parent and received feedback on structuring my assessment.",
+        "synthetic": true
+      },
+      "selected_form_type": "MINI_CEX",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "MINI_CEX",
+          "rationale": "The trainee was directly observed by a consultant during a focused history and examination of a paediatric patient and received immediate feedback on their assessment structure."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-05",
+        "clinical_setting": "Paediatric Emergency Department",
+        "patient_presentation": "7-year-old with wheeze",
+        "stage_of_training": "Higher/ST4-ST6",
+        "complexity": "",
+        "clinical_reasoning": "I took a focused history and performed a clinical examination on a 7-year-old presenting with a wheeze in the paediatric emergency department. I formulated an initial management plan and explained this clearly to the patient's parent.",
+        "reflection": "A consultant directly observed my assessment and provided feedback on how to structure my history and clinical examination more effectively in a paediatric setting. I will focus on implementing this structured approach in future paediatric assessments to my examinations remain highly focused and efficient.",
+        "curriculum_links": [
+          "SLO5",
+          "SLO2",
+          "SLO9"
+        ],
+        "key_capabilities": [
+          "SLO5 KC1: be expert in assessing and managing all children and young adult patients attending the ED (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)",
+          "SLO9 KC1: be able to undertake training and supervision of members of the ED team in the clinical environment (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 2.35
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-005-acat",
+        "form_type": "ACAT",
+        "form_name": "Acute Care Assessment Tool",
+        "input_source": "text",
+        "source_text": "I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. On an evening acute take I managed six patients across majors and resus, including sepsis, chest pain and a frail fall. My consultant observed my prioritisation, handover and escalation decisions over the shift.",
+        "synthetic": true
+      },
+      "selected_form_type": "ACAT",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "ACAT",
+          "rationale": "The trainee managed a cohort of six acute patients across majors and resus, with a consultant observing their prioritisation, clinical decision-making, and caseload management over the shift."
+        },
+        {
+          "form_type": "ESLE_ASSESS",
+          "rationale": "A consultant observed the trainee's non-technical skills (prioritisation, handover, escalation, and workload management) across a substantial portion of an acute shift."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-05",
+        "placement": "Emergency Medicine",
+        "clinical_setting": "Emergency Department",
+        "cases_observed": "I managed six patients across majors and resus during an evening acute take, including cases of sepsis, chest pain, and a frail elderly patient who had fallen. I coordinated their initial assessments, investigations, and immediate management plans.",
+        "reflection": "Managing multiple high-acuity patients across different areas of the department required continuous prioritisation and clear communication. I had to balance the immediate resuscitation needs of the sepsis patient with the diagnostic workup for the chest pain presentations and the safe disposition planning for the frail fall.\n\nMy consultant observed my decision-making, handover, and escalation processes throughout the shift. This of maintaining situational awareness and delegating tasks effectively to the nursing and junior medical team to prevent bottlenecks in care.\n\nIn future shifts, I will continue to focus on early escalation and structured handovers during busy takes to patient safety is maintained across all areas of the department.",
+        "curriculum_links": [
+          "SLO2",
+          "SLO8"
+        ],
+        "key_capabilities": [
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)",
+          "SLO8 KC3: will maintain situational awareness throughout the shift to ensure safety is optimised (2025 Update)",
+          "SLO8 KC4: will anticipate challenges, generate options, make decisions and communicate these effectively to the team as lead clinician (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 3.16
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-006-lat",
+        "form_type": "LAT",
+        "form_name": "Leadership Assessment Tool",
+        "input_source": "voice",
+        "source_text": "Voice transcript: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I acted as EPIC for a crowded evening ED shift. I allocated junior doctors, held a safety huddle, escalated capacity concerns to site management and reflected on protecting time for re-review of high-risk patients.",
+        "synthetic": true
+      },
+      "selected_form_type": "LAT",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "LAT",
+          "rationale": "The trainee acted as the EPIC (Emergency Physician in Charge) during a crowded shift, directing flow, allocating resources, holding safety huddles, and managing departmental escalation, which directly fits the EMLeaders leadership framework."
+        },
+        {
+          "form_type": "REFLECT_LOG",
+          "rationale": "The trainee explicitly reflects on a key operational challenge from the shift: how to balance department-wide coordination as EPIC while protecting time for the clinical re-review of high-risk patients."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-05",
+        "clinical_setting": "Emergency Department",
+        "leadership_context": "I acted as EPIC (Emergency Physician in Charge) during a crowded evening shift in the Emergency Department. The environment was highly pressured with capacity concerns, requiring active management of junior doctor allocations, communication with site management, and maintaining department safety.",
+        "stage_of_training": "Higher/ST4-ST6",
+        "clinical_reasoning": "I took on the role of EPIC to manage the flow and safety of a crowded evening shift. My actions included holding a safety huddle with the team to align priorities and coordinate care.\n\nI dynamically allocated junior doctors to areas of highest clinical need to address crowding. To manage the exit block and capacity pressures, I escalated our safety and capacity concerns directly to hospital site management.",
+        "reflection": "Managing a crowded department as EPIC highlighted the difficulty of maintaining overview while individual patient safety. I realised the importance of deliberately protecting time to re-review high-risk patients who may be delayed in the department.\n\nIn future shifts, I will establish a more systematic approach to tracking and re-reviewing vulnerable or high-risk patients during periods of extreme crowding, clinical safety is not compromised by flow pressures.",
+        "curriculum_links": [
+          "SLO8"
+        ],
+        "key_capabilities": [
+          "SLO8 KC1: will provide support to ED staff at all levels and disciplines on the ED shift (2025 Update)",
+          "SLO8 KC2: will be able to liaise with the rest of the acute/urgent care team and wider hospital as shift leader (2025 Update)",
+          "SLO8 KC3: will maintain situational awareness throughout the shift to ensure safety is optimised (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 3.6
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-007-acaf",
+        "form_type": "ACAF",
+        "form_name": "Applied Critical Appraisal Form",
+        "input_source": "document",
+        "source_text": "Document extract from a portfolio note: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I appraised evidence on using age-adjusted D-dimer for suspected PE. I framed a PICO question, searched NICE and a recent meta-analysis, and discussed how I would apply the evidence safely in low-risk patients. I learned to document the limits of the evidence when explaining risk to patients.",
+        "synthetic": true
+      },
+      "selected_form_type": "ACAF",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "ACAF",
+          "rationale": "The trainee formulated a structured clinical question (PICO), searched and appraised the literature (NICE guidelines and a meta-analysis) regarding age-adjusted D-dimer, and determined how to apply this evidence to clinical practice."
+        },
+        {
+          "form_type": "REFLECT_LOG",
+          "rationale": "The trainee includes a clear reflective learning point about realizing the importance of documenting evidence limits when communicating risk to low-risk patients."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-05",
+        "situation": "I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I appraised evidence on using age-adjusted D-dimer for suspected PE.",
+        "pico_population": "Patients with suspected pulmonary embolism (PE)",
+        "pico_intervention": "Age-adjusted D-dimer",
+        "pico_comparison": "Standard D-dimer threshold",
+        "pico_outcome": "Safe exclusion of PE",
+        "search_methodology": "I searched NICE guidelines and a recent meta-analysis.",
+        "evidence_evaluation": "I appraised the evidence on using age-adjusted D-dimer for suspected PE from NICE and a recent meta-analysis.",
+        "apply_to_practice": "I discussed how I would apply the evidence safely in low-risk patients.",
+        "communicate_to_patient": "I discussed documenting the limits of the evidence when explaining risk to patients.",
+        "future_research": "",
+        "reflection": "I learned to document the limits of the evidence when explaining risk to patients.",
+        "curriculum_links": [
+          "SLO10",
+          "SLO2"
+        ],
+        "key_capabilities": [
+          "SLO10 KC1: be able to appraise, synthesise, communicate and use research evidence to develop EM care (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 0.948,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 0.65,
+        "language": 1.0,
+        "issues": [
+          "Reflection appears too thin"
+        ]
+      },
+      "elapsed_s": 2.63
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-008-stat",
+        "form_type": "STAT",
+        "form_name": "Structured Teaching Assessment Tool",
+        "input_source": "image",
+        "source_text": "Context supplied with image: the image is supporting evidence only; do not infer findings beyond this text. I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I delivered a 25-minute teaching session to four junior doctors on ECGs in chest pain. A consultant observed the session and gave feedback on pacing and checking understanding.",
+        "synthetic": true
+      },
+      "selected_form_type": "STAT",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "STAT",
+          "rationale": "The trainee delivered a formal, observed 25-minute teaching session to junior colleagues with a consultant present specifically to observe and provide feedback on their teaching delivery."
+        },
+        {
+          "form_type": "TEACH_OBS",
+          "rationale": "The consultant observed the session specifically to evaluate and provide feedback on the trainee's teaching skills (pacing and checking understanding)."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-05",
+        "stage_of_training": "Higher/ST4-ST6",
+        "learner_group": "Junior doctors",
+        "setting": "Local",
+        "delivery": "Face to Face",
+        "number_of_learners": "Less than 5",
+        "session_length": "25 minutes",
+        "session_title": "ECGs in chest pain",
+        "curriculum_links": [
+          "SLO9",
+          "SLO2"
+        ],
+        "key_capabilities": [
+          "SLO9 KC2: be able to prepare and deliver teaching sessions outside of the clinical environment, including simulation, small group work, and didactic presentations (2025 Update)",
+          "SLO2 KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)",
+          "SLO9 KC1: be able to undertake training and supervision of members of the ED team in the clinical environment (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 2.1
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-009-msf",
+        "form_type": "MSF",
+        "form_name": "Multi-Source Feedback",
+        "input_source": "text",
+        "source_text": "I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I reviewed feedback from nurses, juniors and consultants. Themes were calm leadership and clear explanations, with a development point around documenting senior discussions more consistently.",
+        "synthetic": true
+      },
+      "selected_form_type": "MSF",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "MSF",
+          "rationale": "The trainee has gathered and is reviewing 360-degree feedback from multiple colleagues (nurses, juniors, consultants) regarding their professional skills, leadership, and documentation."
+        },
+        {
+          "form_type": "REFLECT_LOG",
+          "rationale": "The trainee is actively reflecting on feedback themes (calm leadership, clear explanations) and identifying a specific development area regarding documentation of senior discussions to improve future practice."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-05",
+        "stage_of_training": "Higher/ST4-ST6",
+        "context": "I reviewed the collective feedback from my Multi-Source Feedback (MSF), which included responses from nursing staff, junior colleagues, and consultants.",
+        "reflection": "The feedback was generally very positive, highlighting calm leadership and my ability to provide clear explanations to the team during shifts.\n\nAn area identified for development was the consistency of my documentation regarding senior discussions. I will focus on that the advice, plans, and names of the seniors I consult are explicitly and consistently recorded in the patient notes."
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 2.37
+    },
+    {
+      "scenario": {
+        "case_id": "synthetic-010-qiat",
+        "form_type": "QIAT",
+        "form_name": "Quality Improvement Assessment Tool",
+        "input_source": "voice",
+        "source_text": "Voice transcript: I am an ST5 Emergency Medicine trainee on my Emergency Medicine placement. I led a QI project on time to antibiotics in adult sepsis. Baseline audit was 42 cases, we introduced a triage prompt and re-audit showed improvement from 58 to 39 minutes. I presented it at governance. My PDP summary this year is to improve quality improvement leadership. Next year I will focus on embedding the prompt and supporting re-audit.",
+        "synthetic": true
+      },
+      "selected_form_type": "QIAT",
+      "status": "completed",
+      "recommended_forms": [
+        {
+          "form_type": "QIAT",
+          "rationale": "QI/audit project with measurement and change; QIAT is the specific assessment form."
+        }
+      ],
+      "draft_fields": {
+        "date_of_encounter": "2026-07-05",
+        "stage_of_training": "ST5",
+        "placement": "Emergency Medicine",
+        "pdp_summary": "To improve quality improvement leadership.",
+        "qi_engagement": "I led a QI project focusing on time to antibiotics in adult sepsis, completing a baseline audit, intervention, and re-audit cycle.",
+        "qi_understanding": "I developed my understanding of the QI cycle by conducting a baseline audit of 42 cases, designing and implementing a triage prompt intervention, and completing a re-audit to measure the outcome.",
+        "involved_in_project": "Yes",
+        "qi_journey_aspects": [
+          "Measurement",
+          "Testing Changes",
+          "Implement"
+        ],
+        "reflection": "We completed a baseline audit of 42 cases to establish our baseline time to antibiotics in adult sepsis. I led the introduction of a triage prompt as our primary intervention to alert staff early to potential sepsis cases.\n\nOur re-audit demonstrated an improvement in the time to antibiotics, reducing the average from 58 minutes down to 39 minutes. I presented these findings at our departmental governance meeting to share the success and discuss ongoing challenges.\n\nThis project showed me how a simple triage prompt can streamline clinical pathways. Presenting at governance of engaging the wider multidisciplinary team to sustain these improvements.",
+        "next_pdp": "Next year I will focus on embedding the prompt and supporting re-audit.",
+        "curriculum_links": [
+          "SLO11",
+          "SLO12"
+        ],
+        "key_capabilities": [
+          "SLO11 KC1: be able to provide clinical leadership on effective Quality Improvement work (2025 Update)",
+          "SLO11 KC2: be able to support and develop a culture of departmental safety, and good clinical governance (2025 Update)",
+          "SLO12 KC2: be able to investigate a patient safety incident, participate and contribute effectively to department clinical governance activities and risk reduction processes (2025 Update)"
+        ]
+      },
+      "quality": {
+        "overall": 1.0,
+        "required_coverage": 1.0,
+        "grounding": 1.0,
+        "form_fit": 1.0,
+        "reflection": 1.0,
+        "language": 1.0,
+        "issues": []
+      },
+      "elapsed_s": 2.29
+    }
+  ]
+}
