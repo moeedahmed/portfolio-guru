@@ -1,22 +1,19 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-07-06T01:16:06+00:00
-Status: stale_or_needs_review
+Generated: 2026-07-06T19:12:06+00:00
+Status: ready
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
-- Branch: main
-- Last commit: 9ad0623 2026-07-05 Gate gathering prompts before draft readiness
-- Uncommitted changes: yes
+- Branch: fix-gathering-ready-prompt-placement
+- Last commit: 21c2e47 2026-07-06 Record Portfolio Guru core edge
+- Uncommitted changes: no
 
 ## Immediate read before restarting
 1. `AGENTS.md` for durable repo context
 2. Product hub Status + Brief in Notion only for human-facing status, positioning, launch, or risk context
 3. `TASK.md` for active sprint state, if present
 4. This resume brief for drift warnings and repo state
-
-## Warnings
-- Repo has uncommitted changes — capture/commit or summarise before switching context
 
 ## Practical AGENTS.md check
 - Useful for coding-agent/ACP work: yes
@@ -30,51 +27,14 @@ Status: stale_or_needs_review
 - Live/deploy signals: railway.json, render.yaml, .github/workflows/deploy-mac.yml
 
 ## Recent commits
+- 21c2e47 2026-07-06 Record Portfolio Guru core edge
+- eb9a483 2026-07-06 Fix gathering ready prompt placement
+- 055a7a6 2026-07-06 Fix gathering route for detailed clinical context
+- 498a12f 2026-07-06 docs: capture portfolio continuity evidence
 - 9ad0623 2026-07-05 Gate gathering prompts before draft readiness
 - 581f639 2026-07-05 Fix repeated source detail prompts
 - 9b9997f 2026-07-05 Improve draft quality recommendations
 - 24d2f61 2026-07-05 Fix source-detail gathering loop
-- 0dc88e9 2026-07-05 Add synthetic draft quality eval loop
-- cb858fd 2026-07-05 Guard voice drafts against weak transcripts
-- 15ca937 2026-07-05 Fix attach-only media gathering prompt
-- 76bc0a5 2026-07-05 Standardise bot message emoji style
-
-## Uncommitted change summary
-- ?? docs/continuity/dogfood/smoke-2026-07-05T13-13-41Z.md
-- ?? docs/continuity/dogfood/smoke-2026-07-05T18-29-09Z.md
-- ?? docs/continuity/dogfood/smoke-2026-07-05T20-49-17Z.md
-- ?? memory/eval/draft-quality/draft-quality-20260705T193013Z.json
-- ?? memory/eval/draft-quality/draft-quality-20260705T193013Z.md
-- ?? memory/eval/draft-quality/draft-quality-20260705T193114Z.json
-- ?? memory/eval/draft-quality/draft-quality-20260705T193114Z.md
-- ?? memory/eval/draft-quality/draft-quality-20260705T193212Z.json
-- ?? memory/eval/draft-quality/draft-quality-20260705T193212Z.md
-- ?? memory/eval/draft-quality/draft-quality-20260705T193221Z.json
-- ?? memory/eval/draft-quality/draft-quality-20260705T193221Z.md
-- ?? memory/eval/draft-quality/draft-quality-20260705T193352Z.json
-- ?? memory/eval/draft-quality/draft-quality-20260705T193352Z.md
-- ?? memory/eval/draft-quality/draft-quality-20260705T193516Z.json
-- ?? memory/eval/draft-quality/draft-quality-20260705T193516Z.md
-- ?? memory/eval/draft-quality/draft-quality-20260705T193556Z.json
-- ?? memory/eval/draft-quality/draft-quality-20260705T193556Z.md
-- ?? memory/eval/draft-quality/draft-quality-20260705T193708Z.json
-- ?? memory/eval/draft-quality/draft-quality-20260705T193708Z.md
-- ?? memory/eval/draft-quality/draft-quality-20260705T193747Z.json
-- ?? memory/eval/draft-quality/draft-quality-20260705T193747Z.md
-- ?? memory/eval/draft-quality/draft-quality-20260705T195947Z.json
-- ?? memory/eval/draft-quality/draft-quality-20260705T195947Z.md
-- ?? memory/eval/draft-quality/draft-quality-20260705T200239Z.json
-- ?? memory/eval/draft-quality/draft-quality-20260705T200239Z.md
-- ?? memory/eval/draft-quality/draft-quality-20260705T200554Z.json
-- ?? memory/eval/draft-quality/draft-quality-20260705T200554Z.md
-- ?? memory/eval/draft-quality/draft-quality-20260705T200927Z.json
-- ?? memory/eval/draft-quality/draft-quality-20260705T200927Z.md
-- ?? memory/eval/draft-quality/draft-quality-20260705T201232Z.json
-- ?? memory/eval/draft-quality/draft-quality-20260705T201232Z.md
-- ?? memory/eval/draft-quality/draft-quality-20260705T201537Z.json
-- ?? memory/eval/draft-quality/draft-quality-20260705T201537Z.md
-- ?? memory/eval/draft-quality/latest.json
-- ?? memory/eval/draft-quality/latest.md
 
 ## Repo context snapshot
 ### AGENTS.md — present, 0 days old
@@ -99,7 +59,7 @@ Key headings:
 - ## Safety
 - ## Supported Forms
 
-### TASK.md — present, 8 days old
+### TASK.md — present, 9 days old
 Key headings:
 - # Active Task — Hermes Hackathon Production Cut
 - ## Hackathon Objective
@@ -129,7 +89,7 @@ Key headings:
 - ### Phase 0 - Checkpoint and branch
 - ### Phase 1 - Router contract and tests
 
-### WORKFLOWS.md — present, 20 days old
+### WORKFLOWS.md — present, 21 days old
 Key headings:
 - # Portfolio Guru — Agent Workflow Reference
 - ## Channel Boundary — EMGurus WhatsApp Gateway
@@ -145,6 +105,6 @@ Key headings:
 - ## Key Capabilities Selection Rules
 
 ## Recommended restart path
-Refresh the product hub/Brief and repo context before a new build sprint.
+Continuity context looks sufficient; proceed with normal product-docs workflow.
 
 If this product has been idle for weeks, do not start implementation from memory. Refresh the product hub Status/Brief first, then create or update `TASK.md` for the next sprint.
