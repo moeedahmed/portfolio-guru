@@ -54,6 +54,7 @@ from conversation_supervisor import GatheringTurnKind, decide_gathering_turn
 from message_policy import render_message, safety_redirect_text, style_grounded_answer
 from runtime_identity import write_runtime_identity
 import chase_guard
+import dogfood_audit
 
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
@@ -153,17 +154,200 @@ def _start_conversational_router_shadow(update: Update, handler_name: str) -> No
     asyncio.create_task(_log_conversational_router_shadow(text, user_id, handler_name))
 
 
+def _audit_session_id(context) -> str | None:
+    try:
+        session_id = context.user_data.get("audit_session_id")
+        if not session_id:
+            session_id = f"pg-{int(time.time() * 1000)}"
+            context.user_data["audit_session_id"] = session_id
+        return session_id
+    except Exception:
+        return None
+
+
+def _audit_user_id(context) -> int | None:
+    try:
+        return context.user_data.get("_audit_user_id")
+    except Exception:
+        return None
+
+
+def _remember_audit_user(context, update: Update | None = None, user_id: int | None = None) -> int | None:
+    resolved = user_id
+    if resolved is None and update is not None:
+        resolved = getattr(getattr(update, "effective_user", None), "id", None)
+    try:
+        if resolved is not None:
+            context.user_data["_audit_user_id"] = resolved
+    except Exception:
+        pass
+    return resolved
+
+
+def _audit_event(context, event_type: str, *, update: Update | None = None, **payload) -> None:
+    try:
+        user = getattr(update, "effective_user", None) if update is not None else None
+        user_id = _remember_audit_user(context, update) or _audit_user_id(context)
+        username = getattr(user, "username", None) if user is not None else None
+        dogfood_audit.record_event(
+            event_type,
+            user_id=user_id,
+            username=username,
+            session_id=_audit_session_id(context),
+            payload=payload,
+        )
+    except Exception:
+        logger.debug("Dogfood audit event failed: %s", event_type, exc_info=True)
+
+
+def _audit_update_received(
+    update: Update,
+    context,
+    *,
+    stage: str,
+    include_text: bool = True,
+) -> None:
+    message = getattr(update, "message", None) or getattr(update, "effective_message", None)
+    _audit_event(
+        context,
+        "user_input",
+        update=update,
+        stage=stage,
+        **dogfood_audit.message_metadata(message, include_text=include_text),
+    )
+
+
+def _audit_bot_response(context, method: str, text: str, *, reply_markup=None, message_id=None) -> None:
+    _audit_event(
+        context,
+        "bot_response",
+        method=method,
+        message_id=message_id,
+        text_preview=dogfood_audit.message_metadata(SimpleNamespace(text=text), include_text=True).get("text_preview"),
+        text_sha256_16=dogfood_audit.text_fingerprint(text),
+        has_reply_markup=bool(reply_markup),
+    )
+
+
+def _install_dogfood_audit_bot_hooks(application) -> None:
+    """Best-effort live outbound audit for direct bot send/edit/delete calls.
+
+    Many handlers use ``message.reply_text`` directly. PTB routes that through
+    the bot instance, so wrapping the instance methods gives the audit trail a
+    consistent view without rewriting every handler. If PTB internals refuse
+    instance patching, the explicit helper-level audit calls still cover the
+    main draft flow.
+    """
+    bot_obj = getattr(application, "bot", None)
+    if bot_obj is None or getattr(bot_obj, "_dogfood_audit_hooks_installed", False):
+        return
+    try:
+        if hasattr(bot_obj, "_unfreeze"):
+            bot_obj._unfreeze()
+
+        original_send_message = bot_obj.send_message
+        original_edit_message_text = bot_obj.edit_message_text
+        original_delete_message = bot_obj.delete_message
+
+        async def audited_send_message(*args, **kwargs):
+            result = await original_send_message(*args, **kwargs)
+            text = kwargs.get("text")
+            if text is None and len(args) >= 2:
+                text = args[1]
+            dogfood_audit.record_event(
+                "bot_response",
+                payload={
+                    "method": "send_message_hook",
+                    "chat_id": kwargs.get("chat_id") if "chat_id" in kwargs else (args[0] if args else None),
+                    "message_id": getattr(result, "message_id", None),
+                    "text_preview": dogfood_audit.message_metadata(
+                        SimpleNamespace(text=text),
+                        include_text=True,
+                    ).get("text_preview"),
+                    "text_sha256_16": dogfood_audit.text_fingerprint(text),
+                    "has_reply_markup": bool(kwargs.get("reply_markup")),
+                },
+            )
+            return result
+
+        async def audited_edit_message_text(*args, **kwargs):
+            result = await original_edit_message_text(*args, **kwargs)
+            text = kwargs.get("text")
+            if text is None and args:
+                text = args[0]
+            dogfood_audit.record_event(
+                "bot_response",
+                payload={
+                    "method": "edit_message_text_hook",
+                    "chat_id": kwargs.get("chat_id"),
+                    "message_id": kwargs.get("message_id"),
+                    "text_preview": dogfood_audit.message_metadata(
+                        SimpleNamespace(text=text),
+                        include_text=True,
+                    ).get("text_preview"),
+                    "text_sha256_16": dogfood_audit.text_fingerprint(text),
+                    "has_reply_markup": bool(kwargs.get("reply_markup")),
+                },
+            )
+            return result
+
+        async def audited_delete_message(*args, **kwargs):
+            result = await original_delete_message(*args, **kwargs)
+            dogfood_audit.record_event(
+                "prompt_retired",
+                payload={
+                    "action": "delete_message_hook",
+                    "chat_id": kwargs.get("chat_id") if "chat_id" in kwargs else (args[0] if args else None),
+                    "message_id": kwargs.get("message_id") if "message_id" in kwargs else (args[1] if len(args) > 1 else None),
+                },
+            )
+            return result
+
+        bot_obj.send_message = audited_send_message
+        bot_obj.edit_message_text = audited_edit_message_text
+        bot_obj.delete_message = audited_delete_message
+        bot_obj._dogfood_audit_hooks_installed = True
+    except Exception:
+        logger.debug("Could not install dogfood audit bot hooks", exc_info=True)
+
+
 async def _safe_edit_text(target, text: str, **kwargs):
     """Edit message text, splitting if it exceeds Telegram's 4096 char limit.
     For the first chunk, passes kwargs (reply_markup, parse_mode) through.
     Subsequent chunks are sent as new messages with no markup."""
     if len(text) <= MAX_TELEGRAM_MSG:
         try:
-            return await target.edit_text(text, **kwargs)
+            result = await target.edit_text(text, **kwargs)
+            dogfood_audit.record_event(
+                "bot_response",
+                payload={
+                    "method": "edit_text",
+                    "text_preview": dogfood_audit.message_metadata(
+                        SimpleNamespace(text=text),
+                        include_text=True,
+                    ).get("text_preview"),
+                    "text_sha256_16": dogfood_audit.text_fingerprint(text),
+                    "has_reply_markup": bool(kwargs.get("reply_markup")),
+                },
+            )
+            return result
         except BadRequest as exc:
             if "can't parse entities" in str(exc).lower() and kwargs.get("parse_mode"):
                 plain_kwargs = {k: v for k, v in kwargs.items() if k != "parse_mode"}
-                return await target.edit_text(text, **plain_kwargs)
+                result = await target.edit_text(text, **plain_kwargs)
+                dogfood_audit.record_event(
+                    "bot_response",
+                    payload={
+                        "method": "edit_text_plain_fallback",
+                        "text_preview": dogfood_audit.message_metadata(
+                            SimpleNamespace(text=text),
+                            include_text=True,
+                        ).get("text_preview"),
+                        "text_sha256_16": dogfood_audit.text_fingerprint(text),
+                        "has_reply_markup": bool(plain_kwargs.get("reply_markup")),
+                    },
+                )
+                return result
             raise
 
     # Split at last newline before limit
@@ -536,6 +720,7 @@ async def _edit_last_bot_msg(context, chat_id, text, reply_markup=None, parse_mo
                 reply_markup=reply_markup,
                 parse_mode=parse_mode,
             )
+            _audit_bot_response(context, "edit_message_text", text, reply_markup=reply_markup, message_id=msg_id)
             return
         except Exception:
             pass
@@ -543,6 +728,7 @@ async def _edit_last_bot_msg(context, chat_id, text, reply_markup=None, parse_mo
     msg = await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode=parse_mode)
     context.user_data["last_bot_msg_id"] = msg.message_id
     context.user_data["last_bot_chat_id"] = chat_id
+    _audit_bot_response(context, "send_message", text, reply_markup=reply_markup, message_id=msg.message_id)
 
 
 def _track_latest_message(context, msg):
@@ -705,6 +891,7 @@ async def _send_latest_message(message, context, text, reply_markup=None, parse_
                 parse_mode=parse_mode,
             )
             context.user_data["last_bot_chat_id"] = chat_id
+            _audit_bot_response(context, "edit_message_text", text, reply_markup=reply_markup, message_id=msg_id)
             return _TrackedMessage(context.bot, chat_id, msg_id)
         except Exception as exc:
             if _telegram_message_not_modified_error(exc):
@@ -713,6 +900,7 @@ async def _send_latest_message(message, context, text, reply_markup=None, parse_
             pass
     msg = await message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
     _track_latest_message(context, msg)
+    _audit_bot_response(context, "reply_text", text, reply_markup=reply_markup, message_id=msg.message_id)
     return msg
 
 
@@ -735,6 +923,13 @@ async def _retire_active_source_detail_message(context) -> None:
                 text="📥 Added to this case. Use the latest prompt below.",
                 reply_markup=None,
             )
+            _audit_event(
+                context,
+                "prompt_retired",
+                action="source_detail_prompt_edited",
+                message_id=msg_id,
+                chat_id=chat_id,
+            )
         except Exception:
             try:
                 await context.bot.edit_message_reply_markup(
@@ -742,10 +937,24 @@ async def _retire_active_source_detail_message(context) -> None:
                     message_id=msg_id,
                     reply_markup=None,
                 )
+                _audit_event(
+                    context,
+                    "prompt_retired",
+                    action="source_detail_reply_markup_removed",
+                    message_id=msg_id,
+                    chat_id=chat_id,
+                )
             except Exception:
                 pass
         try:
             await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+            _audit_event(
+                context,
+                "prompt_retired",
+                action="source_detail_prompt_deleted",
+                message_id=msg_id,
+                chat_id=chat_id,
+            )
         except Exception:
             pass
     for key in ("last_bot_msg_id", "last_bot_chat_id", "status_msg_id", "status_msg_chat"):
@@ -766,6 +975,7 @@ async def _send_pending_bundle_status(message, context, text, reply_markup=None,
                 parse_mode=parse_mode,
             )
             context.user_data["pending_bundle_chat_id"] = chat_id
+            _audit_bot_response(context, "edit_pending_bundle", text, reply_markup=reply_markup, message_id=msg_id)
 
             class _TrackedMessage:
                 def __init__(self, bot, chat_id, message_id):
@@ -788,6 +998,7 @@ async def _send_pending_bundle_status(message, context, text, reply_markup=None,
             context.user_data.pop("pending_bundle_chat_id", None)
     msg = await message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
     _track_pending_bundle_message(context, msg)
+    _audit_bot_response(context, "reply_pending_bundle", text, reply_markup=reply_markup, message_id=msg.message_id)
     return msg
 
 
@@ -3078,6 +3289,7 @@ def _track_funnel_event(context, event: str, *, update_last: bool = True, **meta
     except Exception:
         pass
     logger.info("Portfolio Guru funnel event=%s metadata=%s", event, safe)
+    _audit_event(context, "decision_path", decision=event, metadata=safe)
 
 
 def _log_filing_attempt(
@@ -4157,6 +4369,16 @@ async def _show_draft_review(
     needs_reflection_detail = _set_reflection_detail_gate(context, draft)
     missing_required, missing_optional, _ = _missing_template_fields(draft, form_type)
     has_missing = bool(missing_required or missing_optional)
+    _audit_event(
+        context,
+        "draft_payload",
+        action="show_review",
+        form_type=form_type,
+        needs_reflection_detail=needs_reflection_detail,
+        missing_required_count=len(missing_required),
+        missing_optional_count=len(missing_optional),
+        draft=dogfood_audit.summarise_draft_payload(draft, form_type=form_type),
+    )
     _track_funnel_event(context, "draft_shown", form_type=form_type, has_missing=has_missing)
     _track_funnel_event(
         context,
@@ -8064,6 +8286,16 @@ async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: in
     _store_pending_draft(context, draft)
     context.user_data["chosen_form"] = form_type
     context.user_data["awaiting_detail"] = True
+    _audit_event(
+        context,
+        "draft_payload",
+        action="analyse_selected_form",
+        form_type=form_type,
+        input_source=context.user_data.get("case_input_source", "text"),
+        case_text_sha256_16=dogfood_audit.text_fingerprint(case_text),
+        case_chars=len(case_text or ""),
+        draft=dogfood_audit.summarise_draft_payload(draft, form_type=form_type),
+    )
     return draft
 
 
@@ -8119,6 +8351,17 @@ async def _handle_reuse_request(update: Update, context: ContextTypes.DEFAULT_TY
 async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_id: int, case_text: str, input_source: str) -> int:
     """Store case text, suggest form types, or move directly to the chosen template review."""
     _track_funnel_event(context, "input_received", source=input_source)
+    _audit_event(
+        context,
+        "case_text_ready",
+        input_source=input_source,
+        case_text_preview=dogfood_audit.message_metadata(
+            SimpleNamespace(text=case_text),
+            include_text=True,
+        ).get("text_preview"),
+        case_text_sha256_16=dogfood_audit.text_fingerprint(case_text),
+        case_chars=len(case_text or ""),
+    )
     # Anti-fabrication gate: never feed a too-thin input to the recommender or
     # the field extractor. The LLM is instructed not to fabricate, but with no
     # content to ground against it can still hallucinate plausible-sounding
@@ -8129,6 +8372,13 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
 
     if _source_context_needs_more_detail(input_source, case_text):
         context.user_data["awaiting_source_detail"] = True
+        _audit_event(
+            context,
+            "decision_path",
+            decision="source_context_needed",
+            input_source=input_source,
+            case_chars=len(case_text or ""),
+        )
         prompt_msg = await _send_latest_message(
             message,
             context,
@@ -8150,6 +8400,13 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
             )
             return AWAIT_CASE_INPUT
         context.user_data["chosen_form"] = explicit_form
+        _audit_event(
+            context,
+            "decision_path",
+            decision="explicit_form_detected",
+            form_type=explicit_form,
+            input_source=input_source,
+        )
         prompt_text = (
             f"I’ll use *{_form_display_name(explicit_form)}* for this entry.\n\n"
             "Tap Draft to extract the fields from what you sent."
@@ -8165,6 +8422,13 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
         return AWAIT_FORM_CHOICE
 
     if not _looks_like_clinical_case(case_text):
+        _audit_event(
+            context,
+            "decision_path",
+            decision="clinical_context_needed",
+            input_source=input_source,
+            case_chars=len(case_text or ""),
+        )
         await message.reply_text(
             _video_context_detail_request()
             if _has_video_attachment_for_drafting(context)
@@ -8209,6 +8473,14 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
             )
             return AWAIT_FORM_CHOICE
         context.user_data["form_recommendations"] = recommendations
+        _audit_event(
+            context,
+            "decision_path",
+            decision="recommendations_generated",
+            input_source=input_source,
+            count=len(recommendations),
+            form_types=[getattr(rec, "form_type", None) for rec in recommendations],
+        )
     except Exception as exc:
         logger.error("Form recommendation failed across all providers: %s", exc)
         _track_funnel_event(context, "recommendation_failed", source=input_source)
@@ -8268,6 +8540,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Route callback queries based on prefix."""
     query = update.callback_query
     data = query.data
+    _remember_audit_user(context, update)
+    _audit_event(
+        context,
+        "callback_input",
+        update=update,
+        callback_data=data,
+        message_id=getattr(getattr(query, "message", None), "message_id", None),
+    )
     logger.info(
         "Conversation callback: data=%s user=%s state=%s",
         data,
@@ -8495,6 +8775,7 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
     query = update.callback_query
     await query.answer()
     mode = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else ""
+    _remember_audit_user(context, update)
     pending_doc = context.user_data.pop("_pending_doc", None) or {}
     pending_doc_context = context.user_data.pop("_pending_doc_context", "")
     file_path = pending_doc.get("path")
@@ -8503,6 +8784,21 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
     is_image_attachment = attachment_kind == "image"
     is_video_attachment = attachment_kind == "video"
     attachment_label = "image" if is_image_attachment else "video" if is_video_attachment else "document"
+    _audit_event(
+        context,
+        "media_document_flow",
+        update=update,
+        action="intent_selected",
+        mode=mode,
+        attachment_kind=attachment_kind,
+        attachment_label=attachment_label,
+        file_name=dogfood_audit.message_metadata(
+            SimpleNamespace(document=SimpleNamespace(file_name=file_name)),
+            include_text=False,
+        ).get("file_name"),
+        has_cached_file=bool(file_path and os.path.exists(file_path)),
+        has_user_context=bool(pending_doc_context.strip()),
+    )
     if is_image_attachment:
         _remember_case_context_source(
             context,
@@ -8538,6 +8834,13 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
             f"✅ Removed that {attachment_label}.",
             reply_markup=None,
         )
+        _audit_event(
+            context,
+            "prompt_retired",
+            action="media_ignored",
+            attachment_kind=attachment_kind,
+            original_removed=original_removed,
+        )
         # Delete our own message (always allowed for own messages)
         try:
             await query.message.delete()
@@ -8554,6 +8857,13 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
         return AWAIT_CASE_INPUT
 
     if mode not in {"info", "attach", "both"} or not file_path or not os.path.exists(file_path):
+        _audit_event(
+            context,
+            "media_document_flow",
+            action="intent_expired",
+            mode=mode,
+            attachment_kind=attachment_kind,
+        )
         await query.edit_message_text(
             f"That {attachment_label} choice has expired. Send it again when you're ready."
         )
@@ -8563,6 +8873,17 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
         context.user_data["attachment_path"] = file_path
         context.user_data["attachment_name"] = file_name
         context.user_data["attachment_kind"] = attachment_kind
+        _audit_event(
+            context,
+            "media_document_flow",
+            action="attachment_registered",
+            mode=mode,
+            attachment_kind=attachment_kind,
+            file_name=dogfood_audit.message_metadata(
+                SimpleNamespace(document=SimpleNamespace(file_name=file_name)),
+                include_text=False,
+            ).get("file_name"),
+        )
 
     if mode == "attach":
         reply_text, reply_markup = _attachment_captured_reply(
@@ -8575,6 +8896,12 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
             reply_markup=reply_markup,
         )
         _track_gathering_prompt(context, query.message.message_id, query.message.chat_id)
+        _audit_event(
+            context,
+            "decision_path",
+            decision="attach_only_waiting_for_context",
+            attachment_kind=attachment_kind,
+        )
         return AWAIT_GATHERING
 
     if is_video_attachment:
@@ -8603,8 +8930,25 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
                 case_text = ""
         else:
             case_text = await extract_from_document(file_path)
+        _audit_event(
+            context,
+            "media_document_flow",
+            action="extraction_complete",
+            mode=mode,
+            attachment_kind=attachment_kind,
+            extracted_chars=len(case_text or ""),
+            extracted_sha256_16=dogfood_audit.text_fingerprint(case_text),
+        )
     except Exception as exc:
         logger.error("%s extraction failed after DOCUSE=%s: %s", attachment_label.title(), mode, exc, exc_info=True)
+        _audit_event(
+            context,
+            "media_document_flow",
+            action="extraction_failed",
+            mode=mode,
+            attachment_kind=attachment_kind,
+            error=type(exc).__name__,
+        )
         case_text = ""
 
     if not case_text or not case_text.strip():
@@ -9220,6 +9564,7 @@ async def handle_edit_value_with_intent(update: Update, context: ContextTypes.DE
 async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle text, voice, photo, video, or document input for case description."""
     user_id = update.effective_user.id
+    _remember_audit_user(context, update, user_id)
     _start_conversational_router_shadow(update, "handle_case_input")
     attachment_path_to_save = None
     attachment_name_to_save = None
@@ -9297,6 +9642,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     # document route through this handler, so this single check gates
     # them all before any LLM or transcription call.
     if not await consent.has_current_consent(user_id):
+        _audit_update_received(update, context, stage="pre_consent", include_text=False)
         return await _prompt_consent(update, context)
 
     # Tier enforcement — check usage limit
@@ -9311,6 +9657,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         context.user_data["_flow_anchor_upgrade"] = (limit_msg.chat_id, limit_msg.message_id)
         return ConversationHandler.END
     context.user_data["user_tier"] = tier
+    _audit_update_received(update, context, stage="case_input", include_text=True)
 
     # Determine input type and extract text
     case_text = None
@@ -9587,6 +9934,13 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     elif _voice_media_from_message(update.message):
         voice_media = _voice_media_from_message(update.message)
+        _audit_event(
+            context,
+            "media_document_flow",
+            action="voice_received",
+            file_size=getattr(voice_media, "file_size", None),
+            mime_type=getattr(voice_media, "mime_type", None),
+        )
         ack = await update.message.reply_text("🎙️ Transcribing voice note…")
         tmp_path = None
         try:
@@ -9595,6 +9949,13 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 tmp_path = tmp.name
                 await voice_file.download_to_drive(tmp_path)
                 case_text = await transcribe_voice(tmp_path)
+            _audit_event(
+                context,
+                "media_document_flow",
+                action="voice_transcribed",
+                extracted_chars=len(case_text or ""),
+                extracted_sha256_16=dogfood_audit.text_fingerprint(case_text),
+            )
             await ack.edit_text(
                 "🎙️ Voice note read. Checking clinical detail…"
                 if (
@@ -9610,6 +9971,12 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 await _retire_active_source_detail_message(context)
             _track_latest_message(context, ack)
         except Exception as e:
+            _audit_event(
+                context,
+                "media_document_flow",
+                action="voice_transcription_failed",
+                error=type(e).__name__,
+            )
             await ack.edit_text(
                 "⚠️ Couldn't transcribe voice note. Try again or describe the case in text.",
                 reply_markup=InlineKeyboardMarkup([
@@ -9624,6 +9991,14 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     elif update.message.photo:
         bundling = bool(context.user_data.get("pending_case_bundle"))
+        _audit_event(
+            context,
+            "media_document_flow",
+            action="photo_received",
+            bundling=bundling,
+            photo_count=len(update.message.photo or []),
+            has_caption=bool((update.message.caption or "").strip()),
+        )
         if bundling:
             ack = await _send_pending_bundle_status(update.message, context, "📷 Reading images…")
             typing_stop = asyncio.Event()
@@ -9643,12 +10018,26 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 ocr_done.set()
                 progress_task.cancel()
                 if case_text.strip() == "NOT_CLINICAL":
+                    _audit_event(
+                        context,
+                        "media_document_flow",
+                        action="photo_not_clinical",
+                        bundling=True,
+                    )
                     await ack.edit_text("This image doesn't look like a clinical case. Send a text description or a photo of clinical notes/findings.")
                     return AWAIT_CASE_INPUT
                 caption = (update.message.caption or "").strip()
                 if caption:
                     case_text = f"{caption}\n\n{case_text}".strip()
                 _append_pending_case_bundle(context, case_text, "photo")
+                _audit_event(
+                    context,
+                    "media_document_flow",
+                    action="photo_ocr_complete",
+                    bundling=True,
+                    extracted_chars=len(case_text or ""),
+                    extracted_sha256_16=dogfood_audit.text_fingerprint(case_text),
+                )
                 case_text, input_source = _combined_pending_case_bundle(context)
                 _clear_pending_case_bundle(context)
                 await ack.edit_text("📷 Images read. Finding matching forms…")
@@ -9658,6 +10047,13 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 ocr_done.set()
                 progress_task.cancel()
                 logger.warning("Photo OCR failed in pending bundle: %s", e)
+                _audit_event(
+                    context,
+                    "media_document_flow",
+                    action="photo_ocr_failed",
+                    bundling=True,
+                    error=type(e).__name__,
+                )
                 await ack.edit_text(
                     "⚠️ Couldn't read that image — your other inputs are still saved.\n"
                     "Send another image or type `done` to draft from what I already have.",
@@ -9699,6 +10095,14 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             caption = (update.message.caption or "").strip()
             if caption:
                 context.user_data["_pending_doc_context"] = caption
+            _audit_event(
+                context,
+                "media_document_flow",
+                action="photo_cached_for_intent",
+                attachment_kind="image",
+                file_name="portfolio-image.jpg",
+                has_caption=bool(caption),
+            )
 
             await ack.edit_text(
                 "📷 Image received — how would you like to use it?\n\n"
@@ -9710,6 +10114,12 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return AWAIT_DOC_INTENT
         except Exception as e:
             logger.warning("Photo download/cache failed: %s", e)
+            _audit_event(
+                context,
+                "media_document_flow",
+                action="photo_cache_failed",
+                error=type(e).__name__,
+            )
             if _gathering_case_active(context):
                 await ack.edit_text(
                     "⚠️ Couldn't receive that image — your other inputs are still saved.\n"
@@ -9735,7 +10145,20 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         try:
             import shutil
             video = _video_media_from_message(update.message)
+            _audit_event(
+                context,
+                "media_document_flow",
+                action="video_received",
+                file_size=getattr(video, "file_size", None),
+                mime_type=getattr(video, "mime_type", None),
+            )
             if _media_exceeds_telegram_download_limit(video):
+                _audit_event(
+                    context,
+                    "media_document_flow",
+                    action="video_oversized",
+                    file_size=getattr(video, "file_size", None),
+                )
                 if _gathering_case_active(context):
                     await ack.edit_text(
                         _oversized_video_text(gathering=True),
@@ -9772,6 +10195,14 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             caption = (update.message.caption or "").strip()
             if caption:
                 context.user_data["_pending_doc_context"] = caption
+            _audit_event(
+                context,
+                "media_document_flow",
+                action="video_cached_for_intent",
+                attachment_kind="video",
+                file_name=f"portfolio-video{suffix}",
+                has_caption=bool(caption),
+            )
 
             await ack.edit_text(
                 "🎞️ Video received — would you like to attach it to the Kaizen draft?\n\n"
@@ -9782,6 +10213,12 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return AWAIT_DOC_INTENT
         except BadRequest as e:
             logger.warning("Video download/cache failed: %s", e)
+            _audit_event(
+                context,
+                "media_document_flow",
+                action="video_cache_failed",
+                error=type(e).__name__,
+            )
             if _telegram_file_too_big_error(e):
                 if _gathering_case_active(context):
                     await ack.edit_text(
@@ -9812,6 +10249,12 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return AWAIT_CASE_INPUT
         except Exception as e:
             logger.warning("Video download/cache failed: %s", e)
+            _audit_event(
+                context,
+                "media_document_flow",
+                action="video_cache_failed",
+                error=type(e).__name__,
+            )
             if _gathering_case_active(context):
                 await ack.edit_text(
                     "⚠️ Couldn't receive that video — your other inputs are still saved.\n"
@@ -9834,8 +10277,22 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         # Handle document files (PDF, PPTX, DOCX)
         doc = update.message.document
         file_name = doc.file_name or "document"
+        _audit_event(
+            context,
+            "media_document_flow",
+            action="document_received",
+            file_name=dogfood_audit.message_metadata(update.message, include_text=False).get("file_name"),
+            mime_type=getattr(doc, "mime_type", None),
+            file_size=getattr(doc, "file_size", None),
+        )
 
         if not is_supported_document(file_name):
+            _audit_event(
+                context,
+                "media_document_flow",
+                action="document_unsupported",
+                file_name=dogfood_audit.message_metadata(update.message, include_text=False).get("file_name"),
+            )
             await update.message.reply_text(
                 "📄 I can read PDF, PowerPoint (.pptx), Word (.docx), and text files. "
                 "This file type isn't supported yet."
@@ -9861,6 +10318,12 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             shutil.copy2(tmp_path, cached_path)
         except Exception as e:
             logger.error(f"Document download failed: {e}", exc_info=True)
+            _audit_event(
+                context,
+                "media_document_flow",
+                action="document_cache_failed",
+                error=type(e).__name__,
+            )
             context.user_data.clear()
             await ack.edit_text(
                 "⚠️ Couldn't receive that document. Try again or describe the case in text."
@@ -9871,6 +10334,12 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 os.unlink(tmp_path)
 
         context.user_data["_pending_doc"] = {"path": cached_path, "name": file_name}
+        _audit_event(
+            context,
+            "media_document_flow",
+            action="document_cached_for_intent",
+            file_name=dogfood_audit.message_metadata(update.message, include_text=False).get("file_name"),
+        )
         await ack.edit_text(
             "📄 How would you like to use this document?",
             reply_markup=_build_doc_intent_keyboard(),
@@ -10030,6 +10499,13 @@ async def _delete_previous_gathering_message(context: ContextTypes.DEFAULT_TYPE)
                 text="📥 Added to this case. Use the latest prompt below.",
                 reply_markup=None,
             )
+            _audit_event(
+                context,
+                "prompt_retired",
+                action="gathering_prompt_edited",
+                message_id=old_msg_id,
+                chat_id=old_chat_id,
+            )
         except Exception:
             try:
                 await context.bot.edit_message_reply_markup(
@@ -10037,10 +10513,24 @@ async def _delete_previous_gathering_message(context: ContextTypes.DEFAULT_TYPE)
                     message_id=old_msg_id,
                     reply_markup=None,
                 )
+                _audit_event(
+                    context,
+                    "prompt_retired",
+                    action="gathering_reply_markup_removed",
+                    message_id=old_msg_id,
+                    chat_id=old_chat_id,
+                )
             except Exception:
                 pass
         try:
             await context.bot.delete_message(chat_id=old_chat_id, message_id=old_msg_id)
+            _audit_event(
+                context,
+                "prompt_retired",
+                action="gathering_prompt_deleted",
+                message_id=old_msg_id,
+                chat_id=old_chat_id,
+            )
         except Exception:
             pass
     for msg_key, chat_key in (
@@ -10136,6 +10626,14 @@ async def _finish_gathering_case(update: Update, context: ContextTypes.DEFAULT_T
 async def gather_done_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
+    _remember_audit_user(context, update)
+    _audit_event(
+        context,
+        "callback_input",
+        update=update,
+        callback_data=getattr(query, "data", None),
+        action="gather_done",
+    )
     if not _gathering_case_active(context):
         _clear_gathering_case(context)
         _pop_gathering_prompt_refs(context)
@@ -10246,6 +10744,14 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
 
     data = query.data
+    _remember_audit_user(context, update)
+    _audit_event(
+        context,
+        "callback_input",
+        update=update,
+        callback_data=data,
+        message_id=getattr(getattr(query, "message", None), "message_id", None),
+    )
     if data == "FORM|disabled":
         await query.answer("Coming soon — choose another form.", show_alert=False)
         return AWAIT_FORM_CHOICE
@@ -10622,6 +11128,14 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     """Handle 'File this draft' approval."""
     query = update.callback_query
     is_callback = query is not None
+    _remember_audit_user(context, update)
+    _audit_event(
+        context,
+        "callback_input" if is_callback else "user_input",
+        update=update,
+        callback_data=getattr(query, "data", None) if query else None,
+        action="approval_save_draft",
+    )
 
     # Idempotency guard for a one-shot external effect: saving a Kaizen draft.
     # Re-entry happens via double-taps and stale retry/save buttons still sitting
@@ -10709,6 +11223,15 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             "reflection": draft.reflection,
         }
         curriculum_links = draft.curriculum_links or []
+    _audit_event(
+        context,
+        "draft_payload",
+        action="save_attempted",
+        form_type=form_type,
+        input_source=context.user_data.get("case_input_source"),
+        has_attachment=bool(context.user_data.get("attachment_path")),
+        draft=dogfood_audit.summarise_draft_payload(fields, form_type=form_type),
+    )
 
     schema = FORM_SCHEMAS.get(schema_form_type(form_type), {})
     form_name = public_form_name(form_type) or schema.get("name", form_type)
@@ -10831,6 +11354,15 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             status="timeout",
             error="Filing exceeded 300s timeout",
         )
+        _audit_event(
+            context,
+            "kaizen_save_result",
+            form_type=form_type,
+            status="timeout",
+            error="Filing exceeded timeout",
+            method=None,
+            verified=None,
+        )
         _track_funnel_event(context, "filing_failed", form_type=form_type, reason="timeout")
         kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS.get(form_type, '')}" if FORM_UUIDS.get(form_type) else "https://kaizenep.com/activities"
         timeout_msg = (
@@ -10863,6 +11395,15 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             form_type=form_type,
             status="exception",
             error=str(e),
+        )
+        _audit_event(
+            context,
+            "kaizen_save_result",
+            form_type=form_type,
+            status="exception",
+            error=type(e).__name__,
+            method=None,
+            verified=None,
         )
         _track_funnel_event(context, "filing_failed", form_type=form_type, reason="exception")
         # Keep draft data for retry — do NOT clear user_data
@@ -10979,6 +11520,22 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         skipped=[str(s) for s in skipped],
         method=result.get("method"),
         verified=result.get("verified"),
+    )
+    _audit_event(
+        context,
+        "kaizen_save_result",
+        form_type=form_type,
+        status=status,
+        method=result.get("method"),
+        verified=result.get("verified"),
+        filled_count=len(filled),
+        skipped=[str(s) for s in skipped],
+        error_preview=dogfood_audit.message_metadata(
+            SimpleNamespace(text=error),
+            include_text=True,
+        ).get("text_preview") if error else None,
+        saved_url_present=bool(result.get("saved_url")),
+        attachment_skipped=attachment_skipped_reason,
     )
     proof_report = _format_proof_report(
         status,
@@ -12968,6 +13525,7 @@ def build_application() -> Application:
     # NOTE: CallbackQueryHandler already registered in case_conv fallbacks.
     # Do NOT add a second one here — causes duplicate message delivery.
 
+    _install_dogfood_audit_bot_hooks(application)
     return application
 
 

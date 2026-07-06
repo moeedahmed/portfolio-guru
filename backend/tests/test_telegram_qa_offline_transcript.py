@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+import dogfood_audit
 from tests.fixtures.telegram_qa_cases import CASES
 from tests.qa_transcript import (
     CaseTranscript,
@@ -43,6 +44,8 @@ def _artifact_dir() -> Path:
 
 async def test_offline_qa_transcript_runs_all_golden_cases(monkeypatch):
     out_dir = _artifact_dir()
+    audit_path = out_dir / "dogfood-audit.ndjson"
+    monkeypatch.setenv("PORTFOLIO_GURU_DOGFOOD_AUDIT_PATH", str(audit_path))
     transcripts: list[CaseTranscript] = []
     failures: list[str] = []
 
@@ -71,3 +74,10 @@ async def test_offline_qa_transcript_runs_all_golden_cases(monkeypatch):
         assert not first.timed_out, (
             f"{transcript.case_id}: handler timed out on initial case input — see {md_path}"
         )
+
+    audit_counts = dogfood_audit.count_by_event(dogfood_audit.iter_records(audit_path))
+    assert audit_counts["user_input"] >= len(CASES)
+    assert audit_counts["decision_path"] >= len(CASES)
+    assert audit_counts["draft_payload"] >= 1
+    assert audit_counts["bot_response"] >= 1
+    assert audit_counts["media_document_flow"] >= 1
