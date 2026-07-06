@@ -123,6 +123,20 @@ def test_grammar_fix_does_not_alter_safe_discharge_used_correctly():
     assert "safe discharge" in result
 
 
+def test_grammar_fix_missing_ensure_in_future_reflection():
+    """Repair missing verb in 'In future, I will...' reflection phrasing."""
+    text = (
+        "In future, I will these elements are clearly detailed in my initial "
+        "documentation."
+    )
+    result = _portfolio_quality_polish(text)
+    assert "I will these elements" not in result
+    assert (
+        "In future, I will ensure these elements are clearly documented in my "
+        "initial documentation."
+    ) == result
+
+
 # ─── Procedural skills: no CBD content field, but DOM defaults apply ─────────
 
 

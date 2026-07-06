@@ -1306,6 +1306,10 @@ def _portfolio_quality_polish(text: str) -> str:
         # as a verb, producing "I safe discharge" instead of "I safely discharged".
         (r"\bI safe discharge(?:d)?\b", "I safely discharged"),
         (
+            r"\bIn future,?\s+I will these elements are clearly detailed\b",
+            "In future, I will ensure these elements are clearly documented",
+        ),
+        (
             r"\b(?:without|with no) (?:any )?septations?,?\s*(?:which )?(?:suggesting|suggested|meaning|meant) (?:it (?:is|was) )?(?:a )?transudative effusion\b",
             "without septations, supporting a non-complex effusion; the wider clinical picture still needed to guide the likely cause and treatment",
         ),
