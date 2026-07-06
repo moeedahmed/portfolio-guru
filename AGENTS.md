@@ -4,6 +4,8 @@
 
 Portfolio Guru automates e-portfolio filing for UK EM trainees. A doctor sends a clinical case via Telegram (text, voice, photo, document); the bot extracts structured WPBA data, recommends/accepts a form type, previews a draft, then saves a Kaizen draft on approval. Supervisor submission is never automatic.
 
+Core product edge: this is not a generic AI writing tool. Doctors can already draft with ChatGPT; Portfolio Guru's wedge is reducing the whole portfolio filing load: capture evidence where the doctor already is, help select the right Kaizen ticket/form, draft simply in the doctor's voice when possible, attach the right evidence, and save a Kaizen draft after approval. Product/content positioning source: `docs/portfolio-guru-core-edge-2026-07-06.md`.
+
 ## Current State
 
 - Phase: controlled dogfood / beta-hardening on Mac Mini. Core filing is built, but wider invite-only paid beta remains gated by the launch checklist, legal sign-off, and manual live smoke proof for new attachment flows. Deploy: GitHub Actions self-hosted runner, push to `main`, **gated on CI tests passing** with post-deploy smoke + auto-rollback (`deploy_mac.sh`).
