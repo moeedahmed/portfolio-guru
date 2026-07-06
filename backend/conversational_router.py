@@ -299,7 +299,18 @@ def _normalise(message: str) -> str:
 
 
 def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
-    return any(term in text for term in terms)
+    return any(_contains_term(text, term) for term in terms)
+
+
+def _contains_term(text: str, term: str) -> bool:
+    """Match intent terms without catching substrings inside clinical words.
+
+    This keeps words like "planning" out of the billing "plan" route and
+    "escalated" out of LAT/form-code routing.
+    """
+    if not term:
+        return False
+    return bool(re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", text))
 
 
 def _extract_form_type(text: str) -> str | None:

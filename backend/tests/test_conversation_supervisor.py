@@ -67,6 +67,18 @@ def test_plain_case_detail_continues_gathering():
     assert kind is GatheringTurnKind.CONTINUE_GATHERING
 
 
+def test_detailed_case_with_airway_planning_continues_gathering_not_support_answer():
+    kind, intent = classify_gathering_turn(
+        "A patient was bitten on the face by an injured dog. They came to ED with facial wounds "
+        "and airway concern. I assessed them, escalated to seniors, prepared for airway management, "
+        "and they were intubated safely. My learning was about early escalation, airway planning, "
+        "and documenting animal bite risk and safeguarding considerations."
+    )
+
+    assert kind is GatheringTurnKind.CONTINUE_GATHERING
+    assert intent is ConversationalIntent.NEW_CASE
+
+
 @pytest.mark.asyncio
 async def test_finish_decision_defers_to_caller():
     decision = await decide_gathering_turn("done", answer_question=_unused_answer)
@@ -84,6 +96,22 @@ async def test_continue_decision_adds_to_case_and_offers_draft_now():
     assert decision.add_to_case is True
     assert decision.reply is not None
     assert decision.reply.actions == (DRAFT_NOW_ACTION,)
+
+
+@pytest.mark.asyncio
+async def test_detailed_case_does_not_call_grounded_answer_or_return_lat_support():
+    decision = await decide_gathering_turn(
+        "A patient was bitten on the face by an injured dog. They came to ED with facial wounds "
+        "and airway concern. I assessed them, escalated to seniors, prepared for airway management, "
+        "and they were intubated safely. My learning was about early escalation, airway planning, "
+        "and documenting animal bite risk and safeguarding considerations.",
+        answer_question=_unused_answer,
+    )
+
+    assert decision.kind is GatheringTurnKind.CONTINUE_GATHERING
+    assert decision.add_to_case is True
+    assert decision.reply is not None
+    assert "Leadership Assessment Tool" not in decision.reply.full_text()
 
 
 @pytest.mark.asyncio

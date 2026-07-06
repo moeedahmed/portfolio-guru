@@ -1026,6 +1026,41 @@ def _looks_like_pricing_question(text_lower: str) -> bool:
     )
 
 
+def _contains_standalone_term(text_lower: str, term: str) -> bool:
+    """Match support terms/form codes as standalone terms, not substrings."""
+    if not term:
+        return False
+    return bool(re.search(rf"(?<![a-z0-9]){re.escape(term.lower())}(?![a-z0-9])", text_lower))
+
+
+def _mentions_specific_form(text_lower: str, form_code: str, form_name: str) -> bool:
+    code = form_code.lower().replace("_", " ")
+    return _contains_standalone_term(text_lower, code) or _contains_standalone_term(text_lower, form_name.lower())
+
+
+def _looks_like_form_support_question(text_lower: str) -> bool:
+    if not text_lower:
+        return False
+    questionish = "?" in text_lower or bool(
+        re.match(r"^(what|which|can|could|do|does|is|are|will|should|how)\b", text_lower)
+    )
+    support_signals = (
+        "form",
+        "forms",
+        "ticket",
+        "type",
+        "mapped",
+        "supported",
+        "support",
+        "available",
+        "auto-filing",
+        "autofiling",
+        "file to kaizen",
+        "save to kaizen",
+    )
+    return questionish and any(_contains_standalone_term(text_lower, signal) for signal in support_signals)
+
+
 async def answer_question(text: str, case_context: str = "") -> str:
     """Generate a helpful answer about the bot's capabilities.
 
@@ -1118,9 +1153,10 @@ Be concise. For each suggestion give the form name and a one-line reason why it 
             "🩺 Tell me the activity in one or two lines and I’ll recommend the best RCEM form before drafting."
         )
 
-    # Check if user is asking about specific form types or capabilities
-    form_keywords = ["form", "ticket", "type", "mapped", "support", "management", "cbd", "dops", "lat", "qiat", "msf", "available"]
-    is_asking_about_forms = any(kw in text_lower for kw in form_keywords)
+    # Check if user is asking about specific form types or capabilities. Use
+    # standalone matching so clinical prose like "airway management" or
+    # "escalated" does not become a Management/LAT support answer.
+    is_asking_about_forms = _looks_like_form_support_question(text_lower)
 
     if is_asking_about_forms:
         # Direct answer about available forms
@@ -1148,7 +1184,7 @@ Be concise. For each suggestion give the form name and a one-line reason why it 
 
         # Check if asking about a specific form
         for form_code, form_name in form_list:
-            if form_code.lower().replace("_", " ") in text_lower or form_code.lower() in text_lower:
+            if _mentions_specific_form(text_lower, form_code, form_name):
                 return sanitize_internal_form_codes(
                     f"✅ Yes, {form_code} ({form_name}) is fully supported with auto-filing to Kaizen."
                 )

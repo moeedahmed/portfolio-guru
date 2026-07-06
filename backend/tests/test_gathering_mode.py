@@ -105,6 +105,30 @@ async def test_gathering_mode_answers_side_question_without_adding_case_detail(m
 
 
 @pytest.mark.asyncio
+async def test_gathering_mode_treats_detailed_airway_case_as_case_detail(monkeypatch):
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+    bot._append_gathering_case(context, "I saw a dog and cat fight and the cat died.", "text")
+    update = sim._make_text_update(
+        "A patient was bitten on the face by an injured dog. They came to ED with facial wounds "
+        "and airway concern. I assessed them, escalated to seniors, prepared for airway management, "
+        "and they were intubated safely. My learning was about early escalation, airway planning, "
+        "and documenting animal bite risk and safeguarding considerations."
+    )
+
+    answer = AsyncMock(return_value="✅ Yes, Leadership Assessment Tool is supported.")
+    with patch("bot.answer_question", new=answer):
+        result = await handle_gathering_input(update, context)
+
+    assert result == AWAIT_GATHERING
+    answer.assert_not_awaited()
+    assert "airway management" in context.user_data["case_text"]
+    assert "Leadership Assessment Tool" not in (sim.get_last_text() or "")
+    assert ("✅ Draft now", "GATHER|done") in sim.get_last_buttons()
+
+
+@pytest.mark.asyncio
 async def test_gathering_mode_portfolio_question_uses_grounded_answer(monkeypatch):
     monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
     sim = BotSimulator()

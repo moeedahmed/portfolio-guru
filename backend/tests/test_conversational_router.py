@@ -63,6 +63,18 @@ def test_setup_or_credentials_routes_separately_from_billing():
     assert result.signals == {"action": "setup_credentials"}
 
 
+def test_clinical_planning_and_escalation_are_not_billing_or_form_support():
+    result = route_message(
+        "A patient was bitten on the face by an injured dog. They came to ED with facial wounds "
+        "and airway concern. I assessed them, escalated to seniors, prepared for airway management, "
+        "and they were intubated safely. My learning was about early escalation, airway planning, "
+        "and documenting animal bite risk and safeguarding considerations."
+    )
+
+    assert result.intent == ConversationalIntent.NEW_CASE
+    assert result.signals == {"action": "start_case"}
+
+
 def test_unknown_has_useful_clarification_and_no_side_effect_signals():
     result = route_message("")
 
