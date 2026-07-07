@@ -16,7 +16,7 @@ Surface split:
 
 - Web app: trust, onboarding, dashboard, pricing, account linking, portfolio health, case history, upgrade.
 - Telegram: fastest daily workflow for voice/text/photo/document case capture and Kaizen draft filing.
-- WhatsApp: later convenience route through the EMGurus gateway, not the first public surface.
+- WhatsApp: later convenience route through a dedicated Portfolio Guru account/profile, not the first public surface.
 - GStack/sidepanel: hackathon and supervisor-copilot demo layer, not the first mainstream user onboarding surface.
 
 The product is about 80-90% ready as a working private/beta engine, but not 80-90% ready as a public product. The remaining work is packaging, onboarding, trust, instrumentation, and clean upgrade/conversion paths.
@@ -81,8 +81,8 @@ Recommended public product architecture:
    - Treat Telegram as the action layer: ingest, draft, approve, save to Kaizen, quick health summary.
 
 3. WhatsApp as a later channel.
-   - WhatsApp should sit behind the EMGurus gateway and route 1:1 portfolio workflows into Portfolio Guru.
-   - Do not promise WhatsApp publicly until quoted-message selection and privacy/group boundaries are proven.
+   - WhatsApp tester rollout requires a dedicated Portfolio Guru number/account/profile, with Hermes/WhatsApp acting only as a channel shell.
+   - Do not promise WhatsApp publicly until dedicated-account isolation, quoted-message selection, privacy/group boundaries, and Meta/WhatsApp processor review are proven.
 
 4. Web dashboard as trust and conversion.
    - Show monthly usage, recent filings, tier, ARCP/Portfolio Health, account link, and next best action.
@@ -228,7 +228,7 @@ Phase 3: Public launch, after proof.
 
 - Publish clear case study: "from shift note to Kaizen draft".
 - Add Portfolio Health/CESR framing.
-- Add WhatsApp only after gateway privacy/routing is proven.
+- Add WhatsApp only after dedicated-account isolation, processor review, and privacy/routing proof.
 
 ## Build Backlog
 
@@ -295,6 +295,5 @@ Default route:
 - Product strategy and launch decisions: Founder / Products or Portfolio topic.
 - Portfolio Guru bot engine: Portfolio Guru repo.
 - Web dashboard/front door: EMGurus Hub repo.
-- WhatsApp gateway plumbing: EMGurus/OpenClaw gateway route, not Portfolio Guru product strategy.
+- WhatsApp channel plumbing: dedicated Portfolio Guru account/profile, with the deterministic engine remaining in the Portfolio Guru repo.
 - Hackathon demo: keep separate from public beta unless the feature is genuinely useful after the contest.
-

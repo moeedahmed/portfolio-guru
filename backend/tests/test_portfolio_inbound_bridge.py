@@ -1,4 +1,4 @@
-"""HTTP bridge for the EMGurus WhatsApp Gateway inbound boundary.
+"""HTTP bridge for the Portfolio Guru WhatsApp inbound boundary.
 
 `POST /api/portfolio/inbound` is the smallest authenticated surface the gateway
 calls to hand a turn to Portfolio Guru and receive the first workflow reply.
@@ -43,7 +43,7 @@ def _direct_body(text: str = "58M chest pain, CBD reflection") -> dict:
     return {
         "channel": "whatsapp",
         "conversation_id": "wa:+440000000000",
-        "gateway_user_id": "emgurus-user-123",
+        "gateway_user_id": "pg-user-123",
         "scope": "direct",
         "text": text,
     }

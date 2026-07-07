@@ -53,7 +53,7 @@ Portfolio Guru ingests clinicians' free-text/voice/image clinical case descripti
 ## Step 3 — Consultation process
 
 - **Data subjects:** «REVIEW: describe how user views are sought (e.g. beta feedback) and reflected.»
-- **Processors:** rely on Google, Supabase, Stripe, Telegram/Meta DPAs and documentation. «REVIEW: obtain and file each DPA.»
+- **Processors:** rely on Google, Supabase, Stripe, Telegram/Meta DPAs and documentation. «REVIEW: obtain and file each DPA. WhatsApp/Meta launch requires completion of `docs/legal/whatsapp-meta-processor-review.md` before any tester rollout.»
 - **DPO/legal:** this DPIA itself is the consultation artefact for solicitor/DPO sign-off.
 - **ICO prior consultation:** required only if high residual risk cannot be mitigated. «REVIEW: assess after mitigations — aim to avoid by reducing residual risk to acceptable.»
 
@@ -115,7 +115,7 @@ Portfolio Guru ingests clinicians' free-text/voice/image clinical case descripti
 | ICO prior consultation needed? | «REVIEW: only if high residual risk remains after mitigation — target NO.»                    |
 | This DPIA to be reviewed       | «REVIEW: set trigger — material change, new processor, new platform (WhatsApp), or annually.» |
 
-**Key open items the founder must close before launch:** (1) confirm/verify live Vertex AI `europe-west2` routing and no-training terms; (2) document credential key management; (3) finalise Art 9 explicit-consent flow and Schedule 1/APD position; (4) document international-transfer mechanisms; (5) decide on automated patient-data redaction.
+**Key open items the founder must close before launch:** (1) confirm/verify live Vertex AI `europe-west2` routing and no-training terms; (2) document credential key management; (3) finalise Art 9 explicit-consent flow and Schedule 1/APD position; (4) document international-transfer mechanisms; (5) decide on automated patient-data redaction; (6) complete `docs/legal/whatsapp-meta-processor-review.md` before any WhatsApp tester rollout.
 
 ---
 

@@ -1,9 +1,9 @@
-"""Channel-neutral inbound contract for the EMGurus WhatsApp Gateway boundary.
+"""Channel-neutral inbound contract for the Portfolio Guru WhatsApp boundary.
 
-Portfolio Guru sits *behind* the single EMGurus WhatsApp Gateway as a 1:1
-portfolio service. The gateway owns the WhatsApp number and DM-vs-group
-routing; Portfolio Guru owns only the direct (1:1) portfolio conversation and
-must refuse group/community scope. These tests pin that boundary:
+Portfolio Guru uses WhatsApp as a channel shell for a 1:1 portfolio service.
+The dedicated channel gateway owns the WhatsApp number and DM-vs-group routing;
+Portfolio Guru owns only the direct portfolio conversation and must refuse
+group/community scope. These tests pin that boundary:
 
 * an inbound message is a channel-neutral envelope (channel + session context +
   content), never a Telegram object;
@@ -39,7 +39,7 @@ def _session(channel: Channel = Channel.WHATSAPP) -> SessionRef:
     return SessionRef(
         channel=channel,
         conversation_id="wa:+440000000000",
-        gateway_user_id="emgurus-user-123",
+        gateway_user_id="pg-user-123",
     )
 
 
@@ -124,7 +124,7 @@ def test_contract_is_channel_agnostic_across_channels():
 def test_handle_decision_has_fresh_start_true():
     """fresh_start is always True until Portfolio Guru tracks server-side sessions.
 
-    The gateway (OpenClaw WhatsApp bridge) is authoritative for session
+    The channel gateway is authoritative for session
     continuity in the interim: it uses an in-memory TTL to suppress the
     "Starting…" ACK on continuation turns.
     """

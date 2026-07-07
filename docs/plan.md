@@ -21,14 +21,23 @@ Portfolio Guru is a separate product engine, not a sub-prompt inside the EMGurus
 Current channel plan:
 
 - Telegram can keep the separate Portfolio Bot identity.
-- WhatsApp should initially route through the single EMGurus/Guru WhatsApp front door because the active WhatsApp number is registered to EMGurus/Guru.
-- The EMGurus/Guru WhatsApp agent owns channel routing, DM-vs-group gating, and handoff.
+- WhatsApp tester rollout now requires a dedicated Portfolio Guru number,
+  account, and Hermes profile. The older shared EMGurus/Guru front-door route
+  is withdrawn for tester rollout because the active Portfolio Guru Hermes
+  WhatsApp credentials are linked to the same underlying account as EMGurus.
+- The dedicated WhatsApp channel shell owns channel routing, DM-vs-group gating,
+  opt-in/out, and handoff.
 - Portfolio Guru owns portfolio intake, extraction, drafting, confirmation, and draft-only Kaizen filing.
-- The WhatsApp bridge must connect to Portfolio Guru through channel-neutral contracts, so the same engine can later be used by a dedicated Portfolio Guru WhatsApp number, web app, API, or another channel.
+- The WhatsApp bridge must connect to Portfolio Guru through channel-neutral
+  contracts, so the same engine can later be used by web app, API, or another
+  channel.
 
 Do not move portfolio workflow logic into OpenClaw agent memory or the generic EMGurus/Guru prompt. The engine must remain portable and repo-owned.
 
-Canonical umbrella note: `../../emgurus-hub/docs/okf/emgurus-product-knowledge/channel-architecture.md`.
+Historical umbrella note for the old shared-gateway plan:
+`../../emgurus-hub/docs/okf/emgurus-product-knowledge/channel-architecture.md`.
+For current WhatsApp rollout gates, see
+`docs/hermes/WHATSAPP_ROLLOUT_PLAN.md`.
 
 ## Architecture
 
@@ -434,23 +443,24 @@ as both Telegram buttons and numbered replies without losing labels/context.
 Full offline gate green (1140 passed). Not live until the Mac Mini bot is
 redeployed.
 
-## 2026-06-14 — EMGurus WhatsApp Gateway boundary (contract only)
+## 2026-06-14 — WhatsApp channel boundary (contract only; superseded for rollout)
 
-**Architecture decision (locked).** There is one EMGurus WhatsApp business
-number and one external EMGurus gateway/router. Portfolio Guru is a separate
-_internal service_ behind that gateway for 1:1 ARCP/Kaizen portfolio workflows
-— **not** a direct WhatsApp bot. Group, community, and exam behaviour belong to
-the other Gurus (Career / Exam) behind the same gateway, never to this repo.
-This repo does not connect to Meta/WhatsApp and holds no WhatsApp credentials.
+**Historical architecture note.** This slice built a channel-neutral inbound
+contract while the working assumption was a shared EMGurus/Guru route. That
+tester rollout path was superseded on 2026-07-07 by the dedicated Portfolio
+Guru WhatsApp number/account/profile decision in
+`docs/hermes/WHATSAPP_ROLLOUT_PLAN.md`. The reusable contract remains valid:
+Portfolio Guru receives only direct, channel-neutral portfolio turns and refuses
+group scope. This repo still does not connect to Meta/WhatsApp or hold WhatsApp
+credentials.
 
 **Responsibility split (gateway-owned vs Portfolio Guru-owned):**
 
 | Concern                                                    | Owner           |
 | ---------------------------------------------------------- | --------------- |
-| WhatsApp business number, Meta/WhatsApp API plumbing       | EMGurus Gateway |
-| DM-vs-group detection and routing                          | EMGurus Gateway |
-| Identity resolution (channel id → EMGurus user)            | EMGurus Gateway |
-| Fan-out to the right Guru (Career / Exam / Portfolio)      | EMGurus Gateway |
+| Dedicated WhatsApp number and Meta/WhatsApp API plumbing   | Channel Gateway |
+| DM-vs-group detection and routing                          | Channel Gateway |
+| Identity resolution (channel id -> Portfolio Guru user)    | Channel Gateway |
 | 1:1 portfolio extraction, drafting, draft-only Kaizen save | Portfolio Guru  |
 | Refusing group scope for portfolio evidence                | Portfolio Guru  |
 | Keeping portfolio evidence private to the 1:1 session      | Portfolio Guru  |
@@ -503,13 +513,12 @@ refusal renders without Telegram, and the module imports clean of Telegram.
 3. Keep the Kaizen save draft-only and confirm-first regardless of channel; no
    new path may file/save without the existing confirmation gates.
 
-## 2026-06-15 — EMGurus WhatsApp Gateway bridge: outbound reply path (slice 2)
+## 2026-06-15 — WhatsApp channel bridge: outbound reply path (slice 2; superseded for rollout)
 
-**Architecture decision (locked).** The portfolio bridge is now end-to-end for
-a single DIRECT handled turn: Portfolio Guru replies back to the WhatsApp user
-via a new authenticated outbound endpoint on the OpenClaw gateway, so the
-user receives a real Portfolio Guru workflow question (not just the gateway ACK)
-in their DM.
+**Historical architecture note.** The bridge proved a single DIRECT handled
+turn over a channel gateway. For tester rollout, this must now be wired only to
+a dedicated Portfolio Guru WhatsApp account/profile, never to the general
+EMGurus account.
 
 **What changed:**
 
@@ -547,12 +556,12 @@ _Portfolio Guru (`backend/webhook_server.py`):_
 
 | Var | Purpose |
 |---|---|
-| `PORTFOLIO_OUTBOUND_URL` | Base URL of the OpenClaw gateway |
+| `PORTFOLIO_OUTBOUND_URL` | Base URL of the channel gateway |
 | `PORTFOLIO_OUTBOUND_ACCOUNT_ID` | WhatsApp account id to route through |
 | `PORTFOLIO_OUTBOUND_SECRET` | Shared secret for X-Portfolio-Secret header |
 
-**Responsibility split update:** the gateway's `PORTFOLIO_BRIDGE_SECRET` is now
-used for both directions — it gates the gateway→PG inbound call (via
+**Responsibility split update:** the channel gateway's `PORTFOLIO_BRIDGE_SECRET`
+is now used for both directions — it gates the gateway -> PG inbound call (via
 `PORTFOLIO_INBOUND_SECRET` on the PG side) and the PG→gateway outbound call
 (via `PORTFOLIO_BRIDGE_SECRET` on the OpenClaw side, echoed as
 `PORTFOLIO_OUTBOUND_SECRET` in the PG env).
@@ -577,7 +586,8 @@ Kaizen filing, Telegram path, live WhatsApp, credentials, push, restart, deploy.
 **Remaining live/manual gates (orchestrator/foreground only):**
 1. Set `PORTFOLIO_OUTBOUND_URL` / `PORTFOLIO_OUTBOUND_ACCOUNT_ID` /
    `PORTFOLIO_OUTBOUND_SECRET` in the Mac Mini Portfolio Guru env (BWS).
-2. Set `PORTFOLIO_BRIDGE_SECRET` in the OpenClaw gateway env (BWS).
-3. Live WhatsApp DM end-to-end smoke (user sends "portfolio" DM → gateway ACK →
-   Portfolio Guru gathering question received in same DM).
+2. Set `PORTFOLIO_BRIDGE_SECRET` in the channel gateway env (BWS).
+3. Live WhatsApp DM end-to-end smoke only on the dedicated Portfolio Guru
+   account (user sends "portfolio" DM -> gateway ACK -> Portfolio Guru
+   gathering question received in same DM).
 4. Push both repos once live gates pass.

@@ -197,12 +197,13 @@ async def create_checkout(
 
 
 # ---------------------------------------------------------------------------
-# EMGurus WhatsApp Gateway inbound bridge
+# Portfolio Guru WhatsApp channel inbound bridge
 # ---------------------------------------------------------------------------
-# Portfolio Guru sits behind the single EMGurus WhatsApp Gateway. The gateway
-# owns the WhatsApp number and DM-vs-group routing; it calls this endpoint to
-# learn whether Portfolio Guru will take a turn (DIRECT) or refuse it (GROUP /
-# empty). This is a thin, side-effect-free wrapper around
+# Portfolio Guru uses WhatsApp as a channel shell. For tester rollout, the
+# gateway must be tied to a dedicated Portfolio Guru WhatsApp account/profile,
+# not the general EMGurus account. The gateway owns the WhatsApp number and
+# DM-vs-group routing; it calls this endpoint to learn whether Portfolio Guru
+# will take a turn (DIRECT) or refuse it (GROUP / empty). This is a thin wrapper around
 # channel_contract.accept_inbound — it starts no workflow, touches no
 # credential, and never echoes inbound content back into a shared thread.
 #
