@@ -29,6 +29,7 @@ const fs = require('fs');
 
 const { sanitizeEnvelope, extractInbound, serializeEnvelope } = require('./lib/sanitize');
 const { resolveAuthDir, resolveFixturesPath, AUTH_DIR_ENV, FIXTURES_ENV } = require('./lib/config');
+const { buildLiveSocketConfig, describeDisconnect } = require('./lib/live');
 
 function log(msg) {
   process.stderr.write(`${msg}\n`);
@@ -138,17 +139,43 @@ async function runLive(env) {
   }
 
   const makeWASocket = baileys.default || baileys.makeWASocket;
-  const { useMultiFileAuthState, DisconnectReason } = baileys;
+  const {
+    useMultiFileAuthState,
+    DisconnectReason,
+    fetchLatestBaileysVersion,
+    Browsers,
+  } = baileys;
 
   fs.mkdirSync(authDir, { recursive: true });
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
-  const socket = makeWASocket({ auth: state, printQRInTerminal: false });
+
+  // Pin the current WhatsApp Web build. Connecting with a stale/absent version
+  // is what makes WhatsApp close the handshake with a 405 before any QR is
+  // offered; a best-effort fetch keeps us on the version the server accepts.
+  let version;
+  try {
+    const fetched = await fetchLatestBaileysVersion();
+    version = fetched.version;
+    log(
+      `live: negotiated WhatsApp Web version ${version.join('.')} (isLatest=${!!fetched.isLatest}).`
+    );
+  } catch (err) {
+    log(
+      `live: could not fetch latest WhatsApp Web version (${err && err.message}); ` +
+        'falling back to the Baileys default.'
+    );
+  }
+
+  const socket = makeWASocket(buildLiveSocketConfig({ state, version, Browsers }));
+
+  let sawQr = false;
 
   socket.ev.on('creds.update', saveCreds);
 
   socket.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect, qr } = update;
     if (qr) {
+      sawQr = true;
       // QR to stderr — stdout is reserved for the NDJSON event stream.
       let rendered = false;
       try {
@@ -173,7 +200,12 @@ async function runLive(env) {
         && lastDisconnect.error.output
         && lastDisconnect.error.output.statusCode;
       const loggedOut = DisconnectReason && statusCode === DisconnectReason.loggedOut;
-      log(`live: connection closed (status ${statusCode}; loggedOut=${!!loggedOut}).`);
+      const reason = describeDisconnect(statusCode, DisconnectReason);
+      const phase = sawQr ? 'after QR' : 'before QR';
+      log(
+        `live: connection closed (status ${statusCode}; reason=${reason}; ` +
+          `${phase}; loggedOut=${!!loggedOut}).`
+      );
       if (loggedOut) {
         process.exitCode = 0;
       }
