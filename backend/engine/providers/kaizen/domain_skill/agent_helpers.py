@@ -38,26 +38,44 @@ from browser_harness.helpers import (  # noqa: F401 — re-exported for in-modul
 # ── Tab management ──
 _DEFAULT_TAB = None  # set on first kaizen_goto
 
+def _find_reusable_tab():
+    """Prefer an existing Kaizen/ePortfolio tab over opening a new blank tab."""
+    tabs = list_tabs()
+    for tab in reversed(tabs):
+        url = tab.get("url", "") or ""
+        if "kaizenep.com" in url or "eportfolio.rcem.ac.uk" in url:
+            return tab.get("targetId")
+    return None
+
+
+def _is_blank_tab(url):
+    return url == "about:blank" or url.startswith("chrome://new-tab-page")
+
+
 def kaizen_init():
     """Open/reuse one tab for the session.
     
-    Instead of new_tab() every time, opens one tab and stores its
-    targetId so goto_url() reuses it. Prevents memory leak.
+    Instead of new_tab() every time, stores one targetId so goto_url() reuses
+    it. Prefer an existing tab, and if a new tab is unavoidable open Kaizen
+    directly rather than leaving visible about:blank clutter.
     """
     global _DEFAULT_TAB
     if _DEFAULT_TAB is None:
-        new_tab("about:blank")
-        tabs = list_tabs()
-        if tabs:
-            _DEFAULT_TAB = tabs[-1]["targetId"]
+        _DEFAULT_TAB = _find_reusable_tab()
+    if _DEFAULT_TAB is None:
+        new_tab(KAIZEN_URL)
+        _DEFAULT_TAB = _find_reusable_tab()
+    if _DEFAULT_TAB:
+        switch_tab(_DEFAULT_TAB)
     return _DEFAULT_TAB
 
 def kaizen_close_extra_tabs():
-    """Close all Kaizen tabs except the default session tab."""
+    """Close all Kaizen/about:blank tabs except the default session tab."""
     global _DEFAULT_TAB
     for t in list_tabs():
         tid = t.get("targetId")
-        if tid and tid != _DEFAULT_TAB and "kaizenep.com" in t.get("url", ""):
+        url = t.get("url", "") or ""
+        if tid and tid != _DEFAULT_TAB and ("kaizenep.com" in url or _is_blank_tab(url)):
             cdp("Target.closeTarget", targetId=tid)
     if _DEFAULT_TAB:
         try:
