@@ -321,6 +321,76 @@ Gate:
 - Rollback path is to disable the dedicated WhatsApp profile, not to route
   users through EMGurus.
 
+## Production-Scale Path for Public WhatsApp (beyond moving the Mac Mini to cloud)
+
+Moving the engine off the Mac Mini onto a cloud host improves availability and
+hosting, but it does **not** make WhatsApp production-ready. These are two
+independent axes, and public scale needs both handled:
+
+1. **Where the engine runs** — Mac Mini today; a cloud VM/container later for
+   uptime, backups, and monitoring. This is a hosting decision only.
+2. **How WhatsApp messages arrive** — the transport. This is the axis that
+   actually gates public scale, and cloud hosting does nothing for it.
+
+### Why the linked-device (Baileys) path is beta-only, not production
+
+The direct linked-device connector is the right lean choice for a **controlled,
+low-volume beta on the dedicated number**, but it is not a public-scale
+transport:
+
+- It drives an unofficial WhatsApp-Web multi-device session, which is outside
+  Meta's supported/permitted integration surface and carries account-ban risk.
+- It is a single phone-bound session: one number, one device link, fragile
+  re-pairing, no formal throughput guarantees, no SLA, no support path.
+- There is no formal processor/DPA relationship with Meta for that session, so
+  it cannot satisfy the public-launch legal posture the Phase 3 review needs.
+- Observability, opt-in/opt-out management, and message templating are all
+  ad hoc rather than platform-provided.
+
+### The production transport: WhatsApp Business Platform (Cloud API)
+
+The best production-readiness path is to move the **transport** (not the engine)
+onto the official **WhatsApp Business Platform / Cloud API**, either directly via
+Meta or through a Business Solution Provider (e.g. 360dialog, Twilio, Sinch). That
+provides:
+
+- A verified WhatsApp Business number as an **identity**, not a device link, with
+  documented throughput tiers and a real support/SLA path.
+- Official inbound **webhooks** and outbound send APIs, approved message
+  templates, and platform-managed opt-in/opt-out.
+- Meta as a **contracted processor with a DPA** — the transfer mechanism and
+  processor status the `docs/legal/whatsapp-meta-processor-review.md` gate is
+  written to cover for a public audience.
+
+### Why this is a transport swap, not a rebuild
+
+The whole point of the channel-neutral boundary is that this migration touches
+**transport only**. The product engine, extraction, drafting, approval gates,
+first-contact onboarding, and Kaizen save behaviour all sit behind
+`POST /api/portfolio/inbound` and the `InboundMessage` contract. Going to the
+Cloud API means writing one new transport normaliser — a Cloud API webhook
+handler that maps Meta's inbound payload onto the same `InboundMessage` and posts
+the same neutral bridge body — in place of the Baileys sidecar + relay. No product
+logic, no `channel_contract`, and no first-contact code changes. The dry-run and
+readiness scaffolding stay valid; only the `PG_WHATSAPP_CONNECTOR` transport
+implementation is replaced.
+
+### Recommended sequence
+
+1. Run the controlled beta now on the linked-device connector against the
+   dedicated number (Phases 1–6 above), keeping cohorts small and monitored.
+2. In parallel, apply for the WhatsApp Business Platform / a BSP, complete
+   business verification, get message templates approved, and sign the Meta DPA
+   as part of the Phase 3 legal review — extended to cover public (non-tester)
+   scale.
+3. Build a Cloud API webhook normaliser feeding the existing inbound bridge;
+   exercise it in shadow mode with synthetic payloads exactly like the
+   linked-device path.
+4. Cut testers over to the Cloud API transport, then decommission the
+   linked-device session. Host the engine wherever availability dictates (cloud);
+   that hosting move is orthogonal to the transport and can happen before, during,
+   or after the transport migration.
+
 ## Stop Conditions
 
 Stop if any of these are true:

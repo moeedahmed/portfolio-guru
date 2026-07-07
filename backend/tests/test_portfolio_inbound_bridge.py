@@ -389,12 +389,13 @@ def test_rich_case_text_invokes_draft_insight_reply_not_gathering_prompt(
 
 
 def test_short_generic_text_still_returns_gathering_prompt(outbound_client):
-    """Short or vague messages (below word threshold) must still get the
-    intake gathering prompt, not the draft path."""
+    """Short or vague messages (below word threshold, not a greeting or
+    capability ask) must still get the intake gathering prompt, not the draft
+    path."""
     client, captured = outbound_client
     resp = client.post(
         "/api/portfolio/inbound",
-        json=_direct_body("help"),
+        json=_direct_body("thanks"),
         headers={"X-Gateway-Secret": _SECRET},
     )
     assert resp.status_code == 200
@@ -404,6 +405,71 @@ def test_short_generic_text_still_returns_gathering_prompt(outbound_client):
     assert len(captured) == 1
     _, sent_text = captured[0]
     assert "clinical case" in sent_text.lower()
+
+
+# ---------------------------------------------------------------------------
+# First-contact onboarding tests — /start, greeting, capability
+# ---------------------------------------------------------------------------
+# A first message like /start, hi, or "what can you do?" must be answered with
+# WhatsApp-native onboarding copy (the same FIXED welcome the Telegram beta bot
+# uses), not the "describe the clinical case" gathering demand. This removes the
+# "magic sentence" problem where only a full case produced a coherent reply.
+
+
+@pytest.mark.parametrize("opening", ["/start", "start", "hi", "hello", "hey there"])
+def test_start_and_greeting_get_welcome_onboarding(outbound_client, opening):
+    client, captured = outbound_client
+    resp = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body(opening),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["disposition"] == "handle"
+    assert data["reply_sent"] is True
+    assert len(captured) == 1
+    _, sent_text = captured[0]
+    # Onboarding orients the user; it does not demand a clinical case first.
+    assert "Welcome to Portfolio Guru" in sent_text
+    assert "describe the clinical case" not in sent_text.lower()
+
+
+@pytest.mark.parametrize("opening", ["help", "features", "what can you do?"])
+def test_capability_question_gets_overview(outbound_client, opening):
+    client, captured = outbound_client
+    resp = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body(opening),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["disposition"] == "handle"
+    assert data["reply_sent"] is True
+    assert len(captured) == 1
+    _, sent_text = captured[0]
+    assert "Portfolio Guru" in sent_text
+    assert "recommend the best-fit WPBA form" in sent_text
+
+
+def test_start_does_not_invoke_case_insight(monkeypatch, outbound_client):
+    """A /start opening must never reach the LLM-backed draft-insight path."""
+    client, captured = outbound_client
+
+    async def _must_not_be_called(text: str):  # pragma: no cover - guard
+        raise AssertionError("first-contact onboarding must not call the extractor")
+
+    monkeypatch.setattr(webhook_server, "_make_case_insight_reply", _must_not_be_called)
+
+    resp = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body("/start"),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["disposition"] == "handle"
+    assert len(captured) == 1
 
 
 def test_rich_case_insight_reply_falls_back_to_gathering_on_extractor_error(

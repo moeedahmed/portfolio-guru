@@ -59,6 +59,33 @@ counterpart to `backend/channel_actions.py`):
   is import-clean of `python-telegram-bot` so it can run inside a connector
   process that never loads Telegram. Tests: `tests/test_channel_contract.py`.
 
+### First-contact parity (WhatsApp opens like the Telegram bot)
+
+The connector must feel like the Telegram beta bot at first contact: a first
+message of `/start`, `start`, a bare greeting (`hi`/`hello`/`hey`), or a
+capability question (`help`, `what can you do?`) is answered with WhatsApp-native
+onboarding, and a real first message (a clinical case) routes straight into the
+engine. No "magic sentence" is required — the user never has to type a full case
+just to get a coherent reply.
+
+This is a deterministic, LLM-free classifier (`backend/portfolio_first_contact.py`)
+wired into the inbound bridge's HANDLE path (`webhook_server._select_inbound_reply`):
+
+- `START_OR_GREETING` → the FIXED `welcome_disconnected` welcome (same copy the
+  Telegram `/start` uses via `message_policy`).
+- `CAPABILITY` → the FIXED `capability_overview` (what Portfolio Guru can do).
+- `CASE` (default; also media-only turns and blank text) → existing routing:
+  rich case (≥ `_RICH_CASE_WORD_THRESHOLD` words) → form-recommendation insight,
+  otherwise the generic gathering prompt.
+
+Matching is exact against normalised text (a leading `/` is stripped so `/start`
+and `start` resolve identically on a channel with no command menu), so a real
+case that merely *opens* with "hi" is never swallowed as a greeting. The module
+owns no product logic and pulls all copy from `message_policy`, so the WhatsApp
+first-touch copy can never drift from the Telegram surface or fabricate clinical
+content. Tests: `tests/test_portfolio_first_contact.py` and the onboarding cases
+in `tests/test_portfolio_inbound_bridge.py`.
+
 > Historical: an earlier plan routed Portfolio Guru behind a single shared
 > EMGurus WhatsApp gateway that fanned out to multiple Gurus. That shared
 > front-door route is withdrawn for tester rollout — testers use the dedicated

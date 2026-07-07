@@ -223,6 +223,7 @@ from channel_contract import (
     SessionRef,
     accept_inbound,
 )
+from portfolio_first_contact import classify_first_contact, first_contact_reply
 
 
 class InboundMediaModel(BaseModel):
@@ -400,6 +401,26 @@ async def _make_case_insight_reply(text: str) -> ChannelReply:
     return ChannelReply(body=body, continuation=None)
 
 
+async def _select_inbound_reply(text: str | None) -> ChannelReply:
+    """Pick the first Portfolio Guru reply for a handled DIRECT turn.
+
+    First-contact openings — a ``/start`` / ``start`` command, a bare greeting,
+    or a capability question — get the same FIXED onboarding copy the Telegram
+    welcome uses, so a WhatsApp user is oriented instead of being told to
+    "describe the clinical case" before they know what the service is. Only when
+    the turn is a real case does routing fall through to the rich-case draft
+    insight (>= threshold words) or the generic gathering prompt. The
+    classification is deterministic and LLM-free (see
+    :mod:`portfolio_first_contact`).
+    """
+    onboarding = first_contact_reply(classify_first_contact(text))
+    if onboarding is not None:
+        return onboarding
+    if _has_rich_case_content(text):
+        return await _make_case_insight_reply(text or "")
+    return _make_initial_gathering_reply()
+
+
 async def _send_portfolio_turn_reply(
     to: str,
     text: str,
@@ -447,10 +468,7 @@ async def portfolio_inbound(
         outbound_cfg = _resolve_outbound_config()
         reply_sent = False
         if outbound_cfg is not None:
-            if _has_rich_case_content(body.text):
-                reply = await _make_case_insight_reply(body.text or "")
-            else:
-                reply = _make_initial_gathering_reply()
+            reply = await _select_inbound_reply(body.text)
             rendered = render_numbered(reply)
             try:
                 await _send_portfolio_turn_reply(body.conversation_id, rendered, outbound_cfg)
