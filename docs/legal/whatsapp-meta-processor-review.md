@@ -11,12 +11,16 @@ and signed off.
 ## Launch Decision Under Review
 
 Portfolio Guru should not route testers through the general EMGurus WhatsApp
-account. The rollout path is a dedicated Portfolio Guru WhatsApp number,
-account, and Hermes profile. Hermes/WhatsApp is only a channel shell; the
-Portfolio Guru deterministic engine remains the product brain.
+account. The rollout path is a dedicated Portfolio Guru WhatsApp number/account
+behind a thin channel connector. A dedicated Hermes profile is **optional** — it
+may be used only as a thin transport for that connector, not as a required
+layer, and never as the classifier, drafter, or product identity. WhatsApp is
+only a channel connector; the Portfolio Guru deterministic engine remains the
+product brain. Portfolio Guru is never an EMGurus/Guru fan-out agent.
 
-The current `portfolio-guru` Hermes WhatsApp credentials must not be started if
-they are linked to the same underlying WhatsApp account as EMGurus.
+If Hermes is used as the transport, the current `portfolio-guru` Hermes WhatsApp
+credentials must not be started while they are linked to the same underlying
+WhatsApp account as EMGurus.
 
 ## Primary Sources Checked
 
@@ -68,6 +72,7 @@ Before WhatsApp tester rollout, record decisions for each item:
 | Item | Decision / Evidence |
 | --- | --- |
 | Dedicated Portfolio Guru number/account exists and is distinct from EMGurus | `REVIEW` |
+| Thin channel connector is ready (Hermes profile optional, thin transport only) | `REVIEW` |
 | Chosen route: Business App vs Platform/Cloud API vs other | `REVIEW` |
 | Contracting WhatsApp/Meta entity | `REVIEW` |
 | Data Processing Terms / DPA status | `REVIEW` |

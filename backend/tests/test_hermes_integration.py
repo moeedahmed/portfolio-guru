@@ -229,6 +229,51 @@ def test_profile_prompt_has_concise_shareable_cases_answer() -> None:
 
 
 CAPABILITY_MAP = REPO_ROOT / "docs" / "demo" / "HERMES_CAPABILITY_MAP.md"
+WHATSAPP_ROLLOUT_PLAN = REPO_ROOT / "docs" / "hermes" / "WHATSAPP_ROLLOUT_PLAN.md"
+
+
+# ── Hermes is optional thin transport, not the product brain ───────────────
+
+
+def test_rollout_plan_marks_hermes_profile_optional() -> None:
+    """The WhatsApp rollout plan must state the Hermes profile is optional.
+
+    The lean direction is that WhatsApp is only a channel connector for a
+    dedicated Portfolio Guru number/account. A Hermes profile is one optional
+    thin transport, never a required layer — so the plan must say so explicitly
+    and must offer a non-Hermes (direct) connector path.
+    """
+    lower = WHATSAPP_ROLLOUT_PLAN.read_text(encoding="utf-8").lower()
+
+    assert "optional" in lower and "hermes profile" in lower, (
+        "WHATSAPP_ROLLOUT_PLAN.md must state the Hermes profile is optional."
+    )
+    assert "thin transport" in lower or "thin channel connector" in lower, (
+        "WHATSAPP_ROLLOUT_PLAN.md must frame Hermes as thin transport only."
+    )
+    # A direct (non-Hermes) connector must be a documented path.
+    assert "direct" in lower and "connector" in lower, (
+        "WHATSAPP_ROLLOUT_PLAN.md must document a direct channel connector "
+        "path that needs no Hermes profile."
+    )
+
+
+def test_rollout_plan_keeps_engine_as_product_brain_not_emgurus_fanout() -> None:
+    """Portfolio Guru's deterministic engine — not Hermes/EMGurus — is the brain."""
+    lower = WHATSAPP_ROLLOUT_PLAN.read_text(encoding="utf-8").lower()
+
+    assert "deterministic portfolio guru engine" in lower or (
+        "deterministic" in lower and "product brain" in lower
+    ), "WHATSAPP_ROLLOUT_PLAN.md must name the deterministic engine as the brain."
+    # Tester rollout must not route through the general EMGurus account / fan-out.
+    assert "must not use the general emgurus whatsapp account" in lower, (
+        "WHATSAPP_ROLLOUT_PLAN.md must forbid routing testers through the "
+        "general EMGurus WhatsApp account."
+    )
+    assert "fan-out" in lower or "fanout" in lower or "fan out" in lower, (
+        "WHATSAPP_ROLLOUT_PLAN.md must state Portfolio Guru is not an EMGurus "
+        "fan-out agent/gateway."
+    )
 
 
 # ── BWS secret name vs runtime alias ──────────────────────────────────────

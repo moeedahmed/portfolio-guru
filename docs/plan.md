@@ -21,12 +21,13 @@ Portfolio Guru is a separate product engine, not a sub-prompt inside the EMGurus
 Current channel plan:
 
 - Telegram can keep the separate Portfolio Bot identity.
-- WhatsApp tester rollout now requires a dedicated Portfolio Guru number,
-  account, and Hermes profile. The older shared EMGurus/Guru front-door route
+- WhatsApp tester rollout now requires a dedicated Portfolio Guru number and
+  account behind a thin channel connector. A Hermes profile is optional (thin
+  transport only), not required. The older shared EMGurus/Guru front-door route
   is withdrawn for tester rollout because the active Portfolio Guru Hermes
   WhatsApp credentials are linked to the same underlying account as EMGurus.
-- The dedicated WhatsApp channel shell owns channel routing, DM-vs-group gating,
-  opt-in/out, and handoff.
+- The dedicated WhatsApp channel connector owns channel routing, DM-vs-group
+  gating, opt-in/out, and handoff — it carries no product logic.
 - Portfolio Guru owns portfolio intake, extraction, drafting, confirmation, and draft-only Kaizen filing.
 - The WhatsApp bridge must connect to Portfolio Guru through channel-neutral
   contracts, so the same engine can later be used by web app, API, or another

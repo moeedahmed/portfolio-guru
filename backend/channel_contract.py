@@ -1,11 +1,13 @@
 """Channel-neutral inbound contract for the Portfolio Guru WhatsApp boundary.
 
 Portfolio Guru is a 1:1 portfolio/ARCP filing service. WhatsApp is a channel
-shell around the deterministic engine, not a place for product logic. Current
-rollout requires a dedicated Portfolio Guru WhatsApp number/account/profile
-before tester traffic; the channel gateway owns WhatsApp plumbing and
-DM-vs-group routing. Portfolio Guru owns only direct portfolio turns and refuses
-group/community scope.
+connector around the deterministic engine, not a place for product logic.
+Current rollout requires a dedicated Portfolio Guru WhatsApp number/account and
+a thin channel connector before tester traffic — not the general EMGurus account
+and not an EMGurus fan-out gateway. A Hermes profile is optional: it may be used
+only as a thin transport for that connector, never as the product brain. The
+connector owns WhatsApp plumbing and DM-vs-group routing; Portfolio Guru owns
+only direct portfolio turns and refuses group/community scope.
 
 This module is the *inbound* counterpart to :mod:`channel_actions` (which
 renders a channel-neutral :class:`~channel_actions.ChannelReply` to a Telegram

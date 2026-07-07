@@ -1,8 +1,11 @@
 """Tests for the repo-owned WhatsApp rollout readiness guard.
 
 The guard is read-only, disabled by default, and only reaches launch-ready
-when explicit approvals plus distinct safe account/profile identifiers are
-supplied by the operator.
+when explicit approvals plus distinct safe account identifiers are supplied by
+the operator. The hard gates are a dedicated Portfolio Guru number/account, a
+distinct EMGurus account, a ready channel connector, and legal approval — a
+Hermes profile is optional thin transport and is only gated when the chosen
+connector is Hermes.
 """
 
 from __future__ import annotations
@@ -28,16 +31,26 @@ def _load_module():
 
 
 def _approved_env(**overrides: str) -> dict[str, str]:
+    """Happy-path env for the lean *direct* connector — no Hermes profile."""
     env = {
         "PG_WHATSAPP_ROLLOUT_APPROVED": "dedicated-portfolio-guru-whatsapp",
         "PG_WHATSAPP_LEGAL_APPROVED": "meta-whatsapp-processor-reviewed",
         "PG_WHATSAPP_NUMBER_APPROVED": "dedicated-number-ready",
-        "PG_WHATSAPP_PROFILE_APPROVED": "dedicated-hermes-profile-ready",
+        "PG_WHATSAPP_CONNECTOR_APPROVED": "channel-connector-ready",
         "PG_WHATSAPP_ACCOUNT_FINGERPRINT": "pg-safe-fingerprint",
         "EMGURUS_WHATSAPP_ACCOUNT_FINGERPRINT": "emgurus-safe-fingerprint",
-        "PG_WHATSAPP_PROFILE_ID": "portfolio-guru",
-        "EMGURUS_WHATSAPP_PROFILE_ID": "emgurus",
     }
+    env.update(overrides)
+    return env
+
+
+def _hermes_env(**overrides: str) -> dict[str, str]:
+    """Happy-path env when the *optional* Hermes connector is chosen."""
+    env = _approved_env(
+        PG_WHATSAPP_CONNECTOR="hermes",
+        PG_WHATSAPP_PROFILE_ID="portfolio-guru",
+        EMGURUS_WHATSAPP_PROFILE_ID="emgurus",
+    )
     env.update(overrides)
     return env
 
@@ -73,12 +86,12 @@ def test_readiness_guard_requires_distinct_whatsapp_account_fingerprints() -> No
     assert "distinct-whatsapp-account" in blocked_names
 
 
-def test_readiness_guard_requires_portfolio_guru_profile_id() -> None:
+def test_hermes_connector_requires_portfolio_guru_profile_id() -> None:
     guard = _load_module()
 
     result = guard.evaluate(
         REPO_ROOT,
-        env=_approved_env(PG_WHATSAPP_PROFILE_ID="portfolio-guru-shared"),
+        env=_hermes_env(PG_WHATSAPP_PROFILE_ID="portfolio-guru-shared"),
     )
 
     assert result["status"] == "blocked"
@@ -95,6 +108,51 @@ def test_readiness_guard_launch_ready_with_explicit_approvals_and_distinct_ids()
 
     assert result["status"] == "launch-ready"
     assert all(check["status"] == "pass" for check in result["checks"])
+
+
+def test_direct_connector_launch_ready_without_any_hermes_profile() -> None:
+    """The lean direct connector is launch-ready with NO Hermes profile at all.
+
+    Hermes is optional thin transport, so the guard must not gate on any
+    Hermes-profile identifier when the connector is not Hermes.
+    """
+    guard = _load_module()
+
+    result = guard.evaluate(REPO_ROOT, env=_approved_env())
+
+    assert result["status"] == "launch-ready"
+    check_names = {check["name"] for check in result["checks"]}
+    # No Hermes-profile gate is even evaluated for a direct connector.
+    assert "portfolio-guru-profile-id" not in check_names
+    assert "distinct-hermes-profile" not in check_names
+    assert "profile-shim-delegates" not in check_names
+    assert "safe-id:PG_WHATSAPP_PROFILE_ID" not in check_names
+
+
+def test_hermes_connector_requires_profile_ids() -> None:
+    """Choosing the Hermes connector re-introduces the profile-id gates."""
+    guard = _load_module()
+
+    result = guard.evaluate(
+        REPO_ROOT, env=_approved_env(PG_WHATSAPP_CONNECTOR="hermes")
+    )
+
+    assert result["status"] == "blocked"
+    blocked_names = {
+        check["name"] for check in result["checks"] if check["status"] == "block"
+    }
+    assert "safe-id:PG_WHATSAPP_PROFILE_ID" in blocked_names
+
+
+def test_hermes_connector_launch_ready_with_profile() -> None:
+    guard = _load_module()
+
+    result = guard.evaluate(REPO_ROOT, env=_hermes_env())
+
+    assert result["status"] == "launch-ready"
+    check_names = {check["name"] for check in result["checks"]}
+    assert "portfolio-guru-profile-id" in check_names
+    assert "profile-shim-delegates" in check_names
 
 
 def test_cli_outputs_json_and_does_not_expose_safe_identifier_values() -> None:

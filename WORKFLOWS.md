@@ -11,43 +11,58 @@ smoke checklist lives in `scripts/dogfood_smoke.sh`.
 
 ---
 
-## Channel Boundary — EMGurus WhatsApp Gateway
+## Channel Boundary — Dedicated Portfolio Guru WhatsApp Connector
 
-Portfolio Guru sits **behind** one EMGurus WhatsApp Gateway; it is not a
-direct WhatsApp bot. The architecture is one WhatsApp business number + one
-external EMGurus gateway/router that fans out to the right Guru (Career /
-Exam / Portfolio). The flows below are channel-neutral — they describe the
-1:1 portfolio conversation regardless of whether the gateway delivered it
-over Telegram, WhatsApp, or web.
+Portfolio Guru is the deterministic product engine and the source of truth,
+exactly like the Telegram beta bot. WhatsApp is **only a channel connector /
+transport** for a **dedicated Portfolio Guru WhatsApp number/account** — not the
+general EMGurus WhatsApp account, and not an EMGurus/Guru fan-out gateway.
+Portfolio Guru is never a Hermes/EMGurus agent layer; Hermes may be used only as
+an optional *thin transport wrapper*, never as the brain, classifier, drafter,
+product identity, or a general EMGurus fan-out front door. The flows below are
+channel-neutral — they describe the 1:1 portfolio conversation regardless of
+whether the connector delivered it over Telegram, WhatsApp, or web.
 
 Responsibility split:
 
-| Concern                                                    | Owner           |
-| ---------------------------------------------------------- | --------------- |
-| WhatsApp business number, Meta/WhatsApp API plumbing       | EMGurus Gateway |
-| DM-vs-group detection and routing                          | EMGurus Gateway |
-| Identity resolution (channel id → EMGurus user)            | EMGurus Gateway |
-| Fan-out to the right Guru (Career / Exam / Portfolio)      | EMGurus Gateway |
-| 1:1 portfolio extraction, drafting, draft-only Kaizen save | Portfolio Guru  |
+| Concern                                                    | Owner                     |
+| ---------------------------------------------------------- | ------------------------- |
+| Dedicated PG WhatsApp number/account, Meta/WhatsApp plumbing | WhatsApp channel connector |
+| DM-vs-group detection and routing                          | WhatsApp channel connector |
+| Identity resolution (channel id → gateway user)            | WhatsApp channel connector |
+| 1:1 portfolio extraction, drafting, draft-only Kaizen save | Portfolio Guru engine      |
+
+The connector is deliberately thin: it moves messages to and from the dedicated
+Portfolio Guru WhatsApp account and calls the engine's channel-neutral contract.
+It carries no product logic. A Hermes profile, if used, is one possible thin
+transport for that connector, not a required layer — the readiness guard
+(`scripts/pg_whatsapp_readiness.py`) only enforces Hermes-profile gates when the
+chosen connector is Hermes.
 
 Boundary contract (code: `backend/channel_contract.py`, the inbound
 counterpart to `backend/channel_actions.py`):
 
-- A gateway adapter hands in a channel-neutral `InboundMessage`
+- A connector adapter hands in a channel-neutral `InboundMessage`
   (`SessionRef` channel/conversation/user, `ConversationScope` DIRECT|GROUP,
   `text`, `MediaRef` tuple, `private=True` default).
 - `accept_inbound()` is the single entrypoint and has no side effects:
   `HANDLE` for DIRECT-with-content, `REFUSE_GROUP` (with a channel-neutral
   refusal that never echoes the inbound content) for group scope,
   `REFUSE_EMPTY` otherwise.
-- Group/community/exam behaviour belongs to the other Gurus behind the same
-  gateway. Portfolio Guru refuses GROUP scope and never owns group mode.
+- Group/community scope is refused by design — it is the connector's problem,
+  never Portfolio Guru's. Portfolio Guru refuses GROUP scope and never owns
+  group mode.
 - Portfolio evidence is private 1:1 state by default and must never be
   replayed into any group/community agent context.
 - Contract + guard only: no Meta/WhatsApp connection, no credentials, and
   no live handler imports it yet. The Telegram path is unchanged. The module
-  is import-clean of `python-telegram-bot` so it can run inside a gateway
+  is import-clean of `python-telegram-bot` so it can run inside a connector
   process that never loads Telegram. Tests: `tests/test_channel_contract.py`.
+
+> Historical: an earlier plan routed Portfolio Guru behind a single shared
+> EMGurus WhatsApp gateway that fanned out to multiple Gurus. That shared
+> front-door route is withdrawn for tester rollout — testers use the dedicated
+> Portfolio Guru WhatsApp account only.
 
 ---
 

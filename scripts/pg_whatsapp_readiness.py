@@ -16,16 +16,27 @@ from pathlib import Path
 from typing import Mapping
 
 
+# The hard rollout requirement is a dedicated Portfolio Guru WhatsApp
+# number/account behind a channel connector, distinct from the EMGurus account,
+# with legal sign-off. A dedicated Hermes profile is NOT required — Hermes is an
+# optional thin-transport connector, selected only when PG_WHATSAPP_CONNECTOR is
+# "hermes". Portfolio Guru's deterministic engine is always the product brain.
 EXPECTED_APPROVALS = {
     "PG_WHATSAPP_ROLLOUT_APPROVED": "dedicated-portfolio-guru-whatsapp",
     "PG_WHATSAPP_LEGAL_APPROVED": "meta-whatsapp-processor-reviewed",
     "PG_WHATSAPP_NUMBER_APPROVED": "dedicated-number-ready",
-    "PG_WHATSAPP_PROFILE_APPROVED": "dedicated-hermes-profile-ready",
+    "PG_WHATSAPP_CONNECTOR_APPROVED": "channel-connector-ready",
 }
 
 REQUIRED_SAFE_IDS = (
     "PG_WHATSAPP_ACCOUNT_FINGERPRINT",
     "EMGURUS_WHATSAPP_ACCOUNT_FINGERPRINT",
+)
+
+# Hermes-specific identifiers — only required when the chosen connector is
+# Hermes (PG_WHATSAPP_CONNECTOR="hermes"). For a direct channel connector they
+# are irrelevant and never gate the rollout.
+HERMES_SAFE_IDS = (
     "PG_WHATSAPP_PROFILE_ID",
     "EMGURUS_WHATSAPP_PROFILE_ID",
 )
@@ -35,7 +46,19 @@ STALE_PHRASES = (
     "single " + "EMGurus WhatsApp Gateway",
     "single " + "EMGurus WhatsApp business number",
     "single " + "EMGurus/Guru WhatsApp front door",
+    "behind one " + "EMGurus WhatsApp Gateway",
+    "sits behind one " + "EMGurus",
 )
+
+
+def _connector(env: Mapping[str, str]) -> str:
+    """The chosen WhatsApp channel connector. Defaults to a direct connector.
+
+    Only ``"hermes"`` pulls in the optional Hermes-profile gates below; every
+    other value (including the default) treats WhatsApp as a direct channel
+    connector to the deterministic engine and requires no Hermes profile.
+    """
+    return (env.get("PG_WHATSAPP_CONNECTOR") or "direct").strip().lower()
 
 
 @dataclass(frozen=True)
@@ -66,6 +89,7 @@ def _file_contains(path: Path, needles: tuple[str, ...]) -> bool:
 
 def _no_stale_phrases(root: Path) -> Check:
     files = (
+        root / "WORKFLOWS.md",
         root / "docs" / "plan.md",
         root / "docs" / "PUBLIC_PRODUCT_PLAN_2026-06-17.md",
         root / "backend" / "channel_contract.py",
@@ -126,6 +150,21 @@ def _safe_id_checks(env: Mapping[str, str]) -> list[Check]:
         )
     )
 
+    # Hermes profile gates apply only when Hermes is the chosen connector. A
+    # direct channel connector needs no Hermes profile at all.
+    if _connector(env) != "hermes":
+        return checks
+
+    for key in HERMES_SAFE_IDS:
+        checks.append(
+            _check(
+                bool(env.get(key, "").strip()),
+                f"safe-id:{key}",
+                f"{key} is supplied",
+                f"{key} must be supplied when PG_WHATSAPP_CONNECTOR=hermes",
+            )
+        )
+
     pg_profile = env.get("PG_WHATSAPP_PROFILE_ID", "").strip()
     emgurus_profile = env.get("EMGURUS_WHATSAPP_PROFILE_ID", "").strip()
     checks.append(
@@ -133,7 +172,7 @@ def _safe_id_checks(env: Mapping[str, str]) -> list[Check]:
             pg_profile == "portfolio-guru",
             "portfolio-guru-profile-id",
             "Portfolio Guru profile id is portfolio-guru",
-            "PG_WHATSAPP_PROFILE_ID must equal 'portfolio-guru'",
+            "PG_WHATSAPP_PROFILE_ID must equal 'portfolio-guru' when PG_WHATSAPP_CONNECTOR=hermes",
         )
     )
     checks.append(
@@ -163,7 +202,7 @@ def evaluate(root: Path, env: Mapping[str, str] | None = None) -> dict[str, obje
                 (
                     "dedicated portfolio guru whatsapp",
                     "readiness guard",
-                    "backend/hermes_pg_cli.py",
+                    "channel connector",
                     "meta/whatsapp processor review",
                 ),
             ),
@@ -190,14 +229,17 @@ def evaluate(root: Path, env: Mapping[str, str] | None = None) -> dict[str, obje
             "docs/legal/whatsapp-meta-processor-review.md is missing required review language",
         )
     )
-    checks.append(
-        _check(
-            _file_contains(shim, ("hermes_pg_cli", "execvpe")),
-            "profile-shim-delegates",
-            "tracked Hermes profile shim delegates to backend/hermes_pg_cli.py",
-            "scripts/hermes-profile/pg must remain a thin delegating shim",
+    # The Hermes profile shim only gates the rollout when Hermes is the chosen
+    # connector; a direct channel connector does not use it at all.
+    if _connector(env) == "hermes":
+        checks.append(
+            _check(
+                _file_contains(shim, ("hermes_pg_cli", "execvpe")),
+                "profile-shim-delegates",
+                "tracked Hermes profile shim delegates to backend/hermes_pg_cli.py",
+                "scripts/hermes-profile/pg must remain a thin delegating shim",
+            )
         )
-    )
     checks.append(_no_stale_phrases(root))
     checks.extend(_approval_checks(env))
     checks.extend(_safe_id_checks(env))
