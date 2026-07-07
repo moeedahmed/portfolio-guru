@@ -1,0 +1,24 @@
+{
+  "name": "pg-whatsapp-linked-device",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Portfolio Guru WhatsApp linked-device (Baileys / WhatsApp-Web multi-device) transport sidecar. Streams sanitised inbound message envelopes as NDJSON into backend/whatsapp_connector_runner.py --relay. No product logic.",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "main": "index.js",
+  "bin": {
+    "pg-whatsapp-linked-device": "index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "mock": "node index.js --mock",
+    "qr": "node index.js --qr"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}

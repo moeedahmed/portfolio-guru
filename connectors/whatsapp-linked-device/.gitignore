@@ -1,0 +1,4 @@
+node_modules/
+# Linked-device auth session lives here at link time and is NEVER committed.
+.wa-auth/
+*.wa-auth/

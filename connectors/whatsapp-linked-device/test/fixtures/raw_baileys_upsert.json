@@ -1,0 +1,38 @@
+{
+  "type": "notify",
+  "messages": [
+    {
+      "key": { "remoteJid": "447700900000@s.whatsapp.net", "fromMe": true, "id": "OUT-1" },
+      "message": { "conversation": "our own outbound echo that must be dropped" }
+    },
+    {
+      "key": { "remoteJid": "447700900000@s.whatsapp.net", "fromMe": false, "id": "IN-TEXT-1" },
+      "pushName": "Synthetic Tester",
+      "message": {
+        "extendedTextMessage": {
+          "text": "synthetic inbound direct text",
+          "contextInfo": { "stanzaId": "should-be-dropped" }
+        }
+      }
+    },
+    {
+      "key": { "remoteJid": "447700900000@s.whatsapp.net", "fromMe": false, "id": "IN-IMAGE-1" },
+      "message": {
+        "imageMessage": {
+          "mimetype": "image/jpeg",
+          "caption": "synthetic caption",
+          "url": "https://mmg.whatsapp.net/SECRET-ENCRYPTED-URL",
+          "directPath": "/v/SECRET-DIRECT-PATH",
+          "mediaKey": "SECRET-MEDIA-KEY-BASE64==",
+          "fileEncSha256": "SECRET-ENC-SHA",
+          "fileSha256": "SECRET-SHA",
+          "mediaKeyTimestamp": "1720000000",
+          "jpegThumbnail": "SECRET-THUMBNAIL-BYTES"
+        }
+      }
+    },
+    {
+      "key": { "remoteJid": "447700900000@s.whatsapp.net", "fromMe": false, "id": "IN-RECEIPT-1" }
+    }
+  ]
+}

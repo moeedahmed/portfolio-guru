@@ -207,6 +207,9 @@ def evaluate(root: Path, env: Mapping[str, str] | None = None) -> dict[str, obje
     shim = root / "scripts" / "hermes-profile" / "pg"
     linked_device_adapter = root / "backend" / "whatsapp_linked_device.py"
     connector_shell = root / "backend" / "whatsapp_connector_runner.py"
+    sidecar_dir = root / "connectors" / "whatsapp-linked-device"
+    sidecar_pkg = sidecar_dir / "package.json"
+    sidecar_entry = sidecar_dir / "index.js"
 
     connector = _connector(env)
     checks.append(
@@ -224,10 +227,14 @@ def evaluate(root: Path, env: Mapping[str, str] | None = None) -> dict[str, obje
     #   * adapter-present  — the neutral transport normaliser exists;
     #   * shell-present    — the runnable relay shell that drives the normaliser
     #                        and forwards to the inbound bridge exists.
-    # A third tier, "live-linked" (a real WhatsApp linked-device session), is a
+    #   * sidecar-present  — the isolated Baileys/WhatsApp-Web sidecar that emits
+    #                        the QR and streams raw NDJSON events into the shell
+    #                        exists as repo-owned transport code.
+    # A further tier, "live-linked" (a real WhatsApp linked-device session), is a
     # runtime state proven manually out-of-band and is deliberately NOT asserted
-    # here, so this guard never claims a device is linked. Hermes uses its own
-    # shim gate below instead.
+    # here, so this guard never claims a device is linked. sidecar-present only
+    # attests the transport code exists, never that a device has been linked.
+    # Hermes uses its own shim gate below instead.
     if connector in LINKED_DEVICE_CONNECTORS:
         checks.append(
             _check(
@@ -249,6 +256,17 @@ def evaluate(root: Path, env: Mapping[str, str] | None = None) -> dict[str, obje
                 "connector-shell-present",
                 "runnable linked-device connector shell is present and relays via the neutral normaliser",
                 "backend/whatsapp_connector_runner.py must provide the runnable linked-device connector relay shell",
+            )
+        )
+        checks.append(
+            _check(
+                _file_contains(sidecar_pkg, ("@whiskeysockets/baileys",))
+                and _file_contains(
+                    sidecar_entry, ("messages.upsert", "connection.update", "--mock")
+                ),
+                "linked-device-sidecar-present",
+                "isolated Baileys/WhatsApp-Web sidecar transport is present (QR + NDJSON streaming); this attests transport code only, not a live-linked device",
+                "connectors/whatsapp-linked-device must provide the Baileys sidecar entrypoint and package that streams raw events into the connector shell",
             )
         )
 

@@ -210,6 +210,27 @@ def test_direct_connector_gates_on_runnable_connector_shell() -> None:
     assert "live-linked" not in check_names
 
 
+def test_direct_connector_gates_on_baileys_sidecar_present() -> None:
+    """A direct connector adds a repo-owned sidecar-present tier: the isolated
+    Baileys transport code must exist. It attests transport code only and must
+    never assert a live-linked device.
+    """
+    guard = _load_module()
+
+    result = guard.evaluate(REPO_ROOT, env=_approved_env())
+
+    check_names = {check["name"] for check in result["checks"]}
+    assert "linked-device-sidecar-present" in check_names
+    sidecar_check = next(
+        c for c in result["checks"] if c["name"] == "linked-device-sidecar-present"
+    )
+    assert sidecar_check["status"] == "pass"
+    # sidecar-present is a code-exists claim, never a linked-device claim: the
+    # detail explicitly attests transport code only, not a live link.
+    assert "live-linked" not in check_names
+    assert "attests transport code only" in sidecar_check["detail"]
+
+
 def test_default_direct_connector_gates_on_linked_device_adapter() -> None:
     """The default (unset) connector is direct and ties readiness to the adapter."""
     guard = _load_module()

@@ -168,25 +168,46 @@ Required env vars for relay (names only; never commit values):
 - `PORTFOLIO_INBOUND_SECRET` — shared gateway secret sent as `X-Gateway-Secret`;
   this is the same value the bridge reads from `PORTFOLIO_INBOUND_SECRET`.
 
-##### Deferred live dependency — the Baileys / WhatsApp-Web sidecar
+##### Live dependency — the Baileys / WhatsApp-Web sidecar (present, not yet linked)
 
 Emitting the WhatsApp QR and maintaining the linked-device session is **not**
-done by the Python shell and is intentionally deferred to a thin Baileys /
-WhatsApp-Web multi-device sidecar (a Node dependency not yet added to this repo).
-Its only job is transport: authenticate the linked-device session in a persistent
-store it owns, then stream each raw incoming message envelope as one JSON object
-per line into `whatsapp_connector_runner.py --relay`. It must contain no product
-logic, never place a WhatsApp media key or auth token on stdout, and read no repo
-secret. The exact next dependency step is to add and wire that sidecar; until
-then the shell is the tested seam and the connector is not live-ready.
+done by the Python shell — it is the job of a thin Baileys / WhatsApp-Web
+multi-device sidecar. That sidecar now exists in the repo as an **isolated Node
+package** at `connectors/whatsapp-linked-device/` (its own `package.json` /
+`package-lock.json`, dependency `@whiskeysockets/baileys`; the Python backend
+requirements are untouched). Its only job is transport: authenticate the
+linked-device session in a persistent auth dir it owns, then stream each raw
+incoming message envelope as one JSON object per line into
+`whatsapp_connector_runner.py --relay`. It contains no product logic, drops every
+WhatsApp media key / encrypted URL by whitelist before emitting (see
+`connectors/whatsapp-linked-device/lib/sanitize.js`), emits the QR only to
+stderr so stdout stays a clean NDJSON channel, and reads no repo secret.
+
+The sidecar is offline-testable today and has **not** linked any live account:
+
+- Unit + mock-mode tests (no socket, no WhatsApp, no QR):
+
+  ```bash
+  cd connectors/whatsapp-linked-device && npm test
+  ```
+
+- Mock replay whose NDJSON is accepted verbatim by the Python normaliser:
+
+  ```bash
+  cd connectors/whatsapp-linked-device && \
+    node index.js --mock --fixtures ../../backend/tests/fixtures/whatsapp_linked_device_events.json \
+    | (cd ../../backend && venv/bin/python3 whatsapp_connector_runner.py)
+  ```
 
 The readiness guard tiers a direct/linked-device connector by the repo code that
-actually exists: `linked-device-adapter-present` (the neutral normaliser) and
-`connector-shell-present` (the runnable relay shell). It never asserts a
-`live-linked` tier — a real linked-device session is a manual runtime state
-proven out-of-band, so the guard cannot and does not claim a device is linked.
-Both repo tiers must be present alongside the dedicated account, legal, connector,
-and distinct-fingerprint gates for the guard to return `launch-ready`.
+actually exists: `linked-device-adapter-present` (the neutral normaliser),
+`connector-shell-present` (the runnable relay shell), and
+`linked-device-sidecar-present` (the isolated Baileys sidecar transport). None of
+these assert a `live-linked` tier — a real linked-device session is a manual
+runtime state proven out-of-band, so the guard cannot and does not claim a device
+is linked; `linked-device-sidecar-present` attests transport code only. All three
+repo tiers must be present alongside the dedicated account, legal, connector, and
+distinct-fingerprint gates for the guard to return `launch-ready`.
 
 #### Next manual live step — link the dedicated account via Linked Devices
 
@@ -196,12 +217,23 @@ the offline readiness guard returns `launch-ready` for the direct connector.
 1. On the phone holding the **dedicated Portfolio Guru** WhatsApp Business
    number (never the EMGurus handset), open WhatsApp → Settings → **Linked
    Devices** → **Link a device**.
-2. Start the Baileys / WhatsApp-Web sidecar (the deferred Node dependency) in
-   QR/link mode and scan the QR with the dedicated handset. The sidecar owns the
-   QR and the session; the repo-owned `whatsapp_connector_runner.py --relay`
-   consumes the raw events it streams and never emits or scans a QR itself.
-   Confirm the newly linked device appears under Linked Devices on the dedicated
-   account.
+2. Install the sidecar dependency once and start it in QR/link mode, then scan
+   the QR with the dedicated handset. The sidecar owns the QR and the session;
+   the repo-owned `whatsapp_connector_runner.py --relay` consumes the raw events
+   it streams and never emits or scans a QR itself:
+
+   ```bash
+   cd connectors/whatsapp-linked-device
+   npm install                 # first time only; isolated to this dir
+   PG_WA_AUTH_DIR=.wa-auth node index.js --qr \
+     | (cd ../../backend && \
+        PORTFOLIO_INBOUND_URL=<bridge-url> \
+        PORTFOLIO_INBOUND_SECRET=<shared-gateway-secret> \
+        venv/bin/python3 whatsapp_connector_runner.py --relay)
+   ```
+
+   The QR prints to stderr; scan it on the dedicated handset. Confirm the newly
+   linked device appears under Linked Devices on the dedicated account.
 3. Verify the resulting account fingerprint is **distinct** from the EMGurus
    fingerprint before any tester traffic (this is the guard's
    `distinct-whatsapp-account` gate).
@@ -318,6 +350,12 @@ cd backend && venv/bin/python3 -m pytest \
   tests/test_portfolio_inbound_bridge.py \
   tests/test_whatsapp_linked_device.py \
   tests/test_whatsapp_connector_runner.py -v
+```
+
+Sidecar transport contract (Node, offline — no socket, no WhatsApp, no QR):
+
+```bash
+cd connectors/whatsapp-linked-device && npm test
 ```
 
 Do not run live Telegram tests or live WhatsApp tests as part of this repo-only
