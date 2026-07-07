@@ -103,6 +103,7 @@ def _no_stale_phrases(root: Path) -> Check:
         root / "backend" / "channel_contract.py",
         root / "backend" / "webhook_server.py",
         root / "backend" / "whatsapp_linked_device.py",
+        root / "backend" / "whatsapp_connector_runner.py",
         root / "backend" / "tests" / "test_channel_contract.py",
         root / "backend" / "tests" / "test_portfolio_inbound_bridge.py",
         root / "backend" / "tests" / "test_whatsapp_linked_device.py",
@@ -205,6 +206,7 @@ def evaluate(root: Path, env: Mapping[str, str] | None = None) -> dict[str, obje
     legal_doc = root / "docs" / "legal" / "whatsapp-meta-processor-review.md"
     shim = root / "scripts" / "hermes-profile" / "pg"
     linked_device_adapter = root / "backend" / "whatsapp_linked_device.py"
+    connector_shell = root / "backend" / "whatsapp_connector_runner.py"
 
     connector = _connector(env)
     checks.append(
@@ -217,9 +219,15 @@ def evaluate(root: Path, env: Mapping[str, str] | None = None) -> dict[str, obje
         )
     )
     # A direct linked-device connector is only launch-ready when its repo-owned
-    # transport normaliser exists. This keeps the readiness claim tied to real
-    # adapter code rather than to configuration alone. Hermes uses its own shim
-    # gate below instead.
+    # transport code exists. Readiness is tiered so the claim is tied to real
+    # code, not configuration alone:
+    #   * adapter-present  — the neutral transport normaliser exists;
+    #   * shell-present    — the runnable relay shell that drives the normaliser
+    #                        and forwards to the inbound bridge exists.
+    # A third tier, "live-linked" (a real WhatsApp linked-device session), is a
+    # runtime state proven manually out-of-band and is deliberately NOT asserted
+    # here, so this guard never claims a device is linked. Hermes uses its own
+    # shim gate below instead.
     if connector in LINKED_DEVICE_CONNECTORS:
         checks.append(
             _check(
@@ -230,6 +238,17 @@ def evaluate(root: Path, env: Mapping[str, str] | None = None) -> dict[str, obje
                 "linked-device-adapter-present",
                 "direct linked-device transport normaliser is present and delegates to the neutral contract",
                 "backend/whatsapp_linked_device.py must provide the direct linked-device transport normaliser",
+            )
+        )
+        checks.append(
+            _check(
+                _file_contains(
+                    connector_shell,
+                    ("relay_events", "to_inbound_payload", "run_dry_run"),
+                ),
+                "connector-shell-present",
+                "runnable linked-device connector shell is present and relays via the neutral normaliser",
+                "backend/whatsapp_connector_runner.py must provide the runnable linked-device connector relay shell",
             )
         )
 

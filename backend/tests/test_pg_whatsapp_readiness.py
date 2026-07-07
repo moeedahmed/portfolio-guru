@@ -189,6 +189,27 @@ def test_unknown_connector_value_is_blocked() -> None:
     assert "connector-recognised" in blocked_names
 
 
+def test_direct_connector_gates_on_runnable_connector_shell() -> None:
+    """A direct connector ties readiness to the runnable relay shell, not just
+    the adapter — this distinguishes adapter-present from connector-shell-present.
+    The default (unset) connector is direct, so the shell tier is always evaluated.
+    """
+    guard = _load_module()
+
+    result = guard.evaluate(REPO_ROOT, env=_approved_env())
+
+    check_names = {check["name"] for check in result["checks"]}
+    assert "linked-device-adapter-present" in check_names
+    assert "connector-shell-present" in check_names
+    shell_check = next(
+        c for c in result["checks"] if c["name"] == "connector-shell-present"
+    )
+    assert shell_check["status"] == "pass"
+    # The guard must never assert a live-linked device — that is a manual runtime
+    # state, not a repo fact.
+    assert "live-linked" not in check_names
+
+
 def test_default_direct_connector_gates_on_linked_device_adapter() -> None:
     """The default (unset) connector is direct and ties readiness to the adapter."""
     guard = _load_module()

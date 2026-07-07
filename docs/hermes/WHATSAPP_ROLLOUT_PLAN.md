@@ -132,9 +132,61 @@ The transport boundary is repo-owned and offline-testable today:
   It prints routing metadata only (scope, disposition, media kinds) and never
   the clinical text or captions.
 
-The readiness guard treats a direct/linked-device connector as launch-ready only
-when `backend/whatsapp_linked_device.py` is present alongside the dedicated
-account, legal, connector, and distinct-fingerprint gates.
+##### Runnable connector shell (`backend/whatsapp_connector_runner.py`)
+
+The normaliser is driven by a repo-owned, offline-testable **connector shell**.
+It is the transport half of the connector and carries no product logic — it only
+normalises raw linked-device events and relays neutral payloads to the inbound
+bridge. Two modes:
+
+- **dry-run** (default, always offline): read a recorded batch (a JSON array, a
+  single JSON object, or NDJSON) and print the routing verdict per turn. Contacts
+  nothing:
+
+  ```bash
+  cd backend && venv/bin/python3 whatsapp_connector_runner.py \
+    --payload tests/fixtures/whatsapp_linked_device_events.json
+  ```
+
+- **relay** (gated): read raw events (NDJSON on stdin, as the live sidecar
+  streams them) and forward only DIRECT non-empty turns to the inbound bridge.
+  GROUP and empty turns are refused locally and never posted. Relay refuses
+  unless `scripts/pg_whatsapp_readiness.py` returns `launch-ready`, so it is
+  blocked by default:
+
+  ```bash
+  # Blocked by default; runs only when the readiness guard is launch-ready.
+  PORTFOLIO_INBOUND_URL=<bridge-url> \
+  PORTFOLIO_INBOUND_SECRET=<shared-gateway-secret> \
+  <baileys-sidecar> | \
+    cd backend && venv/bin/python3 whatsapp_connector_runner.py --relay
+  ```
+
+Required env vars for relay (names only; never commit values):
+
+- `PORTFOLIO_INBOUND_URL` — full URL of the `POST /api/portfolio/inbound` bridge.
+- `PORTFOLIO_INBOUND_SECRET` — shared gateway secret sent as `X-Gateway-Secret`;
+  this is the same value the bridge reads from `PORTFOLIO_INBOUND_SECRET`.
+
+##### Deferred live dependency — the Baileys / WhatsApp-Web sidecar
+
+Emitting the WhatsApp QR and maintaining the linked-device session is **not**
+done by the Python shell and is intentionally deferred to a thin Baileys /
+WhatsApp-Web multi-device sidecar (a Node dependency not yet added to this repo).
+Its only job is transport: authenticate the linked-device session in a persistent
+store it owns, then stream each raw incoming message envelope as one JSON object
+per line into `whatsapp_connector_runner.py --relay`. It must contain no product
+logic, never place a WhatsApp media key or auth token on stdout, and read no repo
+secret. The exact next dependency step is to add and wire that sidecar; until
+then the shell is the tested seam and the connector is not live-ready.
+
+The readiness guard tiers a direct/linked-device connector by the repo code that
+actually exists: `linked-device-adapter-present` (the neutral normaliser) and
+`connector-shell-present` (the runnable relay shell). It never asserts a
+`live-linked` tier — a real linked-device session is a manual runtime state
+proven out-of-band, so the guard cannot and does not claim a device is linked.
+Both repo tiers must be present alongside the dedicated account, legal, connector,
+and distinct-fingerprint gates for the guard to return `launch-ready`.
 
 #### Next manual live step — link the dedicated account via Linked Devices
 
@@ -144,9 +196,12 @@ the offline readiness guard returns `launch-ready` for the direct connector.
 1. On the phone holding the **dedicated Portfolio Guru** WhatsApp Business
    number (never the EMGurus handset), open WhatsApp → Settings → **Linked
    Devices** → **Link a device**.
-2. Start the connector in QR/link mode and scan the QR with the dedicated
-   handset. Confirm the newly linked device appears under Linked Devices on the
-   dedicated account.
+2. Start the Baileys / WhatsApp-Web sidecar (the deferred Node dependency) in
+   QR/link mode and scan the QR with the dedicated handset. The sidecar owns the
+   QR and the session; the repo-owned `whatsapp_connector_runner.py --relay`
+   consumes the raw events it streams and never emits or scans a QR itself.
+   Confirm the newly linked device appears under Linked Devices on the dedicated
+   account.
 3. Verify the resulting account fingerprint is **distinct** from the EMGurus
    fingerprint before any tester traffic (this is the guard's
    `distinct-whatsapp-account` gate).
@@ -261,7 +316,8 @@ cd backend && venv/bin/python3 -m pytest \
   tests/test_hermes_integration.py \
   tests/test_channel_contract.py \
   tests/test_portfolio_inbound_bridge.py \
-  tests/test_whatsapp_linked_device.py -v
+  tests/test_whatsapp_linked_device.py \
+  tests/test_whatsapp_connector_runner.py -v
 ```
 
 Do not run live Telegram tests or live WhatsApp tests as part of this repo-only

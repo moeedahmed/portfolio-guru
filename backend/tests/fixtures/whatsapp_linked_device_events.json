@@ -1,0 +1,18 @@
+[
+  {
+    "key": {"remoteJid": "447700900000@s.whatsapp.net", "fromMe": false, "id": "REC-DIRECT-1"},
+    "message": {"conversation": "synthetic direct case text for a dry run"},
+    "pushName": "Synthetic Tester"
+  },
+  {
+    "key": {"remoteJid": "447700900000@s.whatsapp.net", "id": "REC-MEDIA-1"},
+    "message": {"imageMessage": {"mimetype": "image/jpeg", "caption": "synthetic caption"}}
+  },
+  {
+    "key": {"remoteJid": "120363000000000000@g.us", "participant": "447700900001@s.whatsapp.net", "id": "REC-GROUP-1"},
+    "message": {"conversation": "synthetic group message that must be refused"}
+  },
+  {
+    "key": {"remoteJid": "447700900000@s.whatsapp.net", "id": "REC-EMPTY-1"}
+  }
+]
