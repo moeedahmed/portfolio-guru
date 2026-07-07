@@ -49,6 +49,7 @@ from channel_contract import (
     Channel,
     ConversationScope,
     InboundDecision,
+    InboundDisposition,
     InboundMessage,
     MediaRef,
     SessionRef,
@@ -88,8 +89,27 @@ class NormalizedInbound:
     decide whether to forward the turn or render the neutral refusal.
     """
 
-    message: InboundMessage
+    message: InboundMessage | None
     decision: InboundDecision
+
+
+def _is_routable_frame(raw: Any) -> bool:
+    """True only when ``raw`` carries a usable 1:1 routing identity.
+
+    A live linked-device session streams more than user turns: internal /
+    protocol frames, receipts, and partially-decoded envelopes can arrive with no
+    ``key`` mapping or a blank ``key.remoteJid``. Those are not a conversation and
+    cannot be normalised onto the neutral contract, so the connector must drop
+    them locally rather than crash or forward them. This is the single structural
+    gate that distinguishes such non-user traffic from a real turn; it inspects
+    only routing shape, never content.
+    """
+    if not isinstance(raw, Mapping):
+        return False
+    key = raw.get("key")
+    if not isinstance(key, Mapping):
+        return False
+    return bool(str(key.get("remoteJid") or "").strip())
 
 
 def _require_mapping(value: Any, what: str) -> Mapping[str, Any]:
@@ -226,9 +246,17 @@ def normalize_and_route(raw: Mapping[str, Any]) -> NormalizedInbound:
 
     This is the single entrypoint a live linked-device connector calls before
     touching any product workflow: DIRECT turns with content are handled, GROUP
-    turns are refused as a gateway responsibility, and contentless turns are
-    refused as empty.
+    turns are refused as a gateway responsibility, contentless turns are refused
+    as empty, and internal/non-user frames with no routable ``remoteJid`` are
+    refused as invalid and dropped locally (``message`` is ``None``) rather than
+    raising, so a Baileys protocol frame can never crash the relay or be
+    forwarded.
     """
+    if not _is_routable_frame(raw):
+        return NormalizedInbound(
+            message=None,
+            decision=InboundDecision(disposition=InboundDisposition.REFUSE_INVALID),
+        )
     message = normalize_message(raw)
     return NormalizedInbound(message=message, decision=accept_inbound(message))
 
@@ -272,6 +300,17 @@ def dry_run(raw: Mapping[str, Any]) -> dict[str, Any]:
     """
     normalized = normalize_and_route(raw)
     message = normalized.message
+    if message is None:
+        # A non-user/internal frame with no routable identity — dropped locally.
+        return {
+            "channel": Channel.WHATSAPP.value,
+            "conversation_id": None,
+            "scope": None,
+            "disposition": normalized.decision.disposition.value,
+            "has_content": False,
+            "media_kinds": [],
+            "fresh_start": normalized.decision.fresh_start,
+        }
     return {
         "channel": message.session.channel.value,
         "conversation_id": message.session.conversation_id,

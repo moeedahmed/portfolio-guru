@@ -109,6 +109,25 @@ test('extractInbound drops our own outbound and bodiless frames', () => {
   assert.deepEqual(ids, ['IN-TEXT-1', 'IN-IMAGE-1']);
 });
 
+test('extractInbound drops internal frames with no routable remoteJid', () => {
+  // A live Baileys session streams protocol/internal frames that carry a body
+  // but no key.remoteJid. Emitting one crashed the Python relay before any
+  // account link, so the sidecar must not stream it inbound.
+  const upsert = {
+    type: 'notify',
+    messages: [
+      { key: { id: 'PROTO-1' }, message: { conversation: 'internal frame' } },
+      { message: { protocolMessage: { type: 3 } } },
+      {
+        key: { remoteJid: '447700900000@s.whatsapp.net', id: 'IN-OK-1', fromMe: false },
+        message: { conversation: 'real inbound turn' },
+      },
+    ],
+  };
+  const envelopes = extractInbound(upsert);
+  assert.deepEqual(envelopes.map((e) => e.key.id), ['IN-OK-1']);
+});
+
 test('sidecar output for the Python fixture is stable and content-shaped', () => {
   // Sanitising each recorded envelope reproduces the exact neutral shape the
   // Python normaliser consumes (key.remoteJid + whitelisted body).

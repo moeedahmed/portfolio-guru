@@ -64,14 +64,17 @@ class RelayStats:
     """Counts for one relay pass — routing metadata only, never content.
 
     ``forwarded`` is the number of DIRECT non-empty turns posted to the bridge;
-    ``refused_group`` and ``refused_empty`` are turns dropped locally without any
-    forward. The sum equals ``total``.
+    ``refused_group``, ``refused_empty`` and ``refused_invalid`` are turns dropped
+    locally without any forward. ``refused_invalid`` counts internal/non-user
+    frames (no routable ``remoteJid``) that a live Baileys session can stream. The
+    sum equals ``total``.
     """
 
     total: int = 0
     forwarded: int = 0
     refused_group: int = 0
     refused_empty: int = 0
+    refused_invalid: int = 0
 
     def as_dict(self) -> dict[str, int]:
         return {
@@ -79,6 +82,7 @@ class RelayStats:
             "forwarded": self.forwarded,
             "refused_group": self.refused_group,
             "refused_empty": self.refused_empty,
+            "refused_invalid": self.refused_invalid,
         }
 
 
@@ -124,11 +128,12 @@ def relay_events(events: Iterable[Mapping[str, Any]], poster: Poster) -> RelaySt
     Routing is delegated wholly to the neutral contract:
     :func:`whatsapp_linked_device.normalize_and_route` decides the disposition and
     :func:`whatsapp_linked_device.to_inbound_payload` builds the exact bridge
-    body. DIRECT non-empty turns are forwarded; GROUP and empty turns are refused
-    locally and never posted, so private content in a shared thread never leaves
-    the connector. No product logic runs here.
+    body. DIRECT non-empty turns are forwarded; GROUP, empty and internal/non-user
+    frames (no routable ``remoteJid``) are refused locally and never posted, so
+    private content in a shared thread never leaves the connector and a Baileys
+    protocol frame can never crash the relay. No product logic runs here.
     """
-    total = forwarded = refused_group = refused_empty = 0
+    total = forwarded = refused_group = refused_empty = refused_invalid = 0
     for raw in events:
         total += 1
         decision = wld.normalize_and_route(raw).decision
@@ -137,6 +142,8 @@ def relay_events(events: Iterable[Mapping[str, Any]], poster: Poster) -> RelaySt
             forwarded += 1
         elif decision.disposition is InboundDisposition.REFUSE_GROUP:
             refused_group += 1
+        elif decision.disposition is InboundDisposition.REFUSE_INVALID:
+            refused_invalid += 1
         else:
             refused_empty += 1
     return RelayStats(
@@ -144,6 +151,7 @@ def relay_events(events: Iterable[Mapping[str, Any]], poster: Poster) -> RelaySt
         forwarded=forwarded,
         refused_group=refused_group,
         refused_empty=refused_empty,
+        refused_invalid=refused_invalid,
     )
 
 

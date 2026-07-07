@@ -140,6 +140,12 @@ class InboundDisposition(str, Enum):
     HANDLE = "handle"
     REFUSE_GROUP = "refuse_group"
     REFUSE_EMPTY = "refuse_empty"
+    # A frame that is not a routable 1:1 user turn at all — an internal/protocol
+    # Baileys frame with no ``key.remoteJid`` or otherwise too malformed to carry
+    # a conversation identity. It is dropped locally by the connector and never
+    # forwarded; it is a transport-plumbing disposition, not a product refusal, so
+    # no channel-neutral refusal copy is rendered for it.
+    REFUSE_INVALID = "refuse_invalid"
 
 
 @dataclass(frozen=True)

@@ -108,6 +108,36 @@ def test_missing_remote_jid_raises():
         wld.normalize_message({"key": {"id": "M5"}, "message": {"conversation": "hi"}})
 
 
+@pytest.mark.parametrize(
+    "frame",
+    [
+        {"key": {"id": "M5"}, "message": {"conversation": "hi"}},
+        {"key": {"remoteJid": "  "}, "message": {"conversation": "hi"}},
+        {"key": {"remoteJid": None}, "message": {"conversation": "hi"}},
+        {"message": {"conversation": "hi"}},
+        {"key": "not-a-mapping"},
+        {},
+        "not-a-mapping",
+    ],
+)
+def test_non_user_frame_is_refused_invalid_not_crashed(frame):
+    """An internal/protocol Baileys frame with no routable remoteJid is dropped."""
+    normalized = wld.normalize_and_route(frame)
+    assert normalized.message is None
+    assert normalized.decision.disposition is InboundDisposition.REFUSE_INVALID
+    # A drop is transport plumbing, not a product refusal — no refusal copy.
+    assert normalized.decision.refusal is None
+
+
+def test_dry_run_on_invalid_frame_returns_metadata_without_crashing():
+    result = wld.dry_run({"key": {"id": "M5"}, "message": {"conversation": "hi"}})
+    assert result["disposition"] == "refuse_invalid"
+    assert result["scope"] is None
+    assert result["conversation_id"] is None
+    assert result["has_content"] is False
+    assert result["media_kinds"] == []
+
+
 def test_ptt_audio_maps_to_voice_and_plain_audio_maps_to_audio():
     voice = {
         "key": {"remoteJid": "447700900000@s.whatsapp.net", "id": "V1"},

@@ -111,8 +111,10 @@ function sanitizeEnvelope(rawMsg) {
 // From a Baileys `messages.upsert` payload ({ messages, type }), yield the
 // sanitised envelopes worth streaming inbound. Messages we sent ourselves
 // (`key.fromMe`) are dropped — echoing our own outbound is a pure transport
-// de-duplication concern, not product logic. Messages with no recognised body
-// are also dropped in the live path (receipts, protocol frames).
+// de-duplication concern, not product logic. Frames with no routable
+// `key.remoteJid` (internal/protocol frames) and frames with no recognised body
+// are also dropped in the live path (receipts, protocol frames), so the runner
+// never receives a frame it cannot route.
 function extractInbound(upsert) {
   if (!isObject(upsert) || !Array.isArray(upsert.messages)) {
     return [];
@@ -126,7 +128,7 @@ function extractInbound(upsert) {
       continue;
     }
     const envelope = sanitizeEnvelope(rawMsg);
-    if (envelope.message) {
+    if (envelope.key.remoteJid && envelope.message) {
       out.push(envelope);
     }
   }

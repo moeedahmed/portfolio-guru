@@ -92,6 +92,32 @@ def test_relay_never_forwards_group_content():
     assert posted == []
 
 
+def test_relay_drops_non_user_frame_without_crashing_or_forwarding():
+    """A Baileys internal/protocol frame with no remoteJid must not crash relay.
+
+    This is the exact live-QR crash repro: a frame missing key.remoteJid reached
+    the normaliser and raised ValueError before any account was linked. It must
+    now be dropped locally, counted as refused_invalid, and never forwarded.
+    """
+    events = [
+        {"key": {"id": "PROTO-1"}, "message": {"conversation": "internal"}},
+        {"message": {"protocolMessage": {"type": 3}}},
+        {
+            "key": {"remoteJid": "447700900000@s.whatsapp.net", "id": "OK1"},
+            "message": {"conversation": "real turn"},
+        },
+    ]
+    posted: list[dict] = []
+
+    stats = runner.relay_events(events, posted.append)
+
+    assert stats.total == 3
+    assert stats.forwarded == 1
+    assert stats.refused_invalid == 2
+    assert len(posted) == 1
+    assert posted[0]["conversation_id"] == "wa:447700900000@s.whatsapp.net"
+
+
 def test_make_bridge_poster_sends_shared_secret_header(monkeypatch):
     captured: dict[str, object] = {}
 
