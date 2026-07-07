@@ -96,6 +96,9 @@ Read by the **Python runner** (passed to its environment, not this sidecar):
 
 - Link **only** on the dedicated Portfolio Guru handset — never the EMGurus
   handset, and never attach the linked device to the EMGurus account.
+- After a first successful QR scan, WhatsApp may close once with
+  `restartRequired`; the sidecar reconnects automatically with the saved auth
+  state.
 - The dedicated account fingerprint must stay **distinct** from the EMGurus
   fingerprint (the readiness guard's `distinct-whatsapp-account` gate).
 - Stop if the readiness guard returns `blocked`, or if linking would require

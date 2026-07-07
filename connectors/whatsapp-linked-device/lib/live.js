@@ -56,4 +56,16 @@ function describeDisconnect(statusCode, DisconnectReason) {
   return 'unrecognised status';
 }
 
-module.exports = { buildLiveSocketConfig, describeDisconnect, BROWSER_NAME };
+function shouldReconnectAfterClose(statusCode, DisconnectReason) {
+  return Boolean(
+    DisconnectReason
+      && statusCode === DisconnectReason.restartRequired
+  );
+}
+
+module.exports = {
+  buildLiveSocketConfig,
+  describeDisconnect,
+  shouldReconnectAfterClose,
+  BROWSER_NAME,
+};

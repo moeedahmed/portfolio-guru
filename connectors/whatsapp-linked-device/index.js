@@ -37,7 +37,11 @@ const {
   FIXTURES_ENV,
   QR_DIR_ENV,
 } = require('./lib/config');
-const { buildLiveSocketConfig, describeDisconnect } = require('./lib/live');
+const {
+  buildLiveSocketConfig,
+  describeDisconnect,
+  shouldReconnectAfterClose,
+} = require('./lib/live');
 
 function log(msg) {
   process.stderr.write(`${msg}\n`);
@@ -204,66 +208,72 @@ async function runLive(env) {
     );
   }
 
-  const socket = makeWASocket(buildLiveSocketConfig({ state, version, Browsers }));
+  function startSocket() {
+    const socket = makeWASocket(buildLiveSocketConfig({ state, version, Browsers }));
+    let sawQr = false;
 
-  let sawQr = false;
+    socket.ev.on('creds.update', saveCreds);
 
-  socket.ev.on('creds.update', saveCreds);
-
-  socket.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect, qr } = update;
-    if (qr) {
-      sawQr = true;
-      writeQrArtifacts(qr, qrDir)
-        .then((artifact) => {
-          if (artifact) {
-            log(`live: wrote QR image to ${artifact.pngPath}`);
-          }
-        })
-        .catch((err) => {
-          log(`live: failed to write QR image (${err && err.message ? err.message : err})`);
-        });
-      // QR to stderr — stdout is reserved for the NDJSON event stream.
-      let rendered = false;
-      try {
-        // eslint-disable-next-line global-require
-        require('qrcode-terminal').generate(qr, { small: true }, (art) => {
-          log('\nScan this QR on the dedicated Portfolio Guru handset:');
-          log(art);
-          rendered = true;
-        });
-      } catch (err) {
-        rendered = false;
+    socket.ev.on('connection.update', (update) => {
+      const { connection, lastDisconnect, qr } = update;
+      if (qr) {
+        sawQr = true;
+        writeQrArtifacts(qr, qrDir)
+          .then((artifact) => {
+            if (artifact) {
+              log(`live: wrote QR image to ${artifact.pngPath}`);
+            }
+          })
+          .catch((err) => {
+            log(`live: failed to write QR image (${err && err.message ? err.message : err})`);
+          });
+        // QR to stderr — stdout is reserved for the NDJSON event stream.
+        let rendered = false;
+        try {
+          // eslint-disable-next-line global-require
+          require('qrcode-terminal').generate(qr, { small: true }, (art) => {
+            log('\nScan this QR on the dedicated Portfolio Guru handset:');
+            log(art);
+            rendered = true;
+          });
+        } catch (err) {
+          rendered = false;
+        }
+        if (!rendered) {
+          log('\nScan this QR string on the dedicated Portfolio Guru handset:');
+          log(qr);
+        }
       }
-      if (!rendered) {
-        log('\nScan this QR string on the dedicated Portfolio Guru handset:');
-        log(qr);
+      if (connection === 'open') {
+        log('live: linked-device session open; streaming inbound events.');
+      } else if (connection === 'close') {
+        const statusCode = lastDisconnect && lastDisconnect.error
+          && lastDisconnect.error.output
+          && lastDisconnect.error.output.statusCode;
+        const loggedOut = DisconnectReason && statusCode === DisconnectReason.loggedOut;
+        const reason = describeDisconnect(statusCode, DisconnectReason);
+        const phase = sawQr ? 'after QR' : 'before QR';
+        log(
+          `live: connection closed (status ${statusCode}; reason=${reason}; ` +
+            `${phase}; loggedOut=${!!loggedOut}).`
+        );
+        if (shouldReconnectAfterClose(statusCode, DisconnectReason)) {
+          log('live: restart required after pairing; reconnecting with saved auth state.');
+          setTimeout(startSocket, 500);
+        } else if (loggedOut) {
+          process.exitCode = 0;
+        }
       }
-    }
-    if (connection === 'open') {
-      log('live: linked-device session open; streaming inbound events.');
-    } else if (connection === 'close') {
-      const statusCode = lastDisconnect && lastDisconnect.error
-        && lastDisconnect.error.output
-        && lastDisconnect.error.output.statusCode;
-      const loggedOut = DisconnectReason && statusCode === DisconnectReason.loggedOut;
-      const reason = describeDisconnect(statusCode, DisconnectReason);
-      const phase = sawQr ? 'after QR' : 'before QR';
-      log(
-        `live: connection closed (status ${statusCode}; reason=${reason}; ` +
-          `${phase}; loggedOut=${!!loggedOut}).`
-      );
-      if (loggedOut) {
-        process.exitCode = 0;
-      }
-    }
-  });
+    });
 
-  socket.ev.on('messages.upsert', (upsert) => {
-    for (const envelope of extractInbound(upsert)) {
-      emit(envelope);
-    }
-  });
+    socket.ev.on('messages.upsert', (upsert) => {
+      for (const envelope of extractInbound(upsert)) {
+        emit(envelope);
+      }
+    });
+  }
+
+  startSocket();
 
   // Keep the process alive; the socket owns the event loop until logout.
   return new Promise(() => {});

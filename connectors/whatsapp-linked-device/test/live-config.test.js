@@ -10,7 +10,12 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { buildLiveSocketConfig, describeDisconnect, BROWSER_NAME } = require('../lib/live');
+const {
+  buildLiveSocketConfig,
+  describeDisconnect,
+  shouldReconnectAfterClose,
+  BROWSER_NAME,
+} = require('../lib/live');
 const { writeQrArtifacts } = require('../index');
 
 // A tiny stand-in for Baileys' Browsers map so the test never needs the real
@@ -52,6 +57,14 @@ test('describeDisconnect prefers the named Baileys DisconnectReason', () => {
 test('describeDisconnect handles a missing status code', () => {
   assert.match(describeDisconnect(undefined, {}), /no status code/i);
   assert.match(describeDisconnect(null, {}), /no status code/i);
+});
+
+test('shouldReconnectAfterClose handles the first-pair restart requirement only', () => {
+  const DisconnectReason = { loggedOut: 401, restartRequired: 515 };
+  assert.equal(shouldReconnectAfterClose(515, DisconnectReason), true);
+  assert.equal(shouldReconnectAfterClose(401, DisconnectReason), false);
+  assert.equal(shouldReconnectAfterClose(408, DisconnectReason), false);
+  assert.equal(shouldReconnectAfterClose(515, null), false);
 });
 
 test('writeQrArtifacts creates scannable image handoff files', async () => {
