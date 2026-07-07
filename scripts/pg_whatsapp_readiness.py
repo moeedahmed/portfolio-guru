@@ -41,6 +41,14 @@ HERMES_SAFE_IDS = (
     "EMGURUS_WHATSAPP_PROFILE_ID",
 )
 
+# The direct linked-device connector family. These treat WhatsApp as a thin
+# transport to the deterministic engine and need no Hermes profile. Their
+# transport normaliser is the repo-owned backend/whatsapp_linked_device.py.
+# "hermes" is the only value that pulls in the optional Hermes-profile gates.
+# The set mirrors whatsapp_linked_device.LINKED_DEVICE_CONNECTORS.
+LINKED_DEVICE_CONNECTORS = ("direct", "linked-device", "baileys")
+KNOWN_CONNECTORS = (*LINKED_DEVICE_CONNECTORS, "hermes")
+
 STALE_PHRASES = (
     "WhatsApp should sit behind the " + "EMGurus gateway",
     "single " + "EMGurus WhatsApp Gateway",
@@ -94,8 +102,10 @@ def _no_stale_phrases(root: Path) -> Check:
         root / "docs" / "PUBLIC_PRODUCT_PLAN_2026-06-17.md",
         root / "backend" / "channel_contract.py",
         root / "backend" / "webhook_server.py",
+        root / "backend" / "whatsapp_linked_device.py",
         root / "backend" / "tests" / "test_channel_contract.py",
         root / "backend" / "tests" / "test_portfolio_inbound_bridge.py",
+        root / "backend" / "tests" / "test_whatsapp_linked_device.py",
     )
     matches: list[str] = []
     for path in files:
@@ -194,6 +204,34 @@ def evaluate(root: Path, env: Mapping[str, str] | None = None) -> dict[str, obje
     rollout_doc = root / "docs" / "hermes" / "WHATSAPP_ROLLOUT_PLAN.md"
     legal_doc = root / "docs" / "legal" / "whatsapp-meta-processor-review.md"
     shim = root / "scripts" / "hermes-profile" / "pg"
+    linked_device_adapter = root / "backend" / "whatsapp_linked_device.py"
+
+    connector = _connector(env)
+    checks.append(
+        _check(
+            connector in KNOWN_CONNECTORS,
+            "connector-recognised",
+            f"PG_WHATSAPP_CONNECTOR={connector!r} is a recognised connector",
+            "PG_WHATSAPP_CONNECTOR must be one of "
+            + ", ".join(repr(name) for name in KNOWN_CONNECTORS),
+        )
+    )
+    # A direct linked-device connector is only launch-ready when its repo-owned
+    # transport normaliser exists. This keeps the readiness claim tied to real
+    # adapter code rather than to configuration alone. Hermes uses its own shim
+    # gate below instead.
+    if connector in LINKED_DEVICE_CONNECTORS:
+        checks.append(
+            _check(
+                _file_contains(
+                    linked_device_adapter,
+                    ("normalize_message", "accept_inbound", "InboundMessage"),
+                ),
+                "linked-device-adapter-present",
+                "direct linked-device transport normaliser is present and delegates to the neutral contract",
+                "backend/whatsapp_linked_device.py must provide the direct linked-device transport normaliser",
+            )
+        )
 
     checks.append(
         _check(

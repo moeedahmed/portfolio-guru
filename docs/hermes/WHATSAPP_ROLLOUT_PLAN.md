@@ -104,6 +104,68 @@ Gate (only when `PG_WHATSAPP_CONNECTOR=hermes`):
 A direct connector needs no Hermes profile, and the readiness guard does not
 require one unless `PG_WHATSAPP_CONNECTOR=hermes`.
 
+#### Direct linked-device connector (default path)
+
+The lean direct path is a WhatsApp linked-device (Baileys / WhatsApp-Web
+multi-device) session against the dedicated Portfolio Guru account. Set
+`PG_WHATSAPP_CONNECTOR` to `linked-device` (or leave it unset — `direct` is the
+default and is the same connector family).
+
+The transport boundary is repo-owned and offline-testable today:
+
+- `backend/whatsapp_linked_device.py` normalises a raw linked-device message
+  envelope into the channel-neutral `InboundMessage` contract and delegates the
+  routing decision to `channel_contract.accept_inbound`. It contains no product
+  logic, fetches no bytes, forwards no WhatsApp media key, and is import-clean of
+  Telegram and the product engine.
+- `whatsapp_linked_device.to_inbound_payload(raw)` produces the exact JSON body
+  for the repo-owned `POST /api/portfolio/inbound` bridge, so the live connector
+  only relays neutral envelopes — the product boundary is identical to every
+  other channel and a future Meta Cloud API webhook can replace the transport
+  without touching product logic.
+- Dry-run any recorded payload offline (no service, no secret, no device link):
+
+  ```bash
+  cd backend && venv/bin/python3 whatsapp_linked_device.py --payload envelope.json
+  ```
+
+  It prints routing metadata only (scope, disposition, media kinds) and never
+  the clinical text or captions.
+
+The readiness guard treats a direct/linked-device connector as launch-ready only
+when `backend/whatsapp_linked_device.py` is present alongside the dedicated
+account, legal, connector, and distinct-fingerprint gates.
+
+#### Next manual live step — link the dedicated account via Linked Devices
+
+This is the first action that touches a live WhatsApp account. Do it only after
+the offline readiness guard returns `launch-ready` for the direct connector.
+
+1. On the phone holding the **dedicated Portfolio Guru** WhatsApp Business
+   number (never the EMGurus handset), open WhatsApp → Settings → **Linked
+   Devices** → **Link a device**.
+2. Start the connector in QR/link mode and scan the QR with the dedicated
+   handset. Confirm the newly linked device appears under Linked Devices on the
+   dedicated account.
+3. Verify the resulting account fingerprint is **distinct** from the EMGurus
+   fingerprint before any tester traffic (this is the guard's
+   `distinct-whatsapp-account` gate).
+4. Exercise shadow mode with synthetic/anonymised payloads first, then a single
+   direct-message smoke to the dedicated number only.
+
+Stop conditions for this step:
+
+- The QR would be scanned on the EMGurus handset, or the linked device would
+  attach to the EMGurus account.
+- The Portfolio Guru and EMGurus account fingerprints match.
+- The readiness guard returns `blocked`.
+- Linking would require reading secrets, editing `~/.hermes`, or restarting a
+  shared service.
+
+Rollback: remove the linked device from **Linked Devices** on the dedicated
+account and stop the connector process. Never fall back to routing testers
+through the EMGurus account.
+
 ### Phase 3 - Legal and processor review
 
 Goal: make Meta/WhatsApp a reviewed processor before launch.
@@ -198,7 +260,8 @@ cd backend && venv/bin/python3 -m pytest \
   tests/test_hermes_pg_cli.py \
   tests/test_hermes_integration.py \
   tests/test_channel_contract.py \
-  tests/test_portfolio_inbound_bridge.py -v
+  tests/test_portfolio_inbound_bridge.py \
+  tests/test_whatsapp_linked_device.py -v
 ```
 
 Do not run live Telegram tests or live WhatsApp tests as part of this repo-only

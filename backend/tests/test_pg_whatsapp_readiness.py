@@ -155,6 +155,54 @@ def test_hermes_connector_launch_ready_with_profile() -> None:
     assert "profile-shim-delegates" in check_names
 
 
+def test_linked_device_connector_is_recognised_and_launch_ready() -> None:
+    """The explicit linked-device connector is a direct-family connector.
+
+    It needs no Hermes profile and stays launch-ready with the same dedicated
+    account + legal + fingerprint gates as the default direct connector.
+    """
+    guard = _load_module()
+
+    result = guard.evaluate(
+        REPO_ROOT, env=_approved_env(PG_WHATSAPP_CONNECTOR="linked-device")
+    )
+
+    assert result["status"] == "launch-ready"
+    check_names = {check["name"] for check in result["checks"]}
+    assert "connector-recognised" in check_names
+    assert "linked-device-adapter-present" in check_names
+    # No Hermes-profile gate is evaluated for a linked-device connector.
+    assert "portfolio-guru-profile-id" not in check_names
+
+
+def test_unknown_connector_value_is_blocked() -> None:
+    guard = _load_module()
+
+    result = guard.evaluate(
+        REPO_ROOT, env=_approved_env(PG_WHATSAPP_CONNECTOR="whatsapp-cloud")
+    )
+
+    assert result["status"] == "blocked"
+    blocked_names = {
+        check["name"] for check in result["checks"] if check["status"] == "block"
+    }
+    assert "connector-recognised" in blocked_names
+
+
+def test_default_direct_connector_gates_on_linked_device_adapter() -> None:
+    """The default (unset) connector is direct and ties readiness to the adapter."""
+    guard = _load_module()
+
+    result = guard.evaluate(REPO_ROOT, env=_approved_env())
+
+    check_names = {check["name"] for check in result["checks"]}
+    assert "linked-device-adapter-present" in check_names
+    adapter_check = next(
+        c for c in result["checks"] if c["name"] == "linked-device-adapter-present"
+    )
+    assert adapter_check["status"] == "pass"
+
+
 def test_cli_outputs_json_and_does_not_expose_safe_identifier_values() -> None:
     env = _approved_env(
         PG_WHATSAPP_ACCOUNT_FINGERPRINT="pg-secret-looking-safe-id",
