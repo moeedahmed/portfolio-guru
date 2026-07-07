@@ -13,8 +13,11 @@
 //                     (Baileys multi-file auth state). Created/owned at link
 //                     time; never committed, never read here in mock mode.
 //   PG_WA_FIXTURES  — path to a JSON fixture file used only in --mock mode.
+//   PG_WA_QR_DIR    — optional directory for short-lived QR handoff artefacts
+//                     (latest.png/latest.txt). Created only in live QR mode.
 const AUTH_DIR_ENV = 'PG_WA_AUTH_DIR';
 const FIXTURES_ENV = 'PG_WA_FIXTURES';
+const QR_DIR_ENV = 'PG_WA_QR_DIR';
 
 const DEFAULT_AUTH_DIR = '.wa-auth';
 
@@ -31,10 +34,17 @@ function resolveFixturesPath(env, cliValue) {
   return value || null;
 }
 
+function resolveQrDir(env) {
+  const value = (env[QR_DIR_ENV] || '').trim();
+  return value || null;
+}
+
 module.exports = {
   AUTH_DIR_ENV,
   FIXTURES_ENV,
+  QR_DIR_ENV,
   DEFAULT_AUTH_DIR,
   resolveAuthDir,
   resolveFixturesPath,
+  resolveQrDir,
 };

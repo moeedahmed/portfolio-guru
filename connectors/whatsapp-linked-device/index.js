@@ -26,9 +26,17 @@
 // to stderr so they never corrupt the event stream piped into the Python runner.
 
 const fs = require('fs');
+const path = require('path');
 
 const { sanitizeEnvelope, extractInbound, serializeEnvelope } = require('./lib/sanitize');
-const { resolveAuthDir, resolveFixturesPath, AUTH_DIR_ENV, FIXTURES_ENV } = require('./lib/config');
+const {
+  resolveAuthDir,
+  resolveFixturesPath,
+  resolveQrDir,
+  AUTH_DIR_ENV,
+  FIXTURES_ENV,
+  QR_DIR_ENV,
+} = require('./lib/config');
 const { buildLiveSocketConfig, describeDisconnect } = require('./lib/live');
 
 function log(msg) {
@@ -51,6 +59,7 @@ function usage() {
       'Environment (names only; never commit values):',
       `  ${AUTH_DIR_ENV}   directory the sidecar owns for the linked-device auth session`,
       `  ${FIXTURES_ENV}   path to a JSON fixture used only in --mock mode`,
+      `  ${QR_DIR_ENV}     optional directory for latest.png/latest.txt QR handoff artefacts`,
       '',
       'Pipe the NDJSON stream into the repo-owned Python relay:',
       '  node index.js --qr | (cd ../../backend && venv/bin/python3 whatsapp_connector_runner.py --relay)',
@@ -118,13 +127,42 @@ function runMock(fixturesPath) {
   return 0;
 }
 
+async function writeQrArtifacts(qr, qrDir) {
+  if (!qrDir) {
+    return null;
+  }
+
+  fs.mkdirSync(qrDir, { recursive: true });
+  const txtPath = path.join(qrDir, 'latest.txt');
+  const pngPath = path.join(qrDir, 'latest.png');
+
+  fs.writeFileSync(txtPath, qr, { mode: 0o600 });
+
+  // Lazily loaded so mock mode and pure tests never need QR rendering.
+  // eslint-disable-next-line global-require
+  const qrcode = require('qrcode');
+  await qrcode.toFile(pngPath, qr, {
+    errorCorrectionLevel: 'M',
+    margin: 2,
+    scale: 10,
+    type: 'png',
+  });
+  fs.chmodSync(pngPath, 0o600);
+
+  return { txtPath, pngPath };
+}
+
 // Live mode. Baileys is required lazily so mock mode and the unit tests never
 // need the dependency installed and never risk opening a socket.
 async function runLive(env) {
   const authDir = resolveAuthDir(env);
+  const qrDir = resolveQrDir(env);
   log(`live: using linked-device auth dir ${JSON.stringify(authDir)}`);
   log('live: this will open a WhatsApp linked-device socket and emit a QR.');
   log('live: scan the QR ONLY on the dedicated Portfolio Guru handset.');
+  if (qrDir) {
+    log(`live: QR image handoff enabled at ${JSON.stringify(qrDir)}.`);
+  }
 
   let baileys;
   try {
@@ -176,6 +214,15 @@ async function runLive(env) {
     const { connection, lastDisconnect, qr } = update;
     if (qr) {
       sawQr = true;
+      writeQrArtifacts(qr, qrDir)
+        .then((artifact) => {
+          if (artifact) {
+            log(`live: wrote QR image to ${artifact.pngPath}`);
+          }
+        })
+        .catch((err) => {
+          log(`live: failed to write QR image (${err && err.message ? err.message : err})`);
+        });
       // QR to stderr — stdout is reserved for the NDJSON event stream.
       let rendered = false;
       try {
@@ -256,4 +303,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { main, parseArgs, readFixtures, runMock };
+module.exports = { main, parseArgs, readFixtures, runMock, writeQrArtifacts };

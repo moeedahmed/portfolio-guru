@@ -6,8 +6,12 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
 const { buildLiveSocketConfig, describeDisconnect, BROWSER_NAME } = require('../lib/live');
+const { writeQrArtifacts } = require('../index');
 
 // A tiny stand-in for Baileys' Browsers map so the test never needs the real
 // package (or a network fetch) to validate config shape.
@@ -48,4 +52,16 @@ test('describeDisconnect prefers the named Baileys DisconnectReason', () => {
 test('describeDisconnect handles a missing status code', () => {
   assert.match(describeDisconnect(undefined, {}), /no status code/i);
   assert.match(describeDisconnect(null, {}), /no status code/i);
+});
+
+test('writeQrArtifacts creates scannable image handoff files', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pg-wa-qr-'));
+  const artifact = await writeQrArtifacts('portfolio-guru-test-qr-payload', dir);
+
+  assert.equal(artifact.txtPath, path.join(dir, 'latest.txt'));
+  assert.equal(artifact.pngPath, path.join(dir, 'latest.png'));
+  assert.equal(fs.readFileSync(artifact.txtPath, 'utf8'), 'portfolio-guru-test-qr-payload');
+
+  const png = fs.readFileSync(artifact.pngPath);
+  assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
 });

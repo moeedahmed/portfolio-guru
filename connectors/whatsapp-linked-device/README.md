@@ -33,6 +33,9 @@ dedicated PG WhatsApp account
   through this transport frame.
 - The QR and all human-facing logs go to **stderr**; **stdout is reserved for
   the NDJSON event stream** so it is never corrupted.
+- If `PG_WA_QR_DIR` is set, the sidecar also writes short-lived QR handoff
+  artefacts to `latest.png` and `latest.txt` in that directory. Use the PNG for
+  Telegram/laptop scanning; treat both files as temporary login artefacts.
 - The sidecar reads **no repo secret**. The inbound bridge URL and secret belong
   to the Python runner's environment, not this process.
 
@@ -61,8 +64,9 @@ Deferred manual step — see the rollout plan. Do **not** run this until the
 readiness guard returns `launch-ready`.
 
 ```bash
-npm install            # installs Baileys + qrcode-terminal (isolated to this dir)
+npm install            # installs Baileys + QR rendering dependencies (isolated to this dir)
 node index.js --qr     # emits QR to stderr; streams inbound NDJSON to stdout
+PG_WA_QR_DIR=/tmp/pg-wa-qr node index.js --qr  # also writes latest.png
 ```
 
 Pipe live events into the repo-owned Python relay:
@@ -79,6 +83,9 @@ Read by this sidecar:
   session (Baileys multi-file auth state). Created at link time, git-ignored,
   never committed. Defaults to `.wa-auth/` inside this package.
 - `PG_WA_FIXTURES` — path to a JSON/NDJSON fixture, used only in `--mock` mode.
+- `PG_WA_QR_DIR` — optional directory for `latest.png` / `latest.txt` QR handoff
+  files. Prefer this for headless Mac Mini workflows so the QR can be sent as a
+  scannable Telegram image instead of relying on terminal output.
 
 Read by the **Python runner** (passed to its environment, not this sidecar):
 
