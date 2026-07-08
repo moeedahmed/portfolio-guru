@@ -21,6 +21,9 @@
 //                               linked-device socket, prints the QR to stderr for
 //                               a human to scan, and streams inbound events as
 //                               NDJSON to stdout. Not exercised by tests.
+//   --forbid-qr                 Saved-session mode. If WhatsApp asks for a QR,
+//                               exit loudly instead of emitting one. Used by the
+//                               supervised beta runner after the device is linked.
 //
 // stdout is the data channel (NDJSON events). The QR and all human-facing logs go
 // to stderr so they never corrupt the event stream piped into the Python runner.
@@ -68,6 +71,7 @@ function usage() {
       'Usage:',
       '  node index.js --mock [--fixtures <path>]   Offline replay to NDJSON (no socket, no QR)',
       '  node index.js --qr                         Live: emit QR, stream inbound NDJSON to stdout',
+      '  node index.js --qr --forbid-qr             Live saved-session only; exit if QR is needed',
       '',
       'Environment (names only; never commit values):',
       `  ${AUTH_DIR_ENV}   directory the sidecar owns for the linked-device auth session`,
@@ -82,13 +86,15 @@ function usage() {
 }
 
 function parseArgs(argv) {
-  const args = { mock: false, qr: false, fixtures: null };
+  const args = { mock: false, qr: false, forbidQr: false, fixtures: null };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--mock') {
       args.mock = true;
     } else if (arg === '--qr' || arg === '--live') {
       args.qr = true;
+    } else if (arg === '--forbid-qr' || arg === '--no-qr') {
+      args.forbidQr = true;
     } else if (arg === '--fixtures') {
       i += 1;
       args.fixtures = argv[i];
@@ -99,6 +105,10 @@ function parseArgs(argv) {
     }
   }
   return args;
+}
+
+function qrForbidden(args, env) {
+  return !!(args && args.forbidQr) || env.PG_WA_FORBID_QR === '1';
 }
 
 // Parse a fixtures file recorded as a JSON array, a single JSON object, or
@@ -168,13 +178,17 @@ async function writeQrArtifacts(qr, qrDir) {
 
 // Live mode. Baileys is required lazily so mock mode and the unit tests never
 // need the dependency installed and never risk opening a socket.
-async function runLive(env) {
+async function runLive(env, args = {}) {
   const authDir = resolveAuthDir(env);
   const qrDir = resolveQrDir(env);
   const sendPort = resolveSendPort(env);
+  const forbidQr = qrForbidden(args, env);
   log(`live: using linked-device auth dir ${JSON.stringify(authDir)}`);
   log('live: this will open a WhatsApp linked-device socket and emit a QR.');
   log('live: scan the QR ONLY on the dedicated Portfolio Guru handset.');
+  if (forbidQr) {
+    log('live: QR emission is forbidden; saved linked-device auth must reopen without pairing.');
+  }
   if (qrDir) {
     log(`live: QR image handoff enabled at ${JSON.stringify(qrDir)}.`);
   }
@@ -243,6 +257,18 @@ async function runLive(env) {
     socket.ev.on('connection.update', (update) => {
       const { connection, lastDisconnect, qr } = update;
       if (qr) {
+        if (forbidQr) {
+          log('live: QR requested but forbidden; exiting instead of starting a new pairing flow.');
+          if (outboundServer) {
+            outboundServer.close();
+          }
+          if (activeSocket && typeof activeSocket.end === 'function') {
+            activeSocket.end(new Error('qr-forbidden'));
+          }
+          process.exitCode = 6;
+          setTimeout(() => process.exit(6), 50);
+          return;
+        }
         sawQr = true;
         writeQrArtifacts(qr, qrDir)
           .then((artifact) => {
@@ -356,7 +382,7 @@ async function main(argv, env) {
   if (args.mock) {
     return runMock(resolveFixturesPath(env, args.fixtures));
   }
-  return runLive(env);
+  return runLive(env, args);
 }
 
 if (require.main === module) {
@@ -372,4 +398,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { main, parseArgs, readFixtures, runMock, writeQrArtifacts };
+module.exports = { main, parseArgs, qrForbidden, readFixtures, runMock, writeQrArtifacts };

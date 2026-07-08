@@ -250,6 +250,33 @@ is linked; `linked-device-sidecar-present` attests transport code only. All thre
 repo tiers must be present alongside the dedicated account, legal, connector, and
 distinct-fingerprint gates for the guard to return `launch-ready`.
 
+##### Supervised saved-session beta runner (`scripts/pg_whatsapp_beta_runner.py`)
+
+Once the QR has been scanned exactly once and the saved auth reopens, the beta
+operating mode is **not** another QR/link run. Use the supervisor wrapper:
+
+```bash
+scripts/pg_whatsapp_beta_runner.py plan
+scripts/pg_whatsapp_beta_runner.py start
+scripts/pg_whatsapp_beta_runner.py status
+scripts/pg_whatsapp_beta_runner.py stop
+```
+
+The supervisor starts the linked-device sidecar and Python relay as one local
+process group, writes redacted logs to `.artifacts/whatsapp-live/beta-runner.log`,
+and refuses to start unless:
+
+- `scripts/pg_whatsapp_readiness.py` returns `launch-ready`.
+- saved linked-device auth exists (`creds.json` in the sidecar auth dir).
+- `PORTFOLIO_INBOUND_URL`, `PORTFOLIO_INBOUND_SECRET`, and `PG_WA_SEND_PORT`
+  are set in the environment.
+- no existing beta runner PID is alive.
+
+It always runs the sidecar with `--forbid-qr` / `PG_WA_FORBID_QR=1`. If WhatsApp
+asks for a QR, the sidecar exits loudly instead of emitting one. That makes the
+normal beta failure mode "runner stopped; relink needs a deliberate manual
+approval" rather than "unexpected QR loop".
+
 #### Next manual live step — link the dedicated account via Linked Devices
 
 This is the first action that touches a live WhatsApp account. Do it only after
@@ -293,6 +320,21 @@ Stop conditions for this step:
 Rollback: remove the linked device from **Linked Devices** on the dedicated
 account and stop the connector process. Never fall back to routing testers
 through the EMGurus account.
+
+#### Next beta operating step — receive replies continuously
+
+After a single private canary proves:
+
+1. saved session opens without QR,
+2. inbound `messages.upsert` is observed,
+3. the relay forwards to `POST /api/portfolio/inbound`,
+4. the bridge returns `200 OK`,
+5. outbound send succeeds,
+
+start `scripts/pg_whatsapp_beta_runner.py start` for a supervised beta window.
+Do not invite testers while the runner is only being launched manually for
+bounded watches. Tester traffic needs the supervised runner alive, observable,
+and stoppable.
 
 ### Phase 3 - Legal and processor review
 

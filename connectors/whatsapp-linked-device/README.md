@@ -93,6 +93,23 @@ PG_WA_SEND_PORT=18795 node index.js --qr \
       venv/bin/python3 whatsapp_connector_runner.py --relay)
 ```
 
+### Saved-session beta runner (no QR)
+
+After the dedicated Portfolio Guru handset has been linked once and the saved
+auth reopens, use the repo supervisor instead of another QR/link command:
+
+```bash
+scripts/pg_whatsapp_beta_runner.py plan
+scripts/pg_whatsapp_beta_runner.py start
+scripts/pg_whatsapp_beta_runner.py status
+scripts/pg_whatsapp_beta_runner.py stop
+```
+
+The supervisor requires the readiness guard, saved auth, inbound bridge config,
+outbound send port, and no existing runner PID. It starts this sidecar with
+`--forbid-qr` and `PG_WA_FORBID_QR=1`, so if WhatsApp asks for a QR the process
+exits loudly instead of starting a new pairing flow.
+
 ## Live diagnostics (reading a watch)
 
 stdout stays the clean NDJSON data channel; all diagnostics go to **stderr**, so
@@ -159,6 +176,9 @@ Read by the **Python runner** (passed to its environment, not this sidecar):
   fingerprint (the readiness guard's `distinct-whatsapp-account` gate).
 - Stop if the readiness guard returns `blocked`, or if linking would require
   reading secrets, editing `~/.hermes`, or restarting a shared service.
+- In supervised beta mode, QR emission is forbidden. If the sidecar asks for a
+  QR, stop and deliberately re-enter the manual link checklist rather than
+  letting the runner pair a new device.
 - **Rollback:** on the dedicated account open WhatsApp → Settings → Linked
   Devices → remove this linked device, then stop the sidecar process. The
   git-ignored auth dir may be deleted to drop the local session. Never fall back

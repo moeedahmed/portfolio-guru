@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { spawnSync } = require('child_process');
 const path = require('path');
+const { parseArgs, qrForbidden } = require('../index');
 
 const INDEX = path.join(__dirname, '..', 'index.js');
 const PY_FIXTURE = path.join(
@@ -84,4 +85,22 @@ test('no arguments prints usage and exits non-zero (no accidental live socket)',
   assert.ok(/Usage:/.test(result.stderr));
   // Default invocation must not enter live mode.
   assert.ok(!/linked-device socket/.test(result.stderr));
+});
+
+test('saved-session live mode can forbid QR emission', () => {
+  const args = parseArgs(['--qr', '--forbid-qr']);
+
+  assert.equal(args.qr, true);
+  assert.equal(args.forbidQr, true);
+  assert.equal(qrForbidden(args, {}), true);
+  assert.equal(qrForbidden({ forbidQr: false }, { PG_WA_FORBID_QR: '1' }), true);
+  assert.equal(qrForbidden({ forbidQr: false }, {}), false);
+});
+
+test('usage documents the no-QR saved-session mode', () => {
+  const result = spawnSync(process.execPath, [INDEX, '--help'], { encoding: 'utf8' });
+
+  assert.equal(result.status, 0);
+  assert.ok(/--forbid-qr/.test(result.stderr));
+  assert.ok(/saved-session/i.test(result.stderr));
 });
