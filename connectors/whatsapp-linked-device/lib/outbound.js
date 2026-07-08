@@ -13,9 +13,13 @@ function normaliseRecipient(to) {
     throw new Error('recipient is required');
   }
   if (value.startsWith('wa:')) {
-    return value.slice(3);
+    return normaliseRecipient(value.slice(3));
   }
-  if (value.includes('@s.whatsapp.net') || value.includes('@g.us')) {
+  if (
+    value.endsWith('@s.whatsapp.net') ||
+    value.endsWith('@lid') ||
+    value.endsWith('@g.us')
+  ) {
     return value;
   }
   const digits = value.replace(/[^\d]/g, '');

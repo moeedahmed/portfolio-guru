@@ -50,6 +50,10 @@ test('normaliseRecipient accepts neutral wa conversation ids and phone numbers',
     normaliseRecipient('wa:447700900000@s.whatsapp.net'),
     '447700900000@s.whatsapp.net'
   );
+  assert.equal(
+    normaliseRecipient('wa:274195762118823@lid'),
+    '274195762118823@lid'
+  );
   assert.equal(normaliseRecipient('+44 7700 900000'), '447700900000@s.whatsapp.net');
   assert.equal(normaliseRecipient('120363000000000000@g.us'), '120363000000000000@g.us');
 });
@@ -96,7 +100,7 @@ test('outbound server sends through the active linked-device socket', async () =
     const response = await post(
       port,
       '/api/channels/whatsapp/portfolio-guru/send',
-      { to: 'wa:447700900000@s.whatsapp.net', text: 'Hello from Portfolio Guru' },
+      { to: 'wa:274195762118823@lid', text: 'Hello from Portfolio Guru' },
       { 'x-portfolio-secret': 'secret' }
     );
 
@@ -104,7 +108,7 @@ test('outbound server sends through the active linked-device socket', async () =
     assert.deepEqual(response.body, { ok: true });
     assert.deepEqual(sent, [
       {
-        jid: '447700900000@s.whatsapp.net',
+        jid: '274195762118823@lid',
         message: { text: 'Hello from Portfolio Guru' },
       },
     ]);
