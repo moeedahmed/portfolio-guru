@@ -26,9 +26,11 @@ linked-device connector while the account is still being reviewed.
 
 A Hermes profile is **optional**: it may be used only as a thin transport for
 that connector, never as product logic. If Hermes is chosen as the transport,
-the current `portfolio-guru` Hermes WhatsApp credentials are linked to the same
-underlying WhatsApp account as EMGurus, so starting that profile as-is is unsafe;
-the dedicated account must come first. A direct channel connector (for example
+`scripts/pg_whatsapp_identity_guard.py` must pass immediately before the
+Portfolio Hermes gateway is started. On 2026-07-08 the `portfolio-guru` Hermes
+WhatsApp session was repaired by archiving the EMGurus-linked session and
+installing the distinct saved Portfolio Guru session; the guard is the durable
+proof that this separation still holds. A direct channel connector (for example
 the `POST /api/portfolio/inbound` bridge in `backend/webhook_server.py`) needs no
 Hermes profile at all.
 
@@ -86,7 +88,8 @@ Gate:
   restriction, lock, review, or risk flag.
 - The safe account fingerprint for the Portfolio Guru WhatsApp account is
   distinct from the safe account fingerprint for EMGurus.
-- The old linked `portfolio-guru` Hermes WhatsApp credentials are not used.
+- The old EMGurus-linked `portfolio-guru` Hermes WhatsApp credentials are not
+  used.
 
 Evidence must be supplied to the readiness guard as non-secret identifiers only.
 Do not put raw WhatsApp credentials, QR material, auth tokens, device session
@@ -144,6 +147,10 @@ Gate (only when `PG_WHATSAPP_CONNECTOR=hermes`):
   Portfolio Hermes gateway and do not ask for more WhatsApp test messages; two
   Baileys bridges are fighting for the same account and WhatsApp will return
   `440 connectionReplaced`.
+- Do not treat an old status note saying "current Portfolio Hermes credentials
+  match EMGurus" as live truth. Re-run the guard; the current expected good
+  state is a distinct Portfolio Guru session, with the previous bad session
+  archived.
 
 A direct connector needs no Hermes profile, and the readiness guard does not
 require one unless `PG_WHATSAPP_CONNECTOR=hermes`.

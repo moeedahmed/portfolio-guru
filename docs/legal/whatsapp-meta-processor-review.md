@@ -18,9 +18,11 @@ layer, and never as the classifier, drafter, or product identity. WhatsApp is
 only a channel connector; the Portfolio Guru deterministic engine remains the
 product brain. Portfolio Guru is never an EMGurus/Guru fan-out agent.
 
-If Hermes is used as the transport, the current `portfolio-guru` Hermes WhatsApp
-credentials must not be started while they are linked to the same underlying
-WhatsApp account as EMGurus.
+If Hermes is used as the transport, the `portfolio-guru` Hermes WhatsApp
+credentials must pass the repo-owned identity guard before launch. On
+2026-07-08 the profile was repaired from a prior EMGurus-linked session to a
+distinct saved Portfolio Guru session; do not regress to a shared EMGurus
+identity.
 
 ## Primary Sources Checked
 
