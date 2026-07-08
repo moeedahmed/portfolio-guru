@@ -8,6 +8,8 @@ These tests pin the contract the Hermes profile shim relies on:
   metadata and never contains raw clinical text.
 * ``preview`` returns a user-visible, source-tied local draft preview for
   the same user conversation while still blocking Kaizen writes.
+* ``whatsapp-reply`` renders the Portfolio Guru reply for a Hermes WhatsApp
+  transport, without sending WhatsApp messages or writing to Kaizen.
 * ``recommend`` / ``draft`` / ``health`` always return ``blocked`` so
   the test bot cannot drift away from the live engine via local
   heuristics.
@@ -232,6 +234,71 @@ def test_preview_without_payload_argument_returns_error():
 
     assert code == 1
     assert response["status"] == "error"
+
+
+# ---------------------------------------------------------------------------
+# whatsapp-reply — Hermes WhatsApp transport rendering
+# ---------------------------------------------------------------------------
+
+
+def test_whatsapp_reply_greeting_returns_portfolio_onboarding():
+    payload = _valid_payload(
+        channel="whatsapp",
+        conversation_id="447000000000@s.whatsapp.net",
+        gateway_user_id="447000000000@s.whatsapp.net",
+        text="hi",
+    )
+
+    code, response = _run_cli("whatsapp-reply", "--payload", json.dumps(payload))
+
+    assert code == 0
+    assert response["status"] == "ok"
+    data = response["data"]
+    assert data["disposition"] == "handle"
+    assert data["reply_kind"] == "portfolio_reply"
+    assert data["kaizen_writes"] is False
+    rendered = data["rendered_reply"]
+    assert "Welcome to Portfolio Guru" in rendered
+    assert "Kaizen" in rendered
+
+
+def test_whatsapp_reply_group_scope_returns_private_refusal_without_echo():
+    secret = "ZZWHATSAPPGROUPSECRETZZ"
+    payload = _valid_payload(
+        channel="whatsapp",
+        conversation_id="120000000000000000@g.us",
+        gateway_user_id="447000000000@s.whatsapp.net",
+        scope="group",
+        text=secret,
+    )
+
+    code, response = _run_cli("whatsapp-reply", "--payload", json.dumps(payload))
+
+    assert code == 0
+    assert response["status"] == "ok"
+    data = response["data"]
+    assert data["disposition"] == "refuse_group"
+    assert data["reply_kind"] == "refusal"
+    assert data["kaizen_writes"] is False
+    rendered = data["rendered_reply"]
+    assert "one-to-one" in rendered
+    assert secret not in json.dumps(response)
+
+
+def test_whatsapp_reply_empty_payload_blocks_without_reply():
+    payload = _valid_payload(
+        channel="whatsapp",
+        conversation_id="447000000000@s.whatsapp.net",
+        text=None,
+        media=[],
+    )
+
+    code, response = _run_cli("whatsapp-reply", "--payload", json.dumps(payload))
+
+    assert code == 0
+    assert response["status"] == "blocked"
+    assert response["data"]["disposition"] == "refuse_empty"
+    assert response["data"]["kaizen_writes"] is False
 
 
 # ---------------------------------------------------------------------------

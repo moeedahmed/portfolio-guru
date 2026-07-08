@@ -1,0 +1,10 @@
+name: portfolio-guru-engine-dispatch
+label: Portfolio Guru Engine Dispatch
+kind: standalone
+version: 1.0.0
+description: >
+  Routes Portfolio Guru WhatsApp DMs through the repo-owned Portfolio Guru
+  engine command and sends the rendered reply through Hermes WhatsApp.
+author: Solvoro Labs
+provides_hooks:
+  - pre_gateway_dispatch

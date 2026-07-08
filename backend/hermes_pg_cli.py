@@ -64,6 +64,7 @@ Safety
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import sys
 from typing import Any
@@ -73,6 +74,7 @@ SUPPORTED_COMMANDS = (
     "status",
     "shadow",
     "preview",
+    "whatsapp-reply",
     "recommend",
     "draft",
     "health",
@@ -183,6 +185,70 @@ def cmd_preview(
     return {"status": "ok", "data": data}
 
 
+def cmd_whatsapp_reply(
+    *, payload_json: str | None = None, payload_path: str | None = None
+) -> dict[str, Any]:
+    """Render the Portfolio Guru reply Hermes should send on WhatsApp.
+
+    This is the deterministic runtime path for the Hermes WhatsApp transport:
+    validate the channel-neutral inbound contract, select the same first-turn
+    reply the HTTP bridge would use, and return rendered WhatsApp-safe text.
+    It performs no WhatsApp send and no Kaizen write.
+    """
+    try:
+        payload = _load_payload(
+            command="whatsapp-reply",
+            payload_json=payload_json,
+            payload_path=payload_path,
+        )
+    except _PayloadError as exc:
+        return {"status": "error", "error": str(exc)}
+
+    from channel_actions import render_numbered
+    from hermes_bridge_contract import inbound_from_payload, serialise_decision
+    from webhook_server import _select_inbound_reply
+
+    try:
+        decision = inbound_from_payload(payload)
+    except ValueError as exc:
+        return {
+            "status": "error",
+            "error": f"invalid Hermes payload: {exc}",
+        }
+
+    if decision.refusal is not None:
+        return {
+            "status": "ok",
+            "data": {
+                "disposition": decision.disposition.value,
+                "rendered_reply": render_numbered(decision.refusal),
+                "reply_kind": "refusal",
+                "kaizen_writes": False,
+            },
+        }
+
+    if decision.message is None:
+        return {
+            "status": "blocked",
+            "data": {
+                **serialise_decision(decision),
+                "reason": "payload produced no user-visible reply",
+                "kaizen_writes": False,
+            },
+        }
+
+    reply = asyncio.run(_select_inbound_reply(payload.get("text")))
+    return {
+        "status": "ok",
+        "data": {
+            "disposition": decision.disposition.value,
+            "rendered_reply": render_numbered(reply),
+            "reply_kind": "portfolio_reply",
+            "kaizen_writes": False,
+        },
+    }
+
+
 def cmd_deferred(name: str) -> dict[str, Any]:
     return {
         "status": "blocked",
@@ -289,6 +355,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path to a JSON payload file, or '-' for stdin.",
     )
 
+    whatsapp_reply = sub.add_parser(
+        "whatsapp-reply",
+        help="Render the Portfolio Guru reply for Hermes WhatsApp transport.",
+    )
+    whatsapp_reply.add_argument("--payload", help="Inline JSON payload string.")
+    whatsapp_reply.add_argument(
+        "--payload-file",
+        help="Path to a JSON payload file, or '-' for stdin.",
+    )
+
     for name in DEFERRED_COMMANDS:
         sub.add_parser(
             name,
@@ -310,6 +386,11 @@ def _dispatch(args: argparse.Namespace) -> dict[str, Any]:
         )
     if args.command == "preview":
         return cmd_preview(
+            payload_json=args.payload,
+            payload_path=args.payload_file,
+        )
+    if args.command == "whatsapp-reply":
+        return cmd_whatsapp_reply(
             payload_json=args.payload,
             payload_path=args.payload_file,
         )
