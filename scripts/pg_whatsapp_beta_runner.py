@@ -15,24 +15,29 @@ import json
 import os
 import shlex
 import signal
+import socket
 import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Mapping
+from urllib.parse import urlparse
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STATE_DIR = REPO_ROOT / ".artifacts" / "whatsapp-live"
 DEFAULT_AUTH_DIR = REPO_ROOT / "connectors" / "whatsapp-linked-device" / ".wa-auth"
 PID_FILE = DEFAULT_STATE_DIR / "beta-runner.pid"
+BRIDGE_PID_FILE = DEFAULT_STATE_DIR / "beta-bridge.pid"
 LOG_FILE = DEFAULT_STATE_DIR / "beta-runner.log"
 STATUS_FILE = DEFAULT_STATE_DIR / "beta-runner.json"
 REQUIRED_ENV = (
     "PORTFOLIO_INBOUND_URL",
     "PORTFOLIO_INBOUND_SECRET",
     "PG_WA_SEND_PORT",
+    "PG_WA_OUTBOUND_SECRET",
+    "PG_WA_OUTBOUND_GATEWAY_TOKEN",
 )
 
 
@@ -60,6 +65,23 @@ def _read_pid(path: Path | None = None) -> int | None:
         return int(path.read_text(encoding="utf-8").strip())
     except (FileNotFoundError, ValueError):
         return None
+
+
+def _kill_pid_file(path: Path, *, timeout: float = 5.0) -> int | None:
+    pid = _read_pid(path)
+    if not pid or not _pid_alive(pid):
+        path.unlink(missing_ok=True)
+        return pid
+    os.killpg(pid, signal.SIGTERM)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not _pid_alive(pid):
+            path.unlink(missing_ok=True)
+            return pid
+        time.sleep(0.1)
+    os.killpg(pid, signal.SIGKILL)
+    path.unlink(missing_ok=True)
+    return pid
 
 
 def current_status() -> RunnerStatus:
@@ -102,6 +124,97 @@ def _auth_ready(auth_dir: Path) -> bool:
 
 def _missing_env(env: Mapping[str, str]) -> list[str]:
     return [name for name in REQUIRED_ENV if not env.get(name, "").strip()]
+
+
+def _python_path() -> Path:
+    backend_dir = REPO_ROOT / "backend"
+    for candidate in (
+        backend_dir / "venv" / "bin" / "python3",
+        backend_dir / ".venv" / "bin" / "python3",
+    ):
+        if candidate.exists():
+            return candidate
+    return Path(sys.executable)
+
+
+def _local_bridge_target(env: Mapping[str, str]) -> tuple[str, int] | None:
+    parsed = urlparse(env.get("PORTFOLIO_INBOUND_URL", ""))
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    if parsed.hostname not in {"127.0.0.1", "localhost"}:
+        return None
+    if parsed.scheme == "https":
+        return None
+    return parsed.hostname or "127.0.0.1", parsed.port or 80
+
+
+def _port_accepts(host: str, port: int) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def _wait_for_port(host: str, port: int, *, timeout: float = 12.0) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if _port_accepts(host, port):
+            return True
+        time.sleep(0.2)
+    return False
+
+
+def _bridge_env(env: Mapping[str, str]) -> dict[str, str]:
+    merged = {**os.environ, **dict(env)}
+    merged.setdefault("PORTFOLIO_OUTBOUND_URL", f"http://127.0.0.1:{env['PG_WA_SEND_PORT']}")
+    merged.setdefault("PORTFOLIO_OUTBOUND_ACCOUNT_ID", "portfolio-guru")
+    merged.setdefault("PORTFOLIO_OUTBOUND_SECRET", env["PG_WA_OUTBOUND_SECRET"])
+    merged.setdefault("PORTFOLIO_OUTBOUND_GATEWAY_TOKEN", env["PG_WA_OUTBOUND_GATEWAY_TOKEN"])
+    return merged
+
+
+def _start_local_bridge_if_needed(env: Mapping[str, str]) -> int | None:
+    if env.get("PG_WA_MANAGE_LOCAL_BRIDGE", "1").strip().lower() in {"0", "false", "no"}:
+        return None
+    target = _local_bridge_target(env)
+    if target is None:
+        return None
+    host, port = target
+    if _port_accepts(host, port):
+        return None
+
+    stale_pid = _read_pid(BRIDGE_PID_FILE)
+    if stale_pid and not _pid_alive(stale_pid):
+        BRIDGE_PID_FILE.unlink(missing_ok=True)
+
+    backend_dir = REPO_ROOT / "backend"
+    with LOG_FILE.open("a", encoding="utf-8") as handle:
+        handle.write(f"bridge: starting local Portfolio inbound bridge on {host}:{port}\n")
+        proc = subprocess.Popen(
+            [
+                str(_python_path()),
+                "-m",
+                "uvicorn",
+                "webhook_server:app",
+                "--host",
+                host,
+                "--port",
+                str(port),
+                "--log-level",
+                "warning",
+            ],
+            cwd=str(backend_dir),
+            env=_bridge_env(env),
+            stdout=handle,
+            stderr=handle,
+            start_new_session=True,
+        )
+    BRIDGE_PID_FILE.write_text(str(proc.pid), encoding="utf-8")
+    if _wait_for_port(host, port):
+        return proc.pid
+    _kill_pid_file(BRIDGE_PID_FILE, timeout=1.0)
+    raise RuntimeError(f"local Portfolio inbound bridge did not listen on {host}:{port}")
 
 
 def _command(env: Mapping[str, str], auth_dir: Path, log_file: Path) -> str:
@@ -179,10 +292,20 @@ def start(env: Mapping[str, str] | None = None) -> RunnerStatus:
     plan = build_start_plan(env)
     if plan.status != "ready":
         return plan
+    try:
+        bridge_pid = _start_local_bridge_if_needed(env)
+    except Exception as exc:  # noqa: BLE001 - reported as a start blocker
+        return RunnerStatus(
+            status="blocked",
+            detail=f"local Portfolio inbound bridge failed to start: {exc}",
+            log_path=str(LOG_FILE),
+        )
 
     command = _command(env, DEFAULT_AUTH_DIR, LOG_FILE)
     with LOG_FILE.open("a", encoding="utf-8") as handle:
         handle.write(f"\n--- beta runner start {time.strftime('%Y-%m-%dT%H:%M:%S%z')} ---\n")
+        if bridge_pid:
+            handle.write(f"bridge: local Portfolio inbound bridge pid={bridge_pid}\n")
     proc = subprocess.Popen(
         ["bash", "-lc", command],
         cwd=str(REPO_ROOT),
@@ -201,32 +324,11 @@ def start(env: Mapping[str, str] | None = None) -> RunnerStatus:
 
 
 def stop() -> RunnerStatus:
-    pid = _read_pid()
-    if not pid or not _pid_alive(pid):
-        PID_FILE.unlink(missing_ok=True)
-        return RunnerStatus(
-            status="stopped",
-            detail="Portfolio Guru WhatsApp beta runner was not running",
-            pid=pid,
-            log_path=str(LOG_FILE),
-        )
-    os.killpg(pid, signal.SIGTERM)
-    deadline = time.time() + 5
-    while time.time() < deadline:
-        if not _pid_alive(pid):
-            PID_FILE.unlink(missing_ok=True)
-            return RunnerStatus(
-                status="stopped",
-                detail="Portfolio Guru WhatsApp beta runner stopped",
-                pid=pid,
-                log_path=str(LOG_FILE),
-            )
-        time.sleep(0.1)
-    os.killpg(pid, signal.SIGKILL)
-    PID_FILE.unlink(missing_ok=True)
+    pid = _kill_pid_file(PID_FILE)
+    _kill_pid_file(BRIDGE_PID_FILE)
     return RunnerStatus(
         status="stopped",
-        detail="Portfolio Guru WhatsApp beta runner killed after graceful stop timeout",
+        detail="Portfolio Guru WhatsApp beta runner stopped",
         pid=pid,
         log_path=str(LOG_FILE),
     )

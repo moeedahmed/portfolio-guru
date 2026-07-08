@@ -38,6 +38,8 @@ def _approved_env(**overrides: str) -> dict[str, str]:
         "PORTFOLIO_INBOUND_URL": "http://127.0.0.1:8101/api/portfolio/inbound",
         "PORTFOLIO_INBOUND_SECRET": "test-secret",
         "PG_WA_SEND_PORT": "18795",
+        "PG_WA_OUTBOUND_SECRET": "outbound-secret",
+        "PG_WA_OUTBOUND_GATEWAY_TOKEN": "outbound-token",
     }
     env.update(overrides)
     return env
@@ -71,6 +73,22 @@ def test_start_plan_requires_bridge_and_outbound_env(tmp_path, monkeypatch) -> N
     assert "PG_WA_SEND_PORT" in result.detail
 
 
+def test_start_plan_requires_outbound_secret_for_local_bridge(tmp_path, monkeypatch) -> None:
+    runner = _load_module()
+    auth_dir = tmp_path / ".wa-auth"
+    auth_dir.mkdir()
+    (auth_dir / "creds.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(runner, "PID_FILE", tmp_path / "beta-runner.pid")
+    monkeypatch.setattr(runner, "LOG_FILE", tmp_path / "beta-runner.log")
+    env = _approved_env()
+    env.pop("PG_WA_OUTBOUND_SECRET")
+
+    result = runner.build_start_plan(env, auth_dir=auth_dir)
+
+    assert result.status == "blocked"
+    assert "PG_WA_OUTBOUND_SECRET" in result.detail
+
+
 def test_start_plan_ready_when_gates_auth_and_env_are_present(tmp_path, monkeypatch) -> None:
     runner = _load_module()
     auth_dir = tmp_path / ".wa-auth"
@@ -83,6 +101,28 @@ def test_start_plan_ready_when_gates_auth_and_env_are_present(tmp_path, monkeypa
 
     assert result.status == "ready"
     assert "without QR" in result.detail
+
+
+def test_local_bridge_target_only_allows_plain_localhost() -> None:
+    runner = _load_module()
+
+    assert runner._local_bridge_target(_approved_env()) == ("127.0.0.1", 8101)
+    assert (
+        runner._local_bridge_target(
+            _approved_env(PORTFOLIO_INBOUND_URL="https://example.com/api/portfolio/inbound")
+        )
+        is None
+    )
+
+
+def test_bridge_env_maps_local_outbound_endpoint() -> None:
+    runner = _load_module()
+    mapped = runner._bridge_env(_approved_env())
+
+    assert mapped["PORTFOLIO_OUTBOUND_URL"] == "http://127.0.0.1:18795"
+    assert mapped["PORTFOLIO_OUTBOUND_ACCOUNT_ID"] == "portfolio-guru"
+    assert mapped["PORTFOLIO_OUTBOUND_SECRET"] == "outbound-secret"
+    assert mapped["PORTFOLIO_OUTBOUND_GATEWAY_TOKEN"] == "outbound-token"
 
 
 def test_supervised_command_forbids_qr_and_uses_saved_auth(tmp_path) -> None:

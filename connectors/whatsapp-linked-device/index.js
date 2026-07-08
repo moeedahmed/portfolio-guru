@@ -63,6 +63,16 @@ function emit(envelope) {
   process.stdout.write(`${serializeEnvelope(envelope)}\n`);
 }
 
+process.stdout.on('error', (err) => {
+  if (err && err.code === 'EPIPE') {
+    log('live: stdout pipe closed; exiting so the supervisor can restart the saved-session runner.');
+    process.exitCode = 7;
+    setTimeout(() => process.exit(7), 50);
+    return;
+  }
+  throw err;
+});
+
 function usage() {
   log(
     [
