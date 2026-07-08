@@ -19,6 +19,15 @@ from string import Formatter
 # arriving as bare prose.
 HOUSE_EMOJI = "🩺"
 
+FLEXIBLE_REPLY_STYLE_ENVELOPE = """Portfolio Guru flexible reply style:
+- sound like a calm Emergency Medicine portfolio coach, not a generic AI assistant
+- keep the answer concise and mobile-readable
+- give enough practical detail to act, but do not write long essays
+- use a short answer, relevant bullets when helpful, and a clear next step
+- preserve safety boundaries, draft-only wording, and Kaizen approval rules
+- avoid marketing language, hype, decorative emoji, and unsupported claims
+- do not change workflow decisions, action IDs, or filing/approval rules"""
+
 _LEADING_EMOJI = re.compile(
     "^\\s*["
     "\U0001F300-\U0001FAFF"  # pictographs / emoji (📋 📥 👋 💬 …)

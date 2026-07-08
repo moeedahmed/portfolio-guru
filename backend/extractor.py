@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 from models import CBDData, FormTypeRecommendation, FormDraft
 from form_schemas import FORM_SCHEMAS
 from form_display import public_form_name, sanitize_internal_form_codes
-from message_policy import render_message
+from message_policy import FLEXIBLE_REPLY_STYLE_ENVELOPE, render_message
 from model_config import gemini_three_five_flash_model
 from privacy_guard import deidentify_clinical_text
 import ai_telemetry
@@ -1111,7 +1111,9 @@ User question: {text}
 Analyse the case and suggest the 2-3 best RCEM WPBA form types for THIS specific case.
 Available forms: CBD, DOPS, Mini-CEX, ACAT, LAT, ACAF, STAT, MSF, QIAT, JCF, Teaching, Procedural Log, SDL, Ultrasound Case, ESLE, Complaint, Serious Incident, Educational Activity, Formal Course.
 
-Be concise. For each suggestion give the form name and a one-line reason why it fits this case."""
+Be concise. For each suggestion give the form name and a one-line reason why it fits this case.
+
+{FLEXIBLE_REPLY_STYLE_ENVELOPE}"""
             text = await _generate(prompt, purpose="grounded_answer")
             return sanitize_internal_form_codes(text.strip())
 
@@ -1238,7 +1240,9 @@ Answer this question about what you do. Be concise and helpful. Key facts:
 
 Question: {text}
 
-Answer concisely. If the question is about a specific form type, confirm it's supported."""
+Answer concisely. If the question is about a specific form type, confirm it's supported.
+
+{FLEXIBLE_REPLY_STYLE_ENVELOPE}"""
 
     text = await _generate(prompt, purpose="grounded_answer")
     return sanitize_internal_form_codes(text.strip())

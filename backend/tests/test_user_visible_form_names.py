@@ -173,6 +173,59 @@ async def test_answer_question_pricing_copy_is_not_free_hallucination(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_probabilistic_side_question_prompt_uses_style_envelope(monkeypatch):
+    import extractor
+
+    prompts = []
+
+    async def fake_generate(prompt, **kwargs):
+        prompts.append(prompt)
+        return "Portfolio evidence should be specific and source-tied."
+
+    monkeypatch.setattr(extractor, "_generate", fake_generate)
+
+    answer = await extractor.answer_question(
+        "How should I think about portfolio evidence after a messy shift?"
+    )
+
+    assert answer == "Portfolio evidence should be specific and source-tied."
+    assert prompts
+    prompt = prompts[-1]
+    assert "Portfolio Guru flexible reply style:" in prompt
+    assert "calm Emergency Medicine portfolio coach" in prompt
+    assert "draft-only wording" in prompt
+    assert "do not write long essays" in prompt
+
+
+@pytest.mark.asyncio
+async def test_case_specific_form_question_prompt_uses_style_envelope(monkeypatch):
+    import extractor
+
+    prompts = []
+
+    async def fake_generate(prompt, **kwargs):
+        prompts.append(prompt)
+        return "CBD fits because the case centres on clinical reasoning."
+
+    monkeypatch.setattr(extractor, "_generate", fake_generate)
+
+    answer = await extractor.answer_question(
+        "Which form is best?",
+        case_context=(
+            "Adult in ED with chest pain. I assessed, discussed ECG/troponin "
+            "findings with a senior, managed risk and reflected on escalation."
+        ),
+    )
+
+    assert "Case-Based Discussion fits" in answer
+    assert prompts
+    prompt = prompts[-1]
+    assert "Portfolio Guru flexible reply style:" in prompt
+    assert "calm Emergency Medicine portfolio coach" in prompt
+    assert "do not change workflow decisions" in prompt
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("prompt", "expected"),
     [
