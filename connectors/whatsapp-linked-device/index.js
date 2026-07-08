@@ -33,15 +33,18 @@ const {
   resolveAuthDir,
   resolveFixturesPath,
   resolveQrDir,
+  resolveSendPort,
   AUTH_DIR_ENV,
   FIXTURES_ENV,
   QR_DIR_ENV,
+  SEND_PORT_ENV,
 } = require('./lib/config');
 const {
   buildLiveSocketConfig,
   describeDisconnect,
   shouldReconnectAfterClose,
 } = require('./lib/live');
+const { startOutboundServer } = require('./lib/outbound');
 
 function log(msg) {
   process.stderr.write(`${msg}\n`);
@@ -64,6 +67,7 @@ function usage() {
       `  ${AUTH_DIR_ENV}   directory the sidecar owns for the linked-device auth session`,
       `  ${FIXTURES_ENV}   path to a JSON fixture used only in --mock mode`,
       `  ${QR_DIR_ENV}     optional directory for latest.png/latest.txt QR handoff artefacts`,
+      `  ${SEND_PORT_ENV}  optional localhost port for the outbound send endpoint`,
       '',
       'Pipe the NDJSON stream into the repo-owned Python relay:',
       '  node index.js --qr | (cd ../../backend && venv/bin/python3 whatsapp_connector_runner.py --relay)',
@@ -161,11 +165,15 @@ async function writeQrArtifacts(qr, qrDir) {
 async function runLive(env) {
   const authDir = resolveAuthDir(env);
   const qrDir = resolveQrDir(env);
+  const sendPort = resolveSendPort(env);
   log(`live: using linked-device auth dir ${JSON.stringify(authDir)}`);
   log('live: this will open a WhatsApp linked-device socket and emit a QR.');
   log('live: scan the QR ONLY on the dedicated Portfolio Guru handset.');
   if (qrDir) {
     log(`live: QR image handoff enabled at ${JSON.stringify(qrDir)}.`);
+  }
+  if (sendPort) {
+    log(`live: outbound replies will be accepted on localhost port ${sendPort}.`);
   }
 
   let baileys;
@@ -190,6 +198,8 @@ async function runLive(env) {
 
   fs.mkdirSync(authDir, { recursive: true });
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
+  let activeSocket = null;
+  let outboundServer = null;
 
   // Pin the current WhatsApp Web build. Connecting with a stale/absent version
   // is what makes WhatsApp close the handshake with a 405 before any QR is
@@ -210,7 +220,17 @@ async function runLive(env) {
 
   function startSocket() {
     const socket = makeWASocket(buildLiveSocketConfig({ state, version, Browsers }));
+    activeSocket = socket;
     let sawQr = false;
+
+    if (sendPort && !outboundServer) {
+      outboundServer = startOutboundServer({
+        port: sendPort,
+        getSocket: () => activeSocket,
+        env,
+        log,
+      });
+    }
 
     socket.ev.on('creds.update', saveCreds);
 
@@ -261,7 +281,17 @@ async function runLive(env) {
           log('live: restart required after pairing; reconnecting with saved auth state.');
           setTimeout(startSocket, 500);
         } else if (loggedOut) {
+          if (outboundServer) {
+            outboundServer.close();
+          }
           process.exitCode = 0;
+        } else {
+          log('live: non-recoverable close; exiting so supervisors do not treat the relay as healthy.');
+          if (outboundServer) {
+            outboundServer.close();
+          }
+          process.exitCode = 5;
+          setTimeout(() => process.exit(5), 50);
         }
       }
     });

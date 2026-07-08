@@ -14,6 +14,11 @@ engine. The sidecar's stdout is consumed by
 via `backend/whatsapp_linked_device.py` and forwards handled turns to
 `POST /api/portfolio/inbound`.
 
+For the linked-device beta, the same sidecar can expose a localhost-only
+WhatsApp send endpoint via `PG_WA_SEND_PORT`. Portfolio Guru still owns the
+reply text; the sidecar only sends that text through the already-linked
+WhatsApp socket.
+
 ```
 dedicated PG WhatsApp account
   -> this sidecar (Baileys)  --NDJSON on stdout-->
@@ -37,7 +42,10 @@ dedicated PG WhatsApp account
   artefacts to `latest.png` and `latest.txt` in that directory. Use the PNG for
   Telegram/laptop scanning; treat both files as temporary login artefacts.
 - The sidecar reads **no repo secret**. The inbound bridge URL and secret belong
-  to the Python runner's environment, not this process.
+  to the Python runner's environment, not this process. If `PG_WA_SEND_PORT` is
+  enabled for outbound beta replies, the sidecar may read
+  `PG_WA_OUTBOUND_SECRET` / `PG_WA_OUTBOUND_GATEWAY_TOKEN` from the environment
+  to validate localhost send requests; values are never logged or committed.
 
 ## Modes
 
@@ -75,6 +83,16 @@ Pipe live events into the repo-owned Python relay:
 node index.js --qr | (cd ../../backend && venv/bin/python3 whatsapp_connector_runner.py --relay)
 ```
 
+Live beta with the sidecar owning outbound sends on localhost:
+
+```bash
+PG_WA_SEND_PORT=18795 node index.js --qr \
+  | (cd ../../backend && \
+      PORTFOLIO_INBOUND_URL=http://127.0.0.1:8101/api/portfolio/inbound \
+      PORTFOLIO_INBOUND_SECRET=<shared-gateway-secret> \
+      venv/bin/python3 whatsapp_connector_runner.py --relay)
+```
+
 ## Configuration (env var names only — never commit values)
 
 Read by this sidecar:
@@ -86,6 +104,12 @@ Read by this sidecar:
 - `PG_WA_QR_DIR` — optional directory for `latest.png` / `latest.txt` QR handoff
   files. Prefer this for headless Mac Mini workflows so the QR can be sent as a
   scannable Telegram image instead of relying on terminal output.
+- `PG_WA_SEND_PORT` — optional localhost port exposing
+  `POST /api/channels/whatsapp/:accountId/send` for Portfolio Guru replies.
+- `PG_WA_OUTBOUND_SECRET` — optional secret checked against
+  `X-Portfolio-Secret` on the localhost send endpoint.
+- `PG_WA_OUTBOUND_GATEWAY_TOKEN` — optional bearer token checked on the
+  localhost send endpoint.
 
 Read by the **Python runner** (passed to its environment, not this sidecar):
 

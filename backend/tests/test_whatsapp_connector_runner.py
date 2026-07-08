@@ -25,6 +25,7 @@ import json
 import os
 import subprocess
 import sys
+from io import StringIO
 
 import pytest
 
@@ -77,6 +78,24 @@ def test_relay_forwards_only_handled_turns_using_the_normaliser():
     assert posted[0] == wld.to_inbound_payload(events[0])
     assert posted[0]["channel"] == "whatsapp"
     assert posted[0]["scope"] == "direct"
+
+
+def test_relay_stream_processes_ndjson_lines_without_batching_until_eof():
+    """Live sidecar stdin must be consumed as an NDJSON stream.
+
+    The Baileys process keeps stdout open for the whole linked-device session,
+    so relay mode cannot call ``sys.stdin.read()`` and wait for EOF before
+    forwarding messages. This pins the live behaviour to line-by-line dispatch.
+    """
+    event = _recorded_events()[0]
+    posted: list[dict] = []
+
+    stats = runner.relay_stream(StringIO(json.dumps(event) + "\n"), posted.append)
+
+    assert stats.total == 1
+    assert stats.forwarded == 1
+    assert len(posted) == 1
+    assert posted[0]["conversation_id"] == "wa:447700900000@s.whatsapp.net"
 
 
 def test_relay_never_forwards_group_content():

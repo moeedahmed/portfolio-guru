@@ -45,7 +45,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any, Callable, Iterable, Iterator, Mapping, TextIO
 
 import whatsapp_linked_device as wld
 from channel_contract import InboundDisposition
@@ -112,6 +112,24 @@ def _iter_events(source_text: str) -> list[Mapping[str, Any]]:
     return [decoded]
 
 
+def _iter_ndjson_stream(source: Iterable[str]) -> Iterator[Mapping[str, Any]]:
+    """Yield one decoded event per NDJSON line from a live stream.
+
+    The live Baileys sidecar keeps stdout open while the linked-device socket is
+    running. Relay mode must therefore process each line as it arrives instead
+    of waiting for EOF. This helper is intentionally NDJSON-only because the
+    live sidecar emits one sanitised JSON envelope per line.
+    """
+    for line in source:
+        line = line.strip()
+        if not line:
+            continue
+        decoded = json.loads(line)
+        if not isinstance(decoded, Mapping):
+            raise ValueError("live NDJSON stream must contain JSON objects")
+        yield decoded
+
+
 def run_dry_run(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """Offline routing preview for a batch — never contacts a service.
 
@@ -153,6 +171,11 @@ def relay_events(events: Iterable[Mapping[str, Any]], poster: Poster) -> RelaySt
         refused_empty=refused_empty,
         refused_invalid=refused_invalid,
     )
+
+
+def relay_stream(source: Iterable[str], poster: Poster) -> RelayStats:
+    """Relay a live NDJSON stream without waiting for the sidecar to exit."""
+    return relay_events(_iter_ndjson_stream(source), poster)
 
 
 def make_bridge_poster(url: str, secret: str, *, timeout: float = 10.0) -> Poster:
@@ -207,6 +230,18 @@ def _load_source_text(payload: str | None) -> str:
     if payload:
         return Path(payload).read_text(encoding="utf-8")
     return sys.stdin.read()
+
+
+def _relay_source(
+    *,
+    payload: str | None,
+    poster: Poster,
+    stdin: TextIO | None = None,
+) -> RelayStats:
+    """Relay from a finite payload file or the live stdin NDJSON stream."""
+    if payload:
+        return relay_events(_iter_events(_load_source_text(payload)), poster)
+    return relay_stream(stdin if stdin is not None else sys.stdin, poster)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -289,8 +324,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 4
 
-    events = _iter_events(_load_source_text(args.payload))
-    stats = relay_events(events, make_bridge_poster(url, secret))
+    stats = _relay_source(
+        payload=args.payload,
+        poster=make_bridge_poster(url, secret),
+    )
     print(json.dumps(stats.as_dict(), indent=2, sort_keys=True))
     return 0
 
