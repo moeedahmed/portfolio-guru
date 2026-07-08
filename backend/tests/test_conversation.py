@@ -115,6 +115,19 @@ class TestMessagePolicy:
         assert style_grounded_answer("✅ Yes, CBD is supported.") == "✅ Yes, CBD is supported."
         assert style_grounded_answer("   ") == ""
 
+    def test_kaizen_setup_guide_is_short_structured_and_plain_text(self):
+        from message_policy import render_message
+
+        text = render_message("kaizen_setup_guide")
+
+        assert text.startswith("🔗 Connect Kaizen")
+        assert "1. Open Connect Kaizen" in text
+        assert "Safety notes:" in text
+        assert "review and approve" in text
+        assert "supervisor" in text
+        assert "**" not in text
+        assert "`" not in text
+
     def test_form_recommendation_template_is_mobile_first_and_privacy_safe(self):
         from bot import _build_form_recommendation_text
         from extractor import FORM_UUIDS

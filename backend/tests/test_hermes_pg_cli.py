@@ -267,7 +267,7 @@ def test_whatsapp_reply_greeting_returns_portfolio_onboarding():
     [
         (
             "do you not want to connect to my kaizen account?",
-            ("Kaizen", "WhatsApp", "credentials"),
+            ("Connect Kaizen", "secure setup", "review and approve"),
         ),
         (
             "What forms would this support for my portfolio?",

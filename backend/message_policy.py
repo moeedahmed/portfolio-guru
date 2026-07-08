@@ -180,6 +180,22 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         ),
         safety_critical=True,
     ),
+    "kaizen_setup_guide": MessageTemplate(
+        key="kaizen_setup_guide",
+        message_class=MessageClass.FIXED,
+        text=(
+            "🔗 Connect Kaizen\n\n"
+            "Use the secure Connect Kaizen flow before you ask me to save drafts.\n\n"
+            "1. Open Connect Kaizen.\n"
+            "2. Enter your Kaizen username and password in the secure setup screen.\n"
+            "3. Wait for the connection check to pass, then send an anonymised case.\n\n"
+            "Safety notes:\n"
+            "• Kaizen credentials are encrypted and not shown back in chat.\n"
+            "• I only save Kaizen drafts after you review and approve them.\n"
+            "• I never submit anything to a supervisor."
+        ),
+        safety_critical=True,
+    ),
     "greeting_reply": MessageTemplate(
         key="greeting_reply",
         message_class=MessageClass.FIXED,

@@ -9885,6 +9885,15 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 await update.message.reply_text(_standalone_safe_redirect_text(raw_text))
                 return ConversationHandler.END
             if pre_capture_route == "answer":
+                if route_message(raw_text).intent is ConversationalIntent.SETUP_OR_CREDENTIALS:
+                    await update.message.reply_text(
+                        render_message("kaizen_setup_guide"),
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")],
+                            [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")],
+                        ]),
+                    )
+                    return ConversationHandler.END
                 try:
                     answer = style_grounded_answer(await answer_question(raw_text))
                     await update.message.reply_text(answer)

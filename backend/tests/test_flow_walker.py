@@ -205,6 +205,29 @@ class TestFlowWalker:
         recommend.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_kaizen_setup_question_uses_structured_button_response(self):
+        from bot import handle_case_input
+
+        sim = BotSimulator()
+        update = sim._make_text_update("How do I set up Kaizen?")
+        context = sim._make_context()
+        answer = AsyncMock(return_value="old generated Kaizen paragraph")
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.answer_question', new=answer):
+            result = await handle_case_input(update, context)
+
+        assert result == ConversationHandler.END
+        text = sim.get_last_text()
+        assert text.startswith("🔗 Connect Kaizen")
+        assert "1. Open Connect Kaizen" in text
+        assert "Safety notes:" in text
+        assert "**" not in text
+        assert ("🔗 Connect Kaizen", "ACTION|setup") in sim.get_last_buttons()
+        assert ("⚙️ Settings", "ACTION|settings") in sim.get_last_buttons()
+        answer.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_reply_to_rich_case_with_explicit_cbd_uses_quoted_case_text(self):
         from bot import AWAIT_FORM_CHOICE, handle_case_input
 

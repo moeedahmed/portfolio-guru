@@ -63,6 +63,19 @@ def test_setup_or_credentials_routes_separately_from_billing():
     assert result.signals == {"action": "setup_credentials"}
 
 
+@pytest.mark.asyncio
+async def test_answer_question_uses_fixed_kaizen_setup_copy():
+    from extractor import answer_question
+
+    answer = await answer_question("How do I set up Kaizen?")
+
+    assert answer.startswith("🔗 Connect Kaizen")
+    assert "1. Open Connect Kaizen" in answer
+    assert "Safety notes:" in answer
+    assert "supervisor" in answer
+    assert "**" not in answer
+
+
 def test_clinical_planning_and_escalation_are_not_billing_or_form_support():
     result = route_message(
         "A patient was bitten on the face by an injured dog. They came to ED with facial wounds "

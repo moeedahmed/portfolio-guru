@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 from models import CBDData, FormTypeRecommendation, FormDraft
 from form_schemas import FORM_SCHEMAS
 from form_display import public_form_name, sanitize_internal_form_codes
+from message_policy import render_message
 from model_config import gemini_three_five_flash_model
 from privacy_guard import deidentify_clinical_text
 import ai_telemetry
@@ -1026,6 +1027,27 @@ def _looks_like_pricing_question(text_lower: str) -> bool:
     )
 
 
+def _looks_like_kaizen_setup_question(text_lower: str) -> bool:
+    if not text_lower:
+        return False
+    if "kaizen" not in text_lower:
+        return False
+    return any(
+        phrase in text_lower
+        for phrase in (
+            "setup",
+            "set up",
+            "connect",
+            "link",
+            "login",
+            "credential",
+            "credentials",
+            "password",
+            "reconnect",
+        )
+    )
+
+
 def _contains_standalone_term(text_lower: str, term: str) -> bool:
     """Match support terms/form codes as standalone terms, not substrings."""
     if not term:
@@ -1095,6 +1117,8 @@ Be concise. For each suggestion give the form name and a one-line reason why it 
 
     # Check deterministic standalone product/help questions before broad form support.
     text_lower = text.lower()
+    if _looks_like_kaizen_setup_question(text_lower):
+        return render_message("kaizen_setup_guide")
     if _looks_like_standalone_capability_question(text_lower):
         return sanitize_internal_form_codes(
             "🩺 I turn anonymised case notes, voice notes, photos, or documents into RCEM portfolio drafts. I can suggest the best form, show you the draft first, and save it to Kaizen as a draft after you approve."

@@ -278,14 +278,7 @@ async def _select_whatsapp_reply(text: str | None):
 
     if intent == ConversationalIntent.SETUP_OR_CREDENTIALS:
         return ChannelReply(
-            body=style_grounded_answer(
-                "Yes — Portfolio Guru is built to work with Kaizen, but I won't "
-                "collect or manage Kaizen credentials directly inside WhatsApp.\n\n"
-                "Use the secure Portfolio Guru account setup flow to connect "
-                "Kaizen. In WhatsApp, you can send anonymised case notes, ask "
-                "portfolio questions, and review draft wording. Nothing is filed "
-                "to Kaizen until you approve it."
-            )
+            body=render_message("kaizen_setup_guide"),
         )
 
     if intent == ConversationalIntent.PORTFOLIO_QUESTION:
