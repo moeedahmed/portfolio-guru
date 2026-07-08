@@ -45,6 +45,12 @@ const {
   shouldReconnectAfterClose,
 } = require('./lib/live');
 const { startOutboundServer } = require('./lib/outbound');
+const {
+  describeSelfIdentity,
+  formatUpsertSummary,
+  summarizeHistorySync,
+  summarizeUpsert,
+} = require('./lib/diagnostics');
 
 function log(msg) {
   process.stderr.write(`${msg}\n`);
@@ -265,7 +271,12 @@ async function runLive(env) {
         }
       }
       if (connection === 'open') {
-        log('live: linked-device session open; streaming inbound events.');
+        const identity = describeSelfIdentity(state && state.creds);
+        log(
+          `live: linked-device session open; streaming inbound events ` +
+            `(platform=${identity.platform || 'unknown'}; ` +
+            `self=${identity.self.scope}/${identity.self.fingerprint || 'none'}).`
+        );
       } else if (connection === 'close') {
         const statusCode = lastDisconnect && lastDisconnect.error
           && lastDisconnect.error.output
@@ -297,9 +308,27 @@ async function runLive(env) {
     });
 
     socket.ev.on('messages.upsert', (upsert) => {
+      // Redacted, content-free summary to stderr so a live watch can see that a
+      // message was observed and why any were dropped — stdout stays the clean
+      // NDJSON data channel.
+      log(`live: ${formatUpsertSummary(summarizeUpsert(upsert))}`);
       for (const envelope of extractInbound(upsert)) {
         emit(envelope);
       }
+    });
+
+    // History sync is diagnostic-only: messages the phone already showed but
+    // that were delivered before this companion came online surface here rather
+    // than as a live upsert. We log the batch size (never content) so a
+    // "delivered but not observed" report can be explained, but we do NOT route
+    // history messages into the product path — replaying old turns as new
+    // inbound would be unsafe.
+    socket.ev.on('messaging-history.set', (historySet) => {
+      const sync = summarizeHistorySync(historySet);
+      log(
+        `live: messaging-history.set messages=${sync.messages} ` +
+          `chats=${sync.chats} isLatest=${sync.isLatest} (diagnostic only; not relayed).`
+      );
     });
   }
 

@@ -55,6 +55,14 @@ from channel_contract import InboundDisposition
 # fully unit-testable offline; the live implementation is make_bridge_poster.
 Poster = Callable[[Mapping[str, Any]], None]
 
+# An observer receives a content-free routing record for each relayed turn so a
+# live watch can see the per-turn disposition without waiting for the end-of-run
+# stats. It is injected and defaults to None so the pure relay functions stay
+# free of any I/O. The record carries routing SHAPE only — disposition, running
+# turn index and whether the turn was forwarded — never the conversation id
+# (which embeds a phone number), the message text, or a caption.
+RelayObserver = Callable[[Mapping[str, Any]], None]
+
 _INBOUND_URL_ENV = "PORTFOLIO_INBOUND_URL"
 _INBOUND_SECRET_ENV = "PORTFOLIO_INBOUND_SECRET"
 
@@ -140,7 +148,11 @@ def run_dry_run(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
     return [wld.dry_run(raw) for raw in events]
 
 
-def relay_events(events: Iterable[Mapping[str, Any]], poster: Poster) -> RelayStats:
+def relay_events(
+    events: Iterable[Mapping[str, Any]],
+    poster: Poster,
+    observer: RelayObserver | None = None,
+) -> RelayStats:
     """Normalise each raw event and forward only the handled turns via ``poster``.
 
     Routing is delegated wholly to the neutral contract:
@@ -150,20 +162,33 @@ def relay_events(events: Iterable[Mapping[str, Any]], poster: Poster) -> RelaySt
     frames (no routable ``remoteJid``) are refused locally and never posted, so
     private content in a shared thread never leaves the connector and a Baileys
     protocol frame can never crash the relay. No product logic runs here.
+
+    ``observer`` (optional) is called once per turn with a content-free routing
+    record so a live watch can see each turn's disposition as it happens; it never
+    receives the conversation id, text, or caption.
     """
     total = forwarded = refused_group = refused_empty = refused_invalid = 0
     for raw in events:
         total += 1
-        decision = wld.normalize_and_route(raw).decision
-        if decision.disposition is InboundDisposition.HANDLE:
+        disposition = wld.normalize_and_route(raw).decision.disposition
+        was_forwarded = disposition is InboundDisposition.HANDLE
+        if was_forwarded:
             poster(wld.to_inbound_payload(raw))
             forwarded += 1
-        elif decision.disposition is InboundDisposition.REFUSE_GROUP:
+        elif disposition is InboundDisposition.REFUSE_GROUP:
             refused_group += 1
-        elif decision.disposition is InboundDisposition.REFUSE_INVALID:
+        elif disposition is InboundDisposition.REFUSE_INVALID:
             refused_invalid += 1
         else:
             refused_empty += 1
+        if observer is not None:
+            observer(
+                {
+                    "n": total,
+                    "disposition": disposition.value,
+                    "forwarded": was_forwarded,
+                }
+            )
     return RelayStats(
         total=total,
         forwarded=forwarded,
@@ -173,9 +198,13 @@ def relay_events(events: Iterable[Mapping[str, Any]], poster: Poster) -> RelaySt
     )
 
 
-def relay_stream(source: Iterable[str], poster: Poster) -> RelayStats:
+def relay_stream(
+    source: Iterable[str],
+    poster: Poster,
+    observer: RelayObserver | None = None,
+) -> RelayStats:
     """Relay a live NDJSON stream without waiting for the sidecar to exit."""
-    return relay_events(_iter_ndjson_stream(source), poster)
+    return relay_events(_iter_ndjson_stream(source), poster, observer)
 
 
 def make_bridge_poster(url: str, secret: str, *, timeout: float = 10.0) -> Poster:
@@ -196,6 +225,41 @@ def make_bridge_poster(url: str, secret: str, *, timeout: float = 10.0) -> Poste
             timeout=timeout,
         )
         resp.raise_for_status()
+
+    return _post
+
+
+def _stderr_observer(record: Mapping[str, Any]) -> None:
+    """Write one content-free per-turn line to stderr for a live watch.
+
+    Prints routing shape only (turn index, disposition, forwarded flag) so the
+    watch can see each turn as it is relayed. stdout stays reserved for the
+    end-of-run stats JSON.
+    """
+    print(
+        f"relay: turn {record['n']} disposition={record['disposition']} "
+        f"forwarded={record['forwarded']}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+def _logging_poster(inner: Poster) -> Poster:
+    """Wrap a poster so each bridge POST attempt and its outcome is visible.
+
+    Makes the "bridge POST attempted" / "engine accepted" / "bridge POST failed"
+    states observable in a live watch. It logs routing shape only — never the
+    payload, which embeds the conversation id and text — and preserves the inner
+    poster's raise-on-failure semantics so a failing bridge still surfaces.
+    """
+
+    def _post(payload: Mapping[str, Any]) -> None:
+        try:
+            inner(payload)
+        except Exception as err:  # noqa: BLE001 - re-raised after logging
+            print(f"relay: bridge POST failed ({type(err).__name__})", file=sys.stderr, flush=True)
+            raise
+        print("relay: bridge POST ok", file=sys.stderr, flush=True)
 
     return _post
 
@@ -237,11 +301,12 @@ def _relay_source(
     payload: str | None,
     poster: Poster,
     stdin: TextIO | None = None,
+    observer: RelayObserver | None = None,
 ) -> RelayStats:
     """Relay from a finite payload file or the live stdin NDJSON stream."""
     if payload:
-        return relay_events(_iter_events(_load_source_text(payload)), poster)
-    return relay_stream(stdin if stdin is not None else sys.stdin, poster)
+        return relay_events(_iter_events(_load_source_text(payload)), poster, observer)
+    return relay_stream(stdin if stdin is not None else sys.stdin, poster, observer)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -326,7 +391,8 @@ def main(argv: list[str] | None = None) -> int:
 
     stats = _relay_source(
         payload=args.payload,
-        poster=make_bridge_poster(url, secret),
+        poster=_logging_poster(make_bridge_poster(url, secret)),
+        observer=_stderr_observer,
     )
     print(json.dumps(stats.as_dict(), indent=2, sort_keys=True))
     return 0

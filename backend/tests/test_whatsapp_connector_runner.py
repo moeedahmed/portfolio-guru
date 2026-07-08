@@ -98,6 +98,61 @@ def test_relay_stream_processes_ndjson_lines_without_batching_until_eof():
     assert posted[0]["conversation_id"] == "wa:447700900000@s.whatsapp.net"
 
 
+def test_relay_events_invokes_observer_with_content_free_records():
+    """The per-turn observer sees routing shape only — never content or JIDs.
+
+    This is the live-watch diagnostic seam: it lets an operator see each turn's
+    disposition as it is relayed instead of only the end-of-run stats. The
+    record must carry the turn index, disposition and forwarded flag and nothing
+    that embeds the conversation id (a phone number), text, or a caption.
+    """
+    events = _recorded_events()
+    seen: list[dict] = []
+
+    runner.relay_events(events, lambda _payload: None, seen.append)
+
+    assert [r["disposition"] for r in seen] == [
+        "handle",
+        "handle",
+        "refuse_group",
+        "refuse_empty",
+    ]
+    assert [r["forwarded"] for r in seen] == [True, True, False, False]
+    assert [r["n"] for r in seen] == [1, 2, 3, 4]
+    # Routing shape only — the recorded clinical/caption text and the JID that
+    # rides inside conversation_id must never reach the observer record.
+    serialized = json.dumps(seen)
+    assert "synthetic" not in serialized
+    assert "conversation_id" not in serialized
+    assert "@s.whatsapp.net" not in serialized
+
+
+def test_logging_poster_logs_ok_and_reraises_on_failure(capsys):
+    """The logging poster makes bridge POST attempts visible and preserves raises."""
+    ok = runner._logging_poster(lambda _payload: None)
+    ok({"channel": "whatsapp", "scope": "direct"})
+    assert "bridge POST ok" in capsys.readouterr().err
+
+    def _boom(_payload):
+        raise RuntimeError("bridge down")
+
+    failing = runner._logging_poster(_boom)
+    with pytest.raises(RuntimeError):
+        failing({"channel": "whatsapp"})
+    err = capsys.readouterr().err
+    assert "bridge POST failed" in err
+    # The redacted log names the error type only, never the payload.
+    assert "RuntimeError" in err
+    assert "whatsapp" not in err
+
+
+def test_stderr_observer_writes_content_free_line(capsys):
+    runner._stderr_observer({"n": 1, "disposition": "handle", "forwarded": True})
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "turn 1 disposition=handle forwarded=True" in captured.err
+
+
 def test_relay_never_forwards_group_content():
     group_event = {
         "key": {"remoteJid": "120363000000000000@g.us", "id": "G1"},

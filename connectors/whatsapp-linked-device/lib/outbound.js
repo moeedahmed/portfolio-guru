@@ -2,6 +2,8 @@
 
 const http = require('http');
 
+const { redactJid } = require('./diagnostics');
+
 function normaliseRecipient(to) {
   const value = String(to || '').trim();
   if (!value) {
@@ -108,6 +110,10 @@ function createOutboundServer({ getSocket, env, log }) {
       }
 
       await socket.sendMessage(jid, { text });
+      if (log) {
+        const target = redactJid(jid);
+        log(`outbound: sent reply to ${target.scope}/${target.fingerprint || 'none'}`);
+      }
       writeJson(res, 200, { ok: true });
     } catch (err) {
       if (log) {

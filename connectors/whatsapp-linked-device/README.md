@@ -93,6 +93,38 @@ PG_WA_SEND_PORT=18795 node index.js --qr \
       venv/bin/python3 whatsapp_connector_runner.py --relay)
 ```
 
+## Live diagnostics (reading a watch)
+
+stdout stays the clean NDJSON data channel; all diagnostics go to **stderr**, so
+a live watch can now tell the states of the inbound path apart instead of going
+blind between "session open" and process exit. Every line is redacted — scope,
+booleans, counts and a one-way JID fingerprint only, never a number, JID in the
+clear, message text, or caption.
+
+- `session open ... (platform=<p>; self=<scope>/<fp>)` — **which account** is
+  linked. Confirm `platform` and the `self` fingerprint match the dedicated
+  Portfolio Guru account before trusting any inbound result.
+- `messages.upsert type=<notify|append> total=N emitted=M dropped=K [reason=n]`
+  — a message was **observed** by the sidecar. `type=notify` is a live message,
+  `type=append` is one delivered on reconnect. `dropped` reasons are `fromMe`
+  (our own echo), `no-remoteJid` (a protocol frame) and `no-body` (a receipt or
+  unsupported body). **`total=0` across the whole window means WhatsApp never
+  delivered the message to this companion** — the problem is upstream of this
+  transport, not a filter here.
+- `messaging-history.set messages=N ...` — offline/history batch size. Messages
+  the phone already showed but that predate this companion coming online surface
+  here; they are logged for visibility but **not** relayed as new inbound.
+- `relay: turn N disposition=<...> forwarded=<bool>` (Python runner) — the
+  neutral routing verdict per turn.
+- `relay: bridge POST ok` / `bridge POST failed (<ErrorType>)` — the forward to
+  `POST /api/portfolio/inbound` was attempted and its outcome.
+- `outbound: sent reply to <scope>/<fp>` — a Portfolio Guru reply went back out
+  through the linked session.
+
+A conclusive watch reads top to bottom: open (right account) → upsert observed →
+turn forwarded → bridge POST ok → outbound sent. The first missing line is the
+failing hop.
+
 ## Configuration (env var names only — never commit values)
 
 Read by this sidecar:
