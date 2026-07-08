@@ -63,6 +63,12 @@ test('describeDisconnect names the observed 405 handshake rejection', () => {
   assert.match(label, /WA Web version/i);
 });
 
+test('describeDisconnect names 428 as a reconnectable socket close', () => {
+  const label = describeDisconnect(428, {});
+  assert.match(label, /connection closed/i);
+  assert.match(label, /reconnect/i);
+});
+
 test('describeDisconnect prefers the named Baileys DisconnectReason', () => {
   const DisconnectReason = { loggedOut: 401, restartRequired: 515 };
   assert.equal(describeDisconnect(401, DisconnectReason), 'loggedOut');
@@ -77,6 +83,7 @@ test('describeDisconnect handles a missing status code', () => {
 test('shouldReconnectAfterClose handles the first-pair restart requirement only', () => {
   const DisconnectReason = { loggedOut: 401, restartRequired: 515 };
   assert.equal(shouldReconnectAfterClose(515, DisconnectReason), true);
+  assert.equal(shouldReconnectAfterClose(428, DisconnectReason), true);
   assert.equal(shouldReconnectAfterClose(401, DisconnectReason), false);
   assert.equal(shouldReconnectAfterClose(408, DisconnectReason), false);
   assert.equal(shouldReconnectAfterClose(515, null), false);

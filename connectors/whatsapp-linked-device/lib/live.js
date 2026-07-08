@@ -60,6 +60,7 @@ function describeDisconnect(statusCode, DisconnectReason) {
     return 'unknown (no status code)';
   }
   const extras = {
+    428: 'connection closed — WhatsApp closed the web socket; reconnect the saved session',
     405: 'connection failure — WhatsApp rejected the web handshake, usually a stale/absent WA Web version',
     409: 'conflict — another session may already hold this linked device',
   };
@@ -79,6 +80,7 @@ function describeDisconnect(statusCode, DisconnectReason) {
 
 function shouldReconnectAfterClose(statusCode, DisconnectReason) {
   return Boolean(
+    statusCode === 428 ||
     DisconnectReason
       && statusCode === DisconnectReason.restartRequired
   );
