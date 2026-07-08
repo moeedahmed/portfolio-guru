@@ -1,9 +1,17 @@
-"""Shared deterministic replies for side questions across channels.
+"""Shared reply contracts for side questions across channels.
 
-Telegram and WhatsApp should not maintain separate answer heuristics for
+Telegram and WhatsApp should not maintain separate workflow heuristics for
 ordinary setup/capability/portfolio/account questions. This module returns a
 channel-neutral :class:`channel_actions.ChannelReply`; callers render it as
 Telegram inline buttons or WhatsApp-safe text.
+
+The contract is deliberately stricter than free generation and looser than
+"identical message every time":
+
+* workflow decisions, safety boundaries and action IDs are deterministic;
+* high-risk copy remains static;
+* lower-risk portfolio guidance can later flex inside the same required-facts
+  contract without changing channel controls.
 """
 
 from __future__ import annotations
@@ -22,6 +30,35 @@ SETTINGS_ACTION = ChannelAction(
     action_id="ACTION|settings",
     label="⚙️ Settings",
 )
+
+STATIC_COPY_INTENTS = frozenset(
+    {
+        ConversationalIntent.SETUP_OR_CREDENTIALS,
+        ConversationalIntent.SAFETY_OR_MEDICAL_ADVICE,
+        ConversationalIntent.ACCOUNT_OR_BILLING,
+        ConversationalIntent.OUT_OF_SCOPE,
+    }
+)
+
+FLEXIBLE_COPY_INTENTS = frozenset(
+    {
+        ConversationalIntent.PORTFOLIO_QUESTION,
+        ConversationalIntent.HELP_OR_CAPABILITY,
+        ConversationalIntent.EDIT_DRAFT,
+        ConversationalIntent.FILE_TO_KAIZEN,
+        ConversationalIntent.UNKNOWN,
+    }
+)
+
+
+def copy_mode_for_intent(intent: ConversationalIntent) -> str:
+    """Return whether copy for an intent should be static or controlled-flexible."""
+
+    if intent in STATIC_COPY_INTENTS:
+        return "static"
+    if intent in FLEXIBLE_COPY_INTENTS:
+        return "controlled-flexible"
+    return "workflow-only"
 
 
 def select_deterministic_reply(

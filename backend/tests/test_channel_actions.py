@@ -81,6 +81,20 @@ def test_telegram_and_numbered_share_the_same_labels():
         assert label in numbered
 
 
+def test_channel_renderers_do_not_require_identical_body_copy_for_stable_actions():
+    original = _reply()
+    variant = ChannelReply(
+        body="Different wording, same workflow.",
+        continuation="Use the same stable actions.",
+        actions=original.actions,
+    )
+
+    assert original.full_text() != variant.full_text()
+    assert to_telegram_button_rows(original) == to_telegram_button_rows(variant)
+    assert resolve_numbered_choice(variant, "1") == "GATHER|done"
+    assert resolve_numbered_choice(variant, "cancel") == "ACTION|cancel"
+
+
 def test_resolve_numbered_choice_by_number():
     reply = _reply()
     assert resolve_numbered_choice(reply, "1") == "GATHER|done"
