@@ -152,6 +152,40 @@ Gate (only when `PG_WHATSAPP_CONNECTOR=hermes`):
   state is a distinct Portfolio Guru session, with the previous bad session
   archived.
 
+#### Incident-derived failure ladder
+
+The 2026-07-08 WhatsApp incident proved that repeated user canaries can waste
+time and increase account risk when the real issue is runtime/session ownership.
+For Portfolio Guru, repeated no-response is now a diagnostic state, not a prompt
+to ask Moeed for another `hi`.
+
+Before any live WhatsApp test, prove:
+
+- `scripts/pg_whatsapp_identity_guard.py` passes and shows the Portfolio Guru
+  Hermes WhatsApp identity is distinct from EMGurus.
+- `hermes --profile portfolio-guru status` and `hermes --profile emgurus status`
+  show the expected gateways without one profile replacing the other.
+- The active bridge process uses the expected profile session path.
+- Recent bridge logs do not show repeated `connectionReplaced` / `440`, QR
+  prompts, logged-out/bad-session errors, or persistent decrypt/pre-key loops.
+- The message under test was sent after the runtime reached ready state; older
+  messages sent before a restart should not be treated as missing replies.
+
+If a fresh test still shows no visible reply, inspect this ladder before asking
+for another user action:
+
+1. Real WhatsApp inbound reached the `portfolio-guru` Hermes transport.
+2. `portfolio-guru-engine-dispatch` saw the turn and skipped generic Hermes LLM
+   dispatch for the correct reason.
+3. The Portfolio Guru engine rendered the reply.
+4. Hermes sent the reply through the Portfolio Guru WhatsApp adapter.
+5. Receipt/update or Moeed-visible WhatsApp proof confirms delivery.
+
+`gateway running`, `WhatsApp connected`, `send accepted`, and local smoke tests
+are useful clues but are not final proof. The ready-to-test state is: distinct
+identity, non-conflicting EMGurus and Portfolio Guru gateways, a fresh message
+after readiness, and observed inbound -> engine dispatch -> outbound reply.
+
 A direct connector needs no Hermes profile, and the readiness guard does not
 require one unless `PG_WHATSAPP_CONNECTOR=hermes`.
 
