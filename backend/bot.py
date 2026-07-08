@@ -50,6 +50,7 @@ from bulk_filer import bulk_file
 from kaizen_unsigned_scraper import scrape_unsigned_tickets
 from conversational_router import ConversationalIntent, route_message
 from channel_actions import to_telegram_keyboard
+from channel_reply_policy import select_deterministic_reply
 from conversation_supervisor import GatheringTurnKind, decide_gathering_turn
 from message_policy import render_message, safety_redirect_text, style_grounded_answer
 from runtime_identity import write_runtime_identity
@@ -9885,13 +9886,14 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 await update.message.reply_text(_standalone_safe_redirect_text(raw_text))
                 return ConversationHandler.END
             if pre_capture_route == "answer":
-                if route_message(raw_text).intent is ConversationalIntent.SETUP_OR_CREDENTIALS:
+                deterministic_reply = select_deterministic_reply(
+                    raw_text,
+                    include_first_contact=True,
+                )
+                if deterministic_reply is not None:
                     await update.message.reply_text(
-                        render_message("kaizen_setup_guide"),
-                        reply_markup=InlineKeyboardMarkup([
-                            [InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")],
-                            [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")],
-                        ]),
+                        deterministic_reply.full_text(),
+                        reply_markup=to_telegram_keyboard(deterministic_reply),
                     )
                     return ConversationHandler.END
                 try:

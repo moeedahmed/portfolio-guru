@@ -228,6 +228,46 @@ class TestFlowWalker:
         answer.assert_not_awaited()
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("text", "expected_terms"),
+        [
+            (
+                "What can you help me with?",
+                ("Portfolio Guru turns your case notes", "Kaizen"),
+            ),
+            (
+                "Can you help me with my ARCP portfolio?",
+                ("RCEM", "WPBA", "drafts"),
+            ),
+            (
+                "How much does this cost?",
+                ("account", "billing", "payment details"),
+            ),
+        ],
+    )
+    async def test_short_side_questions_use_shared_reply_policy_not_llm(
+        self, text, expected_terms
+    ):
+        from bot import handle_case_input
+
+        sim = BotSimulator()
+        update = sim._make_text_update(text)
+        context = sim._make_context()
+        answer = AsyncMock(return_value="old generated answer")
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.answer_question', new=answer):
+            result = await handle_case_input(update, context)
+
+        assert result == ConversationHandler.END
+        rendered = sim.get_last_text() or ""
+        assert "old generated answer" not in rendered
+        assert "Please describe the clinical case you want to document" not in rendered
+        for term in expected_terms:
+            assert term in rendered
+        answer.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_reply_to_rich_case_with_explicit_cbd_uses_quoted_case_text(self):
         from bot import AWAIT_FORM_CHOICE, handle_case_input
 

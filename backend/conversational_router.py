@@ -159,6 +159,8 @@ ACCOUNT_TERMS = (
     "payment",
     "pay",
     "paid",
+    "cost",
+    "how much",
     "subscribe",
     "subscription",
     "plan",
@@ -247,6 +249,13 @@ def route_message(message: str) -> RouterResult:
             intent=ConversationalIntent.ACCOUNT_OR_BILLING,
             confidence=0.86,
             signals=_compact_signals(action="account_or_billing"),
+        )
+
+    if _looks_like_form_help_request(text, form_type):
+        return RouterResult(
+            intent=ConversationalIntent.PORTFOLIO_QUESTION,
+            confidence=0.82,
+            signals=_compact_signals(action="answer_question", form_type=form_type),
         )
 
     if _looks_like_help_or_capability_question(text):
@@ -338,6 +347,18 @@ def _extract_edit_action(text: str) -> str:
 
 def _looks_like_portfolio_question(text: str) -> bool:
     return "?" in text and _contains_any(text, PORTFOLIO_QUESTION_TERMS)
+
+
+def _looks_like_form_help_request(text: str, form_type: str | None) -> bool:
+    return bool(form_type) and _contains_any(
+        text,
+        (
+            "help with",
+            "need help",
+            "support with",
+            "can you help",
+        ),
+    )
 
 
 def _looks_like_help_or_capability_question(text: str) -> bool:
