@@ -55,6 +55,23 @@ def test_direct_text_envelope_normalises_to_handled_private_turn():
     )
 
 
+def test_lid_direct_turn_keeps_lid_session_but_prefers_phone_gateway_user_id():
+    env = {
+        "key": {
+            "remoteJid": "84125843243120@lid",
+            "senderPn": "447700900000@s.whatsapp.net",
+            "senderLid": "84125843243120@lid",
+            "id": "LID1",
+        },
+        "message": {"conversation": "hello"},
+    }
+    msg = wld.normalize_message(env)
+
+    assert msg.session.conversation_id == "wa:84125843243120@lid"
+    assert msg.session.gateway_user_id == "447700900000@s.whatsapp.net"
+    assert wld.to_inbound_payload(env)["gateway_user_id"] == "447700900000@s.whatsapp.net"
+
+
 def test_extended_text_message_is_extracted():
     env = {
         "key": {"remoteJid": "447700900000@s.whatsapp.net", "id": "M2"},

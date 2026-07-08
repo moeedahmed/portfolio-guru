@@ -223,6 +223,29 @@ def test_direct_handled_turn_invokes_outbound_with_rendered_whatsapp_text(
     assert "callback_data" not in text
 
 
+def test_whatsapp_lid_turn_replies_to_gateway_phone_jid_when_present(
+    outbound_client: tuple[TestClient, list[tuple[str, str]]],
+):
+    client, captured = outbound_client
+    resp = client.post(
+        "/api/portfolio/inbound",
+        json={
+            "channel": "whatsapp",
+            "conversation_id": "wa:84125843243120@lid",
+            "gateway_user_id": "447700900000@s.whatsapp.net",
+            "scope": "direct",
+            "text": "hello",
+        },
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["reply_sent"] is True
+    assert len(captured) == 1
+    to, _text = captured[0]
+    assert to == "447700900000@s.whatsapp.net"
+
+
 def test_group_turn_does_not_trigger_outbound(
     outbound_client: tuple[TestClient, list[tuple[str, str]]],
 ):

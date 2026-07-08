@@ -138,8 +138,18 @@ def _gateway_user_id(key: Mapping[str, Any], remote_jid: str) -> str:
     """The resolved sender identity — a routing id, never clinical content.
 
     In a group envelope the actual sender is ``key.participant``; in a 1:1
-    envelope the sender is the conversation JID itself.
+    envelope the sender is the conversation JID itself. Newer Baileys builds may
+    deliver the conversation on a LID JID while also exposing a phone-number JID
+    on ``senderPn`` / ``participantPn``. Prefer that phone-number JID as the
+    gateway user id so outbound replies can target the visible WhatsApp chat,
+    while ``conversation_id`` remains the stable inbound chat id.
     """
+    participant_pn = str(key.get("participantPn") or "").strip()
+    if participant_pn:
+        return participant_pn
+    sender_pn = str(key.get("senderPn") or "").strip()
+    if sender_pn:
+        return sender_pn
     participant = str(key.get("participant") or "").strip()
     return participant or remote_jid
 

@@ -81,6 +81,28 @@ test('sanitizeEnvelope keeps only routing ids on the key', () => {
   });
 });
 
+test('sanitizeEnvelope preserves Baileys phone and LID routing ids', () => {
+  const envelope = sanitizeEnvelope({
+    key: {
+      remoteJid: '84125843243120@lid',
+      senderPn: '447700900000@s.whatsapp.net',
+      senderLid: '84125843243120@lid',
+      id: 'IN-LID-1',
+      fromMe: false,
+    },
+    message: { conversation: 'hello' },
+    pushName: 'Dr Smith',
+  });
+
+  assert.deepEqual(envelope.key, {
+    remoteJid: '84125843243120@lid',
+    senderPn: '447700900000@s.whatsapp.net',
+    senderLid: '84125843243120@lid',
+    id: 'IN-LID-1',
+    fromMe: false,
+  });
+});
+
 test('sanitizeEnvelope emits key-only when there is no recognised body', () => {
   const receipt = RAW_UPSERT.messages.find((m) => m.key.id === 'IN-RECEIPT-1');
   const envelope = sanitizeEnvelope(receipt);

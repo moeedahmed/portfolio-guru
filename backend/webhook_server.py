@@ -445,6 +445,27 @@ async def _send_portfolio_turn_reply(
         resp.raise_for_status()
 
 
+def _is_whatsapp_user_jid(value: str | None) -> bool:
+    """True when ``value`` is a direct WhatsApp user JID, not a group/session label."""
+    if not value:
+        return False
+    lowered = value.strip().lower()
+    return lowered.endswith("@s.whatsapp.net") or lowered.endswith("@lid")
+
+
+def _reply_target_for_inbound(body: InboundRequest) -> str:
+    """Choose the safest outbound target for a handled inbound WhatsApp turn.
+
+    ``conversation_id`` is the stable channel conversation key and can be a LID.
+    Baileys may also provide ``gateway_user_id`` as the phone-number JID
+    (``senderPn`` / ``participantPn``); use that when present for visible
+    delivery, otherwise fall back to the conversation id.
+    """
+    if body.channel == "whatsapp" and _is_whatsapp_user_jid(body.gateway_user_id):
+        return body.gateway_user_id or body.conversation_id
+    return body.conversation_id
+
+
 @app.post("/api/portfolio/inbound")
 async def portfolio_inbound(
     body: InboundRequest,
@@ -471,7 +492,9 @@ async def portfolio_inbound(
             reply = await _select_inbound_reply(body.text)
             rendered = render_numbered(reply)
             try:
-                await _send_portfolio_turn_reply(body.conversation_id, rendered, outbound_cfg)
+                await _send_portfolio_turn_reply(
+                    _reply_target_for_inbound(body), rendered, outbound_cfg
+                )
                 reply_sent = True
             except Exception as exc:
                 logger.warning("Portfolio outbound send failed: %s", exc)

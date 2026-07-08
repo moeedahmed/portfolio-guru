@@ -61,6 +61,15 @@ function sanitizeKey(rawKey) {
   if (typeof rawKey.fromMe === 'boolean') {
     key.fromMe = rawKey.fromMe;
   }
+  // Baileys can receive user chats on a LID JID while also providing the
+  // companion phone-number JID on the message key. Preserve those routing-only
+  // fields so the product bridge can keep the LID as the stable conversation id
+  // but reply via the phone-number JID when WhatsApp exposes it.
+  for (const jidKey of ['senderPn', 'participantPn', 'senderLid', 'participantLid']) {
+    if (typeof rawKey[jidKey] === 'string') {
+      key[jidKey] = rawKey[jidKey];
+    }
+  }
   return key;
 }
 
