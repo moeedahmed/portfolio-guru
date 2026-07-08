@@ -206,7 +206,6 @@ def cmd_whatsapp_reply(
 
     from channel_actions import render_numbered
     from hermes_bridge_contract import inbound_from_payload, serialise_decision
-    from webhook_server import _select_inbound_reply
 
     try:
         decision = inbound_from_payload(payload)
@@ -237,7 +236,7 @@ def cmd_whatsapp_reply(
             },
         }
 
-    reply = asyncio.run(_select_inbound_reply(payload.get("text")))
+    reply = asyncio.run(_select_whatsapp_reply(payload.get("text")))
     return {
         "status": "ok",
         "data": {
@@ -247,6 +246,109 @@ def cmd_whatsapp_reply(
             "kaizen_writes": False,
         },
     }
+
+
+async def _select_whatsapp_reply(text: str | None):
+    """Pick a WhatsApp reply without collapsing every short turn to intake.
+
+    The HTTP inbound bridge still owns first-contact/case-intake replies.
+    WhatsApp adds one extra layer: short user questions must use the same
+    deterministic conversational intent contract as Telegram, otherwise every
+    non-case message looks like "please describe the clinical case".
+    """
+    from channel_actions import ChannelReply
+    from conversational_router import ConversationalIntent, route_message
+    from message_policy import render_message, style_grounded_answer
+    from portfolio_first_contact import classify_first_contact, first_contact_reply
+    from webhook_server import (
+        _has_rich_case_content,
+        _make_case_insight_reply,
+        _make_initial_gathering_reply,
+    )
+
+    onboarding = first_contact_reply(classify_first_contact(text))
+    if onboarding is not None:
+        return onboarding
+
+    if _has_rich_case_content(text):
+        return await _make_case_insight_reply(text or "")
+
+    routed = route_message(text or "")
+    intent = routed.intent
+
+    if intent == ConversationalIntent.SETUP_OR_CREDENTIALS:
+        return ChannelReply(
+            body=style_grounded_answer(
+                "Yes — Portfolio Guru is built to work with Kaizen, but I won't "
+                "collect or manage Kaizen credentials directly inside WhatsApp.\n\n"
+                "Use the secure Portfolio Guru account setup flow to connect "
+                "Kaizen. In WhatsApp, you can send anonymised case notes, ask "
+                "portfolio questions, and review draft wording. Nothing is filed "
+                "to Kaizen until you approve it."
+            )
+        )
+
+    if intent == ConversationalIntent.PORTFOLIO_QUESTION:
+        form_type = routed.signals.get("form_type")
+        form_line = (
+            f"\n\nYou mentioned {form_type}; send the case details and I'll check "
+            "whether that is the best fit."
+            if form_type
+            else ""
+        )
+        return ChannelReply(
+            body=style_grounded_answer(
+                "I can help with RCEM portfolio evidence and WPBA drafts, including "
+                "CBD, Mini-CEX, DOPS, reflective logs, teaching, QIP and related "
+                "portfolio forms.\n\n"
+                "Send rough anonymised case notes and I'll recommend the best-fit "
+                f"form before drafting.{form_line}"
+            )
+        )
+
+    if intent == ConversationalIntent.HELP_OR_CAPABILITY:
+        return ChannelReply(body=render_message("capability_overview"))
+
+    if intent == ConversationalIntent.SAFETY_OR_MEDICAL_ADVICE:
+        return ChannelReply(body=render_message("medical_advice_refusal"))
+
+    if intent == ConversationalIntent.ACCOUNT_OR_BILLING:
+        return ChannelReply(
+            body=style_grounded_answer(
+                "For account, access, billing or subscription questions, use the "
+                "main Portfolio Guru account/support flow rather than WhatsApp.\n\n"
+                "This WhatsApp beta is for portfolio questions, case capture and "
+                "draft review. It will not ask for payment details or Kaizen "
+                "credentials here."
+            )
+        )
+
+    if intent in {ConversationalIntent.EDIT_DRAFT, ConversationalIntent.FILE_TO_KAIZEN}:
+        return ChannelReply(
+            body=style_grounded_answer(
+                "I don't have an active WhatsApp draft in this chat yet.\n\n"
+                "Send the anonymised case details first. I'll prepare the draft "
+                "for review, and nothing is saved or filed to Kaizen until you "
+                "approve it."
+            )
+        )
+
+    if intent == ConversationalIntent.OUT_OF_SCOPE:
+        return ChannelReply(body=render_message("prompt_injection_refusal"))
+
+    if intent == ConversationalIntent.UNKNOWN:
+        return ChannelReply(
+            body=style_grounded_answer(
+                routed.clarification
+                or (
+                    "I can help draft portfolio evidence, answer portfolio questions, "
+                    "edit a draft, or prepare a Kaizen draft. Which would you like "
+                    "to do?"
+                )
+            )
+        )
+
+    return _make_initial_gathering_reply()
 
 
 def cmd_deferred(name: str) -> dict[str, Any]:

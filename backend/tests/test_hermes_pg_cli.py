@@ -262,6 +262,47 @@ def test_whatsapp_reply_greeting_returns_portfolio_onboarding():
     assert "Kaizen" in rendered
 
 
+@pytest.mark.parametrize(
+    ("text", "expected_terms"),
+    [
+        (
+            "do you not want to connect to my kaizen account?",
+            ("Kaizen", "WhatsApp", "credentials"),
+        ),
+        (
+            "What forms would this support for my portfolio?",
+            ("RCEM", "WPBA", "drafts"),
+        ),
+        (
+            "what dose morphine should I give?",
+            ("advise", "prescribing", "portfolio draft"),
+        ),
+        (
+            "why are you sending the same message to every question",
+            ("draft portfolio evidence", "portfolio questions", "Kaizen"),
+        ),
+    ],
+)
+def test_whatsapp_reply_routes_short_questions_instead_of_repeating_case_prompt(
+    text, expected_terms
+):
+    payload = _valid_payload(
+        channel="whatsapp",
+        conversation_id="447000000000@s.whatsapp.net",
+        gateway_user_id="447000000000@s.whatsapp.net",
+        text=text,
+    )
+
+    code, response = _run_cli("whatsapp-reply", "--payload", json.dumps(payload))
+
+    assert code == 0
+    assert response["status"] == "ok"
+    rendered = response["data"]["rendered_reply"]
+    assert "Please describe the clinical case you want to document" not in rendered
+    for term in expected_terms:
+        assert term in rendered
+
+
 def test_whatsapp_reply_group_scope_returns_private_refusal_without_echo():
     secret = "ZZWHATSAPPGROUPSECRETZZ"
     payload = _valid_payload(
