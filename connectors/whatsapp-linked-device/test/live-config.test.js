@@ -12,6 +12,7 @@ const path = require('node:path');
 
 const {
   buildLiveSocketConfig,
+  createSilentLogger,
   describeDisconnect,
   shouldReconnectAfterClose,
   BROWSER_NAME,
@@ -34,12 +35,26 @@ test('live socket config pins the fetched WA Web version and a browser identity'
   assert.deepEqual(config.browser, ['Mac OS', BROWSER_NAME, '14.4.1']);
   // QR is rendered by index.js to stderr, never by Baileys to stdout.
   assert.equal(config.printQRInTerminal, false);
+  assert.equal(config.logger.level, 'silent');
+  assert.equal(config.logger.child(), config.logger);
+  assert.doesNotThrow(() => config.logger.info({ event: 'protocol-log' }));
 });
 
 test('live socket config omits version when the fetch failed', () => {
   const config = buildLiveSocketConfig({ state: {}, version: undefined, Browsers });
   assert.ok(!('version' in config), 'undefined version must not be forwarded to Baileys');
   assert.deepEqual(config.browser, ['Mac OS', BROWSER_NAME, '14.4.1']);
+  assert.equal(config.logger.level, 'silent');
+});
+
+test('silent logger has the methods Baileys calls without writing to stdout', () => {
+  const logger = createSilentLogger();
+
+  for (const method of ['trace', 'debug', 'info', 'warn', 'error', 'fatal']) {
+    assert.equal(typeof logger[method], 'function');
+    assert.doesNotThrow(() => logger[method]({ hello: 'world' }, 'ignored'));
+  }
+  assert.equal(logger.child({ class: 'baileys' }), logger);
 });
 
 test('describeDisconnect names the observed 405 handshake rejection', () => {

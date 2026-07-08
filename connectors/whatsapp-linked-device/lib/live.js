@@ -7,6 +7,26 @@
 
 const BROWSER_NAME = 'Portfolio Guru';
 
+function noop() {}
+
+// Baileys' default logger can emit JSON diagnostics to stdout. stdout is this
+// sidecar's data channel into the Python relay, so protocol diagnostics must be
+// silenced at the socket boundary rather than filtered downstream.
+function createSilentLogger() {
+  return {
+    level: 'silent',
+    child() {
+      return this;
+    },
+    trace: noop,
+    debug: noop,
+    info: noop,
+    warn: noop,
+    error: noop,
+    fatal: noop,
+  };
+}
+
 // Build the Baileys socket config for a live linked-device session. Takes the
 // resolved multi-file auth state, the negotiated WhatsApp Web `version` tuple
 // (from fetchLatestBaileysVersion; may be undefined to fall back to the Baileys
@@ -21,6 +41,7 @@ function buildLiveSocketConfig({ state, version, Browsers }) {
   const config = {
     auth: state,
     browser: Browsers.macOS(BROWSER_NAME),
+    logger: createSilentLogger(),
     printQRInTerminal: false,
   };
   if (version) {
@@ -65,6 +86,7 @@ function shouldReconnectAfterClose(statusCode, DisconnectReason) {
 
 module.exports = {
   buildLiveSocketConfig,
+  createSilentLogger,
   describeDisconnect,
   shouldReconnectAfterClose,
   BROWSER_NAME,
