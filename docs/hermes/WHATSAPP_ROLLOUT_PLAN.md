@@ -137,6 +137,13 @@ Gate (only when `PG_WHATSAPP_CONNECTOR=hermes`):
 - The profile command path still resolves to the tracked shim:
   `scripts/hermes-profile/pg` -> `backend/hermes_pg_cli.py`.
 - Product logic has not been copied into the Hermes profile.
+- The live Hermes WhatsApp identity guard passes:
+  `scripts/pg_whatsapp_identity_guard.py` must show the `portfolio-guru` and
+  `emgurus` Hermes WhatsApp session fingerprints are distinct before the
+  Portfolio Hermes gateway is started. If the fingerprints match, stop the
+  Portfolio Hermes gateway and do not ask for more WhatsApp test messages; two
+  Baileys bridges are fighting for the same account and WhatsApp will return
+  `440 connectionReplaced`.
 
 A direct connector needs no Hermes profile, and the readiness guard does not
 require one unless `PG_WHATSAPP_CONNECTOR=hermes`.
@@ -344,7 +351,11 @@ the offline readiness guard returns `launch-ready` for the direct connector.
    linked device appears under Linked Devices on the dedicated account.
 3. Verify the resulting account fingerprint is **distinct** from the EMGurus
    fingerprint before any tester traffic (this is the guard's
-   `distinct-whatsapp-account` gate).
+   `distinct-whatsapp-account` gate). If the chosen connector is Hermes, also
+   run `scripts/pg_whatsapp_identity_guard.py` against the live Hermes profile
+   creds and set
+   `PG_WHATSAPP_HERMES_IDENTITY_APPROVED=distinct-live-hermes-identity` only
+   after that script passes.
 4. Exercise shadow mode with synthetic/anonymised payloads first, then a single
    direct-message smoke to the dedicated number only.
 

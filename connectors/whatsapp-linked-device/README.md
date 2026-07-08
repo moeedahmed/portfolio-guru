@@ -140,6 +140,10 @@ clear, message text, or caption.
 - `messages.update ...` / `message-receipt.update ...` — WhatsApp delivery/read
   state changed for a redacted message id. These lines are the stronger evidence
   that the accepted outbound reached WhatsApp's delivery lifecycle.
+- Repeated `connectionReplaced` / disconnect `440` means another bridge or
+  linked-device session is replacing this one. Stop the competing Portfolio
+  transport and inspect account identity instead of asking for another inbound
+  message.
 
 A conclusive watch reads top to bottom: open (right account) → upsert observed →
 turn forwarded → bridge POST ok → outbound accepted → receipt/update. The first
@@ -178,6 +182,9 @@ Read by the **Python runner** (passed to its environment, not this sidecar):
   state.
 - The dedicated account fingerprint must stay **distinct** from the EMGurus
   fingerprint (the readiness guard's `distinct-whatsapp-account` gate).
+- If the route is Hermes, `scripts/pg_whatsapp_identity_guard.py` must also show
+  the live Hermes `portfolio-guru` and `emgurus` WhatsApp session fingerprints
+  are distinct before both gateways are allowed to run.
 - Stop if the readiness guard returns `blocked`, or if linking would require
   reading secrets, editing `~/.hermes`, or restarting a shared service.
 - In supervised beta mode, QR emission is forbidden. If the sidecar asks for a

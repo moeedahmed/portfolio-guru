@@ -51,6 +51,7 @@ def _hermes_env(**overrides: str) -> dict[str, str]:
         PG_WHATSAPP_CONNECTOR="hermes",
         PG_WHATSAPP_PROFILE_ID="portfolio-guru",
         EMGURUS_WHATSAPP_PROFILE_ID="emgurus",
+        PG_WHATSAPP_HERMES_IDENTITY_APPROVED="distinct-live-hermes-identity",
     )
     env.update(overrides)
     return env
@@ -144,6 +145,21 @@ def test_hermes_connector_requires_profile_ids() -> None:
         check["name"] for check in result["checks"] if check["status"] == "block"
     }
     assert "safe-id:PG_WHATSAPP_PROFILE_ID" in blocked_names
+    assert "approval:PG_WHATSAPP_HERMES_IDENTITY_APPROVED" in blocked_names
+
+
+def test_hermes_connector_requires_live_identity_guard_approval() -> None:
+    guard = _load_module()
+
+    env = _hermes_env()
+    env.pop("PG_WHATSAPP_HERMES_IDENTITY_APPROVED")
+    result = guard.evaluate(REPO_ROOT, env=env)
+
+    assert result["status"] == "blocked"
+    blocked_names = {
+        check["name"] for check in result["checks"] if check["status"] == "block"
+    }
+    assert "approval:PG_WHATSAPP_HERMES_IDENTITY_APPROVED" in blocked_names
 
 
 def test_hermes_connector_launch_ready_with_profile() -> None:

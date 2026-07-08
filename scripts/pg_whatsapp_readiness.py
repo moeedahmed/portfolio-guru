@@ -42,6 +42,10 @@ HERMES_SAFE_IDS = (
     "EMGURUS_WHATSAPP_PROFILE_ID",
 )
 
+HERMES_APPROVALS = {
+    "PG_WHATSAPP_HERMES_IDENTITY_APPROVED": "distinct-live-hermes-identity",
+}
+
 # The direct linked-device connector family. These treat WhatsApp as a thin
 # transport to the deterministic engine and need no Hermes profile. Their
 # transport normaliser is the repo-owned backend/whatsapp_linked_device.py.
@@ -215,6 +219,16 @@ def _safe_id_checks(env: Mapping[str, str]) -> list[Check]:
     # direct channel connector needs no Hermes profile at all.
     if _connector(env) != "hermes":
         return checks
+
+    for key, expected in HERMES_APPROVALS.items():
+        checks.append(
+            _check(
+                env.get(key) == expected,
+                f"approval:{key}",
+                f"{key} is explicitly approved",
+                f"{key} must equal {expected!r} after scripts/pg_whatsapp_identity_guard.py passes",
+            )
+        )
 
     for key in HERMES_SAFE_IDS:
         checks.append(
