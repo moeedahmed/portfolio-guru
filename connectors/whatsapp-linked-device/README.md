@@ -135,12 +135,16 @@ clear, message text, or caption.
   neutral routing verdict per turn.
 - `relay: bridge POST ok` / `bridge POST failed (<ErrorType>)` — the forward to
   `POST /api/portfolio/inbound` was attempted and its outcome.
-- `outbound: sent reply to <scope>/<fp>` — a Portfolio Guru reply went back out
-  through the linked session.
+- `outbound: send accepted target=<scope>/<fp> id=<fp> status=<n>` — Baileys
+  accepted the send call locally and returned a redacted message id.
+- `messages.update ...` / `message-receipt.update ...` — WhatsApp delivery/read
+  state changed for a redacted message id. These lines are the stronger evidence
+  that the accepted outbound reached WhatsApp's delivery lifecycle.
 
 A conclusive watch reads top to bottom: open (right account) → upsert observed →
-turn forwarded → bridge POST ok → outbound sent. The first missing line is the
-failing hop.
+turn forwarded → bridge POST ok → outbound accepted → receipt/update. The first
+missing line is the failing hop. Do not treat local outbound acceptance alone as
+proof that Moeed can see the reply.
 
 ## Configuration (env var names only — never commit values)
 

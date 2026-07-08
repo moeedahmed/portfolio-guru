@@ -50,8 +50,12 @@ const {
 const { startOutboundServer } = require('./lib/outbound');
 const {
   describeSelfIdentity,
+  formatMessageUpdateSummary,
+  formatReceiptUpdateSummary,
   formatUpsertSummary,
   summarizeHistorySync,
+  summarizeMessageUpdates,
+  summarizeReceiptUpdates,
   summarizeUpsert,
 } = require('./lib/diagnostics');
 
@@ -351,6 +355,14 @@ async function runLive(env, args = {}) {
       for (const envelope of extractInbound(upsert)) {
         emit(envelope);
       }
+    });
+
+    socket.ev.on('messages.update', (updates) => {
+      log(`live: ${formatMessageUpdateSummary(summarizeMessageUpdates(updates))}`);
+    });
+
+    socket.ev.on('message-receipt.update', (receipts) => {
+      log(`live: ${formatReceiptUpdateSummary(summarizeReceiptUpdates(receipts))}`);
     });
 
     // History sync is diagnostic-only: messages the phone already showed but

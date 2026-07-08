@@ -112,9 +112,13 @@ def _recent_activity() -> dict[str, object]:
             "inbound_events_since_start": 0,
             "bridge_posts_since_start": 0,
             "outbound_sends_since_start": 0,
+            "message_updates_since_start": 0,
+            "receipt_updates_since_start": 0,
             "last_inbound": None,
             "last_bridge_post": None,
             "last_outbound": None,
+            "last_message_update": None,
+            "last_receipt_update": None,
         }
 
     start_index = 0
@@ -131,16 +135,27 @@ def _recent_activity() -> dict[str, object]:
 
     inbound = [line for line in window if "live: messages.upsert" in line]
     bridge_posts = [line for line in window if "relay: bridge POST ok" in line]
-    outbound_sends = [line for line in window if "outbound: sent reply" in line]
+    outbound_sends = [
+        line
+        for line in window
+        if "outbound: sent reply" in line or "outbound: send accepted" in line
+    ]
+    message_updates = [line for line in window if "live: messages.update" in line]
+    receipt_updates = [line for line in window if "live: message-receipt.update" in line]
     history_sync = [line for line in window if "live: messaging-history.set" in line]
     return {
         "inbound_events_since_start": len(inbound),
         "bridge_posts_since_start": len(bridge_posts),
         "outbound_sends_since_start": len(outbound_sends),
+        "message_updates_since_start": len(message_updates),
+        "receipt_updates_since_start": len(receipt_updates),
         "history_sync_events_since_start": len(history_sync),
         "last_inbound": _last_contains("live: messages.upsert"),
         "last_bridge_post": _last_contains("relay: bridge POST ok"),
-        "last_outbound": _last_contains("outbound: sent reply"),
+        "last_outbound": _last_contains("outbound: send accepted")
+        or _last_contains("outbound: sent reply"),
+        "last_message_update": _last_contains("live: messages.update"),
+        "last_receipt_update": _last_contains("live: message-receipt.update"),
         "last_history_sync": _last_contains("live: messaging-history.set"),
     }
 

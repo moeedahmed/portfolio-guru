@@ -277,6 +277,46 @@ asks for a QR, the sidecar exits loudly instead of emitting one. That makes the
 normal beta failure mode "runner stopped; relink needs a deliberate manual
 approval" rather than "unexpected QR loop".
 
+##### Baileys source-of-truth checklist for the beta runner
+
+Upstream references checked on 2026-07-08: WhiskeySockets/Baileys README,
+Baileys wiki Introduction, Socket Configuration, Connecting, and Receiving
+Updates pages, plus the Baileys `DisconnectReason` enum in source.
+
+For this repo, those upstream facts translate into these local requirements:
+
+- Baileys is WhatsApp Web over WebSocket via Linked Devices, not WABA/Cloud API.
+  Treat it as the lean controlled-beta transport only.
+- QR/pairing proves only that a linked-device auth session was created. It does
+  not prove the Portfolio Guru bridge, engine, outbound send path, or recipient
+  delivery.
+- Persist auth and key updates. Baileys emits `creds.update` after auth/key
+  changes; losing those updates can stop messages reaching recipients. The demo
+  `useMultiFileAuthState` is acceptable for the current local beta runner, but
+  the Baileys wiki explicitly warns not to rely on it in production. A durable
+  service needs its own auth/key store.
+- Add a real message store before calling the linked-device route production
+  quality. Baileys expects `getMessage` for resend/retry and other message
+  operations; a runner with no store can prove a beta canary but not robust
+  delivery semantics.
+- Process every item in each `messages.upsert` array. `notify` is usually a new
+  live message; `append` is old/already-seen/offline-sync style traffic. Status
+  proof must distinguish them so replayed or from-self events are not mistaken
+  for fresh tester traffic.
+- Local outbound success is not the same as WhatsApp delivery. Beta proof should
+  add receipt/update tracking before wider tester use, so "sent" can be separated
+  from "delivered/read/failed" rather than inferred from `sendMessage` resolving.
+- Reconnect policy must be driven by Baileys disconnect codes:
+  `428 connectionClosed`, `408 connectionLost/timedOut`, and
+  `515 restartRequired` are reconnectable for a saved session;
+  `401 loggedOut`, `500 badSession`, `403 forbidden`, `440 connectionReplaced`,
+  and repeated `503 unavailableService` require stop-and-investigate rather than
+  blind relink.
+- Keep Baileys/protocol logs out of the NDJSON message pipe. If any library line
+  leaks into stdout, the Python relay must ignore it as non-message transport
+  noise and continue; canary proof still requires a routable inbound envelope,
+  bridge `200 OK`, and outbound send/receipt evidence.
+
 #### Next manual live step — link the dedicated account via Linked Devices
 
 This is the first action that touches a live WhatsApp account. Do it only after

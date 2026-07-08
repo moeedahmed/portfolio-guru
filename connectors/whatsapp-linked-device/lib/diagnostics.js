@@ -168,13 +168,141 @@ function summarizeHistorySync(historySet) {
   };
 }
 
+function valueLabel(value) {
+  if (value == null) {
+    return 'none';
+  }
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  return 'present';
+}
+
+function summarizeMessageUpdates(updates) {
+  const summary = {
+    total: Array.isArray(updates) ? updates.length : 0,
+    statuses: {},
+    messageIds: [],
+    chats: {},
+  };
+  if (!Array.isArray(updates)) {
+    return summary;
+  }
+  for (const item of updates) {
+    if (!isObject(item)) {
+      continue;
+    }
+    const key = isObject(item.key) ? item.key : {};
+    const update = isObject(item.update) ? item.update : {};
+    const status = valueLabel(update.status);
+    summary.statuses[status] = (summary.statuses[status] || 0) + 1;
+
+    const messageId = fingerprint(typeof key.id === 'string' ? key.id : '');
+    if (messageId && summary.messageIds.length < 3) {
+      summary.messageIds.push(messageId);
+    }
+
+    const chat = redactJid(typeof key.remoteJid === 'string' ? key.remoteJid : '');
+    if (chat.scope !== 'none') {
+      const label = `${chat.scope}/${chat.fingerprint || 'none'}`;
+      summary.chats[label] = (summary.chats[label] || 0) + 1;
+    }
+  }
+  return summary;
+}
+
+function summarizeReceiptUpdates(receipts) {
+  const summary = {
+    total: Array.isArray(receipts) ? receipts.length : 0,
+    receiptTypes: {},
+    messageIds: [],
+    chats: {},
+  };
+  if (!Array.isArray(receipts)) {
+    return summary;
+  }
+  for (const item of receipts) {
+    if (!isObject(item)) {
+      continue;
+    }
+    const key = isObject(item.key) ? item.key : {};
+    const receipt = isObject(item.receipt) ? item.receipt : {};
+    const receiptType = valueLabel(receipt.type);
+    summary.receiptTypes[receiptType] = (summary.receiptTypes[receiptType] || 0) + 1;
+
+    const messageId = fingerprint(typeof key.id === 'string' ? key.id : '');
+    if (messageId && summary.messageIds.length < 3) {
+      summary.messageIds.push(messageId);
+    }
+
+    const chat = redactJid(typeof key.remoteJid === 'string' ? key.remoteJid : '');
+    if (chat.scope !== 'none') {
+      const label = `${chat.scope}/${chat.fingerprint || 'none'}`;
+      summary.chats[label] = (summary.chats[label] || 0) + 1;
+    }
+  }
+  return summary;
+}
+
+function formatCounts(counts) {
+  const keys = Object.keys(counts || {}).sort();
+  if (keys.length === 0) {
+    return 'none';
+  }
+  return keys.map((key) => `${key}=${counts[key]}`).join(' ');
+}
+
+function formatMessageUpdateSummary(summary) {
+  const ids = summary.messageIds.length > 0 ? summary.messageIds.join(',') : 'none';
+  return [
+    'messages.update',
+    `total=${summary.total}`,
+    `statuses=[${formatCounts(summary.statuses)}]`,
+    `ids=${ids}`,
+  ].join(' ');
+}
+
+function formatReceiptUpdateSummary(summary) {
+  const ids = summary.messageIds.length > 0 ? summary.messageIds.join(',') : 'none';
+  return [
+    'message-receipt.update',
+    `total=${summary.total}`,
+    `types=[${formatCounts(summary.receiptTypes)}]`,
+    `ids=${ids}`,
+  ].join(' ');
+}
+
+function summarizeOutboundSend(jid, result) {
+  const target = redactJid(jid);
+  const key = isObject(result) && isObject(result.key) ? result.key : {};
+  return {
+    target,
+    messageId: fingerprint(typeof key.id === 'string' ? key.id : ''),
+    status: isObject(result) && result.status != null ? valueLabel(result.status) : 'none',
+  };
+}
+
+function formatOutboundSendSummary(summary) {
+  return (
+    `outbound: send accepted target=${summary.target.scope}/` +
+    `${summary.target.fingerprint || 'none'} id=${summary.messageId || 'none'} ` +
+    `status=${summary.status || 'none'}`
+  );
+}
+
 module.exports = {
   classifyMessage,
   describeSelfIdentity,
   fingerprint,
+  formatMessageUpdateSummary,
+  formatOutboundSendSummary,
+  formatReceiptUpdateSummary,
   formatUpsertSummary,
   jidScope,
   redactJid,
   summarizeHistorySync,
+  summarizeMessageUpdates,
+  summarizeOutboundSend,
+  summarizeReceiptUpdates,
   summarizeUpsert,
 };

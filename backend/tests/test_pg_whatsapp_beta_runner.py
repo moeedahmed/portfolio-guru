@@ -143,6 +143,8 @@ def test_recent_activity_reports_no_false_health_when_runner_is_idle(tmp_path, m
     assert activity["inbound_events_since_start"] == 0
     assert activity["bridge_posts_since_start"] == 0
     assert activity["outbound_sends_since_start"] == 0
+    assert activity["message_updates_since_start"] == 0
+    assert activity["receipt_updates_since_start"] == 0
     assert activity["last_inbound"] is None
 
 
@@ -158,6 +160,9 @@ def test_recent_activity_counts_only_current_runner_window(tmp_path, monkeypatch
                 "outbound: sent reply to direct/abc123",
                 "--- beta runner start 2026-07-08T16:45:26+0100 ---",
                 "live: messages.upsert type=append total=1 emitted=1 dropped=0",
+                "outbound: send accepted target=direct/abc123 id=def456 status=1",
+                "live: messages.update total=1 statuses=[3=1] ids=def456",
+                "live: message-receipt.update total=1 types=[read=1] ids=def456",
             ]
         ),
         encoding="utf-8",
@@ -168,8 +173,14 @@ def test_recent_activity_counts_only_current_runner_window(tmp_path, monkeypatch
 
     assert activity["inbound_events_since_start"] == 1
     assert activity["bridge_posts_since_start"] == 0
-    assert activity["outbound_sends_since_start"] == 0
+    assert activity["outbound_sends_since_start"] == 1
+    assert activity["message_updates_since_start"] == 1
+    assert activity["receipt_updates_since_start"] == 1
     assert activity["last_inbound"] == "live: messages.upsert type=append total=1 emitted=1 dropped=0"
+    assert (
+        activity["last_outbound"]
+        == "outbound: send accepted target=direct/abc123 id=def456 status=1"
+    )
 
 
 def test_local_bridge_target_only_allows_plain_localhost() -> None:

@@ -9,10 +9,16 @@ const {
   classifyMessage,
   describeSelfIdentity,
   fingerprint,
+  formatMessageUpdateSummary,
+  formatOutboundSendSummary,
+  formatReceiptUpdateSummary,
   formatUpsertSummary,
   jidScope,
   redactJid,
   summarizeHistorySync,
+  summarizeMessageUpdates,
+  summarizeOutboundSend,
+  summarizeReceiptUpdates,
   summarizeUpsert,
 } = require('../lib/diagnostics');
 const { extractInbound } = require('../lib/sanitize');
@@ -120,4 +126,51 @@ test('summarizeHistorySync reports batch size for offline delivery visibility', 
     chats: 0,
     isLatest: false,
   });
+});
+
+test('message update diagnostics report status without leaking JIDs', () => {
+  const summary = summarizeMessageUpdates([
+    {
+      key: { remoteJid: DIRECT_JID, id: 'ABC123' },
+      update: { status: 3 },
+    },
+  ]);
+  assert.equal(summary.total, 1);
+  assert.deepEqual(summary.statuses, { 3: 1 });
+  assert.deepEqual(summary.messageIds, [fingerprint('ABC123')]);
+  const line = formatMessageUpdateSummary(summary);
+  assert.ok(line.includes('messages.update total=1'));
+  assert.ok(line.includes(`ids=${fingerprint('ABC123')}`));
+  assert.ok(!line.includes('447700900000'));
+  assert.ok(!line.includes('ABC123'));
+});
+
+test('receipt update diagnostics report receipt type without leaking JIDs', () => {
+  const summary = summarizeReceiptUpdates([
+    {
+      key: { remoteJid: DIRECT_JID, id: 'MSG1' },
+      receipt: { type: 'read' },
+    },
+  ]);
+  assert.equal(summary.total, 1);
+  assert.deepEqual(summary.receiptTypes, { read: 1 });
+  const line = formatReceiptUpdateSummary(summary);
+  assert.ok(line.includes('message-receipt.update total=1'));
+  assert.ok(line.includes('types=[read=1]'));
+  assert.ok(!line.includes('447700900000'));
+  assert.ok(!line.includes('MSG1'));
+});
+
+test('outbound send diagnostics include accepted message fingerprint only', () => {
+  const summary = summarizeOutboundSend(DIRECT_JID, {
+    key: { id: 'OUTBOUND1' },
+    status: 1,
+  });
+  assert.equal(summary.target.scope, 'direct');
+  assert.equal(summary.messageId, fingerprint('OUTBOUND1'));
+  const line = formatOutboundSendSummary(summary);
+  assert.ok(line.includes(`id=${fingerprint('OUTBOUND1')}`));
+  assert.ok(line.includes('status=1'));
+  assert.ok(!line.includes('447700900000'));
+  assert.ok(!line.includes('OUTBOUND1'));
 });
