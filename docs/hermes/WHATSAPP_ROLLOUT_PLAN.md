@@ -16,6 +16,14 @@ Tester rollout must not use the general EMGurus WhatsApp account. The clean path
 is a dedicated Portfolio Guru WhatsApp number and account behind a thin channel
 connector before any tester traffic is routed through WhatsApp.
 
+After the 2026-07-08 account restriction/review incident, a recovered WhatsApp
+Business account is not automatically safe to reconnect. The rollout now also
+requires explicit account-health approval: the account must show no current
+restriction, review, lock, or risk flag, and the verification/profile state must
+be stable before any connector is started. If the account asks for verification
+again, complete that process first and do not generate QR codes or start a
+linked-device connector while the account is still being reviewed.
+
 A Hermes profile is **optional**: it may be used only as a thin transport for
 that connector, never as product logic. If Hermes is chosen as the transport,
 the current `portfolio-guru` Hermes WhatsApp credentials are linked to the same
@@ -74,6 +82,8 @@ Gate:
 
 - A dedicated Portfolio Guru number exists.
 - The number is parked/maintained according to the chosen provider's rules.
+- The account has passed any required verification/review and shows no current
+  restriction, lock, review, or risk flag.
 - The safe account fingerprint for the Portfolio Guru WhatsApp account is
   distinct from the safe account fingerprint for EMGurus.
 - The old linked `portfolio-guru` Hermes WhatsApp credentials are not used.
@@ -88,11 +98,24 @@ Goal: wire the dedicated account to a thin channel connector. The connector may
 be a direct bridge (`POST /api/portfolio/inbound` in
 `backend/webhook_server.py`) or an optional Hermes thin-transport profile.
 
+Preferred safety order after the account review incident:
+
+1. Official WhatsApp Business Platform / BSP route (`cloud-api`,
+   `meta-cloud-api`, `whatsapp-business-platform`, `kapso`, or `2chat-waba`)
+   when the goal is durable beta/production behaviour with webhooks, delivery
+   status, templates, and fewer consumer-linked-device risks.
+2. Direct linked-device/Baileys route only for controlled beta transport, only
+   after account health is stable, and only with the one-QR readiness rule.
+   Linked-device pairing must never be used as a retry loop or as proof that the
+   Portfolio Guru relay can reply.
+
 Gate (always):
 
 - The connector is thin transport only and carries no product logic.
 - Underlying WhatsApp account fingerprint differs from EMGurus.
-- Set `PG_WHATSAPP_CONNECTOR` to the chosen connector (`direct` or `hermes`).
+- Set `PG_WHATSAPP_CONNECTOR` to the chosen connector (`direct`, `hermes`,
+  `cloud-api`, `meta-cloud-api`, `whatsapp-business-platform`, `kapso`, or
+  `2chat-waba`).
 
 Gate (only when `PG_WHATSAPP_CONNECTOR=hermes`):
 

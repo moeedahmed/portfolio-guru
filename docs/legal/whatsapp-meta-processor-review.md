@@ -72,6 +72,7 @@ Before WhatsApp tester rollout, record decisions for each item:
 | Item | Decision / Evidence |
 | --- | --- |
 | Dedicated Portfolio Guru number/account exists and is distinct from EMGurus | `REVIEW` |
+| Account verification/review complete, with no current restriction, lock, review, or risk flag | `REVIEW` |
 | Thin channel connector is ready (Hermes profile optional, thin transport only) | `REVIEW` |
 | Chosen route: Business App vs Platform/Cloud API vs other | `REVIEW` |
 | Contracting WhatsApp/Meta entity | `REVIEW` |

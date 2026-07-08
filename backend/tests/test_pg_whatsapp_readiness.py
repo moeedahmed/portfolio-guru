@@ -36,6 +36,7 @@ def _approved_env(**overrides: str) -> dict[str, str]:
         "PG_WHATSAPP_ROLLOUT_APPROVED": "dedicated-portfolio-guru-whatsapp",
         "PG_WHATSAPP_LEGAL_APPROVED": "meta-whatsapp-processor-reviewed",
         "PG_WHATSAPP_NUMBER_APPROVED": "dedicated-number-ready",
+        "PG_WHATSAPP_ACCOUNT_HEALTH_APPROVED": "verified-stable-no-restrictions",
         "PG_WHATSAPP_CONNECTOR_APPROVED": "channel-connector-ready",
         "PG_WHATSAPP_ACCOUNT_FINGERPRINT": "pg-safe-fingerprint",
         "EMGURUS_WHATSAPP_ACCOUNT_FINGERPRINT": "emgurus-safe-fingerprint",
@@ -65,6 +66,7 @@ def test_readiness_guard_blocks_by_default() -> None:
         check["name"] for check in result["checks"] if check["status"] == "block"
     }
     assert "approval:PG_WHATSAPP_ROLLOUT_APPROVED" in blocked_names
+    assert "approval:PG_WHATSAPP_ACCOUNT_HEALTH_APPROVED" in blocked_names
     assert "safe-id:PG_WHATSAPP_ACCOUNT_FINGERPRINT" in blocked_names
 
 
@@ -187,6 +189,39 @@ def test_unknown_connector_value_is_blocked() -> None:
         check["name"] for check in result["checks"] if check["status"] == "block"
     }
     assert "connector-recognised" in blocked_names
+
+
+def test_official_api_connector_is_recognised_without_linked_device_gates() -> None:
+    """A provider/BSP route should not require Baileys transport code.
+
+    Official API connectors still require the same dedicated number, legal,
+    account-health, connector approval, and distinct-account gates, but they
+    avoid the linked-device readiness tiers entirely.
+    """
+    guard = _load_module()
+
+    result = guard.evaluate(REPO_ROOT, env=_approved_env(PG_WHATSAPP_CONNECTOR="kapso"))
+
+    assert result["status"] == "launch-ready"
+    check_names = {check["name"] for check in result["checks"]}
+    assert "connector-recognised" in check_names
+    assert "linked-device-adapter-present" not in check_names
+    assert "connector-shell-present" not in check_names
+    assert "linked-device-sidecar-present" not in check_names
+
+
+def test_account_health_approval_is_required_after_review_or_restriction() -> None:
+    guard = _load_module()
+
+    env = _approved_env()
+    env.pop("PG_WHATSAPP_ACCOUNT_HEALTH_APPROVED")
+    result = guard.evaluate(REPO_ROOT, env=env)
+
+    assert result["status"] == "blocked"
+    blocked_names = {
+        check["name"] for check in result["checks"] if check["status"] == "block"
+    }
+    assert "approval:PG_WHATSAPP_ACCOUNT_HEALTH_APPROVED" in blocked_names
 
 
 def test_direct_connector_gates_on_runnable_connector_shell() -> None:

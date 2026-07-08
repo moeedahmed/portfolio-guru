@@ -25,6 +25,7 @@ EXPECTED_APPROVALS = {
     "PG_WHATSAPP_ROLLOUT_APPROVED": "dedicated-portfolio-guru-whatsapp",
     "PG_WHATSAPP_LEGAL_APPROVED": "meta-whatsapp-processor-reviewed",
     "PG_WHATSAPP_NUMBER_APPROVED": "dedicated-number-ready",
+    "PG_WHATSAPP_ACCOUNT_HEALTH_APPROVED": "verified-stable-no-restrictions",
     "PG_WHATSAPP_CONNECTOR_APPROVED": "channel-connector-ready",
 }
 
@@ -47,7 +48,14 @@ HERMES_SAFE_IDS = (
 # "hermes" is the only value that pulls in the optional Hermes-profile gates.
 # The set mirrors whatsapp_linked_device.LINKED_DEVICE_CONNECTORS.
 LINKED_DEVICE_CONNECTORS = ("direct", "linked-device", "baileys")
-KNOWN_CONNECTORS = (*LINKED_DEVICE_CONNECTORS, "hermes")
+OFFICIAL_API_CONNECTORS = (
+    "cloud-api",
+    "meta-cloud-api",
+    "whatsapp-business-platform",
+    "kapso",
+    "2chat-waba",
+)
+KNOWN_CONNECTORS = (*LINKED_DEVICE_CONNECTORS, *OFFICIAL_API_CONNECTORS, "hermes")
 
 STALE_PHRASES = (
     "WhatsApp should sit behind the " + "EMGurus gateway",
