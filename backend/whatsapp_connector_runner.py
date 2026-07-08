@@ -132,7 +132,15 @@ def _iter_ndjson_stream(source: Iterable[str]) -> Iterator[Mapping[str, Any]]:
         line = line.strip()
         if not line:
             continue
-        decoded = json.loads(line)
+        try:
+            decoded = json.loads(line)
+        except json.JSONDecodeError:
+            print(
+                "relay: ignored non-json sidecar line",
+                file=sys.stderr,
+                flush=True,
+            )
+            continue
         if not isinstance(decoded, Mapping):
             raise ValueError("live NDJSON stream must contain JSON objects")
         yield decoded

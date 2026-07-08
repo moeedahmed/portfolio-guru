@@ -98,6 +98,34 @@ def test_relay_stream_processes_ndjson_lines_without_batching_until_eof():
     assert posted[0]["conversation_id"] == "wa:447700900000@s.whatsapp.net"
 
 
+def test_relay_stream_ignores_non_json_sidecar_noise_without_crashing(capsys):
+    """Baileys/protocol diagnostics can leak into stdout; they are not turns.
+
+    stdout is the data pipe from the linked-device sidecar into this relay, but
+    some lower-level WhatsApp libraries can still write diagnostic text there.
+    A diagnostic line must not kill the whole live runner or prevent later real
+    message envelopes from being handled.
+    """
+    event = _recorded_events()[0]
+    posted: list[dict] = []
+    stream = StringIO(
+        json.dumps(event)
+        + "\nClosing open session in favor of incoming prekey bundle\n"
+        + json.dumps(event)
+        + "\n"
+    )
+
+    stats = runner.relay_stream(stream, posted.append)
+
+    assert stats.total == 2
+    assert stats.forwarded == 2
+    assert len(posted) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "ignored non-json sidecar line" in captured.err
+    assert "prekey" not in captured.err
+
+
 def test_relay_events_invokes_observer_with_content_free_records():
     """The per-turn observer sees routing shape only — never content or JIDs.
 
