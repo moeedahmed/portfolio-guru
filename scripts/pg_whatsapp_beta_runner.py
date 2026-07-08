@@ -47,6 +47,7 @@ class RunnerStatus:
     detail: str
     pid: int | None = None
     log_path: str | None = None
+    recent_activity: dict[str, object] | None = None
 
 
 def _pid_alive(pid: int) -> bool:
@@ -92,13 +93,56 @@ def current_status() -> RunnerStatus:
             detail="Portfolio Guru WhatsApp beta runner process is alive",
             pid=pid,
             log_path=str(LOG_FILE),
+            recent_activity=_recent_activity(),
         )
     return RunnerStatus(
         status="stopped",
         detail="Portfolio Guru WhatsApp beta runner is not running",
         pid=pid,
         log_path=str(LOG_FILE),
+        recent_activity=_recent_activity(),
     )
+
+
+def _recent_activity() -> dict[str, object]:
+    try:
+        lines = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
+    except FileNotFoundError:
+        return {
+            "inbound_events_since_start": 0,
+            "bridge_posts_since_start": 0,
+            "outbound_sends_since_start": 0,
+            "last_inbound": None,
+            "last_bridge_post": None,
+            "last_outbound": None,
+        }
+
+    start_index = 0
+    for index, line in enumerate(lines):
+        if line.startswith("--- beta runner start "):
+            start_index = index
+    window = lines[start_index:]
+
+    def _last_contains(needle: str) -> str | None:
+        for line in reversed(window):
+            if needle in line:
+                return line
+        return None
+
+    inbound = [line for line in window if "live: messages.upsert" in line]
+    bridge_posts = [line for line in window if "relay: bridge POST ok" in line]
+    outbound_sends = [line for line in window if "outbound: sent reply" in line]
+    history_sync = [line for line in window if "live: messaging-history.set" in line]
+    return {
+        "inbound_events_since_start": len(inbound),
+        "bridge_posts_since_start": len(bridge_posts),
+        "outbound_sends_since_start": len(outbound_sends),
+        "history_sync_events_since_start": len(history_sync),
+        "last_inbound": _last_contains("live: messages.upsert"),
+        "last_bridge_post": _last_contains("relay: bridge POST ok"),
+        "last_outbound": _last_contains("outbound: sent reply"),
+        "last_history_sync": _last_contains("live: messaging-history.set"),
+    }
 
 
 def _load_readiness_guard():
@@ -124,6 +168,112 @@ def _auth_ready(auth_dir: Path) -> bool:
 
 def _missing_env(env: Mapping[str, str]) -> list[str]:
     return [name for name in REQUIRED_ENV if not env.get(name, "").strip()]
+
+
+def _bws_bin() -> str:
+    for candidate in (
+        Path("/Users/moeedahmed/.cargo/bin/bws"),
+        Path("/opt/homebrew/bin/bws"),
+    ):
+        if candidate.exists():
+            return str(candidate)
+    return "bws"
+
+
+def _bws_access_token() -> str:
+    token_path = Path.home() / ".openclaw" / ".bws-token"
+    return token_path.read_text(encoding="utf-8").strip()
+
+
+def _mapped_secret_id(key: str) -> str:
+    map_path = Path(
+        os.environ.get(
+            "OPENCLAW_SECRETS_MAP",
+            str(Path.home() / ".openclaw" / "workspace" / "secrets.json"),
+        )
+    )
+    data = json.loads(map_path.read_text(encoding="utf-8"))
+    entry = data["credentials"][key]
+    secret_id = entry.get("bwsId") or entry.get("bws_secret_id")
+    if not secret_id:
+        raise RuntimeError(f"no BWS secret id mapped for {key}")
+    return str(secret_id)
+
+
+def _bws_secret(secret_id: str) -> str:
+    raw = subprocess.check_output(
+        [_bws_bin(), "secret", "get", secret_id, "--output", "json"],
+        env={**os.environ, "BWS_ACCESS_TOKEN": _bws_access_token()},
+        text=True,
+    )
+    return str(json.loads(raw)["value"])
+
+
+def _mapped_secret(key: str) -> str:
+    return _bws_secret(_mapped_secret_id(key))
+
+
+def build_live_beta_env(env: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Build the approved local beta env without printing secrets.
+
+    This is the operator-safe path for the already-linked Portfolio Guru
+    controlled beta. It keeps secret retrieval in BWS and encodes only the
+    non-secret approvals/fingerprints that gate this specific saved session.
+    """
+
+    base = {**os.environ, **dict(env or {})}
+    inbound_secret = base.get("PORTFOLIO_INBOUND_SECRET") or _mapped_secret(
+        "PORTFOLIO_INBOUND_SECRET"
+    )
+    bridge_secret = base.get("PG_WA_OUTBOUND_SECRET") or _mapped_secret(
+        "PORTFOLIO_BRIDGE_SECRET"
+    )
+    deepseek_key = base.get("DEEPSEEK_API_KEY") or _mapped_secret(
+        "DEEPSEEK_API_KEY_PORTFOLIO"
+    )
+    base.update(
+        {
+            "PORTFOLIO_INBOUND_SECRET": inbound_secret,
+            "PG_WA_OUTBOUND_SECRET": bridge_secret,
+            "PORTFOLIO_OUTBOUND_SECRET": bridge_secret,
+            "PG_WA_OUTBOUND_GATEWAY_TOKEN": base.get(
+                "PG_WA_OUTBOUND_GATEWAY_TOKEN",
+                "local-portfolio-guru-linked-device",
+            ),
+            "PORTFOLIO_OUTBOUND_GATEWAY_TOKEN": base.get(
+                "PORTFOLIO_OUTBOUND_GATEWAY_TOKEN",
+                "local-portfolio-guru-linked-device",
+            ),
+            "PG_WA_SEND_PORT": base.get("PG_WA_SEND_PORT", "18795"),
+            "PORTFOLIO_INBOUND_URL": base.get(
+                "PORTFOLIO_INBOUND_URL",
+                "http://127.0.0.1:8101/api/portfolio/inbound",
+            ),
+            "PORTFOLIO_OUTBOUND_URL": base.get(
+                "PORTFOLIO_OUTBOUND_URL",
+                "http://127.0.0.1:18795",
+            ),
+            "PORTFOLIO_OUTBOUND_ACCOUNT_ID": base.get(
+                "PORTFOLIO_OUTBOUND_ACCOUNT_ID",
+                "portfolio-guru",
+            ),
+            "PORTFOLIO_GURU_EXTRACTOR_PROVIDER": base.get(
+                "PORTFOLIO_GURU_EXTRACTOR_PROVIDER",
+                "deepseek-v4-flash",
+            ),
+            "DEEPSEEK_API_KEY": deepseek_key,
+            "PG_WHATSAPP_ROLLOUT_APPROVED": "dedicated-portfolio-guru-whatsapp",
+            "PG_WHATSAPP_LEGAL_APPROVED": "meta-whatsapp-processor-reviewed",
+            "PG_WHATSAPP_NUMBER_APPROVED": "dedicated-number-ready",
+            "PG_WHATSAPP_ACCOUNT_HEALTH_APPROVED": "verified-stable-no-restrictions",
+            "PG_WHATSAPP_CONNECTOR_APPROVED": "channel-connector-ready",
+            "PG_WHATSAPP_ACCOUNT_FINGERPRINT": "portfolio-guru-dedicated-giffgaff-whatsapp",
+            "EMGURUS_WHATSAPP_ACCOUNT_FINGERPRINT": "emgurus-existing-whatsapp",
+            "PG_WHATSAPP_CONNECTOR": "linked-device",
+        }
+    )
+    base["PORTFOLIO_OUTBOUND_GATEWAY_TOKEN"] = base["PG_WA_OUTBOUND_GATEWAY_TOKEN"]
+    return base
 
 
 def _python_path() -> Path:
@@ -338,11 +488,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Start/status/stop the saved-session Portfolio Guru WhatsApp beta runner."
     )
-    parser.add_argument("action", choices=("start", "status", "stop", "plan"))
+    parser.add_argument(
+        "action",
+        choices=("start", "status", "stop", "plan", "start-live", "plan-live"),
+    )
     args = parser.parse_args(argv)
 
     if args.action == "start":
         result = start()
+    elif args.action == "start-live":
+        result = start(build_live_beta_env())
+    elif args.action == "plan-live":
+        result = build_start_plan(build_live_beta_env())
     elif args.action == "stop":
         result = stop()
     elif args.action == "plan":

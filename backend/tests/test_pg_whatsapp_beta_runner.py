@@ -103,6 +103,75 @@ def test_start_plan_ready_when_gates_auth_and_env_are_present(tmp_path, monkeypa
     assert "without QR" in result.detail
 
 
+def test_live_beta_env_loads_secrets_from_bws_without_printing_them(monkeypatch) -> None:
+    runner = _load_module()
+
+    monkeypatch.setattr(runner, "_mapped_secret", lambda key: f"{key}-value")
+    for key in (
+        "PORTFOLIO_INBOUND_SECRET",
+        "PG_WA_OUTBOUND_SECRET",
+        "DEEPSEEK_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    env = runner.build_live_beta_env({"PG_WA_SEND_PORT": "18888"})
+
+    assert env["PORTFOLIO_INBOUND_SECRET"] == "PORTFOLIO_INBOUND_SECRET-value"
+    assert env["PG_WA_OUTBOUND_SECRET"] == "PORTFOLIO_BRIDGE_SECRET-value"
+    assert env["PORTFOLIO_OUTBOUND_SECRET"] == "PORTFOLIO_BRIDGE_SECRET-value"
+    assert env["DEEPSEEK_API_KEY"] == "DEEPSEEK_API_KEY_PORTFOLIO-value"
+    assert env["PG_WA_SEND_PORT"] == "18888"
+    assert env["PG_WHATSAPP_CONNECTOR"] == "linked-device"
+    assert env["PG_WHATSAPP_ACCOUNT_HEALTH_APPROVED"] == "verified-stable-no-restrictions"
+
+
+def test_recent_activity_reports_no_false_health_when_runner_is_idle(tmp_path, monkeypatch) -> None:
+    runner = _load_module()
+    log_file = tmp_path / "beta-runner.log"
+    log_file.write_text(
+        "\n".join(
+            [
+                "--- beta runner start 2026-07-08T16:45:26+0100 ---",
+                "live: linked-device session open; streaming inbound events",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runner, "LOG_FILE", log_file)
+
+    activity = runner._recent_activity()
+
+    assert activity["inbound_events_since_start"] == 0
+    assert activity["bridge_posts_since_start"] == 0
+    assert activity["outbound_sends_since_start"] == 0
+    assert activity["last_inbound"] is None
+
+
+def test_recent_activity_counts_only_current_runner_window(tmp_path, monkeypatch) -> None:
+    runner = _load_module()
+    log_file = tmp_path / "beta-runner.log"
+    log_file.write_text(
+        "\n".join(
+            [
+                "--- beta runner start 2026-07-08T16:30:20+0100 ---",
+                "live: messages.upsert type=notify total=1 emitted=1 dropped=0",
+                "relay: bridge POST ok",
+                "outbound: sent reply to direct/abc123",
+                "--- beta runner start 2026-07-08T16:45:26+0100 ---",
+                "live: messages.upsert type=append total=1 emitted=1 dropped=0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runner, "LOG_FILE", log_file)
+
+    activity = runner._recent_activity()
+
+    assert activity["inbound_events_since_start"] == 1
+    assert activity["bridge_posts_since_start"] == 0
+    assert activity["outbound_sends_since_start"] == 0
+    assert activity["last_inbound"] == "live: messages.upsert type=append total=1 emitted=1 dropped=0"
+
+
 def test_local_bridge_target_only_allows_plain_localhost() -> None:
     runner = _load_module()
 
