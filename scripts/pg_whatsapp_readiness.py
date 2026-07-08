@@ -66,13 +66,41 @@ STALE_PHRASES = (
     "sits behind one " + "EMGurus",
 )
 
+# Wording that would re-encode an accidental bias toward one transport route as
+# the automatic default. The rollout is route-neutral: Baileys/linked-device is a
+# valid lean controlled-beta route and official/BSP/Cloud API is a valid durable
+# production route, but neither is "preferred", "safe by default", or "first".
+# The transport choice is an explicit, gated operations decision. If any of these
+# phrases reappear in the rollout plan, the guard blocks so the bias cannot land
+# silently. Matching is case-insensitive.
+BIASED_TRANSPORT_PHRASES = (
+    "preferred safety order",
+    "official route first",
+    "official whatsapp business platform / bsp route (",
+    "default to the official",
+    "cloud api first",
+    "bsp first",
+    "prefer the official route",
+    "always use the official",
+)
+
+
+def _find_biased_transport_phrases(text: str) -> list[str]:
+    """Return biased transport-route phrases present in ``text`` (lowercased)."""
+    haystack = text.lower()
+    return [phrase for phrase in BIASED_TRANSPORT_PHRASES if phrase in haystack]
+
 
 def _connector(env: Mapping[str, str]) -> str:
-    """The chosen WhatsApp channel connector. Defaults to a direct connector.
+    """The operator-selected WhatsApp channel connector.
 
-    Only ``"hermes"`` pulls in the optional Hermes-profile gates below; every
-    other value (including the default) treats WhatsApp as a direct channel
-    connector to the deterministic engine and requires no Hermes profile.
+    No transport route is the automatic default. When ``PG_WHATSAPP_CONNECTOR``
+    is unset the guard falls back to the ``"direct"`` family only so the offline
+    report has a connector to validate; that fallback is a reporting convenience,
+    not a recommendation of one route over another. Only ``"hermes"`` pulls in
+    the optional Hermes-profile gates below; every other value treats WhatsApp as
+    a thin channel connector to the deterministic engine and requires no Hermes
+    profile.
     """
     return (env.get("PG_WHATSAPP_CONNECTOR") or "direct").strip().lower()
 
@@ -129,6 +157,20 @@ def _no_stale_phrases(root: Path) -> Check:
         "stale-emgurus-gateway-wording",
         "no stale shared EMGurus WhatsApp rollout wording found",
         "shared-account rollout wording remains: " + "; ".join(matches),
+    )
+
+
+def _no_transport_route_bias(root: Path) -> Check:
+    rollout_doc = root / "docs" / "hermes" / "WHATSAPP_ROLLOUT_PLAN.md"
+    matches: list[str] = []
+    if rollout_doc.is_file():
+        for phrase in _find_biased_transport_phrases(_read_text(rollout_doc)):
+            matches.append(f"{rollout_doc.relative_to(root)}: {phrase}")
+    return _check(
+        not matches,
+        "no-transport-route-bias",
+        "rollout plan keeps transport routes neutral (no route is the automatic default)",
+        "rollout plan re-encodes transport-route bias: " + "; ".join(matches),
     )
 
 
@@ -324,6 +366,7 @@ def evaluate(root: Path, env: Mapping[str, str] | None = None) -> dict[str, obje
             )
         )
     checks.append(_no_stale_phrases(root))
+    checks.append(_no_transport_route_bias(root))
     checks.extend(_approval_checks(env))
     checks.extend(_safe_id_checks(env))
 

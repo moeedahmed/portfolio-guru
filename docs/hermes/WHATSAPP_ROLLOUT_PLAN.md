@@ -98,16 +98,30 @@ Goal: wire the dedicated account to a thin channel connector. The connector may
 be a direct bridge (`POST /api/portfolio/inbound` in
 `backend/webhook_server.py`) or an optional Hermes thin-transport profile.
 
-Preferred safety order after the account review incident:
+Transport decision gate (no route is the automatic default):
 
-1. Official WhatsApp Business Platform / BSP route (`cloud-api`,
-   `meta-cloud-api`, `whatsapp-business-platform`, `kapso`, or `2chat-waba`)
-   when the goal is durable beta/production behaviour with webhooks, delivery
-   status, templates, and fewer consumer-linked-device risks.
-2. Direct linked-device/Baileys route only for controlled beta transport, only
-   after account health is stable, and only with the one-QR readiness rule.
-   Linked-device pairing must never be used as a retry loop or as proof that the
-   Portfolio Guru relay can reply.
+Both transport families are valid. The choice is an explicit, context-driven
+operations decision made per rollout, not a ranking. Neither route is
+"preferred" or "safe by default"; each is selected by matching this rollout's
+volume, legal posture, and lifecycle stage against the matrix below, and each
+must clear the *same* account-health, dedicated-account, legal, connector, and
+private-canary gates before any traffic flows. The readiness guard validates the
+connector you selected; it never selects one for you.
+
+| Transport family | Route values | Fits when | Trade-offs |
+| --- | --- | --- | --- |
+| Direct linked-device / Baileys | `direct`, `linked-device`, `baileys` | Lean, controlled, low-volume private beta on the dedicated number where a repo-owned transport is wanted end-to-end | Unofficial WhatsApp-Web multi-device session; single phone-bound link; no Meta DPA/SLA; account-ban risk at scale (see production-scale path) |
+| Official WhatsApp Business Platform / BSP | `cloud-api`, `meta-cloud-api`, `whatsapp-business-platform`, `kapso`, `2chat-waba` | Durable larger-beta or production behaviour needing webhooks, delivery status, templates, contracted Meta processor/DPA, and throughput tiers | Requires business verification, template approval, and a provider/BSP relationship; more onboarding before first message |
+| Hermes thin-transport (optional) | `hermes` | Only when an existing Hermes profile is reused strictly as thin transport | Adds the Hermes-profile shim gates; carries no product logic |
+
+Route-specific rules that apply once a family is selected:
+
+- Direct linked-device/Baileys is selected only after account health is stable
+  and only with the one-QR readiness rule. Linked-device pairing must never be
+  used as a retry loop or as proof that the Portfolio Guru relay can reply.
+- Official/BSP routes carry no linked-device readiness tiers, but they do not
+  bypass any gate: the same account-health, dedicated-account, distinct-account,
+  legal, connector, and private-canary proofs are mandatory before launch.
 
 Gate (always):
 
@@ -127,12 +141,16 @@ Gate (only when `PG_WHATSAPP_CONNECTOR=hermes`):
 A direct connector needs no Hermes profile, and the readiness guard does not
 require one unless `PG_WHATSAPP_CONNECTOR=hermes`.
 
-#### Direct linked-device connector (default path)
+#### Direct linked-device connector (lean controlled-beta path)
 
-The lean direct path is a WhatsApp linked-device (Baileys / WhatsApp-Web
-multi-device) session against the dedicated Portfolio Guru account. Set
-`PG_WHATSAPP_CONNECTOR` to `linked-device` (or leave it unset — `direct` is the
-default and is the same connector family).
+This is one of the two transport families in the decision gate above, not the
+mandatory route. It is the lean, repo-owned path for a controlled beta: a
+WhatsApp linked-device (Baileys / WhatsApp-Web multi-device) session against the
+dedicated Portfolio Guru account. Select it explicitly by setting
+`PG_WHATSAPP_CONNECTOR` to `linked-device` (or `direct` / `baileys` — the same
+connector family). If the variable is left unset the guard falls back to the
+`direct` family only so the offline report has something to validate; that
+fallback is a reporting convenience, not a recommendation to use this route.
 
 The transport boundary is repo-owned and offline-testable today:
 
@@ -370,12 +388,14 @@ transport:
 - Observability, opt-in/opt-out management, and message templating are all
   ad hoc rather than platform-provided.
 
-### The production transport: WhatsApp Business Platform (Cloud API)
+### A durable production transport: WhatsApp Business Platform (Cloud API)
 
-The best production-readiness path is to move the **transport** (not the engine)
-onto the official **WhatsApp Business Platform / Cloud API**, either directly via
-Meta or through a Business Solution Provider (e.g. 360dialog, Twilio, Sinch). That
-provides:
+When a rollout needs public scale, a durable production-readiness route is to
+move the **transport** (not the engine) onto the official **WhatsApp Business
+Platform / Cloud API**, either directly via Meta or through a Business Solution
+Provider (e.g. 360dialog, Twilio, Sinch). This is the route to reach for when the
+linked-device limits below bind; it is not automatically correct for a small
+controlled beta. It provides:
 
 - A verified WhatsApp Business number as an **identity**, not a device link, with
   documented throughput tiers and a real support/SLA path.

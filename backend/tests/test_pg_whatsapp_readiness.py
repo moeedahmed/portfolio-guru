@@ -280,6 +280,72 @@ def test_default_direct_connector_gates_on_linked_device_adapter() -> None:
     assert adapter_check["status"] == "pass"
 
 
+def test_find_biased_transport_phrases_detects_official_route_first_bias() -> None:
+    """The pure phrase detector catches wording that ranks one route as default."""
+    guard = _load_module()
+
+    biased = (
+        "Preferred safety order after the account review incident:\n"
+        "1. Official WhatsApp Business Platform / BSP route (`cloud-api`) first."
+    )
+    hits = guard._find_biased_transport_phrases(biased)
+    assert "preferred safety order" in hits
+
+    neutral = (
+        "Transport decision gate (no route is the automatic default). Both "
+        "transport families are valid and clear the same gates."
+    )
+    assert guard._find_biased_transport_phrases(neutral) == []
+
+
+def test_guard_blocks_if_rollout_plan_reintroduces_transport_bias() -> None:
+    """A no-transport-route-bias check runs and passes on the real rollout plan,
+    so future edits cannot silently re-add 'official route first' wording."""
+    guard = _load_module()
+
+    result = guard.evaluate(REPO_ROOT, env=_approved_env())
+
+    check_names = {check["name"] for check in result["checks"]}
+    assert "no-transport-route-bias" in check_names
+    bias_check = next(
+        c for c in result["checks"] if c["name"] == "no-transport-route-bias"
+    )
+    assert bias_check["status"] == "pass"
+
+
+def test_rollout_plan_uses_neutral_transport_decision_wording() -> None:
+    """The rollout plan must present a neutral decision gate, not a ranked order."""
+    rollout_doc = REPO_ROOT / "docs" / "hermes" / "WHATSAPP_ROLLOUT_PLAN.md"
+    text = rollout_doc.read_text(encoding="utf-8").lower()
+
+    assert "preferred safety order" not in text
+    assert "transport decision gate" in text
+    # Both routes must stay documented as valid — neither deprecated nor mandatory.
+    assert "lean controlled-beta path" in text
+    assert "durable production transport" in text
+
+
+def test_official_and_linked_device_routes_are_gated_symmetrically() -> None:
+    """Neither transport family is the implicit default: both reach launch-ready
+    under identical approvals, and both stay blocked without account-health."""
+    guard = _load_module()
+
+    for connector in ("linked-device", "kapso"):
+        ready = guard.evaluate(
+            REPO_ROOT, env=_approved_env(PG_WHATSAPP_CONNECTOR=connector)
+        )
+        assert ready["status"] == "launch-ready", connector
+
+        no_health = _approved_env(PG_WHATSAPP_CONNECTOR=connector)
+        no_health.pop("PG_WHATSAPP_ACCOUNT_HEALTH_APPROVED")
+        blocked = guard.evaluate(REPO_ROOT, env=no_health)
+        assert blocked["status"] == "blocked", connector
+        blocked_names = {
+            c["name"] for c in blocked["checks"] if c["status"] == "block"
+        }
+        assert "approval:PG_WHATSAPP_ACCOUNT_HEALTH_APPROVED" in blocked_names
+
+
 def test_cli_outputs_json_and_does_not_expose_safe_identifier_values() -> None:
     env = _approved_env(
         PG_WHATSAPP_ACCOUNT_FINGERPRINT="pg-secret-looking-safe-id",
