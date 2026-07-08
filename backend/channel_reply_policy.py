@@ -113,10 +113,11 @@ def select_deterministic_reply(
     if intent is ConversationalIntent.ACCOUNT_OR_BILLING:
         return ChannelReply(
             body=style_grounded_answer(
-                "For account, access, billing or subscription questions, use the "
-                "main Portfolio Guru account/support flow rather than WhatsApp.\n\n"
-                "This beta chat is for portfolio questions, case capture and draft "
-                "review. It will not ask for payment details or Kaizen credentials here."
+                "The free plan includes 5 cases a month. Portfolio Guru Unlimited "
+                "is £9.99/month for unlimited filing and premium features.\n\n"
+                "For account, access, billing or subscription changes, use the main "
+                "Portfolio Guru account/support flow rather than chat. I will not ask "
+                "for payment details or Kaizen credentials here."
             )
         )
 

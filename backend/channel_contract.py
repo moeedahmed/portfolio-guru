@@ -158,13 +158,9 @@ class InboundDecision:
     render the same wording on any channel.
 
     ``fresh_start`` signals whether this is the opening turn of a new session.
-    Portfolio Guru currently has no server-side session store, so this is always
-    ``True`` on HANDLE responses. The gateway (OpenClaw WhatsApp bridge) is
-    authoritative for session continuity: it maintains an in-memory TTL per
-    conversationId and suppresses the "Starting…" acknowledgement on
-    continuation turns, regardless of this flag. When Portfolio Guru implements
-    its own session store this field will reflect backend-tracked state and the
-    gateway can defer to it.
+    The pure contract has no state and defaults this to ``True``; stateful
+    adapters such as ``webhook_server.portfolio_inbound`` may override it after
+    applying their own in-memory freshness tracker.
     """
 
     disposition: InboundDisposition

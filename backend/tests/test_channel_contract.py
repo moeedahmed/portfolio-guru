@@ -122,12 +122,7 @@ def test_contract_is_channel_agnostic_across_channels():
 
 
 def test_handle_decision_has_fresh_start_true():
-    """fresh_start is always True until Portfolio Guru tracks server-side sessions.
-
-    The channel gateway is authoritative for session
-    continuity in the interim: it uses an in-memory TTL to suppress the
-    "Starting…" ACK on continuation turns.
-    """
+    """The pure contract is stateless; stateful adapters may override this."""
     msg = InboundMessage(
         session=_session(), scope=ConversationScope.DIRECT, text="CBD review"
     )

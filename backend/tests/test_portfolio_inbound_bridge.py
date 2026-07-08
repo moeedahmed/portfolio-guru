@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import os
 import sys
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -31,6 +33,13 @@ import webhook_server
 from channel_actions import ChannelReply
 
 _SECRET = "test-gateway-secret"
+
+
+@pytest.fixture(autouse=True)
+def reset_inbound_session_store():
+    webhook_server._inbound_session_store.reset()
+    yield
+    webhook_server._inbound_session_store.reset()
 
 
 @pytest.fixture
@@ -140,8 +149,7 @@ def test_unconfigured_secret_returns_500(monkeypatch):
     assert resp.status_code == 500
 
 
-def test_handle_response_includes_fresh_start(client: TestClient):
-    """fresh_start is always True until Portfolio Guru tracks server-side sessions."""
+def test_handle_response_marks_first_turn_as_fresh(client: TestClient):
     resp = client.post(
         "/api/portfolio/inbound",
         json=_direct_body(),
@@ -151,6 +159,24 @@ def test_handle_response_includes_fresh_start(client: TestClient):
     data = resp.json()
     assert data["disposition"] == "handle"
     assert data.get("fresh_start") is True
+
+
+def test_second_direct_turn_in_same_conversation_is_not_fresh(client: TestClient):
+    first = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body("hello"),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    second = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body("hello again"),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["fresh_start"] is True
+    assert second.json()["fresh_start"] is False
 
 
 def test_invalid_scope_is_rejected(client: TestClient):
@@ -493,6 +519,73 @@ def test_start_does_not_invoke_case_insight(monkeypatch, outbound_client):
     assert resp.status_code == 200
     assert resp.json()["disposition"] == "handle"
     assert len(captured) == 1
+
+
+def test_continuation_greeting_does_not_repeat_first_contact_onboarding(outbound_client):
+    client, captured = outbound_client
+
+    first = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body("/start"),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    second = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body("hello"),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["fresh_start"] is True
+    assert second.json()["fresh_start"] is False
+    assert len(captured) == 2
+    assert "Welcome to Portfolio Guru" in captured[0][1]
+    assert "Welcome to Portfolio Guru" not in captured[1][1]
+    assert "clinical case" in captured[1][1].lower()
+
+
+def test_rich_whatsapp_case_recommends_form_without_generating_draft(
+    monkeypatch,
+    outbound_client,
+):
+    """The WhatsApp beta bridge may recommend/gather, but must not call the
+    refined draft generator until a future channel-neutral workflow owns state
+    and approval gates."""
+    client, captured = outbound_client
+
+    import extractor
+
+    recommend = AsyncMock(
+        return_value=[
+            SimpleNamespace(
+                form_type="CBD",
+                rationale="There is enough clinical reasoning for CBD.",
+            )
+        ]
+    )
+    draft_generator = AsyncMock(side_effect=AssertionError("draft generator called"))
+
+    monkeypatch.setattr(extractor, "recommend_form_types", recommend)
+    monkeypatch.setattr(extractor, "extract_cbd_data", draft_generator)
+
+    resp = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body(
+            "62-year-old attended ED with pleuritic chest pain, tachycardia and "
+            "recent long-haul travel. I assessed PE risk, discussed Wells score "
+            "with my consultant, arranged D-dimer then CTPA, and reflected on "
+            "ambulatory pathway use."
+        ),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["reply_sent"] is True
+    recommend.assert_awaited_once()
+    draft_generator.assert_not_awaited()
+    assert "CBD" in captured[0][1]
+    assert "To complete your draft I need a few details" in captured[0][1]
 
 
 def test_rich_case_insight_reply_falls_back_to_gathering_on_extractor_error(

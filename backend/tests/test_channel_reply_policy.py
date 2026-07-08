@@ -19,7 +19,7 @@ from message_policy import render_message
         ),
         (
             "How do I set up Kaizen?",
-            ("Connect Kaizen", "secure setup"),
+            ("Connect Kaizen", "send /start"),
         ),
         (
             "Can you help me with my ARCP portfolio?",

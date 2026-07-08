@@ -20,6 +20,7 @@ Two responsibilities:
 import hmac
 import os
 import logging
+import time
 from fastapi import FastAPI, Request, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -245,6 +246,57 @@ class InboundRequest(BaseModel):
     private: bool = True
 
 
+class _InboundSessionStore:
+    """Small in-process freshness tracker for the private WhatsApp bridge.
+
+    The bridge is not the durable conversation engine. It only needs to know
+    whether a direct channel conversation has been seen recently so fixed
+    first-contact onboarding does not repeat on every WhatsApp turn.
+    """
+
+    def __init__(self, ttl_seconds: int, *, clock=time.monotonic) -> None:
+        self.ttl_seconds = ttl_seconds
+        self._clock = clock
+        self._last_seen: dict[str, float] = {}
+
+    def mark_seen(self, *, channel: str, conversation_id: str) -> bool:
+        """Return True when this is a fresh session, then update last-seen."""
+        now = self._clock()
+        self._prune(now)
+        key = f"{channel}:{conversation_id}"
+        previous = self._last_seen.get(key)
+        self._last_seen[key] = now
+        if previous is None:
+            return True
+        return now - previous > self.ttl_seconds
+
+    def reset(self) -> None:
+        """Clear tracked sessions; used by offline tests."""
+        self._last_seen.clear()
+
+    def _prune(self, now: float) -> None:
+        expired = [
+            key for key, last_seen in self._last_seen.items()
+            if now - last_seen > self.ttl_seconds
+        ]
+        for key in expired:
+            self._last_seen.pop(key, None)
+
+
+def _session_ttl_seconds() -> int:
+    raw = os.environ.get("PORTFOLIO_INBOUND_SESSION_TTL_SECONDS", "").strip()
+    if not raw:
+        return 60 * 60
+    try:
+        parsed = int(raw)
+    except ValueError:
+        return 60 * 60
+    return max(60, parsed)
+
+
+_inbound_session_store = _InboundSessionStore(_session_ttl_seconds())
+
+
 def _verify_gateway_secret(provided: str | None) -> None:
     """Authenticate a gateway-to-Portfolio request, or raise 401/500."""
     expected = os.environ.get("PORTFOLIO_INBOUND_SECRET", "")
@@ -401,7 +453,11 @@ async def _make_case_insight_reply(text: str) -> ChannelReply:
     return ChannelReply(body=body, continuation=None)
 
 
-async def _select_inbound_reply(text: str | None) -> ChannelReply:
+async def _select_inbound_reply(
+    text: str | None,
+    *,
+    fresh_start: bool = True,
+) -> ChannelReply:
     """Pick the first Portfolio Guru reply for a handled DIRECT turn.
 
     First-contact openings — a ``/start`` / ``start`` command, a bare greeting,
@@ -413,9 +469,10 @@ async def _select_inbound_reply(text: str | None) -> ChannelReply:
     classification is deterministic and LLM-free (see
     :mod:`portfolio_first_contact`).
     """
-    onboarding = first_contact_reply(classify_first_contact(text))
-    if onboarding is not None:
-        return onboarding
+    if fresh_start:
+        onboarding = first_contact_reply(classify_first_contact(text))
+        if onboarding is not None:
+            return onboarding
     if _has_rich_case_content(text):
         return await _make_case_insight_reply(text or "")
     return _make_initial_gathering_reply()
@@ -486,10 +543,14 @@ async def portfolio_inbound(
     decision = accept_inbound(message)
 
     if decision.disposition is InboundDisposition.HANDLE:
+        fresh_start = _inbound_session_store.mark_seen(
+            channel=body.channel,
+            conversation_id=body.conversation_id,
+        )
         outbound_cfg = _resolve_outbound_config()
         reply_sent = False
         if outbound_cfg is not None:
-            reply = await _select_inbound_reply(body.text)
+            reply = await _select_inbound_reply(body.text, fresh_start=fresh_start)
             rendered = render_numbered(reply)
             try:
                 await _send_portfolio_turn_reply(
@@ -502,10 +563,7 @@ async def portfolio_inbound(
             "disposition": decision.disposition.value,
             "refusal": None,
             "reply_sent": reply_sent,
-            # fresh_start is always True here: Portfolio Guru has no server-side
-            # session store yet.  The gateway is responsible for suppressing the
-            # "Starting…" ACK on continuation turns via its own in-memory TTL.
-            "fresh_start": decision.fresh_start,
+            "fresh_start": fresh_start,
         }
 
     refusal = (

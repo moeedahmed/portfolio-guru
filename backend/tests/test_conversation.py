@@ -121,7 +121,9 @@ class TestMessagePolicy:
         text = render_message("kaizen_setup_guide")
 
         assert text.startswith("🔗 Connect Kaizen")
-        assert "1. Open Connect Kaizen" in text
+        assert "1. Tap Connect Kaizen" in text
+        assert "send /start" in text
+        assert "/login" not in text
         assert "Safety notes:" in text
         assert "review and approve" in text
         assert "supervisor" in text

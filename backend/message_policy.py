@@ -195,8 +195,9 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         text=(
             "🔗 Connect Kaizen\n\n"
             "Use the secure Connect Kaizen flow before you ask me to save drafts.\n\n"
-            "1. Open Connect Kaizen.\n"
-            "2. Enter your Kaizen username and password in the secure setup screen.\n"
+            "1. Tap Connect Kaizen below. If you do not see the button, send /start "
+            "and choose Connect Kaizen.\n"
+            "2. Send your Kaizen username, then your password, in the private setup flow.\n"
             "3. Wait for the connection check to pass, then send an anonymised case.\n\n"
             "Safety notes:\n"
             "• Kaizen credentials are encrypted and not shown back in chat.\n"

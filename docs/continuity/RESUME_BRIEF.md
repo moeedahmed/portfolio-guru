@@ -1,19 +1,22 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-07-06T19:12:06+00:00
-Status: ready
+Generated: 2026-07-07T23:32:26+00:00
+Status: stale_or_needs_review
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
-- Branch: fix-gathering-ready-prompt-placement
-- Last commit: 21c2e47 2026-07-06 Record Portfolio Guru core edge
-- Uncommitted changes: no
+- Branch: main
+- Last commit: 64e7f44 2026-07-08 Reconnect WhatsApp sidecar after first pairing
+- Uncommitted changes: yes
 
 ## Immediate read before restarting
 1. `AGENTS.md` for durable repo context
 2. Product hub Status + Brief in Notion only for human-facing status, positioning, launch, or risk context
 3. `TASK.md` for active sprint state, if present
 4. This resume brief for drift warnings and repo state
+
+## Warnings
+- Repo has uncommitted local changes — next agent must review and either commit, revert, or summarise them before building from this checkout
 
 ## Practical AGENTS.md check
 - Useful for coding-agent/ACP work: yes
@@ -27,17 +30,20 @@ Status: ready
 - Live/deploy signals: railway.json, render.yaml, .github/workflows/deploy-mac.yml
 
 ## Recent commits
-- 21c2e47 2026-07-06 Record Portfolio Guru core edge
-- eb9a483 2026-07-06 Fix gathering ready prompt placement
-- 055a7a6 2026-07-06 Fix gathering route for detailed clinical context
-- 498a12f 2026-07-06 docs: capture portfolio continuity evidence
-- 9ad0623 2026-07-05 Gate gathering prompts before draft readiness
-- 581f639 2026-07-05 Fix repeated source detail prompts
-- 9b9997f 2026-07-05 Improve draft quality recommendations
-- 24d2f61 2026-07-05 Fix source-detail gathering loop
+- 64e7f44 2026-07-08 Reconnect WhatsApp sidecar after first pairing
+- 01763db 2026-07-07 Add WhatsApp QR image handoff
+- f16e8d8 2026-07-07 Pin WhatsApp Web version and browser identity to fix 405 before QR
+- a99d1ca 2026-07-07 Drop non-user WhatsApp frames instead of crashing the relay
+- 51ebe40 2026-07-07 Add isolated Baileys WhatsApp linked-device sidecar
+- 57e8b25 2026-07-07 Add runnable WhatsApp linked-device connector shell
+- 3becd45 2026-07-07 Add direct WhatsApp linked-device connector boundary
+- ca225bd 2026-07-07 Run Kaizen browser automation quietly
+
+## Uncommitted change summary
+- M docs/continuity/RESUME_BRIEF.md
 
 ## Repo context snapshot
-### AGENTS.md — present, 0 days old
+### AGENTS.md — present, 1 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
@@ -48,7 +54,7 @@ Key headings:
 - ## Safety
 - ## Supported Forms
 
-### CLAUDE.md — present, 0 days old
+### CLAUDE.md — present, 1 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
@@ -59,7 +65,7 @@ Key headings:
 - ## Safety
 - ## Supported Forms
 
-### TASK.md — present, 9 days old
+### TASK.md — present, 10 days old
 Key headings:
 - # Active Task — Hermes Hackathon Production Cut
 - ## Hackathon Objective
@@ -74,7 +80,7 @@ Key headings:
 - ## Hackathon Done Criteria
 - # Previous Active Task — Kaizen Mapping Sprint
 
-### docs/plan.md — present, 4 days old
+### docs/plan.md — present, 0 days old
 Key headings:
 - # Portfolio Guru - Conversational Router Plan
 - ## Goal
@@ -89,10 +95,10 @@ Key headings:
 - ### Phase 0 - Checkpoint and branch
 - ### Phase 1 - Router contract and tests
 
-### WORKFLOWS.md — present, 21 days old
+### WORKFLOWS.md — present, 0 days old
 Key headings:
 - # Portfolio Guru — Agent Workflow Reference
-- ## Channel Boundary — EMGurus WhatsApp Gateway
+- ## Channel Boundary — Dedicated Portfolio Guru WhatsApp Connector
 - ## Conversation States
 - ## Flow 1 — First-Time User
 - ## Flow 2 — Core Filing (Happy Path)
@@ -105,6 +111,6 @@ Key headings:
 - ## Key Capabilities Selection Rules
 
 ## Recommended restart path
-Continuity context looks sufficient; proceed with normal product-docs workflow.
+Refresh the product hub/Brief and repo context before a new build sprint.
 
 If this product has been idle for weeks, do not start implementation from memory. Refresh the product hub Status/Brief first, then create or update `TASK.md` for the next sprint.

@@ -1576,6 +1576,37 @@ def _standalone_pre_capture_route(text: str) -> str | None:
     return None
 
 
+def _use_shared_reply_policy_for_pre_capture(text: str) -> bool:
+    """True when a Telegram first-turn answer should stay fixed/structured.
+
+    The pre-capture router can identify many non-case questions. Some should use
+    Portfolio Guru's shared deterministic reply policy (setup, broad "what can
+    you help with?", cost/payment safety copy). More specific form, pricing, and
+    style questions still go through ``answer_question`` so the answer can be
+    grounded without entering the case pipeline.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    lowered = raw.lower()
+    routed = route_message(raw)
+    if routed.intent in {
+        ConversationalIntent.SETUP_OR_CREDENTIALS,
+        ConversationalIntent.SAFETY_OR_MEDICAL_ADVICE,
+        ConversationalIntent.OUT_OF_SCOPE,
+    }:
+        return True
+    if routed.intent is ConversationalIntent.ACCOUNT_OR_BILLING:
+        return "cost" in lowered or "how much" in lowered or "payment details" in lowered
+    if "what can you help me with" in lowered:
+        return True
+    if "can you help me with" in lowered and (
+        "portfolio" in lowered or "arcp" in lowered or "wpba" in lowered
+    ):
+        return True
+    return False
+
+
 def _standalone_safe_redirect_text(text: str) -> str:
     return safety_redirect_text(text)
 
@@ -9886,16 +9917,17 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 await update.message.reply_text(_standalone_safe_redirect_text(raw_text))
                 return ConversationHandler.END
             if pre_capture_route == "answer":
-                deterministic_reply = select_deterministic_reply(
-                    raw_text,
-                    include_first_contact=True,
-                )
-                if deterministic_reply is not None:
-                    await update.message.reply_text(
-                        deterministic_reply.full_text(),
-                        reply_markup=to_telegram_keyboard(deterministic_reply),
+                if _use_shared_reply_policy_for_pre_capture(raw_text):
+                    deterministic_reply = select_deterministic_reply(
+                        raw_text,
+                        include_first_contact=True,
                     )
-                    return ConversationHandler.END
+                    if deterministic_reply is not None:
+                        await update.message.reply_text(
+                            deterministic_reply.full_text(),
+                            reply_markup=to_telegram_keyboard(deterministic_reply),
+                        )
+                        return ConversationHandler.END
                 try:
                     answer = style_grounded_answer(await answer_question(raw_text))
                     await update.message.reply_text(answer)
