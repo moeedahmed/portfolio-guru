@@ -1,3 +1,5 @@
+import inspect
+
 import pytest
 
 
@@ -223,6 +225,18 @@ async def test_case_specific_form_question_prompt_uses_style_envelope(monkeypatc
     assert "Portfolio Guru flexible reply style:" in prompt
     assert "calm Emergency Medicine portfolio coach" in prompt
     assert "do not change workflow decisions" in prompt
+
+
+def test_flexible_reply_style_envelope_does_not_touch_draft_generators():
+    import extractor
+
+    assert "FLEXIBLE_REPLY_STYLE_ENVELOPE" in inspect.getsource(extractor.answer_question)
+    assert "FLEXIBLE_REPLY_STYLE_ENVELOPE" not in inspect.getsource(
+        extractor.extract_cbd_data
+    )
+    assert "FLEXIBLE_REPLY_STYLE_ENVELOPE" not in inspect.getsource(
+        extractor.extract_form_data
+    )
 
 
 @pytest.mark.asyncio
