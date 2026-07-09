@@ -84,6 +84,11 @@ def test_incomplete_draft_complaint_detected(text):
         "what forms do you support?",
         "67 year old with chest pain and a raised troponin",
         "patient didn't do well overnight and was escalated to ITU",
+        (
+            "42-year-old man brought to ED after a high-speed motorbike collision. "
+            "I reflected that my ultrasound image saving/documentation was incomplete "
+            "and that I should verbalise the safety pause more explicitly."
+        ),
     ],
 )
 def test_non_complaint_text_not_flagged(text):
@@ -151,6 +156,35 @@ async def test_plain_chitchat_after_success_does_not_trigger_recovery():
 
     assert context.user_data.get("amend_mode") is not True
     assert result != AWAIT_APPROVAL or context.user_data.get("amend_mode") is not True
+
+
+@pytest.mark.asyncio
+async def test_new_case_with_incomplete_documentation_after_success_starts_new_case():
+    """A new clinical case can mention incomplete documentation without reopening
+    the previously saved draft as an amendment."""
+    sim = BotSimulator()
+    context = sim._make_context()
+    _filed_sdl_context(sim, reflection="Solid reflection here.", resource_details="RCEMLearning")
+    case_text = (
+        "42-year-old man brought to ED after a high-speed motorbike collision with "
+        "left-sided chest pain, hypoxia and hypotension. I performed an eFAST scan, "
+        "identified absent lung sliding with a lung point, and inserted a left-sided "
+        "intercostal chest drain. I reflected that my ultrasound image "
+        "saving/documentation was incomplete and that I should verbalise the safety "
+        "pause more explicitly before the procedure."
+    )
+    update = sim._make_text_update(case_text)
+
+    with patch("bot.has_credentials", return_value=True), \
+         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 1, 10, "free"))), \
+         patch("bot.consent.has_current_consent", new=AsyncMock(return_value=True)), \
+         patch("bot._process_case_text", new=AsyncMock(return_value=bot.AWAIT_FORM_CHOICE)) as process_case:
+        result = await bot.handle_case_input(update, context)
+
+    assert result == bot.AWAIT_FORM_CHOICE
+    assert context.user_data.get("amend_mode") is not True
+    process_case.assert_awaited_once()
+    assert process_case.await_args.args[3] == case_text
 
 
 @pytest.mark.asyncio

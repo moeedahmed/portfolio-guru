@@ -1311,11 +1311,20 @@ _INCOMPLETE_DRAFT_COMPLAINT_RE = re.compile(
     r")",
     re.IGNORECASE,
 )
+_INCOMPLETE_DRAFT_ANCHOR_RE = re.compile(
+    r"\b(?:draft|ticket|form|fields?|details?|sections?|reflection|rest|remainder)\b",
+    re.IGNORECASE,
+)
 
 
 def _is_incomplete_draft_complaint(text: str) -> bool:
     """True when the user complains a draft/ticket is missing fields or detail."""
-    return bool(text and _INCOMPLETE_DRAFT_COMPLAINT_RE.search(text))
+    if not text or not _INCOMPLETE_DRAFT_COMPLAINT_RE.search(text):
+        return False
+    # A clinical reflection can legitimately say "documentation was incomplete".
+    # Only reopen a filed draft when the complaint is anchored to the bot draft,
+    # form, ticket, fields, details, or a named missing section.
+    return bool(_INCOMPLETE_DRAFT_ANCHOR_RE.search(text))
 
 
 def _explicit_form_start_request(text: str) -> str | None:
