@@ -179,6 +179,36 @@ class TestMessagePolicy:
         assert "Strongest fit because" in text
         assert "Reflective Practice Log:" in text
 
+    def test_form_recommendation_copy_does_not_show_dangling_fragments(self):
+        from bot import _build_form_recommendation_text
+        from extractor import FORM_UUIDS
+        from models import FormTypeRecommendation
+
+        text = _build_form_recommendation_text(
+            [
+                FormTypeRecommendation(
+                    form_type="CBD",
+                    rationale="The trainee managed diagnostic uncertainty and assessment of a",
+                    uuid=FORM_UUIDS["CBD"],
+                ),
+                FormTypeRecommendation(
+                    form_type="LAT",
+                    rationale="the",
+                    uuid=FORM_UUIDS["LAT"],
+                ),
+                FormTypeRecommendation(
+                    form_type="REFLECT_LOG",
+                    rationale="The trainee reflected on escalation and documentation.",
+                    uuid=FORM_UUIDS["REFLECT_LOG"],
+                ),
+            ]
+        )
+
+        assert "assessment of a." not in text
+        assert "the." not in text
+        assert "Fits the main portfolio evidence in this case." in text
+        assert "The trainee reflected on escalation and documentation." in text
+
 class TestExplicitFormRouting:
     QI_AUDIT_SCREENSHOT_TEXT = (
         "Please create the best-fit kaizen draft for an intermediate portfolio account.\n"

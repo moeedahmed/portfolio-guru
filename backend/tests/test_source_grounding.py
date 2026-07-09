@@ -401,6 +401,39 @@ class TestEnforceImageSourceGrounding:
         assert "the doctor" in value
         assert "tertiary centre" in value
 
+    def test_humanizer_keeps_load_bearing_clinical_words(self):
+        """The preview humanizer must not delete words needed for grammar or
+        clinical meaning."""
+        from extractor import _humanize_all_fields
+
+        fields = {
+            "reflection": (
+                "In future, I will ensure that escalation conversations are "
+                "documented clearly. There was no significant past medical history."
+            )
+        }
+
+        polished = _humanize_all_fields(fields)["reflection"]
+
+        assert "I will ensure that escalation conversations" in polished
+        assert "significant past medical history" in polished
+
+    def test_humanizer_repairs_previous_ensure_deletion_artifact(self):
+        """Regression for: 'In future, I will that my escalation...'"""
+        from extractor import _humanize_all_fields
+
+        fields = {
+            "reflection": (
+                "In future, I will that my escalation conversations with senior "
+                "colleagues are documented more clearly."
+            )
+        }
+
+        polished = _humanize_all_fields(fields)["reflection"]
+
+        assert "In future, I will ensure that my escalation conversations" in polished
+        assert "I will that" not in polished
+
     def test_weak_admin_cpr_anchor_does_not_support_resus_narrative(self):
         """The second failure: OCR saw 'For CPR' in the admin/header area,
         then allowed a full CPR/ALS/ROSC story. That phrase is not enough."""

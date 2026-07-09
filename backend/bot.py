@@ -3941,14 +3941,37 @@ def _safe_markdown_text(text: str) -> str:
     return str(text).replace("_", " ").replace("*", "").replace("`", "").replace("[", "").replace("]", "")
 
 
-def _short_plain_text(text: str, max_words: int = 16) -> str:
+_DANGLING_RATIONALE_TAILS = {
+    "a", "an", "and", "as", "at", "because", "by", "for", "from", "in",
+    "into", "of", "on", "or", "the", "to", "with",
+}
+
+
+def _short_plain_text(text: str, max_words: int = 16, min_words: int = 5) -> str:
     clean = _safe_markdown_text(text or "").strip()
     clean = clean.replace("...", "").replace("…", "")
     clean = re.sub(r"\s+", " ", clean).strip(" .")
+    if not clean:
+        return ""
     words = clean.split()
+    if len(words) < min_words:
+        return ""
+    if words[-1].strip(",;:.").lower() in _DANGLING_RATIONALE_TAILS:
+        return ""
     if len(words) <= max_words:
         return clean + "." if clean and clean[-1] not in ".!?" else clean
-    return " ".join(words[:max_words]).rstrip(",;:.") + "."
+
+    first_sentence = re.split(r"(?<=[.!?])\s+", clean, maxsplit=1)[0].strip()
+    first_sentence_words = first_sentence.split()
+    if min_words <= len(first_sentence_words) <= max_words:
+        return first_sentence if first_sentence[-1] in ".!?" else first_sentence + "."
+
+    truncated = words[:max_words]
+    while truncated and truncated[-1].strip(",;:.").lower() in _DANGLING_RATIONALE_TAILS:
+        truncated.pop()
+    if len(truncated) < min_words:
+        return ""
+    return " ".join(truncated).rstrip(",;:.") + "."
 
 
 def _recommendation_line(rec, *, index: int, total: int, curriculum: str) -> str:

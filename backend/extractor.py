@@ -383,62 +383,33 @@ def schema_form_type(form_type: str) -> str:
         return canonical[:-5]
     return canonical
 
-# AI-tell patterns to strip from ALL narrative text (humanizer)
-# Applied before the user sees any draft — not post-approval
+# AI-tell phrase patterns to strip from ALL narrative text (humanizer).
+# Keep this list phrase-only: deleting load-bearing single words such as
+# "ensure" or "significant" can corrupt grammar and clinical meaning.
 SLOP_PATTERNS = [
     r"\s*—\s*",  # em dashes -> " - "
     r"\s*--\s*",  # double hyphens (AI em-dash approximation) -> " - "
-    # Single words
-    r"\bdelve\b",
-    r"\bnavigate\b",
-    r"\bcrucial\b",
-    r"\bimportantly\b",
-    r"\bcomprehensive\b",
-    r"\bmoreover\b",
-    r"\bfurthermore\b",
-    r"\bunderscore[sd]?\b",
-    r"\bpivotal\b",
-    r"\bseamless(?:ly)?\b",
-    r"\bholistic(?:ally)?\b",
-    r"\brobust\b",
-    r"\binstrumental\b",
-    r"\bmultifaceted\b",
-    r"\blandscape\b",
-    r"\brealm\b",
-    r"\bparadigm\b",
-    r"\bfacilitate[sd]?\b",
-    r"\bleverag(?:e[sd]?|ing)\b",
-    r"\bunlock(?:s|ed|ing)?\b",
-    r"\btapestry\b",
-    r"\bcommenc(?:e[sd]?|ing)\b",
-    r"\bembark(?:s|ed|ing)?\b",
-    r"\bmeticulous(?:ly)?\b",
-    r"\boverarch(?:ing)?\b",
-    # Phrases
     r"\bit's worth noting\b",
     r"\bit is worth noting\b",
-    r"\bon the other hand\b",
     r"\bin summary\b",
     r"\bto summarise\b",
     r"\bto summarize\b",
     r"\bin conclusion\b",
-    r"\bthis case highlights\b",
-    r"\bthis experience underscored\b",
-    r"\bthis encounter reinforced\b",
     r"\bmoving forward\b",
     r"\bin this context\b",
     r"\bit is important to note\b",
-    r"\bplayed a (?:key|vital|critical|crucial) role\b",
-    r"\ba testament to\b",
     r"\bgame.?changer\b",
-    r"\bensur(?:e[sd]?|ing)\b",
-    r"\benhance[sd]?\b",
-    r"\bultimately\b",
-    r"\bsignificant(?:ly)?\b",
-    r"\bnotably\b",
-    r"\bthis case (?:served as|was) a (?:valuable|important|key)\b",
-    r"\breinforced (?:the importance|my understanding)\b",
-    r"\bhighlighted the (?:importance|need|value)\b",
+]
+
+HUMANIZER_ARTIFACT_REPAIRS = [
+    (
+        re.compile(r"\bIn future,?\s+I will that\b", flags=re.IGNORECASE),
+        "In future, I will ensure that",
+    ),
+    (
+        re.compile(r"\bI will that\b", flags=re.IGNORECASE),
+        "I will ensure that",
+    ),
 ]
 
 # Fields that should be humanized (narrative text, not dates/dropdowns/names)
@@ -1299,12 +1270,16 @@ def _humanize_text(text: str) -> str:
     result = re.sub(r"\s*—\s*", " - ", result)
     # Replace double hyphens (AI em-dash approximation)
     result = re.sub(r"\s*--\s*", " - ", result)
-    # Remove slop words/phrases
+    # Remove only safe standalone filler phrases. Do not strip single words:
+    # that can produce broken portfolio prose and change clinical meaning.
     for pattern in SLOP_PATTERNS[1:]:  # skip em dash pattern (already handled)
         result = re.sub(pattern, "", result, flags=re.IGNORECASE)
+    for pattern, replacement in HUMANIZER_ARTIFACT_REPAIRS:
+        result = pattern.sub(replacement, result)
     # Fix orphaned commas and double spaces from removals
     result = re.sub(r",\s*,", ",", result)
     result = re.sub(r"\.\s*\.", ".", result)
+    result = re.sub(r"\s+,", ",", result)
     result = re.sub(r"  +", " ", result)
     # Fix sentences starting with lowercase after removal
     result = re.sub(r"\.\s+([a-z])", lambda m: ". " + m.group(1).upper(), result)
