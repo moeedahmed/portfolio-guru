@@ -486,6 +486,14 @@ def _flow_done(context, flow_key="setup"):
     context.user_data.pop(f"_flow_anchor_{flow_key}", None)
 
 
+async def _retire_clicked_keyboard(query) -> None:
+    """Best-effort removal of buttons from the message that was just clicked."""
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        logger.debug("Could not retire clicked inline keyboard", exc_info=True)
+
+
 # ---------------------------------------------------------------------------
 # Weekly nudge — FORM_LABELS + helpers ported from weekly_check.py
 # ---------------------------------------------------------------------------
@@ -4902,16 +4910,31 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             await update.callback_query.answer()
         return ConversationHandler.END
 
+    query = update.callback_query
+    if query:
+        active_anchor = context.user_data.get("_flow_anchor_setup")
+        setup_state = context.user_data.get("_setup_state_hint")
+        if active_anchor and setup_state == "username":
+            await query.answer("I'm already waiting for your Kaizen email.")
+            await _retire_clicked_keyboard(query)
+            return AWAIT_USERNAME
+        if active_anchor and setup_state == "password" and context.user_data.get("setup_username"):
+            await query.answer("I'm already waiting for your Kaizen password.")
+            await _retire_clicked_keyboard(query)
+            return AWAIT_PASSWORD
+
     # /setup command guard: connected users get settings; explicit button
     # clicks (Update Kaizen login / Connect Kaizen) always start setup.
-    if not update.callback_query and has_credentials(update.effective_user.id):
+    if not query and has_credentials(update.effective_user.id):
         await settings_command(update, context)
         return ConversationHandler.END
 
     # Can be triggered by command or callback. Anchor the setup flow message.
-    if update.callback_query:
-        await update.callback_query.answer()
+    if query:
+        await query.answer()
+        await _retire_clicked_keyboard(query)
     _flow_done(context, "setup")  # fresh start — drop any stale anchor
+    context.user_data["_setup_state_hint"] = "username"
     await _flow_msg(
         update, context,
         _KAIZEN_USERNAME_PROMPT,

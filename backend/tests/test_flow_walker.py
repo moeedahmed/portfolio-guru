@@ -90,6 +90,34 @@ class TestFlowWalker:
         assert sim.get_last_buttons() == []
 
     @pytest.mark.asyncio
+    async def test_setup_button_retap_does_not_duplicate_username_prompt(self):
+        from bot import AWAIT_USERNAME, setup_start
+
+        sim = BotSimulator()
+        context = sim._make_context()
+
+        first_tap = sim._make_callback_update("ACTION|setup", message_text="⚙️ Settings")
+        result = await setup_start(first_tap, context)
+
+        assert result == AWAIT_USERNAME
+        assert "Step 1 of 3" in sim.get_last_text()
+        assert context.user_data.get("_setup_state_hint") == "username"
+        assert context.user_data.get("_flow_anchor_setup")
+
+        sim.clear_messages()
+        second_tap = sim._make_callback_update("ACTION|setup", message_text="⚙️ Settings")
+        result = await setup_start(second_tap, context)
+
+        assert result == AWAIT_USERNAME
+        assert not any(
+            text and "Step 1 of 3" in text
+            for _, text, _ in sim.messages_sent
+        )
+        second_tap.callback_query.answer.assert_awaited_with(
+            "I'm already waiting for your Kaizen email."
+        )
+
+    @pytest.mark.asyncio
     async def test_case_input_walks_to_form_choice(self, recommended_forms):
         from bot import AWAIT_FORM_CHOICE, handle_case_input
 
