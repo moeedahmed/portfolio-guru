@@ -24,6 +24,7 @@ These tests pin the contract the Hermes profile shim relies on:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -34,15 +35,32 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_DIR = REPO_ROOT / "backend"
 CLI_PATH = BACKEND_DIR / "hermes_pg_cli.py"
 PROFILE_SHIM_PATH = REPO_ROOT / "scripts" / "hermes-profile" / "pg"
+RUN_LOCAL_PATH = BACKEND_DIR / "run_local.sh"
 
 
-def _run_cli(*args: str, stdin: str | None = None) -> tuple[int, dict]:
+@pytest.fixture(autouse=True)
+def isolated_whatsapp_state(monkeypatch, tmp_path):
+    monkeypatch.setenv(
+        "PORTFOLIO_GURU_WHATSAPP_STATE_PATH",
+        str(tmp_path / "whatsapp-state.json"),
+    )
+
+
+def _run_cli(
+    *args: str,
+    stdin: str | None = None,
+    env: dict[str, str] | None = None,
+) -> tuple[int, dict]:
+    run_env = os.environ.copy()
+    if env:
+        run_env.update(env)
     result = subprocess.run(
         [sys.executable, "-m", "hermes_pg_cli", *args],
         cwd=str(BACKEND_DIR),
         input=stdin,
         capture_output=True,
         text=True,
+        env=run_env,
     )
     if not result.stdout.strip():
         raise AssertionError(
@@ -342,6 +360,78 @@ def test_whatsapp_reply_empty_payload_blocks_without_reply():
     assert response["data"]["kaizen_writes"] is False
 
 
+def test_whatsapp_reply_setup_choice_resolves_from_persisted_actions(tmp_path):
+    state_path = tmp_path / "whatsapp-state.json"
+    env = {"PORTFOLIO_GURU_WHATSAPP_STATE_PATH": str(state_path)}
+    payload = _valid_payload(
+        channel="whatsapp",
+        conversation_id="447000000000@s.whatsapp.net",
+        gateway_user_id="447000000000@s.whatsapp.net",
+        text="How do I set up Kaizen?",
+    )
+
+    code, first = _run_cli("whatsapp-reply", "--payload", json.dumps(payload), env=env)
+    assert code == 0
+    assert "1. 🔗 Connect Kaizen" in first["data"]["rendered_reply"]
+
+    payload["text"] = "1"
+    code, second = _run_cli("whatsapp-reply", "--payload", json.dumps(payload), env=env)
+    assert code == 0
+    rendered = second["data"]["rendered_reply"]
+    assert "I can't collect Kaizen credentials in WhatsApp." in rendered
+    assert "Please describe the clinical case" not in rendered
+
+
+def test_whatsapp_reply_gathering_persists_across_cli_processes(tmp_path):
+    state_path = tmp_path / "whatsapp-state.json"
+    env = {"PORTFOLIO_GURU_WHATSAPP_STATE_PATH": str(state_path)}
+    payload = _valid_payload(
+        channel="whatsapp",
+        conversation_id="447000000000@s.whatsapp.net",
+        gateway_user_id="447000000000@s.whatsapp.net",
+        text="I need to write up a case",
+    )
+
+    code, opening = _run_cli("whatsapp-reply", "--payload", json.dumps(payload), env=env)
+    assert code == 0
+    assert "clinical case" in opening["data"]["rendered_reply"].lower()
+
+    payload["text"] = "62M came to ED with chest pain and I assessed him with my consultant."
+    code, followup = _run_cli("whatsapp-reply", "--payload", json.dumps(payload), env=env)
+    assert code == 0
+    assert "Captured" in followup["data"]["rendered_reply"]
+    assert "1. ✅ Draft now" in followup["data"]["rendered_reply"]
+
+
+def test_whatsapp_reply_draft_now_uses_accumulated_state_without_kaizen(tmp_path):
+    state_path = tmp_path / "whatsapp-state.json"
+    env = {"PORTFOLIO_GURU_WHATSAPP_STATE_PATH": str(state_path)}
+    payload = _valid_payload(
+        channel="whatsapp",
+        conversation_id="447000000000@s.whatsapp.net",
+        gateway_user_id="447000000000@s.whatsapp.net",
+        text="start a case",
+    )
+
+    _run_cli("whatsapp-reply", "--payload", json.dumps(payload), env=env)
+    payload["text"] = (
+        "55-year-old male in ED resus with central chest pain radiating to "
+        "left arm. I assessed him, escalated to cardiology, and reflected on "
+        "earlier ECG repetition."
+    )
+    _run_cli("whatsapp-reply", "--payload", json.dumps(payload), env=env)
+    payload["text"] = "1"
+    code, response = _run_cli("whatsapp-reply", "--payload", json.dumps(payload), env=env)
+
+    assert code == 0
+    assert response["status"] == "ok"
+    data = response["data"]
+    assert data["kaizen_writes"] is False
+    rendered = data["rendered_reply"]
+    assert "recommended WPBA form" in rendered
+    assert "Reply with the number of your choice." not in rendered
+
+
 # ---------------------------------------------------------------------------
 # Deferred / blocked commands — never fake the engine
 # ---------------------------------------------------------------------------
@@ -445,3 +535,9 @@ def test_profile_shim_source_is_thin_and_delegates():
 
     # It must never name the live beta bot token.
     assert "PORTFOLIO_GURU_TELEGRAM_BOT_TOKEN" not in src
+
+
+def test_runtime_outbound_whatsapp_default_is_portfolio_guru_not_emgurus():
+    src = RUN_LOCAL_PATH.read_text(encoding="utf-8")
+    assert 'PORTFOLIO_OUTBOUND_ACCOUNT_ID="${PORTFOLIO_OUTBOUND_ACCOUNT_ID:-portfolio-guru}"' in src
+    assert 'PORTFOLIO_OUTBOUND_ACCOUNT_ID="${PORTFOLIO_OUTBOUND_ACCOUNT_ID:-emgurus}"' not in src

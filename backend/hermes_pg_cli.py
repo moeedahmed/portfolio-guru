@@ -66,7 +66,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
+import time
+from pathlib import Path
 from typing import Any
 
 ENGINE_VERSION = "1.0.0-hermes-test"
@@ -236,7 +239,7 @@ def cmd_whatsapp_reply(
             },
         }
 
-    reply = asyncio.run(_select_whatsapp_reply(payload.get("text")))
+    reply = asyncio.run(_select_whatsapp_reply(payload))
     return {
         "status": "ok",
         "data": {
@@ -248,7 +251,284 @@ def cmd_whatsapp_reply(
     }
 
 
-async def _select_whatsapp_reply(text: str | None):
+def _state_path() -> Path:
+    explicit = os.environ.get("PORTFOLIO_GURU_WHATSAPP_STATE_PATH")
+    if explicit:
+        return Path(explicit).expanduser()
+    return (
+        Path.home()
+        / ".openclaw"
+        / "data"
+        / "portfolio-guru"
+        / "hermes-whatsapp-workflows.json"
+    )
+
+
+def _state_ttl_seconds() -> int:
+    raw = os.environ.get("PORTFOLIO_GURU_WHATSAPP_STATE_TTL_SECONDS", "").strip()
+    if not raw:
+        return 60 * 60
+    try:
+        return max(60, int(raw))
+    except ValueError:
+        return 60 * 60
+
+
+def _load_whatsapp_state() -> dict[str, Any]:
+    path = _state_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    conversations = data.get("conversations")
+    if not isinstance(conversations, dict):
+        conversations = {}
+    now = time.time()
+    ttl = _state_ttl_seconds()
+    kept = {
+        key: value
+        for key, value in conversations.items()
+        if isinstance(value, dict)
+        and now - float(value.get("updated_at") or value.get("created_at") or 0) <= ttl
+    }
+    return {"conversations": kept}
+
+
+def _save_whatsapp_state(state: dict[str, Any]) -> None:
+    path = _state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _conversation_key(payload: dict[str, Any]) -> str:
+    return str(payload.get("conversation_id") or "").strip()
+
+
+def _conversation_record(state: dict[str, Any], key: str) -> dict[str, Any] | None:
+    conversations = state.setdefault("conversations", {})
+    record = conversations.get(key)
+    return record if isinstance(record, dict) else None
+
+
+def _ensure_conversation_record(state: dict[str, Any], key: str) -> dict[str, Any]:
+    conversations = state.setdefault("conversations", {})
+    now = time.time()
+    record = conversations.get(key)
+    if not isinstance(record, dict):
+        record = {"created_at": now, "updated_at": now, "parts": []}
+        conversations[key] = record
+    record["updated_at"] = now
+    record.setdefault("parts", [])
+    return record
+
+
+def _append_case_part(record: dict[str, Any], text: str | None) -> None:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return
+    parts = record.setdefault("parts", [])
+    if isinstance(parts, list):
+        parts.append(cleaned)
+    record["updated_at"] = time.time()
+
+
+def _combined_case_text(record: dict[str, Any] | None) -> str:
+    if not record:
+        return ""
+    parts = record.get("parts")
+    if not isinstance(parts, list):
+        return ""
+    return "\n\n".join(str(part).strip() for part in parts if str(part).strip())
+
+
+def _remember_actions(record: dict[str, Any] | None, reply) -> None:
+    if record is None:
+        return
+    actions = getattr(reply, "actions", ()) or ()
+    if actions:
+        record["last_actions"] = [
+            {"action_id": action.action_id, "label": action.label}
+            for action in actions
+        ]
+    else:
+        record.pop("last_actions", None)
+    record["updated_at"] = time.time()
+
+
+def _resolve_stored_action(record: dict[str, Any] | None, text: str | None) -> str | None:
+    if not record:
+        return None
+    actions = record.get("last_actions")
+    if not isinstance(actions, list) or not actions:
+        return None
+    from channel_actions import ChannelAction, ChannelReply, resolve_numbered_choice
+
+    reply = ChannelReply(
+        body="",
+        actions=tuple(
+            ChannelAction(
+                action_id=str(action.get("action_id") or ""),
+                label=str(action.get("label") or ""),
+            )
+            for action in actions
+            if action.get("action_id") and action.get("label")
+        ),
+    )
+    return resolve_numbered_choice(reply, text)
+
+
+def _is_unmatched_plain_choice(text: str | None) -> bool:
+    stripped = (text or "").strip()
+    return bool(stripped) and stripped.isdigit()
+
+
+def _looks_like_case_start_request(text: str | None) -> bool:
+    lowered = " ".join((text or "").strip().lower().split())
+    if not lowered:
+        return False
+    starters = (
+        "start a case",
+        "write up a case",
+        "write this up",
+        "draft a case",
+        "draft this case",
+        "file a case",
+        "new case",
+    )
+    return any(starter in lowered for starter in starters)
+
+
+async def _answer_whatsapp_side_question(text: str) -> str:
+    from channel_reply_policy import select_deterministic_reply
+    from message_policy import render_message
+
+    reply = select_deterministic_reply(text, include_first_contact=False)
+    if reply is None:
+        return render_message("capability_overview")
+    return reply.full_text()
+
+
+def _make_gathering_captured_reply():
+    from channel_actions import ChannelReply
+    from conversation_supervisor import DRAFT_NOW_ACTION
+    from message_policy import render_message
+
+    return ChannelReply(
+        body=render_message("gathering_captured"),
+        actions=(DRAFT_NOW_ACTION,),
+    )
+
+
+async def _make_finish_reply(record: dict[str, Any] | None):
+    from channel_actions import ChannelReply
+
+    case_text = _combined_case_text(record)
+    if not case_text.strip():
+        return ChannelReply(
+            body=(
+                "📋 Case details needed\n\n"
+                "I do not have a case captured for that option yet. Send "
+                "anonymised case details, then choose Draft now."
+            )
+        )
+    return _make_local_case_insight_reply(case_text)
+
+
+def _make_local_case_insight_reply(text: str):
+    """Return a source-tied WhatsApp case recommendation without network I/O.
+
+    Hermes invokes this CLI in a fresh process for each WhatsApp message. That
+    path must not depend on the live webhook's model-backed extractor
+    credentials, and it must not touch Kaizen or the refined draft generator.
+    """
+    from channel_actions import ChannelReply
+    from form_display import public_form_name
+    from vnext_form_recommender import FormRecommendation, recommend
+    from vnext_text_extractor import extract_text_facts
+    from webhook_server import _make_initial_gathering_reply
+
+    facts = extract_text_facts(text or "")
+    if not facts:
+        return _make_initial_gathering_reply()
+
+    case_facts = tuple(
+        _case_fact_from_text(key, value, turn_index=index)
+        for index, (key, value) in enumerate(facts, start=1)
+    )
+    recommendation = recommend(case_facts)
+    if not isinstance(recommendation, FormRecommendation):
+        return ChannelReply(
+            body=(
+                "📋 I have started the case, but I need one more detail before "
+                "choosing the best WPBA form.\n\n"
+                f"{recommendation.missing_prompt}\n\n"
+                "Reply with that detail and I'll prepare your portfolio entry."
+            )
+        )
+
+    form_label = public_form_name(recommendation.form_type) or recommendation.form_type
+    body = (
+        f"Based on your description, the recommended WPBA form is:\n"
+        f"{form_label} ({recommendation.form_type})\n\n"
+        f"{recommendation.reason}\n\n"
+        "To complete your draft I need a few details:\n"
+        "- Date of the activity (dd/mm/yyyy)\n"
+        "- Your training grade and current placement\n"
+        "- Your specific role or contribution\n"
+        "- Supervisor / assessor name and grade\n"
+        "- Key metrics or outcomes (if applicable)\n\n"
+        "Reply with the above and I'll prepare your portfolio entry."
+    )
+    return ChannelReply(body=body)
+
+
+def _case_fact_from_text(key: str, value: str, *, turn_index: int):
+    from conversational_case_engine import CaseFact, SourceType
+
+    return CaseFact(
+        key=key,
+        value=value,
+        source_type=SourceType.TEXT,
+        source_turn_id=f"hermes-whatsapp-{turn_index}",
+    )
+
+
+async def _select_active_whatsapp_reply(
+    text: str | None,
+    *,
+    record: dict[str, Any],
+):
+    from conversation_supervisor import GatheringTurnKind, decide_gathering_turn
+
+    if _is_unmatched_plain_choice(text):
+        from channel_actions import ChannelReply
+
+        return ChannelReply(
+            body=(
+                "That option is no longer available.\n\n"
+                "Send anonymised case details, or type done when you are ready "
+                "for me to check the best-fit form."
+            )
+        )
+
+    decision = await decide_gathering_turn(
+        text,
+        answer_question=_answer_whatsapp_side_question,
+    )
+    if decision.kind is GatheringTurnKind.FINISH_CASE:
+        return await _make_finish_reply(record)
+    if decision.add_to_case:
+        _append_case_part(record, text)
+        return _make_gathering_captured_reply()
+    assert decision.reply is not None
+    return decision.reply
+
+
+async def _select_whatsapp_reply(payload: dict[str, Any]):
     """Pick a WhatsApp reply without collapsing every short turn to intake.
 
     The HTTP inbound bridge still owns first-contact/case-intake replies.
@@ -257,20 +537,56 @@ async def _select_whatsapp_reply(text: str | None):
     non-case message looks like "please describe the clinical case".
     """
     from channel_reply_policy import select_deterministic_reply
+    from conversation_supervisor import DRAFT_NOW_ACTION
     from webhook_server import (
         _has_rich_case_content,
-        _make_case_insight_reply,
         _make_initial_gathering_reply,
+        _make_resolved_action_reply,
     )
 
-    reply = select_deterministic_reply(text, include_first_contact=True)
-    if reply is not None:
+    text = payload.get("text")
+    key = _conversation_key(payload)
+    state = _load_whatsapp_state()
+    record = _conversation_record(state, key)
+    action_id = _resolve_stored_action(record, text)
+    if action_id == DRAFT_NOW_ACTION.action_id:
+        reply = await _make_finish_reply(record)
+        _remember_actions(record, reply)
+        _save_whatsapp_state(state)
+        return reply
+    if action_id is not None:
+        reply = _make_resolved_action_reply(action_id)
+        _remember_actions(record, reply)
+        _save_whatsapp_state(state)
         return reply
 
-    if _has_rich_case_content(text):
-        return await _make_case_insight_reply(text or "")
+    if record is not None:
+        reply = await _select_active_whatsapp_reply(text, record=record)
+        _remember_actions(record, reply)
+        _save_whatsapp_state(state)
+        return reply
 
-    return _make_initial_gathering_reply()
+    reply = select_deterministic_reply(text, include_first_contact=True)
+    if reply is not None and not _looks_like_case_start_request(text):
+        if key:
+            record = _ensure_conversation_record(state, key)
+            _remember_actions(record, reply)
+            _save_whatsapp_state(state)
+        return reply
+
+    record = _ensure_conversation_record(state, key) if key else None
+    if _has_rich_case_content(text):
+        if record is not None:
+            _append_case_part(record, text)
+        reply = _make_local_case_insight_reply(text or "")
+        _remember_actions(record, reply)
+        _save_whatsapp_state(state)
+        return reply
+
+    reply = _make_initial_gathering_reply()
+    _remember_actions(record, reply)
+    _save_whatsapp_state(state)
+    return reply
 
 
 def cmd_deferred(name: str) -> dict[str, Any]:
