@@ -456,6 +456,96 @@ def test_short_generic_text_still_returns_gathering_prompt(outbound_client):
     assert "clinical case" in sent_text.lower()
 
 
+@pytest.mark.parametrize("choice_text", ["1", "Connect Kaizen"])
+def test_whatsapp_setup_choice_resolves_previous_actions(
+    outbound_client,
+    choice_text,
+):
+    """A numbered WhatsApp reply to a rendered setup option must resolve to the
+    offered action, not be treated as fake clinical case text."""
+    client, captured = outbound_client
+
+    setup_prompt = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body("How do I set up Kaizen?"),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    choice = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body(choice_text),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+
+    assert setup_prompt.status_code == 200
+    assert choice.status_code == 200
+    assert setup_prompt.json()["reply_sent"] is True
+    assert choice.json()["reply_sent"] is True
+    assert len(captured) == 2
+
+    _, setup_text = captured[0]
+    assert "1. 🔗 Connect Kaizen" in setup_text
+    assert "2. ⚙️ Settings" in setup_text
+    assert "Reply with the number of your choice." in setup_text
+
+    _, choice_reply_text = captured[1]
+    assert "clinical case" not in choice_reply_text.lower()
+    assert "I can't collect Kaizen credentials in WhatsApp." in choice_reply_text
+    assert "Reply with the number of your choice." not in choice_reply_text
+
+
+def test_whatsapp_action_memory_clears_after_reply_without_actions(outbound_client):
+    client, captured = outbound_client
+
+    setup_prompt = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body("How do I set up Kaizen?"),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    generic_reply = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body("thanks"),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    stale_choice = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body("1"),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+
+    assert setup_prompt.status_code == 200
+    assert generic_reply.status_code == 200
+    assert stale_choice.status_code == 200
+    assert len(captured) == 3
+    assert "1. 🔗 Connect Kaizen" in captured[0][1]
+    assert "clinical case" in captured[1][1].lower()
+    assert "option is no longer available" in captured[2][1]
+    assert "anonymised case details" in captured[2][1]
+    assert "I can't collect Kaizen credentials in WhatsApp." not in captured[2][1]
+
+
+def test_whatsapp_settings_choice_resolves_to_static_guidance(outbound_client):
+    client, captured = outbound_client
+
+    setup_prompt = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body("How do I set up Kaizen?"),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    settings_choice = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body("2"),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+
+    assert setup_prompt.status_code == 200
+    assert settings_choice.status_code == 200
+    assert len(captured) == 2
+    assert "2. ⚙️ Settings" in captured[0][1]
+    assert "clinical case" not in captured[1][1].lower()
+    assert "I can't change settings or collect credentials in WhatsApp." in captured[1][1]
+    assert "Reply with the number of your choice." not in captured[1][1]
+
+
 # ---------------------------------------------------------------------------
 # First-contact onboarding tests — /start, greeting, capability
 # ---------------------------------------------------------------------------
@@ -627,3 +717,223 @@ def test_rich_case_without_outbound_config_still_returns_handle(client: TestClie
     data = resp.json()
     assert data["disposition"] == "handle"
     assert data["reply_sent"] is False
+
+
+# ---------------------------------------------------------------------------
+# WhatsApp gathering-state parity tests
+# ---------------------------------------------------------------------------
+# WhatsApp cannot use Telegram inline-state, so the bridge keeps a small
+# per-conversation case bundle and resolves the same "Draft now" action from a
+# numbered reply. This stays offline and stops at form recommendation/gathering:
+# no Kaizen save and no refined draft generation.
+
+
+def test_whatsapp_followup_case_detail_is_captured_with_draft_now_action(
+    outbound_client,
+):
+    client, captured = outbound_client
+
+    opening = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body("I need to write up a case"),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    followup = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body(
+            "62M came to ED with chest pain. I assessed him with my consultant "
+            "and reflected on escalation."
+        ),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+
+    assert opening.status_code == 200
+    assert followup.status_code == 200
+    assert len(captured) == 2
+    assert "clinical case" in captured[0][1].lower()
+    assert "Captured" in captured[1][1]
+    assert "1. ✅ Draft now" in captured[1][1]
+    assert "Reply with the number of your choice." in captured[1][1]
+
+
+def test_whatsapp_draft_now_uses_accumulated_case_without_refined_draft_generator(
+    monkeypatch,
+    outbound_client,
+):
+    client, captured = outbound_client
+
+    seen_cases: list[str] = []
+
+    async def _stub_insight(text: str) -> ChannelReply:
+        seen_cases.append(text)
+        return ChannelReply(
+            body=(
+                "Based on your description, the recommended WPBA form is:\n"
+                "Case Based Discussion (CBD)\n\n"
+                "This is still a WhatsApp preview step; nothing has been saved."
+            )
+        )
+
+    import extractor
+
+    draft_generator = AsyncMock(side_effect=AssertionError("draft generator called"))
+    monkeypatch.setattr(webhook_server, "_make_case_insight_reply", _stub_insight)
+    monkeypatch.setattr(extractor, "extract_cbd_data", draft_generator)
+
+    client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body("I need to write up a case"),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body("62M ED chest pain assessed with consultant."),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    draft_now = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body("1"),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+
+    assert draft_now.status_code == 200
+    assert draft_now.json()["reply_sent"] is True
+    assert len(captured) == 3
+    assert seen_cases == ["62M ED chest pain assessed with consultant."]
+    assert "Case Based Discussion" in captured[2][1]
+    assert "Reply with the number of your choice." not in captured[2][1]
+    draft_generator.assert_not_awaited()
+
+
+def test_whatsapp_done_finishes_active_gathering_with_accumulated_case(
+    monkeypatch,
+    outbound_client,
+):
+    client, captured = outbound_client
+    seen_cases: list[str] = []
+
+    async def _stub_insight(text: str) -> ChannelReply:
+        seen_cases.append(text)
+        return ChannelReply(body="Recommended: CBD")
+
+    monkeypatch.setattr(webhook_server, "_make_case_insight_reply", _stub_insight)
+
+    client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body("start a case"),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body("55F ED collapse assessed with registrar."),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    done = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body("done"),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+
+    assert done.status_code == 200
+    assert len(captured) == 3
+    assert seen_cases == ["55F ED collapse assessed with registrar."]
+    assert captured[2][1] == "Recommended: CBD"
+
+
+def test_whatsapp_side_question_during_gathering_keeps_case_bundle(
+    monkeypatch,
+    outbound_client,
+):
+    client, captured = outbound_client
+    seen_cases: list[str] = []
+
+    async def _stub_insight(text: str) -> ChannelReply:
+        seen_cases.append(text)
+        return ChannelReply(body="Recommended from accumulated case")
+
+    monkeypatch.setattr(webhook_server, "_make_case_insight_reply", _stub_insight)
+
+    client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body("case please"),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body("70M ED sepsis assessed with consultant."),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    side_question = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body("Which form would this be?"),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body("I learned about early antibiotics and escalation."),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    done = client.post(
+        "/api/portfolio/inbound",
+        json=_direct_body("done"),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+
+    assert side_question.status_code == 200
+    assert done.status_code == 200
+    assert len(captured) == 5
+    assert "Back to your case" in captured[2][1]
+    assert seen_cases == [
+        "70M ED sepsis assessed with consultant.\n\n"
+        "I learned about early antibiotics and escalation."
+    ]
+
+
+def test_whatsapp_gathering_state_is_isolated_by_conversation(
+    monkeypatch,
+    outbound_client,
+):
+    client, captured = outbound_client
+    seen_cases: list[str] = []
+
+    async def _stub_insight(text: str) -> ChannelReply:
+        seen_cases.append(text)
+        return ChannelReply(body=f"Recommended from {text}")
+
+    monkeypatch.setattr(webhook_server, "_make_case_insight_reply", _stub_insight)
+
+    def body(conversation_id: str, text: str) -> dict:
+        payload = _direct_body(text)
+        payload["conversation_id"] = conversation_id
+        return payload
+
+    client.post(
+        "/api/portfolio/inbound",
+        json=body("wa:one", "start case"),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    client.post(
+        "/api/portfolio/inbound",
+        json=body("wa:one", "60M ED chest pain assessed with consultant."),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    client.post(
+        "/api/portfolio/inbound",
+        json=body("wa:two", "start case"),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    client.post(
+        "/api/portfolio/inbound",
+        json=body("wa:two", "30F ED syncope reviewed with registrar."),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+    one_done = client.post(
+        "/api/portfolio/inbound",
+        json=body("wa:one", "done"),
+        headers={"X-Gateway-Secret": _SECRET},
+    )
+
+    assert one_done.status_code == 200
+    assert len(captured) == 5
+    assert seen_cases == ["60M ED chest pain assessed with consultant."]
+    assert "30F ED syncope" not in captured[4][1]

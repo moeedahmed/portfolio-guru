@@ -220,7 +220,8 @@ class TestFlowWalker:
         assert result == ConversationHandler.END
         text = sim.get_last_text()
         assert text.startswith("🔗 Connect Kaizen")
-        assert "1. Open Connect Kaizen" in text
+        assert "1. Tap Connect Kaizen" in text
+        assert "/login" not in text
         assert "Safety notes:" in text
         assert "**" not in text
         assert ("🔗 Connect Kaizen", "ACTION|setup") in sim.get_last_buttons()

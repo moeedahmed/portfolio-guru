@@ -1,12 +1,12 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-07-07T23:32:26+00:00
+Generated: 2026-07-09T00:20:41+00:00
 Status: stale_or_needs_review
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
 - Branch: main
-- Last commit: 64e7f44 2026-07-08 Reconnect WhatsApp sidecar after first pairing
+- Last commit: 4e7cce9 2026-07-09 Harden Portfolio Guru channel replies
 - Uncommitted changes: yes
 
 ## Immediate read before restarting
@@ -30,20 +30,22 @@ Status: stale_or_needs_review
 - Live/deploy signals: railway.json, render.yaml, .github/workflows/deploy-mac.yml
 
 ## Recent commits
-- 64e7f44 2026-07-08 Reconnect WhatsApp sidecar after first pairing
-- 01763db 2026-07-07 Add WhatsApp QR image handoff
-- f16e8d8 2026-07-07 Pin WhatsApp Web version and browser identity to fix 405 before QR
-- a99d1ca 2026-07-07 Drop non-user WhatsApp frames instead of crashing the relay
-- 51ebe40 2026-07-07 Add isolated Baileys WhatsApp linked-device sidecar
-- 57e8b25 2026-07-07 Add runnable WhatsApp linked-device connector shell
-- 3becd45 2026-07-07 Add direct WhatsApp linked-device connector boundary
-- ca225bd 2026-07-07 Run Kaizen browser automation quietly
+- 4e7cce9 2026-07-09 Harden Portfolio Guru channel replies
+- 58e944b 2026-07-08 Protect draft generators from reply envelope
+- e0d00aa 2026-07-08 Add Portfolio Guru flexible reply style envelope
+- e48903b 2026-07-08 Codify controlled-flexible reply policy
+- b116032 2026-07-08 Unify Portfolio Guru channel side replies
+- 16b8cd5 2026-07-08 Align Kaizen setup replies across channels
+- 5be7366 2026-07-08 Route WhatsApp side questions through intent router
+- 583f1ef 2026-07-08 Document Portfolio WhatsApp failure ladder
 
 ## Uncommitted change summary
-- M docs/continuity/RESUME_BRIEF.md
+- M backend/message_policy.py
+-  M backend/tests/test_portfolio_inbound_bridge.py
+-  M backend/webhook_server.py
 
 ## Repo context snapshot
-### AGENTS.md — present, 1 days old
+### AGENTS.md — present, 2 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
@@ -54,7 +56,7 @@ Key headings:
 - ## Safety
 - ## Supported Forms
 
-### CLAUDE.md — present, 1 days old
+### CLAUDE.md — present, 2 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
@@ -65,7 +67,7 @@ Key headings:
 - ## Safety
 - ## Supported Forms
 
-### TASK.md — present, 10 days old
+### TASK.md — present, 11 days old
 Key headings:
 - # Active Task — Hermes Hackathon Production Cut
 - ## Hackathon Objective
@@ -80,7 +82,7 @@ Key headings:
 - ## Hackathon Done Criteria
 - # Previous Active Task — Kaizen Mapping Sprint
 
-### docs/plan.md — present, 0 days old
+### docs/plan.md — present, 1 days old
 Key headings:
 - # Portfolio Guru - Conversational Router Plan
 - ## Goal
@@ -95,10 +97,11 @@ Key headings:
 - ### Phase 0 - Checkpoint and branch
 - ### Phase 1 - Router contract and tests
 
-### WORKFLOWS.md — present, 0 days old
+### WORKFLOWS.md — present, 1 days old
 Key headings:
 - # Portfolio Guru — Agent Workflow Reference
 - ## Channel Boundary — Dedicated Portfolio Guru WhatsApp Connector
+- ### First-contact parity (WhatsApp opens like the Telegram bot)
 - ## Conversation States
 - ## Flow 1 — First-Time User
 - ## Flow 2 — Core Filing (Happy Path)
@@ -108,7 +111,6 @@ Key headings:
 - ## Flow 4 — Edit Previously Filed Draft (v2.1 — NOT YET BUILT)
 - ## Flow 5 — Reset / Recovery
 - ## Form Type Decision Rules
-- ## Key Capabilities Selection Rules
 
 ## Recommended restart path
 Refresh the product hub/Brief and repo context before a new build sprint.

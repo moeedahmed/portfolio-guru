@@ -72,7 +72,8 @@ async def test_answer_question_uses_fixed_kaizen_setup_copy():
     answer = await answer_question("How do I set up Kaizen?")
 
     assert answer.startswith("🔗 Connect Kaizen")
-    assert "1. Open Connect Kaizen" in answer
+    assert "1. Tap Connect Kaizen" in answer
+    assert "/login" not in answer
     assert "Safety notes:" in answer
     assert "supervisor" in answer
     assert "**" not in answer

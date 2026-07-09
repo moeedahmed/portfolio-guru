@@ -21,6 +21,7 @@ import hmac
 import os
 import logging
 import time
+from dataclasses import dataclass, field
 from fastapi import FastAPI, Request, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -214,7 +215,8 @@ async def create_checkout(
 # PORTFOLIO_INBOUND_SECRET via the X-Gateway-Secret header. The gateway holds
 # the matching value; this server only ever reads it from the environment.
 
-from channel_actions import ChannelReply, render_numbered
+from channel_actions import ChannelReply, render_numbered, resolve_numbered_choice
+from channel_reply_policy import select_deterministic_reply
 from channel_contract import (
     Channel,
     ConversationScope,
@@ -224,6 +226,13 @@ from channel_contract import (
     SessionRef,
     accept_inbound,
 )
+from conversation_supervisor import (
+    DRAFT_NOW_ACTION,
+    GatheringTurnKind,
+    decide_gathering_turn,
+)
+from conversational_router import ConversationalIntent, route_message
+from message_policy import render_message
 from portfolio_first_contact import classify_first_contact, first_contact_reply
 
 
@@ -246,6 +255,29 @@ class InboundRequest(BaseModel):
     private: bool = True
 
 
+@dataclass
+class _InboundWorkflowState:
+    """In-process WhatsApp case bundle for the current direct conversation.
+
+    This deliberately stores only transient channel state. It is not a durable
+    filing workflow, and it never writes to Kaizen.
+    """
+
+    created_at: float
+    updated_at: float
+    parts: list[str] = field(default_factory=list)
+
+    def append(self, text: str | None, *, now: float) -> None:
+        cleaned = (text or "").strip()
+        if not cleaned:
+            return
+        self.parts.append(cleaned)
+        self.updated_at = now
+
+    def combined_text(self) -> str:
+        return "\n\n".join(part for part in self.parts if part.strip())
+
+
 class _InboundSessionStore:
     """Small in-process freshness tracker for the private WhatsApp bridge.
 
@@ -258,21 +290,104 @@ class _InboundSessionStore:
         self.ttl_seconds = ttl_seconds
         self._clock = clock
         self._last_seen: dict[str, float] = {}
+        self._last_action_replies: dict[str, ChannelReply] = {}
+        self._workflow_states: dict[str, _InboundWorkflowState] = {}
 
     def mark_seen(self, *, channel: str, conversation_id: str) -> bool:
         """Return True when this is a fresh session, then update last-seen."""
         now = self._clock()
         self._prune(now)
-        key = f"{channel}:{conversation_id}"
+        key = self._key(channel=channel, conversation_id=conversation_id)
         previous = self._last_seen.get(key)
         self._last_seen[key] = now
         if previous is None:
             return True
         return now - previous > self.ttl_seconds
 
+    def resolve_action(
+        self,
+        *,
+        channel: str,
+        conversation_id: str,
+        text: str | None,
+    ) -> str | None:
+        """Resolve text against the last rendered numbered actions, if any."""
+        key = self._key(channel=channel, conversation_id=conversation_id)
+        reply = self._last_action_replies.get(key)
+        if reply is None:
+            return None
+        return resolve_numbered_choice(reply, text)
+
+    def remember_reply(
+        self,
+        *,
+        channel: str,
+        conversation_id: str,
+        reply: ChannelReply,
+    ) -> None:
+        """Store action-bearing replies and clear stale actions otherwise."""
+        key = self._key(channel=channel, conversation_id=conversation_id)
+        if reply.actions:
+            self._last_action_replies[key] = reply
+        else:
+            self._last_action_replies.pop(key, None)
+
+    def workflow_state(
+        self,
+        *,
+        channel: str,
+        conversation_id: str,
+    ) -> _InboundWorkflowState | None:
+        return self._workflow_states.get(
+            self._key(channel=channel, conversation_id=conversation_id)
+        )
+
+    def start_workflow(
+        self,
+        *,
+        channel: str,
+        conversation_id: str,
+        initial_text: str | None = None,
+    ) -> _InboundWorkflowState:
+        key = self._key(channel=channel, conversation_id=conversation_id)
+        now = self._clock()
+        state = self._workflow_states.get(key)
+        if state is None:
+            state = _InboundWorkflowState(created_at=now, updated_at=now)
+            self._workflow_states[key] = state
+        state.append(initial_text, now=now)
+        return state
+
+    def append_workflow_text(
+        self,
+        *,
+        channel: str,
+        conversation_id: str,
+        text: str | None,
+    ) -> _InboundWorkflowState:
+        state = self.start_workflow(
+            channel=channel,
+            conversation_id=conversation_id,
+        )
+        state.append(text, now=self._clock())
+        return state
+
+    def clear_workflow(
+        self,
+        *,
+        channel: str,
+        conversation_id: str,
+    ) -> None:
+        self._workflow_states.pop(
+            self._key(channel=channel, conversation_id=conversation_id),
+            None,
+        )
+
     def reset(self) -> None:
         """Clear tracked sessions; used by offline tests."""
         self._last_seen.clear()
+        self._last_action_replies.clear()
+        self._workflow_states.clear()
 
     def _prune(self, now: float) -> None:
         expired = [
@@ -281,6 +396,11 @@ class _InboundSessionStore:
         ]
         for key in expired:
             self._last_seen.pop(key, None)
+            self._last_action_replies.pop(key, None)
+            self._workflow_states.pop(key, None)
+
+    def _key(self, *, channel: str, conversation_id: str) -> str:
+        return f"{channel}:{conversation_id}"
 
 
 def _session_ttl_seconds() -> int:
@@ -399,6 +519,11 @@ def _make_initial_gathering_reply() -> ChannelReply:
 
 
 _RICH_CASE_WORD_THRESHOLD = 15
+_DIRECT_INBOUND_POLICY_INTENTS = frozenset(
+    {
+        ConversationalIntent.SETUP_OR_CREDENTIALS,
+    }
+)
 
 
 def _has_rich_case_content(text: str | None) -> bool:
@@ -411,6 +536,129 @@ def _has_rich_case_content(text: str | None) -> bool:
     if not text:
         return False
     return len(text.split()) >= _RICH_CASE_WORD_THRESHOLD
+
+
+def _select_direct_policy_reply(text: str | None) -> ChannelReply | None:
+    """Return a deterministic direct-channel reply for safe side questions."""
+    routed = route_message(text or "")
+    if routed.intent not in _DIRECT_INBOUND_POLICY_INTENTS:
+        return None
+    return select_deterministic_reply(text, include_first_contact=False)
+
+
+def _make_resolved_action_reply(action_id: str) -> ChannelReply:
+    """Return static WhatsApp-safe guidance for a resolved plain-text action."""
+    if action_id == "ACTION|setup":
+        return ChannelReply(
+            body=(
+                "🔗 Connect Kaizen\n\n"
+                "Use the secure Portfolio Guru setup flow on Telegram to connect "
+                "or update Kaizen. I can't collect Kaizen credentials in WhatsApp.\n\n"
+                "Open Portfolio Guru on Telegram, send /start, choose Connect "
+                "Kaizen, and complete the private setup there. Once connected, "
+                "you can send anonymised case details here and I can help with "
+                "the portfolio draft."
+            )
+        )
+    if action_id == "ACTION|settings":
+        return ChannelReply(
+            body=(
+                "⚙️ Settings\n\n"
+                "Account settings, Kaizen connection changes, and credential "
+                "updates are handled in the secure Portfolio Guru Telegram flow. "
+                "I can't change settings or collect credentials in WhatsApp.\n\n"
+                "Open Portfolio Guru on Telegram and send /settings or /start."
+            )
+        )
+    return ChannelReply(
+        body=(
+            "That option is not available in WhatsApp yet.\n\n"
+            "Send anonymised case details here, or use the Portfolio Guru "
+            "Telegram bot for setup, settings, and approval-gated filing."
+        )
+    )
+
+
+def _make_gathering_captured_reply() -> ChannelReply:
+    """Channel-neutral capture acknowledgement with a WhatsApp-resolvable action."""
+    return ChannelReply(
+        body=render_message("gathering_captured"),
+        actions=(DRAFT_NOW_ACTION,),
+    )
+
+
+async def _answer_inbound_side_question(text: str) -> str:
+    """Deterministic WhatsApp side-question answer for active gathering.
+
+    Telegram can use a richer grounded answer path inside the supervisor. The
+    WhatsApp bridge stays safer for now: it answers from deterministic channel
+    policy and points the user back to the active case without making LLM calls.
+    """
+    reply = select_deterministic_reply(text, include_first_contact=False)
+    if reply is None:
+        return render_message("capability_overview")
+    return reply.full_text()
+
+
+def _looks_like_unmatched_plain_choice(text: str | None) -> bool:
+    stripped = (text or "").strip()
+    return bool(stripped) and stripped.isdigit()
+
+
+async def _make_workflow_finish_reply(
+    state: _InboundWorkflowState | None,
+) -> ChannelReply:
+    """Resolve a WhatsApp Draft now/done turn without saving or generating a draft."""
+    case_text = state.combined_text() if state is not None else ""
+    if not case_text.strip():
+        return ChannelReply(
+            body=(
+                "📋 Case details needed\n\n"
+                "I do not have a case captured for that option yet. Send "
+                "anonymised case details, then choose Draft now."
+            )
+        )
+    return await _make_case_insight_reply(case_text)
+
+
+async def _select_active_workflow_reply(
+    text: str | None,
+    *,
+    channel: str,
+    conversation_id: str,
+) -> ChannelReply:
+    """Handle a subsequent WhatsApp turn inside the transient gathering workflow."""
+    if _looks_like_unmatched_plain_choice(text):
+        return ChannelReply(
+            body=(
+                "That option is no longer available.\n\n"
+                "Send anonymised case details, or type done when you are ready "
+                "for me to check the best-fit form."
+            )
+        )
+
+    decision = await decide_gathering_turn(
+        text,
+        answer_question=_answer_inbound_side_question,
+    )
+    state = _inbound_session_store.workflow_state(
+        channel=channel,
+        conversation_id=conversation_id,
+    )
+
+    if decision.kind is GatheringTurnKind.FINISH_CASE:
+        return await _make_workflow_finish_reply(state)
+
+    if decision.add_to_case:
+        _inbound_session_store.append_workflow_text(
+            channel=channel,
+            conversation_id=conversation_id,
+            text=text,
+        )
+        return _make_gathering_captured_reply()
+
+    assert decision.reply is not None
+    return decision.reply
 
 
 async def _make_case_insight_reply(text: str) -> ChannelReply:
@@ -457,6 +705,8 @@ async def _select_inbound_reply(
     text: str | None,
     *,
     fresh_start: bool = True,
+    channel: str = "whatsapp",
+    conversation_id: str = "",
 ) -> ChannelReply:
     """Pick the first Portfolio Guru reply for a handled DIRECT turn.
 
@@ -473,8 +723,29 @@ async def _select_inbound_reply(
         onboarding = first_contact_reply(classify_first_contact(text))
         if onboarding is not None:
             return onboarding
+    policy_reply = _select_direct_policy_reply(text)
+    if policy_reply is not None:
+        return policy_reply
+    if _inbound_session_store.workflow_state(
+        channel=channel,
+        conversation_id=conversation_id,
+    ) is not None:
+        return await _select_active_workflow_reply(
+            text,
+            channel=channel,
+            conversation_id=conversation_id,
+        )
     if _has_rich_case_content(text):
+        _inbound_session_store.start_workflow(
+            channel=channel,
+            conversation_id=conversation_id,
+            initial_text=text,
+        )
         return await _make_case_insight_reply(text or "")
+    _inbound_session_store.start_workflow(
+        channel=channel,
+        conversation_id=conversation_id,
+    )
     return _make_initial_gathering_reply()
 
 
@@ -550,8 +821,33 @@ async def portfolio_inbound(
         outbound_cfg = _resolve_outbound_config()
         reply_sent = False
         if outbound_cfg is not None:
-            reply = await _select_inbound_reply(body.text, fresh_start=fresh_start)
+            action_id = _inbound_session_store.resolve_action(
+                channel=body.channel,
+                conversation_id=body.conversation_id,
+                text=body.text,
+            )
+            if action_id == DRAFT_NOW_ACTION.action_id:
+                reply = await _make_workflow_finish_reply(
+                    _inbound_session_store.workflow_state(
+                        channel=body.channel,
+                        conversation_id=body.conversation_id,
+                    )
+                )
+            elif action_id is not None:
+                reply = _make_resolved_action_reply(action_id)
+            else:
+                reply = await _select_inbound_reply(
+                    body.text,
+                    fresh_start=fresh_start,
+                    channel=body.channel,
+                    conversation_id=body.conversation_id,
+                )
             rendered = render_numbered(reply)
+            _inbound_session_store.remember_reply(
+                channel=body.channel,
+                conversation_id=body.conversation_id,
+                reply=reply,
+            )
             try:
                 await _send_portfolio_turn_reply(
                     _reply_target_for_inbound(body), rendered, outbound_cfg
