@@ -11,6 +11,28 @@ smoke checklist lives in `scripts/dogfood_smoke.sh`.
 
 ---
 
+## Current Product Focus — Telegram Launch Proof
+
+As of 2026-07-09, Portfolio Guru is a Telegram-first private beta. WhatsApp is
+paused as a product priority, not deleted: keep the connector/code intact, but
+do not extend WhatsApp parity, Cloud API, or web-workflow scope until Telegram
+proves real repeat use.
+
+Launch-proof work should improve the Telegram golden path only:
+
+1. case capture
+2. recommendation
+3. draft preview
+4. edit/approve
+5. Kaizen draft save
+6. retry/failure recovery
+7. PHI-free funnel and filing reliability reporting
+
+Use `/funnelreport` for journey proof and `/filingreport` for Kaizen reliability.
+Do not infer adoption from bot logs alone.
+
+---
+
 ## Channel Boundary — Dedicated Portfolio Guru WhatsApp Connector
 
 Portfolio Guru is the deterministic product engine and the source of truth,
@@ -107,6 +129,37 @@ in `tests/test_portfolio_inbound_bridge.py`.
 | `AWAIT_PASSWORD`    | Setup flow. Waiting for Kaizen password.                     |
 
 **Invariant:** Every path to `ConversationHandler.END` must call `context.user_data.clear()` first.
+
+## Telegram Callback And State Map
+
+This map is the regression guard for Telegram button fixes. Keep it updated
+whenever callback payloads or conversation states change.
+
+| Callback family | Primary handler | Required active state/data | Safe stale-button behaviour |
+| --- | --- | --- | --- |
+| `ACTION\|setup` | `setup_start` | none, or setup flow anchor | If already waiting for username/password, answer the callback and do not send duplicate Step 1/2 prompts. |
+| `ACTION\|file` | `handle_action_button` / case input path | none | Clear old flow state and prompt for a fresh case. |
+| `ACTION\|retry_filing` | `handle_callback` -> approval save path | active `draft_data` or restorable last amend draft | Retry the current draft only; if draft state is missing, retire the old button and explain that the draft is no longer active. |
+| `ACTION\|reset` / `CONFIRM\|reset` | `reset_data` / `handle_reset_confirm` | none | Clear user state and credentials only after explicit confirmation. |
+| `FORM\|best` | `handle_form_choice` | `form_recommendations`, `case_text` | If the case is gone, remove the stale keyboard and ask for a new case. |
+| `FORM\|<form>` | `handle_form_choice` | `case_text`; optional recommendations | File the selected form against the active case only; never use a form tap to start a synthetic case. |
+| `APPROVE\|draft` | `handle_approval_approve` | `draft_data` plus credentials | One-shot external effect: set `filing_in_progress`, remove old markup, and never run duplicate Kaizen saves on double tap. |
+| `EDIT\|draft` / `FIELD\|<field>` | `handle_approval_edit` / `handle_edit_field` | active draft | If draft state is missing, recover to the latest active draft message or end with a clear stale-draft explanation. |
+| `CANCEL\|draft` / `CANCEL\|form` | `handle_callback` | optional active state | Clear active flow state and return to idle; do not leave old buttons live. |
+| `SET_CURRICULUM\|*`, `LEVEL\|*` | settings/setup handlers | setup or settings flow anchor | Respect the active flow; setup callbacks must not be stolen by global settings handlers. |
+| `UPGRADE\|*` | `handle_upgrade_button` | current user tier | Start checkout only after explicit tap; failures stay in Telegram and do not affect filing state. |
+
+Callback invariants:
+
+- Every external side effect callback must be idempotent before the first
+  `await`.
+- Every clicked keyboard that advances a flow should be retired or made
+  harmless.
+- A stale callback must never create a fake clinical case.
+- A retry callback must only run against a current or deliberately restored
+  draft.
+- Funnel events must stay PHI-free and should be emitted at state transitions,
+  not from raw message text.
 
 ---
 

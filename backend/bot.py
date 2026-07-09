@@ -3329,7 +3329,41 @@ def _track_funnel_event(context, event: str, *, update_last: bool = True, **meta
     except Exception:
         pass
     logger.info("Portfolio Guru funnel event=%s metadata=%s", event, safe)
+    try:
+        from funnel_metrics import log_event
+        log_event(
+            user_id=_audit_user_id(context),
+            username=None,
+            event=event,
+            metadata=safe,
+            session_id=_audit_session_id(context),
+        )
+    except Exception:
+        logger.debug("Funnel metric append failed: %s", event, exc_info=True)
     _audit_event(context, "decision_path", decision=event, metadata=safe)
+
+
+async def _alert_filing_failure(
+    context,
+    *,
+    form_type: str,
+    status: str,
+    reason: str | None = None,
+    user_id: int | None = None,
+) -> None:
+    """Page the operator for live Kaizen filing failures without PHI."""
+    try:
+        import ops_alert
+        reason_text = f" ({reason})" if reason else ""
+        user_text = f" user={user_id}" if user_id is not None else ""
+        await ops_alert.notify_operator(
+            getattr(context, "bot", None),
+            f"Kaizen filing {status}{reason_text} for {form_type}.{user_text}",
+            key=f"kaizen_filing_failure:{form_type}:{status}:{reason or 'unknown'}",
+            cooldown=900,
+        )
+    except Exception:
+        logger.debug("Filing failure operator alert failed", exc_info=True)
 
 
 def _log_filing_attempt(
@@ -7018,6 +7052,32 @@ async def filingreport_command(update: Update, context: ContextTypes.DEFAULT_TYP
     return ConversationHandler.END
 
 
+async def funnelreport_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Admin-only — render the Telegram beta funnel report from the durable
+    PHI-free funnel event log. Use ``/funnelreport all`` to include synthetic
+    test traffic.
+    """
+    if update.effective_user.id != ADMIN_USER_ID:
+        await update.message.reply_text("🚫 Admin only.")
+        return ConversationHandler.END
+
+    args = [arg.strip().lower() for arg in (context.args or [])]
+    include_synthetic = bool(args) and args[0] in {"all", "synthetic", "full"}
+
+    try:
+        from funnel_metrics import build_report
+        report = build_report(include_synthetic=include_synthetic)
+    except Exception as exc:
+        logger.error("funnelreport failed: %s", exc, exc_info=True)
+        await update.message.reply_text(f"⚠️ Could not build funnel report: {exc}")
+        return ConversationHandler.END
+
+    if len(report) > 3900:
+        report = report[:3900] + "\n…(truncated)"
+    await update.message.reply_text(report)
+    return ConversationHandler.END
+
+
 async def gather_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Toggle multi-message gathering for the current user. Default is on."""
     args = [arg.strip().lower() for arg in (context.args or [])]
@@ -8405,6 +8465,7 @@ async def _handle_reuse_request(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_id: int, case_text: str, input_source: str) -> int:
     """Store case text, suggest form types, or move directly to the chosen template review."""
+    _track_funnel_event(context, "case_started", source=input_source, update_last=False)
     _track_funnel_event(context, "input_received", source=input_source)
     _audit_event(
         context,
@@ -11430,6 +11491,13 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             verified=None,
         )
         _track_funnel_event(context, "filing_failed", form_type=form_type, reason="timeout")
+        await _alert_filing_failure(
+            context,
+            form_type=form_type,
+            status="timeout",
+            reason="timeout",
+            user_id=user_id,
+        )
         kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS.get(form_type, '')}" if FORM_UUIDS.get(form_type) else "https://kaizenep.com/activities"
         timeout_msg = (
             "⏱ Filing took too long — Kaizen may be slow right now. "
@@ -11472,6 +11540,13 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             verified=None,
         )
         _track_funnel_event(context, "filing_failed", form_type=form_type, reason="exception")
+        await _alert_filing_failure(
+            context,
+            form_type=form_type,
+            status="exception",
+            reason=type(e).__name__,
+            user_id=user_id,
+        )
         # Keep draft data for retry — do NOT clear user_data
         retry_keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")],
@@ -11615,6 +11690,16 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     method = result.get("method", "deterministic")
 
     uncertain_save = status == "partial" and bool(error)
+    if uncertain_save:
+        reason = _classify_filing_failure(error, skipped, status, filled)
+        _track_funnel_event(context, "filing_failed", form_type=form_type, reason=reason)
+        await _alert_filing_failure(
+            context,
+            form_type=form_type,
+            status=status,
+            reason=reason,
+            user_id=user_id,
+        )
     filed_case_text = context.user_data.get("case_text", "")
     if status in ("success", "partial") and not uncertain_save:
         context.user_data.clear()
@@ -11811,6 +11896,13 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         # "already connected" short-circuit when the user taps Reconnect.
         is_login_failure = _is_session_failure_error(error)
         if is_login_failure and platform == "kaizen":
+            await _alert_filing_failure(
+                context,
+                form_type=form_type,
+                status=status,
+                reason="LOGIN_FAILED",
+                user_id=user_id,
+            )
             context.user_data["force_reconnect"] = True
             msg = (
                 f"❌ Filing didn't complete\n"
@@ -11849,6 +11941,13 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         # each filer raises.
         classification = _classify_filing_failure(error, skipped, status, filled)
         _track_funnel_event(context, "filing_failed", form_type=form_type, reason=classification)
+        await _alert_filing_failure(
+            context,
+            form_type=form_type,
+            status=status,
+            reason=classification,
+            user_id=user_id,
+        )
         kaizen_url = (
             f"https://kaizenep.com/events/new-section/{FORM_UUIDS[form_type]}"
             if platform == "kaizen" and FORM_UUIDS.get(form_type)
@@ -13482,6 +13581,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("beta", beta_command))
     application.add_handler(CommandHandler("listusers", listusers_command))
     application.add_handler(CommandHandler("filingreport", filingreport_command))
+    application.add_handler(CommandHandler("funnelreport", funnelreport_command))
     application.add_handler(CommandHandler("gather", gather_command))
     application.add_handler(CommandHandler("assignbeta", assignbeta_command))
     application.add_handler(CallbackQueryHandler(handle_upgrade_button, pattern=r"^UPGRADE\|"))

@@ -1,8 +1,8 @@
 # Portfolio Guru WhatsApp Rollout Plan
 
 Date: 2026-07-07
-Status: repo-owned preparation only; live rollout is blocked until the gates
-below are approved.
+Status: paused as of 2026-07-09. Repo-owned preparation remains intact, but
+WhatsApp is no longer a product priority for the current 14-day sprint.
 
 ## Decision
 
@@ -11,6 +11,11 @@ product brain remains the deterministic Portfolio Guru engine, exactly like the
 Telegram beta bot. WhatsApp is only a thin channel connector for a dedicated
 Portfolio Guru WhatsApp number/account. Portfolio Guru is never a Hermes/EMGurus
 agent layer, classifier, drafter, or fan-out gateway.
+
+Current product decision (2026-07-09): pause WhatsApp, do not delete it. Telegram
+is the launch-proof path until real repeat use is demonstrated. Do not deepen
+the linked-device bridge, migrate to Cloud API, or pursue WhatsApp parity during
+this sprint unless Moeed explicitly reopens the WhatsApp workstream.
 
 Tester rollout must not use the general EMGurus WhatsApp account. The clean path
 is a dedicated Portfolio Guru WhatsApp number and account behind a thin channel

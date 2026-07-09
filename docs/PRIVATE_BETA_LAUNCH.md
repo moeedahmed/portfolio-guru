@@ -7,6 +7,17 @@
 Branch of record: `launch/private-beta-cut`.
 Deploy host: Mac Mini, launchd service `com.portfolioguru.bot`.
 Source of truth for filing routing: `backend/filer_router.py`.
+Product page: https://emgurus.com/portfolio
+
+Current focus (2026-07-09): Telegram-first launch proof. WhatsApp is paused,
+not deleted. Re-engage beta users only after the Telegram golden path and
+private-beta legal boundary are ready.
+
+Legal readiness note:
+`docs/legal/private-beta-readiness-2026-07-09.md`. The current conclusion is
+that a tiny controlled private beta can continue with explicit consent and
+draft-only boundaries, but public or paid launch remains blocked until draft
+privacy/terms markers are closed.
 
 ---
 
@@ -181,6 +192,12 @@ Check on this cadence after each launch / re-launch:
 **First 24 hours (steady-state):**
 
 - Same logs, but scan for repeated errors against the same form or user.
+- `/funnelreport` — journey proof: real users reaching preview, draft save, and
+  repeat use. Use `/funnelreport all` only when synthetic test traffic should be
+  included.
+- `/filingreport` — Kaizen reliability: real filing attempts, success/partial
+  rate, top failure categories, and recent failures. Use `/filingreport all`
+  only when synthetic test traffic should be included.
 - `~/.openclaw/data/portfolio-guru/supervisor/` — if any assessor users
   signed in, supervisor state files appear here. Each user has their own
   file. Inspect only if a supervisor user reports a problem.
