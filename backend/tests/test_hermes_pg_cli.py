@@ -360,6 +360,93 @@ def test_whatsapp_reply_empty_payload_blocks_without_reply():
     assert response["data"]["kaizen_writes"] is False
 
 
+def test_whatsapp_reply_continues_after_form_recommendation_to_preview():
+    conversation_id = "447000000123@s.whatsapp.net"
+
+    def whatsapp_payload(text: str) -> str:
+        return json.dumps(
+            _valid_payload(
+                channel="whatsapp",
+                conversation_id=conversation_id,
+                gateway_user_id=conversation_id,
+                text=text,
+            )
+        )
+
+    first = _run_cli(
+        "whatsapp-reply",
+        "--payload",
+        whatsapp_payload("start a case"),
+    )
+    second = _run_cli(
+        "whatsapp-reply",
+        "--payload",
+        whatsapp_payload(
+            "55-year-old male in ED resus with central chest pain radiating "
+            "to left arm. I assessed him, escalated to cardiology, and "
+            "reflected on earlier ECG repetition."
+        ),
+    )
+    third = _run_cli("whatsapp-reply", "--payload", whatsapp_payload("1"))
+    fourth = _run_cli("whatsapp-reply", "--payload", whatsapp_payload("Cbd"))
+
+    assert first[0] == second[0] == third[0] == fourth[0] == 0
+    assert first[1]["status"] == "ok"
+    assert second[1]["status"] == "ok"
+    assert third[1]["status"] == "ok"
+    assert fourth[1]["status"] == "ok"
+
+    captured_reply = second[1]["data"]["rendered_reply"]
+    assert "1. ✅ Draft now" in captured_reply
+
+    recommendation = third[1]["data"]["rendered_reply"]
+    assert "recommended WPBA form is" in recommendation
+    assert "Case-Based Discussion (CBD)" in recommendation
+    assert "1. ✅ Draft now" in recommendation
+
+    preview = fourth[1]["data"]["rendered_reply"]
+    assert "vNext local preview" in preview
+    assert "not a Kaizen draft" in preview
+    assert "WhatsApp preview only" in preview
+    assert "I can help with portfolio/admin work" not in preview
+    assert fourth[1]["data"]["kaizen_writes"] is False
+
+
+def test_whatsapp_reply_recovers_existing_case_when_old_recommendation_had_no_action():
+    conversation_id = "447000000124@s.whatsapp.net"
+    state = {
+        "conversations": {
+            conversation_id: {
+                "created_at": 4102444800,
+                "updated_at": 4102444800,
+                "parts": [
+                    "55-year-old male in ED resus with central chest pain "
+                    "radiating to left arm. I assessed him and escalated to cardiology."
+                ],
+            }
+        }
+    }
+    Path(os.environ["PORTFOLIO_GURU_WHATSAPP_STATE_PATH"]).write_text(
+        json.dumps(state),
+        encoding="utf-8",
+    )
+    payload = _valid_payload(
+        channel="whatsapp",
+        conversation_id=conversation_id,
+        gateway_user_id=conversation_id,
+        text="Cbd",
+    )
+
+    code, response = _run_cli("whatsapp-reply", "--payload", json.dumps(payload))
+
+    assert code == 0
+    assert response["status"] == "ok"
+    rendered = response["data"]["rendered_reply"]
+    assert "vNext local preview" in rendered
+    assert "WhatsApp preview only" in rendered
+    assert "I can help with portfolio/admin work" not in rendered
+
+
 def test_whatsapp_reply_setup_choice_resolves_from_persisted_actions(tmp_path):
     state_path = tmp_path / "whatsapp-state.json"
     env = {"PORTFOLIO_GURU_WHATSAPP_STATE_PATH": str(state_path)}
@@ -421,15 +508,37 @@ def test_whatsapp_reply_draft_now_uses_accumulated_state_without_kaizen(tmp_path
     )
     _run_cli("whatsapp-reply", "--payload", json.dumps(payload), env=env)
     payload["text"] = "1"
-    code, response = _run_cli("whatsapp-reply", "--payload", json.dumps(payload), env=env)
+    code, recommendation_response = _run_cli(
+        "whatsapp-reply",
+        "--payload",
+        json.dumps(payload),
+        env=env,
+    )
 
     assert code == 0
-    assert response["status"] == "ok"
-    data = response["data"]
+    assert recommendation_response["status"] == "ok"
+    data = recommendation_response["data"]
     assert data["kaizen_writes"] is False
     rendered = data["rendered_reply"]
     assert "recommended WPBA form" in rendered
-    assert "Reply with the number of your choice." not in rendered
+    assert "1. ✅ Draft now" in rendered
+
+    payload["text"] = "1"
+    code, preview_response = _run_cli(
+        "whatsapp-reply",
+        "--payload",
+        json.dumps(payload),
+        env=env,
+    )
+
+    assert code == 0
+    assert preview_response["status"] == "ok"
+    preview_data = preview_response["data"]
+    assert preview_data["kaizen_writes"] is False
+    preview = preview_data["rendered_reply"]
+    assert "vNext local preview" in preview
+    assert "WhatsApp preview only" in preview
+    assert "Reply with the number of your choice." not in preview
 
 
 # ---------------------------------------------------------------------------

@@ -423,6 +423,64 @@ def _make_gathering_captured_reply():
     )
 
 
+def _mark_case_recommended(record: dict[str, Any] | None, reply) -> None:
+    if record is None:
+        return
+    body = getattr(reply, "body", "") or ""
+    if "recommended WPBA form is" not in body:
+        return
+    record["stage"] = "recommended"
+    lowered = body.lower()
+    if "case-based discussion" in lowered or "(cbd)" in lowered:
+        record["recommended_form_type"] = "CBD"
+    record["updated_at"] = time.time()
+
+
+def _looks_like_recommended_form_confirmation(
+    text: str | None,
+    record: dict[str, Any] | None,
+) -> bool:
+    if not record:
+        return False
+    normalised = " ".join((text or "").strip().lower().split())
+    if not normalised:
+        return False
+    aliases = {
+        "cbd": {"cbd", "case based discussion", "case-based discussion"},
+    }
+    form_type = str(record.get("recommended_form_type") or "").lower()
+    if not form_type and _combined_case_text(record):
+        return any(normalised in values for values in aliases.values())
+    if record.get("stage") != "recommended":
+        return False
+    return normalised in aliases.get(form_type, {form_type})
+
+
+def _make_local_draft_preview_reply(record: dict[str, Any] | None):
+    from channel_actions import ChannelReply
+    from vnext_draft_preview import build_draft_preview
+    from vnext_form_recommender import recommend
+    from vnext_text_extractor import extract_text_facts
+
+    case_text = _combined_case_text(record)
+    facts = extract_text_facts(case_text or "")
+    case_facts = tuple(
+        _case_fact_from_text(key, value, turn_index=index)
+        for index, (key, value) in enumerate(facts, start=1)
+    )
+    preview = build_draft_preview(case_facts, recommend(case_facts))
+    if record is not None:
+        record["stage"] = "previewed"
+        record["updated_at"] = time.time()
+    return ChannelReply(
+        body=(
+            f"{preview}\n\n"
+            "WhatsApp preview only: nothing has been saved to Kaizen. "
+            "Use the Telegram bot for the full approval-gated Kaizen draft save."
+        )
+    )
+
+
 async def _make_finish_reply(record: dict[str, Any] | None):
     from channel_actions import ChannelReply
 
@@ -435,7 +493,11 @@ async def _make_finish_reply(record: dict[str, Any] | None):
                 "anonymised case details, then choose Draft now."
             )
         )
-    return _make_local_case_insight_reply(case_text)
+    if record is not None and record.get("stage") == "recommended":
+        return _make_local_draft_preview_reply(record)
+    reply = _make_local_case_insight_reply(case_text)
+    _mark_case_recommended(record, reply)
+    return reply
 
 
 def _make_local_case_insight_reply(text: str):
@@ -483,7 +545,9 @@ def _make_local_case_insight_reply(text: str):
         "- Key metrics or outcomes (if applicable)\n\n"
         "Reply with the above and I'll prepare your portfolio entry."
     )
-    return ChannelReply(body=body)
+    from conversation_supervisor import DRAFT_NOW_ACTION
+
+    return ChannelReply(body=body, actions=(DRAFT_NOW_ACTION,))
 
 
 def _case_fact_from_text(key: str, value: str, *, turn_index: int):
@@ -507,6 +571,8 @@ async def _select_active_whatsapp_reply(
     if _is_unmatched_plain_choice(text):
         from channel_actions import ChannelReply
 
+        if _combined_case_text(record):
+            return await _make_finish_reply(record)
         return ChannelReply(
             body=(
                 "That option is no longer available.\n\n"
@@ -514,6 +580,9 @@ async def _select_active_whatsapp_reply(
                 "for me to check the best-fit form."
             )
         )
+
+    if _looks_like_recommended_form_confirmation(text, record):
+        return _make_local_draft_preview_reply(record)
 
     decision = await decide_gathering_turn(
         text,
@@ -523,6 +592,8 @@ async def _select_active_whatsapp_reply(
         return await _make_finish_reply(record)
     if decision.add_to_case:
         _append_case_part(record, text)
+        if record.get("stage") == "recommended":
+            return _make_local_draft_preview_reply(record)
         return _make_gathering_captured_reply()
     assert decision.reply is not None
     return decision.reply
@@ -579,6 +650,7 @@ async def _select_whatsapp_reply(payload: dict[str, Any]):
         if record is not None:
             _append_case_part(record, text)
         reply = _make_local_case_insight_reply(text or "")
+        _mark_case_recommended(record, reply)
         _remember_actions(record, reply)
         _save_whatsapp_state(state)
         return reply
