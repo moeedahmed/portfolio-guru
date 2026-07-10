@@ -52,6 +52,11 @@ from conversational_router import ConversationalIntent, route_message
 from channel_actions import to_telegram_keyboard
 from channel_reply_policy import select_deterministic_reply
 from conversation_supervisor import GatheringTurnKind, decide_gathering_turn
+from workflow_turn_policy import (
+    WorkflowPhase,
+    WorkflowTurnKind,
+    decide_workflow_turn,
+)
 from message_policy import render_message, safety_redirect_text, style_grounded_answer
 from runtime_identity import write_runtime_identity
 import chase_guard
@@ -9560,7 +9565,16 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
     try:
         intent = await classify_intent(raw_text, case_context=case_text)
     except Exception:
-        intent = "edit_detail"
+        logger.warning("Template-review intent classification failed closed", exc_info=True)
+        await update.message.reply_text(
+            "I didn't change your case because that request was unclear. Add case detail, ask a question, or use the buttons above.",
+            reply_markup=(
+                _build_template_review_keyboard()
+                if context.user_data.get("pending_draft_data")
+                else _KB_CANCEL
+            ),
+        )
+        return AWAIT_TEMPLATE_REVIEW
 
     form_name = _form_display_name(current_form) if current_form else "your form"
 
@@ -12564,6 +12578,79 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return AWAIT_APPROVAL
 
 
+def _workflow_phase_for_text_turn(context, *, has_draft: bool, in_flow: bool) -> WorkflowPhase:
+    """Map Telegram's persisted context to the pure free-text policy phase."""
+    if has_draft:
+        return WorkflowPhase.DRAFT_OPEN
+    if in_flow:
+        return WorkflowPhase.CASE_OPEN
+    if context.user_data.get("last_filing_status") == "success":
+        return WorkflowPhase.COMPLETED
+    return WorkflowPhase.IDLE
+
+
+def _current_text_flow_state(context, *, has_draft: bool, has_pending: bool) -> int:
+    """Return the active Telegram step without changing persisted workflow data."""
+    if context.user_data.get("_pending_doc"):
+        return AWAIT_DOC_INTENT
+    if has_draft:
+        return AWAIT_APPROVAL
+    if has_pending:
+        return AWAIT_TEMPLATE_REVIEW
+    if context.user_data.get("case_text"):
+        return AWAIT_FORM_CHOICE
+    return AWAIT_CASE_INPUT
+
+
+def _current_text_flow_keyboard(context, *, has_draft: bool, has_pending: bool = False):
+    if has_draft:
+        return _active_draft_keyboard(context)
+    if has_pending:
+        return _build_template_review_keyboard()
+    explicit_form = context.user_data.get("explicit_form_choice")
+    if explicit_form:
+        return _build_explicit_form_keyboard(explicit_form)
+    return _KB_CANCEL
+
+
+async def _answer_mid_flow_question(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    raw_text: str,
+    *,
+    case_text: str,
+    has_draft: bool,
+    has_pending: bool,
+) -> int:
+    """Answer a side question and return the user to the unchanged current step."""
+    next_state = _current_text_flow_state(
+        context,
+        has_draft=has_draft,
+        has_pending=has_pending,
+    )
+    try:
+        answer = style_grounded_answer(await answer_question(raw_text, case_context=case_text))
+    except Exception:
+        answer = (
+            "I can help with portfolio forms, drafting, Kaizen setup, and how this "
+            "workflow works."
+        )
+
+    if has_draft:
+        continuation = "Your draft is ready above — tap Save as draft when ready."
+    elif next_state == AWAIT_TEMPLATE_REVIEW:
+        continuation = "Your template review is still open — use the buttons above to continue."
+    elif next_state == AWAIT_FORM_CHOICE:
+        continuation = "Your case is still in progress — use the form buttons above to continue."
+    elif next_state == AWAIT_DOC_INTENT:
+        continuation = "Your document choice is still waiting above."
+    else:
+        continuation = "Send a case whenever you're ready."
+
+    await update.message.reply_text(f"{answer}\n\n{continuation}")
+    return next_state
+
+
 async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle unexpected text messages mid-conversation (AWAIT_APPROVAL, AWAIT_EDIT_FIELD, AWAIT_FORM_CHOICE)."""
     # After a reset, treat ANY incoming message as a fresh case
@@ -12580,6 +12667,29 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
     in_flow = has_draft or has_pending or bool(case_text) or bool(context.user_data.get("_pending_doc"))
 
     if context.user_data.get("_pending_doc"):
+        pending_turn = decide_workflow_turn(
+            raw_text,
+            phase=WorkflowPhase.DRAFT_OPEN if has_draft else WorkflowPhase.CASE_OPEN,
+            legacy_intent=None,
+        )
+        if pending_turn.kind is WorkflowTurnKind.SIDE_QUESTION:
+            return await _answer_mid_flow_question(
+                update,
+                context,
+                raw_text,
+                case_text=case_text,
+                has_draft=has_draft,
+                has_pending=has_pending,
+            )
+        if pending_turn.kind in {
+            WorkflowTurnKind.CHAT,
+            WorkflowTurnKind.CLARIFY,
+            WorkflowTurnKind.CONFIRM_STATE_CHANGE,
+        }:
+            await update.message.reply_text(
+                "I haven't changed your case. Your document choice is still waiting above.",
+            )
+            return AWAIT_DOC_INTENT
         pending_kind = (context.user_data.get("_pending_doc") or {}).get("kind") or "document"
         pending_label = "image" if pending_kind == "image" else "document"
         existing = context.user_data.get("_pending_doc_context", "").strip()
@@ -12649,10 +12759,13 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
             raw_text,
         )
 
+    classifier_failed = False
     try:
         intent = await classify_intent(raw_text, case_context=case_text)
     except Exception:
-        intent = "new_case"
+        logger.warning("Mid-flow intent classification failed closed", exc_info=True)
+        intent = None
+        classifier_failed = True
 
     # Check if we're in a state with an active draft
     amend_mode = bool(context.user_data.get("amend_mode") and has_draft)
@@ -12679,12 +12792,41 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
             )
         return ConversationHandler.END
 
+    phase = _workflow_phase_for_text_turn(context, has_draft=has_draft, in_flow=in_flow)
+    turn = decide_workflow_turn(
+        raw_text,
+        phase=phase,
+        legacy_intent=intent,
+        classifier_failed=classifier_failed,
+    )
+
     if amend_mode:
-        if _looks_like_explicit_new_case_request(raw_text):
+        if turn.kind is WorkflowTurnKind.CONFIRM_STATE_CHANGE and turn.state_action == "start_new_case":
             context.user_data["amend_pending_feedback"] = raw_text
             await update.message.reply_text(
                 "Looks like this may be a new case. Do you want to update this draft or start a new case?",
                 reply_markup=_build_amend_new_case_choice_keyboard(),
+            )
+            return AWAIT_APPROVAL
+        if turn.kind is WorkflowTurnKind.SIDE_QUESTION:
+            return await _answer_mid_flow_question(
+                update,
+                context,
+                raw_text,
+                case_text=case_text,
+                has_draft=has_draft,
+                has_pending=has_pending,
+            )
+        if turn.kind is WorkflowTurnKind.CHAT:
+            await update.message.reply_text(
+                "Still here — your draft is unchanged. Send your amendment when ready.",
+                reply_markup=_active_draft_keyboard(context),
+            )
+            return AWAIT_APPROVAL
+        if turn.kind in {WorkflowTurnKind.CLARIFY, WorkflowTurnKind.CONFIRM_STATE_CHANGE}:
+            await update.message.reply_text(
+                "I haven't changed or cancelled your draft. Tell me the exact change, or use the buttons below.",
+                reply_markup=_active_draft_keyboard(context),
             )
             return AWAIT_APPROVAL
         return await _regenerate_active_draft_with_feedback(
@@ -12695,7 +12837,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
             input_source="text",
         )
 
-    if intent == "chitchat":
+    if turn.kind is WorkflowTurnKind.CHAT:
         if has_draft:
             await update.message.reply_text(
                 "Still here — your draft is ready above. Tap *Save as draft* when ready, or *Edit* to change it.",
@@ -12715,32 +12857,84 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
         )
         return AWAIT_CASE_INPUT
 
-    elif intent in ("question_general", "question_about_case"):
-        try:
-            answer = style_grounded_answer(await answer_question(raw_text, case_context=case_text))
-            if has_draft:
-                await update.message.reply_text(
-                    f"{answer}\n\nYour draft is ready above — tap Save as draft when ready."
-                )
-                return AWAIT_APPROVAL
-            if in_flow:
-                await update.message.reply_text(
-                    f"{answer}\n\nYour case is still in progress — use the buttons above to continue."
-                )
-                return AWAIT_FORM_CHOICE
-            await update.message.reply_text(answer)
-        except Exception:
-            await update.message.reply_text(
-                "I help you file clinical cases to your Kaizen e-portfolio. "
-                "Send me a case description by text, voice note, photo, video, or document."
-            )
-        return AWAIT_CASE_INPUT
+    if turn.kind is WorkflowTurnKind.SIDE_QUESTION:
+        return await _answer_mid_flow_question(
+            update,
+            context,
+            raw_text,
+            case_text=case_text,
+            has_draft=has_draft,
+            has_pending=has_pending,
+        )
 
-    else:
+    if turn.kind is WorkflowTurnKind.ENRICH_AND_ANSWER:
+        added_detail = turn.case_detail or raw_text
+        if has_pending and context.user_data.get("chosen_form"):
+            try:
+                answer = style_grounded_answer(await answer_question(raw_text, case_context=case_text))
+            except Exception:
+                answer = "I'll keep that extra detail with the current template."
+            await update.message.reply_text(
+                f"{answer}\n\nI'll include that detail and refresh the current template."
+            )
+            return await _accumulate_and_refresh(update, context, added_detail)
+        context.user_data["case_text"] = f"{case_text.strip()}\n\n{added_detail}".strip()
+        return await _answer_mid_flow_question(
+            update,
+            context,
+            raw_text,
+            case_text=context.user_data["case_text"],
+            has_draft=has_draft,
+            has_pending=has_pending,
+        )
+
+    if turn.kind is WorkflowTurnKind.CONFIRM_STATE_CHANGE:
+        if turn.state_action == "start_new_case":
+            return await _show_open_case_new_case_gate(update.message, context, raw_text)
+        await update.message.reply_text(
+            "I haven't cancelled anything. Use Cancel below if that is what you want; otherwise keep going.",
+            reply_markup=_current_text_flow_keyboard(
+                context,
+                has_draft=has_draft,
+                has_pending=has_pending,
+            ),
+        )
+        return _current_text_flow_state(context, has_draft=has_draft, has_pending=has_pending)
+
+    if turn.kind is WorkflowTurnKind.CLARIFY:
+        if has_draft:
+            message = "I didn't change your draft because that request was unclear. Tell me the exact change, or use the buttons below."
+        elif in_flow:
+            message = "I didn't change your case because that request was unclear. Add case detail, ask a question, or use the buttons above."
+        else:
+            message = "Tell me whether you want to start a case, ask a portfolio question, or manage your setup."
+        await update.message.reply_text(
+            message,
+            reply_markup=_current_text_flow_keyboard(
+                context,
+                has_draft=has_draft,
+                has_pending=has_pending,
+            ),
+        )
+        return _current_text_flow_state(context, has_draft=has_draft, has_pending=has_pending)
+
+    if turn.kind is WorkflowTurnKind.EXPLICIT_FILE:
+        if _load_draft(context) or _restore_retryable_draft(context):
+            return await handle_approval_approve(update, context)
+
+    if turn.kind is WorkflowTurnKind.NEW_CASE and not in_flow:
+        context.user_data.clear()
+        return await handle_case_input(update, context)
+
+    if turn.kind in {
+        WorkflowTurnKind.ENRICH,
+        WorkflowTurnKind.EXPLICIT_EDIT,
+        WorkflowTurnKind.NEW_CASE,
+    }:
         # When the user has an active draft awaiting approval, try treating
         # "edit_detail" as a natural-language edit instruction first
         # (e.g. "change the date to last Tuesday", "set patient age to 67").
-        if intent == "edit_detail" and has_draft:
+        if turn.kind is WorkflowTurnKind.EXPLICIT_EDIT and has_draft:
             draft = _load_draft(context)
             chosen_form = context.user_data.get("chosen_form") or getattr(draft, "form_type", None)
             try:
@@ -12771,8 +12965,11 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
 
         # Treat any text reply as edit feedback when we have a draft to refine.
         # (Explicit "new_case" intent still routes to the warning path below.)
-        if has_draft and intent != "new_case" and case_text:
+        if has_draft and turn.kind in {WorkflowTurnKind.ENRICH, WorkflowTurnKind.EXPLICIT_EDIT} and case_text:
             return await _regenerate_active_draft_with_feedback(update, context, raw_text)
+
+        if has_pending and context.user_data.get("chosen_form") and turn.kind is WorkflowTurnKind.ENRICH:
+            return await _accumulate_and_refresh(update, context, raw_text)
 
         # Before a form has been chosen there is no draft to abandon yet. In
         # practice Telegram users often send a long case in chunks; fold the

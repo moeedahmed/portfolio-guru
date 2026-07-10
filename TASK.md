@@ -49,6 +49,8 @@ By the end of this sprint, Portfolio Guru should be able to answer:
 3. Golden-path Telegram stability:
    - no duplicate/stale buttons
    - setup loops recover cleanly
+   - flexible side questions return to the exact current step
+   - free text cannot silently amend, save, cancel, reset, or switch cases
    - case capture, recommendation, preview, edit, approve, retry, and reset stay deterministic
 4. Private beta readiness:
    - minimal beta consent/terms/privacy boundary

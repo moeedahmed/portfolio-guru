@@ -161,6 +161,29 @@ Callback invariants:
 - Funnel events must stay PHI-free and should be emitted at state transitions,
   not from raw message text.
 
+### Controlled flexibility for free text
+
+Portfolio Guru is a resilient assistant around a deterministic filing engine,
+not a button-only machine and not an LLM-controlled state machine.
+
+- Free text may ask questions, clarify, add genuine case context, or request a
+  draft edit. Side questions are answered and return to the exact active step.
+- Amend, save, cancel/reset/abandon, and case-switch actions require explicit
+  intent that is permitted in the current state, or an existing callback.
+- Ambiguous destructive/case-switch language asks for confirmation and does
+  not mutate the active case or draft.
+- A classifier failure fails closed: preserve the active state and ask for a
+  clearer instruction instead of guessing a state-changing action.
+- After successful completion, substantial clinical text starts a fresh case;
+  thanks, questions, and vague edit requests do not do so silently.
+- Command-sounding clinical wording (for example, documentation being
+  incomplete or a clinical case being cancelled) remains case evidence unless
+  the user explicitly refers to the Portfolio Guru draft/form/ticket.
+
+The pure decision contract lives in `backend/workflow_turn_policy.py`; Telegram
+handlers execute the returned decision but remain owners of I/O and the current
+deterministic filing flow.
+
 ---
 
 ## Flow 1 — First-Time User

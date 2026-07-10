@@ -692,7 +692,8 @@ async def test_mid_flow_sdl_reflection_with_supervisor_action_plan_is_processed_
     context.user_data["case_text"] = "previous case still in form-choice state"
     context.user_data["form_recommendations"] = []
 
-    with patch('bot._process_case_text', new=AsyncMock(return_value=AWAIT_FORM_CHOICE)) as process_case:
+    with patch('bot.classify_intent', new=AsyncMock(return_value='new_case')), \
+         patch('bot._process_case_text', new=AsyncMock(return_value=AWAIT_FORM_CHOICE)) as process_case:
         result = await handle_mid_conversation_text(update, context)
 
     assert result == AWAIT_FORM_CHOICE
