@@ -1,12 +1,12 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-07-10T16:30:54+00:00
+Generated: 2026-07-10T16:31:06+00:00
 Status: ready
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
 - Branch: main
-- Last commit: f670e77 2026-07-10 Guard Telegram workflow state from free text
+- Last commit: 5f1a602 2026-07-10 Guard Telegram workflow state from free text
 - Uncommitted changes: no
 
 ## Immediate read before restarting
@@ -27,7 +27,7 @@ Status: ready
 - Live/deploy signals: railway.json, render.yaml, .github/workflows/deploy-mac.yml
 
 ## Recent commits
-- f670e77 2026-07-10 Guard Telegram workflow state from free text
+- 5f1a602 2026-07-10 Guard Telegram workflow state from free text
 - d8a7f43 2026-07-09 Fix post-save incomplete-case routing
 - 0a3b9b1 2026-07-09 Polish Telegram draft quality gates
 - 8fbc5ab 2026-07-09 Focus Portfolio Guru on Telegram launch proof
