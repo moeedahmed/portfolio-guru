@@ -176,7 +176,7 @@ class TestMessagePolicy:
         assert "(2025)" not in text
         assert "..." not in text
         assert "…" not in text
-        assert "Strongest fit because" in text
+        assert "Strongest match" in text
         assert "Reflective Practice Log:" in text
 
     def test_form_recommendation_copy_does_not_show_dangling_fragments(self):
@@ -265,7 +265,7 @@ class TestExplicitFormRouting:
         assert "]" not in sent_text
         assert "ED case" in sent_text
         assert "Privacy check" in sent_text
-        assert "names, NHS numbers, DOBs or addresses" in sent_text
+        assert "names, NHS numbers, DOBs, or addresses" in sent_text
 
     @pytest.mark.asyncio
     async def test_intermediate_qi_audit_prefers_qiat_not_teaching(self, monkeypatch):

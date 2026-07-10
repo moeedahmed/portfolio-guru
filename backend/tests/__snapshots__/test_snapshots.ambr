@@ -16,21 +16,19 @@
       ),
     ]),
     'text': '''
-      🩺 *Case-Based Discussion draft ready*
+      🩺 *Here is your Case-Based Discussion draft:*
       
       📅 *Date:* 17 Mar 2026
-      
       🏥 *Clinical Setting:* Emergency Department
-      
       🩺 *Patient Presentation:* Central chest pain with diaphoresis
-      
       📈 *Stage of Training:* Higher/ST4-ST6
-      
       👨‍⚕️ *Trainee Role:* I led the assessment with indirect supervision.
       
-      🗒️ *Case to be discussed:* I treated the presentation as acute coronary syndrome and escalated early to cardiology.
+      🗒️ *Case to be discussed:*
+      I treated the presentation as acute coronary syndrome and escalated early to cardiology.
       
-      💭 *Reflection of event:* I would involve the cath lab team earlier if the ECG remains dynamic.
+      💭 *Reflection of event:*
+      I would involve the cath lab team earlier if the ECG remains dynamic.
       
       🎚️ *Level of Supervision:* Indirect
       
@@ -39,10 +37,9 @@
         ↳ KC1: assessing & managing adult patients
       • *SLO2 — Clinical questions & safe decisions*
         ↳ KC1: supporting the team's safe decisions
+      💡 This reflection is brief. Tap 'Improve reflection' if you'd like to expand it.
       
-      💡 Reflection is short — Improve reflection can flesh it out.
-      
-      💬 Reply to refine this draft, or save/cancel before sending a new case.
+      💬 Reply to refine this draft, or use the buttons below to save.
     ''',
   })
 # ---
@@ -67,12 +64,12 @@
       ),
     ]),
     'text': '''
-      📋 Forms that fit your case:
+      📋 Here are the forms that fit your case:
       
-      - Case-Based Discussion: Best fit for a reflective clinical case. Strongest fit because it matches the main event better than the alternative.
+      - Case-Based Discussion: Best fit for a reflective clinical case. Strongest match for the main event.
       - Acute Care Assessment Tool: The case spans multiple patients across a shift.
       
-      Tap Use best fit for the fastest draft, or choose another form.
+      Tap "Use best fit" for a quick draft, or select a different form below.
     ''',
   })
 # ---

@@ -67,7 +67,7 @@ def test_variant_draft_preview_uses_public_name_and_base_schema():
 
     preview = _format_generic_draft(draft)
 
-    assert "Direct Observation of Procedural Skills draft ready" in preview
+    assert "Here is your Direct Observation of Procedural Skills draft:" in preview
     assert "DOPS_2021" not in preview
     assert "Procedure" in preview
     assert "Trainee Performance" in preview

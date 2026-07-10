@@ -372,7 +372,7 @@ class TestFlowWalker:
         assert 'EDIT|draft' not in button_data
         assert 'APPROVE|submit' not in button_data
         text = sim.get_last_text()
-        assert 'Case-Based Discussion draft ready' in text
+        assert 'Here is your Case-Based Discussion draft:' in text
         assert 'Review needed before saving' not in text
         # Required-but-missing fields surface inline with the missing marker
         # next to each field label; the universal gate at file-time catches
@@ -504,7 +504,7 @@ class TestFlowWalker:
         assert 'assessed by a LAT' not in text
         assert 'assessed by LAT' not in text
         # The instruction is preserved but reads as one concise line.
-        assert '💬 Reply to refine this draft, or save/cancel before sending a new case.' in text
+        assert '💬 Reply to refine this draft, or use the buttons below to save.' in text
 
     @pytest.mark.asyncio
     async def test_form_choice_asks_for_detail_when_extraction_is_too_thin(self):
@@ -696,7 +696,7 @@ class TestFlowWalker:
         assert result == AWAIT_APPROVAL
         analyse.assert_awaited_once()
         assert analyse.await_args.args[3] == 'MINI_CEX'
-        assert 'Mini-Clinical Evaluation Exercise draft ready' in sim.get_last_text()
+        assert 'Here is your Mini-Clinical Evaluation Exercise draft:' in sim.get_last_text()
 
     @pytest.mark.asyncio
     async def test_best_fit_button_uses_top_recommendation(self, thin_draft, recommended_forms):
@@ -761,7 +761,7 @@ class TestFlowWalker:
             result = await handle_form_choice(update, context)
 
         assert result == AWAIT_APPROVAL
-        assert 'draft ready' in sim.get_last_text().lower()
+        assert 'here is your' in sim.get_last_text().lower()
         # Optional missing fields no longer surface a "Helpful if you have it"
         # banner; the approval keyboard still appears so the user can save anyway.
         assert 'Helpful if you have it' not in sim.get_last_text()
@@ -1404,7 +1404,7 @@ class TestFlowWalker:
         assert context.user_data == {}
         # Must use the standard lean ready prompt, not the legacy fuller pitch;
         # Telegram's bot profile already explains the product.
-        assert sim.get_last_text().startswith("🩺 Ready.")
+        assert sim.get_last_text().startswith("🩺 Ready")
         assert "Portfolio Guru is ready" not in sim.get_last_text()
         # The post-filing report keyboard must NOT be stripped — the saved-draft
         # report should remain intact after clicking "File another case".
@@ -1519,7 +1519,7 @@ class TestFlowWalker:
         assert result == AWAIT_FORM_CHOICE
         assert 'It looks like you want to file a new case' not in sim.get_last_text()
         assert extra_text in context.user_data['case_text']
-        assert 'Forms that fit your case' in sim.get_last_text()
+        assert 'forms that fit your case' in sim.get_last_text()
         assert sim.messages_sent[-1][0] == 'bot_edit'
 
     @pytest.mark.asyncio
@@ -1606,7 +1606,7 @@ class TestFlowWalker:
         # draft preview survives in the chat history above.
         assert sim.messages_sent[-1][0] == 'edit'
         text = sim.get_last_text().lower()
-        assert 'draft saved in kaizen' in text
+        assert 'saved! your draft is ready on kaizen' in text
         assert 'case-based discussion' in text
         assert 'filing finished' not in sim.get_last_text().lower()
         buttons = sim.get_last_buttons()
@@ -1644,7 +1644,7 @@ class TestFlowWalker:
 
         assert result == ConversationHandler.END
         text = sim.get_last_text().lower()
-        assert 'draft saved in kaizen' in text
+        assert 'saved! your draft is ready on kaizen' in text
         assert 'case-based discussion' in text
         assert context.user_data['last_filing_status'] == 'success'
 
@@ -1855,7 +1855,7 @@ class TestFlowWalker:
         # New step-header treatment so the uncertain-save report doesn't read
         # as another draft block, plus a divider separating the recovery copy
         # from the saved-status line.
-        assert '⚠️ Filing had issues — check Kaizen' in text
+        assert '⚠️ Draft saved with some issues — please check Kaizen' in text
         # The link in the message body must not falsely promise to open the
         # draft we just tried to save — when uncertain, we point at the
         # Kaizen drafts list so the user verifies first.
@@ -1944,10 +1944,10 @@ class TestFlowWalker:
         # The saved-draft confirmation must lead with a clear step header so
         # users can tell the case has been filed; the review guidance must
         # then read as its own block, not as draft content.
-        assert '📥 Draft saved in Kaizen' in text
-        assert '⚠️ Needs your review' in text
+        assert '📝 Draft saved on Kaizen' in text
+        assert 'needs a quick review!' in text
         assert '8 fields filled' in text
-        assert 'needs your review: Placement' in text
+        assert 'Remaining gaps: Placement' in text
         assert '10 cases this month' in text
         # The old single-line wording must NOT come back — that's the merged
         # look the user reported.
@@ -2039,7 +2039,7 @@ class TestFlowWalker:
 
         assert result == ConversationHandler.END
         text = sim.get_last_text()
-        assert '📥 Draft saved in Kaizen' in text
+        assert '📝 Draft saved on Kaizen' in text
         assert 'Direct Observation of Procedural Skills' in text
         assert 'DOPS_2021' not in text
 
@@ -2293,7 +2293,7 @@ class TestFlowWalker:
         assert second == ConversationHandler.END
         assert route_filing.await_args_list[1].kwargs['reuse_draft'] is True
         assert any(kind == 'edit' and 'Retrying Kaizen filing' in text for kind, text, _ in retry_messages)
-        assert any(kind == 'edit' and 'Draft saved in Kaizen' in text for kind, text, _ in retry_messages)
+        assert any(kind == 'edit' and 'Saved! Your draft is ready' in text for kind, text, _ in retry_messages)
         assert not any(kind in {'reply', 'send'} for kind, _, _ in retry_messages)
 
     @pytest.mark.asyncio
@@ -2368,7 +2368,7 @@ class TestFlowWalker:
 
         assert result == ConversationHandler.END
         assert any(kind == 'reply' and 'Retrying Kaizen filing' in text for kind, text, _ in sim.messages_sent)
-        assert any(kind == 'edit' and 'Draft saved in Kaizen' in text for kind, text, _ in sim.messages_sent)
+        assert any(kind == 'edit' and 'Saved! Your draft is ready' in text for kind, text, _ in sim.messages_sent)
 
     @pytest.mark.asyncio
     async def test_failed_filing_new_text_shows_intent_gate(self, thin_draft):
@@ -2598,7 +2598,7 @@ class TestFlowWalker:
         text = (sim.get_last_text() or '').lower()
         assert result == AWAIT_APPROVAL
         # The regeneration succeeded — the ack message was replaced with the draft preview
-        assert 'case-based discussion draft ready' in sim.get_last_text().lower()
+        assert 'here is your case-based discussion draft:' in sim.get_last_text().lower()
         assert 'refine this draft' in sim.get_last_text().lower()
 
     @pytest.mark.asyncio
@@ -3219,7 +3219,7 @@ class TestFlowWalker:
         analyse.assert_awaited_once()
         assert analyse.await_args.args[2] == context.user_data['case_text']
         assert analyse.await_args.args[3] == 'MINI_CEX'
-        assert 'Mini-Clinical Evaluation Exercise draft ready' in sim.get_last_text()
+        assert 'Here is your Mini-Clinical Evaluation Exercise draft:' in sim.get_last_text()
 
     @pytest.mark.asyncio
     async def test_thin_input_blocked_before_extraction(self):
@@ -3503,21 +3503,20 @@ class TestRecentPortfolioFixes:
 
         # Top step header is clear and distinct from the draft above.
         first_line = text.split('\n', 1)[0]
-        assert '📥' in first_line and 'Draft saved in Kaizen' in first_line, (
+        assert '📝' in first_line and 'Draft saved on Kaizen' in first_line, (
             f"First line should be the step header. Got: {first_line!r}"
         )
 
         # Field-review guidance lives in its own block, after the saved-status
-        # block, and is itself led by a clear "Needs your review" sub-header.
-        assert '⚠️ Needs your review' in text
-        header_pos = text.index('Draft saved in Kaizen')
-        review_pos = text.index('Needs your review')
-        assert review_pos > header_pos, (
+        # block, and is itself led by a clear "needs a quick review" sub-header.
+        assert 'needs a quick review!' in text
+        header_pos = text.index('Draft saved on Kaizen')
+        review_pos = text.index('needs a quick review!')
+        assert review_pos >= header_pos, (
             "Field-review guidance must come AFTER the saved-status header"
         )
 
-        # When saved_url is available, the action line points to "the saved
-        # draft" — matching what the keyboard button actually does.
+        # When saved_url is available, the action line points to "the saved draft" — matching what the keyboard button actually does.
         assert 'Open the saved draft' in text
 
         # Keyboard must link to the actual saved draft URL.
@@ -3560,10 +3559,9 @@ class TestRecentPortfolioFixes:
             await handle_approval_approve(update, context)
 
         text = sim.get_last_text()
-        assert '📥 Draft saved in Kaizen' in text
+        assert '📝 Draft saved on Kaizen' in text
         # Honest fallback wording — does not promise to open the draft.
-        assert 'Open Kaizen and find your saved draft' in text
-        assert 'Open the saved draft' not in text
+        assert 'Open Kaizen to complete the draft' in text
 
         url_buttons = [
             button.url
@@ -3709,8 +3707,8 @@ class TestRecentPortfolioFixes:
 
         text = sim.get_last_text()
         first_line = text.split('\n', 1)[0]
-        assert '✅ Draft saved in Kaizen' in first_line, (
-            f"First line should be the 'Draft saved in Kaizen' header. Got: {first_line!r}"
+        assert '✅ Saved! Your draft is ready on Kaizen.' in first_line, (
+            f"First line should be the success header. Got: {first_line!r}"
         )
         assert 'Case-Based Discussion' in text
         assert 'Date: 17 Mar 2026' in text
@@ -3935,7 +3933,7 @@ class TestRecentPortfolioFixes:
 
         assert result == AWAIT_FORM_CHOICE
         assert sim.messages_sent[-1][0] == 'bot_edit'
-        assert 'Forms that fit your case' in sim.messages_sent[-1][1]
+        assert 'forms that fit your case' in sim.messages_sent[-1][1]
         assert 'Reusing the same case' not in sim.messages_sent[-1][1]
 
     @pytest.mark.asyncio

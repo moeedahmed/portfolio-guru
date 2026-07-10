@@ -3992,12 +3992,7 @@ def _recommendation_line(rec, *, index: int, total: int, curriculum: str) -> str
     name = _recommendation_form_display_name(rec.form_type, curriculum)
     rationale = _short_plain_text(sanitize_internal_form_codes(getattr(rec, "rationale", "")))
     if index == 0 and total > 1:
-        alternative_count = total - 1
-        comparison = (
-            "Strongest fit because it matches the main event better than the alternative."
-            if alternative_count == 1
-            else "Strongest fit because it matches the main event better than the alternatives."
-        )
+        comparison = "Strongest match for the main event."
         if rationale:
             rationale = f"{rationale} {comparison}"
         else:
@@ -4018,8 +4013,8 @@ def _build_form_recommendation_text(
     *,
     input_source: str | None = None,
     curriculum: str = "2025",
-    opening: str = "📋 Forms that fit your case:",
-    closing: str = "Tap Use best fit for the fastest draft, or choose another form.",
+    opening: str = "📋 Here are the forms that fit your case:",
+    closing: str = "Tap \"Use best fit\" for a quick draft, or select a different form below.",
 ) -> str:
     visible_recommendations = [r for r in recommendations if getattr(r, "uuid", None)]
     rationale_lines = [
@@ -4094,9 +4089,9 @@ def _draft_coach_note(draft) -> str:
     Returns "" for solid reflections so the preview isn't padded with noise."""
     reflection = _draft_reflection_text(draft).strip()
     if not reflection:
-        return "Coach note: Tap Improve reflection to draft a stronger reflection."
+        return "Coach note: Tap 'Improve reflection' to help flesh out your thoughts."
     if len(reflection.split()) < 18:
-        return "Coach note: Reflection is short — Improve reflection can flesh it out."
+        return "Coach note: This reflection is brief. Tap 'Improve reflection' if you'd like to expand it."
     return ""
 
 
@@ -4166,9 +4161,10 @@ def _set_reflection_detail_gate(context, draft) -> bool:
 
 
 def _draft_header(title: str) -> list[str]:
-    """Compact status header before the draft body."""
+    """Warm, concise status header before the draft body."""
+    clean_title = title.replace(" draft", "").strip()
     return [
-        f"🟢 *{FLOW_STATE_LABELS['drafted']} — {title} ready*",
+        f"🩺 *Here is your {clean_title} draft:*",
         "",
     ]
 
@@ -4795,6 +4791,7 @@ def _format_cbd_draft(cbd_data) -> str:
         curriculum = _MISSING_MARKER
 
     lines = _draft_header("CBD draft")
+    lines[0] = "🩺 *Here is your Case-Based Discussion draft:*"
     lines.extend([
         f"📅 *Date:* {date_display}",
         f"🏥 *Setting:* {display('clinical_setting', cbd_data.clinical_setting)}",
@@ -4817,9 +4814,19 @@ def _format_generic_draft(draft: FormDraft) -> str:
     emoji = FORM_EMOJIS.get(schema_key, FORM_EMOJIS.get(_normalise_form_type(draft.form_type), "📋"))
 
     lines = _draft_header(f"{form_name} draft")
-    lines[0] = f"{emoji} *{form_name} draft ready*"
+    lines[0] = f"{emoji} *Here is your {form_name} draft:*"
+
+    LONG_NARRATIVE_KEYS = {
+        "clinical_reasoning", "reflection", "trainee_performance", "case_observed",
+        "case_discussion", "case_to_be_discussed", "actions_taken", "incident_summary",
+        "reflective_comments", "reflective_notes", "lessons_learned", "learning_points",
+        "learning_outcomes", "different_outcome", "further_action", "replay_differently",
+        "indication"
+    }
 
     fields = schema.get("fields", [])
+    rendered_items = []
+
     for field in fields:
         key = field["key"]
         field_type = field["type"]
@@ -4835,12 +4842,15 @@ def _format_generic_draft(draft: FormDraft) -> str:
             # Optional + empty: skip silently. Required + empty: render the
             # missing-marker so the user knows what to complete.
             continue
-        if empty:
-            label = field["label"]
-            fe = FIELD_EMOJIS.get(key, "📌")
-            lines.append(f"{fe} *{label}:* {_MISSING_MARKER}\n")
-            continue
+
         label = field["label"]
+        fe = FIELD_EMOJIS.get(key, "📌")
+        label_str = f"{fe} *{label}:*"
+
+        if empty:
+            # Missing required field
+            rendered_items.append((f"{label_str} {_MISSING_MARKER}", False))
+            continue
 
         # Format date nicely
         if field_type == "date" and isinstance(value, str):
@@ -4872,26 +4882,31 @@ def _format_generic_draft(draft: FormDraft) -> str:
             # Use key_caps for KC lines — deduplicate against curriculum_links to avoid doubling
             kc_strings = key_caps if key_caps else [v for v in value if _re.match(r'^SLO\w+\s+KC', v, _re.IGNORECASE)]
             formatted = _format_curriculum_hierarchy(slos_seen, kc_strings)
-            lines.append(f"📚 *Curriculum:*\n{formatted}\n")
+            rendered_items.append((f"📚 *Curriculum:*\n{formatted}", True))
             continue
-
-        # Prefix label with emoji if available
-        fe = FIELD_EMOJIS.get(key, "📌")
-        label_str = f"{fe} *{label}:*"
 
         # Format other lists (multi_select)
         if isinstance(value, list):
             if value:
-                value = "\n".join(f"  • {v}" for v in value)
-                lines.append(f"{label_str}\n{value}\n")
+                value_str = "\n".join(f"  • {v}" for v in value)
+                rendered_items.append((f"{label_str}\n{value_str}", True))
             else:
-                lines.append(f"{label_str}\n  • None\n")
+                rendered_items.append((f"{label_str}\n  • None", True))
         else:
             formatted_value = _format_preview_text_value(key, value)
-            if len(str(value)) > 100 or "\n" in formatted_value:
-                lines.append(f"{label_str}\n{formatted_value}\n")
+            is_narrative = key in LONG_NARRATIVE_KEYS
+            if is_narrative or len(str(value)) > 100 or "\n" in formatted_value:
+                rendered_items.append((f"{label_str}\n{formatted_value}", True))
             else:
-                lines.append(f"{label_str} {formatted_value}\n")
+                rendered_items.append((f"{label_str} {formatted_value}", False))
+
+    # Assemble lines with clean vertical spacing (no double blank lines)
+    prev_was_block = False
+    for text, is_block in rendered_items:
+        if (is_block or prev_was_block) and lines and lines[-1] != "":
+            lines.append("")
+        lines.append(text)
+        prev_was_block = is_block
 
     return "\n".join(lines)
 
@@ -11282,7 +11297,7 @@ def _format_receipt_date(value: str) -> str:
 
 
 def _format_attachment_status_line(skipped: list) -> str:
-    """Return a post-save attachment note without making the save look failed."""
+    """Return a post-save attachment note (used in handle_approval_approve) without making the save look failed."""
     for item in skipped:
         item_text = str(item).lower()
         if "attachment" not in item_text:
@@ -11836,29 +11851,35 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     if status == "success":
         date_val = result.get("activity_date") or fields.get("date_of_encounter", fields.get("date_of_event", ""))
         slo_str = ", ".join(curriculum_links) if curriculum_links else ""
-        receipt_lines = [form_name]
         date_display = _format_receipt_date(date_val)
-        if date_display:
-            receipt_lines.append(f"Date: {date_display}")
-        if slo_str:
-            receipt_lines.append(f"Curriculum: {slo_str}")
-        # Clean success message — no verbose proof report. Lead with a step
-        # header so the confirmation reads as a new phase, distinct from the
-        # draft preview the user just approved.
         filled_count = len(filled)
+
+        receipt_details = []
+        if date_display:
+            receipt_details.append(f"Date: {date_display}")
+        if slo_str:
+            receipt_details.append(f"Curriculum: {slo_str}")
         if filled_count > 0:
-            receipt_lines.append(f"{filled_count} field{'s' if filled_count != 1 else ''} completed")
+            receipt_details.append(f"{filled_count} field{'s' if filled_count != 1 else ''} completed")
+
+        details_section = ("\n" + "\n".join(receipt_details)) if receipt_details else ""
+        msg_header = f"✅ Saved! Your draft is ready on Kaizen.\n\n*{form_name}*{details_section}"
+
+        extra_blocks = []
+        if date_default_note:
+            extra_blocks.append(date_default_note.strip())
+        if observation_line:
+            extra_blocks.append(observation_line.strip())
         if usage_line:
-            receipt_lines.append(usage_line)
-        receipt_body = "\n".join(receipt_lines)
+            extra_blocks.append(usage_line.strip())
         attachment_status_line = _format_attachment_status_line(skipped)
-        msg = (
-            f"✅ Draft saved in Kaizen\n"
-            f"{receipt_body}"
-            f"{date_default_note}"
-            f"{observation_line}"
-            f"{attachment_status_line}"
-        )
+        if attachment_status_line:
+            extra_blocks.append(attachment_status_line.strip())
+
+        if extra_blocks:
+            msg = msg_header + "\n\n" + "\n\n".join(extra_blocks)
+        else:
+            msg = msg_header
         status_line = "✅ Draft saved."
     elif status == "partial":
         skipped_names = _friendly_skipped_names(skipped)
@@ -11879,58 +11900,58 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             else:
                 link_text = ""
             fields_filled_str = f"{len(filled)} field{'s' if len(filled) != 1 else ''} filled"
-            recovery_block = (
-                "Fields filled but save wasn't confirmed. "
-                "The draft may not have saved — open Kaizen to verify before retrying."
+
+            msg_body = (
+                f"⚠️ Draft saved with some issues — please check Kaizen\n\n"
+                f"*{form_name}*\n"
+                f"Filled: {fields_filled_str}.\n\n"
+                f"The draft may not have saved completely. Please check to verify before retrying."
             )
-            usage_block = f"\n\n{usage_line}" if usage_line else ""
-            msg = (
-                f"⚠️ Filing had issues — check Kaizen\n"
-                f"{form_name}\n\n"
-                f"{fields_filled_str}.\n\n"
-                f"{_DRAFT_DIVIDER}\n\n"
-                f"{recovery_block}{link_text}{usage_block}"
-            )
+
+            extra_blocks = []
+            if link_text:
+                extra_blocks.append(link_text.strip())
+            if date_default_note:
+                extra_blocks.append(date_default_note.strip())
+            if usage_line:
+                extra_blocks.append(usage_line.strip())
+            attachment_status_line = _format_attachment_status_line(skipped)
+            if attachment_status_line:
+                extra_blocks.append(attachment_status_line.strip())
+
+            if extra_blocks:
+                msg = msg_body + "\n\n" + "\n\n".join(extra_blocks)
+            else:
+                msg = msg_body
             status_line = "⚠️ Filing needs attention."
         else:
             fields_filled_str = f"{len(filled)} field{'s' if len(filled) != 1 else ''} filled"
-            # Count the de-duplicated, collapsed review items (a tag-only miss
-            # is one curriculum issue, not six), so the headline number matches
-            # the readable list and never over-states the gaps.
-            review_count = len(skipped_names)
-            review_clause = (
-                f"{review_count} field{'s' if review_count != 1 else ''} "
-                f"need{'s' if review_count == 1 else ''} your review"
-            )
-            # The action line tracks what the keyboard button actually does:
-            # if we have the saved-draft URL, "Open saved draft" lands on the
-            # exact draft; otherwise the fallback opens the activities list
-            # and the user finds the draft from there.
             if raw_saved_url:
-                action_line = (
-                    "Open the saved draft to fill the missing detail, "
-                    "then assign an assessor."
-                )
+                action_line = "Open the saved draft to complete the details and assign your assessor."
             else:
-                action_line = (
-                    "Open Kaizen and find your saved draft to fill the missing "
-                    "detail, then assign an assessor."
-                )
-            # Lead with a distinct "Draft saved in Kaizen" step header so the
-            # confirmation doesn't visually merge with the approved draft
-            # above it, and keep the review guidance in its own block so it
-            # reads as guidance, not as draft content.
-            attachment_status_line = _format_attachment_status_line(skipped)
-            usage_block = f"\n\n{usage_line}" if usage_line else ""
-            msg = (
-                f"📥 Draft saved in Kaizen\n"
-                f"{form_name}\n\n"
-                f"⚠️ Needs your review\n"
-                f"{fields_filled_str} from your case. "
-                f"{review_clause}: {skipped_display}.\n\n"
-                f"{action_line}{date_default_note}{usage_block}"
-                f"{attachment_status_line}"
+                action_line = "Open Kaizen to complete the draft and assign your assessor."
+
+            msg_header = (
+                f"📝 Draft saved on Kaizen, but needs a quick review!\n\n"
+                f"*{form_name}*\n"
+                f"Completed: {fields_filled_str}.\n"
+                f"Remaining gaps: {skipped_display}.\n\n"
+                f"{action_line}"
             )
+
+            extra_blocks = []
+            if date_default_note:
+                extra_blocks.append(date_default_note.strip())
+            if usage_line:
+                extra_blocks.append(usage_line.strip())
+            attachment_status_line = _format_attachment_status_line(skipped)
+            if attachment_status_line:
+                extra_blocks.append(attachment_status_line.strip())
+
+            if extra_blocks:
+                msg = msg_header + "\n\n" + "\n\n".join(extra_blocks)
+            else:
+                msg = msg_header
             status_line = "⚠️ Filing needs manual review."
     else:
         # Login failures need a dedicated path: the generic "try again / file

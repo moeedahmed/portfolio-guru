@@ -95,7 +95,7 @@ async def test_canonical_message_matches_brief():
     from bot import WELCOME_MSG_CONNECTED
 
     text = WELCOME_MSG_CONNECTED
-    assert "Ready." in text
+    assert "Ready" in text
     for modality in ("text", "voice", "photo", "document"):
         assert modality in text.lower(), f"missing modality in canonical copy: {modality}"
     assert "Kaizen" not in text

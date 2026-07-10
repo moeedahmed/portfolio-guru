@@ -209,7 +209,7 @@ async def test_weak_first_text_gets_context_gate_not_draft_button(monkeypatch):
     assert result == AWAIT_GATHERING
     process_case.assert_not_awaited()
     assert "More clinical context needed" in sim.get_last_text()
-    assert "patient/presentation" in sim.get_last_text()
+    assert "presentation" in sim.get_last_text()
     assert ("✅ Draft now", "GATHER|done") not in sim.get_last_buttons()
     assert context.user_data["gathering_case"]["parts"][0]["text"].startswith("I saw a dog")
 
@@ -382,7 +382,7 @@ async def test_voice_transcript_fragment_asks_for_grounding_before_recommendatio
     recommend.assert_not_awaited()
     assert context.user_data["awaiting_source_detail"] is True
     assert "More clinical context needed" in sim.get_last_text()
-    assert "patient/presentation" in sim.get_last_text()
+    assert "presentation" in sim.get_last_text()
 
 
 @pytest.mark.asyncio
@@ -405,7 +405,7 @@ async def test_voice_transcript_explicit_procedural_log_fragment_does_not_open_d
     assert context.user_data.get("chosen_form") is None
     assert ("✅ Draft Procedural Log", "FORM|PROC_LOG") not in sim.get_last_buttons()
     assert "More clinical context needed" in sim.get_last_text()
-    assert "patient/presentation" in sim.get_last_text()
+    assert "presentation" in sim.get_last_text()
 
 
 @pytest.mark.asyncio
