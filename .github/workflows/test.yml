@@ -26,6 +26,9 @@ jobs:
           python-version: "3.14"
       - name: Install dependencies
         run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+      - name: Change-safety gate (verify:changed)
+        working-directory: .
+        run: bash scripts/verify_changed.sh
       - name: Run non-E2E tests
         run: python -m pytest tests/ -v --ignore=tests/test_e2e.py
 
