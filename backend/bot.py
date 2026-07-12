@@ -6858,6 +6858,23 @@ ADMIN_USER_ID = 6912896590
 TIER_LABELS = {"free": "Free", "pro": "Pro", "pro_plus": "Unlimited"}
 
 
+def _admin_revision_line() -> str:
+    """One-line branch@commit proof for admin reports — never shown to ordinary users.
+
+    Reuses the existing runtime identity file written at startup
+    (``runtime_identity.write_runtime_identity``) so admin reports are
+    unambiguous about which deployed revision produced the numbers, without
+    a second identity-tracking mechanism.
+    """
+    try:
+        import json
+        from runtime_identity import runtime_identity_path
+        data = json.loads(runtime_identity_path().read_text())
+        return f"Revision: {data.get('branch', '?')}@{data.get('commit', '?')}"
+    except Exception:
+        return "Revision: unavailable"
+
+
 def _upgrade_buttons(current_tier: str) -> list:
     """Build upgrade option buttons based on current tier.
 
@@ -6898,8 +6915,7 @@ async def upgrade_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         "• Unlimited Kaizen WPBA filing\n"
         "• Draft Review (AI critique before filing)\n"
         "• Portfolio Health — pathway-aware analysis (Training/CCT ARCP evidence review or CESR / Portfolio Pathway evidence plan)\n"
-        "• Unsigned ticket scanning with chase guardrails\n"
-        "• Bulk filing\n"
+        "• Unsigned ticket scanning\n"
     )
 
     await _flow_msg(
@@ -7086,15 +7102,17 @@ async def filingreport_command(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
 
     args = [arg.strip().lower() for arg in (context.args or [])]
-    include_synthetic = bool(args) and args[0] in {"all", "synthetic", "full"}
+    include_non_real = bool(args) and args[0] in {"all", "synthetic", "full"}
 
     try:
         from filing_attempt_log import build_report
-        report = build_report(include_synthetic=include_synthetic)
+        report = build_report(include_synthetic=include_non_real, include_operator=include_non_real)
     except Exception as exc:
         logger.error("filingreport failed: %s", exc, exc_info=True)
         await update.message.reply_text(f"⚠️ Could not build filing report: {exc}")
         return ConversationHandler.END
+
+    report += f"\n\n{_admin_revision_line()}"
 
     # Telegram message cap is 4096 chars. The report is bounded by category
     # and recent-failure counts, but truncate as a belt-and-braces guard.
@@ -7114,15 +7132,17 @@ async def funnelreport_command(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
 
     args = [arg.strip().lower() for arg in (context.args or [])]
-    include_synthetic = bool(args) and args[0] in {"all", "synthetic", "full"}
+    include_non_real = bool(args) and args[0] in {"all", "synthetic", "full"}
 
     try:
         from funnel_metrics import build_report
-        report = build_report(include_synthetic=include_synthetic)
+        report = build_report(include_synthetic=include_non_real, include_operator=include_non_real)
     except Exception as exc:
         logger.error("funnelreport failed: %s", exc, exc_info=True)
         await update.message.reply_text(f"⚠️ Could not build funnel report: {exc}")
         return ConversationHandler.END
+
+    report += f"\n\n{_admin_revision_line()}"
 
     if len(report) > 3900:
         report = report[:3900] + "\n…(truncated)"

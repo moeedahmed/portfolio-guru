@@ -1,12 +1,12 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-07-10T16:31:06+00:00
+Generated: 2026-07-12T18:13:21+00:00
 Status: ready
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
-- Branch: main
-- Last commit: 5f1a602 2026-07-10 Guard Telegram workflow state from free text
+- Branch: chore/change-safety-gate
+- Last commit: 836c218 2026-07-12 feat(beta): make launch-proof metrics trustworthy
 - Uncommitted changes: no
 
 ## Immediate read before restarting
@@ -27,17 +27,17 @@ Status: ready
 - Live/deploy signals: railway.json, render.yaml, .github/workflows/deploy-mac.yml
 
 ## Recent commits
+- 836c218 2026-07-12 feat(beta): make launch-proof metrics trustworthy
+- 06886bd 2026-07-12 ci(verify): fold verify:changed into existing Tests workflow PR gate
+- b2477d7 2026-07-12 docs(agents): require verify:changed/verify:release proof before done/release-ready
+- 973cac7 2026-07-12 docs(verify): add repo-specific rollback playbook
+- 29f3bd7 2026-07-12 feat(verify): add verify:changed/verify:release change-safety gate
+- de81b48 2026-07-10 Polish Telegram response copy, templates, and mobile formatting
+- 2becf64 2026-07-10 Refresh Portfolio Guru continuity brief
 - 5f1a602 2026-07-10 Guard Telegram workflow state from free text
-- d8a7f43 2026-07-09 Fix post-save incomplete-case routing
-- 0a3b9b1 2026-07-09 Polish Telegram draft quality gates
-- 8fbc5ab 2026-07-09 Focus Portfolio Guru on Telegram launch proof
-- 82be937 2026-07-09 Continue WhatsApp recommendations to preview
-- de7e06c 2026-07-09 Deduplicate Telegram setup callbacks
-- b0caaf8 2026-07-09 Align Portfolio Guru Hermes WhatsApp route
-- 7425081 2026-07-09 Improve Portfolio Guru WhatsApp workflow parity
 
 ## Repo context snapshot
-### AGENTS.md — present, 3 days old
+### AGENTS.md — present, 0 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
@@ -45,10 +45,11 @@ Key headings:
 - ## Dev / Test Commands
 - ## Filing Routing Discipline
 - ## Key Known Failure Modes
+- ## Telemetry Provenance
 - ## Safety
 - ## Supported Forms
 
-### CLAUDE.md — present, 3 days old
+### CLAUDE.md — present, 0 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
@@ -56,12 +57,14 @@ Key headings:
 - ## Dev / Test Commands
 - ## Filing Routing Discipline
 - ## Key Known Failure Modes
+- ## Telemetry Provenance
 - ## Safety
 - ## Supported Forms
 
 ### TASK.md — present, 0 days old
 Key headings:
 - # Active Task — 14-Day Telegram Launch-Proof Sprint
+- ## 2026-07-12 — Beta narrowing / telemetry-provenance hardening
 - ## Decision
 - ## Commercial Boundary
 - ## Goal
@@ -71,7 +74,7 @@ Key headings:
 - ## Current Build Actions
 - ## Proof Before Re-Engagement
 
-### docs/plan.md — present, 3 days old
+### docs/plan.md — present, 5 days old
 Key headings:
 - # Portfolio Guru - Conversational Router Plan
 - ## Goal
@@ -86,7 +89,7 @@ Key headings:
 - ### Phase 0 - Checkpoint and branch
 - ### Phase 1 - Router contract and tests
 
-### WORKFLOWS.md — present, 0 days old
+### WORKFLOWS.md — present, 2 days old
 Key headings:
 - # Portfolio Guru — Agent Workflow Reference
 - ## Current Product Focus — Telegram Launch Proof

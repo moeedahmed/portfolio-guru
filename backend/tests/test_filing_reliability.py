@@ -193,6 +193,82 @@ async def test_dom_mapped_form_refused_if_routed_to_browser_use(monkeypatch):
     browser_use.assert_not_awaited()
 
 
+# ─── Browser-use fallback: off by default in beta ────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_unmapped_form_refuses_browser_use_by_default(monkeypatch):
+    """No DOM mapping + fallback flag unset => clean failure, no browser-use call."""
+    from filer_router import route_filing
+
+    monkeypatch.delenv("PG_ENABLE_BROWSER_USE_FALLBACK", raising=False)
+    browser_use = AsyncMock(return_value={
+        "status": "success",
+        "filled": ["reflection"],
+        "skipped": [],
+        "method": "browser-use",
+    })
+
+    with patch("filer_router._route_browser_use", new=browser_use):
+        result = await route_filing(
+            platform="kaizen",
+            form_type="ABSENCE",  # supported_forms entry with no DOM mapping
+            fields={"reflection": "Sample"},
+            credentials={"username": "u", "password": "p"},
+        )
+
+    browser_use.assert_not_awaited()
+    assert result["status"] == "failed"
+    assert result["method"] == "browser-use-disabled"
+    assert "PG_ENABLE_BROWSER_USE_FALLBACK" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_unmapped_form_uses_browser_use_when_explicitly_enabled(monkeypatch):
+    """Setting the opt-in flag restores the existing browser-use fallback."""
+    from filer_router import route_filing
+
+    monkeypatch.setenv("PG_ENABLE_BROWSER_USE_FALLBACK", "1")
+    browser_use = AsyncMock(return_value={
+        "status": "success",
+        "filled": ["reflection"],
+        "skipped": [],
+        "method": "browser-use",
+    })
+
+    with patch("filer_router._route_browser_use", new=browser_use):
+        result = await route_filing(
+            platform="kaizen",
+            form_type="ABSENCE",
+            fields={"reflection": "Sample"},
+            credentials={"username": "u", "password": "p"},
+        )
+
+    browser_use.assert_awaited_once()
+    assert result["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_unknown_platform_refuses_browser_use_by_default(monkeypatch):
+    """Unmapped platforms are also blocked by the same off-by-default flag."""
+    from filer_router import route_filing
+
+    monkeypatch.delenv("PG_ENABLE_BROWSER_USE_FALLBACK", raising=False)
+    browser_use = AsyncMock(return_value={"status": "success", "filled": [], "skipped": []})
+
+    with patch("filer_router._route_browser_use", new=browser_use):
+        result = await route_filing(
+            platform="horus",
+            form_type="SOMETHING",
+            fields={"reflection": "Sample"},
+            credentials={"username": "u", "password": "p"},
+        )
+
+    browser_use.assert_not_awaited()
+    assert result["status"] == "failed"
+    assert result["method"] == "browser-use-disabled"
+
+
 # ─── Reuse / retry contract ──────────────────────────────────────────────
 
 

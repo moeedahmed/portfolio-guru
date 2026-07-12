@@ -33,6 +33,19 @@ def _max_concurrent_filings() -> int:
         return 2
 
 
+def _browser_use_fallback_enabled() -> bool:
+    """Whether the non-deterministic browser-use fallback may run at all.
+
+    Off by default for the beta: deterministic Playwright is the only
+    default filing route. A form with no DOM mapping (or an unmapped
+    platform) fails cleanly instead of silently escalating to browser-use.
+    Set PG_ENABLE_BROWSER_USE_FALLBACK=1 to opt back in explicitly.
+    """
+    return os.environ.get("PG_ENABLE_BROWSER_USE_FALLBACK", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
 # Admission control: one shared Chrome on one Mac Mini — without a cap, N users
 # approving at once spawn N browser contexts and starve each other (launch
 # checklist 3.3). Excess filings queue here; the caller's overall timeout
@@ -264,6 +277,26 @@ async def _route_filing_unbounded(
             ),
             "method": "deterministic",
         }
+    if not _browser_use_fallback_enabled():
+        logger.warning(
+            "Browser-use fallback disabled (set PG_ENABLE_BROWSER_USE_FALLBACK=1 to "
+            "enable) — refusing %s/%s, no DOM mapping available",
+            platform,
+            form_type,
+        )
+        return {
+            "status": "failed",
+            "filled": [],
+            "skipped": list(fields.keys()),
+            "error": (
+                f"{form_type} on {platform} has no deterministic DOM mapping, and the "
+                "browser-use fallback is off by default in this beta. Ask the operator "
+                "to build a DOM mapping, or set PG_ENABLE_BROWSER_USE_FALLBACK=1 to "
+                "enable the fallback explicitly."
+            ),
+            "method": "browser-use-disabled",
+        }
+
     if attachment_path or attachment_drive_url:
         return {
             "status": "failed",

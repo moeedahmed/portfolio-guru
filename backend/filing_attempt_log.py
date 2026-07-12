@@ -38,9 +38,17 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_TEST_USER_IDS = frozenset({99999999})
 
+# Moeed's operator/admin Telegram id — mirrors bot.ADMIN_USER_ID. Kept here
+# (rather than imported from bot.py) to avoid a circular import; bot.py
+# already imports this module. Operator dogfood traffic is real Telegram
+# traffic (not a synthetic fixture id), so it needs its own classifier —
+# folding it into is_synthetic_user would make "is this a test fixture"
+# ambiguous with "is this the operator dogfooding".
+_DEFAULT_OPERATOR_USER_IDS = frozenset({6912896590})
 
-def _synthetic_user_ids() -> frozenset[int]:
-    raw = os.environ.get("PORTFOLIO_GURU_SYNTHETIC_USER_IDS", "")
+
+def _parse_id_env(var_name: str) -> frozenset[int]:
+    raw = os.environ.get(var_name, "")
     extras: List[int] = []
     for chunk in raw.split(","):
         chunk = chunk.strip()
@@ -50,18 +58,46 @@ def _synthetic_user_ids() -> frozenset[int]:
             extras.append(int(chunk))
         except ValueError:
             continue
-    return _DEFAULT_TEST_USER_IDS | frozenset(extras)
+    return frozenset(extras)
+
+
+def _synthetic_user_ids() -> frozenset[int]:
+    return _DEFAULT_TEST_USER_IDS | _parse_id_env("PORTFOLIO_GURU_SYNTHETIC_USER_IDS")
+
+
+def _operator_user_ids() -> frozenset[int]:
+    return _DEFAULT_OPERATOR_USER_IDS | _parse_id_env("PORTFOLIO_GURU_OPERATOR_USER_IDS")
+
+
+def _coerce_user_id(user_id: Optional[int]) -> Optional[int]:
+    if user_id is None:
+        return None
+    try:
+        return int(user_id)
+    except (TypeError, ValueError):
+        return None
 
 
 def is_synthetic_user(user_id: Optional[int]) -> bool:
-    """Whether ``user_id`` should be excluded from real-reliability counts."""
-    if user_id is None:
-        return False
-    try:
-        uid = int(user_id)
-    except (TypeError, ValueError):
+    """Whether ``user_id`` is a synthetic test-fixture id (e.g. 99999999)."""
+    uid = _coerce_user_id(user_id)
+    if uid is None:
         return False
     return uid in _synthetic_user_ids()
+
+
+def is_operator_user(user_id: Optional[int]) -> bool:
+    """Whether ``user_id`` is the operator/admin dogfooding, not a beta tester."""
+    uid = _coerce_user_id(user_id)
+    if uid is None:
+        return False
+    return uid in _operator_user_ids()
+
+
+def _record_is_operator(record: Dict[str, Any]) -> bool:
+    if "operator" in record:
+        return bool(record.get("operator"))
+    return is_operator_user(record.get("user_id"))
 
 
 def default_log_path() -> pathlib.Path:
@@ -168,6 +204,7 @@ def log_attempt(
         "user_id": user_id,
         "username": str(username) if username is not None else None,
         "synthetic": is_synthetic_user(user_id),
+        "operator": is_operator_user(user_id),
         "form_type": form_type,
         "status": status,
         "category": categorise_outcome(status, error, skipped_list, filled_list),
@@ -211,21 +248,39 @@ def summarise(
     records: Iterable[Dict[str, Any]],
     *,
     include_synthetic: bool = False,
+    include_operator: bool = False,
     recent_failure_limit: int = 5,
 ) -> Dict[str, Any]:
     """Compute reliability counts over the given records.
 
-    ``include_synthetic=False`` (the default) filters out test traffic.
-    The synthetic count is still reported separately so the operator knows
-    how much fixture noise was suppressed.
+    ``include_synthetic=False`` (the default) filters out test-fixture
+    traffic; ``include_operator=False`` (the default) filters out the
+    operator's own dogfooding. Both counts are still reported separately so
+    the admin knows how much non-beta-user noise was suppressed.
+
+    Records with no ``user_id`` (legacy/unattributed — no caller-supplied
+    identity) are always excluded from the real total and counted
+    separately in ``unattributed_total``: they can never be attributed to a
+    real or repeat beta user, so they must not inflate reliability counts.
     """
     real_records: List[Dict[str, Any]] = []
     synthetic_count = 0
+    operator_count = 0
+    unattributed_count = 0
     for record in records:
-        if record.get("synthetic"):
+        is_synthetic = bool(record.get("synthetic"))
+        is_operator = _record_is_operator(record)
+        if is_synthetic:
             synthetic_count += 1
-            if not include_synthetic:
-                continue
+        if is_operator:
+            operator_count += 1
+        if is_synthetic and not include_synthetic:
+            continue
+        if is_operator and not include_operator:
+            continue
+        if record.get("user_id") is None:
+            unattributed_count += 1
+            continue
         real_records.append(record)
 
     total = len(real_records)
@@ -301,19 +356,37 @@ def summarise(
         "recent_failures": failures[:recent_failure_limit],
         "synthetic_excluded": synthetic_count if not include_synthetic else 0,
         "synthetic_total": synthetic_count,
+        "operator_excluded": operator_count if not include_operator else 0,
+        "operator_total": operator_count,
+        "unattributed_total": unattributed_count,
     }
+
+
+def _exclusion_footer_parts(summary: Dict[str, Any]) -> List[str]:
+    """PHI-free, user-id-free description of what a report excluded."""
+    parts: List[str] = []
+    synthetic = summary.get("synthetic_excluded") or 0
+    if synthetic:
+        parts.append(f"{synthetic} synthetic test attempt{'s' if synthetic != 1 else ''}")
+    operator = summary.get("operator_excluded") or 0
+    if operator:
+        parts.append(f"{operator} operator/dogfood attempt{'s' if operator != 1 else ''}")
+    unattributed = summary.get("unattributed_total") or 0
+    if unattributed:
+        parts.append(
+            f"{unattributed} legacy/unattributed attempt{'s' if unattributed != 1 else ''} "
+            "(no user identity)"
+        )
+    return parts
 
 
 def format_admin_report(summary: Dict[str, Any]) -> str:
     """Render a concise, monospace-friendly text report for /filingreport."""
     total = summary["total"]
     if total == 0:
-        synthetic = summary["synthetic_excluded"] or summary["synthetic_total"]
-        suffix = (
-            f"\n(Excluded {synthetic} synthetic test attempt{'s' if synthetic != 1 else ''}.)"
-            if synthetic
-            else ""
-        )
+        synthetic_total = summary["synthetic_excluded"] or summary["synthetic_total"]
+        parts = _exclusion_footer_parts({**summary, "synthetic_excluded": synthetic_total})
+        suffix = f"\n(Excluded {'; '.join(parts)}.)" if parts else ""
         return "📋 Filing reliability\n\nNo real-user filing attempts on record yet." + suffix
 
     lines: List[str] = [
@@ -383,12 +456,10 @@ def format_admin_report(summary: Dict[str, Any]) -> str:
             err_suffix = f"  — {err}" if err else ""
             lines.append(f"  {ts}  {form_type}  {category}{user_suffix}{err_suffix}")
 
-    if summary["synthetic_excluded"]:
+    exclusion_parts = _exclusion_footer_parts(summary)
+    if exclusion_parts:
         lines.append("")
-        lines.append(
-            f"(Excluded {summary['synthetic_excluded']} synthetic test "
-            f"attempt{'s' if summary['synthetic_excluded'] != 1 else ''}.)"
-        )
+        lines.append(f"(Excluded {'; '.join(exclusion_parts)}.)")
 
     return "\n".join(lines)
 
@@ -397,12 +468,14 @@ def build_report(
     *,
     log_path: Optional[pathlib.Path] = None,
     include_synthetic: bool = False,
+    include_operator: bool = False,
     recent_failure_limit: int = 5,
 ) -> str:
     """Convenience: read the log and render the admin report in one call."""
     summary = summarise(
         iter_records(log_path),
         include_synthetic=include_synthetic,
+        include_operator=include_operator,
         recent_failure_limit=recent_failure_limit,
     )
     return format_admin_report(summary)
@@ -413,6 +486,7 @@ __all__ = [
     "categorise_outcome",
     "default_log_path",
     "format_admin_report",
+    "is_operator_user",
     "is_synthetic_user",
     "iter_records",
     "log_attempt",

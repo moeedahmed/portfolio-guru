@@ -4,6 +4,34 @@
 > Status: active product focus.
 > Prior task archived at `_archived/TASK-hermes-hackathon-production-cut-20260709.md`.
 
+## 2026-07-12 — Beta narrowing / telemetry-provenance hardening
+
+Implemented from an accepted Fable consolidation plan, on
+`chore/change-safety-gate`:
+
+- Telemetry provenance repair: `filing_attempt_log.py` / `funnel_metrics.py`
+  now classify every event/attempt as real, synthetic test fixture,
+  operator/dogfood (Moeed's own `ADMIN_USER_ID`), or legacy/unattributed
+  (no `user_id`). Admin reports default to the real cohort only and never
+  count unattributed records as completed/repeat real users.
+- `/filingreport` and `/funnelreport` now append a `Revision: <branch>@<commit>`
+  line (admin-only) sourced from the existing `runtime_identity` mechanism.
+- `filer_router.py`: the browser-use fallback is now off by default
+  (`PG_ENABLE_BROWSER_USE_FALLBACK`, unset = disabled). An unmapped form or
+  platform fails cleanly instead of silently escalating to browser-use.
+  Deterministic Playwright remains the only default beta filing route.
+- Fixed `/upgrade` advertising "Bulk filing" as a paid perk while `/bulk`
+  returns "coming soon" — removed the false promise.
+
+**Open decision for Moeed (not guessed):** the deterministic DOM-mapped form
+set is large (~72 forms across 2021/2025 curricula). This hardening pass did
+not narrow the advertised/supported form list, because doing so is a
+clinical/product judgement call, not something derivable from repo evidence
+alone. If a smaller explicit beta form set (e.g. CBD/DOPS/LAT/ACAT only) is
+wanted for the 3-5 tester cohort, that selection needs Moeed's call — current
+coverage stays as-is (`docs/form-coverage.md`, `filer_router.PLATFORM_REGISTRY`)
+until then.
+
 ## Decision
 
 Portfolio Guru is now a Telegram-first private beta. The next 7-14 days should

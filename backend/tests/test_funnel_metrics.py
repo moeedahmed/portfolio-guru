@@ -48,6 +48,130 @@ def test_log_event_writes_phi_free_record(log_path):
     assert parsed["session_id"] == "session-1"
 
 
+def test_log_event_flags_operator_user(log_path):
+    fm.log_event(user_id=6912896590, username="operator", event="case_started", metadata={})
+    parsed = json.loads(log_path.read_text().splitlines()[0])
+    assert parsed["operator"] is True
+    assert parsed["synthetic"] is False
+
+
+def test_summarise_excludes_operator_traffic_by_default(log_path):
+    fm.log_event(user_id=111, username=None, event="case_started", metadata={})
+    fm.log_event(user_id=6912896590, username="operator", event="case_started", metadata={})
+    summary = fm.summarise(fm.iter_records(log_path))
+    assert summary["unique_users"] == 1
+    assert summary["operator_excluded"] == 1
+    assert summary["operator_total"] == 1
+
+
+def test_summarise_can_include_operator_for_debugging(log_path):
+    fm.log_event(user_id=111, username=None, event="case_started", metadata={})
+    fm.log_event(user_id=6912896590, username="operator", event="case_started", metadata={})
+    summary = fm.summarise(fm.iter_records(log_path), include_operator=True)
+    assert summary["unique_users"] == 2
+    assert summary["operator_excluded"] == 0
+    assert summary["operator_total"] == 1
+
+
+def test_summarise_derives_operator_for_legacy_records_without_operator_flag():
+    records = [
+        {
+            "user_id": 111,
+            "synthetic": False,
+            "event": "case_started",
+            "metadata": {},
+        },
+        {
+            "user_id": 6912896590,
+            "synthetic": False,
+            "event": "case_started",
+            "metadata": {},
+        },
+    ]
+
+    summary = fm.summarise(records)
+    assert summary["total"] == 1
+    assert summary["unique_users"] == 1
+    assert summary["operator_excluded"] == 1
+    assert summary["operator_total"] == 1
+
+    debug_summary = fm.summarise(records, include_operator=True)
+    assert debug_summary["total"] == 2
+    assert debug_summary["unique_users"] == 2
+    assert debug_summary["operator_excluded"] == 0
+    assert debug_summary["operator_total"] == 1
+
+
+def test_summarise_respects_explicit_operator_flag_over_user_id():
+    records = [
+        {
+            "user_id": 6912896590,
+            "operator": False,
+            "synthetic": False,
+            "event": "case_started",
+            "metadata": {},
+        },
+        {
+            "user_id": 222,
+            "operator": True,
+            "synthetic": False,
+            "event": "case_started",
+            "metadata": {},
+        },
+    ]
+
+    summary = fm.summarise(records)
+    assert summary["total"] == 1
+    assert summary["unique_users"] == 1
+    assert summary["operator_excluded"] == 1
+    assert summary["operator_total"] == 1
+
+
+def test_summarise_null_identity_never_counts_as_completed_or_repeat(log_path):
+    fm.log_event(user_id=111, username=None, event="case_started", metadata={})
+    fm.log_event(user_id=111, username=None, event="draft_previewed", metadata={})
+    fm.log_event(user_id=111, username=None, event="draft_saved", metadata={})
+    # Unattributed events — no caller-supplied identity.
+    fm.log_event(user_id=None, username=None, event="draft_previewed", metadata={})
+    fm.log_event(user_id=None, username=None, event="draft_saved", metadata={})
+
+    summary = fm.summarise(fm.iter_records(log_path))
+    assert summary["unique_users"] == 1
+    assert summary["completed_users"] == 1
+    assert summary["repeat_users"] == 0
+    assert summary["unattributed_total"] == 2
+
+
+def test_format_admin_report_separates_synthetic_operator_and_unattributed(log_path):
+    fm.log_event(user_id=111, username=None, event="case_started", metadata={})
+    fm.log_event(user_id=99999999, username="synthetic", event="case_started", metadata={})
+    fm.log_event(user_id=6912896590, username="operator", event="case_started", metadata={})
+    fm.log_event(user_id=None, username=None, event="case_started", metadata={})
+
+    report = fm.build_report(log_path=log_path)
+    assert "1 synthetic test event" in report
+    assert "1 operator/dogfood event" in report
+    assert "1 legacy/unattributed event" in report
+    assert "no user identity" in report
+    assert "6912896590" not in report
+
+
+def test_format_admin_report_hides_legacy_operator_user_id():
+    records = [
+        {
+            "user_id": 6912896590,
+            "synthetic": False,
+            "event": "case_started",
+            "metadata": {},
+        }
+    ]
+
+    report = fm.format_admin_report(fm.summarise(records))
+    assert "No real-user funnel events" in report
+    assert "1 operator/dogfood event" in report
+    assert "6912896590" not in report
+
+
 def test_summarise_answers_completed_and_repeat_users(log_path):
     for event in ("case_started", "recommendation_shown", "form_chosen", "draft_previewed", "save_attempted", "draft_saved"):
         fm.log_event(user_id=111, username=None, event=event, metadata={})

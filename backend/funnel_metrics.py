@@ -23,7 +23,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, Iterator, Optional
 
-from filing_attempt_log import is_synthetic_user
+from filing_attempt_log import is_operator_user, is_synthetic_user
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +85,7 @@ def log_event(
         "user_id": user_id,
         "username": str(username) if username else None,
         "synthetic": is_synthetic_user(user_id),
+        "operator": is_operator_user(user_id),
         "event": str(event),
         "metadata": safe_metadata(metadata),
         "session_id": str(session_id) if session_id else None,
@@ -120,26 +121,51 @@ def summarise(
     records: Iterable[Dict[str, Any]],
     *,
     include_synthetic: bool = False,
+    include_operator: bool = False,
 ) -> Dict[str, Any]:
-    """Summarise real-user funnel progress and repeat value."""
+    """Summarise real-user funnel progress and repeat value.
+
+    ``include_synthetic=False`` (the default) filters out test-fixture
+    traffic; ``include_operator=False`` (the default) filters out the
+    operator's own dogfooding — both are real Telegram ids, so they need
+    separate accounting from real beta-tester traffic.
+
+    Records with no ``user_id`` (legacy/unattributed) are always excluded
+    from the funnel counts and reported separately: they cannot be tied to
+    a real or repeat user, so they must never count as a completed or
+    repeat user.
+    """
     events_by_user: dict[Any, Counter[str]] = defaultdict(Counter)
     events_by_name: Counter[str] = Counter()
     unique_by_event: dict[str, set[Any]] = defaultdict(set)
     synthetic_count = 0
+    operator_count = 0
+    unattributed_count = 0
     total = 0
 
     for record in records:
-        if record.get("synthetic"):
+        is_synthetic = bool(record.get("synthetic"))
+        if "operator" in record:
+            is_operator = bool(record.get("operator"))
+        else:
+            is_operator = is_operator_user(record.get("user_id"))
+        if is_synthetic:
             synthetic_count += 1
-            if not include_synthetic:
-                continue
-        event = str(record.get("event") or "unknown")
+        if is_operator:
+            operator_count += 1
+        if is_synthetic and not include_synthetic:
+            continue
+        if is_operator and not include_operator:
+            continue
         user_id = record.get("user_id")
+        if user_id is None:
+            unattributed_count += 1
+            continue
+        event = str(record.get("event") or "unknown")
         total += 1
         events_by_name[event] += 1
-        if user_id is not None:
-            events_by_user[user_id][event] += 1
-            unique_by_event[event].add(user_id)
+        events_by_user[user_id][event] += 1
+        unique_by_event[event].add(user_id)
 
     saved_users = {
         user_id
@@ -180,18 +206,36 @@ def summarise(
         "events_by_name": dict(events_by_name),
         "synthetic_excluded": synthetic_count if not include_synthetic else 0,
         "synthetic_total": synthetic_count,
+        "operator_excluded": operator_count if not include_operator else 0,
+        "operator_total": operator_count,
+        "unattributed_total": unattributed_count,
     }
+
+
+def _exclusion_footer_parts(summary: Dict[str, Any]) -> list[str]:
+    """PHI-free, user-id-free description of what a report excluded."""
+    parts: list[str] = []
+    synthetic = summary.get("synthetic_excluded") or 0
+    if synthetic:
+        parts.append(f"{synthetic} synthetic test event{'s' if synthetic != 1 else ''}")
+    operator = summary.get("operator_excluded") or 0
+    if operator:
+        parts.append(f"{operator} operator/dogfood event{'s' if operator != 1 else ''}")
+    unattributed = summary.get("unattributed_total") or 0
+    if unattributed:
+        parts.append(
+            f"{unattributed} legacy/unattributed event{'s' if unattributed != 1 else ''} "
+            "(no user identity)"
+        )
+    return parts
 
 
 def format_admin_report(summary: Dict[str, Any]) -> str:
     total = summary["total"]
     if total == 0:
-        synthetic = summary["synthetic_excluded"] or summary["synthetic_total"]
-        suffix = (
-            f"\n(Excluded {synthetic} synthetic test event{'s' if synthetic != 1 else ''}.)"
-            if synthetic
-            else ""
-        )
+        synthetic_total = summary["synthetic_excluded"] or summary["synthetic_total"]
+        parts = _exclusion_footer_parts({**summary, "synthetic_excluded": synthetic_total})
+        suffix = f"\n(Excluded {'; '.join(parts)}.)" if parts else ""
         return "📈 Telegram funnel\n\nNo real-user funnel events on record yet." + suffix
 
     counts = summary["key_counts"]
@@ -211,13 +255,9 @@ def format_admin_report(summary: Dict[str, Any]) -> str:
         f"  • Draft saved: {counts['draft_saved']['users']} users / {counts['draft_saved']['events']} events",
         f"  • Filing failed: {counts['filing_failed']['users']} users / {counts['filing_failed']['events']} events",
     ]
-    if summary["synthetic_excluded"]:
-        lines.extend(
-            [
-                "",
-                f"(Excluded {summary['synthetic_excluded']} synthetic test event{'s' if summary['synthetic_excluded'] != 1 else ''}.)",
-            ]
-        )
+    exclusion_parts = _exclusion_footer_parts(summary)
+    if exclusion_parts:
+        lines.extend(["", f"(Excluded {'; '.join(exclusion_parts)}.)"])
     return "\n".join(lines)
 
 
@@ -225,8 +265,13 @@ def build_report(
     *,
     log_path: Optional[pathlib.Path] = None,
     include_synthetic: bool = False,
+    include_operator: bool = False,
 ) -> str:
-    summary = summarise(iter_records(log_path), include_synthetic=include_synthetic)
+    summary = summarise(
+        iter_records(log_path),
+        include_synthetic=include_synthetic,
+        include_operator=include_operator,
+    )
     return format_admin_report(summary)
 
 

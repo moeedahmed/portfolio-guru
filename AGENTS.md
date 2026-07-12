@@ -15,7 +15,7 @@ Core product edge: this is not a generic AI writing tool. Doctors can already dr
 - Target: Kaizen ePortfolio (`eportfolio.rcem.ac.uk` → `kaizenep.com`). Multi-platform-ready via `filer_router.PLATFORM_REGISTRY` (kaizen built, horus stubbed).
 - Inputs: text, voice, audio, photos, documents.
 - Output: Kaizen draft save only. No supervisor submission.
-- Disabled commands: `/bulk` and `/chase` return early with "coming soon" (their dead implementation code has been removed). `/unsigned` is NOT disabled — it is a live, tier-gated (`pro_plus`) feature registered in `build_application`.
+- Disabled commands: `/bulk` and `/chase` return early with "coming soon" (their dead implementation code has been removed). `/unsigned` is NOT disabled — it is a live, tier-gated (`pro_plus`) feature registered in `build_application`. The `/upgrade` upsell copy must never advertise `/bulk` or `/chase` as a paid perk while they are disabled.
 
 ## Dev / Test Commands
 
@@ -37,8 +37,8 @@ Core product edge: this is not a generic AI writing tool. Doctors can already dr
 Single source: `backend/filer_router.py` selects the method per form type.
 
 - **Mapped forms** → deterministic Playwright via CDP (`localhost:18800`). New/updated maps use semantic-first selector plans: label/role/placeholder/name/data candidates first, DOM id/CSS/XPath as fallback, with repair hints and snapshot evidence when selectors drift. No browser-use. If partial, log gap and fix — never credentials in LLM prompts.
-- **Unknown form types on supported platform** → browser-use via CDP as emergency bridge. Auth in persistent Chrome session, never in prompt.
-- **Unknown platforms** → browser-harness + domain skills first. User connects their Chrome, CDP navigates, persists helpers.
+- **Unknown form types on supported platform** → browser-use via CDP as emergency bridge, **off by default in this beta**. `filer_router._browser_use_fallback_enabled()` gates every browser-use call; with `PG_ENABLE_BROWSER_USE_FALLBACK` unset, an unmapped form/platform fails cleanly (`method: "browser-use-disabled"`) instead of silently escalating. Set `PG_ENABLE_BROWSER_USE_FALLBACK=1` to opt back in explicitly. Auth in persistent Chrome session, never in prompt.
+- **Unknown platforms** → same off-by-default gate applies; browser-harness + domain skills is the intended path once explicitly enabled. User connects their Chrome, CDP navigates, persists helpers.
 - browser-use is NEVER a substitute for deterministic mapped forms.
 
 ## Key Known Failure Modes
@@ -49,6 +49,20 @@ Single source: `backend/filer_router.py` selects the method per form type.
 - LLM extraction is non-deterministic — test with multiple runs.
 - Playwright selectors break on Kaizen UI updates (third-party, no notice).
 - Gemini fallback ordering in `model_config.py` — adding a model means updating all callers.
+
+## Telemetry Provenance
+
+`backend/filing_attempt_log.py` and `backend/funnel_metrics.py` classify every
+event/attempt into exactly one of: real beta user, synthetic test fixture
+(`is_synthetic_user`, default id `99999999`), operator/dogfood traffic
+(`is_operator_user`, default id `6912896590` — mirrors `bot.ADMIN_USER_ID`), or
+legacy/unattributed (no `user_id`). `/filingreport` and `/funnelreport` default
+to the real cohort only; `all`/`synthetic`/`full` includes synthetic +
+operator traffic together. Unattributed records are never counted as
+completed/repeat real users — they are reported as a separate count instead.
+Both admin reports append a `Revision: <branch>@<commit>` line sourced from
+the existing `runtime_identity` mechanism (admin-only; never shown to
+ordinary users).
 
 ## Safety
 

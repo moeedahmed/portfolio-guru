@@ -50,6 +50,35 @@ def test_is_synthetic_user_respects_env_override(monkeypatch):
     assert fal.is_synthetic_user(99999999) is True
 
 
+# ─── is_operator_user ─────────────────────────────────────────────────────
+
+
+def test_is_operator_user_recognises_default_admin_id():
+    assert fal.is_operator_user(6912896590) is True
+
+
+def test_is_operator_user_treats_beta_testers_as_real():
+    assert fal.is_operator_user(12345) is False
+
+
+def test_is_operator_user_handles_none_and_garbage():
+    assert fal.is_operator_user(None) is False
+    assert fal.is_operator_user("not an int") is False
+
+
+def test_is_operator_user_respects_env_override(monkeypatch):
+    monkeypatch.setenv("PORTFOLIO_GURU_OPERATOR_USER_IDS", "333")
+    assert fal.is_operator_user(333) is True
+    # Default operator id still recognised alongside env entries.
+    assert fal.is_operator_user(6912896590) is True
+
+
+def test_operator_id_is_not_synthetic_and_vice_versa():
+    """Operator dogfooding and synthetic fixtures are distinct classifiers."""
+    assert fal.is_synthetic_user(6912896590) is False
+    assert fal.is_operator_user(99999999) is False
+
+
 # ─── categorise_outcome ───────────────────────────────────────────────────
 
 
@@ -143,6 +172,34 @@ def test_log_attempt_flags_synthetic_user(log_path):
     )
     parsed = json.loads(log_path.read_text().splitlines()[0])
     assert parsed["synthetic"] is True
+    assert parsed["operator"] is False
+
+
+def test_log_attempt_flags_operator_user(log_path):
+    fal.log_attempt(
+        user_id=6912896590,
+        username="operator",
+        form_type="CBD",
+        status="success",
+        filled=["reflection"],
+    )
+    parsed = json.loads(log_path.read_text().splitlines()[0])
+    assert parsed["operator"] is True
+    assert parsed["synthetic"] is False
+
+
+def test_log_attempt_null_identity_records_are_flagged_neither(log_path):
+    fal.log_attempt(
+        user_id=None,
+        username=None,
+        form_type="CBD",
+        status="success",
+        filled=["reflection"],
+    )
+    parsed = json.loads(log_path.read_text().splitlines()[0])
+    assert parsed["user_id"] is None
+    assert parsed["synthetic"] is False
+    assert parsed["operator"] is False
 
 
 def test_log_attempt_normalises_portfolio_shape(log_path):
@@ -274,6 +331,127 @@ def test_summarise_can_include_synthetic_for_debugging(log_path):
     assert summary["failures"] == 3
     assert summary["synthetic_excluded"] == 0
     assert summary["synthetic_total"] == 2
+
+
+def test_summarise_excludes_operator_traffic_by_default(log_path):
+    fal.log_attempt(
+        user_id=11111, username="real_doc", form_type="CBD",
+        status="success", filled=["reflection"], skipped=[],
+    )
+    fal.log_attempt(
+        user_id=6912896590, username="operator", form_type="CBD",
+        status="success", filled=["reflection"], skipped=[],
+    )
+    summary = fal.summarise(fal.iter_records())
+    assert summary["total"] == 1
+    assert summary["unique_users"] == 1
+    assert summary["operator_excluded"] == 1
+    assert summary["operator_total"] == 1
+
+
+def test_summarise_can_include_operator_for_debugging(log_path):
+    fal.log_attempt(
+        user_id=11111, username="real_doc", form_type="CBD",
+        status="success", filled=["reflection"], skipped=[],
+    )
+    fal.log_attempt(
+        user_id=6912896590, username="operator", form_type="CBD",
+        status="success", filled=["reflection"], skipped=[],
+    )
+    summary = fal.summarise(fal.iter_records(), include_operator=True)
+    assert summary["total"] == 2
+    assert summary["operator_excluded"] == 0
+    assert summary["operator_total"] == 1
+
+
+def test_summarise_derives_operator_for_legacy_records_without_operator_flag():
+    records = [
+        {
+            "user_id": 11111,
+            "synthetic": False,
+            "form_type": "CBD",
+            "status": "success",
+            "category": "SAVE_SUCCESS",
+            "filled_count": 1,
+            "skipped": [],
+        },
+        {
+            "user_id": 6912896590,
+            "synthetic": False,
+            "form_type": "CBD",
+            "status": "success",
+            "category": "SAVE_SUCCESS",
+            "filled_count": 1,
+            "skipped": [],
+        },
+    ]
+
+    summary = fal.summarise(records)
+    assert summary["total"] == 1
+    assert summary["unique_users"] == 1
+    assert summary["operator_excluded"] == 1
+    assert summary["operator_total"] == 1
+
+    debug_summary = fal.summarise(records, include_operator=True)
+    assert debug_summary["total"] == 2
+    assert debug_summary["unique_users"] == 2
+    assert debug_summary["operator_excluded"] == 0
+    assert debug_summary["operator_total"] == 1
+
+
+def test_summarise_respects_explicit_operator_flag_over_user_id():
+    records = [
+        {
+            "user_id": 6912896590,
+            "operator": False,
+            "synthetic": False,
+            "form_type": "CBD",
+            "status": "success",
+            "category": "SAVE_SUCCESS",
+            "filled_count": 1,
+            "skipped": [],
+        },
+        {
+            "user_id": 22222,
+            "operator": True,
+            "synthetic": False,
+            "form_type": "CBD",
+            "status": "success",
+            "category": "SAVE_SUCCESS",
+            "filled_count": 1,
+            "skipped": [],
+        },
+    ]
+
+    summary = fal.summarise(records)
+    assert summary["total"] == 1
+    assert summary["unique_users"] == 1
+    assert summary["operator_excluded"] == 1
+    assert summary["operator_total"] == 1
+
+
+def test_summarise_null_identity_never_counts_as_real_or_repeat(log_path):
+    fal.log_attempt(
+        user_id=11111, username="real_doc", form_type="CBD",
+        status="success", filled=["reflection"], skipped=[],
+    )
+    fal.log_attempt(
+        user_id=None, username=None, form_type="CBD",
+        status="success", filled=["reflection"], skipped=[],
+    )
+    fal.log_attempt(
+        user_id=None, username=None, form_type="CBD",
+        status="failed", error="anything", filled=[], skipped=[],
+    )
+    summary = fal.summarise(fal.iter_records())
+    assert summary["total"] == 1
+    assert summary["unique_users"] == 1
+    assert summary["unattributed_total"] == 2
+    # Even asking for "all" traffic never resurrects unattributed records
+    # into the real total — they have no identity to attribute to.
+    summary_all = fal.summarise(fal.iter_records(), include_synthetic=True, include_operator=True)
+    assert summary_all["total"] == 1
+    assert summary_all["unattributed_total"] == 2
 
 
 def test_summarise_categories_capture_top_failure_modes(log_path):
@@ -455,6 +633,51 @@ def test_format_admin_report_includes_counts_categories_and_recent(log_path):
     assert "CBD" in report
     assert "Recent failures:" in report
     assert "Excluded 2 synthetic" in report
+
+
+def test_format_admin_report_separates_synthetic_operator_and_unattributed(log_path):
+    fal.log_attempt(
+        user_id=11111, username="real_doc", form_type="CBD",
+        status="success", filled=["reflection"], skipped=[],
+    )
+    fal.log_attempt(
+        user_id=99999999, username="TestDoctor", form_type="CBD",
+        status="success", filled=["reflection"], skipped=[],
+    )
+    fal.log_attempt(
+        user_id=6912896590, username="operator", form_type="CBD",
+        status="success", filled=["reflection"], skipped=[],
+    )
+    fal.log_attempt(
+        user_id=None, username=None, form_type="CBD",
+        status="success", filled=["reflection"], skipped=[],
+    )
+    report = fal.format_admin_report(fal.summarise(fal.iter_records()))
+    assert "Attempts: 1" in report
+    assert "1 synthetic test attempt" in report
+    assert "1 operator/dogfood attempt" in report
+    assert "1 legacy/unattributed attempt" in report
+    assert "no user identity" in report
+    assert "6912896590" not in report
+
+
+def test_format_admin_report_hides_legacy_operator_user_id():
+    records = [
+        {
+            "user_id": 6912896590,
+            "synthetic": False,
+            "form_type": "CBD",
+            "status": "success",
+            "category": "SAVE_SUCCESS",
+            "filled_count": 1,
+            "skipped": [],
+        }
+    ]
+
+    report = fal.format_admin_report(fal.summarise(records))
+    assert "No real-user filing attempts" in report
+    assert "1 operator/dogfood attempt" in report
+    assert "6912896590" not in report
 
 
 def test_format_admin_report_surfaces_shape_specific_partial_stage(log_path):

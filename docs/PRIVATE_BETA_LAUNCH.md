@@ -58,6 +58,12 @@ LAT 2025 v9, ACAT ACCS 2025, ACAF, STAT, MSF, MINI_CEX, JCF, QIAT — see
 `FORM_UUIDS` in `backend/extractor.py`) as the working list; verify against
 `filer_router.py` before promising a form to a beta user.
 
+As of 2026-07-12, the non-deterministic browser-use fallback is off by
+default (`PG_ENABLE_BROWSER_USE_FALLBACK` unset). A form with no DOM mapping
+now fails cleanly for the user instead of silently escalating to browser-use
+— do not set that env var for the beta cut unless a specific unmapped form
+needs the fallback and the operator is watching it live.
+
 ---
 
 ## Controlled Supervisor Scope
@@ -193,11 +199,13 @@ Check on this cadence after each launch / re-launch:
 
 - Same logs, but scan for repeated errors against the same form or user.
 - `/funnelreport` — journey proof: real users reaching preview, draft save, and
-  repeat use. Use `/funnelreport all` only when synthetic test traffic should be
-  included.
+  repeat use. Use `/funnelreport all` only when synthetic/operator test traffic
+  should be included. Both reports exclude Moeed's own operator dogfood
+  traffic by default and append a `Revision: <branch>@<commit>` line so it is
+  unambiguous which deployed build produced the numbers.
 - `/filingreport` — Kaizen reliability: real filing attempts, success/partial
   rate, top failure categories, and recent failures. Use `/filingreport all`
-  only when synthetic test traffic should be included.
+  only when synthetic/operator test traffic should be included.
 - `~/.openclaw/data/portfolio-guru/supervisor/` — if any assessor users
   signed in, supervisor state files appear here. Each user has their own
   file. Inspect only if a supervisor user reports a problem.
