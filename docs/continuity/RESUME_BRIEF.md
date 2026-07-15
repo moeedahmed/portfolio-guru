@@ -1,12 +1,12 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-07-12T18:13:21+00:00
+Generated: 2026-07-15T00:04:36+00:00
 Status: ready
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
-- Branch: chore/change-safety-gate
-- Last commit: 836c218 2026-07-12 feat(beta): make launch-proof metrics trustworthy
+- Branch: main
+- Last commit: 6219873 2026-07-12 feat(beta): make launch-proof metrics trustworthy
 - Uncommitted changes: no
 
 ## Immediate read before restarting
@@ -27,7 +27,7 @@ Status: ready
 - Live/deploy signals: railway.json, render.yaml, .github/workflows/deploy-mac.yml
 
 ## Recent commits
-- 836c218 2026-07-12 feat(beta): make launch-proof metrics trustworthy
+- 6219873 2026-07-12 feat(beta): make launch-proof metrics trustworthy
 - 06886bd 2026-07-12 ci(verify): fold verify:changed into existing Tests workflow PR gate
 - b2477d7 2026-07-12 docs(agents): require verify:changed/verify:release proof before done/release-ready
 - 973cac7 2026-07-12 docs(verify): add repo-specific rollback playbook
@@ -37,7 +37,7 @@ Status: ready
 - 5f1a602 2026-07-10 Guard Telegram workflow state from free text
 
 ## Repo context snapshot
-### AGENTS.md — present, 0 days old
+### AGENTS.md — present, 2 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
@@ -49,7 +49,7 @@ Key headings:
 - ## Safety
 - ## Supported Forms
 
-### CLAUDE.md — present, 0 days old
+### CLAUDE.md — present, 2 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
@@ -61,7 +61,7 @@ Key headings:
 - ## Safety
 - ## Supported Forms
 
-### TASK.md — present, 0 days old
+### TASK.md — present, 2 days old
 Key headings:
 - # Active Task — 14-Day Telegram Launch-Proof Sprint
 - ## 2026-07-12 — Beta narrowing / telemetry-provenance hardening
@@ -74,7 +74,7 @@ Key headings:
 - ## Current Build Actions
 - ## Proof Before Re-Engagement
 
-### docs/plan.md — present, 5 days old
+### docs/plan.md — present, 7 days old
 Key headings:
 - # Portfolio Guru - Conversational Router Plan
 - ## Goal
@@ -89,7 +89,7 @@ Key headings:
 - ### Phase 0 - Checkpoint and branch
 - ### Phase 1 - Router contract and tests
 
-### WORKFLOWS.md — present, 2 days old
+### WORKFLOWS.md — present, 4 days old
 Key headings:
 - # Portfolio Guru — Agent Workflow Reference
 - ## Current Product Focus — Telegram Launch Proof
