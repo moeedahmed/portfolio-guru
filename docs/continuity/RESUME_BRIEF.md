@@ -1,12 +1,12 @@
 # Resume Brief — portfolio-guru
 
-Generated: 2026-07-15T00:04:36+00:00
+Generated: 2026-07-15T00:15:13+00:00
 Status: ready
 
 ## Where we left off
 - Repo: /Users/moeedahmed/projects/portfolio-guru
 - Branch: main
-- Last commit: 6219873 2026-07-12 feat(beta): make launch-proof metrics trustworthy
+- Last commit: 054c812 2026-07-15 docs(verify): define risk-scaled product proof
 - Uncommitted changes: no
 
 ## Immediate read before restarting
@@ -27,6 +27,7 @@ Status: ready
 - Live/deploy signals: railway.json, render.yaml, .github/workflows/deploy-mac.yml
 
 ## Recent commits
+- 054c812 2026-07-15 docs(verify): define risk-scaled product proof
 - 6219873 2026-07-12 feat(beta): make launch-proof metrics trustworthy
 - 06886bd 2026-07-12 ci(verify): fold verify:changed into existing Tests workflow PR gate
 - b2477d7 2026-07-12 docs(agents): require verify:changed/verify:release proof before done/release-ready
@@ -34,10 +35,9 @@ Status: ready
 - 29f3bd7 2026-07-12 feat(verify): add verify:changed/verify:release change-safety gate
 - de81b48 2026-07-10 Polish Telegram response copy, templates, and mobile formatting
 - 2becf64 2026-07-10 Refresh Portfolio Guru continuity brief
-- 5f1a602 2026-07-10 Guard Telegram workflow state from free text
 
 ## Repo context snapshot
-### AGENTS.md — present, 2 days old
+### AGENTS.md — present, 0 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
@@ -49,7 +49,7 @@ Key headings:
 - ## Safety
 - ## Supported Forms
 
-### CLAUDE.md — present, 2 days old
+### CLAUDE.md — present, 0 days old
 Key headings:
 - # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 - ## Identity
