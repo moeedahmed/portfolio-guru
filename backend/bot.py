@@ -3110,8 +3110,12 @@ def _settings_view_components(
     to that block. Connected users get Portfolio Health as the primary action
     and guarded manual sync as a secondary utility.
     """
-    curriculum = get_curriculum(user_id) or "2025"
-    curriculum_label = "2021 Curriculum" if curriculum == "2021" else "2025 Update"
+    curriculum = get_curriculum(user_id)
+    curriculum_label = (
+        "2021 Curriculum" if curriculum == "2021"
+        else "2025 Update" if curriculum == "2025"
+        else "Not chosen"
+    )
     training_level = _portfolio_settings_label(
         get_training_level(user_id), get_kaizen_role(user_id)
     )
@@ -3454,15 +3458,66 @@ def _effective_curriculum(user_id) -> str:
     return get_curriculum(user_id) or "2025"
 
 
+def _needs_filing_curriculum_choice(user_id: int) -> bool:
+    """Return True for legacy trainee profiles with no saved curriculum.
+
+    Current setup always persists a curriculum. A known trainee portfolio with
+    no value is therefore a legacy profile whose Kaizen form family is genuinely
+    ambiguous. SAS is not ambiguous because Kaizen pins it to the 2021 family.
+    """
+    training_level = get_training_level(user_id)
+    return bool(
+        training_level
+        and training_level != "SAS"
+        and get_curriculum(user_id) not in {"2021", "2025"}
+    )
+
+
 def _form_type_for_curriculum(form_type: str, curriculum: str = "2025") -> str:
     from extractor import FORM_UUIDS
 
-    if curriculum != "2021" or form_type.endswith("_2021"):
+    if curriculum == "2025":
+        reverse_aliases = {
+            variant: base
+            for base, variant in _2021_CURRICULUM_FORM_ALIASES.items()
+        }
+        if form_type in reverse_aliases:
+            return reverse_aliases[form_type]
+        if form_type.endswith("_2021"):
+            base = form_type[:-5]
+            return base if base in FORM_UUIDS else form_type
+        return form_type
+    if form_type.endswith("_2021"):
         return form_type
     if form_type in _2021_CURRICULUM_FORM_ALIASES:
         return _2021_CURRICULUM_FORM_ALIASES[form_type]
     variant = f"{form_type}_2021"
     return variant if variant in FORM_UUIDS else form_type
+
+
+def _alternative_curriculum_variant(form_type: str) -> tuple[str, str] | None:
+    """Return ``(curriculum, form_type)`` for a real alternative form variant."""
+    from extractor import FORM_UUIDS
+
+    reverse_aliases = {
+        variant: base
+        for base, variant in _2021_CURRICULUM_FORM_ALIASES.items()
+    }
+    if form_type in reverse_aliases:
+        base_form = reverse_aliases[form_type]
+        current_curriculum = "2021"
+    elif form_type.endswith("_2021"):
+        base_form = form_type[:-5]
+        current_curriculum = "2021"
+    else:
+        base_form = form_type
+        current_curriculum = "2025"
+
+    alternative_curriculum = "2025" if current_curriculum == "2021" else "2021"
+    alternative_form = _form_type_for_curriculum(base_form, alternative_curriculum)
+    if alternative_form == form_type or alternative_form not in FORM_UUIDS:
+        return None
+    return alternative_curriculum, alternative_form
 
 
 def _filing_form_type_for_user(user_id: int, form_type: str) -> str:
@@ -6477,8 +6532,12 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
 
     elif action == "portfolio_defaults":
-        curriculum = get_curriculum(user_id) or "2025"
-        curriculum_label = "2021 Curriculum" if curriculum == "2021" else "2025 Update"
+        curriculum = get_curriculum(user_id)
+        curriculum_label = (
+            "2021 Curriculum" if curriculum == "2021"
+            else "2025 Update" if curriculum == "2025"
+            else "Not chosen"
+        )
         training_level = _portfolio_settings_label(
             get_training_level(user_id), get_kaizen_role(user_id)
         )
@@ -8223,7 +8282,11 @@ async def curriculum_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """Standalone /curriculum command — change curriculum anytime."""
     user_id = update.effective_user.id
     current = get_curriculum(user_id)
-    label = "2025 curriculum" if current == "2025" else "2021 curriculum"
+    label = (
+        "2025 curriculum" if current == "2025"
+        else "2021 curriculum" if current == "2021"
+        else "not chosen"
+    )
     await update.message.reply_text(
         f"Currently set to: {label}\n\nWhich curriculum are you working under?",
         reply_markup=_build_curriculum_keyboard()
@@ -8848,6 +8911,35 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "ACTION|retry_filing":
         context.user_data["retry_filing_requested"] = True
+        return await handle_approval_approve(update, context)
+
+    elif data.startswith("FILING_CURRICULUM|"):
+        parts = data.split("|")
+        if (
+            len(parts) != 3
+            or parts[1] not in {"select", "retry"}
+            or parts[2] not in {"2021", "2025"}
+        ):
+            await query.answer("That curriculum choice is no longer active.")
+            return AWAIT_APPROVAL
+        action, curriculum = parts[1], parts[2]
+        expected_key = (
+            "awaiting_filing_curriculum_choice"
+            if action == "select"
+            else "alternative_curriculum_offer"
+        )
+        expected = context.user_data.get(expected_key)
+        if expected not in {True, curriculum}:
+            await query.answer("That curriculum choice is no longer active.")
+            return AWAIT_APPROVAL
+        context.user_data.pop("awaiting_filing_curriculum_choice", None)
+        context.user_data.pop("alternative_curriculum_offer", None)
+        store_curriculum(update.effective_user.id, curriculum)
+        if action == "retry":
+            # The rejected form never created a draft. This is a fresh attempt
+            # against the alternative UUID, not an edit/reuse of an older Kaizen
+            # draft with the same form type.
+            context.user_data["alternative_curriculum_retry_requested"] = True
         return await handle_approval_approve(update, context)
 
     elif data == "ACTION|retry_template":
@@ -11405,6 +11497,17 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 parse_mode="Markdown",
             )
         return AWAIT_APPROVAL
+    if _needs_filing_curriculum_choice(user_id):
+        context.user_data.pop("filing_in_progress", None)
+        context.user_data.pop("retry_filing_requested", None)
+        context.user_data["awaiting_filing_curriculum_choice"] = True
+        await source_message.reply_text(
+            "📚 Choose the curriculum for this Kaizen draft\n\n"
+            "Your portfolio profile doesn't have a curriculum saved. "
+            "Nothing has been sent to Kaizen yet.",
+            reply_markup=_build_curriculum_keyboard("FILING_CURRICULUM|select"),
+        )
+        return AWAIT_APPROVAL
     _track_funnel_event(context, "save_attempted", has_draft=True)
 
     # Handle FormDraft (non-CBD forms)
@@ -11469,16 +11572,20 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     # Determine platform (default: kaizen; future: from user profile)
     platform = "kaizen"
     reuse_existing_draft = bool(context.user_data.pop("retry_filing_requested", False))
+    alternative_curriculum_retry = bool(
+        context.user_data.pop("alternative_curriculum_retry_requested", False)
+    )
+    retry_status_message = reuse_existing_draft or alternative_curriculum_retry
     saving_text = (
         f"⏳ Retrying Kaizen filing for {form_name}…"
-        if reuse_existing_draft
+        if retry_status_message
         else f"📤 Saving {form_name} as a Kaizen draft…"
     )
     # First save: send a new progress message so the draft preview survives in
     # the chat history. Retry: mutate the existing failure/status message so
     # one filing attempt has one living status message instead of accumulating
     # failure → retrying → success/failure messages.
-    if reuse_existing_draft and is_callback and source_message:
+    if retry_status_message and is_callback and source_message:
         try:
             ack = await source_message.edit_text(saving_text)
         except Exception:
@@ -12083,11 +12190,26 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         elif classification == "FORM_UNAVAILABLE":
             body = (
                 "This form isn't available on your Kaizen profile right now. "
-                "Nothing was written. Try a different form or reconnect Kaizen "
-                "if this one should be available."
+                "Nothing was written."
             )
             msg = f"❌ Filing didn't complete\n{form_name}\n\n{body}"
-            rows = [[InlineKeyboardButton("🔗 Open Kaizen forms", url="https://kaizenep.com/events/list")]]
+            rows = []
+            alternative = _alternative_curriculum_variant(form_type) if not filled else None
+            if alternative:
+                alternative_curriculum, _ = alternative
+                context.user_data["alternative_curriculum_offer"] = alternative_curriculum
+                rows.append([
+                    InlineKeyboardButton(
+                        f"🔄 Try {alternative_curriculum} curriculum",
+                        callback_data=f"FILING_CURRICULUM|retry|{alternative_curriculum}",
+                    )
+                ])
+            rows.append([
+                InlineKeyboardButton(
+                    "🔗 Open Kaizen forms",
+                    url="https://kaizenep.com/events/list",
+                )
+            ])
             rows.append([
                 InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file"),
                 _BTN_CANCEL,
@@ -13765,6 +13887,10 @@ def build_application() -> Application:
                 CallbackQueryHandler(handle_edit_field, pattern=r"^FIELD\|"),
                 CallbackQueryHandler(handle_amend_draft, pattern=r"^AMEND\|"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CASE\|"),
+                CallbackQueryHandler(
+                    handle_callback,
+                    pattern=r"^FILING_CURRICULUM\|(?:select|retry)\|(?:2021|2025)$",
+                ),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:add_reflection_detail|retry_filing)$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
@@ -13794,7 +13920,12 @@ def build_application() -> Application:
             CommandHandler("cancel", setup_cancel),
             CallbackQueryHandler(
                 handle_callback,
-                pattern=r"^(?:INFO\|.*|CANCEL\|.*|ACTION\|(?:file|reset|cancel|continue_thin|retry_filing|retry_recommend|retry_template))$",
+                pattern=(
+                    r"^(?:INFO\|.*|CANCEL\|.*|"
+                    r"FILING_CURRICULUM\|(?:select|retry)\|(?:2021|2025)|"
+                    r"ACTION\|(?:file|reset|cancel|continue_thin|retry_filing|"
+                    r"retry_recommend|retry_template))$"
+                ),
             ),
         ],
         per_message=False,

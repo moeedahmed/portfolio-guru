@@ -140,6 +140,8 @@ whenever callback payloads or conversation states change.
 | `ACTION\|setup` | `setup_start` | none, or setup flow anchor | If already waiting for username/password, answer the callback and do not send duplicate Step 1/2 prompts. |
 | `ACTION\|file` | `handle_action_button` / case input path | none | Clear old flow state and prompt for a fresh case. |
 | `ACTION\|retry_filing` | `handle_callback` -> approval save path | active `draft_data` or restorable last amend draft | Retry the current draft only; if draft state is missing, retire the old button and explain that the draft is no longer active. |
+| `FILING_CURRICULUM\|select\|*` | `handle_callback` -> approval save path | approved active draft plus a legacy trainee profile with no saved curriculum | Persist the explicit 2021/2025 choice, then continue that same approved draft; stale buttons cannot change the profile or file. |
+| `FILING_CURRICULUM\|retry\|*` | `handle_callback` -> approval save path | active approved draft plus a matching `FORM_UNAVAILABLE` alternative offer | Retry the alternative form UUID only after the tap, as a new form attempt; never reuse or overwrite an older Kaizen draft. |
 | `ACTION\|reset` / `CONFIRM\|reset` | `reset_data` / `handle_reset_confirm` | none | Clear user state and credentials only after explicit confirmation. |
 | `FORM\|best` | `handle_form_choice` | `form_recommendations`, `case_text` | If the case is gone, remove the stale keyboard and ask for a new case. |
 | `FORM\|<form>` | `handle_form_choice` | `case_text`; optional recommendations | File the selected form against the active case only; never use a form tap to start a synthetic case. |
@@ -158,6 +160,10 @@ Callback invariants:
 - A stale callback must never create a fake clinical case.
 - A retry callback must only run against a current or deliberately restored
   draft.
+- A legacy trainee profile with no saved curriculum must choose 2021 or 2025
+  before the first Kaizen form request. A `FORM_UNAVAILABLE` result may offer
+  the real alternative curriculum variant only when no fields were filled;
+  the retry is always explicit.
 - Funnel events must stay PHI-free and should be emitted at state transitions,
   not from raw message text.
 

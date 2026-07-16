@@ -22,7 +22,7 @@ class UserProfile(SQLModel, table=True):
     # Legacy column name. This stores the Kaizen portfolio profile bucket
     # (ACCS|INTERMEDIATE|HIGHER/HST|SAS), not the user's exact grade/year.
     training_level: str = Field(default="UNKNOWN")   # UNKNOWN|ACCS|INTERMEDIATE|HIGHER|SAS, or legacy ST3/ST4/ST5/ST6
-    curriculum: Optional[str] = Field(default=None)  # "2025" or "2021"; None treated as "2025"
+    curriculum: Optional[str] = Field(default=None)  # "2025" or "2021"; None means not chosen
     voice_profile: Optional[str] = Field(default=None)  # JSON style profile from user examples
     voice_examples_count: int = Field(default=0)  # how many examples were used to build profile
     # Detected Kaizen account role — "assessor" (pure Clinical Supervisor),
@@ -197,13 +197,13 @@ def store_curriculum(telegram_user_id: int, curriculum: str) -> None:
         pass
 
 
-def get_curriculum(telegram_user_id: int) -> str:
-    """Get curriculum preference. Returns "2025" if not set."""
+def get_curriculum(telegram_user_id: int) -> Optional[str]:
+    """Get the saved curriculum preference, or ``None`` if it is unknown."""
     with Session(engine) as session:
         profile = session.exec(
             select(UserProfile).where(UserProfile.telegram_user_id == telegram_user_id)
         ).first()
-        return profile.curriculum if profile and profile.curriculum else "2025"
+        return profile.curriculum if profile else None
 
 
 def _select_profile(session, telegram_user_id: int) -> Optional[UserProfile]:
