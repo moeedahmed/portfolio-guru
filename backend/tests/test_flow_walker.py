@@ -4247,6 +4247,90 @@ class TestImageOCRProgress:
             )
 
 
+class TestPhotoGroundingGate:
+    """A photo's OCR text is the document talking, not the doctor.
+
+    Drafting from it alone produced a reflection the trainee never wrote, then
+    apologised for it in the preview. The ask must come *before* the draft.
+    """
+
+    @pytest.mark.asyncio
+    async def test_bare_photo_asks_for_context_instead_of_drafting(self):
+        from bot import AWAIT_CASE_INPUT, _process_case_text
+        from tests.bot_simulator import BotSimulator
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        message = sim._make_text_update('').message
+
+        # Realistic OCR of a clinical report: rich clinical vocabulary, zero
+        # words belonging to the trainee.
+        ocr_text = (
+            'Aorta Normal aortic root dimensions. Pulmonic Valve structurally normal. '
+            'Impression: mild concentric LVH, normal size LV with mild systolic dysfunction '
+            'with SWMA. Patient attended ED. Technically difficult study, poor acoustic windows.'
+        )
+
+        with patch('bot.recommend_form_types', new=AsyncMock()) as recommend_mock:
+            result = await _process_case_text(message, context, 12345, ocr_text, 'photo')
+
+        prompts = [text for _, text, _ in sim.messages_sent if text]
+        assert result == AWAIT_CASE_INPUT
+        recommend_mock.assert_not_called(), 'A bare photo must never reach the recommender'
+        assert context.user_data.get('awaiting_source_detail') is True
+        assert any("isn't your clinical context" in t for t in prompts), (
+            f'Expected a request for the doctor\'s own context, got: {prompts}'
+        )
+
+    @pytest.mark.asyncio
+    async def test_photo_with_user_caption_proceeds_to_drafting(self):
+        from bot import _process_case_text
+        from tests.bot_simulator import BotSimulator
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        # A caption on the image sets this upstream in the attachment flow.
+        context.user_data['case_has_user_context'] = True
+        message = sim._make_text_update('').message
+
+        case_text = (
+            '58M chest pain, I requested the echo and reviewed it with the cardiology reg. '
+            'Impression: mild concentric LVH with SWMA. Patient admitted. '
+            'I learned to escalate borderline studies earlier.'
+        )
+
+        with patch('bot.recommend_form_types', new=AsyncMock(return_value=[])) as recommend_mock:
+            await _process_case_text(message, context, 12345, case_text, 'photo')
+
+        assert context.user_data.get('awaiting_source_detail') is not True
+        recommend_mock.assert_called(), 'A photo with the doctor\'s own words must still draft'
+
+    def test_review_block_names_missing_fields_and_drops_duplicate_coach_note(self):
+        from bot import _format_draft_preview_for_context
+        from models import FormDraft
+        from tests.bot_simulator import BotSimulator
+
+        draft = FormDraft(
+            form_type='REFLECT_LOG',
+            fields={'date_of_encounter': '18/06/2026', 'event_type': 'ED patient', 'reflection': ''},
+        )
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['case_input_source'] = 'photo'
+        context.user_data['case_has_user_context'] = True
+        context.user_data['needs_reflection_detail'] = True
+
+        preview = _format_draft_preview_for_context(draft, context, 'REFLECT_LOG')
+
+        assert 'Still needed: Description / What happened.' in preview
+        assert 'photo/OCR text' not in preview, (
+            'Source jargon must not appear once the doctor has supplied context'
+        )
+        assert preview.count('Improve reflection') == 0, (
+            'The coach note repeats the review block — it must not double up'
+        )
+
+
 class TestMessageStandardCopy:
     """Locks the mode-aware error recovery rule from `WORKFLOWS.md`.
 

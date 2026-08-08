@@ -4003,6 +4003,7 @@ def _format_draft_preview_for_context(
         input_source=context.user_data.get("case_input_source", "text"),
         include_safety_layer=include_safety_layer,
         needs_reflection_detail=context.user_data.get("needs_reflection_detail", False),
+        has_user_context=bool(context.user_data.get("case_has_user_context", True)),
     )
 
 
@@ -4231,25 +4232,24 @@ def _format_draft_preview(
     input_source: str | None = None,
     include_safety_layer: bool = True,
     needs_reflection_detail: bool = False,
+    has_user_context: bool = True,
 ) -> str:
     """Format draft data as a preview message. Dispatches based on type."""
-    if isinstance(draft, FormDraft):
-        preview = _format_generic_draft(draft)
-        if include_safety_layer:
-            preview += _draft_transparency_layer(
-                draft,
-                input_source=input_source,
-                needs_reflection_detail=needs_reflection_detail,
-            )
-        return preview + _draft_coach_note_suffix(draft)
-    preview = _format_cbd_draft(draft)
-    if include_safety_layer:
-        preview += _draft_transparency_layer(
+    preview = _format_generic_draft(draft) if isinstance(draft, FormDraft) else _format_cbd_draft(draft)
+    layer = (
+        _draft_transparency_layer(
             draft,
             input_source=input_source,
             needs_reflection_detail=needs_reflection_detail,
+            has_user_context=has_user_context,
         )
-    return preview + _draft_coach_note_suffix(draft)
+        if include_safety_layer
+        else ""
+    )
+    # The coach note asks for the same thing the review block just asked for.
+    # Showing both made the preview read as three competing instructions.
+    coach = "" if layer else _draft_coach_note_suffix(draft)
+    return preview + layer + coach
 
 
 def _draft_coach_note_suffix(draft) -> str:
@@ -4427,12 +4427,23 @@ def _reflection_review_line(draft) -> str:
 
 
 def _missing_fields_review_line(draft) -> str:
+    """Name the required fields still waiting on the user.
+
+    A bare count next to the inline ``needs your detail`` markers told the user
+    something they could already see; the field names tell them where to type.
+    """
     form_type = _draft_form_type(draft)
     missing_required, _, _ = _missing_template_fields(draft, form_type)
     if not missing_required:
         return ""
-    noun = "field" if len(missing_required) == 1 else "fields"
-    return f"• Gaps: {len(missing_required)} required {noun} still shows {_MISSING_MARKER}."
+    labels = [str(field.get("label") or field.get("key") or "").strip() for field in missing_required]
+    labels = [label for label in labels if label]
+    if not labels:
+        return ""
+    shown = ", ".join(labels[:3])
+    if len(labels) > 3:
+        shown = f"{shown}, +{len(labels) - 3} more"
+    return f"• Still needed: {shown}."
 
 
 def _draft_transparency_layer(
@@ -4440,6 +4451,7 @@ def _draft_transparency_layer(
     *,
     input_source: str | None = None,
     needs_reflection_detail: bool = False,
+    has_user_context: bool = True,
 ) -> str:
     """Compact review note shown before the approval keyboard.
 
@@ -4449,10 +4461,16 @@ def _draft_transparency_layer(
     if not needs_reflection_detail:
         return ""
 
-    source_label = _source_label(input_source)
     lines = ["", "⚠️ *Review needed before saving*"]
 
-    if str(input_source or "").strip().lower() in {"photo", "image"}:
+    if (
+        str(input_source or "").strip().lower() in _USER_CONTEXT_REQUIRED_SOURCES
+        and not has_user_context
+    ):
+        # Backstop only: `_source_context_needs_more_detail` should have asked
+        # for context before this draft existed. Kept so a draft restored from
+        # persistence without that flag still warns rather than saving quietly.
+        source_label = _source_label(input_source)
         lines.append(
             f"• Source: {source_label}. Add your own interpretation/reflection before saving."
         )
@@ -8397,6 +8415,14 @@ def _video_context_has_user_grounding(case_text: str) -> bool:
 
 _SOURCE_GROUNDING_REQUIRED_SOURCES = {"voice", "audio", "mixed"}
 
+# Photo/image OCR text is the *document* talking, never the doctor. Its clinical
+# vocabulary would satisfy `_case_context_has_user_grounding` on its own, so a
+# bare report photo would sail past the grounding check and be drafted into a
+# reflection the doctor never wrote. These sources are therefore gated on
+# `case_has_user_context` — did the user supply words of their own — rather than
+# on the extracted text.
+_USER_CONTEXT_REQUIRED_SOURCES = {"photo", "image"}
+
 _SOURCE_PATIENT_MARKERS = (
     "patient",
     "pt",
@@ -8469,12 +8495,35 @@ def _case_context_has_user_grounding(case_text: str) -> bool:
     return clinical_hits >= 3 and action_hits >= 1 and len(words) >= 25
 
 
-def _source_context_needs_more_detail(input_source: str | None, case_text: str) -> bool:
-    return _source_grounding_required(input_source) and not _case_context_has_user_grounding(case_text)
+def _source_context_needs_more_detail(
+    input_source: str | None,
+    case_text: str,
+    context=None,
+) -> bool:
+    source = str(input_source or "").strip().lower()
+    if source in _USER_CONTEXT_REQUIRED_SOURCES:
+        # Ask before drafting, not after. Without this the bot builds a draft
+        # from OCR alone and then apologises for it in the preview.
+        #
+        # Two independent signals, either of which clears the gate: the caption
+        # flag set by the attachment flow, and grounding detected in the text
+        # itself. The flag alone would block any path that forgot to set it;
+        # the text alone would be fooled by a caption-free clinical report.
+        if context is not None and context.user_data.get("case_has_user_context"):
+            return False
+        # "File this as a procedure log" is the doctor typing, not the scanner.
+        # An explicit form instruction can only have come from them, so it
+        # counts as context even though it is too short to look like a case.
+        if extract_explicit_form_type(case_text):
+            return False
+        return not _case_context_has_user_grounding(case_text)
+    return _source_grounding_required(source) and not _case_context_has_user_grounding(case_text)
 
 
 def _source_context_detail_request(input_source: str | None) -> str:
     source = str(input_source or "").strip().lower()
+    if source in _USER_CONTEXT_REQUIRED_SOURCES:
+        return render_message("photo_grounding_detail_request")
     if source == "voice":
         source_label = "the voice transcript"
     elif source == "audio":
@@ -8621,7 +8670,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
     context.user_data["case_input_source"] = input_source
     _remember_case_context_source(context, input_source)
 
-    if _source_context_needs_more_detail(input_source, case_text):
+    if _source_context_needs_more_detail(input_source, case_text, context):
         context.user_data["awaiting_source_detail"] = True
         _audit_event(
             context,

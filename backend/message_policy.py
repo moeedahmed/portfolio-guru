@@ -140,6 +140,16 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         ),
         safety_critical=True,
     ),
+    "photo_grounding_detail_request": MessageTemplate(
+        key="photo_grounding_detail_request",
+        message_class=MessageClass.TEMPLATED,
+        text=(
+            "📋 I can read the text in that image, but it isn't your clinical context.\n\n"
+            "Tell me in your own words: what the case was, what you did or decided, "
+            "the outcome, and what you learned. I won't interpret the image for you."
+        ),
+        safety_critical=True,
+    ),
     "thin_sdl_detail_request": MessageTemplate(
         key="thin_sdl_detail_request",
         message_class=MessageClass.FIXED,
