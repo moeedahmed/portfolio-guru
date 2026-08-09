@@ -100,6 +100,22 @@ PRIVACY_RULES: tuple[PrivacyRule, ...] = (
         re.compile(r"\b(?:Mr|Mrs|Ms|Miss)\.?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}\b"),
         "the patient",
     ),
+    # Scanned reports print the patient in block capitals ("report of patient
+    # (E R) MUNAWAR AHMED"), which the Title-Case PATIENT_NAME rule above
+    # cannot see. Only the strong labels are accepted — a bare "patient"
+    # followed by capitals would swallow clinical shorthand like
+    # "patient ECG NORMAL".
+    PrivacyRule(
+        "PATIENT_NAME",
+        re.compile(
+            r"\b(?:report\s+of\s+patient|patient(?:'s)?\s+name|name\s+of\s+patient)\b"
+            r"\s*[:\-]?\s*(?:\([A-Z][A-Z .]*\)\s*)?"
+            r"([A-Z][A-Z'\-]{2,}(?:\s+[A-Z][A-Z'\-]{2,}){1,3})",
+            re.IGNORECASE,
+        ),
+        "[patient name]",
+        group=1,
+    ),
     PrivacyRule(
         "TERTIARY_CENTRE",
         re.compile(
@@ -192,6 +208,45 @@ def deidentify_clinical_text(text: str) -> tuple[str, list[PrivacyFinding]]:
     pieces.append(text[cursor:])
     redacted = re.sub(r" {2,}", " ", "".join(pieces)).strip()
     return redacted, selected_findings
+
+
+def deidentify_draft_fields(fields: dict) -> tuple[dict, list[str]]:
+    """De-identify every string value in a draft, whatever the field is called.
+
+    The humanizer only reaches fields listed in ``_HUMANIZE_FIELDS`` and only
+    when the value is over 20 characters, so short and non-narrative fields
+    were never de-identified. A photo of a report produced the title
+    "Echocardiogram Review - Munawar Ahmed" and it went through untouched,
+    because ``reflection_title`` is not a narrative field.
+
+    Every field a doctor can see is a field Kaizen will store, so the sweep is
+    unconditional. Returns (fields, labels_found) with ``fields`` mutated in
+    place; labels are rule names only, never matched values.
+    """
+    if not isinstance(fields, dict):
+        return fields, []
+
+    labels: list[str] = []
+
+    def _clean(value: str) -> str:
+        redacted, findings = deidentify_clinical_text(value)
+        labels.extend(finding.label for finding in findings)
+        return redacted
+
+    for key, value in list(fields.items()):
+        if isinstance(value, str) and value.strip():
+            cleaned = _clean(value)
+            if cleaned != value:
+                fields[key] = cleaned
+        elif isinstance(value, list):
+            new_items = [
+                _clean(item) if isinstance(item, str) and item.strip() else item
+                for item in value
+            ]
+            if new_items != value:
+                fields[key] = new_items
+
+    return fields, sorted(set(labels))
 
 
 def privacy_summary(texts: Iterable[str]) -> dict:

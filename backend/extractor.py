@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 from models import CBDData, FormTypeRecommendation, FormDraft
 from form_schemas import FORM_SCHEMAS
 from form_display import public_form_name, sanitize_internal_form_codes
+from privacy_guard import deidentify_draft_fields
 from message_policy import FLEXIBLE_REPLY_STYLE_ENVELOPE, render_message
 from model_config import gemini_three_five_flash_model
 from privacy_guard import deidentify_clinical_text
@@ -3233,6 +3234,10 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
                 len(stripped), stripped,
             )
 
+    normalised, phi_labels = deidentify_draft_fields(normalised)
+    if phi_labels:
+        logger.warning("De-identified CBD draft fields: %s", phi_labels)
+
     return CBDData(**normalised)
 
 
@@ -3541,6 +3546,12 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
                 "Stripped %d fabricated term(s) from image-derived %s draft: %s",
                 len(stripped), form_type, stripped,
             )
+
+    # Sweeps every field, not just the narrative ones the humanizer reaches:
+    # the title is where a patient name actually leaked.
+    normalised, phi_labels = deidentify_draft_fields(normalised)
+    if phi_labels:
+        logger.warning("De-identified %s draft fields: %s", form_type, phi_labels)
 
     return FormDraft(
         form_type=form_type,
