@@ -31,6 +31,7 @@ from kaizen_form_filer import FORM_UUIDS
 from form_schemas import FORM_SCHEMAS
 from form_display import public_form_name, sanitize_internal_form_codes
 from models import FormDraft, CBDData, FormTypeRecommendation
+from privacy_guard import deidentify_clinical_text
 from whisper import transcribe_voice
 from vision import extract_from_image
 from documents import extract_from_document, is_supported_attachment, is_supported_document
@@ -1114,6 +1115,7 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
     """Clear transient case-review flags while optionally preserving the stored case text."""
     for key in (
         "awaiting_detail",
+        "attachment_upload_confirmed",
         "case_input_source",
         "case_has_user_context",
         "chosen_form",
@@ -4182,6 +4184,69 @@ def _image_source_without_user_context(context) -> bool:
     if source not in {"photo", "image"}:
         return False
     return not bool(context.user_data.get("case_has_user_context"))
+
+
+_ATTACHMENT_PHI_LABEL_WORDS = {
+    "PATIENT_NAME": "a patient name",
+    "CLINICIAN_NAME": "a clinician name",
+    "PERSON_NAME": "a person's name",
+    "NHS_NUMBER": "an NHS number",
+    "HOSPITAL_NUMBER": "a hospital number",
+    "MRN": "a record number",
+    "DOB": "a date of birth",
+    "POSTCODE": "a postcode",
+    "EMAIL": "an email address",
+    "PHONE": "a phone number",
+    "NAMED_HOSPITAL": "a named hospital",
+    "NAMED_WARD": "a named ward",
+}
+
+
+def _attachment_confirmation_reason(context) -> str | None:
+    """Why this attachment needs the doctor's explicit OK before upload.
+
+    De-identification only ever touched *text*. The file itself is uploaded to
+    Kaizen byte-for-byte, so a photo of a report puts the patient's name into
+    the portfolio as pixels — and Kaizen gives no way to review a file once it
+    is on a draft.
+
+    Images and documents are judged by the identifiers found in the text we
+    extracted from them. Video has no such signal (the audio transcript says
+    nothing about a wristband in frame), so it always asks. Returns None when
+    the upload can proceed unchallenged.
+    """
+    if not context.user_data.get("attachment_path"):
+        return None
+    if context.user_data.get("attachment_upload_confirmed"):
+        return None
+
+    kind = str(context.user_data.get("attachment_kind") or "").strip().lower()
+    if kind == "video":
+        return "I can't check what's visible in a video"
+
+    case_text = str(context.user_data.get("case_text") or "")
+    if not case_text.strip():
+        return "I couldn't read any text from it to check"
+
+    _redacted, findings = deidentify_clinical_text(case_text)
+    labels: list[str] = []
+    for finding in findings:
+        word = _ATTACHMENT_PHI_LABEL_WORDS.get(finding.label)
+        if word and word not in labels:
+            labels.append(word)
+    if not labels:
+        return None
+    if len(labels) == 1:
+        return f"it looks like it shows {labels[0]}"
+    return "it looks like it shows " + ", ".join(labels[:-1]) + f" and {labels[-1]}"
+
+
+def _build_attachment_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📎 Attach it anyway", callback_data="ATTACH|yes")],
+        [InlineKeyboardButton("🚫 Save without the file", callback_data="ATTACH|no")],
+        [_BTN_CANCEL],
+    ])
 
 
 def _draft_needs_reflection_detail_before_save(context, draft) -> bool:
@@ -9226,6 +9291,7 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
 
     if mode in {"attach", "both"}:
         context.user_data["attachment_path"] = file_path
+        context.user_data.pop("attachment_upload_confirmed", None)
         context.user_data["attachment_name"] = file_name
         context.user_data["attachment_kind"] = attachment_kind
         _audit_event(
@@ -10811,6 +10877,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             _clear_case_review_state(context, keep_case=False)
         if attachment_path_to_save:
             context.user_data["attachment_path"] = attachment_path_to_save
+            context.user_data.pop("attachment_upload_confirmed", None)
             context.user_data["attachment_name"] = attachment_name_to_save
             context.user_data["attachment_kind"] = "document"
         elif existing_attachment_path:
@@ -10862,6 +10929,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     _clear_case_review_state(context, keep_case=False)
     if attachment_path_to_save:
         context.user_data["attachment_path"] = attachment_path_to_save
+        context.user_data.pop("attachment_upload_confirmed", None)
         context.user_data["attachment_name"] = attachment_name_to_save
         context.user_data["attachment_kind"] = "document"
     elif existing_attachment_path:
@@ -11524,6 +11592,34 @@ def _format_attachment_status_line(skipped: list) -> str:
     return ""
 
 
+async def handle_attachment_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Record the doctor's choice on uploading the file, then resume saving.
+
+    Either branch sets `attachment_upload_confirmed` so the gate does not fire
+    again on the same save; dropping the attachment clears the path so the
+    draft still saves, just without the file.
+    """
+    query = update.callback_query
+    keep = query.data.split("|")[-1] == "yes"
+    await query.answer("Attaching it." if keep else "Saving without the file.")
+
+    context.user_data["attachment_upload_confirmed"] = True
+    if not keep:
+        for key in ("attachment_path", "attachment_name", "attachment_kind"):
+            context.user_data.pop(key, None)
+
+    _audit_event(
+        context,
+        "decision_path",
+        decision="attachment_upload_kept" if keep else "attachment_upload_dropped",
+    )
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    return await handle_approval_approve(update, context)
+
+
 async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle 'File this draft' approval."""
     query = update.callback_query
@@ -11668,6 +11764,29 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     amend_draft_data = _serialise_draft(draft)
     amend_case_text = context.user_data.get("case_text", "")
     amend_chosen_form_type = form_type
+
+    # Nothing uploads to Kaizen without the doctor saying so. Asked before
+    # filing rather than after: Kaizen fills fields and uploads the file in one
+    # pass, so consent has to be settled before that pass starts.
+    attachment_reason = _attachment_confirmation_reason(context)
+    if attachment_reason:
+        _audit_event(
+            context,
+            "decision_path",
+            decision="attachment_upload_confirm_needed",
+            attachment_kind=context.user_data.get("attachment_kind"),
+        )
+        attachment_name = context.user_data.get("attachment_name") or "that file"
+        await _send_latest_message(
+            source_message,
+            context,
+            f"📎 Before I save — {attachment_reason}.\n\n"
+            f"Kaizen keeps *{_safe_markdown_text(attachment_name)}* exactly as you sent it, "
+            "and you can't review a file once it's on the draft.",
+            reply_markup=_build_attachment_confirm_keyboard(),
+            parse_mode="Markdown",
+        )
+        return AWAIT_APPROVAL
 
     # Determine platform (default: kaizen; future: from user profile)
     platform = "kaizen"
@@ -13981,6 +14100,7 @@ def build_application() -> Application:
             AWAIT_APPROVAL: [
                 CallbackQueryHandler(handle_approval_submit, pattern=r"^APPROVE\|submit$"),
                 CallbackQueryHandler(handle_approval_approve, pattern=r"^APPROVE\|draft$"),
+                CallbackQueryHandler(handle_attachment_confirm, pattern=r"^ATTACH\|(?:yes|no)$"),
                 CallbackQueryHandler(handle_quick_improve, pattern=r"^IMPROVE\|reflection$"),
                 CallbackQueryHandler(handle_review_draft, pattern=r"^REVIEW\|draft$"),
                 CallbackQueryHandler(handle_approval_edit, pattern=r"^EDIT\|"),

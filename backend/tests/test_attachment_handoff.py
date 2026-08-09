@@ -798,6 +798,10 @@ async def test_filing_call_receives_attachment_path():
 
     context.user_data["attachment_path"] = temp_path
     context.user_data["attachment_name"] = "clinical-notes.pdf"
+    # Upload consent is recorded: these tests cover path plumbing into
+    # route_filing, which happens after the doctor taps "Attach it anyway".
+    # The gate itself is covered in test_attachment_upload_consent.py.
+    context.user_data["attachment_upload_confirmed"] = True
     context.user_data["chosen_form"] = "CBD"
     
     # Mock draft loading
@@ -846,6 +850,10 @@ async def test_filing_call_accepts_video_attachment_path():
 
     context.user_data["attachment_path"] = temp_path
     context.user_data["attachment_name"] = "portfolio-video.mp4"
+    # Upload consent is recorded: these tests cover path plumbing into
+    # route_filing, which happens after the doctor taps "Attach it anyway".
+    # The gate itself is covered in test_attachment_upload_consent.py.
+    context.user_data["attachment_upload_confirmed"] = True
     context.user_data["attachment_kind"] = "video"
     context.user_data["chosen_form"] = "CBD"
 
@@ -968,6 +976,10 @@ async def test_filing_handles_missing_attachment_gracefully():
     # Set non-existent path
     context.user_data["attachment_path"] = "/nonexistent/file.pdf"
     context.user_data["attachment_name"] = "clinical-notes.pdf"
+    # Upload consent is recorded: these tests cover path plumbing into
+    # route_filing, which happens after the doctor taps "Attach it anyway".
+    # The gate itself is covered in test_attachment_upload_consent.py.
+    context.user_data["attachment_upload_confirmed"] = True
     context.user_data["chosen_form"] = "CBD"
     
     # Mock draft loading
