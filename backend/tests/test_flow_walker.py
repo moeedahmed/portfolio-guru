@@ -4305,6 +4305,69 @@ class TestPhotoGroundingGate:
         assert context.user_data.get('awaiting_source_detail') is not True
         recommend_mock.assert_called(), 'A photo with the doctor\'s own words must still draft'
 
+    @pytest.mark.asyncio
+    async def test_photo_reply_to_image_origin_draft_asks_instead_of_redrafting(self):
+        """The reported failure: a case that began as a bare photo, with a draft
+        already on screen. Sending the same photo again re-ran extraction and
+        produced a fresh ungrounded draft instead of asking for context."""
+        from bot import AWAIT_APPROVAL, _store_draft, handle_approval_media_feedback
+        from models import CBDData
+        from tests.bot_simulator import BotSimulator
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['case_text'] = 'Impression: mild concentric LVH with SWMA.'
+        context.user_data['case_input_source'] = 'photo'
+        context.user_data['case_has_user_context'] = False
+        _store_draft(context, CBDData(patient_presentation=''))
+
+        update = sim._make_text_update('')
+        photo = MagicMock()
+        file_obj = MagicMock()
+        file_obj.download_to_drive = AsyncMock()
+        photo.get_file = AsyncMock(return_value=file_obj)
+        update.message.photo = [photo]
+        update.message.text = None
+        update.message.caption = None
+
+        with patch('bot.extract_from_image', new=AsyncMock(return_value='Impression: mild concentric LVH. Poor acoustic windows.')), \
+             patch('bot.extract_cbd_data', new=AsyncMock()) as extract_mock, \
+             patch('bot.get_voice_profile', return_value=None):
+            result = await handle_approval_media_feedback(update, context)
+
+        assert result == AWAIT_APPROVAL
+        extract_mock.assert_not_awaited(), 'A second bare photo must not re-run extraction'
+
+    @pytest.mark.asyncio
+    async def test_photo_reply_with_caption_still_updates_draft(self):
+        """The caption is the doctor's own account — it must not be blocked."""
+        from bot import _store_draft, handle_approval_media_feedback
+        from models import CBDData
+        from tests.bot_simulator import BotSimulator
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['case_text'] = 'Impression: mild concentric LVH.'
+        context.user_data['case_input_source'] = 'photo'
+        context.user_data['case_has_user_context'] = False
+        _store_draft(context, CBDData(patient_presentation=''))
+
+        update = sim._make_text_update('')
+        photo = MagicMock()
+        file_obj = MagicMock()
+        file_obj.download_to_drive = AsyncMock()
+        photo.get_file = AsyncMock(return_value=file_obj)
+        update.message.photo = [photo]
+        update.message.text = None
+        update.message.caption = 'I requested this echo after he stayed breathless; escalated to cardiology.'
+
+        with patch('bot.extract_from_image', new=AsyncMock(return_value='Impression: mild concentric LVH.')), \
+             patch('bot.extract_cbd_data', new=AsyncMock(return_value=CBDData(patient_presentation='Breathless'))) as extract_mock, \
+             patch('bot.get_voice_profile', return_value=None):
+            await handle_approval_media_feedback(update, context)
+
+        extract_mock.assert_awaited(), 'A captioned photo carries the doctor\'s words and must draft'
+
     def test_review_block_names_missing_fields_and_drops_duplicate_coach_note(self):
         from bot import _format_draft_preview_for_context
         from models import FormDraft

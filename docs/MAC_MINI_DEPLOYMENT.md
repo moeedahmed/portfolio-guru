@@ -21,9 +21,13 @@ This installs the user launchd service:
 
 Logs:
 
-- Bot log: `/tmp/portfolio-guru-bot.log`
-- launchd stdout: `~/Library/Logs/portfolio-guru/launchd.out.log`
-- launchd stderr: `~/Library/Logs/portfolio-guru/launchd.err.log`
+- Bot log: `/tmp/portfolio-guru-bot.log` — the only log. `start-bot.sh`
+  redirects the whole service into it, and launchd's stdout/stderr point at
+  the same file, so service-level start failures land here too.
+- Previous generation: `/tmp/portfolio-guru-bot.log.1` (rotated at 10 MB).
+
+`~/Library/Logs/portfolio-guru/` is no longer written to. Files still there
+are pre-2026-08 history — do not read them as current.
 
 ## Manual Deploy
 

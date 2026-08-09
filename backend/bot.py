@@ -8520,6 +8520,32 @@ def _source_context_needs_more_detail(
     return _source_grounding_required(source) and not _case_context_has_user_grounding(case_text)
 
 
+def _photo_media_needs_user_context(
+    context,
+    input_source: str | None,
+    caption: str,
+    extracted_text: str,
+) -> bool:
+    """True when a photo would drive a case the doctor has never described.
+
+    Photos sent *into an open case* are usually legitimate — a CXR backing up
+    a case the doctor already typed. The failure mode is narrower: a case that
+    originated from an image and still has no words of theirs, where each new
+    photo just rewrites an ungrounded draft from OCR.
+
+    So this fires only when the case is known to lack user context
+    (``case_has_user_context`` explicitly False, set for image-origin cases)
+    and this message adds none either — no caption, no grounding in the text.
+    """
+    if str(input_source or "").strip().lower() not in _USER_CONTEXT_REQUIRED_SOURCES:
+        return False
+    if context is None or context.user_data.get("case_has_user_context") is not False:
+        return False
+    if str(caption or "").strip():
+        return False
+    return not _case_context_has_user_grounding(extracted_text or "")
+
+
 def _source_context_detail_request(input_source: str | None) -> str:
     source = str(input_source or "").strip().lower()
     if source in _USER_CONTEXT_REQUIRED_SOURCES:
@@ -9508,6 +9534,7 @@ async def handle_template_review_media(update: Update, context: ContextTypes.DEF
     """Handle voice, photo, video, or document during AWAIT_TEMPLATE_REVIEW — implicit accumulation."""
     msg = update.message
     extracted_text = None
+    caption = (msg.caption or "").strip()
 
     voice_media = _voice_media_from_message(msg)
     if voice_media:
@@ -9541,6 +9568,10 @@ async def handle_template_review_media(update: Update, context: ContextTypes.DEF
                 extracted_text = None
                 await ack.edit_text("That image doesn't look clinical — send text or another photo.")
                 return AWAIT_TEMPLATE_REVIEW
+            # The caption is the doctor's own account of the image. Dropping it
+            # kept the scanner's words and discarded theirs.
+            if caption:
+                extracted_text = combine_case_inputs(caption, [extracted_text or ""])
             await ack.edit_text("📷 Got it — updating template…")
         except Exception:
             await ack.edit_text("⚠️ Couldn't read image. Try again or send text.")
@@ -9602,6 +9633,16 @@ async def handle_template_review_media(update: Update, context: ContextTypes.DEF
     if not extracted_text or not extracted_text.strip():
         return AWAIT_TEMPLATE_REVIEW
 
+    if _photo_media_needs_user_context(context, "photo" if msg.photo else "", caption, extracted_text):
+        _audit_event(
+            context,
+            "decision_path",
+            decision="photo_template_context_needed",
+            input_source="photo",
+        )
+        await ack.edit_text(_source_context_detail_request("photo"))
+        return AWAIT_TEMPLATE_REVIEW
+
     return await _accumulate_and_refresh(update, context, extracted_text)
 
 
@@ -9610,6 +9651,7 @@ async def handle_approval_media_feedback(update: Update, context: ContextTypes.D
     msg = update.message
     extracted_text = None
     input_source = "media"
+    caption = (msg.caption or "").strip()
 
     voice_media = _voice_media_from_message(msg)
     if voice_media:
@@ -9644,7 +9686,6 @@ async def handle_approval_media_feedback(update: Update, context: ContextTypes.D
             if extracted_text and extracted_text.strip() == "NOT_CLINICAL":
                 await ack.edit_text("That image doesn't look clinical — send text or another photo.")
                 return AWAIT_APPROVAL
-            caption = (msg.caption or "").strip()
             if caption:
                 extracted_text = combine_case_inputs(caption, [extracted_text or ""])
             await ack.edit_text("📷 Got it — updating draft…")
@@ -9705,6 +9746,16 @@ async def handle_approval_media_feedback(update: Update, context: ContextTypes.D
 
     else:
         await msg.reply_text("Send text, voice, image, or a document with the extra detail.")
+        return AWAIT_APPROVAL
+
+    if _photo_media_needs_user_context(context, input_source, caption, extracted_text or ""):
+        _audit_event(
+            context,
+            "decision_path",
+            decision="photo_feedback_context_needed",
+            input_source=input_source,
+        )
+        await ack.edit_text(_source_context_detail_request(input_source))
         return AWAIT_APPROVAL
 
     if _has_retryable_failed_filing_draft(context):

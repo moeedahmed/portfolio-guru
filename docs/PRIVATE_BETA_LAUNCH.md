@@ -113,7 +113,7 @@ Refuse to launch / pull launch if any of these are true:
    shown to beta users (DOM map gap on a recommended form).
 3. `launchctl print gui/$(id -u)/com.portfolioguru.bot` shows the service
    not running or a recent crash loop in
-   `~/Library/Logs/portfolio-guru/launchd.err.log`.
+   `/tmp/portfolio-guru-bot.log`.
 4. Persistent Chrome session at `localhost:18800` is not reachable from the
    bot host (CDP attach fails → live filing dead).
 5. BWS secrets unavailable on the Mac Mini (Telegram token, Google API key,
@@ -186,8 +186,10 @@ Check on this cadence after each launch / re-launch:
 
 **First 2 hours (beta-active window):**
 
-- `~/Library/Logs/portfolio-guru/launchd.err.log` — no new entries since
-  startup, or only benign (e.g. Telegram network hiccups that recover).
+- `/tmp/portfolio-guru-bot.log` — no new error entries since startup, or
+  only benign ones (e.g. Telegram network hiccups that recover). Scope to the
+  current run: everything after the latest `Portfolio Guru live commit:` line.
+  Earlier lines belong to previous runs and are not evidence about this one.
 - `/tmp/portfolio-guru-bot.log` — look for `filer`, `browser_filer`, or
   `assessor_writeback` errors. Any safety guardrail trip (e.g.
   `AssessorWriteBackUnavailable`, `not a CBD plan`, `ticket UUID mismatch`)
