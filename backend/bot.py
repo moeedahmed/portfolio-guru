@@ -9190,12 +9190,60 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
 
+def _content_state_while_media_pending(context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Return the content workflow state without letting pending media override it."""
+    user_data = context.user_data or {}
+    if _load_draft(context):
+        return AWAIT_APPROVAL
+    if _load_pending_draft(context):
+        return AWAIT_TEMPLATE_REVIEW
+    if _gathering_case_active(context):
+        return AWAIT_GATHERING
+    if user_data.get("chosen_form") and user_data.get("awaiting_detail"):
+        return AWAIT_CASE_INPUT
+    if user_data.get("case_text"):
+        return AWAIT_FORM_CHOICE
+    return AWAIT_CASE_INPUT
+
+
+def _pending_media_label(context: ContextTypes.DEFAULT_TYPE) -> str:
+    user_data = context.user_data or {}
+    kind = ((user_data.get("_pending_doc") or {}).get("kind") or "document").lower()
+    return "image" if kind == "image" else "video" if kind == "video" else "document"
+
+
+def _merge_pending_video_context(context: ContextTypes.DEFAULT_TYPE, text: str) -> str:
+    """Move user-authored video context into the case while retaining cached bytes."""
+    user_data = context.user_data or {}
+    pending = user_data.get("_pending_doc") or {}
+    if pending.get("kind") != "video":
+        return text
+    caption = user_data.pop("_pending_doc_context", "").strip()
+    return f"{caption}\n\n{text}".strip() if caption else text
+
+
+def _detach_pending_video_prompt(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Keep the old attach/remove keyboard visible while content gets a new prompt."""
+    user_data = context.user_data or {}
+    for key in ("last_bot_msg_id", "last_bot_chat_id", "status_msg_id", "status_msg_chat"):
+        user_data.pop(key, None)
+
+
+async def handle_pending_media_context(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Let voice/audio advance a pending video without changing image/document choices."""
+    if _pending_media_label(context) != "video":
+        return AWAIT_DOC_INTENT
+    _detach_pending_video_prompt(context)
+    return await handle_case_input(update, context)
+
+
 async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Apply the user's explicit file/image intent: read, attach, both, or remove."""
     query = update.callback_query
     await query.answer()
     mode = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else ""
     _remember_audit_user(context, update)
+    content_state = _content_state_while_media_pending(context)
     pending_doc = context.user_data.pop("_pending_doc", None) or {}
     pending_doc_context = context.user_data.pop("_pending_doc_context", "")
     file_path = pending_doc.get("path")
@@ -9266,6 +9314,14 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
             await query.message.delete()
         except Exception:
             pass
+        if is_video_attachment and content_state != AWAIT_CASE_INPUT:
+            continuation = (
+                "Your draft and case details are unchanged."
+                if content_state == AWAIT_APPROVAL
+                else "Your case details and selected form are unchanged."
+            )
+            await query.message.reply_text(f"↩️ Removed that video. {continuation}")
+            return content_state
         if original_removed:
             await query.message.reply_text(
                 f"↩️ Removed that {attachment_label}. Send the anonymised case details when you're ready."
@@ -9305,6 +9361,13 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
                 include_text=False,
             ).get("file_name"),
         )
+
+    if mode == "attach" and is_video_attachment and content_state != AWAIT_CASE_INPUT:
+        await query.edit_message_text(
+            "📎 Video kept for this draft. I won't interpret or upload it now.\n\n"
+            "If you save the draft, I'll ask again before any video bytes go to Kaizen."
+        )
+        return content_state
 
     if mode == "attach":
         reply_text, reply_markup = _attachment_captured_reply(
@@ -10840,6 +10903,9 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     else:
         input_source = "text"
 
+    if input_source in {"text", "voice"} and _pending_media_label(context) == "video":
+        case_text = _merge_pending_video_context(context, case_text)
+
     if (
         source_detail_retry
         and not (context.user_data.get("awaiting_detail") and context.user_data.get("chosen_form"))
@@ -11777,6 +11843,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             attachment_kind=context.user_data.get("attachment_kind"),
         )
         attachment_name = context.user_data.get("attachment_name") or "that file"
+        context.user_data.pop("filing_in_progress", None)
         await _send_latest_message(
             source_message,
             context,
@@ -13025,7 +13092,12 @@ async def _answer_mid_flow_question(
     elif next_state == AWAIT_FORM_CHOICE:
         continuation = "Your case is still in progress — use the form buttons above to continue."
     elif next_state == AWAIT_DOC_INTENT:
-        continuation = "Your document choice is still waiting above."
+        pending_label = _pending_media_label(context)
+        continuation = (
+            "Your video choice is still waiting above — attach or remove it."
+            if pending_label == "video"
+            else "Your document choice is still waiting above."
+        )
     else:
         continuation = "Send a case whenever you're ready."
 
@@ -13063,23 +13135,38 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
                 has_draft=has_draft,
                 has_pending=has_pending,
             )
+        pending_label = _pending_media_label(context)
         if pending_turn.kind in {
             WorkflowTurnKind.CHAT,
             WorkflowTurnKind.CLARIFY,
             WorkflowTurnKind.CONFIRM_STATE_CHANGE,
         }:
+            choice_copy = (
+                "Your video choice is still waiting above — attach or remove it."
+                if pending_label == "video"
+                else "Your document choice is still waiting above."
+            )
             await update.message.reply_text(
-                "I haven't changed your case. Your document choice is still waiting above.",
+                f"I haven't changed your case. {choice_copy}",
             )
             return AWAIT_DOC_INTENT
-        pending_kind = (context.user_data.get("_pending_doc") or {}).get("kind") or "document"
-        pending_label = "image" if pending_kind == "image" else "document"
+        if pending_label == "video":
+            combined_text = _merge_pending_video_context(context, raw_text)
+            _detach_pending_video_prompt(context)
+            return await _process_case_text(
+                update.message,
+                context,
+                update.effective_user.id,
+                combined_text,
+                "text",
+            )
         existing = context.user_data.get("_pending_doc_context", "").strip()
         context.user_data["_pending_doc_context"] = (
             f"{existing}\n\n{raw_text}".strip() if existing else raw_text
         )
         await update.message.reply_text(
-            f"I've kept that as extra context. Your {pending_label} choice is still pending - use the buttons above to choose whether to use it for drafting, attach it, or both."
+            f"I've kept that as extra context. Your {pending_label} choice is still pending - "
+            "use the buttons above to choose whether to use it for drafting, attach it, or both."
         )
         return AWAIT_DOC_INTENT
 
@@ -14027,6 +14114,7 @@ def build_application() -> Application:
         ],
         states={
             AWAIT_CASE_INPUT: [
+                CallbackQueryHandler(handle_document_intent, pattern=r"^DOCUSE\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_case_input),
                 MessageHandler(filters.VOICE, handle_case_input),
                 MessageHandler(filters.AUDIO, handle_case_input),
@@ -14049,6 +14137,7 @@ def build_application() -> Application:
             AWAIT_TRAINING_LEVEL: [CallbackQueryHandler(setup_training_level, pattern=r"^SETLEVEL\|")],
             AWAIT_CURRICULUM: [CallbackQueryHandler(setup_curriculum, pattern=r"^SETUP_CURRICULUM\|")],
             AWAIT_GATHERING: [
+                CallbackQueryHandler(handle_document_intent, pattern=r"^DOCUSE\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_gathering_input),
                 MessageHandler(filters.VOICE, handle_case_input),
                 MessageHandler(filters.AUDIO, handle_case_input),
@@ -14063,8 +14152,11 @@ def build_application() -> Application:
                 CallbackQueryHandler(handle_document_intent, pattern=r"^DOCUSE\|"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
+                MessageHandler(filters.VOICE, handle_pending_media_context),
+                MessageHandler(filters.AUDIO, handle_pending_media_context),
             ],
             AWAIT_FORM_CHOICE: [
+                CallbackQueryHandler(handle_document_intent, pattern=r"^DOCUSE\|"),
                 CallbackQueryHandler(handle_form_choice, pattern=r"^FORM\|"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:retry_recommend|retry_template)$"),
@@ -14076,6 +14168,7 @@ def build_application() -> Application:
                 MessageHandler(filters.Document.ALL, handle_case_input),
             ],
             AWAIT_FORM_SEARCH: [
+                CallbackQueryHandler(handle_document_intent, pattern=r"^DOCUSE\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_form_search_text),
                 MessageHandler(filters.VOICE, handle_case_input),
                 MessageHandler(filters.AUDIO, handle_case_input),
@@ -14086,6 +14179,7 @@ def build_application() -> Application:
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
             ],
             AWAIT_TEMPLATE_REVIEW: [
+                CallbackQueryHandler(handle_document_intent, pattern=r"^DOCUSE\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_template_review_text),
                 MessageHandler(filters.VOICE, handle_template_review_media),
                 MessageHandler(filters.AUDIO, handle_template_review_media),
@@ -14098,6 +14192,7 @@ def build_application() -> Application:
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
             ],
             AWAIT_APPROVAL: [
+                CallbackQueryHandler(handle_document_intent, pattern=r"^DOCUSE\|"),
                 CallbackQueryHandler(handle_approval_submit, pattern=r"^APPROVE\|submit$"),
                 CallbackQueryHandler(handle_approval_approve, pattern=r"^APPROVE\|draft$"),
                 CallbackQueryHandler(handle_attachment_confirm, pattern=r"^ATTACH\|(?:yes|no)$"),
@@ -14121,11 +14216,13 @@ def build_application() -> Application:
                 MessageHandler(filters.Document.ALL, handle_approval_media_feedback),
             ],
             AWAIT_EDIT_FIELD: [
+                CallbackQueryHandler(handle_document_intent, pattern=r"^DOCUSE\|"),
                 CallbackQueryHandler(handle_edit_field, pattern=r"^FIELD\|"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
             ],
             AWAIT_EDIT_VALUE: [
+                CallbackQueryHandler(handle_document_intent, pattern=r"^DOCUSE\|"),
                 # Text goes through intent check; non-text (voice, photo, doc) passes straight through
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_value_with_intent),
                 MessageHandler(~filters.COMMAND & ~filters.TEXT, handle_edit_value),

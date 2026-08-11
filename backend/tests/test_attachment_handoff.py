@@ -4,6 +4,7 @@ import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
 from bot import (
+    AWAIT_APPROVAL,
     AWAIT_CASE_INPUT,
     AWAIT_DOC_INTENT,
     AWAIT_FORM_CHOICE,
@@ -754,6 +755,197 @@ async def test_text_while_image_choice_pending_is_captured_and_keeps_buttons_val
 
 
 @pytest.mark.asyncio
+async def test_rich_ultrasound_log_text_advances_while_video_choice_stays_pending():
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_text_update(
+        "Ultrasound log: I assessed a hypotensive patient in resus, performed a focused "
+        "cardiac ultrasound, identified poor LV function, escalated to my consultant, "
+        "and reflected that I should document my findings contemporaneously."
+    )
+
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
+        temp_path = f.name
+        f.write(b"dummy video content")
+    context.user_data["_pending_doc"] = {
+        "path": temp_path,
+        "name": "portfolio-video.mp4",
+        "kind": "video",
+    }
+    context.user_data["_pending_doc_context"] = "POCUS clip supplied as supporting evidence."
+
+    with patch("bot.extract_from_document", new=AsyncMock()) as document_extract, \
+         patch("bot.extract_from_image", new=AsyncMock()) as image_extract, \
+         patch("bot.transcribe_voice", new=AsyncMock()) as transcribe:
+        result = await handle_mid_conversation_text(update, context)
+
+    assert result == AWAIT_FORM_CHOICE
+    assert context.user_data["chosen_form"] == "US_CASE"
+    assert "focused cardiac ultrasound" in context.user_data["case_text"]
+    assert "POCUS clip supplied" in context.user_data["case_text"]
+    assert context.user_data["_pending_doc"]["path"] == temp_path
+    assert os.path.exists(temp_path)
+    assert "_pending_doc_context" not in context.user_data
+    document_extract.assert_not_awaited()
+    image_extract.assert_not_awaited()
+    transcribe.assert_not_awaited()
+
+    os.unlink(temp_path)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["attach", "ignore"])
+async def test_video_retain_or_remove_preserves_active_content_state(mode):
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_callback_update(f"DOCUSE|{mode}")
+
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
+        temp_path = f.name
+        f.write(b"dummy video content")
+    context.user_data.update(
+        {
+            "_pending_doc": {
+                "path": temp_path,
+                "name": "portfolio-video.mp4",
+                "kind": "video",
+            },
+            "case_text": "Source-backed ultrasound case narrative.",
+            "chosen_form": "US_CASE",
+            "explicit_form_choice": "US_CASE",
+            "form_recommendations": ["US_CASE recommendation"],
+            "draft_data": {
+                "_type": "FORM",
+                "form_type": "US_CASE",
+                "fields": {"reflection": "I will document findings contemporaneously."},
+            },
+        }
+    )
+    content_before = {
+        key: context.user_data[key]
+        for key in (
+            "case_text", "chosen_form", "explicit_form_choice", "form_recommendations", "draft_data"
+        )
+    }
+
+    result = await handle_document_intent(update, context)
+
+    assert result == AWAIT_APPROVAL
+    assert {
+        key: context.user_data[key]
+        for key in (
+            "case_text", "chosen_form", "explicit_form_choice", "form_recommendations", "draft_data"
+        )
+    } == content_before
+    assert "_pending_doc" not in context.user_data
+    if mode == "attach":
+        assert context.user_data["attachment_path"] == temp_path
+        assert os.path.exists(temp_path)
+        assert "Video kept" in (sim.get_last_text() or "")
+    else:
+        assert "attachment_path" not in context.user_data
+        assert not os.path.exists(temp_path)
+        assert "Removed that video" in _all_visible_text(sim)
+
+    if os.path.exists(temp_path):
+        os.unlink(temp_path)
+
+
+@pytest.mark.asyncio
+async def test_side_question_while_video_choice_pending_names_real_video_choices():
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["_pending_doc"] = {"kind": "video"}
+    before = dict(context.user_data)
+
+    with patch(
+        "bot.answer_question",
+        new=AsyncMock(return_value="A CBD explores reasoning; DOPS observes a procedure."),
+    ):
+        result = await handle_mid_conversation_text(
+            sim._make_text_update("What is the difference between CBD and DOPS?"),
+            context,
+        )
+
+    assert result == AWAIT_DOC_INTENT
+    assert context.user_data == before
+    reply = (sim.get_last_text() or "").lower()
+    assert "cbd explores reasoning" in reply
+    assert "video choice is still waiting" in reply
+    assert "attach or remove" in reply
+    assert "both" not in reply
+
+
+def test_video_choice_callbacks_remain_routed_after_content_advances():
+    import inspect
+    import bot
+
+    source = inspect.getsource(bot.build_application)
+    pending_block = source.split("AWAIT_DOC_INTENT:", 1)[1].split("],", 1)[0]
+    assert "MessageHandler(filters.VOICE, handle_pending_media_context)" in pending_block
+    for state_name in (
+        "AWAIT_CASE_INPUT",
+        "AWAIT_GATHERING",
+        "AWAIT_FORM_CHOICE",
+        "AWAIT_FORM_SEARCH",
+        "AWAIT_TEMPLATE_REVIEW",
+        "AWAIT_APPROVAL",
+        "AWAIT_EDIT_FIELD",
+        "AWAIT_EDIT_VALUE",
+    ):
+        state_block = source.split(f"{state_name}:", 1)[1].split("],", 1)[0]
+        assert "handle_document_intent" in state_block
+        assert r'^DOCUSE\|' in state_block
+
+
+@pytest.mark.asyncio
+async def test_rich_voice_context_advances_while_video_choice_stays_pending():
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_text_update("")
+    voice = MagicMock()
+    file_obj = MagicMock()
+    file_obj.download_to_drive = AsyncMock()
+    voice.get_file = AsyncMock(return_value=file_obj)
+    update.message.text = None
+    update.message.voice = voice
+    update.message.audio = None
+    update.message.photo = []
+    update.message.video = None
+    update.message.document = None
+
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
+        temp_path = f.name
+        f.write(b"dummy video content")
+    context.user_data["_pending_doc"] = {
+        "path": temp_path,
+        "name": "portfolio-video.mp4",
+        "kind": "video",
+    }
+    context.user_data["_pending_doc_context"] = "POCUS clip supplied as supporting evidence."
+
+    spoken_case = (
+        "Ultrasound log: I assessed a shocked patient in resus, performed focused cardiac "
+        "ultrasound, documented poor LV function, escalated to my consultant, and reflected "
+        "on documenting my findings sooner."
+    )
+    with patch("bot.has_credentials", return_value=True), \
+         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 0, 10, "free"))), \
+         patch("bot.transcribe_voice", new=AsyncMock(return_value=spoken_case)):
+        result = await handle_case_input(update, context)
+
+    assert result == AWAIT_FORM_CHOICE
+    assert context.user_data["chosen_form"] == "US_CASE"
+    assert "POCUS clip supplied" in context.user_data["case_text"]
+    assert "shocked patient" in context.user_data["case_text"]
+    assert context.user_data["_pending_doc"]["path"] == temp_path
+    assert os.path.exists(temp_path)
+    assert "_pending_doc_context" not in context.user_data
+
+    os.unlink(temp_path)
+
+
+@pytest.mark.asyncio
 async def test_pending_document_context_is_merged_after_read_choice():
     sim = BotSimulator()
     context = sim._make_context()
@@ -878,6 +1070,57 @@ async def test_filing_call_accepts_video_attachment_path():
     if os.path.exists(temp_path):
         os.unlink(temp_path)
     if filed_path and os.path.exists(filed_path):
+        os.unlink(filed_path)
+        os.rmdir(os.path.dirname(filed_path))
+
+
+@pytest.mark.asyncio
+async def test_video_upload_reaches_filer_only_after_attach_yes():
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    approve_update = sim._make_callback_update("APPROVE|draft")
+
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
+        temp_path = f.name
+        f.write(b"dummy video content")
+    context.user_data.update(
+        {
+            "attachment_path": temp_path,
+            "attachment_name": "portfolio-video.mp4",
+            "attachment_kind": "video",
+            "chosen_form": "US_CASE",
+            "case_text": "I performed a focused ultrasound and documented my own findings.",
+        }
+    )
+    draft = FormDraft(
+        form_type="US_CASE",
+        fields={"reflection": "I will document my ultrasound findings contemporaneously."},
+    )
+
+    with patch("bot.get_credentials", return_value=("testuser", "testpass")), \
+         patch("bot._load_draft", return_value=draft), \
+         patch("bot._needs_filing_curriculum_choice", return_value=False), \
+         patch("bot.route_filing", new=AsyncMock(return_value={
+             "status": "success", "filled": ["reflection", "attachment"], "skipped": []
+         })) as route_mock, \
+         patch("bot.record_case_filed", new=AsyncMock()), \
+         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 1, 10, "free"))):
+        first_result = await handle_approval_approve(approve_update, context)
+        route_mock.assert_not_awaited()
+        assert first_result == AWAIT_APPROVAL
+        assert ("📎 Attach it anyway", "ATTACH|yes") in sim.get_last_buttons()
+
+        consent_update = sim._make_callback_update("ATTACH|yes")
+        await bot.handle_attachment_confirm(consent_update, context)
+
+    route_mock.assert_awaited_once()
+
+    filed_path = route_mock.call_args[1].get("attachment_path")
+    if os.path.exists(temp_path):
+        os.unlink(temp_path)
+    if filed_path and filed_path != temp_path and os.path.exists(filed_path):
         os.unlink(filed_path)
         os.rmdir(os.path.dirname(filed_path))
 

@@ -291,6 +291,7 @@ async def test_sdl_first_turn_file_request_asks_for_learning_details_not_generic
         ("Can you file a CBD?", "CBD", "Case-Based Discussion"),
         ("Create a DOPS for me", "DOPS", "Direct Observation of Procedural Skills"),
         ("Log this as an ultrasound case", "US_CASE", "Ultrasound Case Reflection"),
+        ("Create an ultrasound log", "US_CASE", "Ultrasound Case Reflection"),
     ],
 )
 async def test_explicit_form_start_locks_requested_form_generically(

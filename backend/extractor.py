@@ -747,7 +747,9 @@ def extract_explicit_form_type(text: str, *, require_intent: bool = True) -> str
         "JCF":          ["journal club"],
         "TEACH":        ["teach form", "teaching delivered", "teaching session form"],
         "SDL":          ["self-directed learning", "self directed learning"],
-        "US_CASE":      ["ultrasound case", "us case", "pocus case"],
+        "US_CASE":      [
+            "ultrasound case", "ultrasound log", "ultrasound logs", "us case", "pocus case"
+        ],
         "ESLE_ASSESS":  ["significant learning event"],
         "COMPLAINT":    ["complaint reflection", "complaint form"],
         "SERIOUS_INC":  ["serious incident", "si reflection", "never event"],

@@ -125,6 +125,7 @@ in `tests/test_portfolio_inbound_bridge.py`.
 | `AWAIT_EDIT_FIELD`  | Edit mode. Waiting for user to select which field to change. |
 | `AWAIT_EDIT_VALUE`  | Edit mode. Waiting for user to provide the new field value.  |
 | `AWAIT_GATHERING`   | Opt-in collector. Waiting for more case detail or "done".    |
+| `AWAIT_DOC_INTENT`  | Media is cached. Waiting for a read/attach/remove choice.     |
 | `AWAIT_USERNAME`    | Setup flow. Waiting for Kaizen username.                     |
 | `AWAIT_PASSWORD`    | Setup flow. Waiting for Kaizen password.                     |
 
@@ -145,6 +146,7 @@ whenever callback payloads or conversation states change.
 | `ACTION\|reset` / `CONFIRM\|reset` | `reset_data` / `handle_reset_confirm` | none | Clear user state and credentials only after explicit confirmation. |
 | `FORM\|best` | `handle_form_choice` | `form_recommendations`, `case_text` | If the case is gone, remove the stale keyboard and ask for a new case. |
 | `FORM\|<form>` | `handle_form_choice` | `case_text`; optional recommendations | File the selected form against the active case only; never use a form tap to start a synthetic case. |
+| `DOCUSE\|(info|attach|both|ignore)` | `handle_document_intent` | cached `_pending_doc`; video offers attach/remove only | Image/document read-choice behaviour stays in `AWAIT_DOC_INTENT`. A pending video is orthogonal: substantive text/voice advances the case while its attach/remove callback remains routable through case input/gathering, form choice/search, template review, approval and edit states. Retain/remove changes media state only; upload still requires `ATTACH\|yes` at save time. |
 | `APPROVE\|draft` | `handle_approval_approve` | `draft_data` plus credentials | One-shot external effect: set `filing_in_progress`, remove old markup, and never run duplicate Kaizen saves on double tap. |
 | `EDIT\|draft` / `FIELD\|<field>` | `handle_approval_edit` / `handle_edit_field` | active draft | If draft state is missing, recover to the latest active draft message or end with a clear stale-draft explanation. |
 | `CANCEL\|draft` / `CANCEL\|form` | `handle_callback` | optional active state | Clear active flow state and return to idle; do not leave old buttons live. |

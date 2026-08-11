@@ -45,6 +45,12 @@ class TestFormTypeExtraction:
         )
         assert result == "PROC_LOG"
 
+    @pytest.mark.parametrize("alias", ["ultrasound log", "ultrasound logs"])
+    def test_ultrasound_log_aliases_detect_us_case(self, alias):
+        from extractor import extract_explicit_form_type
+
+        assert extract_explicit_form_type(f"Add this case to my {alias}") == "US_CASE"
+
     def test_bare_form_name_not_detected(self):
         """Bare form name without intent phrase should NOT trigger."""
         from extractor import extract_explicit_form_type
