@@ -8471,11 +8471,27 @@ def _has_video_attachment_for_drafting(context) -> bool:
 
 
 def _video_context_has_user_grounding(case_text: str) -> bool:
+    """Has the doctor written enough of their own account to drive a video draft?
+
+    The verb allowlist below cannot cover how doctors actually write. A real
+    170-word account — junior asked me to scan, I did the echo, I saw a line, we
+    involved cardiology, they deemed it artefact, this was a learning — matched
+    none of it, because it says "did", "saw", "involved", "learning" rather than
+    "assessed", "reviewed", "performed", "learned". The doctor was told to send
+    the context they had already sent.
+
+    So the marker list is now one of two ways through, unioned with the general
+    grounding check every other source uses (and which passes that narrative).
+    Union, not replacement: this can only ever unblock, never add a new block.
+    Extending the verb list instead would just move the whack-a-mole.
+    """
     text = " ".join(str(case_text or "").lower().split())
     words = text.split()
     if len(words) < 12:
         return False
-    return any(marker in text for marker in _VIDEO_CONTEXT_ACTION_MARKERS)
+    if any(marker in text for marker in _VIDEO_CONTEXT_ACTION_MARKERS):
+        return True
+    return _case_context_has_user_grounding(case_text)
 
 
 _SOURCE_GROUNDING_REQUIRED_SOURCES = {"voice", "audio", "mixed"}

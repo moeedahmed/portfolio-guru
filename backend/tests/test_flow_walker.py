@@ -4247,6 +4247,64 @@ class TestImageOCRProgress:
             )
 
 
+class TestVideoGroundingGate:
+    """The video gate must not reject a doctor who has written a real account.
+
+    Reported case: an ultrasound clip sent with a 170-word narrative was met
+    with "I need your own clinical context before drafting from a video
+    attachment". The narrative matched zero entries in
+    `_VIDEO_CONTEXT_ACTION_MARKERS` because it says "did", "saw", "involved",
+    "asked", "learning" rather than "assessed", "reviewed", "performed",
+    "learned" — while the general grounding check passed it.
+    """
+
+    # Verbatim from the report. This text IS the regression — do not paraphrase
+    # it, or the guard stops guarding the thing that actually broke.
+    ULTRASOUND_NARRATIVE = (
+        "This case was brought to me by a junior who saw this patient, a 34-year-old "
+        "multiparous lady with 36 weeks' pregnancy and a history of shortness of breath "
+        "since yesterday, with some left-sided chest pain. I was asked to do an echo "
+        "bedside. I did an echo, and I saw this line, a small line going through the "
+        "aortic outflow tract, which was hyper-echoed as a white line. We were not sure "
+        "whether this was some kind of artifactual line or something, because it raised "
+        "the suspicion of an aortic dissection. Because we can't unsee it now that we "
+        "have seen it, we involved the cardiologist to help us make a conclusion about "
+        "whether this could be an aortic dissection or not. The cardiologist did a "
+        "bedside echo to confirm whether there was any flap in the outflow tract in the "
+        "aortic root. They deemed it to be an artefact, but this was a learning for me, "
+        "and I want to record this in my portfolio in my ultrasound logs."
+    )
+
+    def test_real_clinical_narrative_passes_the_video_gate(self):
+        from bot import _VIDEO_CONTEXT_ACTION_MARKERS, _video_context_has_user_grounding
+
+        text = " ".join(self.ULTRASOUND_NARRATIVE.lower().split())
+        assert not any(marker in text for marker in _VIDEO_CONTEXT_ACTION_MARKERS), (
+            "Fixture no longer reproduces the bug: it now matches a verb marker, so "
+            "this test would pass via the old path and prove nothing."
+        )
+        assert _video_context_has_user_grounding(self.ULTRASOUND_NARRATIVE) is True
+
+    def test_bare_video_with_no_user_words_still_blocks(self):
+        """The anti-fabrication guarantee: we never interpret a video ourselves."""
+        from bot import _video_context_has_user_grounding
+
+        assert _video_context_has_user_grounding("") is False
+        assert _video_context_has_user_grounding("ultrasound clip") is False
+        # Long but entirely non-clinical, no user account of a case.
+        assert _video_context_has_user_grounding(
+            "here is the video file I recorded on my phone earlier today ok thanks"
+        ) is False
+
+    def test_short_marker_style_note_still_passes(self):
+        """The original allowlist path must survive the union."""
+        from bot import _video_context_has_user_grounding
+
+        note = "I performed the scan myself and escalated it to the medical registrar on call"
+        assert len(note.split()) >= 12, "must clear the 12-word floor to exercise the marker path"
+        assert _video_context_has_user_grounding(note) is True
+
+
 class TestPhotoGroundingGate:
     """A photo's OCR text is the document talking, not the doctor.
 
