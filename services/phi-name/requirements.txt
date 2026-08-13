@@ -1,0 +1,14 @@
+# Isolated from backend/requirements.txt on purpose: this pulls torch and
+# transformers (~2GB installed). deploy_mac.sh reinstalls the backend's
+# requirements on every deploy, so these must never land there.
+openmed==2.0.0
+
+# Pinned below 5 deliberately. With transformers 5.14.1 openmed 2.0.0 fails to
+# build its pipeline on every call ("AutoConfig.from_pretrained() got multiple
+# values for keyword argument 'local_files_only'") and silently falls back to
+# reloading the weights per request — it still returns answers, so the only
+# symptom is latency.
+transformers<5
+
+fastapi
+uvicorn

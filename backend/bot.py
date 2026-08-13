@@ -31,7 +31,7 @@ from kaizen_form_filer import FORM_UUIDS
 from form_schemas import FORM_SCHEMAS
 from form_display import public_form_name, sanitize_internal_form_codes
 from models import FormDraft, CBDData, FormTypeRecommendation
-from privacy_guard import deidentify_clinical_text
+from privacy_guard import deidentify_clinical_text, service_failure_count
 from whisper import transcribe_voice
 from vision import extract_from_image
 from documents import extract_from_document, is_supported_attachment, is_supported_document
@@ -4006,6 +4006,7 @@ def _format_draft_preview_for_context(
         include_safety_layer=include_safety_layer,
         needs_reflection_detail=context.user_data.get("needs_reflection_detail", False),
         has_user_context=bool(context.user_data.get("case_has_user_context", True)),
+        name_check_degraded=bool(context.user_data.get("name_check_unavailable", False)),
     )
 
 
@@ -4298,6 +4299,7 @@ def _format_draft_preview(
     include_safety_layer: bool = True,
     needs_reflection_detail: bool = False,
     has_user_context: bool = True,
+    name_check_degraded: bool = False,
 ) -> str:
     """Format draft data as a preview message. Dispatches based on type."""
     preview = _format_generic_draft(draft) if isinstance(draft, FormDraft) else _format_cbd_draft(draft)
@@ -4314,7 +4316,13 @@ def _format_draft_preview(
     # The coach note asks for the same thing the review block just asked for.
     # Showing both made the preview read as three competing instructions.
     coach = "" if layer else _draft_coach_note_suffix(draft)
-    return preview + layer + coach
+    degraded = (
+        "\n🔍 Name checking ran with reduced cover for this draft — please "
+        "double-check names yourself."
+        if (include_safety_layer and name_check_degraded)
+        else ""
+    )
+    return preview + layer + coach + degraded
 
 
 def _draft_coach_note_suffix(draft) -> str:
@@ -8663,6 +8671,7 @@ async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: in
     # Set tier for provider chain gating
     os.environ["CURRENT_USER_TIER"] = context.user_data.get("user_tier", "free")
     vp = get_voice_profile(user_id) or ""
+    name_failures_before = service_failure_count()
     base_form_type = form_type[:-5] if form_type.endswith("_2021") else form_type
     if base_form_type == "CBD":
         draft = await asyncio.wait_for(
@@ -8687,6 +8696,14 @@ async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: in
             ),
             timeout=45,
         )
+    # Carry the sidecar's availability out of the extractor so the preview can
+    # say the draft was checked with weaker cover. A silent downgrade would let
+    # the doctor believe they had protection they did not have on this draft.
+    if service_failure_count() > name_failures_before:
+        context.user_data["name_check_unavailable"] = True
+    else:
+        context.user_data.pop("name_check_unavailable", None)
+
     _apply_profile_training_stage(draft, user_id, form_type)
     _apply_default_dates(draft, form_type)
     _store_pending_draft(context, draft)

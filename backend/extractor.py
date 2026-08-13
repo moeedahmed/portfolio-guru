@@ -13,7 +13,12 @@ logger = logging.getLogger(__name__)
 from models import CBDData, FormTypeRecommendation, FormDraft
 from form_schemas import FORM_SCHEMAS
 from form_display import public_form_name, sanitize_internal_form_codes
-from privacy_guard import deidentify_draft_fields
+from privacy_guard import (
+    apply_model_names,
+    deidentify_draft_fields,
+    model_name_scrub_enabled,
+    model_person_names,
+)
 from message_policy import FLEXIBLE_REPLY_STYLE_ENVELOPE, render_message
 from model_config import gemini_three_five_flash_model
 from privacy_guard import deidentify_clinical_text
@@ -1386,6 +1391,35 @@ def _prepare_case_description_for_model(case_description: str) -> str:
     return cleaned
 
 
+async def _prepare_case_description_for_model_async(case_description: str) -> str:
+    """Deterministic rules, then optional model-based name detection.
+
+    The sidecar call is blocking and can take ~600ms, so it goes to an executor
+    — holding the event loop would stall every other user's message while one
+    draft is prepared.
+
+    A failed or disabled service is not an error: the deterministic result is
+    returned unchanged. Callers learn that cover was reduced by sampling
+    ``privacy_guard.service_failure_count()`` either side of the extraction —
+    not from a ContextVar, because ``asyncio.wait_for`` runs this inside a Task
+    whose context is a copy, so anything set here would never reach the caller.
+    """
+    cleaned = _prepare_case_description_for_model(case_description)
+
+    if not model_name_scrub_enabled() or not cleaned.strip():
+        return cleaned
+
+    loop = asyncio.get_running_loop()
+    names, available = await loop.run_in_executor(None, model_person_names, cleaned)
+    if not available:
+        return cleaned
+
+    scrubbed, labels = apply_model_names(cleaned, names)
+    if labels:
+        logger.info("model_name_scrub removed %d name(s)", len(labels))
+    return scrubbed
+
+
 def _humanize_reflection(text: str) -> str:
     """Legacy alias — calls _humanize_text."""
     return _humanize_text(text)
@@ -1852,7 +1886,7 @@ async def recommend_form_types(case_description: str, input_source: str = "text"
     recommendations toward procedure/reflection forms rather than CBD — image
     evidence is usually a procedure or imaging finding, not a managed case.
     """
-    case_description = _prepare_case_description_for_model(case_description)
+    case_description = await _prepare_case_description_for_model_async(case_description)
     deterministic = _deterministic_recommend_form_types(case_description, input_source)
     if deterministic is not None:
         logger.info(
@@ -3027,7 +3061,7 @@ async def extract_cbd_data(
     advanced-imaging narrative the LLM tries to inject is stripped before the
     user sees the draft.
     """
-    case_description = _prepare_case_description_for_model(case_description)
+    case_description = await _prepare_case_description_for_model_async(case_description)
     missing_text_instruction = (
         'If a field cannot be filled from the case description, return an empty string "" for text/date/dropdown fields, null for nullable fields, and [] for list fields.'
         if leave_missing_blank
@@ -3259,7 +3293,7 @@ async def extract_form_data(
     prompt block forbidding fabrication and have their narrative fields
     sanitised by enforce_image_source_grounding before returning.
     """
-    case_description = _prepare_case_description_for_model(case_description)
+    case_description = await _prepare_case_description_for_model_async(case_description)
     form_type = canonical_form_type(form_type)
     # _2021 variants share draft schemas with their current-curriculum base
     # forms, except where the user-facing code needs an explicit schema alias.

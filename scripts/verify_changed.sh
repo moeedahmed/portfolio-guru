@@ -74,6 +74,7 @@ JOURNEY_TESTS=(
   # 8. Patient-identifier de-identification — a regression puts PHI into Kaizen
   tests/test_privacy_guard_names.py
   tests/test_attachment_upload_consent.py
+  tests/test_model_name_scrub.py
 )
 
 echo

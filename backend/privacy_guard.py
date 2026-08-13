@@ -8,10 +8,16 @@ the Telegram bot request path.
 
 from __future__ import annotations
 
+import json
+import logging
+import os
 import re
+import urllib.request
 from collections import Counter
 from dataclasses import dataclass
 from typing import Iterable
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -247,6 +253,113 @@ def deidentify_draft_fields(fields: dict) -> tuple[dict, list[str]]:
                 fields[key] = new_items
 
     return fields, sorted(set(labels))
+
+
+# ── Optional model-based name detection (local sidecar) ──────────────────────
+# The rules above cannot see an unlabelled name: "chatted to Sarah about it"
+# has no label to anchor on, and guessing from capitalisation would delete
+# clinical terms. A small NER model can, and runs in a separate local service
+# (services/phi-name) so no ML dependency reaches this process.
+#
+# Off unless PG_ENABLE_MODEL_NAME_SCRUB is set, matching the opt-in pattern of
+# PG_ENABLE_BROWSER_USE_FALLBACK in filer_router.py.
+
+_NAME_SERVICE_URL = os.environ.get(
+    "PG_NAME_SERVICE_URL", "http://127.0.0.1:18810/names"
+)
+_NAME_SERVICE_TIMEOUT = float(os.environ.get("PG_NAME_SERVICE_TIMEOUT", "1.5"))
+
+
+def model_name_scrub_enabled() -> bool:
+    return os.environ.get("PG_ENABLE_MODEL_NAME_SCRUB", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+_service_failures = 0
+
+
+def service_failure_count() -> int:
+    """How many sidecar calls have failed since this process started.
+
+    Callers sample it either side of an extraction to learn whether cover was
+    reduced for that draft. A counter rather than a ContextVar because
+    ``asyncio.wait_for`` wraps the extractor in a Task, and a Task gets a *copy*
+    of the context — anything set inside is invisible to the caller.
+
+    A module-level counter is shared across users, which is correct here: the
+    sidecar is up or down for everyone, so another request's failure is real
+    evidence that this draft's cover was reduced too.
+    """
+    return _service_failures
+
+
+def _note_service_failure() -> None:
+    global _service_failures
+    _service_failures += 1
+
+
+def model_person_names(text: str) -> tuple[list[str], bool]:
+    """Ask the local sidecar for person names. Returns (names, service_available).
+
+    Blocking, by design: callers run it in an executor so the bot's event loop
+    is never held. Any failure — service down, timeout, malformed reply — comes
+    back as ``([], False)`` rather than an exception, because a privacy helper
+    must never be the reason a doctor cannot file. The caller is responsible for
+    telling the user that checking was degraded; failing quietly *and* silently
+    would be the worst outcome.
+    """
+    if not model_name_scrub_enabled() or not str(text or "").strip():
+        return [], True
+
+    payload = json.dumps({"text": text}).encode("utf-8")
+    request = urllib.request.Request(
+        _NAME_SERVICE_URL,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=_NAME_SERVICE_TIMEOUT) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001 - every failure degrades the same way
+        _note_service_failure()
+        logger.warning("name service unavailable: %s", type(exc).__name__)
+        return [], False
+
+    names = body.get("names")
+    if not isinstance(names, list):
+        _note_service_failure()
+        logger.warning("name service returned an unexpected payload shape")
+        return [], False
+
+    cleaned = [
+        " ".join(str(name).split()).strip()
+        for name in names
+        if isinstance(name, str) and str(name).strip()
+    ]
+    return sorted(set(cleaned), key=len, reverse=True), True
+
+
+def apply_model_names(text: str, names: Iterable[str]) -> tuple[str, list[str]]:
+    """Replace model-detected names in `text`, mirroring the rules' replacement."""
+    labels: list[str] = []
+    out = text
+    for name in names:
+        pattern = re.compile(r"\b%s\b" % re.escape(name), re.IGNORECASE)
+        if pattern.search(out):
+            out = pattern.sub("the patient", out)
+            labels.append("PATIENT_NAME")
+    if not labels:
+        return text, []
+    out = re.sub(r" {2,}", " ", out)
+    # Defence in depth for a split name the service did not merge: two adjacent
+    # replacements would otherwise read "the patient the patient".
+    out = re.sub(r"\b(the patient)(\s+the patient)+\b", r"\1", out, flags=re.IGNORECASE)
+    return out.strip(), labels
 
 
 def privacy_summary(texts: Iterable[str]) -> dict:
