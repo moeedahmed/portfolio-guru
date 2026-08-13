@@ -11,6 +11,7 @@ Examples: copy-neutral documentation, comments, or a tightly isolated helper.
 - Run the smallest relevant pytest file or static check.
 - Record the command and exit result.
 - Independent review and product-surface evidence are optional unless a shared, filing, privacy, billing, or safety path is touched.
+- For a shipped internal release, exact-SHA Tests, CI deploy, and Mac Mini runtime identity are still mandatory; no manual Telegram journey is required.
 
 ### 2. Meaningful user-facing
 
@@ -41,7 +42,17 @@ Examples: case capture through approval and draft save, or an attachment journey
 
 ## Release boundary
 
-`bash scripts/verify_release.sh` is the full offline release gate. Live Telegram, Vertex AI, Kaizen, Stripe, push, deployment, and supervisor-facing actions remain separate approval-gated proof.
+`bash scripts/verify_release.sh` is the full offline release gate. The existing release loop keeps closure stages distinct and requires `--risk internal|telegram|broad` for ship:
+
+1. prepare and pass offline verification;
+2. commit, then obtain one semantic approval for the complete ship or proof-resume run;
+3. reconcile/push one full SHA and prove `HEAD == origin/main == pushed SHA`;
+4. require a successful GitHub `Tests` workflow for that SHA with event `push`;
+5. require a successful `Deploy Mac Mini` workflow for that SHA with event `workflow_run`, created/started no earlier than the selected Tests completion/update time;
+6. require the Mac Mini checkout and runtime identity to equal that full SHA exactly;
+7. collect risk proof: `internal` needs no manual journey, `telegram` needs the guarded focused text-case journey, and `broad` needs all 15 interactive dogfood checks PASS with Fail=0 and Skip=0.
+
+Manual workflow dispatch is not evidence for an ordinary ship. A completed Tests/deploy or live-journey failure is `blocked` with exit 1. Missing, running, timeout, inaccessible runtime, or unavailable protected live proof is `proof-pending` with exit 4. After a pushed run becomes pending, the loop prints an exact secret-free `--release-sha <40hex>` resume command. Resume repeats the approval gate, requires `HEAD == origin/main == supplied SHA`, performs proof stages only, and never attempts a duplicate push. The ship approval does not weaken live-send guards: Telegram, Vertex AI, Kaizen, Stripe, and supervisor-facing actions remain protected.
 
 ## Completion record
 

@@ -9,6 +9,19 @@ For the private-beta launch boundary, supervisor scope, rollback path,
 and monitoring cadence, see `docs/PRIVATE_BETA_LAUNCH.md`. The dogfood
 smoke checklist lives in `scripts/dogfood_smoke.sh`.
 
+Release closure has one owner: `scripts/release_loop.sh`. Risk must be explicit
+for ship. After prepare and a commit, one semantic ship approval covers push of
+one exact full SHA → a successful `push` Tests run for that SHA → a later
+successful `workflow_run` CI Mac deploy for that SHA → checked-out/running Mac
+Mini identity for that SHA → risk-based proof. Internal tooling stops at
+automated proof; Telegram workflow changes add one focused guarded live case;
+broad releases require all 15 interactive dogfood checks to pass with no skips.
+Manual workflow dispatch is not ordinary ship proof. Missing/running/timeout
+proof exits 4 as `proof-pending`; completed workflow failure is `blocked` and
+non-zero. The printed `--release-sha` resume command requires the same approval
+and `HEAD == origin/main == release SHA`, then performs proof only without a
+second push. Live Telegram/Kaizen guards remain unchanged.
+
 ---
 
 ## Current Product Focus — Telegram Launch Proof

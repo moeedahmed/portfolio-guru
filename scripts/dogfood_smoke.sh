@@ -13,17 +13,25 @@
 # Usage:
 #   bash scripts/dogfood_smoke.sh
 #   bash scripts/dogfood_smoke.sh --no-record   # print checklist only
+#   bash scripts/dogfood_smoke.sh --strict-release
 #
 # Exits non-zero if any check is recorded as FAIL.
 
 set -euo pipefail
 
 RECORD=1
-if [[ "${1:-}" == "--no-record" ]]; then
-  RECORD=0
-fi
+STRICT_RELEASE=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --no-record) RECORD=0 ;;
+    --strict-release) STRICT_RELEASE=1 ;;
+    *) echo "ERROR: unknown argument: $1" >&2; exit 64 ;;
+  esac
+  shift
+done
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SUMMARY_POLICY="${ROOT}/scripts/dogfood_summary_policy.sh"
 ARTEFACT_DIR="${ROOT}/docs/continuity/dogfood"
 STAMP="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
 ARTEFACT="${ARTEFACT_DIR}/smoke-${STAMP}.md"
@@ -242,7 +250,10 @@ if [[ "$RECORD" == "1" ]]; then
   printf 'Pass=%s Fail=%s Skip=%s\n' "$PASS" "$FAIL" "$SKIP"
 fi
 
-if [[ "$FAIL" -gt 0 ]]; then
+if ! bash "$SUMMARY_POLICY" "$STRICT_RELEASE" "$RECORD" "$PASS" "$FAIL" "$SKIP"; then
+  if [[ "$STRICT_RELEASE" == "1" ]]; then
+    echo "STRICT RELEASE FAIL: all 15 mandatory checks must PASS; Fail=0 Skip=0 and recording is required." >&2
+  fi
   exit 1
 fi
 exit 0

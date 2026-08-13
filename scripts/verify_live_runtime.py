@@ -1,20 +1,38 @@
 #!/usr/bin/env python3
-"""Verify that launchd is serving the checked-out Portfolio Guru commit."""
+"""Verify that launchd serves the checked-out Portfolio Guru commit."""
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 
-ROOT = Path(os.environ.get("PORTFOLIO_GURU_APP_DIR", "/Users/moeedahmed/projects/portfolio-guru")).resolve()
-SERVICE_LABEL = os.environ.get("PORTFOLIO_GURU_SERVICE_LABEL", "com.portfolioguru.bot")
-IDENTITY_PATH = Path(os.environ.get("PORTFOLIO_GURU_RUNTIME_IDENTITY", "/tmp/portfolio-guru-runtime.json"))
-WAIT_SECONDS = float(os.environ.get("PORTFOLIO_GURU_RUNTIME_WAIT_SECONDS", "30"))
+DEFAULT_PROJECT_ROOT = Path("/Users/moeedahmed/projects/portfolio-guru")
+DEFAULT_SERVICE_LABEL = "com.portfolioguru.bot"
+DEFAULT_IDENTITY_PATH = Path("/tmp/portfolio-guru-runtime.json")
+FULL_SHA = re.compile(r"^[0-9a-fA-F]{40}$")
+
+
+def validate_expected_sha(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if not FULL_SHA.fullmatch(value):
+        raise ValueError("expected SHA must be a full 40-character hexadecimal value")
+    return value.lower()
+
+
+def resolve_root(*, expected_sha: str | None, inherited_root: str | None) -> Path:
+    # Release proof is bound to the canonical production checkout. The no-arg
+    # deploy smoke keeps its established app-dir override for isolated deploys.
+    if expected_sha is not None:
+        return DEFAULT_PROJECT_ROOT.resolve()
+    return Path(inherited_root or DEFAULT_PROJECT_ROOT).resolve()
 
 
 def run_text(args: list[str], *, check: bool = True) -> str:
@@ -24,17 +42,17 @@ def run_text(args: list[str], *, check: bool = True) -> str:
     return result.stdout
 
 
-def expected_commit() -> str:
-    return run_text(["git", "-C", str(ROOT), "rev-parse", "--short", "HEAD"]).strip()
+def expected_commit(root: Path) -> str:
+    return run_text(["git", "-C", str(root), "rev-parse", "HEAD"]).strip()
 
 
-def launchd_pid() -> int:
-    output = run_text(["launchctl", "print", f"gui/{os.getuid()}/{SERVICE_LABEL}"])
+def launchd_pid(service_label: str = DEFAULT_SERVICE_LABEL) -> int:
+    output = run_text(["launchctl", "print", f"gui/{os.getuid()}/{service_label}"])
     for line in output.splitlines():
         stripped = line.strip()
         if stripped.startswith("pid ="):
             return int(stripped.split("=", 1)[1].strip())
-    raise RuntimeError(f"{SERVICE_LABEL} has no launchd pid")
+    raise RuntimeError(f"{service_label} has no launchd pid")
 
 
 def process_alive(pid: int) -> bool:
@@ -48,15 +66,13 @@ def process_alive(pid: int) -> bool:
 def process_cwd(pid: int) -> str:
     output = run_text(["lsof", "-a", "-p", str(pid), "-d", "cwd"], check=False)
     lines = [line for line in output.splitlines() if line.strip()]
-    if len(lines) < 2:
-        return ""
-    return lines[1].split()[-1]
+    return lines[1].split()[-1] if len(lines) >= 2 else ""
 
 
-def portfolio_bot_pids() -> list[int]:
+def portfolio_bot_pids(root: Path) -> list[int]:
     output = run_text(["pgrep", "-f", "bot.py"], check=False)
+    backend_dir = str(root / "backend")
     pids: list[int] = []
-    backend_dir = str(ROOT / "backend")
     for raw in output.splitlines():
         try:
             pid = int(raw.strip())
@@ -72,56 +88,79 @@ def fail(message: str) -> int:
     return 1
 
 
-def check_runtime() -> str:
-    expected = expected_commit()
+def check_runtime(
+    *,
+    root: Path,
+    identity_path: Path,
+    expected_sha: str | None = None,
+    service_label: str = DEFAULT_SERVICE_LABEL,
+) -> str:
+    checkout_sha = expected_commit(root)
+    if not FULL_SHA.fullmatch(checkout_sha):
+        raise RuntimeError(f"checkout commit is not a full SHA: {checkout_sha}")
+    if expected_sha is not None and checkout_sha.lower() != expected_sha.lower():
+        raise RuntimeError(f"checkout commit {checkout_sha} != expected SHA {expected_sha}")
 
-    try:
-        service_pid = launchd_pid()
-    except Exception as exc:
-        raise RuntimeError(str(exc)) from exc
-
+    service_pid = launchd_pid(service_label)
     if not process_alive(service_pid):
         raise RuntimeError(f"launchd pid {service_pid} is not alive")
-
-    if not IDENTITY_PATH.exists():
-        raise RuntimeError(f"runtime identity file missing: {IDENTITY_PATH}")
-
+    if not identity_path.exists():
+        raise RuntimeError(f"runtime identity file missing: {identity_path}")
     try:
-        identity = json.loads(IDENTITY_PATH.read_text(encoding="utf-8"))
+        identity = json.loads(identity_path.read_text(encoding="utf-8"))
     except Exception as exc:
         raise RuntimeError(f"runtime identity file is unreadable: {exc}") from exc
 
     runtime_pid = identity.get("pid")
-    runtime_commit = identity.get("commit")
+    runtime_sha = identity.get("commit")
     runtime_repo = identity.get("repo_root")
     if runtime_pid != service_pid:
         raise RuntimeError(f"launchd pid {service_pid} != runtime identity pid {runtime_pid}")
-    if runtime_commit != expected:
-        raise RuntimeError(f"runtime commit {runtime_commit} != checkout commit {expected}")
-    if runtime_repo != str(ROOT):
-        raise RuntimeError(f"runtime repo {runtime_repo} != expected repo {ROOT}")
+    if not isinstance(runtime_sha, str) or not FULL_SHA.fullmatch(runtime_sha):
+        raise RuntimeError(f"runtime identity commit is not a full SHA: {runtime_sha}")
+    if expected_sha is not None and runtime_sha.lower() != expected_sha.lower():
+        raise RuntimeError(f"runtime commit {runtime_sha} != expected SHA {expected_sha}")
+    if runtime_sha.lower() != checkout_sha.lower():
+        raise RuntimeError(f"runtime commit {runtime_sha} != checkout commit {checkout_sha}")
+    if runtime_repo != str(root):
+        raise RuntimeError(f"runtime repo {runtime_repo} != expected repo {root}")
 
-    pids = portfolio_bot_pids()
+    pids = portfolio_bot_pids(root)
     if pids != [service_pid]:
         raise RuntimeError(f"expected one Portfolio Guru bot pid [{service_pid}], found {pids}")
 
+    stable_expected = expected_sha or checkout_sha
     return (
         "LIVE_RUNTIME_OK "
-        f"service={SERVICE_LABEL} pid={service_pid} commit={runtime_commit} branch={identity.get('branch')}"
+        f"service={service_label} pid={service_pid} expected_sha={stable_expected} "
+        f"checkout_sha={checkout_sha} runtime_sha={runtime_sha} branch={identity.get('branch')}"
     )
 
 
-def main() -> int:
-    deadline = time.monotonic() + max(0.0, WAIT_SECONDS)
-    last_error = ""
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--expected-sha", help="required exact full SHA for release proof")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    try:
+        expected_sha = validate_expected_sha(args.expected_sha or os.environ.get("PORTFOLIO_GURU_EXPECTED_SHA"))
+    except ValueError as exc:
+        return fail(str(exc))
+    root = resolve_root(expected_sha=expected_sha, inherited_root=os.environ.get("PORTFOLIO_GURU_APP_DIR"))
+    identity_path = Path(os.environ.get("PORTFOLIO_GURU_RUNTIME_IDENTITY", str(DEFAULT_IDENTITY_PATH)))
+    service_label = os.environ.get("PORTFOLIO_GURU_SERVICE_LABEL", DEFAULT_SERVICE_LABEL)
+    wait_seconds = float(os.environ.get("PORTFOLIO_GURU_RUNTIME_WAIT_SECONDS", "30"))
+    deadline = time.monotonic() + max(0.0, wait_seconds)
     while True:
         try:
-            print(check_runtime())
+            print(check_runtime(root=root, identity_path=identity_path, expected_sha=expected_sha, service_label=service_label))
             return 0
         except RuntimeError as exc:
-            last_error = str(exc)
             if time.monotonic() >= deadline:
-                return fail(last_error)
+                return fail(str(exc))
             time.sleep(1)
 
 

@@ -1,57 +1,12 @@
 #!/usr/bin/env bash
+# Deterministic release closure for Portfolio Guru.
 #
-# scripts/release_loop.sh
-#
-# Deterministic release-closure entrypoint for Portfolio Guru.
-#
-# Why this exists: product fixes get committed locally, then the deploy/restart
-# is remembered and run by hand as a separate second step. This wraps the
-# repeatable closure steps behind ONE command so the AI keeps doing diagnosis +
-# code + commit, and the *closure* (tests -> reconcile -> push -> CI deploy +
-# restart -> dogfood) becomes deterministic and gated.
-#
-# This is a thin orchestrator. It does NOT reimplement deploy/restart logic.
-# It calls the existing deterministic pieces:
-#   - offline gate    -> scripts/preflight.sh + scripts/telegram_qa_offline.sh
-#   - deploy+restart   -> a push to main triggers .github/workflows/deploy-mac.yml
-#                         which runs scripts/deploy_mac.sh on the Mac Mini
-#                         (git pull main, pip install, py_compile, launchctl restart)
-#   - dogfood checkpoint -> scripts/dogfood_smoke.sh
-#
-# Run this on the DEV machine (laptop), not the Mac Mini deploy checkout. The
-# Mac Mini checkout must stay clean and on main; ship refuses on main anyway.
-#
-# Modes:
-#   --mode prepare   Safe, non-live. Reports release readiness and whether ship
-#                    is READY or BLOCKED (and why). NEVER pushes/deploys/restarts.
-#   --mode ship      Gated, conservative closure. Refuses without explicit
-#                    approval and a clean, fast-forwardable tree. When approved,
-#                    pushes main (so CI deploys + restarts), then collects
-#                    deploy/restart proof and the dogfood checkpoint where
-#                    available. It prints FINAL_RELEASE_STATE=live only when
-#                    proof was actually collected; otherwise proof-pending.
-#
-# Surfaces:
-#   --surface telegram   (only surface wired in this slice)
-#
-# Approval for ship (either is accepted; checked BEFORE any live action):
-#   RELEASE_APPROVED=telegram-YYYYMMDD   (must match --surface and today, UTC)
-#   --approved                           (explicit per-invocation opt-in flag)
-#
-# Exit codes:
-#   0  success (ship done) / prepare says READY
-#   1  prepare says BLOCKED, or an offline gate failed
-#   2  ship refused: approval missing/stale
-#   3  ship refused: tree/branch/reconcile gate failed
-#   64 usage error
-#
-# Safety: never logs credentials/tokens. prepare is always side-effect free.
-# Never submits Kaizen forms (draft-only product); this script does not touch
-# Kaizen at all.
+# One approved ship run owns offline verification, exact-SHA reconciliation,
+# GitHub Tests/deploy provenance, exact runtime identity, and risk-scaled proof.
+# prepare is side-effect free. A resume run proves an already-pushed SHA and
+# never pushes it again. Live Telegram/Kaizen guards remain authoritative.
 
 set -euo pipefail
-
-# --- presentation helpers (no secrets ever printed) --------------------------
 
 banner() { printf '\n=== %s ===\n' "$*"; }
 step()   { printf '\n--- %s\n' "$*"; }
@@ -60,13 +15,10 @@ warn()   { printf '  ! %s\n' "$*"; }
 err()    { printf '  ERROR: %s\n' "$*" >&2; }
 
 final_state() {
-  local state="$1"
-  local gate="$2"
-  local proof="$3"
   banner "FINAL RELEASE STATE"
-  info "FINAL_RELEASE_STATE=$state"
-  info "FINAL_RELEASE_GATE=$gate"
-  info "FINAL_RELEASE_PROOF=$proof"
+  info "FINAL_RELEASE_STATE=$1"
+  info "FINAL_RELEASE_GATE=$2"
+  info "FINAL_RELEASE_PROOF=$3"
 }
 
 usage() {
@@ -74,91 +26,94 @@ usage() {
 Portfolio Guru — deterministic release closure.
 
 Usage:
-  scripts/release_loop.sh --surface telegram --mode prepare
-  scripts/release_loop.sh --surface telegram --mode ship [--approved]
-  scripts/release_loop.sh --help
+  scripts/release_loop.sh --surface telegram --mode prepare [--risk internal|telegram|broad]
+  scripts/release_loop.sh --surface telegram --mode ship --risk internal|telegram|broad [--approved]
+  scripts/release_loop.sh --surface telegram --mode ship --risk internal|telegram|broad --release-sha <40hex> [--approved]
 
 Options:
-  --surface <name>   Release surface. Only "telegram" is wired today.
-  --mode <mode>      "prepare" (safe readiness report) or "ship" (gated closure).
-  --approved         Explicit per-invocation approval for ship.
-  --no-dogfood       ship: skip the interactive dogfood checkpoint (forces
-                     FINAL_RELEASE_STATE=proof-pending).
-  -h, --help         Show this help.
+  --surface <name>     Only "telegram" is wired today.
+  --mode <mode>        prepare (side-effect free) or ship (approval gated).
+  --risk <class>       Required for ship: internal, telegram, or broad.
+  --release-sha <sha>  Resume proof only for an already-pushed exact full SHA.
+  --approved           Semantic approval for this complete ship/resume graph.
+  --no-dogfood         Legacy broad-proof skip; always leaves proof pending.
+  -h, --help           Show this help.
 
-Approval for ship (one of, checked before any live action):
-  RELEASE_APPROVED=telegram-YYYYMMDD   (today, UTC, surface-scoped)
-  --approved                           (explicit opt-in flag)
+Approval for ship/resume (one of):
+  RELEASE_APPROVED=telegram-YYYYMMDD
+  --approved
 
-prepare never pushes, deploys, or restarts. ship pushes main only after every
-gate passes; deploy + restart are then performed by CI (deploy_mac.sh on the
-Mac Mini), not by this script. ship ends with one final state: live,
-release-ready, proof-pending, or blocked.
+Exit codes:
+  0  ready/live
+  1  blocked gate or completed CI/deploy failure
+  2  approval missing/stale
+  3  git/reconciliation/resume refusal
+  4  retryable proof pending (missing/running/timeout/runtime/live proof)
+  64 usage error
 EOF
 }
 
-# --- argument parsing --------------------------------------------------------
-
 SURFACE="telegram"
 MODE=""
+RISK=""
+RISK_SUPPLIED=0
 APPROVED_FLAG=0
 NO_DOGFOOD=0
-WATCH_DEPLOY="${RELEASE_LOOP_WATCH_DEPLOY:-0}"
+RELEASE_SHA=""
+PROOF_TIMEOUT="${RELEASE_LOOP_PROOF_TIMEOUT:-900}"
+PROOF_INTERVAL="${RELEASE_LOOP_PROOF_INTERVAL:-5}"
+GITHUB_REPOSITORY="${RELEASE_LOOP_GITHUB_REPOSITORY:-moeedahmed/portfolio-guru}"
+
+need_value() {
+  local option="$1"
+  local value="${2:-}"
+  if [[ -z "$value" || "$value" == --* ]]; then
+    err "$option requires a value."
+    exit 64
+  fi
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --surface)   SURFACE="${2:-}"; shift 2 ;;
-    --surface=*) SURFACE="${1#*=}"; shift ;;
-    --mode)      MODE="${2:-}"; shift 2 ;;
-    --mode=*)    MODE="${1#*=}"; shift ;;
-    --approved)  APPROVED_FLAG=1; shift ;;
+    --surface) need_value "$1" "${2:-}"; SURFACE="$2"; shift 2 ;;
+    --surface=*) SURFACE="${1#*=}"; [[ -n "$SURFACE" ]] || { err "--surface requires a value."; exit 64; }; shift ;;
+    --mode) need_value "$1" "${2:-}"; MODE="$2"; shift 2 ;;
+    --mode=*) MODE="${1#*=}"; [[ -n "$MODE" ]] || { err "--mode requires a value."; exit 64; }; shift ;;
+    --risk) need_value "$1" "${2:-}"; RISK="$2"; RISK_SUPPLIED=1; shift 2 ;;
+    --risk=*) RISK="${1#*=}"; [[ -n "$RISK" ]] || { err "--risk requires a value."; exit 64; }; RISK_SUPPLIED=1; shift ;;
+    --release-sha) need_value "$1" "${2:-}"; RELEASE_SHA="$2"; shift 2 ;;
+    --release-sha=*) RELEASE_SHA="${1#*=}"; [[ -n "$RELEASE_SHA" ]] || { err "--release-sha requires a value."; exit 64; }; shift ;;
+    --approved) APPROVED_FLAG=1; shift ;;
     --no-dogfood) NO_DOGFOOD=1; shift ;;
-    -h|--help)   usage; exit 0 ;;
-    *)           err "Unknown argument: $1"; echo; usage; exit 64 ;;
+    -h|--help) usage; exit 0 ;;
+    *) err "Unknown argument: $1"; echo; usage; exit 64 ;;
   esac
 done
 
-if [[ -z "$MODE" ]]; then
-  err "Missing --mode (prepare|ship)."
-  echo; usage; exit 64
-fi
-if [[ "$MODE" != "prepare" && "$MODE" != "ship" ]]; then
-  err "Invalid --mode: $MODE (expected prepare|ship)."
+[[ -n "$MODE" ]] || { err "Missing --mode (prepare|ship)."; echo; usage; exit 64; }
+[[ "$MODE" == prepare || "$MODE" == ship ]] || { err "Invalid --mode: $MODE (expected prepare|ship)."; exit 64; }
+[[ "$SURFACE" == telegram ]] || { err "Unsupported --surface: $SURFACE. Only 'telegram' is wired in this slice."; exit 64; }
+if [[ "$RISK_SUPPLIED" == 1 && "$RISK" != internal && "$RISK" != telegram && "$RISK" != broad ]]; then
+  err "Invalid --risk: $RISK (expected internal|telegram|broad)."
   exit 64
 fi
-if [[ "$SURFACE" != "telegram" ]]; then
-  err "Unsupported --surface: $SURFACE. Only 'telegram' is wired in this slice."
+if [[ "$MODE" == ship && "$RISK_SUPPLIED" != 1 ]]; then
+  err "--risk is required for ship; classification must be explicit."
   exit 64
 fi
-
-# --- repo context ------------------------------------------------------------
+[[ -z "$RELEASE_SHA" || "$RELEASE_SHA" =~ ^[0-9a-fA-F]{40}$ ]] || { err "--release-sha must be a full 40-character hexadecimal SHA."; exit 64; }
+[[ "$PROOF_TIMEOUT" =~ ^[0-9]+$ && "$PROOF_INTERVAL" =~ ^[0-9]+$ ]] || { err "Proof timeout/interval must be base-10 whole seconds."; exit 64; }
+if (( 10#$PROOF_TIMEOUT == 0 || 10#$PROOF_INTERVAL == 0 )); then
+  [[ "${RELEASE_LOOP_TEST_MODE:-0}" == 1 ]] || { err "Proof timeout and interval must be positive outside explicit test mode."; exit 64; }
+fi
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-if [[ -z "$ROOT" ]]; then
-  err "Not inside a git repository."
-  exit 64
-fi
+[[ -n "$ROOT" ]] || { err "Not inside a git repository."; exit 64; }
 cd "$ROOT"
-
 branch="$(git branch --show-current)"
 
-# --- git readiness primitives ------------------------------------------------
-
-fetch_main() {
-  # Best-effort; never fatal so prepare can still report offline state.
-  git fetch --quiet origin main 2>/dev/null || git fetch --quiet origin 2>/dev/null || true
-}
-
-tracked_tree_is_clean() {
-  [[ -z "$(git status --porcelain --untracked-files=no)" ]]
-}
-
-origin_main_ancestor() {
-  # True when origin/main is an ancestor of HEAD => a clean fast-forward push.
-  git merge-base --is-ancestor origin/main HEAD 2>/dev/null
-}
-
-# Echoes "<behind> <ahead>" relative to origin/main, or "? ?" if unknown.
+tracked_tree_is_clean() { [[ -z "$(git status --porcelain --untracked-files=no)" ]]; }
+origin_main_ancestor() { git merge-base --is-ancestor origin/main HEAD 2>/dev/null; }
 ahead_behind() {
   if git rev-parse --verify --quiet origin/main >/dev/null; then
     git rev-list --left-right --count origin/main...HEAD
@@ -166,27 +121,11 @@ ahead_behind() {
     echo "? ?"
   fi
 }
-
-print_git_state() {
-  step "Git state"
-  info "Repo:   $ROOT"
-  info "Branch: ${branch:-<detached>}"
-  info "Commit: $(git rev-parse --short HEAD)"
-  if tracked_tree_is_clean; then
-    info "Tracked tree: clean"
-  else
-    warn "Tracked tree: UNCOMMITTED changes present"
-    git status --short --untracked-files=no | sed 's/^/      /'
-  fi
-  local untracked
-  untracked="$(git ls-files --others --exclude-standard | wc -l | tr -d ' ')"
-  info "Untracked files: $untracked (not shipped; review before committing)"
-  fetch_main
-  read -r behind ahead < <(ahead_behind)
-  info "vs origin/main: ahead=$ahead behind=$behind"
+fetch_main_prepare() { git fetch --quiet origin main 2>/dev/null || git fetch --quiet origin 2>/dev/null || true; }
+fetch_main_required() {
+  git fetch origin main || { err "Required fetch of origin/main failed."; return 1; }
 }
 
-# Runs a sub-step command, capturing its exit code without aborting the script.
 run_check() {
   local label="$1"; shift
   step "$label"
@@ -194,244 +133,290 @@ run_check() {
   "$@"
   local rc=$?
   set -e
-  if [[ $rc -eq 0 ]]; then
-    info "PASS: $label"
-    return 0
-  fi
+  if [[ $rc -eq 0 ]]; then info "PASS: $label"; return 0; fi
   warn "FAIL (exit $rc): $label"
   return 1
 }
 
-# --- prepare -----------------------------------------------------------------
-
 mode_prepare() {
+  RISK="${RISK:-telegram}"
   banner "PREPARE — release readiness (safe, non-live)"
-  info "Surface: $SURFACE. This run never pushes, deploys, or restarts."
-  print_git_state
-
-  local reasons=()
-
-  # Offline gates (reused, not reimplemented).
-  run_check "Offline preflight (scripts/preflight.sh)" \
-    bash "$ROOT/scripts/preflight.sh" \
-    || reasons+=("offline preflight failed")
-
-  run_check "Telegram offline QA (scripts/telegram_qa_offline.sh)" \
-    bash "$ROOT/scripts/telegram_qa_offline.sh" \
-    || reasons+=("telegram offline QA failed")
-
-  # Static readiness gates (no code run).
-  step "Ship preconditions"
-  if [[ "$branch" == "main" || -z "$branch" ]]; then
-    warn "On main / detached HEAD — ship runs from a feature branch."
-    reasons+=("not on a feature branch")
-  else
-    info "On feature branch: $branch"
-  fi
-
+  info "Surface: $SURFACE. Risk: $RISK. This run never pushes, deploys, or restarts."
+  step "Git state"
+  info "Repo: $ROOT"
+  info "Branch: ${branch:-<detached>}"
+  info "Commit: $(git rev-parse --short HEAD)"
   if tracked_tree_is_clean; then
-    info "Working tree: clean (commit already present)"
+    info "Tracked tree: clean"
   else
-    warn "Uncommitted tracked changes — commit before shipping."
-    reasons+=("uncommitted tracked changes")
+    warn "Tracked tree: UNCOMMITTED changes present"
   fi
+  info "Untracked files: $(git ls-files --others --exclude-standard | wc -l | tr -d ' ') (not shipped)"
+  fetch_main_prepare
 
-  read -r behind ahead < <(ahead_behind)
-  if [[ "$ahead" == "?" ]]; then
-    warn "origin/main not found locally — cannot confirm reconcile."
-    reasons+=("origin/main unknown")
-  elif ! origin_main_ancestor; then
-    warn "origin/main is not an ancestor of HEAD — rebase onto main first."
-    reasons+=("branch not fast-forwardable onto origin/main")
-  elif [[ "$ahead" == "0" ]]; then
-    warn "No commits ahead of origin/main — nothing to ship."
-    reasons+=("nothing ahead of origin/main")
-  else
-    info "Fast-forwardable onto origin/main (ahead=$ahead, behind=$behind)"
+  local reasons=() ahead
+  run_check "Offline preflight" bash "$ROOT/scripts/preflight.sh" || reasons+=("offline preflight failed")
+  run_check "Telegram offline QA" bash "$ROOT/scripts/telegram_qa_offline.sh" || reasons+=("Telegram offline QA failed")
+  [[ "$branch" != main && -n "$branch" ]] || reasons+=("not on a feature branch")
+  tracked_tree_is_clean || reasons+=("uncommitted tracked changes")
+  read -r _ ahead < <(ahead_behind)
+  if [[ "$ahead" == "?" ]]; then reasons+=("origin/main unknown")
+  elif ! origin_main_ancestor; then reasons+=("branch not fast-forwardable onto origin/main")
+  elif [[ "$ahead" == 0 ]]; then reasons+=("nothing ahead of origin/main")
   fi
 
   banner "READINESS"
-  if [[ ${#reasons[@]} -eq 0 ]]; then
+  if [[ ${#reasons[@]} == 0 ]]; then
     info "READY — ship is unblocked."
-    info "Next: scripts/release_loop.sh --surface $SURFACE --mode ship --approved"
-    info "  (or set RELEASE_APPROVED=$SURFACE-$(date -u +%Y%m%d))"
+    info "Next: scripts/release_loop.sh --surface $SURFACE --mode ship --risk $RISK --approved"
     return 0
   fi
   warn "BLOCKED — resolve before shipping:"
-  local r
-  for r in "${reasons[@]}"; do
-    printf '      - %s\n' "$r"
-  done
+  local reason; for reason in "${reasons[@]}"; do printf '      - %s\n' "$reason"; done
   return 1
 }
 
-# --- ship --------------------------------------------------------------------
-
 require_approval() {
-  local today expected
-  today="$(date -u +%Y%m%d)"
-  expected="${SURFACE}-${today}"
-  if [[ "$APPROVED_FLAG" == "1" ]]; then
-    info "Approval: --approved flag present."
-    return 0
-  fi
-  if [[ "${RELEASE_APPROVED:-}" == "$expected" ]]; then
-    info "Approval: RELEASE_APPROVED matches $expected."
-    return 0
-  fi
+  local expected
+  expected="${SURFACE}-$(date -u +%Y%m%d)"
+  if [[ "$APPROVED_FLAG" == 1 ]]; then info "Approval: --approved covers this ship graph."; return 0; fi
+  if [[ "${RELEASE_APPROVED:-}" == "$expected" ]]; then info "Approval: RELEASE_APPROVED matches $expected."; return 0; fi
   err "SHIP refused — explicit approval required."
-  echo "  Provide one of:" >&2
-  echo "    RELEASE_APPROVED=$expected   (today, surface-scoped)" >&2
-  echo "    --approved                   (explicit per-invocation opt-in)" >&2
-  if [[ -n "${RELEASE_APPROVED:-}" ]]; then
-    echo "  Note: RELEASE_APPROVED is set but does not match $expected (stale or wrong surface)." >&2
-  fi
-  final_state "release-ready" "provide RELEASE_APPROVED=$expected or --approved, then rerun ship" "no live action taken"
+  [[ -z "${RELEASE_APPROVED:-}" ]] || err "RELEASE_APPROVED is stale or wrong surface (expected $expected)."
+  final_state "release-ready" "provide current approval and rerun the same command" "no mutating action taken"
   exit 2
 }
 
+PUSHED_SHA=""
+restore_feature_branch() {
+  local wanted="$1"
+  git checkout "$wanted" || { err "Failed to restore original feature branch $wanted."; return 1; }
+}
+
 ship_reconcile_and_push() {
-  step "Reconcile $branch -> main and push (LIVE — triggers CI deploy)"
-  local start_branch="$branch"
-  git fetch origin main
-  git checkout main
-  git pull --ff-only origin main
-  git merge --ff-only "$start_branch"
-  git push origin main
-  git checkout "$start_branch"
-  info "Pushed origin/main -> $(git rev-parse --short origin/main)"
+  step "Reconcile $branch -> main and push exact SHA"
+  local start_branch="$branch" candidate_sha rc=0
+  candidate_sha="$(git rev-parse HEAD)"
+  [[ "$candidate_sha" =~ ^[0-9a-fA-F]{40}$ ]] || { err "Cannot capture a full release SHA."; return 1; }
+  fetch_main_required || return 1
+  if ! git checkout main; then err "Failed to checkout main."; return 1; fi
+  if ! git merge --ff-only origin/main; then err "Failed to fast-forward local main to origin/main."; rc=1
+  elif ! git merge --ff-only "$start_branch"; then err "Failed to fast-forward main to the feature branch."; rc=1
+  elif [[ "$(git rev-parse HEAD)" != "$candidate_sha" ]]; then err "Reconciled main differs from approved feature SHA."; rc=1
+  elif ! git push origin main; then err "Push of exact release SHA failed."; rc=1
+  fi
+  restore_feature_branch "$start_branch" || rc=1
+  [[ $rc == 0 ]] || return 1
+  local local_sha remote_sha
+  local_sha="$(git rev-parse HEAD)"
+  remote_sha="$(git rev-parse origin/main)"
+  [[ "$local_sha" == "$candidate_sha" && "$remote_sha" == "$candidate_sha" ]] || { err "Post-push HEAD/origin/main exact-SHA proof failed."; return 1; }
+  PUSHED_SHA="$candidate_sha"
+  info "PUSHED_SHA=$PUSHED_SHA"
 }
 
-ship_deploy_restart_proof() {
-  step "Deploy + restart proof (delegated to CI — not reimplemented here)"
-  if [[ "$WATCH_DEPLOY" == "1" ]] && command -v gh >/dev/null 2>&1; then
-    info "Watching latest Deploy Mac Mini run (best-effort)…"
-    local run_id
-    run_id="$(gh run list --workflow "Deploy Mac Mini" --limit 1 \
-      --json databaseId -q '.[0].databaseId' 2>/dev/null || true)"
-    if [[ -n "$run_id" ]]; then
-      if gh run watch "$run_id" 2>/dev/null; then
-        local conclusion
-        conclusion="$(gh run view "$run_id" --json conclusion -q '.conclusion' 2>/dev/null || true)"
-        if [[ "$conclusion" == "success" ]]; then
-          info "PASS: Deploy Mac Mini workflow completed successfully."
-          return 0
+prepare_resume() {
+  step "Validate exact-SHA proof resume"
+  fetch_main_required || return 1
+  local head remote
+  head="$(git rev-parse HEAD)"
+  remote="$(git rev-parse origin/main)"
+  if [[ "$head" != "$RELEASE_SHA" || "$remote" != "$RELEASE_SHA" ]]; then
+    err "Resume requires HEAD == origin/main == --release-sha; got HEAD=$head origin/main=$remote."
+    return 1
+  fi
+  PUSHED_SHA="$RELEASE_SHA"
+  info "RESUMING_RELEASE_SHA=$PUSHED_SHA"
+  info "Proof-only resume: no checkout, merge, or push will run."
+}
+
+workflow_runs_json() {
+  local workflow_name="$1" workflow_file="$2"
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    gh run list --workflow "$workflow_name" --branch main --limit 100 \
+      --json databaseId,headSha,status,conclusion,event,createdAt,startedAt,updatedAt
+    return
+  fi
+  command -v curl >/dev/null 2>&1 || return 1
+  curl --fail --silent --show-error --max-time 20 \
+    "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_file/runs?branch=main&head_sha=$PUSHED_SHA&per_page=100"
+}
+
+select_provenance_run() {
+  local sha="$1" expected_event="$2" not_before="${3:-}"
+  python3 -c '
+import datetime as dt, json, sys
+sha, expected_event, not_before = sys.argv[1:4]
+def value(run, camel, snake): return run.get(camel) or run.get(snake) or ""
+def instant(raw):
+    if not isinstance(raw, str) or not raw: return None
+    try: parsed = dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except (TypeError, ValueError): return None
+    return parsed if parsed.tzinfo is not None else None
+def run_id(run):
+    raw = value(run, "databaseId", "id")
+    if isinstance(raw, bool): return None
+    if isinstance(raw, int): return raw if raw > 0 else None
+    if isinstance(raw, str) and raw.isdigit() and int(raw) > 0: return int(raw)
+    return None
+try: payload = json.load(sys.stdin)
+except Exception: raise SystemExit(2)
+if isinstance(payload, list): runs = payload
+elif isinstance(payload, dict): runs = payload.get("workflow_runs", [])
+else: runs = []
+if not isinstance(runs, list): raise SystemExit(2)
+boundary = instant(not_before) if not_before else None
+if not_before and boundary is None: raise SystemExit(2)
+candidates = []
+for run in runs:
+    if not isinstance(run, dict): continue
+    if value(run, "headSha", "head_sha") != sha or run.get("event") != expected_event: continue
+    identifier = run_id(run)
+    created = value(run, "createdAt", "created_at")
+    started = value(run, "startedAt", "run_started_at")
+    updated = value(run, "updatedAt", "updated_at")
+    created_at, started_at, updated_at = instant(created), instant(started), instant(updated)
+    if identifier is None or None in (created_at, started_at, updated_at): continue
+    if boundary is not None and (created_at < boundary or started_at < boundary): continue
+    candidates.append((started_at, run, identifier))
+if candidates:
+    _, run, identifier = max(candidates, key=lambda item: item[0])
+    fields = [str(identifier), run.get("status") or "unknown",
+              run.get("conclusion") or "", value(run, "updatedAt", "updated_at"),
+              value(run, "createdAt", "created_at"), value(run, "startedAt", "run_started_at"), run.get("event") or ""]
+    print("|".join(fields))
+' "$sha" "$expected_event" "$not_before"
+}
+
+WORKFLOW_UPDATED_AT=""
+wait_for_exact_workflow() {
+  local workflow_name="$1" workflow_file="$2" sha="$3" expected_event="$4" not_before="${5:-}"
+  local deadline json match run_id status conclusion updated _created _started event now
+  deadline=$(( $(date +%s) + 10#$PROOF_TIMEOUT ))
+  step "$workflow_name provenance proof for exact SHA"
+  while true; do
+    if json="$(workflow_runs_json "$workflow_name" "$workflow_file" 2>/dev/null)"; then
+      match="$(printf '%s' "$json" | select_provenance_run "$sha" "$expected_event" "$not_before" 2>/dev/null || true)"
+      if [[ -n "$match" ]]; then
+        IFS='|' read -r run_id status conclusion updated _created _started event <<< "$match"
+        info "MATCH: workflow=$workflow_name run_id=$run_id head_sha=$sha event=$event status=$status conclusion=${conclusion:-pending}"
+        if [[ "$status" == completed ]]; then
+          if [[ "$conclusion" == success ]]; then
+            WORKFLOW_UPDATED_AT="$updated"
+            info "PASS: $workflow_name succeeded with required provenance."
+            return 0
+          fi
+          warn "$workflow_name completed for exact SHA with conclusion=${conclusion:-unknown}."
+          return 1
         fi
-        warn "Deploy Mac Mini workflow conclusion was '${conclusion:-unknown}'."
-      else
-        warn "Could not watch CI run to completion."
       fi
-    else
-      warn "No Deploy Mac Mini run found yet."
     fi
-  fi
-  warn "Deploy/restart proof not auto-collected. Next gate:"
-  warn "  gh run list --workflow \"Deploy Mac Mini\" --limit 1"
-  warn "  launchctl print gui/\$(id -u)/com.portfolioguru.bot | sed -n '1,25p'"
-  warn "  tail -n 30 /tmp/portfolio-guru-bot.log   # bot logs commit+branch on boot"
-  return 1
+    now="$(date +%s)"
+    if (( now >= deadline )); then
+      warn "No $workflow_name run for exact SHA $sha with event=$expected_event completed successfully within ${PROOF_TIMEOUT}s."
+      return 4
+    fi
+    sleep "$PROOF_INTERVAL"
+  done
 }
 
-ship_dogfood_checkpoint() {
-  step "Dogfood checkpoint"
-  if [[ "$NO_DOGFOOD" == "1" ]]; then
-    warn "Skipped by --no-dogfood. Run 'bash scripts/dogfood_smoke.sh' before"
-    warn "trusting this release — this step is required, not optional."
-    return 1
-  fi
-  if [[ -t 0 && -t 1 ]]; then
-    info "Launching interactive dogfood smoke (scripts/dogfood_smoke.sh)…"
-    if bash "$ROOT/scripts/dogfood_smoke.sh"; then
-      info "PASS: dogfood checkpoint completed."
-      return 0
-    fi
-    warn "Dogfood checkpoint failed."
-    return 1
-  else
-    warn "Non-interactive shell — dogfood smoke needs a TTY. Run it by hand:"
-    warn "  bash scripts/dogfood_smoke.sh"
-    return 1
-  fi
+prove_exact_live_runtime() {
+  local sha="$1" output
+  step "Mac Mini runtime proof for exact SHA"
+  [[ "$(git rev-parse HEAD)" == "$sha" && "$(git rev-parse origin/main)" == "$sha" ]] || { warn "Local HEAD/origin/main no longer equal release SHA."; return 4; }
+  command -v launchctl >/dev/null 2>&1 || { warn "Local launchd access unavailable."; return 4; }
+  launchctl print "gui/$(id -u)/com.portfolioguru.bot" >/dev/null 2>&1 || { warn "Portfolio Guru service is not locally accessible."; return 4; }
+  [[ -x "$ROOT/scripts/verify_live_runtime.py" ]] || { warn "Runtime verifier unavailable."; return 4; }
+  if ! output="$("$ROOT/scripts/verify_live_runtime.py" --expected-sha "$sha" 2>&1)"; then warn "Runtime verification failed: $output"; return 4; fi
+  [[ "$output" == *"expected_sha=$sha"* && "$output" == *"checkout_sha=$sha"* && "$output" == *"runtime_sha=$sha"* ]] || { warn "Runtime verifier omitted exact stable SHA fields."; return 4; }
+  info "$output"
+}
+
+prove_risk_journey() {
+  step "Risk-based live proof ($RISK)"
+  case "$RISK" in
+    internal) info "PASS: internal risk needs no manual journey."; return 0 ;;
+    telegram)
+      [[ "${TELEGRAM_LIVE_APPROVED:-}" == portfolio-guru-live-qa-approved ]] || { warn "Telegram proof pending: exact TELEGRAM_LIVE_APPROVED guard absent."; return 4; }
+      [[ -n "${TELETHON_SESSION:-}" && -n "${TELEGRAM_API_ID:-${TELETHON_API_ID:-}}" && -n "${TELEGRAM_API_HASH:-${TELETHON_API_HASH:-}}" ]] || { warn "Telegram proof pending: credentials incomplete."; return 4; }
+      RUN_LIVE_TELEGRAM=1 REQUIRE_TELEGRAM_LIVE=1 bash "$ROOT/scripts/telegram_bot_qa.sh" --focused-release || return 1
+      ;;
+    broad)
+      [[ "$NO_DOGFOOD" != 1 ]] || { warn "Broad proof skipped; proof remains pending."; return 4; }
+      [[ -t 0 && -t 1 ]] || { warn "Broad risk requires the interactive strict checklist; no TTY available."; return 4; }
+      bash "$ROOT/scripts/dogfood_smoke.sh" --strict-release || return 1
+      ;;
+  esac
+}
+
+resume_command() {
+  printf 'scripts/release_loop.sh --surface %s --mode ship --risk %s --release-sha %s --approved' "$SURFACE" "$RISK" "$PUSHED_SHA"
 }
 
 mode_ship() {
-  banner "SHIP — gated release closure ($SURFACE)"
-
-  # Gate 1: approval, BEFORE any live or mutating action.
+  banner "SHIP — gated release closure ($SURFACE, risk=$RISK)"
   require_approval
+  [[ "$branch" != main && -n "$branch" ]] || { err "SHIP refused — use the preserved feature branch."; final_state blocked "checkout feature branch" "no mutation"; exit 3; }
+  tracked_tree_is_clean || { err "SHIP refused — uncommitted tracked changes present."; final_state blocked "commit or revert changes" "no mutation"; exit 3; }
 
-  # Gate 2: must be on a feature branch (protects the Mac Mini main checkout).
-  if [[ "$branch" == "main" || -z "$branch" ]]; then
-    err "SHIP refused — on main / detached HEAD. Ship from a feature branch."
-    final_state "blocked" "checkout a feature branch with the release commit, then rerun ship" "no live action taken"
-    exit 3
+  if [[ -n "$RELEASE_SHA" ]]; then
+    prepare_resume || { final_state blocked "restore exact resume SHA state" "no push attempted"; exit 3; }
+  else
+    fetch_main_required || { final_state blocked "repair origin fetch" "no push attempted"; exit 3; }
+    local ahead
+    read -r _ ahead < <(ahead_behind)
+    [[ "$ahead" != "?" && "$ahead" != 0 ]] || { err "SHIP refused — no release commit ahead of origin/main."; final_state blocked "create release commit" "no mutation"; exit 3; }
+    origin_main_ancestor || { err "SHIP refused — origin/main is not an ancestor of HEAD."; final_state blocked "rebase onto origin/main" "no mutation"; exit 3; }
+    run_check "Offline preflight" bash "$ROOT/scripts/preflight.sh" || { final_state blocked "fix offline preflight" "no push"; exit 1; }
+    run_check "Telegram offline QA" bash "$ROOT/scripts/telegram_qa_offline.sh" || { final_state blocked "fix Telegram offline QA" "no push"; exit 1; }
+    ship_reconcile_and_push || { final_state blocked "repair reconcile/push and confirm original branch" "push stage failed closed"; exit 1; }
   fi
 
-  fetch_main
-
-  # Gate 3: working tree must be committed. ship does NOT create commits.
-  if ! tracked_tree_is_clean; then
-    err "SHIP refused — uncommitted tracked changes present. Commit first."
-    git status --short --untracked-files=no | sed 's/^/      /' >&2
-    final_state "blocked" "commit or revert tracked changes, then rerun ship" "no live action taken"
-    exit 3
+  local tests_rc deploy_rc runtime_rc risk_rc
+  set +e
+  wait_for_exact_workflow Tests test.yml "$PUSHED_SHA" push; tests_rc=$?
+  set -e
+  if [[ $tests_rc == 1 ]]; then final_state blocked "fix failed Tests run" "pushed_sha=$PUSHED_SHA"; exit 1; fi
+  if [[ $tests_rc == 4 ]]; then
+    banner "SHIP proof pending"; info "RESUME_COMMAND=$(resume_command)"
+    final_state proof-pending "run RESUME_COMMAND after Tests progresses" "pushed_sha=$PUSHED_SHA tests=pending"
+    exit 4
+  fi
+  local tests_completed="$WORKFLOW_UPDATED_AT"
+  if [[ -z "$tests_completed" ]]; then
+    banner "SHIP proof pending"; info "RESUME_COMMAND=$(resume_command)"
+    final_state proof-pending "run RESUME_COMMAND after Tests provides a valid completion boundary" "pushed_sha=$PUSHED_SHA tests=metadata-pending"
+    exit 4
   fi
 
-  # Gate 4: branch must fast-forward onto origin/main and carry new commits.
-  read -r behind ahead < <(ahead_behind)
-  if [[ "$ahead" == "?" ]]; then
-    err "SHIP refused — origin/main not found; cannot reconcile safely."
-    final_state "blocked" "fetch origin/main or repair the remote, then rerun ship" "no live action taken"
-    exit 3
-  fi
-  if ! origin_main_ancestor; then
-    err "SHIP refused — origin/main is not an ancestor of HEAD (behind=$behind)."
-    err "Rebase onto main before shipping."
-    final_state "blocked" "rebase onto origin/main, then rerun ship" "no live action taken"
-    exit 3
-  fi
-  if [[ "$ahead" == "0" ]]; then
-    err "SHIP refused — no commits ahead of origin/main. Nothing to ship."
-    final_state "blocked" "create a release commit or use prepare for readiness only" "no live action taken"
-    exit 3
+  set +e
+  wait_for_exact_workflow "Deploy Mac Mini" deploy-mac.yml "$PUSHED_SHA" workflow_run "$tests_completed"; deploy_rc=$?
+  set -e
+  if [[ $deploy_rc == 1 ]]; then final_state blocked "fix failed deploy run" "pushed_sha=$PUSHED_SHA tests=1 deploy=failed"; exit 1; fi
+  if [[ $deploy_rc == 4 ]]; then
+    banner "SHIP proof pending"; info "RESUME_COMMAND=$(resume_command)"
+    final_state proof-pending "run RESUME_COMMAND after deploy progresses" "pushed_sha=$PUSHED_SHA tests=1 deploy=pending"
+    exit 4
   fi
 
-  # Gate 5: offline gates must pass before anything goes out.
-  run_check "Offline preflight (scripts/preflight.sh)" \
-    bash "$ROOT/scripts/preflight.sh" \
-    || { err "SHIP refused — offline preflight failed."; final_state "blocked" "fix scripts/preflight.sh failures, then rerun ship" "no live action taken"; exit 1; }
-  run_check "Telegram offline QA (scripts/telegram_qa_offline.sh)" \
-    bash "$ROOT/scripts/telegram_qa_offline.sh" \
-    || { err "SHIP refused — telegram offline QA failed."; final_state "blocked" "fix scripts/telegram_qa_offline.sh failures, then rerun ship" "no live action taken"; exit 1; }
-
-  # Live closure — only reached after every gate passes.
-  ship_reconcile_and_push
-  local deploy_proved=0
-  local dogfood_proved=0
-  ship_deploy_restart_proof && deploy_proved=1
-  ship_dogfood_checkpoint && dogfood_proved=1
-
-  if [[ "$deploy_proved" == "1" && "$dogfood_proved" == "1" ]]; then
-    banner "SHIP complete"
-    info "main is pushed; deploy/restart and dogfood proof were collected."
-    final_state "live" "none" "deploy/restart workflow succeeded; dogfood checkpoint passed"
-    return 0
+  set +e; prove_exact_live_runtime "$PUSHED_SHA"; runtime_rc=$?; set -e
+  if [[ $runtime_rc != 0 ]]; then
+    banner "SHIP proof pending"; info "RESUME_COMMAND=$(resume_command)"
+    final_state proof-pending "run RESUME_COMMAND where runtime is accessible" "pushed_sha=$PUSHED_SHA tests=1 deploy=1 runtime=pending"
+    exit 4
   fi
-
-  local next_gate="collect deploy/restart proof, then run bash scripts/dogfood_smoke.sh"
-  if [[ "$deploy_proved" == "1" ]]; then
-    next_gate="run bash scripts/dogfood_smoke.sh"
-  elif [[ "$dogfood_proved" == "1" ]]; then
-    next_gate="collect deploy/restart proof from GitHub Actions, launchctl, and bot logs"
+  set +e; prove_risk_journey; risk_rc=$?; set -e
+  if [[ $risk_rc == 1 ]]; then final_state blocked "fix failed $RISK proof" "pushed_sha=$PUSHED_SHA tests=1 deploy=1 runtime=1"; exit 1; fi
+  if [[ $risk_rc != 0 ]]; then
+    banner "SHIP proof pending"; info "RESUME_COMMAND=$(resume_command)"
+    final_state proof-pending "run RESUME_COMMAND with protected $RISK proof available" "pushed_sha=$PUSHED_SHA tests=1 deploy=1 runtime=1 risk=pending"
+    exit 4
   fi
-  banner "SHIP proof pending"
-  info "main is pushed; do not call this release live until the next gate passes."
-  final_state "proof-pending" "$next_gate" "deploy_proved=$deploy_proved dogfood_proved=$dogfood_proved"
+  banner "SHIP complete"
+  final_state live none "pushed_sha=$PUSHED_SHA tests=1 deploy=1 runtime=1 risk=$RISK:1"
 }
-
-# --- dispatch ----------------------------------------------------------------
 
 case "$MODE" in
   prepare) mode_prepare ;;
-  ship)    mode_ship ;;
+  ship) mode_ship ;;
 esac

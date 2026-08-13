@@ -64,25 +64,30 @@ entrypoint instead of remembering separate test/push/deploy/restart commands:
 
 ```bash
 # Safe readiness report. Never pushes, deploys, or restarts.
-scripts/release_loop.sh --surface telegram --mode prepare
+scripts/release_loop.sh --surface telegram --mode prepare --risk telegram
 
-# Gated closure. Refuses without explicit approval and a clean, fast-forwardable
-# tree. On approval it pushes main (CI deploys + restarts on the Mac Mini),
-# then collects deploy/restart proof and the dogfood checkpoint where available.
+# Gated closure. Risk is mandatory; approval and a clean, fast-forwardable
+# feature branch are required before reconciliation/push.
 RELEASE_APPROVED=telegram-$(date -u +%Y%m%d) \
-  scripts/release_loop.sh --surface telegram --mode ship
+  scripts/release_loop.sh --surface telegram --mode ship --risk telegram
 # or, interactively:
-scripts/release_loop.sh --surface telegram --mode ship --approved
+scripts/release_loop.sh --surface telegram --mode ship --risk telegram --approved
+
+# If proof times out after push, run the exact RESUME_COMMAND printed by ship:
+scripts/release_loop.sh --surface telegram --mode ship --risk telegram \
+  --release-sha <full-40-character-SHA> --approved
 ```
 
 What it wires (reusing existing pieces, not reimplementing them):
 
 1. Offline gate — `scripts/preflight.sh` + `scripts/telegram_qa_offline.sh`.
 2. Commit must already be present (ship never creates commits; refuses if dirty).
-3. Reconcile feature branch → `main` and push (fast-forward only).
-4. Deploy + restart — the push to `main` triggers
-   `.github/workflows/deploy-mac.yml` → `scripts/deploy_mac.sh` on the Mac Mini.
-5. Dogfood checkpoint — `scripts/dogfood_smoke.sh`.
+3. Reconcile the feature branch to `main`, push one full SHA, and restore the original feature branch (fast-forward only; never reset/force).
+4. Prove a successful `push` Tests run for the SHA, then a successful later `workflow_run` deploy for the same SHA. Manual dispatch does not prove an ordinary ship.
+5. Prove the Mac Mini checkout and runtime identity both equal the full SHA exactly.
+6. Apply explicit risk proof: `internal` needs automated proof only; `telegram` runs one guarded focused live case journey; `broad` requires the strict interactive 15-check dogfood checklist with no skips.
+
+A proof-only resume requires the same approval gate and `HEAD == origin/main == --release-sha`; it never pushes again. Retryable missing/running/timeout/runtime/live proof exits 4 as `proof-pending`. A completed Tests/deploy failure or failed journey is `blocked` and non-zero.
 
 Telegram workflow fixes also carry the **setup consent path** gate. Treat the reported
 bug as a symptom of the whole phone journey, not just the line that failed:

@@ -9,6 +9,15 @@ ARTIFACT_DIR="${ARTIFACT_ROOT}/${STAMP}"
 RUN_LIVE="${RUN_LIVE_TELEGRAM:-auto}"
 REQUIRE_LIVE="${REQUIRE_TELEGRAM_LIVE:-0}"
 LIVE_APPROVAL_VALUE="portfolio-guru-live-qa-approved"
+FOCUSED_RELEASE=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --focused-release) FOCUSED_RELEASE=1 ;;
+    *) echo "ERROR: unknown argument: $1" >&2; exit 64 ;;
+  esac
+  shift
+done
 
 mkdir -p "$ARTIFACT_DIR"
 
@@ -94,11 +103,17 @@ if [[ "$RUN_LIVE" == "0" || "$RUN_LIVE" == "false" ]]; then
   printf -- '- live-telegram: SKIP (disabled by RUN_LIVE_TELEGRAM)\n' >> "$SUMMARY"
 elif [[ "$HAS_TELETHON_ENV" == "1" ]]; then
   printf 'Live Telegram QA approved for target: %s\n' "${TELEGRAM_BOT_USERNAME:-portfolio_guru_bot}" >> "$SUMMARY"
-  TELEGRAM_E2E_ARTIFACT_DIR="$ARTIFACT_DIR" run_step live-telegram "$PY" -m pytest \
-    tests/test_e2e.py \
-    tests/test_e2e_live.py \
-    -q \
-    -m "e2e or live"
+  if [[ "$FOCUSED_RELEASE" == "1" ]]; then
+    TELEGRAM_E2E_ARTIFACT_DIR="$ARTIFACT_DIR" run_step live-telegram-focused "$PY" -m pytest \
+      tests/test_e2e.py::test_e2e_case_text_gets_recommendation \
+      -q
+  else
+    TELEGRAM_E2E_ARTIFACT_DIR="$ARTIFACT_DIR" run_step live-telegram "$PY" -m pytest \
+      tests/test_e2e.py \
+      tests/test_e2e_live.py \
+      -q \
+      -m "e2e or live"
+  fi
 else
   if [[ -n "${TELETHON_SESSION:-}" && -n "${TELEGRAM_API_ID:-${TELETHON_API_ID:-}}" && -n "${TELEGRAM_API_HASH:-${TELETHON_API_HASH:-}}" && "${TELEGRAM_LIVE_APPROVED:-}" != "$LIVE_APPROVAL_VALUE" ]]; then
     printf -- '- live-telegram: SKIP (explicit approval missing)\n' >> "$SUMMARY"

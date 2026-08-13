@@ -1,14 +1,16 @@
 name: Deploy Mac Mini
 
 on:
-  # Gated deploy: only runs after the "Tests" workflow completes successfully on main.
-  # This prevents a red test suite (or a green-compile/red-runtime change) from
-  # auto-deploying to the live bot. Use workflow_dispatch for a manual override.
   workflow_run:
     workflows: ["Tests"]
     types: [completed]
     branches: [main]
   workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: "Exact tested main commit to deploy (full 40-character SHA)"
+        required: true
+        type: string
 
 concurrency:
   group: deploy-mac-mini
@@ -17,12 +19,29 @@ concurrency:
 jobs:
   deploy:
     runs-on: [self-hosted, macOS, ARM64, portfolio-guru]
-    # Deploy only when the triggering Tests run passed, or when manually dispatched.
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    env:
+      DEPLOY_EXPECTED_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.expected_sha }}
     steps:
-      - name: Deploy on Mac Mini
+      - name: Validate exact deploy SHA
         shell: bash
         run: |
           set -euo pipefail
-          cd /Users/moeedahmed/projects/portfolio-guru
-          bash scripts/deploy_mac.sh
+          if [[ ! "$DEPLOY_EXPECTED_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "ERROR: DEPLOY_EXPECTED_SHA must be a full 40-character hexadecimal SHA."
+            exit 64
+          fi
+          echo "Deploying exact expected SHA: $DEPLOY_EXPECTED_SHA"
+      - name: Check out exact tested deploy source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_EXPECTED_SHA }}
+          path: release-source
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Deploy exact tested SHA on Mac Mini
+        shell: bash
+        run: |
+          set -euo pipefail
+          PORTFOLIO_GURU_APP_DIR=/Users/moeedahmed/projects/portfolio-guru \
+            bash "$GITHUB_WORKSPACE/release-source/scripts/deploy_mac.sh"

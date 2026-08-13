@@ -21,7 +21,7 @@ def runtime_identity_path() -> Path:
 def git_identity(repo_root: str | Path) -> tuple[str, str]:
     root = str(repo_root)
     commit = subprocess.check_output(
-        ["git", "-C", root, "rev-parse", "--short", "HEAD"],
+        ["git", "-C", root, "rev-parse", "HEAD"],
         text=True,
         stderr=subprocess.DEVNULL,
     ).strip()

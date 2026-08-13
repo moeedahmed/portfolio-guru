@@ -5,6 +5,12 @@ APP_DIR="${PORTFOLIO_GURU_APP_DIR:-/Users/moeedahmed/projects/portfolio-guru}"
 SERVICE_LABEL="${PORTFOLIO_GURU_SERVICE_LABEL:-com.portfolioguru.bot}"
 PLIST_PATH="${HOME}/Library/LaunchAgents/${SERVICE_LABEL}.plist"
 LOCK_DIR="${PORTFOLIO_GURU_DEPLOY_LOCK:-/tmp/portfolio-guru-deploy.lock}"
+DEPLOY_EXPECTED_SHA="${DEPLOY_EXPECTED_SHA:-}"
+
+if [[ ! "$DEPLOY_EXPECTED_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+  echo "ERROR: DEPLOY_EXPECTED_SHA must be a full 40-character hexadecimal SHA."
+  exit 64
+fi
 
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
   if [[ -f "$LOCK_DIR/pid" ]] && ! kill -0 "$(cat "$LOCK_DIR/pid")" 2>/dev/null; then
@@ -38,13 +44,27 @@ if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
 fi
 
 git fetch origin main
+ORIGIN_MAIN="$(git rev-parse origin/main)"
+if [[ "$ORIGIN_MAIN" != "$DEPLOY_EXPECTED_SHA" ]]; then
+  echo "ERROR: origin/main=$ORIGIN_MAIN does not equal DEPLOY_EXPECTED_SHA=$DEPLOY_EXPECTED_SHA."
+  exit 1
+fi
 git checkout main
-# Capture the currently-deployed commit as the rollback target BEFORE we move.
+# Capture the currently-deployed main commit as the rollback target BEFORE we move.
 PREV_COMMIT="$(git rev-parse HEAD)"
 echo "Last known-good commit (rollback target): $(git rev-parse --short "$PREV_COMMIT")"
-git pull --ff-only origin main
+if ! git merge-base --is-ancestor HEAD "$DEPLOY_EXPECTED_SHA"; then
+  echo "ERROR: expected SHA is not a safe fast-forward from current HEAD."
+  exit 1
+fi
+git merge --ff-only "$DEPLOY_EXPECTED_SHA"
+if [[ "$(git rev-parse HEAD)" != "$DEPLOY_EXPECTED_SHA" ]]; then
+  echo "ERROR: post-update HEAD does not equal DEPLOY_EXPECTED_SHA."
+  exit 1
+fi
 
 echo "Updated commit: $(git rev-parse --short HEAD)"
+echo "DEPLOYED_SHA=$DEPLOY_EXPECTED_SHA"
 
 cd "$APP_DIR/backend"
 PYTHON=""
