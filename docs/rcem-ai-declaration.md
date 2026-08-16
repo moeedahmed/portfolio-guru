@@ -63,6 +63,23 @@ specific text, set `PG_AI_DECLARATION_TEXT` and update the default here.
 
 `backend/tests/test_ai_declaration.py`, wired into `scripts/verify_changed.sh`.
 It pins the declaration landing in the filed entry, the preview showing it
-before approval, idempotency, the env overrides, and — via
-`EXEMPT_FORM_TYPES` — that no new mapped form type can ship silently
+before approval, one declaration per entry, idempotency, the env overrides,
+and — via `EXEMPT_FORM_TYPES` — that no new mapped form type can ship silently
 undeclared.
+
+## Verification record (2026-08-16)
+
+Risk class 3 (visual: draft preview changed) with filing behaviour touched.
+
+| Evidence                                                   | Result                                                                                                                                                                              |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bash scripts/verify_changed.sh`                           | PASSED, 447 tests                                                                                                                                                                   |
+| `bash scripts/preflight.sh`                                | Passed, 2416 tests (needs `FERNET_SECRET_KEY` in the shell)                                                                                                                         |
+| `bash scripts/telegram_qa_offline.sh`                      | Passed. All 8 golden cases across both personas render the declaration in the approval preview through the real handler stack                                                       |
+| Live Kaizen draft save (CBD + REFLECT_LOG, CDP/Playwright) | Saved. Read back from the live Kaizen DOM: declaration present once, in `reflection`, and in no other field. REFLECT_LOG has six free-text boxes and only the reflection carries it |
+
+Still pending: a screenshot of the declaration on the real Telegram surface,
+and independent review of the diff by someone other than the builder.
+
+The live test drafts are labelled `[AIDECL-4fbe7244] Test entry.` and should be
+deleted from Kaizen. They are drafts; nothing was submitted.
