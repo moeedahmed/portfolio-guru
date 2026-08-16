@@ -103,12 +103,17 @@ async def delete_draft(page, doc_id: str, expect_marker: str, dry_run: bool) -> 
         result["error"] = f"marker {expect_marker!r} not found on doc {doc_id} — refusing to delete"
         return result
 
+    delete_link = page.locator(DELETE_LINK).first
+    has_delete_control = await delete_link.count() > 0
+
     if dry_run:
+        # Report whether the Delete control is actually there, so a dry run
+        # catches a drifted selector instead of only checking the marker.
+        result["delete_control_present"] = has_delete_control
         result["status"] = "would-delete"
         return result
 
-    delete_link = page.locator(DELETE_LINK).first
-    if await delete_link.count() == 0:
+    if not has_delete_control:
         result["status"] = "no-delete-control"
         result["error"] = f"no Delete link on doc {doc_id}"
         return result

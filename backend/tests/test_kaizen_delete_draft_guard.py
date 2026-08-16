@@ -84,6 +84,17 @@ async def test_dry_run_never_clicks_delete():
 
     assert result["status"] == "would-delete"
     assert result["deleted"] is False
+    assert result["delete_control_present"] is True
+    assert page.clicks == []
+
+
+async def test_dry_run_reports_missing_delete_control():
+    """A drifted Delete selector must show up in the dry run, not at delete time."""
+    page = FakePage(["AI declaration test draft"], CONFIRMED - {DELETE_LINK}, CONFIRM_PROMPT)
+
+    result = await delete_draft(page, "123456", "AI declaration test", dry_run=True)
+
+    assert result["delete_control_present"] is False
     assert page.clicks == []
 
 
