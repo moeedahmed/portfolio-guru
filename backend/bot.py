@@ -8584,11 +8584,20 @@ def _describe_pending_media(context) -> str:
 
 
 def _pending_media_has_readable(context) -> bool:
-    """True when at least one queued file is something we can read text from."""
-    return any(
-        (item.get("kind") or "document") in {"image", "document"}
-        for item in _pending_media_items(context)
-    )
+    """True when at least one queued file actually has text worth offering.
+
+    Documents qualify by type — text is the whole point of a PDF or a Word
+    file, and it is extracted later in the intent handler. Images qualify only
+    when the pre-read found something: an ultrasound or ECG has no text, and
+    offering to read it was a choice with a single real answer.
+    """
+    for item in _pending_media_items(context):
+        kind = item.get("kind") or "document"
+        if kind == "document":
+            return True
+        if kind == "image" and str(item.get("text") or "").strip():
+            return True
+    return False
 
 
 def _numbered_media_name(context, stem: str, suffix: str) -> str:
@@ -8602,7 +8611,7 @@ def _numbered_media_name(context, stem: str, suffix: str) -> str:
     return f"{stem}{suffix}" if position == 1 else f"{stem}-{position}{suffix}"
 
 
-async def _show_pending_media_prompt(context, ack, *, single: str) -> None:
+async def _show_pending_media_prompt(context, ack, *, single: str) -> int:
     """Keep one prompt for the whole upload, updating it as files land.
 
     Each file of an album arrives as its own update with its own "Receiving…"
@@ -8615,8 +8624,33 @@ async def _show_pending_media_prompt(context, ack, *, single: str) -> None:
     rewrites that same message and removes its own ack, so the doctor sees one
     question that grows to describe everything they sent.
     """
-    text = _pending_media_prompt_text(context, single=single)
-    keyboard = _build_pending_media_keyboard(context)
+    next_state = AWAIT_DOC_INTENT
+    if not _pending_media_has_readable(context):
+        next_state = AWAIT_CASE_INPUT
+        # Nothing to read, so there is nothing to decide. Attach and ask for
+        # the one thing that is actually needed next — the doctor's account.
+        # Re-running this as each album sibling lands is safe: queuing dedupes
+        # by path, so the same message simply grows.
+        for item in _pending_media_items(context):
+            if item.get("path") and is_supported_attachment(item.get("name") or ""):
+                _add_case_attachment(
+                    context, item["path"], item.get("name"), item.get("kind") or "document"
+                )
+        context.user_data["attachment_upload_confirmed"] = True
+        count = len(_case_attachments(context))
+        noun = "file" if count == 1 else "files"
+        text = (
+            f"📎 {count} {noun} attached to this case.\n\n"
+            "Kaizen keeps them exactly as you sent them, and you can't review a "
+            "file once it's on the draft — so check nothing identifying is visible.\n\n"
+            "Now tell me about the case in your own words: what happened, what you "
+            "did or decided, the outcome, and what you learned."
+        )
+        keyboard = None
+    else:
+        text = _pending_media_prompt_text(context, single=single)
+        keyboard = _build_pending_media_keyboard(context)
+
     tracked = context.user_data.get("_pending_media_prompt")
 
     if tracked:
@@ -8631,7 +8665,7 @@ async def _show_pending_media_prompt(context, ack, *, single: str) -> None:
                 await ack.delete()
             except Exception:
                 logger.debug("could not remove duplicate ack", exc_info=True)
-            return
+            return next_state
         except Exception:
             # The tracked prompt is gone (deleted, too old). Fall through and
             # let this ack become the prompt rather than losing it entirely.
@@ -8643,6 +8677,7 @@ async def _show_pending_media_prompt(context, ack, *, single: str) -> None:
         "message_id": ack.message_id,
     }
     _track_latest_message(context, ack)
+    return next_state
 
 
 def _pending_media_prompt_text(context, *, single: str) -> str:
@@ -9531,7 +9566,12 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
 
             if mode in {"info", "both"} and sibling_kind in {"image", "document"}:
                 try:
-                    if sibling_kind == "image":
+                    # Images were read once on arrival to decide whether to ask
+                    # at all — reuse that instead of paying for a second call.
+                    cached = str(item.get("text") or "").strip()
+                    if cached:
+                        text = cached
+                    elif sibling_kind == "image":
                         text = await extract_from_image(sibling_path)
                     else:
                         text = await extract_from_document(sibling_path)
@@ -10921,10 +10961,28 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 cached_path = cached_file.name
             shutil.copy2(tmp_path, cached_path)
 
+            # Read the image once, now, and ask only if there was something to
+            # read. An ultrasound or ECG has no text, so offering "read text on
+            # it" was a choice with one real answer. The question is mechanical
+            # — is there text? — never "is anything abnormal", which would be
+            # the clinical interpretation this product refuses to do.
+            image_text = ""
+            try:
+                extracted = await extract_from_image(cached_path)
+                if extracted and extracted.strip() != "NOT_CLINICAL":
+                    image_text = extracted.strip()
+            except Exception:
+                # Unreadable is not fatal: fall through and offer the choice
+                # rather than silently deciding for the doctor.
+                logger.warning("Pre-read of image failed", exc_info=True)
+                image_text = ""
+
             _queue_pending_media(context, {
                 "path": cached_path,
                 "name": _numbered_media_name(context, "portfolio-image", ".jpg"),
                 "kind": "image",
+                "text": image_text,
+                "read_failed": not image_text,
                 "source_chat_id": update.message.chat_id,
                 "source_message_id": update.message.message_id,
                 "source_chat_type": getattr(update.message.chat, "type", None),
@@ -10941,10 +10999,9 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 has_caption=bool(caption),
             )
 
-            await _show_pending_media_prompt(
+            return await _show_pending_media_prompt(
                 context, ack, single="📷 Image received — how would you like to use it?"
             )
-            return AWAIT_DOC_INTENT
         except Exception as e:
             logger.warning("Photo download/cache failed: %s", e)
             _audit_event(
@@ -11037,12 +11094,11 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 has_caption=bool(caption),
             )
 
-            await _show_pending_media_prompt(
+            return await _show_pending_media_prompt(
                 context,
                 ack,
                 single="🎞️ Video received — would you like to attach it to the Kaizen draft?",
             )
-            return AWAIT_DOC_INTENT
         except BadRequest as e:
             logger.warning("Video download/cache failed: %s", e)
             _audit_event(

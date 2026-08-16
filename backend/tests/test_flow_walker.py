@@ -4209,7 +4209,16 @@ class TestImageOCRProgress:
         )
 
     @pytest.mark.asyncio
-    async def test_photo_upload_asks_for_intent_before_ocr(self):
+    async def test_photo_with_text_is_read_then_offers_the_choice(self):
+        """The image is read on arrival so the bot knows whether to ask at all.
+
+        This previously asserted the opposite — prompt first, read only after
+        the doctor chose. That order made "read text on it" appear for every
+        image, including ultrasounds and ECGs that carry no text, so the choice
+        had one real answer and was pure friction. Reading first costs the same
+        vision call the read path already paid for, and buys the ability to
+        skip the question entirely when there is nothing to read.
+        """
         from bot import AWAIT_DOC_INTENT, handle_case_input
 
         sim = BotSimulator()
@@ -4231,7 +4240,7 @@ class TestImageOCRProgress:
 
         ack_texts = [text for _, text, _ in sim.messages_sent if text]
         assert result == AWAIT_DOC_INTENT
-        extract_mock.assert_not_called()
+        extract_mock.assert_called_once()
         assert any("Receiving image" in t for t in ack_texts), (
             f"Expected initial 'Receiving image…' ack, got: {ack_texts}"
         )
@@ -4240,11 +4249,40 @@ class TestImageOCRProgress:
         )
         for text in ack_texts:
             assert "Still reading" not in text, (
-                f"Intent-first image upload must not emit 'Still reading…' — saw: {text!r}"
+                f"Image upload must not emit 'Still reading…' — saw: {text!r}"
             )
             assert "Receiving image…\n" not in text, (
                 f"Ack must not stack with extra lines — saw: {text!r}"
             )
+
+
+    @pytest.mark.asyncio
+    async def test_photo_without_text_skips_the_question_entirely(self):
+        """An ultrasound or ECG has no text, so there is nothing to decide."""
+        from bot import AWAIT_CASE_INPUT, handle_case_input
+
+        sim = BotSimulator()
+        context = sim._make_context()
+
+        photo_update = sim._make_text_update('')
+        photo = MagicMock()
+        file_obj = MagicMock()
+        file_obj.download_to_drive = AsyncMock()
+        photo.get_file = AsyncMock(return_value=file_obj)
+        photo_update.message.text = None
+        photo_update.message.photo = [photo]
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.extract_from_image', new=AsyncMock(return_value='NOT_CLINICAL')), \
+             patch('bot._process_case_text', new=AsyncMock()):
+            result = await handle_case_input(photo_update, context)
+
+        texts = [text for _, text, _ in sim.messages_sent if text]
+        assert result == AWAIT_CASE_INPUT
+        assert sim.get_last_buttons() == [], "nothing to read means nothing to ask"
+        assert any("attached to this case" in t for t in texts), texts
+        assert any("in your own words" in t for t in texts), texts
 
 
 class TestVideoGroundingGate:

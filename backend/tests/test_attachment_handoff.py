@@ -110,7 +110,9 @@ async def test_photo_case_stores_pending_image_and_asks_intent():
     assert context.user_data["_pending_doc"]["source_message_id"] == update.message.message_id
     assert context.user_data["_pending_doc"]["source_chat_type"] == "private"
     assert os.path.exists(context.user_data["_pending_doc"]["path"])
-    extract_mock.assert_not_called()
+    # The image is now read on arrival so the bot can tell whether there is
+    # any text to offer. Text was found here, so the choice is real and shown.
+    extract_mock.assert_called_once()
     buttons = sim.get_last_buttons()
     assert ("📝 Read text on it", "DOCUSE|info") in buttons
     assert ("📎 Attach only", "DOCUSE|attach") in buttons
@@ -152,14 +154,15 @@ async def test_video_case_stores_pending_video_and_asks_attach_intent():
          patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))):
         result = await handle_case_input(update, context)
 
-    assert result == AWAIT_DOC_INTENT
+    # A video has no text, so there is nothing to decide: it attaches and the
+    # bot asks for the one thing it actually needs, the doctor's account.
+    assert result == AWAIT_CASE_INPUT
     assert context.user_data["_pending_doc"]["kind"] == "video"
     assert context.user_data["_pending_doc"]["name"] == "portfolio-video.mp4"
     assert context.user_data["_pending_doc_context"] == update.message.caption
     assert os.path.exists(context.user_data["_pending_doc"]["path"])
-    buttons = sim.get_last_buttons()
-    assert ("📎 Attach video", "DOCUSE|attach") in buttons
-    assert ("❌ Remove video", "DOCUSE|ignore") in buttons
+    assert sim.get_last_buttons() == []
+    assert any("attached to this case" in t for _, t, _ in sim.messages_sent if t)
 
     path = context.user_data["_pending_doc"]["path"]
     if os.path.exists(path):
@@ -199,16 +202,14 @@ async def test_video_sent_as_document_uses_video_intent_not_voice_transcription(
          patch('bot.extract_from_document', new=AsyncMock()) as document_extract:
         result = await handle_case_input(update, context)
 
-    assert result == AWAIT_DOC_INTENT
+    assert result == AWAIT_CASE_INPUT
     transcribe_mock.assert_not_called()
     document_extract.assert_not_called()
     pending_doc = context.user_data["_pending_doc"]
     assert pending_doc["kind"] == "video"
     assert pending_doc["name"] == "portfolio-video.mp4"
     assert context.user_data["_pending_doc_context"] == update.message.caption
-    buttons = sim.get_last_buttons()
-    assert ("📎 Attach video", "DOCUSE|attach") in buttons
-    assert ("❌ Remove video", "DOCUSE|ignore") in buttons
+    assert sim.get_last_buttons() == []
     assert "Couldn't transcribe voice note" not in _all_visible_text(sim)
     assert "PXL_20260705_130629103.TS.mp4" not in _all_visible_text(sim)
 
@@ -1439,7 +1440,10 @@ def test_mixed_upload_offers_the_read_options():
     sim = BotSimulator()
     context = sim._make_context()
     bot._queue_pending_media(context, {"path": "/tmp/a.mp4", "name": "a.mp4", "kind": "video"})
-    bot._queue_pending_media(context, {"path": "/tmp/c.jpg", "name": "c.jpg", "kind": "image"})
+    bot._queue_pending_media(
+        context,
+        {"path": "/tmp/c.jpg", "name": "c.jpg", "kind": "image", "text": "Discharge summary: ..."},
+    )
 
     data = [b.callback_data for row in bot._build_pending_media_keyboard(context).inline_keyboard for b in row]
     assert "DOCUSE|info" in data
@@ -1516,7 +1520,10 @@ async def test_album_shows_one_prompt_that_updates_not_three():
     bot._queue_pending_media(context, {"path": "/tmp/b.mp4", "name": "b.mp4", "kind": "video"})
     await bot._show_pending_media_prompt(context, second, single="🎞️ Video received")
 
-    bot._queue_pending_media(context, {"path": "/tmp/c.jpg", "name": "c.jpg", "kind": "image"})
+    bot._queue_pending_media(
+        context,
+        {"path": "/tmp/c.jpg", "name": "c.jpg", "kind": "image", "text": "Discharge summary"},
+    )
     await bot._show_pending_media_prompt(context, third, single="📷 Image received")
 
     # Only the first ack ever becomes a prompt.
