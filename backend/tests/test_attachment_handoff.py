@@ -1252,3 +1252,121 @@ async def test_filing_handles_missing_attachment_gracefully():
     final_text = _all_visible_text(sim)
     assert "📎 Attachment not added\nFile was no longer available. Draft saved without the attachment." in final_text
     assert "Attachment skipped" not in final_text
+
+
+# ── Multiple attachments on one case ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_every_attached_file_reaches_the_filer():
+    """Reported: sending several files attached only the last one, silently.
+
+    Each upload overwrote `attachment_path`, and because every upload had been
+    acknowledged in chat there was nothing to tell the doctor the rest had been
+    dropped.
+    """
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_callback_update("APPROVE|draft")
+
+    paths = []
+    for suffix in (".mp4", ".png", ".pdf"):
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+            f.write(b"bytes")
+            paths.append(f.name)
+
+    for path, kind in zip(paths, ("video", "image", "document")):
+        bot._add_case_attachment(context, path, os.path.basename(path), kind)
+    context.user_data.update({
+        "chosen_form": "US_CASE",
+        "case_text": "I performed the scan, escalated to cardiology, and documented my findings.",
+        "attachment_upload_confirmed": True,
+    })
+
+    draft = FormDraft(form_type="US_CASE", fields={"reflection": "I will document sooner."})
+
+    with patch("bot.get_credentials", return_value=("u", "p")), \
+         patch("bot._load_draft", return_value=draft), \
+         patch("bot._needs_filing_curriculum_choice", return_value=False), \
+         patch("bot.route_filing", new=AsyncMock(return_value={
+             "status": "success", "filled": ["reflection", "attachment"], "skipped": []
+         })) as route_mock, \
+         patch("bot.record_case_filed", new=AsyncMock()), \
+         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 1, 10, "free"))):
+        await handle_approval_approve(update, context)
+
+    route_mock.assert_awaited_once()
+    filed = route_mock.call_args[1].get("attachment_path")
+    assert isinstance(filed, list), f"all three files must be filed, got {filed!r}"
+    assert len(filed) == 3
+
+    for path in paths:
+        if os.path.exists(path):
+            os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_a_single_attachment_still_files_as_a_plain_string():
+    """Keeps the existing contract for the common one-file case."""
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_callback_update("APPROVE|draft")
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+        f.write(b"bytes")
+        path = f.name
+    bot._add_case_attachment(context, path, "notes.pdf", "document")
+    context.user_data.update({
+        "chosen_form": "CBD",
+        "case_text": "I led the assessment and escalated appropriately.",
+        "attachment_upload_confirmed": True,
+    })
+
+    draft = FormDraft(form_type="CBD", fields={"reflection": "Documented."})
+
+    with patch("bot.get_credentials", return_value=("u", "p")), \
+         patch("bot._load_draft", return_value=draft), \
+         patch("bot._needs_filing_curriculum_choice", return_value=False), \
+         patch("bot.route_filing", new=AsyncMock(return_value={
+             "status": "success", "filled": ["reflection", "attachment"], "skipped": []
+         })) as route_mock, \
+         patch("bot.record_case_filed", new=AsyncMock()), \
+         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 1, 10, "free"))):
+        await handle_approval_approve(update, context)
+
+    filed = route_mock.call_args[1].get("attachment_path")
+    assert isinstance(filed, str)
+
+    if os.path.exists(path):
+        os.unlink(path)
+
+
+def test_queueing_the_same_file_twice_does_not_duplicate_it():
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+
+    assert bot._add_case_attachment(context, "/tmp/a.png", "a.png", "image") is True
+    assert bot._add_case_attachment(context, "/tmp/a.png", "a.png", "image") is False
+    assert len(bot._case_attachments(context)) == 1
+
+
+def test_a_pre_list_draft_still_reports_its_single_attachment():
+    """Drafts restored from persistence carry only the old singular keys."""
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data.update({
+        "attachment_path": "/tmp/legacy.pdf",
+        "attachment_name": "legacy.pdf",
+        "attachment_kind": "document",
+    })
+
+    items = bot._case_attachments(context)
+    assert [i["path"] for i in items] == ["/tmp/legacy.pdf"]

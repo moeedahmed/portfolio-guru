@@ -1151,6 +1151,7 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
             "last_amend_chosen_form",
             "last_bot_msg_id",
             "last_bot_chat_id",
+            "attachments",
             "attachment_path",
             "attachment_name",
             "attachment_kind",
@@ -8476,11 +8477,66 @@ _VIDEO_CONTEXT_ACTION_MARKERS = (
 )
 
 
+def _case_attachments(context) -> list[dict]:
+    """Every file queued for this case, oldest first.
+
+    A case can carry several files — a doctor sending three clips and a report
+    expects all four on the draft. The singular `attachment_*` keys are kept in
+    step with the most recent entry so the many existing readers of them keep
+    working, but this list is the source of truth for what gets filed.
+    """
+    items = context.user_data.get("attachments")
+    if isinstance(items, list) and items:
+        return items
+    # Pre-list drafts restored from persistence still carry only the singular keys.
+    path = context.user_data.get("attachment_path")
+    if not path:
+        return []
+    return [{
+        "path": path,
+        "name": context.user_data.get("attachment_name") or "attachment",
+        "kind": context.user_data.get("attachment_kind") or "document",
+    }]
+
+
+def _add_case_attachment(context, path: str, name: str, kind: str) -> bool:
+    """Queue a file for this case. Returns False if it was already queued.
+
+    Before this, each new file overwrote `attachment_path`, so sending three
+    files silently filed only the last one.
+    """
+    if not path:
+        return False
+    items = context.user_data.setdefault("attachments", [])
+    if not isinstance(items, list):
+        items = []
+        context.user_data["attachments"] = items
+
+    already = any(item.get("path") == path for item in items)
+    if not already:
+        items.append({"path": path, "name": name, "kind": kind})
+
+    # Mirror onto the singular keys for the existing readers (removal copy,
+    # audit events, per-file messaging), which all mean "the latest file".
+    context.user_data["attachment_path"] = path
+    context.user_data["attachment_name"] = name
+    context.user_data["attachment_kind"] = kind
+    return not already
+
+
+def _clear_case_attachments(context) -> None:
+    context.user_data.pop("attachments", None)
+    for key in ("attachment_path", "attachment_name", "attachment_kind"):
+        context.user_data.pop(key, None)
+
+
 def _has_video_attachment_for_drafting(context) -> bool:
-    if context.user_data.get("attachment_kind") == "video":
-        return True
-    attachment_name = str(context.user_data.get("attachment_name") or "").lower()
-    return attachment_name.endswith(_VIDEO_DOCUMENT_EXTENSIONS)
+    for item in _case_attachments(context):
+        if item.get("kind") == "video":
+            return True
+        if str(item.get("name") or "").lower().endswith(_VIDEO_DOCUMENT_EXTENSIONS):
+            return True
+    return False
 
 
 def _video_context_has_user_grounding(case_text: str) -> bool:
@@ -9384,10 +9440,8 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
         return AWAIT_CASE_INPUT
 
     if mode in {"attach", "both"}:
-        context.user_data["attachment_path"] = file_path
+        _add_case_attachment(context, file_path, file_name, attachment_kind)
         context.user_data.pop("attachment_upload_confirmed", None)
-        context.user_data["attachment_name"] = file_name
-        context.user_data["attachment_kind"] = attachment_kind
         _audit_event(
             context,
             "media_document_flow",
@@ -9534,10 +9588,13 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
 
     if _gathering_enabled(context) and not (context.user_data.get("chosen_form") and context.user_data.get("awaiting_detail")):
         if not _gathering_case_active(context):
+            existing_attachments = _case_attachments(context)
             existing_attachment_path = context.user_data.get("attachment_path")
             existing_attachment_name = context.user_data.get("attachment_name")
             existing_attachment_kind = context.user_data.get("attachment_kind")
             _clear_case_review_state(context, keep_case=False)
+            if existing_attachments:
+                context.user_data["attachments"] = existing_attachments
             if existing_attachment_path:
                 context.user_data["attachment_path"] = existing_attachment_path
                 context.user_data["attachment_name"] = existing_attachment_name
@@ -10976,17 +11033,19 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         and not source_detail_retry
         and not (chosen_form and context.user_data.get("awaiting_detail"))
     ):
+        existing_attachments = _case_attachments(context)
         existing_attachment_path = context.user_data.get("attachment_path")
         existing_attachment_name = context.user_data.get("attachment_name")
         existing_attachment_kind = context.user_data.get("attachment_kind")
         if not _gathering_case_active(context):
             _clear_case_review_state(context, keep_case=False)
         if attachment_path_to_save:
-            context.user_data["attachment_path"] = attachment_path_to_save
+            _add_case_attachment(
+                context, attachment_path_to_save, attachment_name_to_save, "document"
+            )
             context.user_data.pop("attachment_upload_confirmed", None)
-            context.user_data["attachment_name"] = attachment_name_to_save
-            context.user_data["attachment_kind"] = "document"
         elif existing_attachment_path:
+            context.user_data["attachments"] = existing_attachments
             context.user_data["attachment_path"] = existing_attachment_path
             context.user_data["attachment_name"] = existing_attachment_name
             context.user_data["attachment_kind"] = existing_attachment_kind
@@ -11029,16 +11088,18 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     active_chat_id = context.user_data.get("last_bot_chat_id")
     active_status_id = context.user_data.get("status_msg_id")
     active_status_chat = context.user_data.get("status_msg_chat")
+    existing_attachments = _case_attachments(context)
     existing_attachment_path = context.user_data.get("attachment_path")
     existing_attachment_name = context.user_data.get("attachment_name")
     existing_attachment_kind = context.user_data.get("attachment_kind")
     _clear_case_review_state(context, keep_case=False)
     if attachment_path_to_save:
-        context.user_data["attachment_path"] = attachment_path_to_save
+        _add_case_attachment(
+            context, attachment_path_to_save, attachment_name_to_save, "document"
+        )
         context.user_data.pop("attachment_upload_confirmed", None)
-        context.user_data["attachment_name"] = attachment_name_to_save
-        context.user_data["attachment_kind"] = "document"
     elif existing_attachment_path:
+        context.user_data["attachments"] = existing_attachments
         context.user_data["attachment_path"] = existing_attachment_path
         context.user_data["attachment_name"] = existing_attachment_name
         context.user_data["attachment_kind"] = existing_attachment_kind
@@ -11711,8 +11772,9 @@ async def handle_attachment_confirm(update: Update, context: ContextTypes.DEFAUL
 
     context.user_data["attachment_upload_confirmed"] = True
     if not keep:
-        for key in ("attachment_path", "attachment_name", "attachment_kind"):
-            context.user_data.pop(key, None)
+        # Declining drops every queued file, not just the most recent one —
+        # the prompt named them all, so the answer covers them all.
+        _clear_case_attachments(context)
 
     _audit_event(
         context,
@@ -11892,7 +11954,12 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             decision="attachment_upload_confirm_needed",
             attachment_kind=context.user_data.get("attachment_kind"),
         )
-        attachment_name = context.user_data.get("attachment_name") or "that file"
+        queued = _case_attachments(context)
+        names = [str(item.get("name") or "that file") for item in queued]
+        if len(names) == 1:
+            attachment_name = names[0]
+        else:
+            attachment_name = f"{len(names)} files ({', '.join(names)})"
         context.user_data.pop("filing_in_progress", None)
         await _send_latest_message(
             source_message,
@@ -11931,20 +11998,34 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         ack = await source_message.reply_text(saving_text)
     _track_latest_message(context, ack)
 
-    # Retrieve attachment path and validate existence / support
-    attachment_path = context.user_data.get("attachment_path")
+    # Validate every queued file, not just the most recent. A case can carry
+    # several; filing only the last one was silent data loss from the doctor's
+    # point of view, because each upload had been acknowledged.
+    attachment_path = None
     attachment_skipped_reason = None
-    if attachment_path:
-        if not os.path.exists(attachment_path):
-            attachment_skipped_reason = "attachment (file missing)"
-            attachment_path = None
-        elif not is_supported_attachment(context.user_data.get("attachment_name", "")):
-            attachment_skipped_reason = "attachment (unsupported type)"
-            attachment_path = None
-        else:
-            attachment_path = _attachment_path_with_original_name(
-                attachment_path, context.user_data.get("attachment_name", "")
-            )
+    usable_paths: list[str] = []
+    dropped: list[str] = []
+    for item in _case_attachments(context):
+        path = item.get("path")
+        name = item.get("name") or ""
+        if not path or not os.path.exists(path):
+            dropped.append("missing")
+            continue
+        if not is_supported_attachment(name):
+            dropped.append("unsupported")
+            continue
+        usable_paths.append(_attachment_path_with_original_name(path, name))
+
+    if usable_paths:
+        # A single file still goes down as a plain string so the filer, the
+        # router and every existing test see exactly what they did before.
+        attachment_path = usable_paths[0] if len(usable_paths) == 1 else usable_paths
+    if dropped:
+        attachment_skipped_reason = (
+            "attachment (file missing)"
+            if "missing" in dropped
+            else "attachment (unsupported type)"
+        )
 
     # Progress edits during the long filing wait so the user doesn't see a
     # static message for up to 5 minutes. Started here — immediately before

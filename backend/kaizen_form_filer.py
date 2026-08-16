@@ -4004,11 +4004,28 @@ def _download_drive_file(url: str) -> Optional[str]:
         return None
 
 
-async def _attach_file(page: Page, file_path: str) -> bool:
-    """Attach a file using Kaizen's Upload button/file chooser flow."""
+async def _attach_file(page: Page, file_path: str | list[str]) -> bool:
+    """Attach one or more files via Kaizen's Upload button/file chooser flow.
+
+    Accepts a list because a doctor can send several files for one case and
+    Kaizen's chooser takes them in a single `set_files` call — uploading them
+    one at a time would mean re-opening the chooser per file, and previously
+    only the last file survived at all.
+
+    Success still requires positive confirmation from the page: a chooser that
+    fired is not evidence Kaizen accepted anything.
+    """
+    file_paths = [file_path] if isinstance(file_path, str) else list(file_path)
+    file_paths = [p for p in file_paths if p]
+    if not file_paths:
+        return False
+
     try:
-        if not os.path.isfile(file_path):
-            logger.warning(f"Attachment file not found: {file_path}")
+        missing = [p for p in file_paths if not os.path.isfile(p)]
+        if missing:
+            logger.warning(f"Attachment file(s) not found: {missing}")
+            file_paths = [p for p in file_paths if p not in missing]
+        if not file_paths:
             return False
 
         upload_selectors = [
@@ -4026,37 +4043,50 @@ async def _attach_file(page: Page, file_path: str) -> bool:
                 async with page.expect_file_chooser(timeout=5000) as chooser_info:
                     await upload_button.click()
                 chooser = await chooser_info.value
-                await chooser.set_files(file_path)
+                await chooser.set_files(file_paths)
                 await asyncio.sleep(2)
 
-                filename = os.path.basename(file_path)
-                verification_targets = [
-                    page.get_by_text(filename, exact=False),
-                    page.get_by_text(KAIZEN_FILE_UPLOAD["uploaded_status_text"], exact=False),
-                    page.get_by_text("Remove", exact=False),
-                    page.get_by_text("Replace", exact=False),
-                ]
-                for target in verification_targets:
+                # Every filename must show. Confirming only the first would let
+                # a partial upload be reported as a complete one, which is the
+                # silent-loss failure this change exists to remove.
+                unconfirmed = []
+                for path in file_paths:
+                    filename = os.path.basename(path)
                     try:
-                        if await target.first.is_visible(timeout=5000):
-                            logger.info(f"Attached file via upload button: {file_path}")
-                            return True
+                        if await page.get_by_text(filename, exact=False).first.is_visible(
+                            timeout=5000
+                        ):
+                            continue
                     except Exception:
-                        continue
+                        pass
+                    unconfirmed.append(filename)
 
-                # The file chooser fired and a file was handed to it, but
-                # nothing on the page confirms Kaizen actually accepted it —
-                # no filename, no "Uploaded" status, no Remove/Replace
-                # controls. Reporting success here is exactly how a failed
-                # upload gets counted as a completed field: don't retry with a
-                # broader selector (that risks clicking an unrelated upload
-                # control and attaching to the wrong section) and don't claim
-                # the attachment filled.
+                if not unconfirmed:
+                    logger.info(f"Attached {len(file_paths)} file(s) via upload button")
+                    return True
+
+                # No filename matched at all: fall back to the generic upload
+                # indicators, but only when a single file was requested — with
+                # several, a lone "Uploaded" badge cannot tell us which landed.
+                if len(unconfirmed) == len(file_paths) == 1:
+                    for target in (
+                        page.get_by_text(KAIZEN_FILE_UPLOAD["uploaded_status_text"], exact=False),
+                        page.get_by_text("Remove", exact=False),
+                        page.get_by_text("Replace", exact=False),
+                    ):
+                        try:
+                            if await target.first.is_visible(timeout=5000):
+                                logger.info(f"Attached file via upload button: {file_paths[0]}")
+                                return True
+                        except Exception:
+                            continue
+
                 logger.warning(
-                    f"Attach file click+chooser fired for {file_path} but no upload "
-                    "confirmation was visible — not counting as attached."
+                    f"Upload chooser fired but {len(unconfirmed)} of {len(file_paths)} "
+                    f"file(s) were not confirmed on the page: {unconfirmed}"
                 )
                 return False
+
             except Exception as e:
                 logger.debug(f"Upload button selector failed ({selector}): {e}")
                 continue
@@ -4065,9 +4095,9 @@ async def _attach_file(page: Page, file_path: str) -> bool:
         file_input = page.locator('input[type="file"]')
         count = await file_input.count()
         if count > 0:
-            await file_input.first.set_input_files(file_path)
+            await file_input.first.set_input_files(file_paths)
             await asyncio.sleep(2)
-            logger.info(f"Attached file: {file_path}")
+            logger.info(f"Attached {len(file_paths)} file(s) via static input")
             return True
 
         logger.warning("No file input element found on form")
@@ -4298,7 +4328,7 @@ async def file_to_kaizen(
     password: str,
     curriculum_links: Optional[List[str]] = None,
     submit: bool = False,
-    attachment_path: Optional[str] = None,
+    attachment_path: Optional[str | list[str]] = None,
     attachment_drive_url: Optional[str] = None,
     reuse_draft: bool = False,
     telegram_user_id: Optional[int] = None,
@@ -4494,6 +4524,8 @@ async def file_to_kaizen(
                 attachment_path = temp_attachment
 
         if attachment_path:
+            # str or list: a case can carry several files, and they upload in a
+            # single chooser call rather than one round trip each.
             if await _attach_file(page, attachment_path):
                 filled.append("attachment")
             else:

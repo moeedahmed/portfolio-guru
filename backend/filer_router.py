@@ -128,7 +128,7 @@ async def route_filing(
     form_url: Optional[str] = None,
     submit: bool = False,
     reuse_draft: bool = False,
-    attachment_path: Optional[str] = None,
+    attachment_path: Optional[str | list[str]] = None,
     attachment_drive_url: Optional[str] = None,
     telegram_user_id: Optional[int] = None,
 ) -> Dict[str, Any]:
@@ -169,7 +169,7 @@ async def _route_filing_unbounded(
     form_url: Optional[str] = None,
     submit: bool = False,
     reuse_draft: bool = False,
-    attachment_path: Optional[str] = None,
+    attachment_path: Optional[str | list[str]] = None,
     attachment_drive_url: Optional[str] = None,
     telegram_user_id: Optional[int] = None,
 ) -> Dict[str, Any]:
@@ -362,7 +362,7 @@ async def _route_deterministic(
     curriculum_links: Optional[List[str]],
     submit: bool = False,
     reuse_draft: bool = False,
-    attachment_path: Optional[str] = None,
+    attachment_path: Optional[str | list[str]] = None,
     attachment_drive_url: Optional[str] = None,
     telegram_user_id: Optional[int] = None,
 ) -> Dict[str, Any]:

@@ -170,7 +170,9 @@ async def test_attach_file_uses_kaizen_upload_button_file_chooser(tmp_path, monk
 
     assert await _attach_file(page, str(attachment)) is True
     upload_button.click.assert_awaited_once()
-    chooser.set_files.assert_awaited_once_with(str(attachment))
+    # A list now, because one case can carry several files and they
+    # upload in a single chooser call.
+    chooser.set_files.assert_awaited_once_with([str(attachment)])
 
 
 @pytest.mark.asyncio
@@ -227,7 +229,9 @@ async def test_attach_file_without_visible_confirmation_returns_false(tmp_path, 
 
     assert await _attach_file(page, str(attachment)) is False
     upload_button.click.assert_awaited_once()
-    chooser.set_files.assert_awaited_once_with(str(attachment))
+    # A list now, because one case can carry several files and they
+    # upload in a single chooser call.
+    chooser.set_files.assert_awaited_once_with([str(attachment)])
 
 
 @pytest.mark.asyncio
@@ -1368,3 +1372,89 @@ async def test_file_to_kaizen_qa_exception_does_not_fail_filing(mock_playwright_
                     result = await file_to_kaizen("CBD", fields, "user", "pass")
                     assert result["status"] in ("success", "partial")
                     assert "filing_qa" in result
+
+
+# ── Multi-file attachment ────────────────────────────────────────────────────
+# A doctor can send several files for one case. Previously each new file
+# overwrote the last, so only one ever reached Kaizen — silently, because every
+# upload had been acknowledged in chat.
+
+
+def _chooser_page(visible_names):
+    """Page double whose get_by_text only confirms `visible_names`."""
+    upload_button = MagicMock()
+    upload_button.is_visible = AsyncMock(return_value=True)
+    upload_button.click = AsyncMock()
+    upload_locator = MagicMock()
+    upload_locator.first = upload_button
+
+    chooser = MagicMock()
+    chooser.set_files = AsyncMock()
+
+    class ChooserInfo:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        @property
+        def value(self):
+            async def _value():
+                return chooser
+
+            return _value()
+
+    def _get_by_text(text, exact=False):
+        hit = MagicMock()
+        hit.is_visible = AsyncMock(return_value=any(n in str(text) for n in visible_names))
+        hit.first = hit
+        return hit
+
+    page = MagicMock()
+    page.locator.return_value = upload_locator
+    page.expect_file_chooser.return_value = ChooserInfo()
+    page.get_by_text.side_effect = _get_by_text
+    return page, chooser
+
+
+@pytest.mark.asyncio
+async def test_attach_file_uploads_every_file_in_one_chooser_call(tmp_path):
+    first = tmp_path / "echo-clip.mp4"
+    second = tmp_path / "ecg.png"
+    third = tmp_path / "notes.pdf"
+    for path in (first, second, third):
+        path.write_bytes(b"bytes")
+    paths = [str(first), str(second), str(third)]
+
+    page, chooser = _chooser_page(["echo-clip.mp4", "ecg.png", "notes.pdf"])
+
+    assert await _attach_file(page, paths) is True
+    chooser.set_files.assert_awaited_once_with(paths)
+
+
+@pytest.mark.asyncio
+async def test_partial_upload_is_not_reported_as_success(tmp_path):
+    """Confirming only the first filename would let a partial upload count as
+    complete — the exact silent loss this change removes."""
+    first = tmp_path / "echo-clip.mp4"
+    second = tmp_path / "ecg.png"
+    for path in (first, second):
+        path.write_bytes(b"bytes")
+
+    # Kaizen shows the first file but never the second.
+    page, _chooser = _chooser_page(["echo-clip.mp4"])
+
+    assert await _attach_file(page, [str(first), str(second)]) is False
+
+
+@pytest.mark.asyncio
+async def test_missing_file_is_dropped_without_losing_the_rest(tmp_path):
+    present = tmp_path / "ecg.png"
+    present.write_bytes(b"bytes")
+    absent = tmp_path / "gone.png"
+
+    page, chooser = _chooser_page(["ecg.png"])
+
+    assert await _attach_file(page, [str(absent), str(present)]) is True
+    chooser.set_files.assert_awaited_once_with([str(present)])
