@@ -3757,11 +3757,15 @@ def _build_doc_intent_keyboard() -> InlineKeyboardMarkup:
 def _build_image_intent_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📝 Use for drafting", callback_data="DOCUSE|info"),
+            # "Use for drafting" implied the bot would interpret the image. It
+            # will not: it reads text off it (report wording, labels, notes) and
+            # refuses to read the clinical picture itself without the doctor's
+            # own account. The label now says what actually happens.
+            InlineKeyboardButton("📝 Read text on it", callback_data="DOCUSE|info"),
             InlineKeyboardButton("📎 Attach only", callback_data="DOCUSE|attach"),
         ],
         [
-            InlineKeyboardButton("📎 Use + attach", callback_data="DOCUSE|both"),
+            InlineKeyboardButton("📎 Read text + attach", callback_data="DOCUSE|both"),
             InlineKeyboardButton("❌ Remove image", callback_data="DOCUSE|ignore"),
         ],
     ])
@@ -8615,8 +8619,13 @@ def _pending_media_prompt_text(context, *, single: str) -> str:
         )
 
     if _pending_media_has_readable(context):
+        # Says what "read" actually does. The old wording ("use for drafting")
+        # implied the bot would interpret an ECG or ultrasound, which it
+        # deliberately refuses to do — so the choice looked bigger than it was.
         tail = (
-            "I won't interpret clinical images or videos unless you add your own context."
+            "Reading means pulling out any text — report wording, labels, notes. "
+            "For an ECG, ultrasound, X-ray or wound photo I won't interpret the "
+            "picture itself; tell me about the case in your own words."
         )
     else:
         tail = (
@@ -14113,8 +14122,9 @@ async def _resume_pending_consent_input(
             context.user_data["_pending_doc_context"] = caption
         await query.edit_message_text(
             "📷 Image received — how would you like to use it?\n\n"
-            "For ECGs, ultrasound, X-rays, wounds or procedure photos, "
-            "I won't interpret the image unless you add your own context.",
+            "Reading means pulling out any text — report wording, labels, notes. "
+            "For an ECG, ultrasound, X-ray or wound photo I won't interpret the "
+            "picture itself; tell me about the case in your own words.",
             reply_markup=_build_image_intent_keyboard(),
         )
         _track_latest_message(context, query.message)

@@ -112,9 +112,9 @@ async def test_photo_case_stores_pending_image_and_asks_intent():
     assert os.path.exists(context.user_data["_pending_doc"]["path"])
     extract_mock.assert_not_called()
     buttons = sim.get_last_buttons()
-    assert ("📝 Use for drafting", "DOCUSE|info") in buttons
+    assert ("📝 Read text on it", "DOCUSE|info") in buttons
     assert ("📎 Attach only", "DOCUSE|attach") in buttons
-    assert ("📎 Use + attach", "DOCUSE|both") in buttons
+    assert ("📎 Read text + attach", "DOCUSE|both") in buttons
     assert ("❌ Remove image", "DOCUSE|ignore") in buttons
 
     path = context.user_data["_pending_doc"]["path"]
@@ -1470,3 +1470,16 @@ def test_later_files_get_distinct_names():
 
     assert first == "portfolio-image.jpg"
     assert second == "portfolio-image-2.jpg"
+
+
+def test_image_buttons_do_not_promise_interpretation():
+    """"Use for drafting" implied the bot would read an ECG or ultrasound.
+
+    It refuses to — it extracts text and asks the doctor for the clinical
+    account. The label has to match that, or the choice looks bigger than it is.
+    """
+    import bot
+
+    labels = [b.text for row in bot._build_image_intent_keyboard().inline_keyboard for b in row]
+    assert any("Read text" in label for label in labels)
+    assert not any("drafting" in label.lower() for label in labels)
