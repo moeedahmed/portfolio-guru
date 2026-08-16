@@ -35,14 +35,8 @@ if [[ ! -d backend ]]; then
   exit 1
 fi
 
+PY="$(bash scripts/pick_backend_python.sh)"
 cd backend
-if [[ -x venv/bin/python3 ]]; then
-  PY="venv/bin/python3"
-elif [[ -x .venv/bin/python3 ]]; then
-  PY=".venv/bin/python3"
-else
-  PY="python3"
-fi
 
 JOURNEY_TESTS=(
   # 1. Case capture -> extraction -> form recommendation
