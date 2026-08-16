@@ -52,6 +52,8 @@ JOURNEY_TESTS=(
   tests/test_vnext_form_recommender.py
   # 2. Draft preview -> approval -> Kaizen draft save
   tests/test_vnext_draft_preview.py
+  # RCEM AI-use declaration must reach the filed entry and the approval preview
+  tests/test_ai_declaration.py
   tests/test_filing_reliability.py
   tests/test_filing_attempt_log.py
   tests/test_curriculum_filing_recovery.py

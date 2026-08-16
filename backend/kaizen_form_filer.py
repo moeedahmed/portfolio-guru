@@ -38,6 +38,7 @@ from typing import Any, Dict, List, Optional
 from playwright.async_api import async_playwright, Page, Browser, BrowserContext
 from selector_strategy import fallback_dom_id
 from form_schemas import FORM_SCHEMAS
+from ai_declaration import apply_ai_declaration
 
 logger = logging.getLogger(__name__)
 
@@ -3368,6 +3369,9 @@ async def fill_kaizen_form(
             fields = normalise_dops_fields(fields)
         fields, header_meta = apply_common_header_defaults(form_type, fields, field_map)
         fields = drop_consumed_unmapped_schema_fields(form_type, fields)
+        # RCEM AI-use declaration. Applied after the header defaults so the
+        # one-line timeline Description is built from clinical text only.
+        fields, _declaration_meta = apply_ai_declaration(form_type, fields, field_map)
 
         if (
             form_type == "PROC_LOG"
@@ -4331,6 +4335,9 @@ async def file_to_kaizen(
         fields = normaliser(fields)
     fields, header_meta = apply_common_header_defaults(form_type, fields, field_map)
     fields = drop_consumed_unmapped_schema_fields(form_type, fields)
+    # RCEM AI-use declaration. Applied after the header defaults so the
+    # one-line timeline Description is built from clinical text only.
+    fields, _declaration_meta = apply_ai_declaration(form_type, fields, field_map)
     browser = None
     cdp_pw = None
     use_cdp = KAIZEN_USE_CDP

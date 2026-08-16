@@ -24,6 +24,7 @@ from usage import record_case_filed, get_cases_this_month, check_can_file, get_u
 # pops `bot` from sys.modules, so multiple bot module objects can be alive in
 # one test run — resolving through the single consent module keeps the gate
 # patchable (and consistent) across all of them.
+import ai_declaration
 import consent
 from consent import CONSENT_BODY, CONSENT_TEXT
 from filer_router import route_filing
@@ -4322,7 +4323,25 @@ def _format_draft_preview(
         if (include_safety_layer and name_check_degraded)
         else ""
     )
-    return preview + layer + coach + degraded
+    declaration = _ai_declaration_note(draft) if include_safety_layer else ""
+    return preview + declaration + layer + coach + degraded
+
+
+def _ai_declaration_note(draft) -> str:
+    """Show the RCEM AI-use declaration that will be saved with this entry.
+
+    Approving the draft approves the declaration too, so the exact sentence
+    has to be visible here — not just mentioned. Suppressed alongside the rest
+    of the safety layer when the preview is being rendered as model input for
+    a regeneration, so the boilerplate cannot leak back into the fields.
+    """
+    fields = _draft_fields_for_review(draft)
+    if not ai_declaration.will_declare(_draft_form_type(draft), fields):
+        return ""
+    return (
+        f"\n\n🤖 *{ai_declaration.declaration_label()}* — saved with this entry:\n"
+        f"{ai_declaration.declaration_text()}"
+    )
 
 
 def _draft_coach_note_suffix(draft) -> str:
