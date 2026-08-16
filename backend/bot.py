@@ -8530,6 +8530,113 @@ def _clear_case_attachments(context) -> None:
         context.user_data.pop(key, None)
 
 
+def _pending_media_items(context) -> list[dict]:
+    """Every file waiting on the intent prompt, in arrival order."""
+    items = context.user_data.get("_pending_docs")
+    if isinstance(items, list) and items:
+        return items
+    single = context.user_data.get("_pending_doc")
+    return [single] if single else []
+
+
+def _queue_pending_media(context, item: dict) -> int:
+    """Buffer one file of a possibly-multi-file upload. Returns the new count.
+
+    Telegram delivers an album as separate updates sharing a media_group_id,
+    never as one message. With a single `_pending_doc` slot and no media
+    handler registered in AWAIT_DOC_INTENT, the second and third files of an
+    album matched nothing and were dropped without a word — sending two videos
+    and a photo produced one prompt about one video.
+
+    `_pending_doc` stays pointed at the first item so the existing intent body,
+    which processes one file, keeps working unchanged.
+    """
+    items = context.user_data.setdefault("_pending_docs", [])
+    if not isinstance(items, list):
+        items = []
+        context.user_data["_pending_docs"] = items
+    if not any(existing.get("path") == item.get("path") for existing in items):
+        items.append(item)
+    context.user_data["_pending_doc"] = items[0]
+    return len(items)
+
+
+def _describe_pending_media(context) -> str:
+    """"2 videos and 1 image" — so the prompt names what actually arrived."""
+    counts: dict[str, int] = {}
+    for item in _pending_media_items(context):
+        kind = item.get("kind") or "document"
+        counts[kind] = counts.get(kind, 0) + 1
+    parts = [
+        f"{count} {kind if count == 1 else kind + 's'}"
+        for kind, count in counts.items()
+    ]
+    if not parts:
+        return "file"
+    if len(parts) == 1:
+        return parts[0]
+    return ", ".join(parts[:-1]) + f" and {parts[-1]}"
+
+
+def _pending_media_has_readable(context) -> bool:
+    """True when at least one queued file is something we can read text from."""
+    return any(
+        (item.get("kind") or "document") in {"image", "document"}
+        for item in _pending_media_items(context)
+    )
+
+
+def _numbered_media_name(context, stem: str, suffix: str) -> str:
+    """First file keeps the plain name; later ones are numbered.
+
+    Several files in one upload would otherwise share a filename, which Kaizen
+    shows identically and which the filer's per-filename upload check cannot
+    tell apart.
+    """
+    position = len(_pending_media_items(context)) + 1
+    return f"{stem}{suffix}" if position == 1 else f"{stem}-{position}{suffix}"
+
+
+def _pending_media_prompt_text(context, *, single: str) -> str:
+    """Prompt copy that names the whole upload, not just the first file."""
+    items = _pending_media_items(context)
+    retention = (
+        "Kaizen keeps files exactly as you sent them, and you can't review a file "
+        "once it's on the draft — so check nothing identifying is visible."
+    )
+    if len(items) <= 1:
+        head = single
+    else:
+        head = (
+            f"📎 {_describe_pending_media(context)} received — "
+            "how would you like to use them?\n\n"
+            "Your choice applies to all of them. Send files one at a time if you "
+            "want to use some as context and attach others."
+        )
+
+    if _pending_media_has_readable(context):
+        tail = (
+            "I won't interpret clinical images or videos unless you add your own context."
+        )
+    else:
+        tail = (
+            "I won't interpret clinical videos. Send your own context or findings "
+            "in text/voice."
+        )
+    return f"{head}\n\n{retention}\n\n{tail}"
+
+
+def _build_pending_media_keyboard(context) -> InlineKeyboardMarkup:
+    """Offer 'read' options only when something in the upload can be read.
+
+    A video-only upload must not offer "use for drafting" — the bot does not
+    interpret video, and offering it would promise something it refuses to do.
+    """
+    if _pending_media_has_readable(context):
+        return _build_image_intent_keyboard()
+    return _build_video_intent_keyboard()
+
+
 def _has_video_attachment_for_drafting(context) -> bool:
     for item in _case_attachments(context):
         if item.get("kind") == "video":
@@ -9338,8 +9445,60 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
     mode = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else ""
     _remember_audit_user(context, update)
     content_state = _content_state_while_media_pending(context)
+    pending_items = _pending_media_items(context)
     pending_doc = context.user_data.pop("_pending_doc", None) or {}
+    context.user_data.pop("_pending_docs", None)
     pending_doc_context = context.user_data.pop("_pending_doc_context", "")
+
+    # The body below handles one file. Everything else in a multi-file upload is
+    # folded in here first: attachments queued, readable files' text merged into
+    # the context that the body already threads into the case. Before this they
+    # never arrived at all.
+    siblings = [
+        item for item in pending_items
+        if item.get("path") and item.get("path") != pending_doc.get("path")
+    ]
+    if siblings:
+        sibling_text: list[str] = []
+        for item in siblings:
+            sibling_path = item.get("path")
+            sibling_name = item.get("name") or "attachment"
+            sibling_kind = item.get("kind") or "document"
+
+            if mode == "ignore":
+                try:
+                    os.unlink(sibling_path)
+                except OSError:
+                    pass
+                continue
+
+            if mode in {"attach", "both"} and is_supported_attachment(sibling_name):
+                _add_case_attachment(context, sibling_path, sibling_name, sibling_kind)
+
+            if mode in {"info", "both"} and sibling_kind in {"image", "document"}:
+                try:
+                    if sibling_kind == "image":
+                        text = await extract_from_image(sibling_path)
+                    else:
+                        text = await extract_from_document(sibling_path)
+                    if text and text.strip() and text.strip() != "NOT_CLINICAL":
+                        sibling_text.append(text.strip())
+                except Exception:
+                    logger.warning(
+                        "Could not read extra %s in multi-file upload", sibling_kind,
+                        exc_info=True,
+                    )
+        if sibling_text:
+            pending_doc_context = "\n\n".join(
+                part for part in [pending_doc_context, *sibling_text] if part
+            )
+        _audit_event(
+            context,
+            "media_document_flow",
+            action="multi_file_siblings_applied",
+            mode=mode,
+            sibling_count=len(siblings),
+        )
     file_path = pending_doc.get("path")
     file_name = pending_doc.get("name") or "document"
     attachment_kind = pending_doc.get("kind") or "document"
@@ -10708,14 +10867,14 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 cached_path = cached_file.name
             shutil.copy2(tmp_path, cached_path)
 
-            context.user_data["_pending_doc"] = {
+            _queue_pending_media(context, {
                 "path": cached_path,
-                "name": "portfolio-image.jpg",
+                "name": _numbered_media_name(context, "portfolio-image", ".jpg"),
                 "kind": "image",
                 "source_chat_id": update.message.chat_id,
                 "source_message_id": update.message.message_id,
                 "source_chat_type": getattr(update.message.chat, "type", None),
-            }
+            })
             caption = (update.message.caption or "").strip()
             if caption:
                 context.user_data["_pending_doc_context"] = caption
@@ -10729,10 +10888,8 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
 
             await ack.edit_text(
-                "📷 Image received — how would you like to use it?\n\n"
-                "For ECGs, ultrasound, X-rays, wounds or procedure photos, "
-                "I won't interpret the image unless you add your own context.",
-                reply_markup=_build_image_intent_keyboard(),
+                _pending_media_prompt_text(context, single="📷 Image received — how would you like to use it?"),
+                reply_markup=_build_pending_media_keyboard(context),
             )
             _track_latest_message(context, ack)
             return AWAIT_DOC_INTENT
@@ -10808,14 +10965,14 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 cached_path = cached_file.name
             shutil.copy2(tmp_path, cached_path)
 
-            context.user_data["_pending_doc"] = {
+            _queue_pending_media(context, {
                 "path": cached_path,
-                "name": f"portfolio-video{suffix}",
+                "name": _numbered_media_name(context, "portfolio-video", suffix),
                 "kind": "video",
                 "source_chat_id": update.message.chat_id,
                 "source_message_id": update.message.message_id,
                 "source_chat_type": getattr(update.message.chat, "type", None),
-            }
+            })
             caption = (update.message.caption or "").strip()
             if caption:
                 context.user_data["_pending_doc_context"] = caption
@@ -10829,11 +10986,11 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
 
             await ack.edit_text(
-                "🎞️ Video received — would you like to attach it to the Kaizen draft?\n\n"
-                "Kaizen keeps it exactly as you sent it, and you can't review a file "
-                "once it's on the draft — so check nothing identifying is visible.\n\n"
-                "I won't interpret clinical videos. Send your own context or findings in text/voice.",
-                reply_markup=_build_video_intent_keyboard(),
+                _pending_media_prompt_text(
+                    context,
+                    single="🎞️ Video received — would you like to attach it to the Kaizen draft?",
+                ),
+                reply_markup=_build_pending_media_keyboard(context),
             )
             _track_latest_message(context, ack)
             return AWAIT_DOC_INTENT
@@ -14287,6 +14444,12 @@ def build_application() -> Application:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
                 MessageHandler(filters.VOICE, handle_pending_media_context),
                 MessageHandler(filters.AUDIO, handle_pending_media_context),
+                # Telegram delivers an album as separate updates. Without these
+                # three, the second and third files of a multi-file upload
+                # matched no handler in this state and were dropped silently.
+                MessageHandler(filters.PHOTO, handle_case_input),
+                MessageHandler(filters.VIDEO, handle_case_input),
+                MessageHandler(filters.Document.ALL, handle_case_input),
             ],
             AWAIT_FORM_CHOICE: [
                 CallbackQueryHandler(handle_document_intent, pattern=r"^DOCUSE\|"),

@@ -1370,3 +1370,103 @@ def test_a_pre_list_draft_still_reports_its_single_attachment():
 
     items = bot._case_attachments(context)
     assert [i["path"] for i in items] == ["/tmp/legacy.pdf"]
+
+
+# ── Albums (several files sent at once) ──────────────────────────────────────
+# Telegram delivers an album as separate updates sharing a media_group_id.
+# With one `_pending_doc` slot and no media handler in AWAIT_DOC_INTENT, the
+# second and third files matched nothing and were dropped without a word.
+
+
+def test_album_files_all_buffer_instead_of_overwriting():
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+
+    bot._queue_pending_media(context, {"path": "/tmp/a.mp4", "name": "a.mp4", "kind": "video"})
+    bot._queue_pending_media(context, {"path": "/tmp/b.mp4", "name": "b.mp4", "kind": "video"})
+    bot._queue_pending_media(context, {"path": "/tmp/c.jpg", "name": "c.jpg", "kind": "image"})
+
+    items = bot._pending_media_items(context)
+    assert [i["path"] for i in items] == ["/tmp/a.mp4", "/tmp/b.mp4", "/tmp/c.jpg"]
+    # The single-file body still reads the first item.
+    assert context.user_data["_pending_doc"]["path"] == "/tmp/a.mp4"
+
+
+def test_prompt_names_everything_that_arrived():
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    for path, kind in (("/tmp/a.mp4", "video"), ("/tmp/b.mp4", "video"), ("/tmp/c.jpg", "image")):
+        bot._queue_pending_media(context, {"path": path, "name": path, "kind": kind})
+
+    assert bot._describe_pending_media(context) == "2 videos and 1 image"
+    text = bot._pending_media_prompt_text(context, single="ignored")
+    assert "2 videos and 1 image" in text
+    assert "applies to all of them" in text
+
+
+def test_single_file_prompt_is_unchanged():
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    bot._queue_pending_media(context, {"path": "/tmp/a.mp4", "name": "a.mp4", "kind": "video"})
+
+    text = bot._pending_media_prompt_text(context, single="🎞️ Video received — attach it?")
+    assert text.startswith("🎞️ Video received — attach it?")
+
+
+def test_video_only_upload_never_offers_to_read_it():
+    """The bot refuses to interpret video, so it must not offer to."""
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    bot._queue_pending_media(context, {"path": "/tmp/a.mp4", "name": "a.mp4", "kind": "video"})
+    bot._queue_pending_media(context, {"path": "/tmp/b.mp4", "name": "b.mp4", "kind": "video"})
+
+    data = [b.callback_data for row in bot._build_pending_media_keyboard(context).inline_keyboard for b in row]
+    assert "DOCUSE|info" not in data
+    assert "DOCUSE|attach" in data
+
+
+def test_mixed_upload_offers_the_read_options():
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    bot._queue_pending_media(context, {"path": "/tmp/a.mp4", "name": "a.mp4", "kind": "video"})
+    bot._queue_pending_media(context, {"path": "/tmp/c.jpg", "name": "c.jpg", "kind": "image"})
+
+    data = [b.callback_data for row in bot._build_pending_media_keyboard(context).inline_keyboard for b in row]
+    assert "DOCUSE|info" in data
+
+
+def test_media_handlers_are_registered_in_the_intent_state():
+    """The actual cause of the drop: nothing in AWAIT_DOC_INTENT matched a
+    photo, video or document, so album siblings hit no handler at all."""
+    import inspect
+
+    import bot
+
+    source = inspect.getsource(bot.build_application)
+    intent_block = source.split("AWAIT_DOC_INTENT: [", 1)[1].split("]", 1)[0]
+    for expected in ("filters.PHOTO", "filters.VIDEO", "filters.Document.ALL"):
+        assert expected in intent_block, f"{expected} missing from AWAIT_DOC_INTENT"
+
+
+def test_later_files_get_distinct_names():
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+
+    first = bot._numbered_media_name(context, "portfolio-image", ".jpg")
+    bot._queue_pending_media(context, {"path": "/tmp/1.jpg", "name": first, "kind": "image"})
+    second = bot._numbered_media_name(context, "portfolio-image", ".jpg")
+
+    assert first == "portfolio-image.jpg"
+    assert second == "portfolio-image-2.jpg"
