@@ -81,5 +81,10 @@ Risk class 3 (visual: draft preview changed) with filing behaviour touched.
 Still pending: a screenshot of the declaration on the real Telegram surface,
 and independent review of the diff by someone other than the builder.
 
-The live test drafts are labelled `[AIDECL-4fbe7244] Test entry.` and should be
-deleted from Kaizen. They are drafts; nothing was submitted.
+The two live test drafts (`[AIDECL-4fbe7244] Test entry.`) were deleted from
+Kaizen after the read-back, each from its own `/events/view-section/<id>` page
+and only after confirming the run token was on that page. The three unrelated
+drafts in the account were left untouched. Nothing was ever submitted.
+
+Note for anyone repeating this: the saved-drafts list pages at five rows, so
+deleting two makes two older drafts appear. Compare drafts by id, not by count.
