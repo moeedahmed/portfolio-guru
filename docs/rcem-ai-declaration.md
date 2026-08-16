@@ -22,9 +22,13 @@ carries a declaration. Implementation: `backend/ai_declaration.py`.
   reflection, or the closest reflective free-text field the form has. Not the
   Kaizen timeline Description, which is a one-line summary rather than part of
   the log.
+- **How many times.** Once per entry, in one field. A form with six free-text
+  boxes (REFLECT_LOG) gets one declaration, in the most reflective of them.
+  Repeating it in every box would read as noise and make the entry look
+  machine-stamped rather than declared.
 - **Which forms.** All of them, not just reflective logs. RCEM's statement is
   scoped to reflective logs, but any entry drafted with model assistance was
-  AI-assisted, so the broader default is the safer one. Seven form types carry
+  AI-assisted, so the broader default is the safer one. Seven of the 74 mapped form types carry
   nothing because they have no free-text control at all: STAT, JCF, AUDIT and
   RESEARCH (plus their `_2021` variants). These are attendance and register
   entries with no reflection to declare against.

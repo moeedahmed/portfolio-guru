@@ -51,30 +51,20 @@ _DISABLED_VALUES = {"0", "false", "no", "off"}
 # Narrative fields that can carry the declaration, most reflective first. Only
 # keys that map to a genuine Kaizen free-text control belong here — a
 # declaration written into a dropdown or a date field would be a misfile.
+#
+# Every entry here is the winning target on at least one current form; nothing
+# is listed speculatively. Between them they cover 67 of the 74 mapped form
+# types. The declaration goes in ONE field per entry — the first match wins and
+# the scan stops. `test_ai_declaration.py` fails if a form type stops being
+# covered, so a new form that needs a different key will say so.
 DECLARATION_FIELD_PRIORITY: tuple[str, ...] = (
-    "reflection",
-    "reflective_comments",
-    "reflective_notes",
-    "reflection_on_learning",
-    "learned",
-    "learning_points",
-    "lessons_learned",
-    "learning_outcomes",
-    "clinical_reasoning",
-    "further_action",
-    "other_comments",
-    "general_comments",
-    "session_description",
-    "case_observed",
-    "cases_observed",
-    "patient_presentation",
-    "clinical_scenario",
-    "leadership_context",
-    "project_description",
-    "brief_description",
-    "resource_details",
-    "situation",
-    "description",
+    "reflection",             # most forms
+    "reflective_comments",    # procedure logs
+    "reflective_notes",       # FORMAL_COURSE
+    "learning_points",        # US_CASE, COMPLAINT, SERIOUS_INC, EDU_ACT
+    "learning_outcomes",      # TEACH
+    "clinical_reasoning",     # LAT
+    "general_comments",       # MSF
 )
 
 # DOM targets that must never receive the declaration even if a priority key
@@ -156,8 +146,6 @@ def declaration_target_field(
     form_type: str,
     fields: dict,
     field_map: Optional[dict] = None,
-    *,
-    require_mapped: bool = True,
 ) -> Optional[str]:
     """Return the field key that should carry the declaration, or None.
 
@@ -166,18 +154,14 @@ def declaration_target_field(
     requirement is deliberate: writing the declaration into an otherwise-empty
     reflection would turn a field the doctor still needs to complete into one
     that looks filled.
-
-    `require_mapped=False` is for the browser-use bridge, which fills by field
-    name on forms that have no DOM map to check against.
     """
-    resolved_map = _resolve_field_map(form_type, field_map) if require_mapped else {}
+    resolved_map = _resolve_field_map(form_type, field_map)
     fields = fields or {}
     for key in DECLARATION_FIELD_PRIORITY:
-        if require_mapped:
-            if key not in resolved_map:
-                continue
-            if _field_dom_id(resolved_map[key]) in _NON_NARRATIVE_DOM_IDS:
-                continue
+        if key not in resolved_map:
+            continue
+        if _field_dom_id(resolved_map[key]) in _NON_NARRATIVE_DOM_IDS:
+            continue
         if _has_content(fields.get(key)):
             return key
     return None
@@ -187,8 +171,6 @@ def apply_ai_declaration(
     form_type: str,
     fields: dict,
     field_map: Optional[dict] = None,
-    *,
-    require_mapped: bool = True,
 ) -> tuple[dict, dict]:
     """Append the RCEM AI-use declaration to the entry's narrative field.
 
@@ -205,7 +187,7 @@ def apply_ai_declaration(
     if fields_carry_declaration(out):
         return out, {"declared": False, "field": None, "reason": "already_declared"}
 
-    target = declaration_target_field(form_type, out, field_map, require_mapped=require_mapped)
+    target = declaration_target_field(form_type, out, field_map)
     if not target:
         logger.info(
             "ai_declaration: no narrative field available on %s — entry filed without a declaration",

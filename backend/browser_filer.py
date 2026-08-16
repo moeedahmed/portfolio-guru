@@ -261,11 +261,6 @@ async def file_with_browser_use(
     """
     from browser_use import Agent
     from browser_use.browser import BrowserProfile, BrowserSession
-    from ai_declaration import apply_ai_declaration
-
-    # RCEM AI-use declaration. This bridge fills by field name on forms with no
-    # DOM map, so the target is resolved from the field keys themselves.
-    fields, _declaration_meta = apply_ai_declaration(form_type, fields, require_mapped=False)
 
     # Extract domain for allowed_domains
     parsed = urlparse(platform_url)

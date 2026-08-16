@@ -104,6 +104,24 @@ def test_declaration_never_lands_in_the_timeline_description_or_a_date_field():
         assert DEFAULT_DECLARATION_LABEL not in str(value), f"declaration leaked into {key}"
 
 
+def test_a_form_with_several_narrative_fields_declares_once_in_one_field():
+    """REFLECT_LOG has six free-text boxes. One entry, one declaration."""
+    fields, meta = _file_as_kaizen_would("REFLECT_LOG", {
+        "date_of_encounter": "2026-08-01",
+        "reflection": "A child arrested shortly after triage.",
+        "replay_differently": "I would call the team earlier.",
+        "why": "The triage score understated how unwell they were.",
+        "different_outcome": "Earlier senior input.",
+        "focussing_on": "Recognition of the sick child.",
+        "learned": "Trust the parent's concern over the score.",
+    })
+
+    assert meta["field"] == "reflection"
+    declared_in = [k for k, v in fields.items() if DEFAULT_DECLARATION_LABEL in str(v)]
+    assert declared_in == ["reflection"]
+    assert fields["reflection"].count(DEFAULT_DECLARATION_LABEL) == 1
+
+
 def test_procedural_log_declares_in_its_reflective_comments():
     fields, meta = _file_as_kaizen_would("PROC_LOG", {
         "date_of_activity": "2026-08-01",
