@@ -1075,7 +1075,15 @@ async def test_filing_call_accepts_video_attachment_path():
 
 
 @pytest.mark.asyncio
-async def test_video_upload_reaches_filer_only_after_attach_yes():
+async def test_video_reaches_filer_without_a_second_consent_prompt():
+    """Consent for a video is taken at upload, not again after the draft.
+
+    This previously asserted a save-time prompt for every video. In use that
+    landed as the bot asking the same question twice — once when the video was
+    received ("would you like to attach it?") and again after the draft was
+    approved. The upload prompt now carries the retention warning, so the
+    save-time gate fires only on identifiers discovered after upload.
+    """
     import bot
 
     sim = BotSimulator()
@@ -1107,15 +1115,12 @@ async def test_video_upload_reaches_filer_only_after_attach_yes():
          })) as route_mock, \
          patch("bot.record_case_filed", new=AsyncMock()), \
          patch("bot.check_can_file", new=AsyncMock(return_value=(True, 1, 10, "free"))):
-        first_result = await handle_approval_approve(approve_update, context)
-        route_mock.assert_not_awaited()
-        assert first_result == AWAIT_APPROVAL
-        assert ("📎 Attach it anyway", "ATTACH|yes") in sim.get_last_buttons()
-
-        consent_update = sim._make_callback_update("ATTACH|yes")
-        await bot.handle_attachment_confirm(consent_update, context)
+        await handle_approval_approve(approve_update, context)
 
     route_mock.assert_awaited_once()
+    assert ("📎 Attach it anyway", "ATTACH|yes") not in sim.get_last_buttons(), (
+        "a video the doctor already chose to attach must not be re-queried"
+    )
 
     filed_path = route_mock.call_args[1].get("attachment_path")
     if os.path.exists(temp_path):

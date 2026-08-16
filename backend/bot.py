@@ -4221,13 +4221,18 @@ def _attachment_confirmation_reason(context) -> str | None:
     if context.user_data.get("attachment_upload_confirmed"):
         return None
 
-    kind = str(context.user_data.get("attachment_kind") or "").strip().lower()
-    if kind == "video":
-        return "I can't check what's visible in a video"
-
+    # Whether to attach at all was already asked and answered at upload time,
+    # where the prompt states the file is kept exactly as sent and cannot be
+    # reviewed once on the draft. Repeating that question here read as the bot
+    # asking the same thing twice. So this gate now fires only on information
+    # that did not exist at upload: identifiers found in the text extracted
+    # from the file afterwards.
+    #
+    # That means a video, and a file attached without being read, no longer
+    # stop here — nothing new is known about them by this point.
     case_text = str(context.user_data.get("case_text") or "")
     if not case_text.strip():
-        return "I couldn't read any text from it to check"
+        return None
 
     _redacted, findings = deidentify_clinical_text(case_text)
     labels: list[str] = []
@@ -10768,6 +10773,8 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
             await ack.edit_text(
                 "🎞️ Video received — would you like to attach it to the Kaizen draft?\n\n"
+                "Kaizen keeps it exactly as you sent it, and you can't review a file "
+                "once it's on the draft — so check nothing identifying is visible.\n\n"
                 "I won't interpret clinical videos. Send your own context or findings in text/voice.",
                 reply_markup=_build_video_intent_keyboard(),
             )
@@ -11712,10 +11719,9 @@ async def handle_attachment_confirm(update: Update, context: ContextTypes.DEFAUL
         "decision_path",
         decision="attachment_upload_kept" if keep else "attachment_upload_dropped",
     )
-    try:
-        await query.edit_message_reply_markup(reply_markup=None)
-    except Exception:
-        pass
+    # Deliberately does not clear the keyboard here: handle_approval_approve
+    # disarms it as its first act, and doing it twice made Telegram reject the
+    # second, no-op edit and killed the filing.
     return await handle_approval_approve(update, context)
 
 
@@ -11746,11 +11752,22 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     context.user_data["filing_in_progress"] = True
 
     if query:
-        await query.answer()
+        try:
+            await query.answer()
+        except Exception:
+            logger.debug("callback answer failed (already answered)", exc_info=True)
 
-    # Disarm buttons immediately — prevents double-tap filing
+    # Disarm buttons immediately — prevents double-tap filing.
+    # Tolerant on purpose: when this is re-entered from the attachment-consent
+    # prompt the markup is already cleared, and Telegram rejects a no-op edit
+    # with "Message is not modified". That cosmetic failure used to propagate
+    # and abort the save, so the doctor saw "Something went wrong while filing"
+    # for a draft that was never attempted.
     if query:
-        await query.edit_message_reply_markup(reply_markup=None)
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            logger.debug("could not disarm buttons (already disarmed)", exc_info=True)
         source_message = query.message
     else:
         source_message = update.message
@@ -13909,6 +13926,8 @@ async def _resume_pending_consent_input(
             context.user_data["_pending_doc_context"] = caption
         await query.edit_message_text(
             "🎞️ Video received — would you like to attach it to the Kaizen draft?\n\n"
+            "Kaizen keeps it exactly as you sent it, and you can't review a file "
+            "once it's on the draft — so check nothing identifying is visible.\n\n"
             "I won't interpret clinical videos. Send your own context or findings in text/voice.",
             reply_markup=_build_video_intent_keyboard(),
         )

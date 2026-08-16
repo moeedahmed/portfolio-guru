@@ -54,22 +54,34 @@ class TestImageAndDocumentPathways:
         assert reason is None
 
     @pytest.mark.parametrize("kind", ["image", "document"])
-    def test_no_extracted_text_means_no_signal_so_it_asks(self, kind):
-        """An 'attach only' file was never read. Silence is not evidence of safety."""
+    def test_unread_file_does_not_ask_again(self, kind):
+        """Whether to attach at all was answered at upload, where the prompt
+        already says the file is kept as sent and cannot be reviewed later.
+        Nothing new is known here, so asking twice was just noise."""
         reason = _attachment_confirmation_reason(
             _context(attachment_path="/tmp/f", attachment_kind=kind, case_text="")
         )
-        assert reason is not None
+        assert reason is None
 
 
 class TestVideoPathway:
-    def test_video_always_asks_even_with_a_clean_transcript(self):
-        """The audio transcript says nothing about a wristband in frame."""
+    def test_video_does_not_ask_a_second_time(self):
+        """Consent for a video is taken at upload, in a prompt that carries the
+        same warning. Repeating it after the draft read as a duplicate ask."""
         reason = _attachment_confirmation_reason(
             _context(attachment_path="/tmp/v.mp4", attachment_kind="video", case_text=CLEAN_CASE)
         )
-        assert reason is not None
-        assert "video" in reason
+        assert reason is None
+
+    def test_upload_prompt_carries_the_retention_warning(self):
+        """The single remaining ask has to be an informed one."""
+        import inspect
+        import bot
+
+        source = inspect.getsource(bot)
+        assert source.count("check nothing identifying is visible") >= 2, (
+            "Both video-intent prompts must warn that the file is kept as sent"
+        )
 
 
 class TestGateMechanics:
@@ -128,6 +140,49 @@ class TestGateMechanics:
         assert context.user_data["attachment_path"] == "/tmp/f.jpg"
         assert context.user_data["attachment_upload_confirmed"] is True
         resume.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_no_op_keyboard_edit_never_aborts_the_save(self):
+        """The reported failure: "Something went wrong while filing".
+
+        `handle_attachment_confirm` cleared the keyboard and then re-entered
+        `handle_approval_approve`, which cleared it again. Telegram rejects the
+        second, identical edit with "Message is not modified", and that purely
+        cosmetic error propagated out and killed the filing for a draft that had
+        never been attempted.
+        """
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from telegram.error import BadRequest
+
+        import bot
+
+        context = _context(chosen_form="CBD")
+        update = MagicMock()
+        update.callback_query.data = "APPROVE|draft"
+        update.callback_query.answer = AsyncMock()
+        update.callback_query.edit_message_reply_markup = AsyncMock(
+            side_effect=BadRequest("Message is not modified")
+        )
+        update.callback_query.message.reply_text = AsyncMock()
+        update.effective_user.id = 12345
+
+        # Fails later, at credentials — the point is it gets *past* the disarm.
+        with patch.object(bot, "get_credentials", return_value=None):
+            await bot.handle_approval_approve(update, context)
+
+        update.callback_query.edit_message_reply_markup.assert_awaited(), (
+            "the disarm must be attempted"
+        )
+
+    def test_confirm_does_not_clear_the_keyboard_itself(self):
+        """Clearing it here and again in the callee is what caused the crash."""
+        import inspect
+
+        import bot
+
+        source = inspect.getsource(bot.handle_attachment_confirm)
+        assert "edit_message_reply_markup" not in source
 
     def test_the_confirm_callbacks_are_routed_in_the_approval_state(self):
         """A gate whose buttons are not registered would strand the save."""
