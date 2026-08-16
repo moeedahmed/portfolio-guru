@@ -1483,3 +1483,79 @@ def test_image_buttons_do_not_promise_interpretation():
     labels = [b.text for row in bot._build_image_intent_keyboard().inline_keyboard for b in row]
     assert any("Read text" in label for label in labels)
     assert not any("drafting" in label.lower() for label in labels)
+
+
+@pytest.mark.asyncio
+async def test_album_shows_one_prompt_that_updates_not_three():
+    """Three files produced three stacked prompts, each with live buttons —
+    "Video received", then "2 videos received", then "2 videos and 1 image".
+    Buffering the files was right; leaving three questions on screen was not.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.bot = MagicMock()
+    context.bot.edit_message_text = AsyncMock()
+
+    def _ack(message_id):
+        ack = MagicMock()
+        ack.chat_id = 99
+        ack.message_id = message_id
+        ack.edit_text = AsyncMock()
+        ack.delete = AsyncMock()
+        return ack
+
+    first, second, third = _ack(1), _ack(2), _ack(3)
+
+    bot._queue_pending_media(context, {"path": "/tmp/a.mp4", "name": "a.mp4", "kind": "video"})
+    await bot._show_pending_media_prompt(context, first, single="🎞️ Video received")
+
+    bot._queue_pending_media(context, {"path": "/tmp/b.mp4", "name": "b.mp4", "kind": "video"})
+    await bot._show_pending_media_prompt(context, second, single="🎞️ Video received")
+
+    bot._queue_pending_media(context, {"path": "/tmp/c.jpg", "name": "c.jpg", "kind": "image"})
+    await bot._show_pending_media_prompt(context, third, single="📷 Image received")
+
+    # Only the first ack ever becomes a prompt.
+    first.edit_text.assert_awaited_once()
+    second.edit_text.assert_not_awaited()
+    third.edit_text.assert_not_awaited()
+
+    # The later acks are removed rather than left as stray messages.
+    second.delete.assert_awaited_once()
+    third.delete.assert_awaited_once()
+
+    # And the one surviving prompt was rewritten to describe everything.
+    assert context.bot.edit_message_text.await_count == 2
+    final = context.bot.edit_message_text.await_args.kwargs
+    assert final["message_id"] == 1
+    assert "2 videos and 1 image" in final["text"]
+
+
+@pytest.mark.asyncio
+async def test_prompt_reanchors_if_the_original_was_deleted():
+    """A deleted prompt must not swallow the file silently."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.bot = MagicMock()
+    context.bot.edit_message_text = AsyncMock(side_effect=Exception("message to edit not found"))
+    context.user_data["_pending_media_prompt"] = {"chat_id": 99, "message_id": 1}
+
+    ack = MagicMock()
+    ack.chat_id = 99
+    ack.message_id = 7
+    ack.edit_text = AsyncMock()
+    ack.delete = AsyncMock()
+
+    bot._queue_pending_media(context, {"path": "/tmp/a.mp4", "name": "a.mp4", "kind": "video"})
+    await bot._show_pending_media_prompt(context, ack, single="🎞️ Video received")
+
+    ack.edit_text.assert_awaited_once()
+    assert context.user_data["_pending_media_prompt"]["message_id"] == 7

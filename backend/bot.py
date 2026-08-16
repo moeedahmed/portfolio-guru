@@ -1152,6 +1152,7 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
             "last_bot_msg_id",
             "last_bot_chat_id",
             "attachments",
+            "_pending_media_prompt",
             "attachment_path",
             "attachment_name",
             "attachment_kind",
@@ -8601,6 +8602,49 @@ def _numbered_media_name(context, stem: str, suffix: str) -> str:
     return f"{stem}{suffix}" if position == 1 else f"{stem}-{position}{suffix}"
 
 
+async def _show_pending_media_prompt(context, ack, *, single: str) -> None:
+    """Keep one prompt for the whole upload, updating it as files land.
+
+    Each file of an album arrives as its own update with its own "Receiving…"
+    ack, so editing each ack produced a stack of prompts — one saying "Video
+    received", the next "2 videos received", the next "2 videos and 1 image" —
+    each with live buttons. Buffering the files was right; leaving three
+    questions on screen was not.
+
+    The first arrival becomes the prompt and is remembered. Every later arrival
+    rewrites that same message and removes its own ack, so the doctor sees one
+    question that grows to describe everything they sent.
+    """
+    text = _pending_media_prompt_text(context, single=single)
+    keyboard = _build_pending_media_keyboard(context)
+    tracked = context.user_data.get("_pending_media_prompt")
+
+    if tracked:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=tracked["chat_id"],
+                message_id=tracked["message_id"],
+                text=text,
+                reply_markup=keyboard,
+            )
+            try:
+                await ack.delete()
+            except Exception:
+                logger.debug("could not remove duplicate ack", exc_info=True)
+            return
+        except Exception:
+            # The tracked prompt is gone (deleted, too old). Fall through and
+            # let this ack become the prompt rather than losing it entirely.
+            logger.debug("pending-media prompt not editable, re-anchoring", exc_info=True)
+
+    await ack.edit_text(text, reply_markup=keyboard)
+    context.user_data["_pending_media_prompt"] = {
+        "chat_id": ack.chat_id,
+        "message_id": ack.message_id,
+    }
+    _track_latest_message(context, ack)
+
+
 def _pending_media_prompt_text(context, *, single: str) -> str:
     """Prompt copy that names the whole upload, not just the first file."""
     items = _pending_media_items(context)
@@ -9457,6 +9501,7 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
     pending_items = _pending_media_items(context)
     pending_doc = context.user_data.pop("_pending_doc", None) or {}
     context.user_data.pop("_pending_docs", None)
+    context.user_data.pop("_pending_media_prompt", None)
     pending_doc_context = context.user_data.pop("_pending_doc_context", "")
 
     # The body below handles one file. Everything else in a multi-file upload is
@@ -10896,11 +10941,9 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 has_caption=bool(caption),
             )
 
-            await ack.edit_text(
-                _pending_media_prompt_text(context, single="📷 Image received — how would you like to use it?"),
-                reply_markup=_build_pending_media_keyboard(context),
+            await _show_pending_media_prompt(
+                context, ack, single="📷 Image received — how would you like to use it?"
             )
-            _track_latest_message(context, ack)
             return AWAIT_DOC_INTENT
         except Exception as e:
             logger.warning("Photo download/cache failed: %s", e)
@@ -10994,14 +11037,11 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 has_caption=bool(caption),
             )
 
-            await ack.edit_text(
-                _pending_media_prompt_text(
-                    context,
-                    single="🎞️ Video received — would you like to attach it to the Kaizen draft?",
-                ),
-                reply_markup=_build_pending_media_keyboard(context),
+            await _show_pending_media_prompt(
+                context,
+                ack,
+                single="🎞️ Video received — would you like to attach it to the Kaizen draft?",
             )
-            _track_latest_message(context, ack)
             return AWAIT_DOC_INTENT
         except BadRequest as e:
             logger.warning("Video download/cache failed: %s", e)
