@@ -75,6 +75,10 @@ JOURNEY_TESTS=(
   tests/test_privacy_guard_names.py
   tests/test_attachment_upload_consent.py
   tests/test_model_name_scrub.py
+  # 9. Disaster recovery — off-device backup must fail loudly, never silently.
+  #    A silent failure here costs every user's data and is invisible until the
+  #    day it matters (see the 53-night incident in scripts/restore_db.md).
+  tests/test_backup_offdevice.py
 )
 
 echo

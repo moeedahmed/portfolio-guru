@@ -36,16 +36,64 @@ snapshots plus the pickle/JSON state.
    sqlite3 "$DATA/portfolio_guru.db" "PRAGMA integrity_check;"   # expect: ok
    sqlite3 "$DATA/usage.db"          "PRAGMA integrity_check;"   # expect: ok
    ```
-5. **Confirm the Fernet key matches** the one the bot runs with (from BWS /
-   `FERNET_SECRET_KEY`). The credentials in `portfolio_guru.db` are encrypted —
-   a different key means they won't decrypt. The key is NOT in the backup by
-   design; it lives in BWS.
+5. **Confirm the Fernet key matches** the one the bot runs with. The credentials
+   in `portfolio_guru.db` are encrypted — a different key means they won't
+   decrypt. The key is NOT in the backup by design; it lives in BWS as
+   **`FERNET_SECRET_KEY_PORTFOLIO`** (id `9e653679-9a33-4c23-a15c-b405015713de`).
+   Note the `_PORTFOLIO` suffix: there is no BWS secret named `FERNET_SECRET_KEY`,
+   and looking for that name is a dead end mid-incident.
+
+   Prove it decrypts before you restart anything:
+
+   ```
+   cd backend && venv/bin/python3 -c "
+   import sqlite3, os, subprocess, json
+   from cryptography.fernet import Fernet
+   tok = open(os.path.expanduser('~/.openclaw/.bws-token')).read().strip()
+   out = subprocess.run([os.path.expanduser('~/.cargo/bin/bws'), 'secret', 'get',
+                         '9e653679-9a33-4c23-a15c-b405015713de', '--output', 'json'],
+                        env={**os.environ, 'BWS_ACCESS_TOKEN': tok},
+                        capture_output=True, text=True).stdout
+   f = Fernet(json.loads(out)['value'].encode())
+   rows = sqlite3.connect(os.path.expanduser('~/.openclaw/data/portfolio-guru/portfolio_guru.db')).execute(
+       'SELECT kaizen_username_enc, kaizen_password_enc FROM usercredential').fetchall()
+   ok = sum(1 for u, p in rows if (f.decrypt(u), f.decrypt(p)))
+   print(f'decrypted {ok}/{len(rows)} credentials')
+   "
+   ```
+
+   Expect `decrypted N/N`. Anything less means the key and the archive disagree —
+   stop and resolve that before restarting the bot.
+
 6. **Restart the bot:**
    ```
    launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.portfolioguru.bot.plist
    ```
 
-## Off-device protection (LIVE)
+## Off-device protection (LIVE — verified 2026-08-18)
+
+> **Incident, 2026-06-26 → 2026-08-17.** Off-device upload failed silently for 53
+> consecutive nights. `backup_db.sh` ran `gcloud storage cp` with `>/dev/null 2>&1`,
+> so a `CommandLoadFailure` (launchd's minimal PATH made gcloud select macOS
+> system Python 3.9, which it no longer supports) collapsed into a one-line
+> WARNING on an exit-0 run that still printed "Backup complete." The bucket held
+> exactly one archive, from 26 June, while this document described off-device
+> protection as live.
+>
+> Fixed by pinning `CLOUDSDK_PYTHON`, verifying the uploaded object is listable
+> before claiming success, alerting the operator on failure, and exiting non-zero.
+> Guarded by `backend/tests/test_backup_offdevice.py`.
+>
+> **The lesson worth keeping: a backup is not proven until it has been restored.**
+> Re-run the drill below after any change to backup, secrets, or the data layer.
+
+### Restore drill — last passed 2026-08-18
+
+Full chain proven from the bucket alone: passphrase fetched from BWS → newest
+archive downloaded → GPG-decrypted → extracted (6 artifacts) → `PRAGMA
+integrity_check` = `ok` on both SQLite databases → PicklePersistence
+deserialised → **15/15 stored Kaizen credentials decrypted** with the BWS Fernet
+key. Recovery from a total loss of the Mac Mini is evidenced, not assumed.
 
 Every nightly backup is **gpg-encrypted (AES256)** and uploaded to an EU bucket
 **`gs://portfolio-guru-eu-backups`** (London, `portfolio-guru-eu` project, 90-day

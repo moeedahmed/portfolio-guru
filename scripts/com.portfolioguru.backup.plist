@@ -9,14 +9,21 @@
     <string>/bin/bash</string>
     <string>/Users/moeedahmed/projects/portfolio-guru/scripts/backup_db.sh</string>
   </array>
-  <!-- Set PG_BACKUP_REMOTE to an OFF-DEVICE target before this is real protection.
-       Empty value = on-device backups only (better than nothing, not disaster-proof). -->
+  <!-- PG_BACKUP_REMOTE is the OFF-DEVICE target. An empty value here does NOT
+       mean "local only" — backup_db.sh reads it with `${PG_BACKUP_REMOTE:-...}`,
+       so empty falls through to the default EU bucket. Set it explicitly so the
+       plist says what actually happens.
+       CLOUDSDK_PYTHON is load-bearing: launchd's minimal PATH makes gcloud pick
+       macOS system Python 3.9, which crashes it (CommandLoadFailure). That is
+       what silently broke every off-device upload from 2026-06-26 to 2026-08-17. -->
   <key>EnvironmentVariables</key>
   <dict>
     <key>PG_BACKUP_REMOTE</key>
-    <string></string>
+    <string>gs://portfolio-guru-eu-backups</string>
     <key>PG_BACKUP_RETAIN_DAYS</key>
     <string>30</string>
+    <key>CLOUDSDK_PYTHON</key>
+    <string>/opt/homebrew/bin/python3.12</string>
   </dict>
   <key>StartCalendarInterval</key>
   <dict>
