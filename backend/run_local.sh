@@ -108,6 +108,18 @@ fi
 
 FERNET_SECRET_KEY="$(get_secret 9e653679-9a33-4c23-a15c-b405015713de)"
 export FERNET_SECRET_KEY
+
+# Liveness heartbeat target (Healthchecks.io ping URL). bot.py already schedules
+# the 5-minute ping; without this the whole mechanism is a silent no-op, which
+# is exactly how it sat unused until 2026-08-18. Non-fatal when absent so a
+# missing secret degrades to "no monitoring", never "bot won't start".
+PG_HEARTBEAT_URL="$(get_secret_by_key PG_HEARTBEAT_URL)"
+export PG_HEARTBEAT_URL
+if [ -n "$PG_HEARTBEAT_URL" ]; then
+  echo "Liveness heartbeat: configured"
+else
+  echo "Liveness heartbeat: NOT configured (set PG_HEARTBEAT_URL in BWS to enable)"
+fi
 # OpenAI keys not in use — extractor uses DeepSeek V4 Flash
 # DEEPSEEK_API_KEY_PORTFOLIO is loaded below
 DEEPSEEK_API_KEY="$(get_secret c5d82503-3d1d-427b-9be1-b44e01564203)"

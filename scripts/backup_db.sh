@@ -55,11 +55,26 @@ fi
 export CLOUDSDK_PYTHON
 
 # Off-device encryption passphrase: env first, else BWS.
+# One BWS round trip, then read whatever keys we need out of it.
+_BWS_CACHE=""
+bws_key() {
+  [ -f "$HOME/.openclaw/.bws-token" ] && [ -x "$BWS_BIN" ] || return 0
+  if [ -z "$_BWS_CACHE" ]; then
+    _BWS_CACHE="$(BWS_ACCESS_TOKEN="$(cat "$HOME/.openclaw/.bws-token")" "$BWS_BIN" secret list --output json 2>/dev/null || true)"
+  fi
+  [ -n "$_BWS_CACHE" ] || return 0
+  printf '%s' "$_BWS_CACHE" | python3 -c "
+import json,sys
+try: print(next((s['value'] for s in json.load(sys.stdin) if s.get('key')=='$1'), ''))
+except Exception: print('')
+" 2>/dev/null || true
+}
+
 GPG_PASS="${PG_BACKUP_GPG_PASSPHRASE:-}"
-if [ -z "$GPG_PASS" ] && [ -f "$HOME/.openclaw/.bws-token" ] && [ -x "$BWS_BIN" ]; then
-  GPG_PASS="$(BWS_ACCESS_TOKEN="$(cat "$HOME/.openclaw/.bws-token")" "$BWS_BIN" secret list --output json 2>/dev/null \
-    | python3 -c "import json,sys;print(next((s['value'] for s in json.load(sys.stdin) if s.get('key')=='PG_BACKUP_GPG_PASSPHRASE'),''))" 2>/dev/null || true)"
-fi
+[ -z "$GPG_PASS" ] && GPG_PASS="$(bws_key PG_BACKUP_GPG_PASSPHRASE)"
+
+# Dead-man's-switch ping URL (Healthchecks.io). Optional; absent = no-op.
+PG_BACKUP_HEALTHCHECK_URL="${PG_BACKUP_HEALTHCHECK_URL:-$(bws_key PG_BACKUP_HEALTHCHECK_URL)}"
 
 # Alert the operator on Telegram. A backup that fails quietly is worse than no
 # backup, because it also buys false confidence — so every failure path below
@@ -171,11 +186,22 @@ find "$LOCAL_DEST" -name 'portfolio-guru-backup-*.tar.gz' -mtime +"$RETAIN_DAYS"
 # 6) Report honestly. A local-only backup does not survive the disk it is
 #    guarding, so off-device failure is a FAILED backup run, not a warning:
 #    alert the operator and exit non-zero so the failure is visible.
+# Dead-man's switch. Telegram alerts only fire when the script RUNS and fails;
+# they cannot report a run that never happened (launchd unloaded, Mac asleep,
+# disk full). Healthchecks.io alerts on the ABSENCE of a ping, which covers the
+# case no in-script check ever can. No-op when unset.
+ping_healthcheck() {
+  [ -n "${PG_BACKUP_HEALTHCHECK_URL:-}" ] || return 0
+  curl -sS -m 10 --retry 3 "${PG_BACKUP_HEALTHCHECK_URL}${1:-}" >/dev/null 2>&1 || true
+}
+
 if [ "$OFFDEVICE_OK" -eq 1 ]; then
   echo "Backup complete (off-device copy verified)."
+  ping_healthcheck
 else
   echo "BACKUP FAILED off-device: $OFFDEVICE_ERR" >&2
   echo "Local archive is intact at $LOCAL_DEST/$ARCHIVE but is NOT disaster-proof." >&2
   alert_operator "off-device copy FAILED — $OFFDEVICE_ERR. Local backup intact but not disaster-proof."
+  ping_healthcheck "/fail"
   exit 1
 fi

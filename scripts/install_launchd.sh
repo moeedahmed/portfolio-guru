@@ -8,7 +8,7 @@ PLIST_PATH="${HOME}/Library/LaunchAgents/${SERVICE_LABEL}.plist"
 # this one file, so launchd must point here too. Pointing launchd at a separate
 # path created a file that never received a byte — and a debugger tailing it got
 # months-old errors that read as current.
-BOT_LOG="${PORTFOLIO_GURU_BOT_LOG:-/tmp/portfolio-guru-bot.log}"
+BOT_LOG="${PORTFOLIO_GURU_BOT_LOG:-$HOME/.openclaw/logs/portfolio-guru/bot.log}"
 
 mkdir -p "$(dirname "$PLIST_PATH")"
 
