@@ -11852,6 +11852,22 @@ def _friendly_field_name(key) -> str:
     )
 
 
+_CURRICULUM_GAP_MARKERS = ("curriculum", "key capabilit", "capabilit", "slo")
+
+
+def _prioritise_skipped_names(names: list[str]) -> list[str]:
+    """Put curriculum gaps first, because only the first three are shown.
+
+    A US_CASE filing reported "Location, Equipment used, Other comments and 1
+    other" — and that one other was the curriculum linkage, which had failed
+    entirely. An untagged portfolio entry is the gap a trainee most needs to
+    know about, and it was hidden purely because it sorted fourth.
+    """
+    curriculum = [n for n in names if any(m in n.lower() for m in _CURRICULUM_GAP_MARKERS)]
+    rest = [n for n in names if n not in curriculum]
+    return curriculum + rest
+
+
 def _friendly_skipped_names(skipped) -> list[str]:
     """Friendly, de-duplicated field names for a skipped list.
 
@@ -12669,7 +12685,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             receipt_details.append(f"{filled_count} field{'s' if filled_count != 1 else ''} completed")
 
         details_section = ("\n" + "\n".join(receipt_details)) if receipt_details else ""
-        msg_header = f"✅ Saved! Your draft is ready on Kaizen.\n\n*{form_name}*{details_section}"
+        msg_header = f"✅ Saved! Your draft is ready on Kaizen.\n\n{form_name}{details_section}"
 
         extra_blocks = []
         if date_default_note:
@@ -12688,7 +12704,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             msg = msg_header
         status_line = "✅ Draft saved."
     elif status == "partial":
-        skipped_names = _friendly_skipped_names(skipped)
+        skipped_names = _prioritise_skipped_names(_friendly_skipped_names(skipped))
         if len(skipped_names) > 3:
             skipped_display = ", ".join(skipped_names[:3]) + f" and {len(skipped_names) - 3} other{'s' if len(skipped_names) - 3 != 1 else ''}"
         else:
@@ -12709,7 +12725,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
 
             msg_body = (
                 f"⚠️ Draft saved with some issues — please check Kaizen\n\n"
-                f"*{form_name}*\n"
+                f"{form_name}\n"
                 f"Filled: {fields_filled_str}.\n\n"
                 f"The draft may not have saved completely. Please check to verify before retrying."
             )
@@ -12737,9 +12753,14 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             else:
                 action_line = "Open Kaizen to complete the draft and assign your assessor."
 
+            # Plain text, not Markdown: this message is sent without a
+            # parse_mode, so the asterisks rendered literally as *Ultrasound
+            # Case Reflection*. Adding parse_mode instead would risk a failed
+            # send — form names and field labels carry underscores and
+            # brackets — and this is the one message that must always arrive.
             msg_header = (
                 f"📝 Draft saved on Kaizen, but needs a quick review!\n\n"
-                f"*{form_name}*\n"
+                f"{form_name}\n"
                 f"Completed: {fields_filled_str}.\n"
                 f"Remaining gaps: {skipped_display}.\n\n"
                 f"{action_line}"
