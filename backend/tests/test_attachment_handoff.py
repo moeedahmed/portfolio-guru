@@ -1065,7 +1065,12 @@ async def test_filing_call_accepts_video_attachment_path():
     route_mock.assert_called_once()
     filed_path = route_mock.call_args[1].get("attachment_path")
     assert filed_path is not None
-    assert os.path.basename(filed_path) == "portfolio-video.mp4"
+    # Bot-named files are renamed to the suggested Kaizen convention on the
+    # way to the filer; a name the doctor chose is left alone (covered above).
+    basename = os.path.basename(filed_path)
+    assert basename.endswith(".mp4")
+    assert basename.count("-") >= 3, f"expected Category-Grade-Description-Date, got {basename}"
+    assert not basename.startswith("portfolio-video")
     assert "Attachment skipped" not in _all_visible_text(sim)
 
     if os.path.exists(temp_path):
@@ -1566,3 +1571,54 @@ async def test_prompt_reanchors_if_the_original_was_deleted():
 
     ack.edit_text.assert_awaited_once()
     assert context.user_data["_pending_media_prompt"]["message_id"] == 7
+
+
+# ── Kaizen document naming (London EM / RCEM suggested convention) ────────────
+
+
+def test_bot_named_files_follow_the_suggested_convention():
+    """Category-Grade-Description-Date, per the RCEM/London guidance."""
+    import bot
+
+    name = bot._kaizen_document_name("portfolio-image.jpg", "US_CASE", "HIGHER")
+    assert name.startswith("POCUS-Higher-")
+    assert name.endswith(".jpg")
+
+
+def test_a_file_the_doctor_named_is_never_renamed():
+    """The convention is explicitly advisory. Overwriting a name the doctor
+    chose would be the tool overruling them on optional guidance."""
+    import bot
+
+    for original in ("ALS certificate.pdf", "Moeed KH A Kind Life.pdf", "scan.png"):
+        assert bot._kaizen_document_name(original, "US_CASE", "HIGHER") == original
+
+
+def test_several_files_on_one_case_keep_distinct_names():
+    """Identical names are indistinguishable in Kaizen and would defeat the
+    filer's per-filename upload confirmation."""
+    import bot
+
+    first = bot._kaizen_document_name("portfolio-image.jpg", "US_CASE", "HIGHER")
+    second = bot._kaizen_document_name("portfolio-image-2.jpg", "US_CASE", "HIGHER")
+    third = bot._kaizen_document_name("portfolio-video-3.mp4", "US_CASE", "HIGHER")
+    assert len({first, second, third}) == 3
+
+
+def test_unknown_form_falls_back_to_other_not_a_wrong_category():
+    import bot
+
+    name = bot._kaizen_document_name("portfolio-image.jpg", "REFLECT_LOG", None)
+    assert name.startswith("Other-")
+
+
+def test_draft_preview_does_not_repeat_one_marker_on_every_line():
+    """An ultrasound reflection rendered eight identical 📌 pins, because every
+    unmapped field fell back to the same default. A marker on everything marks
+    nothing."""
+    import inspect
+
+    import bot
+
+    source = inspect.getsource(bot._format_generic_draft)
+    assert 'FIELD_EMOJIS.get(key, "📌")' not in source

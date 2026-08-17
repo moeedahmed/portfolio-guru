@@ -3306,6 +3306,11 @@ FIELD_EMOJIS = {
     "esle_description":       "📝",
     "us_findings":            "🔊",
     "us_indication":          "🔊",
+    "date_of_case":           "📅",
+    "us_application":         "🔊",
+    "changed_management":     "🔀",
+    "usable_images":          "🖼️",
+    "interpret_images":       "🔎",
     "procedure_type":         "🔬",
     "complications":          "⚠️",
     "outcome":                "📊",
@@ -5001,8 +5006,12 @@ def _format_generic_draft(draft: FormDraft) -> str:
             continue
 
         label = field["label"]
-        fe = FIELD_EMOJIS.get(key, "📌")
-        label_str = f"{fe} *{label}:*"
+        # No default marker. Falling back to 📌 for every unmapped field put an
+        # identical pin on eight lines of an ultrasound reflection, which marks
+        # nothing. An emoji here now means "this line is a different kind of
+        # thing" — a date, a learning point, a warning.
+        fe = FIELD_EMOJIS.get(key, "")
+        label_str = f"{fe} *{label}:*" if fe else f"*{label}:*"
 
         if empty:
             # Missing required field
@@ -11979,6 +11988,54 @@ def _build_field_edit_buttons(skipped: list) -> list[list[InlineKeyboardButton]]
     return rows
 
 
+# London EM / RCEM suggested document naming: Category-Grade-Description-Date.
+# Explicitly "not mandatory but merely a suggested naming system", so this is
+# applied to files the bot named itself (portfolio-image.jpg and friends) and
+# never to a filename the doctor chose — renaming their "ALS certificate.pdf"
+# would be the tool overruling them on a convention that is advisory.
+_KAIZEN_DOC_CATEGORIES = {
+    "US_CASE": "POCUS",
+    "PROCEDURAL_LOG": "Logbook",
+    "PROCEDURAL_LOG_ACCS": "Logbook",
+    "DOPS": "Logbook",
+    "DOPS_ACCS": "Logbook",
+    "TEACH_OBS": "Teaching",
+    "TEACH_CONFID": "Teaching",
+    "EDU_ACT": "Teaching",
+    "QIAT": "Quality improvement",
+    "AUDIT": "Quality improvement",
+    "FORMAL_COURSE": "Certificates",
+    "RESEARCH": "Research",
+    "MSF": "Feedback",
+}
+
+_BOT_ASSIGNED_NAME_RE = re.compile(r"^portfolio-(image|video)(-\d+)?\.\w+$", re.IGNORECASE)
+
+
+def _kaizen_document_name(original_name: str, form_type: str, training_level: str | None) -> str:
+    """Apply the suggested Kaizen naming convention to a bot-named file.
+
+    Produces "POCUS-Higher-Ultrasound Case Reflection-17-08-2026". The guidance
+    asks for the training year (ST4); the profile only records a stage
+    (HIGHER / INTERMEDIATE / ACCS), so the stage is used rather than inventing
+    a year the bot does not know.
+    """
+    name = os.path.basename(original_name or "")
+    if not _BOT_ASSIGNED_NAME_RE.match(name):
+        return original_name
+
+    suffix = os.path.splitext(name)[1]
+    category = _KAIZEN_DOC_CATEGORIES.get(schema_form_type(form_type or ""), "Other")
+    grade = (training_level or "").strip().title() or "Trainee"
+    described = public_form_name(form_type) or "Portfolio evidence"
+    stamp = datetime.now().strftime("%d-%m-%Y")
+    # Keep the per-file index. Several files on one case would otherwise share
+    # a name, which Kaizen shows identically and which defeats the filer's
+    # per-filename upload confirmation.
+    index = _BOT_ASSIGNED_NAME_RE.match(name).group(2) or ""
+    return f"{category}-{grade}-{described}-{stamp}{index}{suffix}"
+
+
 def _attachment_path_with_original_name(path: str, original_name: str) -> str:
     """Return a path whose basename matches the user's original filename.
 
@@ -12292,7 +12349,12 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         if not is_supported_attachment(name):
             dropped.append("unsupported")
             continue
-        usable_paths.append(_attachment_path_with_original_name(path, name))
+        usable_paths.append(
+            _attachment_path_with_original_name(
+                path,
+                _kaizen_document_name(name, form_type, get_training_level(user_id)),
+            )
+        )
 
     if usable_paths:
         # A single file still goes down as a plain string so the filer, the
