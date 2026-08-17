@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import sys
+import shutil
 import tempfile
 import time
 from datetime import UTC, datetime, timedelta
@@ -8538,6 +8539,43 @@ def _add_case_attachment(context, path: str, name: str, kind: str) -> bool:
     return not already
 
 
+def _cache_and_queue_attachment(context, tmp_path: str, name: str, kind: str) -> bool:
+    """Keep a mid-conversation file and queue it for the Kaizen draft.
+
+    Only `handle_case_input` could attach anything. A photo or clip sent after
+    a form was chosen, or once the draft was on screen, went to a different
+    handler that read it for text and then deleted it in a `finally` — so a
+    doctor who remembered a clip after seeing the draft lost it silently.
+
+    The temp file is about to be unlinked by the caller, so it is copied into
+    the same cache directory `handle_case_input` uses before being queued.
+    """
+    if not tmp_path or not os.path.exists(tmp_path):
+        return False
+    if not is_supported_attachment(name or ""):
+        return False
+    try:
+        cache_dir = os.path.join(tempfile.gettempdir(), "portfolio_guru_cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        suffix = os.path.splitext(name)[1] or os.path.splitext(tmp_path)[1]
+        with tempfile.NamedTemporaryFile(dir=cache_dir, suffix=suffix, delete=False) as cached:
+            cached_path = cached.name
+        shutil.copy2(tmp_path, cached_path)
+    except OSError:
+        logger.warning("Could not cache mid-conversation attachment", exc_info=True)
+        return False
+
+    added = _add_case_attachment(context, cached_path, name, kind)
+    if added:
+        _audit_event(
+            context,
+            "media_document_flow",
+            action="mid_conversation_attachment_queued",
+            attachment_kind=kind,
+        )
+    return added
+
+
 def _clear_case_attachments(context) -> None:
     context.user_data.pop("attachments", None)
     for key in ("attachment_path", "attachment_name", "attachment_kind"):
@@ -10050,6 +10088,9 @@ async def handle_template_review_media(update: Update, context: ContextTypes.DEF
                 tmp_path = tmp.name
                 await photo_file.download_to_drive(tmp_path)
                 extracted_text = await extract_from_image(tmp_path)
+                _cache_and_queue_attachment(
+                    context, tmp_path, _numbered_media_name(context, "portfolio-image", ".jpg"), "image"
+                )
             if extracted_text and extracted_text.strip() == "NOT_CLINICAL":
                 extracted_text = None
                 await ack.edit_text("That image doesn't look clinical — send text or another photo.")
@@ -10058,7 +10099,7 @@ async def handle_template_review_media(update: Update, context: ContextTypes.DEF
             # kept the scanner's words and discarded theirs.
             if caption:
                 extracted_text = combine_case_inputs(caption, [extracted_text or ""])
-            await ack.edit_text("📷 Got it — updating template…")
+            await ack.edit_text("📷 Got it — attached, and updating your draft…")
         except Exception:
             await ack.edit_text("⚠️ Couldn't read image. Try again or send text.")
             return AWAIT_TEMPLATE_REVIEW
@@ -10075,7 +10116,10 @@ async def handle_template_review_media(update: Update, context: ContextTypes.DEF
                 tmp_path = tmp.name
                 await video_file.download_to_drive(tmp_path)
                 extracted_text = await transcribe_voice(tmp_path)
-            await ack.edit_text("🎬 Got it — updating template…")
+            _cache_and_queue_attachment(
+                context, tmp_path, _numbered_media_name(context, "portfolio-video", ".mp4"), "video"
+            )
+            await ack.edit_text("🎬 Got it — attached, and updating your draft…")
         except Exception:
             await ack.edit_text("⚠️ Couldn't extract audio from video. Try again or send text.")
             return AWAIT_TEMPLATE_REVIEW
@@ -10098,13 +10142,14 @@ async def handle_template_review_media(update: Update, context: ContextTypes.DEF
                 tmp_path = tmp.name
                 await doc_file.download_to_drive(tmp_path)
                 extracted_text = await extract_from_document(tmp_path)
+                _cache_and_queue_attachment(context, tmp_path, file_name, "document")
             if not extracted_text or not extracted_text.strip():
                 await ack.edit_text("⚠️ Couldn't extract text from that file.")
                 return AWAIT_TEMPLATE_REVIEW
             max_chars = 15000
             if len(extracted_text) > max_chars:
                 extracted_text = extracted_text[:max_chars]
-            await ack.edit_text(f"📄 Got it — updating template…")
+            await ack.edit_text("📄 Got it — attached, and updating your draft…")
         except Exception:
             await ack.edit_text("⚠️ Couldn't read that file. Try again or send text.")
             return AWAIT_TEMPLATE_REVIEW
@@ -10169,12 +10214,15 @@ async def handle_approval_media_feedback(update: Update, context: ContextTypes.D
                 tmp_path = tmp.name
                 await photo_file.download_to_drive(tmp_path)
                 extracted_text = await extract_from_image(tmp_path)
+                _cache_and_queue_attachment(
+                    context, tmp_path, _numbered_media_name(context, "portfolio-image", ".jpg"), "image"
+                )
             if extracted_text and extracted_text.strip() == "NOT_CLINICAL":
                 await ack.edit_text("That image doesn't look clinical — send text or another photo.")
                 return AWAIT_APPROVAL
             if caption:
                 extracted_text = combine_case_inputs(caption, [extracted_text or ""])
-            await ack.edit_text("📷 Got it — updating draft…")
+            await ack.edit_text("📷 Got it — attached, and updating your draft…")
         except Exception:
             await ack.edit_text("⚠️ Couldn't read image. Type your feedback instead.")
             return AWAIT_APPROVAL
@@ -10192,7 +10240,10 @@ async def handle_approval_media_feedback(update: Update, context: ContextTypes.D
                 tmp_path = tmp.name
                 await video_file.download_to_drive(tmp_path)
                 extracted_text = await transcribe_voice(tmp_path)
-            await ack.edit_text("🎬 Got it — updating draft…")
+            _cache_and_queue_attachment(
+                context, tmp_path, _numbered_media_name(context, "portfolio-video", ".mp4"), "video"
+            )
+            await ack.edit_text("🎬 Got it — attached, and updating your draft…")
         except Exception:
             await ack.edit_text("⚠️ Couldn't extract audio from video. Type your feedback instead.")
             return AWAIT_APPROVAL
@@ -10216,13 +10267,14 @@ async def handle_approval_media_feedback(update: Update, context: ContextTypes.D
                 tmp_path = tmp.name
                 await doc_file.download_to_drive(tmp_path)
                 extracted_text = await extract_from_document(tmp_path)
+                _cache_and_queue_attachment(context, tmp_path, file_name, "document")
             if not extracted_text or not extracted_text.strip():
                 await ack.edit_text("⚠️ Couldn't extract text from that file.")
                 return AWAIT_APPROVAL
             max_chars = 15000
             if len(extracted_text) > max_chars:
                 extracted_text = extracted_text[:max_chars]
-            await ack.edit_text("📄 Got it — updating draft…")
+            await ack.edit_text("📄 Got it — attached, and updating your draft…")
         except Exception:
             await ack.edit_text("⚠️ Couldn't read that file. Type your feedback instead.")
             return AWAIT_APPROVAL

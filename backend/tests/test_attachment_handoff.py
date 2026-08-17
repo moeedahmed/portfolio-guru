@@ -1622,3 +1622,103 @@ def test_draft_preview_does_not_repeat_one_marker_on_every_line():
 
     source = inspect.getsource(bot._format_generic_draft)
     assert 'FIELD_EMOJIS.get(key, "📌")' not in source
+
+
+# ── Files sent mid-conversation ──────────────────────────────────────────────
+# Only handle_case_input could attach anything. A clip sent after the form was
+# chosen, or once the draft was on screen, went to a handler that read it for
+# text and deleted it — so remembering a file late meant losing it silently.
+
+
+@pytest.mark.asyncio
+async def test_photo_sent_with_a_draft_on_screen_is_attached():
+    import bot
+    from models import CBDData
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data.update({
+        "case_text": "58M chest pain, I led the assessment and escalated.",
+        "case_input_source": "text",
+    })
+    bot._store_draft(context, CBDData(patient_presentation="Chest pain"))
+
+    update = sim._make_text_update('')
+    photo = MagicMock()
+    file_obj = MagicMock()
+    file_obj.download_to_drive = AsyncMock(
+        side_effect=lambda path: open(path, "wb").write(b"jpeg bytes")
+    )
+    photo.get_file = AsyncMock(return_value=file_obj)
+    update.message.photo = [photo]
+    update.message.text = None
+    update.message.caption = "the scan I mentioned"
+
+    with patch("bot.extract_from_image", new=AsyncMock(return_value="Findings")), \
+         patch("bot.extract_cbd_data", new=AsyncMock(return_value=CBDData(patient_presentation="Chest pain"))), \
+         patch("bot.get_voice_profile", return_value=None):
+        await bot.handle_approval_media_feedback(update, context)
+
+    queued = bot._case_attachments(context)
+    assert queued, "a photo sent with a draft on screen must still be attached"
+    assert queued[0]["kind"] == "image"
+
+    for item in queued:
+        if os.path.exists(item["path"]):
+            os.unlink(item["path"])
+
+
+@pytest.mark.asyncio
+async def test_document_sent_during_template_review_is_attached():
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data.update({"chosen_form": "CBD", "case_text": "Original case."})
+
+    update = sim._make_text_update('')
+    doc = MagicMock()
+    doc.file_name = "ecg-report.pdf"
+    file_obj = MagicMock()
+    file_obj.download_to_drive = AsyncMock(
+        side_effect=lambda path: open(path, "wb").write(b"%PDF-1.4")
+    )
+    doc.get_file = AsyncMock(return_value=file_obj)
+    update.message.document = doc
+    update.message.text = None
+
+    with patch("bot.extract_from_document", new=AsyncMock(return_value="Report text")), \
+         patch("bot._accumulate_and_refresh", new=AsyncMock(return_value=0)):
+        await bot.handle_template_review_media(update, context)
+
+    queued = bot._case_attachments(context)
+    assert [i["name"] for i in queued] == ["ecg-report.pdf"]
+
+    for item in queued:
+        if os.path.exists(item["path"]):
+            os.unlink(item["path"])
+
+
+def test_the_mid_conversation_helper_refuses_unsupported_types():
+    """Kaizen rejects them, so queuing one would report a phantom attachment."""
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+
+    with tempfile.NamedTemporaryFile(suffix=".xyz", delete=False) as f:
+        f.write(b"bytes")
+        path = f.name
+
+    assert bot._cache_and_queue_attachment(context, path, "notes.xyz", "document") is False
+    assert bot._case_attachments(context) == []
+    os.unlink(path)
+
+
+def test_a_vanished_temp_file_is_not_queued():
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    assert bot._cache_and_queue_attachment(context, "/tmp/gone.jpg", "gone.jpg", "image") is False
+    assert bot._case_attachments(context) == []
