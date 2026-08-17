@@ -1458,3 +1458,48 @@ async def test_missing_file_is_dropped_without_losing_the_rest(tmp_path):
 
     assert await _attach_file(page, [str(absent), str(present)]) is True
     chooser.set_files.assert_awaited_once_with([str(present)])
+
+
+# ── Curriculum tree render race ──────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_expand_waits_for_the_curriculum_tree_to_render():
+    """Measured live: the Angular tree paints ~1.7s after domcontentloaded.
+
+    The expand step fired immediately, so whenever the preceding field fills
+    finished first the anchors did not exist and every SLO failed identically
+    ("Could not expand: Higher SLO1:"), leaving the entry untagged. Proven on
+    the real form: without the wait all three expands returned False, with it
+    all three returned True.
+    """
+    from kaizen_form_filer import _await_curriculum_tree
+
+    page = MagicMock()
+    page.wait_for_function = AsyncMock()
+
+    assert await _await_curriculum_tree(page) is True
+    page.wait_for_function.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_tree_that_never_renders_is_reported_not_swallowed():
+    from kaizen_form_filer import _await_curriculum_tree
+
+    page = MagicMock()
+    page.wait_for_function = AsyncMock(side_effect=Exception("timeout"))
+
+    # False, not an exception: a missing tree must not abort the whole filing,
+    # but it must be visible in the log rather than silently producing an
+    # untagged entry.
+    assert await _await_curriculum_tree(page) is False
+
+
+def test_both_expand_loops_wait_first():
+    """Two call sites expand the tree; a wait on only one leaves the race."""
+    import inspect
+
+    import kaizen_form_filer
+
+    source = inspect.getsource(kaizen_form_filer)
+    assert source.count("await _await_curriculum_tree(page)") == 2

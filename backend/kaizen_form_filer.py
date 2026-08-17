@@ -1574,6 +1574,32 @@ for _variant, _base in _FORM_FIELD_MAP_VARIANT_BASES.items():
 
 # ─── JS snippets (passed as separate strings, NEVER f-string interpolated) ───
 
+# The curriculum tree is rendered by Angular after the rest of the form, about
+# 1.7s behind domcontentloaded when measured live on a US_CASE new-section
+# page. The expand step used to fire immediately, so whenever the preceding
+# field fills finished first, the anchors did not exist yet and every SLO
+# failed identically — "Could not expand: Higher SLO1:" — leaving no capability
+# ticked. Waiting removes the race; when the anchors are already there this
+# returns at once.
+SLO_ANCHORS_PRESENT_JS = (
+    "() => Array.from(document.querySelectorAll('a'))"
+    ".some((a) => /SLO\\s*\\d/i.test(a.textContent || ''))"
+)
+
+
+async def _await_curriculum_tree(page: Page, timeout_ms: int = 15000) -> bool:
+    """Wait for the SLO anchors to exist. False means they never rendered."""
+    try:
+        await page.wait_for_function(SLO_ANCHORS_PRESENT_JS, timeout=timeout_ms)
+        return True
+    except Exception:
+        logger.warning(
+            "Curriculum tree did not render within %dms — SLO expansion will fail",
+            timeout_ms,
+        )
+        return False
+
+
 EXPAND_SLO_JS = """(sloText) => {
     var anchors = document.querySelectorAll('a.ng-binding');
     for (var i = 0; i < anchors.length; i++) {
@@ -2552,6 +2578,8 @@ async def _fill_curriculum_links(
                 stage_prefix = s
                 break
 
+
+    await _await_curriculum_tree(page)
     for slo in sorted(slos):
         slo_text = f"{stage_prefix} {slo}:"
         expanded = await page.evaluate(EXPAND_SLO_JS, slo_text)
@@ -2725,6 +2753,8 @@ async def _fill_curriculum_tags(
                 stage_prefix = stage
                 break
 
+
+    await _await_curriculum_tree(page)
     for slo in sorted(slos):
         expanded = await page.evaluate(EXPAND_TAG_TREE_LINK_JS, f"{stage_prefix} {slo}:")
         if not expanded:
