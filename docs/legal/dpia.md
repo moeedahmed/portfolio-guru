@@ -1,122 +1,110 @@
-> **DRAFT — NOT YET IN FORCE.** This Data Protection Impact Assessment (DPIA) is a working draft for review by the founder and a qualified solicitor / DPO. It is **not legal advice**. A DPIA is a living document: it must be completed, signed off, and kept under review. Resolve every `«REVIEW: ...»` marker before relying on this assessment.
+> **DRAFT — NOT IN FORCE / NOT APPROVED.** This DPIA is an internal risk assessment for manager, privacy and UK legal review. It is not legal advice, a compliance claim or residual-risk acceptance.
 
-# Data Protection Impact Assessment (DPIA) — Portfolio Guru
+# Portfolio Guru data protection impact assessment
 
-**Structure follows the ICO's sample DPIA template.**
+**Assessment date:** 20 August 2026
+**Proposed controller:** Solvoro Labs LLC, awaiting manager approval
+**DPIA owner:** [BLOCKER — Manager: appoint an accountable owner.]
+**Review trigger:** before launch expansion and on any material change to channel, model, processor, storage, patient-data handling or Kaizen automation.
 
-- **Project:** Portfolio Guru — AI-assisted RCEM Kaizen ePortfolio drafting for UK EM trainees.
-- **DPIA owner:** «REVIEW: name the accountable person (likely the founder / privacy lead).»
-- **Date started:** «REVIEW» **Last reviewed:** «REVIEW» **Next review due:** «REVIEW (set a cadence, e.g. annually or on material change).»
-- **Why a DPIA is required:** the Service involves **large-scale processing of special-category (health) data**, **innovative use of AI**, and processing that is likely to be high-risk under Art 35 UK GDPR / the ICO's "likely to result in high risk" criteria. A DPIA is therefore mandatory.
+## 1. Screening decision
 
----
+A DPIA is appropriate because the Service combines AI-assisted interpretation of clinical case material, messaging-platform collection, credential storage, third-party portfolio automation and possible accidental patient health data. The scale needed to determine every formal trigger has not been evidenced. This assessment therefore takes the cautious high-risk route without claiming that it is complete or approved.
 
-## Step 1 — Identify the need for a DPIA
+Wider paid or public launch must remain blocked while high residual risks and governance decisions remain open.
 
-Portfolio Guru ingests clinicians' free-text/voice/image clinical case descriptions, sends them to a third-party AI model for extraction, stores the results and the clinician's portfolio credentials, mirrors data to the cloud, and writes drafts into a third-party ePortfolio. The combination of health data + AI + credential storage + cross-border processors triggers several ICO high-risk indicators (sensitive data, new technologies, matching/combining, and a relationship-of-trust with regulated professionals). A DPIA screens and mitigates these risks before launch.
+## 2. Processing and purpose
 
----
+Portfolio Guru helps a UK doctor create an ePortfolio draft:
 
-## Step 2 — Describe the processing
+1. The doctor sends text, voice, audio, a photo or a document in a Telegram cloud chat. Telegram receives and stores the original first.
+2. Portfolio Guru inspects and redacts text/document text locally before sending it to Google Vertex AI. Scanned images and scanned PDFs may reach Vertex before local redaction.
+3. Vertex AI extracts draft fields and recommends a form. The intended live location is London (`europe-west2`). OpenMed code existed but was inactive when checked.
+4. The Service stores canonical data in local SQLite/files on a Mac Mini. A dedicated Supabase project in London (`eu-west-2`) is active as a non-canonical mirror.
+5. The doctor reviews/corrects the draft. Only after approval may the Service use application-encrypted credentials to save a draft in Kaizen. It never submits to a supervisor.
+6. Stripe is authoritative for billing. Kaizen is authoritative for saved drafts. Telegram controls its own messages.
 
-### 2.1 Nature of the processing
+The purpose is administrative ePortfolio capture, extraction and draft-saving. It is not clinical advice, patient care, an NHS system or a medical device.
 
-- **Collection:** user sends case content via Telegram (future: WhatsApp).
-- **AI extraction:** content sent to **Google Vertex AI (Gemini)** — _intended_ `europe-west2` / London region — to extract structured WPBA fields and recommend a form type. «REVIEW: before sign-off, verify the live runtime has `PG_USE_VERTEX` enabled with `GCP_PROJECT_ID` and `GCP_VERTEX_LOCATION=europe-west2`, and confirm Google's data-residency and no-training commitments for the exact API/tier. Developer/evaluation fallbacks may still use `GOOGLE_API_KEY` and must not be treated as production residency proof.»
-- **Storage:** canonical encrypted **SQLite** store on a controlled machine; **Fernet**-encrypted Kaizen credentials; **Supabase** (intended EU) cloud mirror for the web app.
-- **Use:** generate a draft, show it to the user for review, and on approval log in to **Kaizen** and save a **draft** (never auto-submit).
-- **Deletion:** account-scoped deletion on account closure / credential removal «REVIEW: confirm coverage across all stores including Supabase mirror and any logs».
-- **Payments:** **Stripe** for the £9.99/mo tier; free tier limited to 5 cases/month.
+## 3. Scope and people affected
 
-### 2.2 Scope of the processing
+| Item | Scope |
+| --- | --- |
+| Intended users | Adult UK doctors using their own Kaizen account. Volume and case frequency are not evidenced in this pack. |
+| Intended personal data | Telegram/account identifiers, portfolio content about the doctor, credentials, service usage, consent/terms evidence, billing identifiers and support/security records. |
+| Prohibited but foreseeable data | Identifiable or potentially identifiable patient details in text, audio, images or documents; this can be special-category health data. |
+| Systems | Telegram, Mac Mini SQLite/files, Vertex AI London, Supabase London mirror, Kaizen and Stripe. |
+| Retention | Intended 180-day clinical-content maximum; other schedules and cross-store enforcement remain unproved. |
+| Geography | UK users; proposed US controller; UK-region cloud projects; possible global supplier access/transfers. |
 
-- **Data subjects:** primarily the using clinician; secondarily, any patient whose details the clinician includes (the user is instructed to anonymise).
-- **Data categories:** health/clinical content (special category), identity (messaging ID, name/grade), Kaizen credentials, billing, usage/diagnostics, consent records.
-- **Volume/scale:** «REVIEW: estimate expected user numbers and cases/month; "large scale" classification drives obligations.»
-- **Geography:** users in the UK; processors potentially in EU/US (see transfers).
-- **Duration/retention:** «REVIEW: insert retention periods agreed in the Privacy Policy.»
+## 4. Necessity, proportionality and lawful basis
 
-### 2.3 Context of the processing
+- Account and requested draft processing are proposed under Article 6(1)(b), contract.
+- Required financial records are proposed under Article 6(1)(c), legal obligation, once the actual duty and period are documented.
+- Proportionate security, fraud prevention and reliable operation are proposed under Article 6(1)(f), subject to an LIA.
+- Optional marketing would require consent and a PECR assessment.
+- The product prohibits identifiable patient data. A doctor's consent cannot provide an Article 9 condition for a third-party patient. The lawful handling of accidental patient data, including containment and deletion, is unresolved.
 
-- Relationship of professional trust; users are GMC-registered doctors; data concerns their training and patients.
-- Innovative AI technology; third-party platforms (RCEM/Kaizen, Telegram/WhatsApp) outside our control.
-- No prior public expectation that an automation tool drafts ePortfolio entries; transparency is critical.
-- «REVIEW: confirm whether RCEM/Kaizen terms permit automated third-party access — a contractual/relationship risk distinct from data protection.»
+Data-minimisation measures observed or intended include draft-only use, doctor review, no supervisor submission, field-level encryption, keys outside the database, no credentials in AI prompts, local text redaction and a 180-day clinical-content target. Those measures do not cure the upstream Telegram copy, pre-redaction image/PDF path, local-device weaknesses or unproved deletion.
 
-### 2.4 Purposes of the processing
+[BLOCKER — Manager-appointed privacy lead + legal counsel: approve the Article 6 record, LIA and accidental special-category incident position before launch expansion.]
 
-- For the user: faster, lower-friction WPBA record-keeping.
-- For us: provide a paid SaaS product; ensure reliability and prevent abuse.
+## 5. Consultation and evidence
 
----
+| Consultation/evidence | Status |
+| --- | --- |
+| Manager authority | Not obtained for controller adoption, contracts, this DPIA or residual-risk acceptance. |
+| UK legal/privacy review | Not completed. |
+| User consultation | No documented consultation evidence included in this pack. |
+| Google, Supabase and Stripe | Public DPA/CDPA pages reviewed; account-level acceptance, exact scope and transfer evidence absent. |
+| Telegram | Public privacy policy confirms cloud-chat storage; treated as an upstream independent platform/controller. |
+| Kaizen | Terms/automation permission and hosting/transfer evidence unresolved. |
+| Operational inspection | Canonical Mac Mini SQLite/files; London Supabase mirror; application encryption; FileVault off; weak permissions on some drafts/backups; deletion proof incomplete. |
 
-## Step 3 — Consultation process
+## 6. Risk assessment and required treatment
 
-- **Data subjects:** «REVIEW: describe how user views are sought (e.g. beta feedback) and reflected.»
-- **Processors:** rely on Google, Supabase, Stripe, Telegram/Meta DPAs and documentation. «REVIEW: obtain and file each DPA. WhatsApp/Meta launch requires completion of `docs/legal/whatsapp-meta-processor-review.md` before any tester rollout.»
-- **DPO/legal:** this DPIA itself is the consultation artefact for solicitor/DPO sign-off.
-- **ICO prior consultation:** required only if high residual risk cannot be mitigated. «REVIEW: assess after mitigations — aim to avoid by reducing residual risk to acceptable.»
+| Risk to people | Current risk | Existing/observed measures | Required treatment and proposed residual risk |
+| --- | --- | --- | --- |
+| P1. Identifiable patient data reaches Telegram before Portfolio Guru can intervene | High | Clear prohibition; redaction guidance | Put warning before first message and at every upload; approved detection/containment/deletion playbook; channel limitation in notice. Residual **High** because Telegram keeps its own copy. |
+| P2. Scanned image/PDF reaches Vertex before local redaction | High | User prohibition; intended London Vertex location | Pre-upload warning; block or locally inspect these formats before Vertex, or obtain approved alternative control; test with representative files. Residual **High** until implemented/proved. |
+| P3. No settled Article 9/DPA 2018 route for accidental patient data | High | Product rejects identifiable patient data | Legal decision and incident-only minimisation/quarantine/deletion procedure. Do not use the doctor's consent as the patient's condition. Residual **High** until approved. |
+| P4. Local device/file compromise exposes credentials or case material | High | Sensitive fields application-encrypted; keys outside database | Enable/evidence full-device encryption; fix file/backup permissions; least-privilege and access review; key rotation/recovery; restore test. Residual **High** until proof, then requires sign-off. |
+| P5. `/reset` or retention misses SQLite, files, backups, Supabase or temporary artefacts | High | Intended 180-day clinical retention; reset path exists | Cross-store inventory, automated tests, backup-expiry design and sampled deletion certificate. Explain Telegram/Kaizen exclusions. Residual **High** until proven. |
+| P6. Supplier contract or restricted transfer lacks valid evidence | High | London cloud regions; public supplier DPAs | File account terms, subprocessor list, role, transfer map/mechanism and TRA/data protection test as required. Region is not complete proof. Residual **High** until accepted. |
+| P7. Account takeover permits unauthorised draft access/save | High | Telegram and Kaizen authentication; draft approval step | Threat model messaging takeover; high-risk confirmation/re-authentication; session revocation; access alerts and support procedure. Residual **Medium/High**, sign-off required. |
+| P8. AI error creates misleading portfolio content | Medium | Advisory recommendation; doctor preview/correction; draft only | Clear uncertainty wording, behavioural tests, audit trail of user approval, easy correction. Residual **Low/Medium**. |
+| P9. Kaizen automation breaches platform expectations or exposes data in unknown hosting | High | User approves draft save; Kaizen authoritative | Obtain permission or reasoned terms assessment; document hosting/transfers; stop automation if not permitted. Residual **High** until resolved. |
+| P10. Consumer cannot exercise rights or receives incomplete deletion | High | `/reset` intended | Monitored contact, identity check, rights log, response playbook and end-to-end tests. Residual **High** until proved. |
+| P11. Breach response is late or incomplete | High | Operator alerting exists at product level | Named incident lead, 24/7 route, risk assessment, breach log, 72-hour ICO decision workflow and affected-person notification test. Residual **High** until exercised. |
+| P12. AI/provider behaviour changes without reassessment | Medium | Dedicated projects and documented intended regions | Versioned supplier/model inventory, change monitoring and DPIA review gate before activation. Residual **Medium**. |
 
----
+## 7. Residual-risk decision
 
-## Step 4 — Assess necessity and proportionality
+High residual risks remain for upstream Telegram collection, scanned media, accidental patient data, local security, deletion, supplier/transfers, account takeover, Kaizen permission, rights and breach response. This DPIA does not accept them.
 
-- **Lawful basis:** Art 6(1)(b) contract for core processing; Art 6(1)(f) for security/diagnostics (with LIA); **Art 9(2)(a) explicit consent** for health data. «REVIEW: confirm Art 9 condition and any Schedule 1 / Appropriate Policy Document need.»
-- **Necessity:** sending case content to an AI model is necessary to deliver the extraction feature the user requests; credential storage is necessary to save drafts on the user's behalf.
-- **Proportionality / data minimisation:**
-  - Credentials are never sent to the AI model and are encrypted at rest.
-  - The user is asked not to send patient-identifiable data.
-  - «REVIEW: consider minimising retention of raw case content (delete after draft saved) and whether image/voice can be processed without long-term storage.»
-- **Data quality / accuracy:** AI output is non-deterministic; mitigated by mandatory human review (draft-only) — see automation risk below.
-- **Processor compliance:** Art 28 DPAs in place with each processor. «REVIEW: confirm.»
-- **Transfers:** see risk register.
+| Decision | Required authority/status |
+| --- | --- |
+| Measures approved | [BLOCKER — Manager: approve only after evidence and legal/privacy advice.] |
+| Residual risk accepted | [BLOCKER — Manager-appointed accountable owner: record each accepted risk, rationale and date. Moeed cannot accept on the LLC's behalf.] |
+| UK representative/controller position | [BLOCKER — Manager + UK legal counsel: decide and document.] |
+| ICO prior consultation | [BLOCKER — Accountable owner + legal counsel: reassess after treatment; if high residual risk remains that cannot be reduced, decide whether Article 36 prior consultation is required before processing.] |
+| Review/approval date | Not set; this DPIA is **not approved**. |
 
----
+## 8. Launch decision
 
-## Step 5 — Identify and assess risks
+Controlled dogfood may continue only within the separately approved operational boundary, with no relaxation of the patient-data prohibition. Do not expand to a wider paid beta or public launch until the accountability register's launch gates are closed and residual risk is signed off by someone authorised to bind the company.
 
-| #   | Risk to individuals                                                                                                 | Likelihood | Severity    | Overall                  |
-| --- | ------------------------------------------------------------------------------------------------------------------- | ---------- | ----------- | ------------------------ |
-| R1  | **Special-category health data exposed to a third-party AI/LLM**, or used for model training                        | «REVIEW»   | High        | **High** until mitigated |
-| R2  | **Kaizen credential compromise** (theft of stored credentials → unauthorised portfolio access)                      | «REVIEW»   | High        | **High**                 |
-| R3  | **Unlawful / unsafe international transfer** (US sub-processors: Stripe, Meta/WhatsApp; Google if not EU-pinned)    | «REVIEW»   | Medium–High | **High**                 |
-| R4  | **Re-identification of patients** from clinical content the user failed to anonymise                                | «REVIEW»   | High        | **High**                 |
-| R5  | **Inaccuracy / automation harm** — wrong extraction or form-type recommendation leading to a flawed portfolio entry | Medium     | Medium      | **Medium**               |
-| R6  | **Excessive retention** of raw clinical content                                                                     | «REVIEW»   | Medium      | **Medium**               |
-| R7  | **Account takeover via messaging platform** (Telegram/WhatsApp account compromise)                                  | «REVIEW»   | Medium      | **Medium**               |
-| R8  | **Invalid/insufficient consent** for Art 9 health-data processing                                                   | «REVIEW»   | High        | **High**                 |
-| R9  | **Logging of secrets or clinical content** in diagnostics                                                           | Low        | High        | **Medium**               |
+## Official references
 
----
-
-## Step 6 — Identify measures to reduce risk
-
-| #   | Mitigations                                                                                                                                                                                                                                                                                                                                                                    | Residual risk                 | Owner               |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------- | ------------------- |
-| R1  | Use **Vertex AI UK/EU region** with region-pinned processing; contractually exclude content from model training; send the **minimum** content needed; never include credentials in prompts. «REVIEW: verify the live `PG_USE_VERTEX` / `europe-west2` runtime and no-training commitment for the exact API/billing tier; until verified, residual risk stays High.»                                                   | «REVIEW»                      | Founder             |
-| R2  | **Fernet (AES-128-CBC + HMAC) encryption at rest**, decryption only in memory at login time, credentials never logged or sent to AI; document **Fernet key management and rotation**; restrict machine and Supabase access; encrypt the credential blob in the Supabase mirror too. «REVIEW: confirm key storage/rotation and that the mirror stores only the encrypted blob.» | Low–Medium                    | Founder             |
-| R3  | Keep processing in **EU/UK**; for unavoidable US transfers (Stripe, Meta/WhatsApp) rely on **IDTA / SCCs + UK Addendum** and run **Transfer Risk Assessments**. «REVIEW: document mechanism per processor.»                                                                                                                                                                    | Medium                        | Founder + solicitor |
-| R4  | **Explicit user instruction and consent** that they must anonymise; in-bot reminder; «REVIEW: consider building automated PII/PHI redaction before AI processing — would materially lower this risk.»                                                                                                                                                                          | Medium (High if no redaction) | Founder             |
-| R5  | **Draft-only architecture** — never auto-submit; mandatory human review of every field; form-type recommendation is advisory; clear UI framing; test extraction across multiple runs (non-determinism noted in project docs).                                                                                                                                                  | Low–Medium                    | Founder             |
-| R6  | **Minimise retention** of raw case content (e.g. delete after draft saved); define and enforce retention periods; provide user deletion/export. «REVIEW: implement and state actual behaviour.»                                                                                                                                                                                | Low–Medium                    | Founder             |
-| R7  | Encourage platform 2FA; design so a single compromised message cannot alter access settings; «REVIEW: consider a per-user confirmation step before saving drafts.»                                                                                                                                                                                                             | Medium                        | Founder             |
-| R8  | **Dedicated, versioned explicit-consent screen** before first case (see `consent-copy.md`); record version + timestamp + user id; easy withdrawal.                                                                                                                                                                                                                             | Low                           | Founder + DPO       |
-| R9  | Code rule: **never log decrypted values, credentials, or tokens**; scrub clinical content from logs; short log retention.                                                                                                                                                                                                                                                      | Low                           | Founder             |
-
----
-
-## Step 7 — Sign off and record outcomes
-
-| Item                           | Detail                                                                                        |
-| ------------------------------ | --------------------------------------------------------------------------------------------- |
-| Measures approved by           | «REVIEW: name + date»                                                                         |
-| Residual risk accepted by      | «REVIEW: name + date»                                                                         |
-| DPO advice given / acted on    | «REVIEW»                                                                                      |
-| ICO prior consultation needed? | «REVIEW: only if high residual risk remains after mitigation — target NO.»                    |
-| This DPIA to be reviewed       | «REVIEW: set trigger — material change, new processor, new platform (WhatsApp), or annually.» |
-
-**Key open items the founder must close before launch:** (1) confirm/verify live Vertex AI `europe-west2` routing and no-training terms; (2) document credential key management; (3) finalise Art 9 explicit-consent flow and Schedule 1/APD position; (4) document international-transfer mechanisms; (5) decide on automated patient-data redaction; (6) complete `docs/legal/whatsapp-meta-processor-review.md` before any WhatsApp tester rollout.
+- ICO DPIA guidance: https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/accountability-and-governance/data-protection-impact-assessments-dpias/
+- ICO breach reporting: https://ico.org.uk/for-organisations/report-a-breach/personal-data-breach/
+- ICO international transfers: https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/international-transfers/
+- ICO legitimate interests: https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/lawful-basis/a-guide-to-lawful-basis/legitimate-interests/
+- Google Cloud CDPA: https://cloud.google.com/terms/data-processing-addendum
+- Supabase DPA: https://supabase.com/legal/customer-resources/data-processing-addendum
+- Stripe DPA: https://stripe.com/gb/legal/dpa
+- Telegram privacy policy: https://telegram.org/privacy/gb
 
 ---
 
-_End of draft. This DPIA is incomplete until all `«REVIEW»` items are resolved and it is signed off._
+This DPIA remains **DRAFT — NOT IN FORCE / NOT APPROVED**.

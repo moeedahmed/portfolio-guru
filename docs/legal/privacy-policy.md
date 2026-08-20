@@ -1,159 +1,122 @@
-> **DRAFT — NOT YET IN FORCE.** This is a working draft prepared for review by the founder and a qualified solicitor / Data Protection Officer (DPO). It is **not legal advice** and must not be published or relied upon until a legal professional has reviewed and approved it. Every `«REVIEW: ...»` marker flags a decision the founder must resolve with legal counsel before publication.
+> **DRAFT — NOT IN FORCE.** Prepared for manager and UK legal review. This draft is not legal advice, is not a claim of compliance, and must not be published or presented as operative.
 
-# Privacy Policy — Portfolio Guru
+# Portfolio Guru privacy notice
 
-**Last updated:** «REVIEW: insert date the approved version goes live»
-**Version:** 0.1 (draft)
+**Evidence date:** 20 August 2026
+**Proposed version:** 1.0 draft
 
-This Privacy Policy explains how Portfolio Guru ("**we**", "**us**", "**the Service**") collects, uses, stores and shares your personal data when you use the Portfolio Guru bot (via Telegram, and in future WhatsApp) and the web front at `emgurus.com/portfolio`. It is written to meet the transparency requirements of the **UK GDPR** and the **Data Protection Act 2018 (DPA 2018)**.
+## 1. Proposed controller and contact details
 
-Because Portfolio Guru processes information about your clinical work, some of the data we handle is **special-category data** (data concerning health) under Article 9 UK GDPR. We treat this data with the heightened care that classification requires. Please read the section on lawful basis carefully.
+Portfolio Guru is a Telegram-first service for UK doctors. The proposed controller is **Solvoro Labs LLC**, a Texas limited liability company formed on 23 November 2025. Its operating agreement is manager-managed; Moeed cannot bind the company.
 
----
+[BLOCKER — Manager: approve Solvoro Labs LLC as controller and contracting entity, and authorise adoption of this notice after UK legal review.]
 
-## 1. Who we are (Data Controller)
+[BLOCKER — Manager + legal counsel: approve a public business/service address and monitored privacy contact. Do not publish this notice without both.]
 
-The data controller for your personal data is:
+Solvoro Labs LLC is outside the UK and intentionally offers the Service to people in the UK. UK GDPR territorial scope is therefore expected to apply to the relevant processing. No UK representative has been appointed and no exemption is asserted.
 
-- **Trading name:** Portfolio Guru, an EM Gurus product.
-- **Legal entity:** «REVIEW: confirm the exact legal entity that is the controller — e.g. "EM Gurus Ltd" (company number), a sole trader operating as "EM Gurus", or the founder personally. The controller named here must match Companies House / HMRC registration and the entity that holds the Stripe and Google Cloud accounts.»
-- **Registered address:** «REVIEW: insert registered/correspondence address required for an ICO-compliant notice.»
-- **Contact for privacy matters:** «REVIEW: insert a monitored privacy contact email, e.g. privacy@emgurus.com.»
-- **Data Protection Officer:** «REVIEW: a DPO is not strictly mandatory for an organisation of this size under Art 37, but given large-scale processing of special-category health data a DPO (or a documented decision that one is not required, plus a named privacy lead) is strongly advisable. State the outcome here.»
-- **ICO registration:** «REVIEW: the controller must pay the ICO data protection fee and register. Insert ICO registration number once obtained.»
+[BLOCKER — Manager + UK legal counsel: complete the Article 27 assessment and, if required, appoint a UK representative in writing and add its details here.]
 
-We are **not affiliated with, endorsed by, or operated by the Royal College of Emergency Medicine (RCEM), the Kaizen ePortfolio platform, the General Medical Council (GMC), or any NHS body.**
+Portfolio Guru is independent. It is not affiliated with, endorsed by or operated by RCEM, Kaizen, the GMC or any NHS body. It is not an NHS system, patient-care service or medical device.
 
----
+## 2. Data and channel limitations
 
-## 2. What personal data we collect
+| Data | Source and important limitation |
+| --- | --- |
+| Telegram account data | Telegram user ID, profile/display details exposed to the bot, and messages used to operate the account. |
+| Case and portfolio content | Text, voice, audio, photographs, documents, extracted fields, form choices, drafts and user corrections. This may reveal health information if a user breaks the patient-data rule. |
+| Kaizen access data | Kaizen username/password and automation state used to save a user-approved draft. Sensitive credentials are application-encrypted. |
+| Service and security data | Consent/version records, subscription tier, usage counts, timestamps, errors, security and fraud signals. |
+| Billing data | Stripe customer/subscription identifiers and payment status. Stripe receives card and payment details directly; Portfolio Guru does not hold full card numbers. |
+| Rights and support data | Requests, correspondence, identity checks and the record of the response. |
 
-| Category                                                   | Examples                                                                                                                                                                                                                                                     | How we get it                                |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------- |
-| **Clinical case content (special-category — health data)** | The text, voice notes, audio, photographs and documents you send describing clinical cases and reflections, and the structured WPBA (workplace-based assessment) fields we extract from them. This may include patient clinical details if you include them. | You send it to the bot.                      |
-| **Account & identity data**                                | Your Telegram user ID (and, in future, WhatsApp identifier), display name as exposed by the messaging platform, and any name/grade/training details you provide.                                                                                             | Messaging platform + your input.             |
-| **Kaizen ePortfolio credentials**                          | Your RCEM Kaizen username and password, which you provide so the Service can log in and save drafts on your behalf.                                                                                                                                          | You provide them; stored encrypted (see §5). |
-| **Billing data**                                           | Subscription tier, payment status, and billing identifiers. Card details are handled directly by Stripe — **we do not see or store full card numbers.**                                                                                                      | Stripe, on your purchase.                    |
-| **Usage & technical data**                                 | Counts of cases filed (for free-tier limits), form types used, timestamps, error/diagnostic logs.                                                                                                                                                            | Generated as you use the Service.            |
-| **Consent records**                                        | The version of the consent text you accepted, with a timestamp and your user ID (see our consent record).                                                                                                                                                    | Recorded when you consent.                   |
+**Do not submit identifiable patient data.** Remove names, dates of birth, NHS numbers, addresses, images or documents that identify a patient, and unusual combinations of facts that could identify one. Redaction is a safety net, not permission to send patient data.
 
-We ask you **not** to send identifiable patient data. You are responsible for anonymising patient information before sending it (see §3 and our Terms of Service). «REVIEW: confirm whether any automated redaction/anonymisation is implemented at launch; if not, the policy must not imply it exists. As built today, anonymisation is the user's responsibility and is not automated.»
+Telegram receives and stores original cloud-chat text and media before Portfolio Guru can inspect or redact it. Text and document text are locally inspected and redacted before Vertex AI. Scanned images and scanned PDFs may reach Vertex AI before local redaction. A user must therefore redact every format before sending it. OpenMed-related code exists but was not active when this pack was prepared and is not listed as a live recipient.
 
----
+## 3. Purposes and proposed lawful bases
 
-## 3. The lawful basis for processing (and why)
+| Purpose | Data | Proposed UK GDPR basis |
+| --- | --- | --- |
+| Create an account; extract portfolio fields; recommend a form; show and save a user-approved Kaizen draft | Account, case, portfolio and Kaizen access data | Article 6(1)(b), necessary to perform the service contract or take requested pre-contract steps. |
+| Manage subscriptions and service entitlements | Account, usage and limited billing data | Article 6(1)(b). |
+| Keep financial records required by law | Limited transaction and billing records | Article 6(1)(c), legal obligation, once the applicable obligations and schedule are documented. |
+| Protect accounts, investigate abuse/fraud and maintain reliable operations | Account, usage, diagnostic and security data | Article 6(1)(f), the documented interests in security, fraud prevention and proportionate service operation, subject to an approved LIA. |
+| Send optional marketing | Contact and preference data | Article 6(1)(a), consent, with PECR assessment and an easy withdrawal route. No optional marketing is assumed in this draft. |
+| Respond to rights, complaints and legal claims | Account, request and correspondence data | The basis appropriate to the request: legal obligation and, where necessary, legitimate interests in establishing, exercising or defending legal claims. |
 
-Under UK GDPR we must have a lawful basis under **Article 6** for all personal data, and an **additional condition under Article 9** for special-category (health) data.
+[BLOCKER — Manager-appointed privacy lead + legal counsel: approve the lawful-basis record and complete the legitimate interests assessment before relying on Article 6(1)(f).]
 
-### 3.1 General personal data — Article 6
+The contract basis above applies to the doctor's intended account and service data. It does not supply a basis for accidental third-party patient data.
 
-| Processing                                                                 | Art 6 lawful basis                                                                                                                                               |
-| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Operating your account, extracting WPBA data, filing drafts to Kaizen      | **Art 6(1)(b)** — performance of the contract you enter into when you use the Service.                                                                           |
-| Taking payment and managing subscriptions                                  | **Art 6(1)(b)** — contract; and **Art 6(1)(c)** — legal obligation (e.g. tax/accounting records).                                                                |
-| Security, fraud prevention, service diagnostics, and improving reliability | **Art 6(1)(f)** — our legitimate interests, balanced against your rights. «REVIEW: a Legitimate Interests Assessment (LIA) should be documented for this basis.» |
+Users are prohibited from sending identifiable patient data. A doctor's agreement or consent cannot supply an Article 9 condition for a third-party patient's health data. If identifiable or potentially identifiable patient data is detected, Portfolio Guru's intended response is to stop ordinary processing and minimise, quarantine or delete it under an approved incident procedure.
 
-### 3.2 Special-category (health) data — Article 9 — the key decision
+[BLOCKER — Manager + legal counsel: approve the special-category-data position and incident procedure, including any Article 6 basis, Article 9 condition, DPA 2018 condition, notices, evidence preservation and deletion steps that may be required for accidental receipt. Until then, wider launch remains blocked.]
 
-Your clinical case content is **data concerning health** under Art 9(1). Contract (Art 6(1)(b)) alone is **not** sufficient — we also need an Art 9 condition.
+## 4. Recipients and roles
 
-**Our proposed Art 9 condition is `Article 9(2)(a)` — your explicit consent.** We propose explicit consent (rather than, for example, Art 9(2)(h) "provision of health/social care", which is designed for clinicians and care providers acting in a care relationship, not for a portfolio-automation tool) because:
+| Recipient | Role and data shared |
+| --- | --- |
+| Google Cloud Vertex AI | Proposed processor for portfolio extraction. Receives locally inspected/redacted text and document text; scanned images/PDFs may be received before local redaction. The intended runtime is London (`europe-west2`). Account-level CDPA, product terms, data-location, subprocessor, no-training and transfer evidence are not yet filed. |
+| Supabase | Proposed processor for an active London (`eu-west-2`) cloud mirror. It is not the canonical store. Mirrored sensitive fields are application-encrypted. Account-level DPA and transfer evidence are not yet filed. |
+| Telegram | Upstream independent platform/controller for the user's Telegram account and cloud chats, not a processor acting only on Portfolio Guru's instructions. It receives the original messages and media and controls its own copies and retention. |
+| Kaizen / RCEM ePortfolio | Independent destination platform/controller for drafts saved to the user's account. Kaizen is authoritative for data saved there. Its automation permission and hosting/transfer position remain unresolved. |
+| Stripe | Payment provider and authoritative billing platform. Stripe acts in the roles described by its own terms and DPA, including controller activities; the account-specific contracting entity and transfer mechanism remain to be evidenced. |
+| Professional advisers, regulators or courts | Data only where reasonably necessary for advice, a legal claim or a binding legal requirement. |
 
-- Portfolio Guru is **not** providing health or social care to a patient; it is a productivity tool for a doctor's professional training record. The 9(2)(h) care-provision and 9(2)(i) public-health conditions do not naturally fit.
-- Explicit consent gives you clear control, is transparent, and is the most defensible condition for a commercial SaaS tool sending health-related text to a third-party AI model.
-- Explicit consent must be **specific, informed, unambiguous, freely given, and separately affirmed** — which is why we capture it on a dedicated consent screen before you can send your first case (see our consent copy), and record the version and timestamp.
+Portfolio Guru does not sell personal data. No claim is made here that every processor contract or transfer safeguard has been executed.
 
-> «REVIEW: This is the single most important legal decision in this document. Confirm with the solicitor/DPO that **Art 9(2)(a) explicit consent** is the correct condition, and that an **Appropriate Policy Document (APD)** under DPA 2018 Schedule 1 is or is not required for the chosen condition. If any reliance is placed on a Schedule 1 condition (e.g. for record-keeping), an APD is mandatory. Also confirm whether processing patient clinical details (even if the user is meant to anonymise) creates additional controller obligations or a need to treat the user as the relevant data subject only.»
+## 5. Storage and security
 
-You can withdraw consent at any time (see §8). Withdrawal stops future processing; it does not make past processing unlawful.
+The live canonical service data remains in local SQLite and files on a Mac Mini. A dedicated Supabase project is active in London as a non-canonical mirror. Sensitive credentials and case fields are application-encrypted; encryption keys and provider secrets are kept outside the database. Credentials are not intended to be sent to an AI model.
 
----
+Known weaknesses at the evidence date are that some local drafts/backups have weak file permissions and FileVault is off. Encryption at field level does not remove the need for full-device encryption, restrictive file permissions, access review, backup control and tested recovery/deletion procedures.
 
-## 4. Who we share your data with (processors and sub-processors)
+[BLOCKER — Moeed: remediate and evidence Mac Mini disk encryption, local file/backup permissions, least-privilege access and key-management controls; manager-appointed privacy lead to accept any residual risk.]
 
-We use the third-party **processors** below. Each acts on our instructions under a data processing agreement (DPA). A full Record of Processing Activities and sub-processor table is maintained separately (see `processors-ropa.md`).
+## 6. International processing
 
-| Processor                                          | What they do for us                                                                                | Data they receive                                                          | Location / residency                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| -------------------------------------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Google Cloud — Vertex AI (Gemini)**              | AI extraction of structured WPBA data from your case content                                       | Clinical case text, transcribed voice, image/document content              | **Intended: UK/EU region with region-pinned processing.** Production must run with `PG_USE_VERTEX`, `GCP_PROJECT_ID`, and `GCP_VERTEX_LOCATION=europe-west2` before this notice is published. «REVIEW: verify the live runtime and Google's data-residency / no-training commitments for the exact API/tier. Developer and evaluation fallbacks may still use `GOOGLE_API_KEY`; do not treat those as production residency proof.» |
-| **Supabase**                                       | Cloud mirror of account, profile, usage and (encrypted) credential data so the web app can read it | Account/profile/usage data; encrypted Kaizen credentials                   | **Intended: EU region.** «REVIEW: confirm the Supabase project region is EU (e.g. eu-west / eu-central) and that no data is stored in a US region.»                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| **Telegram** (and, in future, **Meta / WhatsApp**) | Messaging transport you use to reach the bot                                                       | All message content in transit, your platform user ID                      | «REVIEW: Telegram's servers and data locations are outside your control and may be outside the UK/EEA. WhatsApp/Meta involves transfers to the US. Both must be addressed in the international-transfers section and in your transparency information. Confirm whether you can rely on the platforms' own terms or need additional safeguards.»                                                                                                                                                                                                                             |
-| **Stripe**                                         | Payment processing and subscription billing                                                        | Billing identifiers, payment status (card data handled by Stripe directly) | «REVIEW: Stripe processes data including in the US; confirm Stripe's UK/EU entity and transfer mechanism (Stripe relies on SCCs / UK Addendum).»                                                                                                                                                                                                                                                                                                                                                                                                                            |
+The proposed controller is in the United States. Vertex AI is intended to process in London and Supabase is active in London, but supplier support, subprocessors, Stripe and Telegram may involve access or processing outside the UK. A service region alone does not prove that all processing stays in that region.
 
-We do **not** sell your personal data. We do **not** use your clinical content to train our own models, and we instruct our AI processor not to use it to train theirs. «REVIEW: confirm contractually that the chosen Google API tier does not use your prompts/content for model training — Vertex AI and the paid Gemini API generally exclude training use, but the free AI Studio tier historically does not. This claim must be verified against the exact API and billing tier in use.»
+[BLOCKER — Manager-appointed privacy lead + legal counsel: map each restricted transfer and file the applicable adequacy, UK IDTA/Addendum or other safeguard, plus a transfer risk assessment/data protection test where required.]
 
----
+## 7. Retention and deletion
 
-## 5. How we store and protect your data
+| Data | Current or proposed position |
+| --- | --- |
+| Clinical content and extracted fields | Intended maximum retention is 180 days. End-to-end enforcement across SQLite, local files, backups, Supabase and temporary processing has not been proven. |
+| Kaizen credentials | Intended to be kept only while the account needs draft-saving access. The final deletion period and proof are blocked. |
+| Account, consent, usage, security and support records | Schedule not yet approved. Records must be minimised and assigned purpose-based periods. |
+| Financial records | Kept for the period required by applicable accounting/tax law; the period is not fixed in this draft. Stripe controls its own billing records. |
+| Telegram messages | Controlled by Telegram and the user's Telegram settings; Portfolio Guru deletion cannot erase Telegram's copies. |
+| Kaizen drafts | Controlled by Kaizen and the user; Portfolio Guru deletion cannot erase a draft already saved there. |
 
-- **Canonical store:** an encrypted **SQLite** database on a controlled machine. Your Kaizen credentials are encrypted at rest using **Fernet (AES-128-CBC + HMAC)** and are only decrypted in memory at the moment they are needed to log in to Kaizen on your behalf.
-- **Credentials are never sent to any AI model or included in any AI prompt.**
-- **Cloud mirror:** account, profile and usage data (and the _encrypted_ credential blob) are mirrored to Supabase (intended EU region) so the web app can function.
-- **Access control, logging and key management:** «REVIEW: document who can access the machine and the Supabase project, how the Fernet key is stored and rotated, and confirm that decrypted values and credentials are never written to logs.»
-- We do not log decrypted credentials, tokens, or secrets.
+[BLOCKER — Moeed: produce a cross-store retention inventory and automated/manual deletion evidence; manager + legal/accounting advisers to approve the schedule.]
 
-No system is perfectly secure, but we take reasonable technical and organisational measures appropriate to the sensitivity of the data.
+The in-service `/reset` route is intended to delete user data, but complete deletion across every store, mirror, file, backup and third-party copy has not yet been proven. Telegram and Kaizen must be managed separately by the user under those platforms' controls.
 
----
+## 8. Rights and complaints
 
-## 6. International transfers
+Depending on the circumstances, UK data-protection rights may include information, access, rectification, erasure, restriction, portability, objection, withdrawal of consent and safeguards relating to automated decisions. Portfolio Guru recommends a form and prepares drafts, but the doctor reviews the draft and decides whether to save and later submit it. It is not intended to make solely automated decisions with legal or similarly significant effects.
 
-Our intent is to keep your data within the **UK/EEA** by using EU-region services for AI processing (Vertex AI EU) and storage (Supabase EU).
+[BLOCKER — Manager: approve and publish a monitored privacy contact and identity-verification process. Moeed: test access, correction, export, restriction, objection and deletion workflows across all stores.]
 
-Some processors may involve transfers outside the UK/EEA:
+A user may also complain to the Information Commissioner's Office: https://ico.org.uk/make-a-complaint/
 
-- **Telegram / WhatsApp (Meta):** messaging transport may route through, or be stored on, servers outside the UK/EEA (Meta/WhatsApp in particular involves US transfers).
-- **Stripe:** may process some billing data in the US.
+## 9. Other platforms and changes
 
-Where data is transferred outside the UK, we rely on an appropriate transfer mechanism — the **UK International Data Transfer Agreement (IDTA)** or the **EU Standard Contractual Clauses with the UK Addendum**, and/or **UK adequacy regulations** where they apply. «REVIEW: for each processor confirm (a) whether a transfer outside the UK/EEA actually occurs, and (b) the specific lawful transfer mechanism relied on, and run a Transfer Risk Assessment (TRA) where required. The US sub-processor exposure (Stripe, Meta/WhatsApp, and Google if not pinned to EU) is the main item here.»
+Telegram's and Kaizen's own terms and privacy notices apply to their services. Portfolio Guru cannot alter or delete the copies they control. Material changes to this notice or the processing must be assessed, notified clearly and, where required, accepted or consented to before the changed processing begins.
 
----
+## Official references
 
-## 7. How long we keep your data (retention)
-
-| Data                                      | Proposed retention                                                                                                                                                                                                                                                                                    |
-| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Clinical case content sent for extraction | **Implemented (2026-07-02):** encrypted case text and extracted fields in the cloud mirror are deleted **180 days** after filing by a daily automated job (`backend/retention.py`, window configurable via `PG_CLINICAL_RETENTION_DAYS`). The non-clinical record (form type, status, date) is kept for the user's own history and ARCP progress features. Attachment and voice files are deleted immediately after processing; in-flight drafts are cleared when the draft is saved or the session is reset. «REVIEW: solicitor to confirm 180 days is appropriate.» |
-| Account, profile, usage data              | For the life of your account plus a short wind-down period. «REVIEW: set a number, e.g. 30 days after account closure.»                                                                                                                                                                               |
-| Kaizen credentials (encrypted)            | Until you remove them or close your account. Deleted on account closure. «REVIEW: confirm the credential-deletion path runs on account closure — the codebase has account-scoped state clearing; verify it covers all stores including the Supabase mirror.»                                          |
-| Billing records                           | As required by UK tax/accounting law — typically **6 years**. «REVIEW: confirm with accountant.»                                                                                                                                                                                                      |
-| Consent records                           | For as long as needed to evidence the lawful basis, plus a reasonable period afterwards. «REVIEW: set a number.»                                                                                                                                                                                      |
-| Diagnostic logs                           | «REVIEW: set a short retention, e.g. 30–90 days, and confirm logs contain no clinical content or secrets.»                                                                                                                                                                                            |
+- ICO UK representative guidance: https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/international-transfers/receiving-personal-information-from-the-eea/
+- ICO legitimate interests guidance: https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/lawful-basis/a-guide-to-lawful-basis/legitimate-interests/
+- ICO international transfers guidance: https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/international-transfers/
+- Telegram privacy policy: https://telegram.org/privacy/gb
+- Google Cloud CDPA: https://cloud.google.com/terms/data-processing-addendum
+- Supabase DPA: https://supabase.com/legal/customer-resources/data-processing-addendum
+- Stripe DPA: https://stripe.com/gb/legal/dpa
 
 ---
 
-## 8. Your rights
-
-Under UK GDPR you have the right to:
-
-- **Be informed** (this notice).
-- **Access** a copy of your personal data (subject access request).
-- **Rectification** of inaccurate data.
-- **Erasure** ("right to be forgotten") — including deletion of your clinical content, credentials, and account. Because our primary Art 9 basis is consent, withdrawing consent will also trigger deletion of the consent-based data.
-- **Restriction** of processing.
-- **Data portability** for data you provided, where processing is based on consent or contract and is automated.
-- **Object** to processing based on legitimate interests.
-- **Withdraw consent** at any time, as easily as you gave it.
-- Rights related to **automated decision-making**. Note: Portfolio Guru **only saves drafts**; it never auto-submits to your supervisor, and a human (you) reviews every entry before it counts. We do not carry out solely-automated decision-making producing legal or similarly significant effects on you. «REVIEW: confirm this characterisation holds and that the form-type recommendation is advisory only.»
-
-### How to exercise your rights
-
-Contact us at «REVIEW: privacy contact email». In-bot, you can use «REVIEW: confirm/define commands, e.g. /delete or /forgetme, and /export». We will respond within **one month** as required by UK GDPR. We may ask you to verify your identity.
-
----
-
-## 9. Complaints
-
-If you are unhappy with how we handle your data, please contact us first. You also have the right to complain to the UK supervisory authority:
-
-**Information Commissioner's Office (ICO)** — https://ico.org.uk/make-a-complaint/ — Helpline 0303 123 1113 — Wycliffe House, Water Lane, Wilmslow, Cheshire SK9 5AF.
-
----
-
-## 10. Changes to this policy
-
-We may update this policy. Material changes affecting how we process your health data may require us to ask for your consent again. We will notify you of significant changes via the bot or web app. «REVIEW: define notification mechanism.»
-
----
-
-_End of draft. Resolve all `«REVIEW»` markers with the solicitor/DPO before publication._
+**Adoption blocker:** manager approval/signature, UK legal review, controller contact details, UK representative decision, processor/transfer evidence and operational proof are all outstanding. This notice remains **DRAFT — NOT IN FORCE**.

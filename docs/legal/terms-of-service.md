@@ -1,144 +1,112 @@
-> **DRAFT — NOT YET IN FORCE.** This is a working draft prepared for review by the founder and a qualified solicitor before publication. It is **not legal advice**. Resolve every `«REVIEW: ...»` marker with legal counsel before the Terms go live.
+> **DRAFT — NOT IN FORCE.** Prepared for manager and UK consumer-law review. This draft is not legal advice, is not a claim of compliance, and must not be offered to users as binding terms.
 
-# Terms of Service — Portfolio Guru
+# Portfolio Guru consumer terms
 
-**Last updated:** «REVIEW: insert go-live date»
-**Version:** 0.1 (draft)
+**Evidence date:** 20 August 2026
+**Proposed version:** 1.0 draft
 
-These Terms of Service ("**Terms**") govern your use of Portfolio Guru ("**the Service**", "**we**", "**us**"), provided by «REVIEW: insert legal entity — must match the controller named in the Privacy Policy». By using the Service you agree to these Terms and to our [Privacy Policy](./privacy-policy.md). If you do not agree, do not use the Service.
+## 1. Proposed provider and contract information
 
----
+The proposed provider and contracting entity is **Solvoro Labs LLC**, a Texas limited liability company formed on 23 November 2025. It is manager-managed; Moeed cannot bind it.
 
-## 1. What the Service does
+[BLOCKER — Manager: approve Solvoro Labs LLC as contracting entity and sign or authorise these terms after UK legal review.]
 
-Portfolio Guru helps UK Emergency Medicine trainees prepare workplace-based assessment (WPBA) entries for their RCEM Kaizen ePortfolio. You send a clinical case (text, voice, audio, photo, or document) via Telegram (and, in future, WhatsApp). The Service uses AI to extract structured data, recommends a form type, shows you a draft for review, and — **only when you approve** — saves a **draft** in your Kaizen ePortfolio.
+[BLOCKER — Manager + legal counsel: insert the public business identity details, service/geographical address, monitored support/legal contact and any required registration particulars before offering a consumer contract.]
 
-**The Service saves drafts only. It never submits anything to your supervisor, assessor, or any other person.** Submission, sign-off, and the integrity of your portfolio remain entirely your responsibility.
+These terms are intended to govern the Portfolio Guru service (the **Service**) once validly adopted. The [privacy notice](./privacy-policy.md) explains the proposed handling of personal data.
 
----
+## 2. The Service
 
-## 2. Eligibility
+Portfolio Guru is a Telegram-first administrative assistant for UK doctors. It turns user-supplied case material into structured ePortfolio fields, recommends a form, shows the doctor a draft and, only after the doctor's approval, can save a **draft** in the doctor's Kaizen/RCEM ePortfolio.
 
-You may use the Service only if:
+The Service does not submit anything to a supervisor or assessor. The doctor must review the draft, correct it and decide separately whether to submit it in Kaizen.
 
-- You are a **medical doctor registered with the General Medical Council (GMC)** (or otherwise lawfully entitled to hold an RCEM Kaizen ePortfolio), and you are using the Service for your own professional training record.
-- You are at least 18 years old.
-- You have the authority to connect your own Kaizen ePortfolio account.
+The Service is not clinical advice, patient care, an NHS system or a medical device. It is not affiliated with, endorsed by or operated by RCEM, Kaizen, the GMC or any NHS body. It does not guarantee acceptance, sign-off, curriculum credit, ARCP progression or any professional outcome.
 
-«REVIEW: confirm whether you wish to actively verify GMC registration, or rely on the user's warranty. If you do not verify, state that you rely on the user's representation.»
+## 3. Who may use it
 
----
+The Service is intended for adults who are UK doctors and are authorised to use the Kaizen account they connect. A user must use only their own account and professional training record, provide accurate account information, and keep Telegram and Kaizen access secure.
 
-## 3. Your account and credentials
+[BLOCKER — Manager: decide and document whether eligibility or professional status will be verified, and ensure the sign-up wording matches the actual control.]
 
-- You authorise the Service to log in to your Kaizen ePortfolio using the credentials you provide, for the sole purpose of saving drafts you have approved.
-- You are responsible for keeping your messaging account secure. Anyone with access to your Telegram/WhatsApp account may be able to use the Service as you.
-- You must comply with RCEM's and Kaizen's own terms of use. «REVIEW: confirm that automated draft-saving via your stored credentials does not breach RCEM/Kaizen terms of use. This is a material risk — RCEM may prohibit automated/third-party access to Kaizen. Obtain a view from the solicitor and, if appropriate, from RCEM.»
+## 4. Draft accuracy and professional responsibility
 
----
+AI output and form recommendations can be wrong, incomplete or unsuitable. The user must check every field and ensure that any portfolio entry is accurate, honest and consistent with professional, employer and training-body requirements. Portfolio Guru remains responsible for providing the Service with reasonable care and skill; this clause does not exclude rights that consumer law does not allow the provider to exclude.
 
-## 4. Acceptable use
+## 5. No identifiable patient data
 
-You agree **not** to:
+Users must not send identifiable or potentially identifiable patient data. Before sending text, audio, images or documents, the user must remove direct identifiers and unusual combinations of facts that could identify a patient.
 
-- Send identifiable patient data (see §6) except as your professional duties and the law permit, and only after anonymisation.
-- Use the Service to create false, fabricated, or misleading portfolio entries.
-- Use the Service for anyone other than yourself, or share access.
-- Attempt to disrupt, reverse-engineer, scrape, or overload the Service or the Kaizen platform.
-- Use the Service unlawfully or in breach of GMC professional standards.
+Telegram receives original cloud-chat content before Portfolio Guru can inspect or redact it. Local redaction is a safety net, not permission: scanned images and scanned PDFs may reach Vertex AI before local redaction. Portfolio Guru does not guarantee that redaction will detect everything.
 
-We may suspend or terminate access for breach (see §11).
+If patient data is detected or reasonably suspected, the proposed response is to pause processing and minimise, quarantine or delete the material under an incident procedure once approved. A user must cooperate with reasonable containment steps. Nothing here transfers Portfolio Guru's legal duties to the doctor or treats the doctor's agreement as consent on behalf of a patient.
 
----
+[BLOCKER — Manager + legal counsel: approve the accidental-patient-data incident procedure and the notices/remedies that apply.]
 
-## 5. Critical disclaimers
+## 6. Kaizen access and third-party services
 
-**Read this section carefully.**
+The user authorises the Service to use the Kaizen credentials they provide only to save a draft the user has approved. Kaizen remains authoritative for anything saved there. Telegram, Kaizen, Stripe and other external services have their own terms, availability and privacy practices.
 
-### 5.1 No affiliation with RCEM or Kaizen
+[BLOCKER — Manager + legal counsel: obtain and document Kaizen/RCEM permission or a reasoned terms assessment covering automated login and draft-saving, plus hosting and data-transfer evidence. Do not expand launch until resolved.]
 
-Portfolio Guru is an independent product. It is **not affiliated with, endorsed, sponsored by, or approved by** the Royal College of Emergency Medicine (RCEM), the Kaizen ePortfolio platform, the GMC, or any NHS or training body. References to RCEM, Kaizen, and form names are for descriptive interoperability only.
+## 7. Acceptable use
 
-### 5.2 Draft-only — you must review everything
+Users must not:
 
-The Service produces **drafts** and an **advisory** form-type recommendation. **You must read and verify every field of every entry before it counts toward anything.** AI extraction can be wrong, incomplete, or miscategorised. Nothing is submitted to a supervisor automatically. You are solely responsible for the final content of your portfolio.
+- send identifiable patient data;
+- create false, fabricated or misleading portfolio material;
+- use another person's account or allow another person to impersonate them;
+- use the Service for clinical decisions, emergencies or patient care;
+- probe, disrupt, overload, scrape or bypass security controls, except under written authorised security testing; or
+- use the Service unlawfully or in breach of professional or third-party obligations.
 
-### 5.3 No clinical or medical advice
+The provider may take proportionate action, including warning, limiting or suspending access, where reasonably necessary to protect users, patient confidentiality, security, the Service or a third-party platform. Except in an urgent security or legal situation, the provider should explain the reason and offer a reasonable opportunity to respond.
 
-The Service does not provide clinical, medical, diagnostic, or professional advice, and must not be used as a clinical decision-making tool. It is an administrative aid for portfolio record-keeping only.
+## 8. Price, subscription and distance-selling information
 
-### 5.4 You are responsible for anonymising patient data
+No price or consumer payment term is adopted by this draft. Before any paid offer, the checkout and durable confirmation must clearly provide the business identity/contact/address, service description, full tax-inclusive GBP price, billing period, contract duration, payment method, cancellation route, right-to-cancel and refund information, and any minimum commitment.
 
-You are the clinician and the data controller for any patient information you choose to include. **You must anonymise patient-identifiable information before sending it**, in line with GMC guidance and your employer's information-governance policies. The Service does not guarantee any automated redaction. «REVIEW: if/when automated redaction is built, update this clause; until then, do not imply redaction exists.»
+[BLOCKER — Manager + finance/legal advisers: approve the final tax-inclusive price, VAT/tax treatment, billing period, renewal wording and minimum term. Reconcile the approved terms with the live Stripe configuration.]
 
-### 5.5 You are responsible for the accuracy and integrity of your portfolio
+[BLOCKER — Manager + legal counsel: approve the cancellation route, statutory cancellation information, service-start request/acknowledgement where relevant, refund treatment and standard cancellation form. Implement and test them before wider paid launch.]
 
-You are responsible for the truthfulness, accuracy, and completeness of every entry, and for compliance with RCEM/GMC requirements. The Service does not assure that any entry meets curriculum or assessment standards.
+[BLOCKER — Moeed: ensure the user receives the accepted terms and order confirmation in a durable format they can save, and retain evidence of the version accepted.]
 
-### 5.6 Service availability
+A failed payment may lead to a proportionate service restriction after reasonable notice. A user must be told before purchase what access continues after cancellation or non-payment.
 
-The Service is provided "as is" and "as available". It depends on third parties (messaging platforms, AI providers, the Kaizen platform) that may change or fail without notice. We do not guarantee uninterrupted or error-free operation.
+## 9. Changing or ending the Service
 
----
+A user may stop using the Service and close their account through the approved route once implemented. Cancellation of a subscription, closure of a Portfolio Guru account, deletion of Telegram messages and deletion of a Kaizen draft are separate actions.
 
-## 6. Patient data and information governance
+The provider may change the Service or these terms for a valid reason, such as law, security, supplier or product changes. Material changes require reasonable advance notice in a durable format. A change will not retrospectively remove accrued consumer rights; renewed agreement or consent must be obtained where law requires it.
 
-Including patient data is at your discretion and risk. By sending content, you confirm you are entitled to process it and have anonymised it appropriately. We process clinical content as described in the Privacy Policy. Nothing in these Terms makes us a clinical care provider or relieves you of your professional and information-governance obligations.
+If the provider permanently ends a paid Service, users must receive reasonable notice where possible and any refund or continuing-access remedy required by law and the approved commercial policy.
 
----
+## 10. Intellectual property and user content
 
-## 7. Subscriptions, billing, and refunds
+The Service software and branding remain the provider's or its licensors' property. Once the terms are adopted, the user receives a personal, limited, non-transferable licence to use the Service for their own ePortfolio.
 
-- **Free tier:** up to **5 cases per month** at no charge. «REVIEW: confirm the reset cadence (calendar month vs rolling 30 days) and exact counting rule.»
-- **Unlimited tier:** **£9.99 per month**, billed monthly in advance via **Stripe**. «REVIEW: confirm price includes/excludes VAT and whether VAT registration applies; confirm currency (GBP).»
-- **Auto-renewal:** the Unlimited subscription renews automatically each month until cancelled.
-- **Cancellation:** you may cancel at any time via «REVIEW: define cancellation route — in-bot command and/or Stripe customer portal». Cancellation takes effect at the end of the current billing period; you keep Unlimited access until then.
-- **Refunds:** «REVIEW: define your refund policy. Note UK consumer law — under the Consumer Contracts Regulations 2013 there is normally a 14-day cancellation right for digital services, but it can be lost once the service begins _if the consumer expressly consented and acknowledged loss of the right_. Decide and document your stance (e.g. no refunds for partial months, or a discretionary refund window) and ensure the checkout captures the required consent/acknowledgement.»
-- **Price changes:** we may change pricing with reasonable advance notice; changes apply from your next billing period. «REVIEW: define notice period, e.g. 30 days.»
-- **Failed payments:** if payment fails, we may downgrade you to the free tier until payment succeeds.
+The user keeps their rights in content they supply. They grant only the limited permission needed to transmit, inspect, extract, present and save their requested draft, operate security and meet legal obligations. The Service must not use case content for unrelated marketing or model training without a separate lawful arrangement.
 
----
+## 11. Service quality and liability
 
-## 8. Intellectual property
+Nothing in these terms excludes or restricts liability where that would be unlawful, including liability for death or personal injury caused by negligence, fraud or fraudulent misrepresentation, or the user's non-excludable consumer rights.
 
-The Service, its software, and its branding belong to us. We grant you a limited, non-exclusive, non-transferable licence to use the Service for your own portfolio. You retain ownership of the content you submit; you grant us the limited licence needed to operate the Service (process, extract, and save drafts on your behalf) as described in the Privacy Policy.
+The Service depends on third-party platforms and may sometimes be unavailable. Any limitation for foreseeable loss, data loss, third-party failure, AI error or professional outcome must be fair, transparent and proportionate to a consumer service. This draft contains no consumer indemnity and no adopted financial cap.
 
----
+[BLOCKER — Manager + UK consumer lawyer: approve a fair liability allocation and any cap, considering the sensitivity of credentials/case content, the price, available insurance, statutory remedies and losses that cannot lawfully be excluded.]
 
-## 9. Limitation of liability
+## 12. Complaints, law and disputes
 
-To the maximum extent permitted by law:
+The final terms must provide an accessible complaints route. The proposed governing law is England and Wales, without depriving a consumer of mandatory protections or the right to bring proceedings available in the part of the UK where they live.
 
-- We are not liable for any loss arising from: inaccurate or incomplete AI extraction; incorrect form-type recommendations; entries you approved; failure to anonymise patient data; portfolio, assessment, ARCP, or career outcomes; or unavailability of the Service or of Kaizen, Telegram, WhatsApp, Stripe, or any AI provider.
-- Our total aggregate liability to you for any claim is limited to the greater of «REVIEW: e.g. the fees you paid us in the 12 months before the claim, or £100».
-- **Nothing in these Terms limits liability that cannot be limited by law** — including death or personal injury caused by negligence, fraud, or your non-excludable rights as a consumer under UK law. «REVIEW: a solicitor must confirm these exclusions are enforceable, particularly against a consumer; unfair-terms law (Consumer Rights Act 2015) constrains what you can exclude.»
+[BLOCKER — Manager + UK consumer lawyer: approve the complaints process, governing-law/jurisdiction clause and any alternative dispute-resolution disclosures.]
+
+## Official references
+
+- GOV.UK distance-selling guidance: https://www.gov.uk/online-and-distance-selling-for-businesses
+- Privacy notice: ./privacy-policy.md
 
 ---
 
-## 10. Indemnity
-
-You agree to indemnify us against claims arising from your breach of these Terms, your misuse of the Service, or your failure to anonymise or lawfully handle patient data. «REVIEW: confirm enforceability and scope against a consumer user.»
-
----
-
-## 11. Suspension and termination
-
-- You may stop using the Service and close your account at any time. On closure we delete your data as described in the Privacy Policy.
-- We may suspend or terminate your access for breach of these Terms, non-payment, legal requirement, or if continuing to provide the Service becomes impractical. We will give reasonable notice where we can.
-- On termination, your right to use the Service ends; clauses that by their nature survive (disclaimers, liability, indemnity, IP) continue.
-
----
-
-## 12. Governing law and jurisdiction
-
-These Terms are governed by the laws of **England and Wales**, and the courts of England and Wales have jurisdiction. «REVIEW: confirm — adjust if you intend to serve users in Scotland/NI and want their consumer-law venue rights respected.»
-
----
-
-## 13. Contact and changes
-
-Contact: «REVIEW: support/legal email». We may update these Terms; material changes will be notified via the bot or web app, and continued use after changes means you accept them. «REVIEW: define notice mechanism and whether any change requires renewed acceptance.»
-
----
-
-_End of draft. Resolve all `«REVIEW»` markers with the solicitor before publication._
+**Adoption blocker:** manager authority, public business/contact/address details, consumer-law review, price/VAT, cancellation/refund mechanics, liability allocation, durable confirmation and Kaizen permission are outstanding. These terms remain **DRAFT — NOT IN FORCE**.
