@@ -43,6 +43,10 @@ If patient data is detected or reasonably suspected, the proposed response is to
 
 [BLOCKER — Manager + legal counsel: approve the accidental-patient-data incident procedure and the notices/remedies that apply.]
 
+The current in-product consent record labels the lawful basis as Article 9(2)(a) explicit consent and says `/reset` can erase Portfolio Guru's stored data at any time. Those statements are not adopted by these terms: a doctor cannot consent for a third-party patient, and the observed reset path intentionally retains limited consent and billing-link evidence while Telegram, Kaizen and backup copies have separate controls.
+
+[BLOCKER — Manager + privacy/legal counsel: approve the lawful-basis and evidence-retention position; Moeed: version and deploy consistent consent, reset, privacy and contract wording only after approval.]
+
 ## 6. Kaizen access and third-party services
 
 The user authorises the Service to use the Kaizen credentials they provide only to save a draft the user has approved. Kaizen remains authoritative for anything saved there. Telegram, Kaizen, Stripe and other external services have their own terms, availability and privacy practices.

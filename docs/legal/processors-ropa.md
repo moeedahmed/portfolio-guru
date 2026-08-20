@@ -18,12 +18,12 @@ Solvoro Labs LLC was formed in Texas on 23 November 2025 and is manager-managed.
 
 | Activity and purpose | People and data | Proposed lawful basis | Recipients/transfers | Retention and safeguards |
 | --- | --- | --- | --- | --- |
-| Account setup and service delivery | Doctor; Telegram ID/profile, preferences, account state | Art 6(1)(b), contract | Telegram upstream; Supabase mirror | Account schedule blocked; application controls and field encryption for sensitive values. |
-| Case capture, extraction and form recommendation | Doctor; case text/audio/images/documents, extracted fields and corrections; accidental patient health data may occur | Art 6(1)(b) only for the doctor's intended service data. Article 6 and Article 9 positions for accidental third-party patient data are not adopted | Telegram receives originals; Google Vertex AI; local Mac Mini; Supabase mirror | Intended clinical-content maximum 180 days, not proven across stores. Text/doc text locally inspected/redacted before Vertex; scanned images/PDFs may reach Vertex first. |
+| Account setup and service delivery | Doctor; Telegram ID/profile, preferences, account state | Art 6(1)(b), contract | Telegram upstream; local Mac Mini; Supabase only if separately activated | Account schedule blocked; application controls and field encryption for sensitive values. |
+| Case capture, extraction and form recommendation | Doctor; case text/audio/images/documents, extracted fields and corrections; accidental patient health data may occur | Art 6(1)(b) only for the doctor's intended service data. Article 6 and Article 9 positions for accidental third-party patient data are not adopted | Telegram receives originals; Google Vertex AI; local Mac Mini; encrypted GCS backup; Supabase only if activated | Intended clinical-content maximum 180 days, not proven across stores/backups. Text/doc text locally inspected/redacted before AI extraction; scanned images/PDFs may reach Vertex first. |
 | Draft preview and Kaizen save | Doctor; draft fields, form choice, Kaizen credentials | Art 6(1)(b); accidental special-category position blocked | Kaizen/RCEM independent destination; hosting/transfer unknown | Kaizen controls saved draft; sensitive credentials application-encrypted and decrypted when needed. |
 | Subscription and billing | Paying doctor; tier, Stripe identifiers, payment status and required financial records | Art 6(1)(b); Art 6(1)(c) for identified financial-record duties | Stripe, including controller and processor roles under its terms; global transfers possible | Stripe authoritative; internal legal-retention period blocked. No full card data held by Portfolio Guru. |
 | Security, fraud and reliable operation | Doctor; IDs, timestamps, usage, errors, security/fraud signals | Art 6(1)(f), subject to approved LIA | Internal access; relevant hosting/service providers | Short, purpose-based schedule blocked; logs must exclude credentials and unnecessary case content. |
-| Consent and terms evidence | Doctor; version, timestamp, user ID and durable contract evidence | Art 6 basis depends on record: contract administration and/or legal obligation | Internal; Supabase mirror where configured | Schedule blocked; retain only as long as needed to evidence the relevant relationship or duty. |
+| Consent and terms evidence | Doctor; version, timestamp, user ID and durable contract evidence | Art 6 basis depends on record: contract administration and/or legal obligation. The code's current Article 9(2)(a) label is not adopted by this pack | Internal; encrypted GCS backup; Supabase only if activated | Schedule blocked; current reset intentionally retains consent history. Retain only as long as needed to evidence the relevant relationship or duty. |
 | Rights, complaints and incidents | Doctor and any affected person; request, verification, correspondence, incident evidence | Legal obligation and, where necessary, legitimate interests in legal claims/security | Advisers, regulator, courts or affected suppliers where necessary | Case-specific hold and deletion rules blocked; access restricted to responders. |
 | Optional marketing | Doctor; contact and preference | Art 6(1)(a), consent; PECR assessment required | Approved communications provider, if introduced | No optional-marketing workflow evidenced; keep suppression record where required. |
 
@@ -33,11 +33,13 @@ Solvoro Labs LLC was formed in Texas on 23 November 2025 and is manager-managed.
 
 | Provider | Processing and location evidence | Contract/transfer status | Next action |
 | --- | --- | --- | --- |
-| Google Cloud Vertex AI | Portfolio extraction. Intended live location London (`europe-west2`). Text/document text locally inspected/redacted first; scanned images/PDFs may arrive before local redaction. | Public CDPA exists; account acceptance, exact product scope, subprocessors, data location, no-training and transfer evidence not filed. | [BLOCKER — Moeed: export account-level terms/configuration evidence; legal/privacy lead: assess and approve.] |
-| Supabase | Active dedicated project in London (`eu-west-2`) mirrors non-canonical service data; sensitive fields are application-encrypted. | Public DPA exists; account acceptance, subprocessor and transfer evidence not filed. | [BLOCKER — Moeed: export project-region and account DPA evidence; legal/privacy lead: assess and approve.] |
-| Other infrastructure support | No additional live processor is established by this evidence pack. OpenMed code existed but was inactive when checked. | Not treated as a live recipient. | Reassess before activation or adding any supplier. |
+| Google Cloud Vertex AI | Portfolio extraction. The running bot inspected on 20 August 2026 had Vertex enabled in London (`europe-west2`); text extraction excluded the configured DeepSeek route while that flag was effective. Text/document text is locally inspected/redacted first; scanned images/PDFs may arrive before local redaction. | Public CDPA and current data-governance/location pages exist; account acceptance, exact product scope, subprocessors, retention/no-training configuration and transfer evidence not filed. The client can fall back to the Google developer API if Vertex configuration is absent. | [BLOCKER — Moeed: make unapproved fallback fail closed and export account/configuration evidence; legal/privacy lead: assess and approve.] |
+| Google Cloud Storage | Encrypted off-device backups of canonical SQLite, persistence and draft state are configured for a GCS bucket. Code describes a 90-day bucket lifecycle. | Public CDPA may cover the service, but bucket region, IAM, account acceptance, lifecycle, restoration/deletion and transfer evidence are not filed here. | [BLOCKER — Moeed: export bucket location, IAM, encryption/lifecycle and account evidence; legal/privacy lead: assess and approve.] |
+| Supabase | A dedicated London (`eu-west-2`) project and non-canonical mirror code exist, but the inspected bot process had neither required Supabase runtime variable. An active live mirror was not established at the evidence date. | Public DPA exists; account acceptance, project region, subprocessor and transfer evidence not filed. | Keep inactive until approved; export project/account evidence before any activation. |
+| Bitwarden Secrets Manager / Healthchecks.io | Bitwarden supplies runtime secrets; Healthchecks receives intended liveness/job metadata. No case content is intended. | Account terms, access, minimisation, subprocessors and transfer position not filed. | [BLOCKER — Moeed gathers; privacy/security lead classifies and approves or records exclusion rationale.] |
+| Inactive/conditional model paths | Code contains Google developer API, DeepSeek and OpenAI routes. They were not established as active in the inspected bot process; OpenMed-related code was also not established as active. | Not approved recipients. Code presence and failover behaviour create change/fail-open risk. | Fail closed and reassess before activation; maintain a tested provider allow-list. |
 
-The local Mac Mini and its files/SQLite database are internal storage, not a processor. They remain the live canonical store. Some local drafts/backups have weak permissions and FileVault was off at the evidence date.
+The local Mac Mini and its files/SQLite database are internal storage, not a processor. They remain the live canonical store. Some local files/backups have weak permissions and FileVault was off at the evidence date.
 
 ## 4. Independent controllers and mixed-role recipients
 
@@ -52,7 +54,7 @@ The local Mac Mini and its files/SQLite database are internal storage, not a pro
 
 | Record | Position at evidence date |
 | --- | --- |
-| Clinical content/extracted fields | Intended 180-day maximum; cross-store execution and backups not proven. |
+| Clinical content/extracted fields | Intended 180-day maximum; cross-store execution not proven. Local backups are configured for 30 days and GCS for 90 days, but live lifecycle/deletion evidence is not filed. |
 | Temporary attachments and processing files | Inventory and deletion timing not proven for every format/path. |
 | Credentials | Kept only while needed is the intended principle; final period and deletion proof blocked. |
 | Account/usage/consent/support/security data | Purpose-based periods not approved. |
@@ -64,10 +66,12 @@ The local Mac Mini and its files/SQLite database are internal storage, not a pro
 ## 6. Security measures and gaps
 
 - Sensitive credentials and case fields are application-encrypted; keys and provider secrets remain outside the database.
-- The canonical SQLite/files and runtime are on a Mac Mini; Supabase is a non-canonical London mirror.
+- The canonical SQLite/files and runtime are on a Mac Mini; an encrypted off-device GCS backup is configured. Supabase mirror code/project exist but the active bot mirror was not established.
 - Credentials are not intended to enter AI prompts.
 - Draft-only architecture requires doctor review before a Kaizen draft is saved and never submits to a supervisor.
-- Known gaps: FileVault off; weak permissions on some drafts/backups; access review, deletion, restore and incident evidence incomplete.
+- Known gaps: FileVault off; weak permissions on some local files/backups; provider fail-open behaviour; access review, deletion, restore and incident evidence incomplete.
+
+The shipped consent record currently labels processing as Article 9(2)(a) explicit consent and promises erasure of Portfolio Guru's stored data with `/reset`. The legal position in this pack does not adopt the first statement for accidental third-party patient data, and the observed reset code intentionally retains consent history and a Stripe billing link. This inconsistency is a transparency and lawful-basis blocker.
 
 [BLOCKER — Moeed: remediate and evidence device encryption, permissions, least privilege, backup protection, key management, deletion and recovery tests.]
 
@@ -81,6 +85,8 @@ Update this record before a new channel, processor, model, storage location, mar
 - ICO legitimate interests: https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/lawful-basis/a-guide-to-lawful-basis/legitimate-interests/
 - ICO international transfers: https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/international-transfers/
 - Google Cloud CDPA: https://cloud.google.com/terms/data-processing-addendum
+- Vertex AI data governance: https://cloud.google.com/vertex-ai/generative-ai/docs/data-governance
+- Vertex AI locations: https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations
 - Supabase DPA: https://supabase.com/legal/customer-resources/data-processing-addendum
 - Stripe DPA: https://stripe.com/gb/legal/dpa
 - Telegram privacy policy: https://telegram.org/privacy/gb
