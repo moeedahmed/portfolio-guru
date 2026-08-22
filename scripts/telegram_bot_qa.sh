@@ -105,7 +105,7 @@ elif [[ "$HAS_TELETHON_ENV" == "1" ]]; then
   printf 'Live Telegram QA approved for target: %s\n' "${TELEGRAM_BOT_USERNAME:-portfolio_guru_bot}" >> "$SUMMARY"
   if [[ "$FOCUSED_RELEASE" == "1" ]]; then
     TELEGRAM_E2E_ARTIFACT_DIR="$ARTIFACT_DIR" run_step live-telegram-focused "$PY" -m pytest \
-      tests/test_e2e.py::test_e2e_case_text_gets_recommendation \
+      tests/test_e2e.py::test_e2e_case_text_enters_draft_flow \
       -q \
       -m e2e
   else

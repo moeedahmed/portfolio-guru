@@ -55,7 +55,7 @@ def test_telegram_focused_selector_runs_only_representative_live_case(tmp_path):
     result = subprocess.run(["bash", str(TELEGRAM_QA), "--focused-release"], env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     calls = log.read_text()
-    assert "tests/test_e2e.py::test_e2e_case_text_gets_recommendation" in calls
-    live_call = next(line for line in calls.splitlines() if "test_e2e_case_text_gets_recommendation" in line)
+    assert "tests/test_e2e.py::test_e2e_case_text_enters_draft_flow" in calls
+    live_call = next(line for line in calls.splitlines() if "test_e2e_case_text_enters_draft_flow" in line)
     assert "test_e2e_live.py" not in live_call
     assert live_call.endswith("-q -m e2e")

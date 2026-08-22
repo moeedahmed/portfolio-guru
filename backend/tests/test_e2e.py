@@ -55,22 +55,25 @@ async def test_e2e_start_shows_welcome(telethon_client):
 
 
 @pytest.mark.asyncio
-async def test_e2e_case_text_gets_recommendation(telethon_client):
+async def test_e2e_case_text_enters_draft_flow(telethon_client):
     async with telethon_client.conversation(BOT_USERNAME, timeout=90) as conv:
         sent = await conv.send_message(
-            "I ran a busy emergency department shift with several acute chest pain patients and want to reflect on my management."
+            "I reviewed an emergency department patient with acute chest pain. "
+            "I took a focused history and examination, reviewed the ECG, arranged serial troponins, "
+            "discussed the case with a senior, documented safety-netting, and made an appropriate referral. "
+            "The patient remained stable, and I learned to document risk stratification more clearly."
         )
         reply = await wait_for_matching_message(
             telethon_client,
             BOT_USERNAME,
             90,
             expect_buttons=True,
-            expect_button_any=("Use best fit", "See all forms"),
+            expect_button_any=("Draft now",),
             min_id=getattr(sent, "id", None),
         )
 
     buttons = [button.text for row in (reply.buttons or []) for button in row]
-    assert any("Use best fit" in text or "See all forms" in text for text in buttons)
+    assert any("Draft now" in text for text in buttons)
 
 
 @pytest.mark.asyncio
