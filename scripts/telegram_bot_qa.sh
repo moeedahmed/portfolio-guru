@@ -106,7 +106,8 @@ elif [[ "$HAS_TELETHON_ENV" == "1" ]]; then
   if [[ "$FOCUSED_RELEASE" == "1" ]]; then
     TELEGRAM_E2E_ARTIFACT_DIR="$ARTIFACT_DIR" run_step live-telegram-focused "$PY" -m pytest \
       tests/test_e2e.py::test_e2e_case_text_gets_recommendation \
-      -q
+      -q \
+      -m e2e
   else
     TELEGRAM_E2E_ARTIFACT_DIR="$ARTIFACT_DIR" run_step live-telegram "$PY" -m pytest \
       tests/test_e2e.py \
