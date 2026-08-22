@@ -65,13 +65,20 @@ def _run_backup(tmp_path: Path, remote: str) -> subprocess.CompletedProcess:
     )
 
 
+def _unreachable_remote(tmp_path: Path) -> Path:
+    """Return a destination that rsync cannot create on any supported version."""
+    blocker = tmp_path / "remote-parent-is-file"
+    blocker.write_text("not a directory")
+    return blocker / "backups"
+
+
 def test_unreachable_offdevice_target_fails_the_run(tmp_path):
     """The regression itself: a failed off-device copy must not exit 0.
 
     Before the fix this run printed "Backup complete." and exited 0, which is
     what let 53 nights of failure pass unnoticed.
     """
-    unwritable = tmp_path / "nonexistent-parent" / "backups"
+    unwritable = _unreachable_remote(tmp_path)
 
     result = _run_backup(tmp_path, str(unwritable))
 
@@ -90,11 +97,11 @@ def test_failure_surfaces_the_transport_error(tmp_path):
     The original bug was undiagnosable from the log alone: the real cause (a
     gcloud CommandLoadFailure under launchd's Python 3.9) was discarded.
     """
-    result = _run_backup(tmp_path, str(tmp_path / "nonexistent-parent" / "backups"))
+    result = _run_backup(tmp_path, str(_unreachable_remote(tmp_path)))
 
     combined = result.stdout + result.stderr
     # rsync's own diagnostic mentions the path it could not write.
-    assert "nonexistent-parent" in combined, (
+    assert "remote-parent-is-file" in combined, (
         f"transport error was swallowed; got:\n{combined}"
     )
 
@@ -123,7 +130,7 @@ def test_successful_offdevice_copy_lands_and_is_encrypted(tmp_path):
 
 def test_local_archive_survives_offdevice_failure(tmp_path):
     """Failing the run must not cost the local backup we did successfully take."""
-    result = _run_backup(tmp_path, str(tmp_path / "nonexistent-parent" / "backups"))
+    result = _run_backup(tmp_path, str(_unreachable_remote(tmp_path)))
 
     assert result.returncode != 0
     archives = list((tmp_path / "archives").glob("portfolio-guru-backup-*.tar.gz"))

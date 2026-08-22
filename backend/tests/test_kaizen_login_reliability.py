@@ -550,3 +550,190 @@ async def test_setup_password_shows_testing_feedback_after_submission():
     assert any("🔄" in t or "testing" in t.lower() for t in texts), (
         "No 'Testing...' feedback emitted after password submission"
     )
+
+
+# ─── _login: timeout vs credential rejection ─────────────────────────────
+#
+# The live 2026-08-21 failure: the password was submitted, the post-submit
+# ``wait_for_url`` timed out, and ``_login`` returned False — so the bot told
+# the doctor to check a password that was actually fine. A timeout, or any
+# other browser/navigation failure, means we could not ask Kaizen at all and
+# must surface as KaizenInfrastructureError. Only an explicit on-page
+# credential rejection may return False.
+
+
+class _FakeLocator:
+    """Minimal Playwright locator stand-in for the login form/error probes."""
+
+    def __init__(self, count: int = 0, texts: list[str] | None = None):
+        self._count = count
+        self._texts = texts or []
+        self.filled: list[str] = []
+        self.clicked = 0
+
+    async def count(self):
+        return self._count
+
+    async def fill(self, value):
+        self.filled.append(value)
+
+    async def click(self, *args, **kwargs):
+        self.clicked += 1
+
+    async def all_inner_texts(self):
+        return list(self._texts)
+
+
+class _FakeLoginPage:
+    """Drives ``_login`` deterministically: two-step form present, then a
+    configurable post-submit outcome and error surface."""
+
+    def __init__(self, *, error_texts=None, goto_error=None, wait_error=None,
+                 url="https://eportfolio.rcem.ac.uk/auth/login"):
+        self._error_texts = error_texts or []
+        self._goto_error = goto_error
+        self._wait_error = wait_error
+        self.url = url
+        self.error_probe_calls = 0
+
+    async def goto(self, *args, **kwargs):
+        if self._goto_error:
+            raise self._goto_error
+
+    def locator(self, selector):
+        if 'name="login"' in selector:
+            return _FakeLocator(count=1)
+        if 'name="password"' in selector:
+            return _FakeLocator(count=1)
+        if selector == 'button[type="submit"]':
+            return _FakeLocator(count=1)
+        # Anything else is the credential-rejection probe.
+        self.error_probe_calls += 1
+        return _FakeLocator(count=len(self._error_texts), texts=self._error_texts)
+
+
+@pytest.fixture
+def _no_login_sleep(monkeypatch):
+    import kaizen_form_filer
+
+    async def _instant(_seconds):
+        return None
+
+    monkeypatch.setattr(kaizen_form_filer.asyncio, "sleep", _instant)
+
+
+def _playwright_timeout(message="Timeout 30000ms exceeded."):
+    from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+
+    return PlaywrightTimeoutError(message)
+
+
+@pytest.mark.asyncio
+async def test_login_raises_infrastructure_error_when_post_submit_url_wait_times_out(_no_login_sleep):
+    """The exact live failure: password submitted, wait_for_url timed out, no
+    on-page credential error. Must be infrastructure, never False."""
+    from engine.providers.kaizen import KaizenInfrastructureError
+    from kaizen_form_filer import _login
+
+    page = _FakeLoginPage(wait_error=_playwright_timeout())
+
+    async def wait_for_url(*args, **kwargs):
+        raise page._wait_error
+
+    page.wait_for_url = wait_for_url
+
+    with pytest.raises(KaizenInfrastructureError):
+        await _login(page, "doctor@example.com", "correct-horse")
+
+
+@pytest.mark.asyncio
+async def test_login_returns_false_only_on_explicit_credential_rejection(_no_login_sleep):
+    """An explicit rejection banner is the one signal that means bad creds."""
+    from kaizen_form_filer import _login
+
+    page = _FakeLoginPage(
+        error_texts=["The username or password you entered is incorrect."],
+        wait_error=_playwright_timeout(),
+    )
+
+    async def wait_for_url(*args, **kwargs):
+        raise page._wait_error
+
+    page.wait_for_url = wait_for_url
+
+    assert await _login(page, "doctor@example.com", "wrong-password") is False
+
+
+@pytest.mark.asyncio
+async def test_login_does_not_infer_bad_credentials_from_generic_auth_page(_no_login_sleep):
+    """Still sitting on the auth page with only chrome copy is not a rejection."""
+    from engine.providers.kaizen import KaizenInfrastructureError
+    from kaizen_form_filer import _login
+
+    page = _FakeLoginPage(error_texts=["Sign in to your RCEM account", "Forgotten password?"],
+                          wait_error=_playwright_timeout())
+
+    async def wait_for_url(*args, **kwargs):
+        raise page._wait_error
+
+    page.wait_for_url = wait_for_url
+
+    with pytest.raises(KaizenInfrastructureError):
+        await _login(page, "doctor@example.com", "correct-horse")
+
+
+@pytest.mark.asyncio
+async def test_login_raises_infrastructure_error_when_portal_navigation_fails(_no_login_sleep):
+    """Browser/navigation death before the form is even reachable is infra."""
+    from engine.providers.kaizen import KaizenInfrastructureError
+    from kaizen_form_filer import _login
+
+    page = _FakeLoginPage(goto_error=_playwright_timeout("navigating to rcem"))
+
+    async def wait_for_url(*args, **kwargs):  # pragma: no cover - never reached
+        return None
+
+    page.wait_for_url = wait_for_url
+
+    with pytest.raises(KaizenInfrastructureError):
+        await _login(page, "doctor@example.com", "correct-horse")
+
+
+@pytest.mark.asyncio
+async def test_login_returns_true_on_successful_redirect(_no_login_sleep):
+    from kaizen_form_filer import _login
+
+    page = _FakeLoginPage(url="https://kaizenep.com/activities")
+
+    async def wait_for_url(*args, **kwargs):
+        return None
+
+    page.wait_for_url = wait_for_url
+
+    assert await _login(page, "doctor@example.com", "correct-horse") is True
+
+
+@pytest.mark.asyncio
+async def test_login_failure_never_logs_credentials_or_page_text(_no_login_sleep, caplog):
+    """Neither the password nor the page body may reach the logs."""
+    import logging
+
+    from engine.providers.kaizen import KaizenInfrastructureError
+    from kaizen_form_filer import _login
+
+    secret = "s3cret-passphrase"
+    page = _FakeLoginPage(error_texts=["Patient-identifiable page body text"],
+                          wait_error=_playwright_timeout())
+
+    async def wait_for_url(*args, **kwargs):
+        raise page._wait_error
+
+    page.wait_for_url = wait_for_url
+
+    with caplog.at_level(logging.DEBUG):
+        with pytest.raises(KaizenInfrastructureError):
+            await _login(page, "doctor@example.com", secret)
+
+    logged = caplog.text
+    assert secret not in logged
+    assert "Patient-identifiable page body text" not in logged

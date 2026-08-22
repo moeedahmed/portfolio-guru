@@ -1936,8 +1936,65 @@ async def use_cached_session(page: Page, telegram_user_id: int, username: Option
 
 # ─── Login ────────────────────────────────────────────────────────────────────
 
+# Surfaces the RCEM portal uses to announce a failed sign-in. Anything else on
+# the page (headings, help text, "Forgotten password?") is not a rejection.
+_LOGIN_ERROR_SELECTOR = (
+    ".alert-danger, .alert-error, [role='alert'], .validation-summary-errors, "
+    ".field-validation-error, .login-error, .error-message"
+)
+
+# Conservative: each phrase means the portal explicitly refused the supplied
+# identity. Ambiguous states (locked out, MFA required, service unavailable)
+# deliberately fall through to KaizenInfrastructureError rather than telling a
+# doctor to retype a password that is fine.
+_LOGIN_REJECTION_PHRASES = (
+    "username or password",
+    "email or password",
+    "password is incorrect",
+    "incorrect password",
+    "invalid password",
+    "invalid username",
+    "invalid email",
+    "invalid credentials",
+    "incorrect username",
+    "credentials are incorrect",
+    "login details are incorrect",
+    "not recognised",
+    "not recognized",
+)
+
+
+def _kaizen_infrastructure_error(message: str) -> Exception:
+    """Build the shared 'we could not even ask Kaizen' error."""
+    from engine.providers.kaizen import KaizenInfrastructureError
+
+    return KaizenInfrastructureError(message)
+
+
+async def _has_credential_rejection(page: Page) -> bool:
+    """True only when the page carries an explicit bad-credentials message.
+
+    Never logs the matched text — the portal echoes the submitted identity.
+    """
+    try:
+        texts = await page.locator(_LOGIN_ERROR_SELECTOR).all_inner_texts()
+    except Exception:
+        return False
+    for text in texts or []:
+        lowered = (text or "").lower()
+        if any(phrase in lowered for phrase in _LOGIN_REJECTION_PHRASES):
+            return True
+    return False
+
+
 async def _login(page: Page, username: str, password: str) -> bool:
-    """Log in to Kaizen via RCEM portal (two-step: username → password)."""
+    """Log in to Kaizen via RCEM portal (two-step: username → password).
+
+    Returns ``False`` only when the portal explicitly rejected the credentials.
+    A timeout, navigation failure, or any other browser problem means we could
+    not test the credentials at all and raises ``KaizenInfrastructureError`` —
+    downgrading those to ``False`` tells doctors to retype a working password.
+    """
     try:
         await page.goto("https://eportfolio.rcem.ac.uk", wait_until="load", timeout=30000)
         await asyncio.sleep(2)
@@ -1954,14 +2011,29 @@ async def _login(page: Page, username: str, password: str) -> bool:
         if await pwd_input.count() > 0:
             await pwd_input.fill(password)
             await page.locator('button[type="submit"]').click()
-
-        await page.wait_for_url("**/kaizenep.com/**", timeout=30000)
-        await asyncio.sleep(3)
-        logger.info(f"Login success: {page.url}")
-        return True
     except Exception as e:
-        logger.error(f"Login failed: {e}")
-        return False
+        logger.error(f"Kaizen login could not be attempted: {type(e).__name__}")
+        raise _kaizen_infrastructure_error(
+            f"Kaizen login form could not be driven: {type(e).__name__}"
+        ) from e
+
+    try:
+        await page.wait_for_url("**/kaizenep.com/**", timeout=30000)
+    except Exception as e:
+        if await _has_credential_rejection(page):
+            logger.info("Kaizen rejected the supplied credentials")
+            return False
+        logger.error(
+            f"Kaizen login did not reach the portfolio and showed no credential "
+            f"error: {type(e).__name__}"
+        )
+        raise _kaizen_infrastructure_error(
+            f"Kaizen login never reached the portfolio: {type(e).__name__}"
+        ) from e
+
+    await asyncio.sleep(3)
+    logger.info(f"Login success: {page.url}")
+    return True
 
 
 # ─── Date filling (THE critical fix) ─────────────────────────────────────────

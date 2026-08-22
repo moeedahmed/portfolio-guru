@@ -96,6 +96,12 @@ Park these unless Moeed explicitly reopens them:
 - ARCP Health expansion
 - new form coverage beyond golden-path reliability
 - hackathon/demo ledger optimisation
+- credential-free agentic filing: investigate sanctioned risr/RCEM API access so
+  the bot never holds a doctor's Kaizen password, with a user-side browser
+  extension (doctor's own authenticated session) as the fallback route.
+  Agentic filing stays the product edge — this is about how we authenticate,
+  not about dropping automation. Not part of the current login-reliability
+  repair; do not fold it into that work.
 
 Do not delete parked code. Freeze it and keep it from distracting the launch
 proof path.
