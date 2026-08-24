@@ -147,18 +147,29 @@ loudly.
 The last row is the point of an external monitor: no check that runs _on_ the
 Mac Mini can tell you the Mac Mini is gone.
 
-### Enabling the external monitor
+### External monitoring (LIVE since 2026-08-24)
 
-Both hooks are wired and inert until given URLs. To turn them on, create two
-checks at healthchecks.io (free tier covers 20) and store the ping URLs in BWS:
+Both checks exist in Healthchecks.io and notify Moeed by Telegram and email:
 
-- `PG_HEARTBEAT_URL` — period 5 min, grace 15 min. Pinged by the bot.
-- `PG_BACKUP_HEALTHCHECK_URL` — cron `30 3 * * *`, grace 2 h. Pinged by the
-  nightly backup, with `/fail` on failure.
+| Check | Watches | Schedule |
+|---|---|---|
+| `Mac Mini Portfolio Guru Backup` | nightly off-device backup | cron `30 3 * * *`, 2 h grace |
+| `Mac Mini Portfolio Guru Bot` | bot liveness heartbeat | every 5 min, 15 min grace |
 
-Point both at Moeed's phone. Restart the bot after adding the secrets.
+Ping URLs live in BWS as `PG_BACKUP_HEALTHCHECK_URL` and `PG_HEARTBEAT_URL`.
+Manage the checks declaratively with `scripts/healthchecks_sync.py` — never by
+hand in the dashboard.
 
----
+**Proven, not assumed:** the backup check was verified by running the real
+launchd job and watching the ping arrive. The notification path itself was
+verified separately by failing a throwaway check and confirming it flipped to
+`down` with both channels attached.
+
+The bot heartbeat is configured but shows `never` until the bot next restarts
+and reads `PG_HEARTBEAT_URL`. It arms itself on the next deploy — no manual
+step. **Do not restart the bot just to arm it** without first running
+`scripts/verify_live_runtime.py`: the deploy checkout doubles as a dev
+workspace, so a restart can boot unreleased code.
 
 ## Known single points of failure
 
