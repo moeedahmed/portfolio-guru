@@ -78,19 +78,20 @@ several agent sessions edit code at once. That overlap causes two real failures:
    so launchd's crash-restart can boot whatever is currently on disk — a feature
    branch, or half-finished edits — with nothing to announce it.
 
-**Therefore: do not edit this checkout directly.** Work in a git worktree:
+**Therefore: do not edit this checkout directly.** Either use Claude Code's
+built-in worktree isolation, or run:
 
 ```bash
-git worktree add -b <branch> /tmp/<name> origin/main
-ln -sfn /Users/moeedahmed/projects/portfolio-guru/backend/venv /tmp/<name>/backend/venv
-ln -sfn /Users/moeedahmed/projects/portfolio-guru/backend/.env  /tmp/<name>/backend/.env
-# ... work, verify, commit, push ...
-git worktree remove /tmp/<name>
+scripts/new-worktree.sh <branch-name>        # from origin/main by default
 ```
 
-Both symlinks are required: a fresh worktree has neither the virtualenv nor
-`backend/.env`, and without the latter every test touching `FERNET_SECRET_KEY`
-fails in a way that looks like broken code but is only a missing file.
+That creates the worktree and symlinks `backend/venv` and `backend/.env` into
+it. Both links are required: a fresh worktree has neither, and without `.env`
+every test touching `FERNET_SECRET_KEY` fails in a way that looks like broken
+code but is only a missing file. This session lost time misdiagnosing `main`
+as red for exactly that reason.
+
+Clean up with `git worktree remove <path>` once your branch is pushed.
 
 **Before restarting the bot for any reason**, run `scripts/verify_live_runtime.py`.
 If runtime and checkout commits disagree, a restart ships unreleased code.
