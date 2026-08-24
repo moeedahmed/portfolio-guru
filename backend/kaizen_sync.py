@@ -169,7 +169,8 @@ def _row_from_payload(payload: dict[str, Any], *, category: str, surface: str = 
         title=_normalise_text(payload.get("title")),
         href=href,
         uuid=uuid or _normalise_text(payload.get("uuid")),
-        state=_normalise_text(payload.get("state")),
+        state=_rollup_section_states(payload.get("section_states"))
+        or _normalise_text(payload.get("state")),
         date_text=_normalise_text(payload.get("date_text") or payload.get("date")),
         surface=surface if surface != "event" else href_surface,
         category=category,
@@ -243,37 +244,96 @@ async def _raise_if_auth(page: Any) -> None:
         raise KaizenAuthRequired("Kaizen authentication required")
 
 
-async def _expand_readonly_listing(page: Any) -> None:
-    """Scroll a read-only listing so lazy-loaded rows enter the DOM."""
+async def _expand_readonly_listing(page: Any) -> bool:
+    """Scroll a read-only listing until every lazy-loaded row is in the DOM.
+
+    Kaizen listings are pure infinite scroll — no pagination controls — and
+    load in batches of roughly ten. A large category needs ~20 scroll passes
+    before the row count settles, so an impatient loop silently reads a
+    fraction of the portfolio and the caller cannot tell truncated data from
+    a genuinely small category.
+
+    Returns True when the row count settled on its own, False when the
+    iteration ceiling was hit with rows still arriving. The caller records
+    that as drift rather than treating a partial read as complete.
+    """
     evaluate = getattr(page, "evaluate", None)
     if not evaluate:
-        return
+        return True
     try:
-        await evaluate(
-            """async () => {
+        return bool(
+            await evaluate(
+                """async () => {
               const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-              let previous = -1;
-              let stable = 0;
-              for (let i = 0; i < 16; i += 1) {
-                const rows = document.querySelectorAll('.row.event-inner, .activity, li').length;
+              const count = () => document.querySelectorAll(
+                '.row.event-inner, .activity, li'
+              ).length;
+              let previous = count();
+              let unchanged = 0;
+              for (let i = 0; i < 80; i += 1) {
                 window.scrollTo(0, document.body.scrollHeight);
-                await sleep(250);
-                const nextRows = document.querySelectorAll('.row.event-inner, .activity, li').length;
-                if (nextRows <= previous || nextRows === rows) {
-                  stable += 1;
+                await sleep(600);
+                const current = count();
+                if (current > previous) {
+                  unchanged = 0;
                 } else {
-                  stable = 0;
+                  unchanged += 1;
                 }
-                previous = nextRows;
-                if (stable >= 3) break;
+                previous = current;
+                // Four consecutive quiet polls (2.4s) means the list is done,
+                // not merely that one fetch was slow.
+                if (unchanged >= 4) {
+                  window.scrollTo(0, 0);
+                  return true;
+                }
               }
               window.scrollTo(0, 0);
+              return false;
             }"""
+            )
         )
     except Exception:
         # Scrolling is a best-effort expansion step. The following DOM read still
         # determines whether the page shape is usable.
-        return
+        return True
+
+
+# Kaizen renders each timeline row's sign-off workflow as a run of icon spans
+# carrying ``event-section-progress-state--<state>`` plus a human-readable
+# ``title``. The spans have no text content, so reading ``textContent`` (as this
+# module did until 2026-08) always returned nothing and every indexed row was
+# stored with ``state = NULL``. The state lives in the class modifier.
+#
+# Ordered most-actionable first: an item awaiting someone else blocks the
+# doctor's portfolio, an unfinished draft is their own to close, an incomplete
+# workflow is merely in progress, and everything else is done.
+SECTION_STATE_PRECEDENCE: tuple[str, ...] = (
+    "pending",   # waiting on someone else — blocks the doctor
+    "draft",     # unfinished and theirs to close
+    "missing",   # workflow has steps still to come
+    "complete",
+    "other",
+    "skipped",   # deliberately skipped: never more informative than a finished section
+)
+
+_STATE_CLASS_PREFIX = "event-section-progress-state--"
+
+
+def _rollup_section_states(states: Any) -> Optional[str]:
+    """Reduce a row's per-section workflow states to one actionable state."""
+    if not isinstance(states, list):
+        return None
+    seen = {
+        _normalise_text(entry.get("state"))
+        for entry in states
+        if isinstance(entry, dict) and _normalise_text(entry.get("state"))
+    }
+    if not seen:
+        return None
+    for candidate in SECTION_STATE_PRECEDENCE:
+        if candidate in seen:
+            return candidate
+    return sorted(seen)[0]
 
 
 async def extract_timeline_rows(
@@ -281,10 +341,16 @@ async def extract_timeline_rows(
     category: str,
     *,
     limit: int | None = None,
+    expand: bool = True,
 ) -> list[KaizenTimelineRow]:
-    """Read visible timeline rows for one category without opening details."""
+    """Read visible timeline rows for one category without opening details.
+
+    Pass ``expand=False`` when the caller has already scrolled the listing and
+    wants to act on whether it settled.
+    """
     await _raise_if_auth(page)
-    await _expand_readonly_listing(page)
+    if expand:
+        await _expand_readonly_listing(page)
     payload = await page.evaluate(
         """(limit) => {
           const text = el => (el && el.textContent ? el.textContent.trim().replace(/\\s+/g, ' ') : null);
@@ -292,13 +358,17 @@ async def extract_timeline_rows(
           return rows.slice(0, limit || rows.length).map(row => {
             const link = row.querySelector('a[href*="/events/view"], a[router-link]');
             const titleEl = row.querySelector('h2.entry-title, .entry-title');
-            const stateEl = row.querySelector('.event-section-progress-state');
+            const sectionStates = Array.from(row.querySelectorAll('.event-section-progress-state')).map(el => ({
+              state: (Array.from(el.classList).find(c => c.indexOf('event-section-progress-state--') === 0) || '')
+                .replace('event-section-progress-state--', '') || null,
+              label: el.getAttribute('title')
+            })).filter(entry => entry.state);
             const rightText = text(row.querySelector('.col-right')) || text(row);
             const dateMatch = rightText && rightText.match(/\\b\\d{1,2}\\s+[A-Za-z]{3,9},?\\s+\\d{4}\\b|\\b\\d{1,2}\\/\\d{1,2}\\/\\d{4}\\b/);
             return {
               title: text(titleEl || link),
               href: link ? link.getAttribute('href') : null,
-              state: text(stateEl),
+              section_states: sectionStates,
               date_text: dateMatch ? dateMatch[0] : null
             };
           }).filter(row => row.title || row.href);
@@ -402,9 +472,18 @@ async def sync_kaizen_portfolio_index(
         for category in categories:
             try:
                 await _goto_readonly(page, _category_url(category))
+                settled = await _expand_readonly_listing(page)
                 rows = await extract_timeline_rows(
-                    page, category, limit=row_limit_per_category
+                    page, category, limit=row_limit_per_category, expand=False
                 )
+                if not settled:
+                    # A truncated listing produces phantom evidence gaps, so it
+                    # must degrade the run status rather than pass as complete.
+                    result.rows_drifted += 1
+                    result.notes.append(
+                        f"{category}: listing still loading at scroll limit; "
+                        f"row set truncated at {len(rows)}"
+                    )
                 result.rows_seen += len(rows)
                 for row in rows:
                     row_key = row.uuid or row.href

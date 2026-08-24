@@ -13,7 +13,8 @@ import pytest
 
 
 class FakeKaizenPage:
-    def __init__(self, *, lists=None, details=None, auth_urls=None):
+    def __init__(self, *, lists=None, details=None, auth_urls=None, scroll_settles=True):
+        self.scroll_settles = scroll_settles
         self.lists = lists or {}
         self.details = details or {}
         self.auth_urls = set(auth_urls or [])
@@ -28,6 +29,8 @@ class FakeKaizenPage:
         return None
 
     async def evaluate(self, _script, *args):
+        if "window.scrollTo" in _script:
+            return self.scroll_settles
         if "/events/list/" in self.url:
             return self.lists.get(self.url, [])
         if self.url == "https://kaizenep.com/activities":
@@ -43,8 +46,8 @@ class FakeKaizenPage:
 class FakeLazyKaizenPage(FakeKaizenPage):
     """Mimics Kaizen rows that only appear after read-only scrolling."""
 
-    def __init__(self, *, initial_lists=None, expanded_lists=None, details=None):
-        super().__init__(lists=initial_lists or {}, details=details or {})
+    def __init__(self, *, initial_lists=None, expanded_lists=None, details=None, scroll_settles=True):
+        super().__init__(lists=initial_lists or {}, details=details or {}, scroll_settles=scroll_settles)
         self.initial_lists = initial_lists or {}
         self.expanded_lists = expanded_lists or {}
         self.did_scroll_expand = False
@@ -52,7 +55,7 @@ class FakeLazyKaizenPage(FakeKaizenPage):
     async def evaluate(self, script, *args):
         if "window.scrollTo" in script:
             self.did_scroll_expand = True
-            return None
+            return self.scroll_settles
         if "/events/list/" in self.url or self.url == "https://kaizenep.com/activities":
             lists = self.expanded_lists if self.did_scroll_expand else self.initial_lists
             return lists.get(self.url, [])
@@ -581,3 +584,100 @@ async def test_sync_for_user_closes_session_even_when_sync_raises(sync_modules, 
 
     assert page.context.closed
     assert pw.stopped
+
+
+@pytest.mark.asyncio
+async def test_sync_reads_signoff_state_from_progress_icon_class(sync_modules):
+    """Kaizen's sign-off state lives in the progress icon's class modifier.
+
+    The icons carry no text, so reading textContent stored NULL for every row
+    and the whole sign-off workflow was invisible. Guard the class read, and
+    guard that an item awaiting someone else outranks its completed sections.
+    """
+    kaizen_index, kaizen_sync = sync_modules
+    href = "/events/view-section/44444444-4444-4444-4444-444444444444"
+    detail_url = f"https://kaizenep.com{href}"
+    page = FakeKaizenPage(
+        lists={
+            "https://kaizenep.com/events/list/Assessments": [
+                {
+                    "title": "CBD - Case Based Discussion (2025 update)",
+                    "href": href,
+                    "section_states": [
+                        {"state": "complete", "label": "This section is completed"},
+                        {"state": "pending", "label": "This section is awaiting a response"},
+                        {"state": "missing", "label": "Future section in the workflow"},
+                    ],
+                    "date_text": "5 Jun, 2026",
+                }
+            ]
+        },
+        # Detail pages carry no progress icons — the listing is the only source.
+        details={detail_url: _detail(state=None, url=detail_url)},
+    )
+
+    await kaizen_sync.sync_kaizen_portfolio_index(
+        77, page, categories=("Assessments",), include_activities=False
+    )
+
+    rows = await kaizen_index.list_evidence_items("77")
+    assert len(rows) == 1
+    assert rows[0].state == "pending"
+
+
+@pytest.mark.asyncio
+async def test_sync_rolls_up_to_complete_when_no_section_is_waiting(sync_modules):
+    kaizen_index, kaizen_sync = sync_modules
+    href = "/events/view-section/55555555-5555-5555-5555-555555555555"
+    detail_url = f"https://kaizenep.com{href}"
+    page = FakeKaizenPage(
+        lists={
+            "https://kaizenep.com/events/list/Assessments": [
+                {
+                    "title": "Mini-CEX (2025 Update)",
+                    "href": href,
+                    "section_states": [
+                        {"state": "complete", "label": "This section is completed"},
+                        {"state": "skipped", "label": "This section was intentionally skipped"},
+                    ],
+                    "date_text": "5 Jun, 2026",
+                }
+            ]
+        },
+        details={detail_url: _detail(state=None, url=detail_url)},
+    )
+
+    await kaizen_sync.sync_kaizen_portfolio_index(
+        78, page, categories=("Assessments",), include_activities=False
+    )
+
+    rows = await kaizen_index.list_evidence_items("78")
+    assert rows[0].state == "complete"
+
+
+@pytest.mark.asyncio
+async def test_sync_flags_truncation_when_listing_never_finishes_loading(sync_modules):
+    """A half-loaded listing invents evidence gaps, so it must not pass as ok."""
+    kaizen_index, kaizen_sync = sync_modules
+    href = "/events/view-section/66666666-6666-6666-6666-666666666666"
+    detail_url = f"https://kaizenep.com{href}"
+    page = FakeKaizenPage(
+        scroll_settles=False,
+        lists={
+            "https://kaizenep.com/events/list/Assessments": [
+                {"title": "CBD", "href": href, "section_states": [], "date_text": "5 Jun, 2026"}
+            ]
+        },
+        details={detail_url: _detail(url=detail_url)},
+    )
+
+    result = await kaizen_sync.sync_kaizen_portfolio_index(
+        79, page, categories=("Assessments",), include_activities=False
+    )
+
+    assert result.status == "partial"
+    assert any("truncated" in note for note in result.notes)
+
+    latest = await kaizen_index.latest_index_run("79")
+    assert latest is not None
+    assert latest.status == "partial"

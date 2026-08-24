@@ -664,6 +664,10 @@ def _kaizen_status_to_evidence_status(state: Optional[str], surface: str) -> str
         return "filed"
     if value in {"submitted", "reviewed", "sign-off", "sign_off", "signed-off", "signed_off"}:
         return "reviewed"
+    # "pending" is a timeline workflow state: the item exists in Kaizen and is
+    # waiting on someone else's response. It is filed, not a local draft.
+    if value == "pending":
+        return "filed"
     if value in {"returned", "returned for amendment", "needs_amendment", "amend"}:
         return "needs_work"
     return "drafted"
@@ -677,17 +681,27 @@ def _kaizen_source_for_surface(surface: str) -> str:
     return "kaizen_filed"
 
 
+_SEPT_PATTERN = re.compile(r"\bSept\b", re.IGNORECASE)
+
+
 def _parse_kaizen_date(value: Optional[str]) -> date:
     if not value:
         return date.today()
     raw = value.strip()
     if not raw:
         return date.today()
+    # Kaizen writes both "8 Sep, 2026" and "4 Sept, 2026". "Sept" matches no
+    # strptime directive, so it used to fall through to date.today() — silently
+    # ageing an old item into a brand new one, which is the one direction a
+    # readiness tool must never err in.
+    raw = _SEPT_PATTERN.sub("Sep", raw)
     for fmt in (
         "%Y-%m-%d",
         "%d/%m/%Y",
         "%d %b, %Y",
         "%d %b %Y",
+        "%d %B, %Y",
+        "%d %B %Y",
         "%Y-%m-%dT%H:%M:%S",
         "%Y-%m-%d %H:%M:%S",
     ):
