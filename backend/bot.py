@@ -7110,6 +7110,11 @@ async def _clear_local_portfolio_account_data(user_id: int, *, reason: str) -> d
         cleared["session_cache"] = invalidate_session_cache(user_id)
     except Exception:
         logger.warning("Could not clear Kaizen session cache for %s", reason, exc_info=True)
+    try:
+        import draft_backup
+        cleared["draft_backups"] = draft_backup.purge_user(user_id)
+    except Exception:
+        logger.warning("Could not clear draft backups for %s", reason, exc_info=True)
     return cleared
 
 
@@ -12472,18 +12477,11 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
 
 
 
-    # Save local JSON backup
-    import json as _json
-    import pathlib
-    from datetime import date
-    try:
-        drafts_dir = pathlib.Path.home() / ".openclaw/data/portfolio-guru/drafts"
-        drafts_dir.mkdir(parents=True, exist_ok=True)
-        filename = f"{user_id}_{form_type}_{date.today()}.json"
-        with open(drafts_dir / filename, "w") as f:
-            _json.dump({"form_type": form_type, "fields": fields}, f, indent=2)
-    except OSError:
-        logger.warning("Local draft JSON backup failed; continuing with Kaizen filing", exc_info=True)
+    # Encrypted crash-recovery backup of the approved draft, deleted again as
+    # soon as Kaizen confirms the save. Fernet-encrypted and covered by /reset;
+    # see draft_backup.py for why this is never written in the clear.
+    import draft_backup
+    draft_backup.save(user_id, form_type, fields)
 
     # Save draft preview and data for later restore + amend feature
     draft_preview_text = _format_draft_preview_for_context(draft, context, form_type) + _REPLY_HINT_SUFFIX
@@ -12899,6 +12897,14 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             logger.warning("Usage tracking failed", exc_info=True)
 
     if status == "success":
+        # Kaizen holds the evidence now, so the local crash-recovery copy of the
+        # clinical content has served its purpose and goes immediately.
+        try:
+            import draft_backup
+            draft_backup.discard(user_id, form_type)
+        except Exception:
+            logger.warning("Draft backup discard failed", exc_info=True)
+
         try:
             kcs = fields.get("key_capabilities") or fields.get("curriculum_links")
             if kcs:
@@ -15252,6 +15258,11 @@ def main():
                 from retention import purge_expired_clinical_content
                 result = await asyncio.to_thread(purge_expired_clinical_content)
                 logger.info("Retention purge: %s", result)
+                # Orphaned draft backups: filings that never succeeded, so the
+                # discard-on-save path never ran for them.
+                import draft_backup
+                drafts = await asyncio.to_thread(draft_backup.purge_expired)
+                logger.info("Draft backup purge: %s", drafts)
             application.job_queue.run_repeating(_retention_job, interval=86400, first=120, name="retention")
             logger.info("Daily clinical-content retention purge scheduled")
     except Exception:
