@@ -65,6 +65,40 @@ Both admin reports append a `Revision: <branch>@<commit>` line sourced from
 the existing `runtime_identity` mechanism (admin-only; never shown to
 ordinary users).
 
+## Working Directory Discipline
+
+`/Users/moeedahmed/projects/portfolio-guru` is the **live deployment checkout** —
+the bot serves real doctors from it. It is also, in practice, where Moeed and
+several agent sessions edit code at once. That overlap causes two real failures:
+
+1. **Blocked deploys.** `deploy_mac.sh` refuses to run when the checkout has
+   uncommitted tracked changes. One session's work-in-progress therefore blocks
+   everyone else's releases, including urgent fixes.
+2. **Unreleased code served to users.** The bot loads its code at process start,
+   so launchd's crash-restart can boot whatever is currently on disk — a feature
+   branch, or half-finished edits — with nothing to announce it.
+
+**Therefore: do not edit this checkout directly.** Work in a git worktree:
+
+```bash
+git worktree add -b <branch> /tmp/<name> origin/main
+ln -sfn /Users/moeedahmed/projects/portfolio-guru/backend/venv /tmp/<name>/backend/venv
+ln -sfn /Users/moeedahmed/projects/portfolio-guru/backend/.env  /tmp/<name>/backend/.env
+# ... work, verify, commit, push ...
+git worktree remove /tmp/<name>
+```
+
+Both symlinks are required: a fresh worktree has neither the virtualenv nor
+`backend/.env`, and without the latter every test touching `FERNET_SECRET_KEY`
+fails in a way that looks like broken code but is only a missing file.
+
+**Before restarting the bot for any reason**, run `scripts/verify_live_runtime.py`.
+If runtime and checkout commits disagree, a restart ships unreleased code.
+
+**Never commit, stash, or revert another session's uncommitted files.** Check
+file mtimes first — recent ones mean a live writer. Report the blockage to
+Moeed instead of clearing it.
+
 ## Safety
 
 - Never log credentials, decrypted values, or tokens.
