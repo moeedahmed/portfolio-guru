@@ -147,14 +147,43 @@ PROVIDERS = [
 ]
 
 
+def _non_eu_providers(providers):
+    """Providers that would send clinical text outside the UK/EEA."""
+    return [p for p in providers if p["type"] != "gemini"]
+
+
 def _select_providers(tier: str = ""):
     from gemini_client import use_vertex
+
     if use_vertex():
         # EU-only routing: never send clinical text to DeepSeek (China). Use the
         # Gemini provider, which _get_client()/make_client() route through Vertex
         # AI in an EU region.
         return [p for p in PROVIDERS if p["type"] == "gemini"]
+
+    # Fail closed. This branch means PG_USE_VERTEX/GCP_PROJECT_ID are not set,
+    # so a restart or a bad deploy would silently start routing special-category
+    # health data to a provider with no UK adequacy decision and no DPA. Refuse
+    # rather than fall back — losing extraction is an outage, and an outage is
+    # recoverable in a way an Art. 9 transfer is not.
+    blocked = _non_eu_providers(PROVIDERS)
+    if blocked and not _allow_non_eu_extraction():
+        raise RuntimeError(
+            "EU-only extraction guard: Vertex routing is off "
+            "(set PG_USE_VERTEX=1 and GCP_PROJECT_ID) and the configured "
+            f"providers include non-EU endpoints ({', '.join(p['name'] for p in blocked)}). "
+            "Refusing to send clinical text off-region. Set "
+            "PG_ALLOW_NON_EU_EXTRACTION=1 only for non-clinical local development."
+        )
     return PROVIDERS
+
+
+def _allow_non_eu_extraction() -> bool:
+    """Explicit, deliberate opt-out for local development and model bake-offs
+    run against non-clinical fixtures. Never set in production."""
+    return os.environ.get("PG_ALLOW_NON_EU_EXTRACTION", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
 
 
 async def _generate(prompt, retries: int = 1, tier: str = "", purpose: str = "unspecified"):

@@ -75,7 +75,9 @@ export TELEGRAM_BOT_TOKEN
 GOOGLE_API_KEY="$(get_secret af6579a0-2cbe-4cef-94b3-b405017b48fe)"
 export GOOGLE_API_KEY
 echo "Google key loaded for OCR/voice utilities (last4): ${GOOGLE_API_KEY: -4}"
-export PORTFOLIO_GURU_EXTRACTOR_PROVIDER="deepseek-v4-flash"
+# Clinical extraction runs on Vertex AI (europe-west2). This label is what the
+# startup banner reports; it must not name an off-region provider.
+export PORTFOLIO_GURU_EXTRACTOR_PROVIDER="vertex-gemini-eu"
 export GEMINI_3_5_FLASH_MODEL="${GEMINI_3_5_FLASH_MODEL:-gemini-3.5-flash}"
 export PG_GATHERING_MODE="${PG_GATHERING_MODE:-1}"
 echo "Model: extractor=$PORTFOLIO_GURU_EXTRACTOR_PROVIDER fallback=$GEMINI_3_5_FLASH_MODEL"
@@ -120,10 +122,13 @@ if [ -n "$PG_HEARTBEAT_URL" ]; then
 else
   echo "Liveness heartbeat: NOT configured (set PG_HEARTBEAT_URL in BWS to enable)"
 fi
-# OpenAI keys not in use — extractor uses DeepSeek V4 Flash
-# DEEPSEEK_API_KEY_PORTFOLIO is loaded below
-DEEPSEEK_API_KEY="$(get_secret c5d82503-3d1d-427b-9be1-b44e01564203)"
-export DEEPSEEK_API_KEY
+# DEEPSEEK_API_KEY is deliberately NOT exported. Clinical extraction runs on
+# Vertex AI in europe-west2; DeepSeek is a Chinese endpoint with no UK adequacy
+# decision and no DPA, and having the key present meant one unset PG_USE_VERTEX
+# away from routing Art. 9 health data off-region. extractor._select_providers
+# now refuses to start in that state rather than falling back. Bake-off scripts
+# that legitimately need it load it themselves.
+#   BWS secret: c5d82503-3d1d-427b-9be1-b44e01564203 (DEEPSEEK_API_KEY_PORTFOLIO)
 
 # OpenAI keys — NOT loaded unless explicitly requested
 # if [ -n "$OPENAI_API_KEY" ]; then

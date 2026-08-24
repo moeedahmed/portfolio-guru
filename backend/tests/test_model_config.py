@@ -5,6 +5,10 @@ import pytest
 def default_to_non_vertex_extractor(monkeypatch):
     monkeypatch.delenv("PG_USE_VERTEX", raising=False)
     monkeypatch.delenv("GCP_PROJECT_ID", raising=False)
+    # These cases deliberately drive the non-Vertex provider chain against
+    # mock endpoints and fixtures, never real clinical text. Production has
+    # no such opt-out: extractor._select_providers refuses to run off-region.
+    monkeypatch.setenv("PG_ALLOW_NON_EU_EXTRACTION", "1")
 
 
 def test_gemini_fallback_models_default_order(monkeypatch):
