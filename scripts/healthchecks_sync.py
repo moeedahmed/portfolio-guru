@@ -80,6 +80,34 @@ CHECKS = [
         "grace": 7200,
         "bws_secret": "PG_BACKUP_HEALTHCHECK_URL",
     },
+    {
+        # NOTE (2026-08-24): the two entries above are named after launchd
+        # labels; the healthchecks skill was corrected the same day to say the
+        # dashboard convention is "Mac Mini <Service>". Run --list and
+        # reconcile before the next apply — if the dashboard uses the other
+        # scheme, re-running this manifest creates duplicates rather than
+        # updating. This entry is left in the file's existing scheme so one
+        # apply cannot silently split the naming three ways.
+        "name": "com.portfolioguru.bot.signoff-chase",
+        "tags": "portfolio-guru mac-mini nudge",
+        "desc": (
+            "Weekly Portfolio Health sign-off chase (Wed 19:00 Europe/London), "
+            "a job-queue task inside bot.py. Pings on EVERY completed run, "
+            "including runs that message nobody, and /fail if the run aborts. "
+            "That matters more here than elsewhere: this feature's success "
+            "signal is silence, so a dead job and a clean portfolio look "
+            "identical to the user — only this check tells them apart. "
+            "Silence means the bot is down, the job was not registered "
+            "(PG_ENABLE_SIGNOFF_CHASE unset), or the event loop wedged. "
+            "Restart: launchctl bootout/bootstrap com.portfolioguru.bot. "
+            "Runbook: docs/disaster-recovery.md"
+        ),
+        "schedule": "0 19 * * 3",  # tz is applied for us: Europe/London
+        # A weekly job needs generous lateness: two days still alerts well
+        # before the next scheduled run, without paging on a slow evening.
+        "grace": 172800,
+        "bws_secret": "PG_SIGNOFF_CHASE_HEALTHCHECK_URL",
+    },
 ]
 
 

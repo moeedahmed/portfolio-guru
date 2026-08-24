@@ -70,11 +70,21 @@ def notify_operator_sync(text: str, *, key: str = "generic", cooldown: int = _AL
         logger.warning("notify_operator_sync failed", exc_info=True)
 
 
-def heartbeat(suffix: str = "") -> None:
-    """Ping the external uptime monitor. No-op if PG_HEARTBEAT_URL is unset."""
-    if not HEARTBEAT_URL:
+def ping_check(url: str, suffix: str = "") -> None:
+    """Ping one Healthchecks.io check. No-op when the URL is unset.
+
+    Monitoring must never break the job it monitors, so every failure here is
+    swallowed. Jobs other than the bot's own liveness heartbeat have their own
+    check URL, which is why this takes the URL rather than reading a global.
+    """
+    if not url:
         return
     try:
-        urllib.request.urlopen(HEARTBEAT_URL + suffix, timeout=5)
+        urllib.request.urlopen(url + suffix, timeout=5)
     except Exception:
-        logger.debug("heartbeat ping failed", exc_info=True)
+        logger.debug("healthcheck ping failed", exc_info=True)
+
+
+def heartbeat(suffix: str = "") -> None:
+    """Ping the external uptime monitor. No-op if PG_HEARTBEAT_URL is unset."""
+    ping_check(HEARTBEAT_URL, suffix)

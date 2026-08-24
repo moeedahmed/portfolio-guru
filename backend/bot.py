@@ -732,6 +732,29 @@ async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
 # ── Sign-off chase (proactive Portfolio Health watcher) ─────────────────────
 
 
+def _signoff_chase_enabled() -> bool:
+    """The proactive chase is opt-in.
+
+    It messages real doctors unprompted, so it stays off until deliberately
+    enabled — the same fail-closed shape as PG_ENABLE_BROWSER_USE_FALLBACK.
+    """
+    return os.environ.get("PG_ENABLE_SIGNOFF_CHASE", "").strip() not in ("", "0", "false", "False")
+
+
+def _signoff_chase_audience(user_ids: list) -> list:
+    """Narrow the chase to an explicit allowlist when one is configured.
+
+    PG_SIGNOFF_CHASE_USER_IDS lets the feature run against a single portfolio
+    (dogfood) before it is pointed at the whole beta cohort. Unset means every
+    active user, which only happens once the flag above is deliberately on.
+    """
+    raw = os.environ.get("PG_SIGNOFF_CHASE_USER_IDS", "").strip()
+    if not raw:
+        return list(user_ids)
+    allowed = {part.strip() for part in raw.split(",") if part.strip()}
+    return [user_id for user_id in user_ids if str(user_id) in allowed]
+
+
 async def signoff_chase_push(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Message users whose Kaizen evidence has been sitting unsigned.
 
@@ -745,8 +768,10 @@ async def signoff_chase_push(context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     import os
 
+    import ops_alert
     from health_watch import find_stuck_signoffs, format_signoff_chase
 
+    heartbeat_url = os.environ.get("PG_SIGNOFF_CHASE_HEALTHCHECK_URL", "")
     sentinel = os.path.expanduser("~/.openclaw/data/portfolio-guru/signoff_chase_last_run")
     os.makedirs(os.path.dirname(sentinel), exist_ok=True)
     now = time.time()
@@ -762,29 +787,35 @@ async def signoff_chase_push(context: ContextTypes.DEFAULT_TYPE) -> None:
     with open(sentinel, "w") as fh:
         fh.write(str(now))
     logger.info("signoff_chase starting")
+    ops_alert.ping_check(heartbeat_url, "/start")
 
     sent = 0
     skipped = 0
     failed = 0
-    for user_id in await get_all_active_users():
-        try:
-            stuck = await find_stuck_signoffs(user_id)
-            text = format_signoff_chase(stuck)
-            if not text:
-                skipped += 1
-                continue
-            logger.info(
-                "Portfolio Guru funnel event=signoff_chase_sent user_id=%s stuck=%d",
-                user_id,
-                len(stuck),
-            )
-            await context.bot.send_message(
-                chat_id=user_id, text=text, parse_mode="Markdown"
-            )
-            sent += 1
-        except Exception as exc:
-            logger.warning("signoff_chase failed for %s: %s", user_id, exc)
-            failed += 1
+    try:
+        for user_id in _signoff_chase_audience(await get_all_active_users()):
+            try:
+                stuck = await find_stuck_signoffs(user_id)
+                text = format_signoff_chase(stuck)
+                if not text:
+                    skipped += 1
+                    continue
+                logger.info(
+                    "Portfolio Guru funnel event=signoff_chase_sent user_id=%s stuck=%d",
+                    user_id,
+                    len(stuck),
+                )
+                await context.bot.send_message(
+                    chat_id=user_id, text=text, parse_mode="Markdown"
+                )
+                sent += 1
+            except Exception as exc:
+                logger.warning("signoff_chase failed for %s: %s", user_id, exc)
+                failed += 1
+    except Exception:
+        logger.error("signoff_chase aborted", exc_info=True)
+        ops_alert.ping_check(heartbeat_url, "/fail")
+        raise
 
     logger.info(
         "signoff_chase complete: %d sent, %d with nothing stuck, %d failed",
@@ -792,6 +823,10 @@ async def signoff_chase_push(context: ContextTypes.DEFAULT_TYPE) -> None:
         skipped,
         failed,
     )
+    # Ping on EVERY completed run, including runs that messaged nobody. This
+    # feature's success signal is silence, so a dead job and a clean portfolio
+    # look identical from the outside — only this ping tells them apart.
+    ops_alert.ping_check(heartbeat_url)
 
 
 async def _edit_last_bot_msg(context, chat_id, text, reply_markup=None, parse_mode=None):
@@ -15269,12 +15304,19 @@ def main():
 
     # Sign-off chase — Wednesday 19:00 UK, deliberately away from the Sunday
     # digest so a user never gets two proactive messages in one evening.
-    application.job_queue.run_daily(
-        signoff_chase_push,
-        time=_dtime(hour=19, minute=0, tzinfo=_uk_tz),
-        days=(2,),
-        name="signoff_chase",
-    )
+    # Off unless PG_ENABLE_SIGNOFF_CHASE is set: the job is not registered at
+    # all when disabled, so a beta user cannot receive an unsolicited message
+    # by accident.
+    if _signoff_chase_enabled():
+        application.job_queue.run_daily(
+            signoff_chase_push,
+            time=_dtime(hour=19, minute=0, tzinfo=_uk_tz),
+            days=(2,),
+            name="signoff_chase",
+        )
+        logger.info("signoff_chase job registered (PG_ENABLE_SIGNOFF_CHASE set)")
+    else:
+        logger.info("signoff_chase disabled — set PG_ENABLE_SIGNOFF_CHASE=1 to enable")
 
     # Clinical Supervisor poll — read-only, inert unless there is at least
     # one user with cached kaizen_role=="assessor" AND credentials AND a

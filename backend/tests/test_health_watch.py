@@ -286,3 +286,85 @@ def test_chase_job_is_registered_on_a_different_day_from_the_weekly_digest(chase
     digest_day = source.index('name="weekly_push"')
     assert source[digest_day - 400 : digest_day].count("days=(6,)") == 1
     assert source[chase_day - 400 : chase_day].count("days=(2,)") == 1
+
+
+# ── Off-switch and failure alarm ────────────────────────────────────────────
+
+
+def test_chase_is_off_unless_deliberately_enabled(chase_job, monkeypatch):
+    """It messages real doctors unprompted, so it must fail closed."""
+    monkeypatch.delenv("PG_ENABLE_SIGNOFF_CHASE", raising=False)
+    assert chase_job._signoff_chase_enabled() is False
+
+    for falsey in ("", "0", "false", "False"):
+        monkeypatch.setenv("PG_ENABLE_SIGNOFF_CHASE", falsey)
+        assert chase_job._signoff_chase_enabled() is False
+
+    monkeypatch.setenv("PG_ENABLE_SIGNOFF_CHASE", "1")
+    assert chase_job._signoff_chase_enabled() is True
+
+
+def test_job_is_not_registered_at_all_when_disabled(chase_job):
+    """Registration is gated, so a disabled chase cannot fire by accident."""
+    import inspect
+
+    source = inspect.getsource(chase_job.main)
+    assert "if _signoff_chase_enabled():" in source
+    gate = source.index("if _signoff_chase_enabled():")
+    registration = source.index('name="signoff_chase"')
+    assert gate < registration
+
+
+def test_allowlist_narrows_the_chase_to_named_users(chase_job, monkeypatch):
+    """Dogfood on one portfolio before pointing it at the beta cohort."""
+    monkeypatch.setenv("PG_SIGNOFF_CHASE_USER_IDS", "111, 333")
+    assert chase_job._signoff_chase_audience([111, 222, 333]) == [111, 333]
+
+
+def test_empty_allowlist_means_every_active_user(chase_job, monkeypatch):
+    monkeypatch.delenv("PG_SIGNOFF_CHASE_USER_IDS", raising=False)
+    assert chase_job._signoff_chase_audience([111, 222]) == [111, 222]
+
+
+@pytest.mark.asyncio
+async def test_run_that_messages_nobody_still_pings_the_alarm(chase_job, monkeypatch):
+    """The whole point: a dead job and a clean portfolio must not look alike."""
+    pings = []
+    monkeypatch.setenv("PG_SIGNOFF_CHASE_HEALTHCHECK_URL", "https://hc-ping.test/abc")
+    monkeypatch.setattr(
+        "ops_alert.ping_check", lambda url, suffix="": pings.append(suffix or "success")
+    )
+
+    async def no_stuck(_user_id, **_kwargs):
+        return []
+
+    monkeypatch.setattr("health_watch.find_stuck_signoffs", no_stuck)
+
+    async def one_user():
+        return [4242]
+
+    monkeypatch.setattr(chase_job, "get_all_active_users", one_user)
+
+    await chase_job.signoff_chase_push(_Context(_RecordingBot()))
+
+    assert pings == ["/start", "success"]
+
+
+@pytest.mark.asyncio
+async def test_aborted_run_pings_fail_not_success(chase_job, monkeypatch):
+    pings = []
+    monkeypatch.setenv("PG_SIGNOFF_CHASE_HEALTHCHECK_URL", "https://hc-ping.test/abc")
+    monkeypatch.setattr(
+        "ops_alert.ping_check", lambda url, suffix="": pings.append(suffix or "success")
+    )
+
+    async def boom():
+        raise RuntimeError("user list unavailable")
+
+    monkeypatch.setattr(chase_job, "get_all_active_users", boom)
+
+    with pytest.raises(RuntimeError):
+        await chase_job.signoff_chase_push(_Context(_RecordingBot()))
+
+    assert "/fail" in pings
+    assert "success" not in pings
