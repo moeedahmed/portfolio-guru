@@ -56,6 +56,15 @@ class EvidenceItemRow:
     end_date: Optional[str] = None
     description: Optional[str] = None
     linked_kc_tags: list[str] = field(default_factory=list)
+    # Per-section sign-off workflow, e.g. [{"state": "pending", "label": "This
+    # section is awaiting a response"}]. The rolled-up ``state`` says what to do
+    # about the item; this says which step of the workflow is holding it up.
+    section_states: list[dict] = field(default_factory=list)
+    # When the row's current ``state`` was first observed, and what it was
+    # before. Together these answer "how long has this been pending?" without
+    # having to store a full snapshot per sync run.
+    state_since: Optional[str] = None
+    previous_state: Optional[str] = None
     filled_in_by: Optional[str] = None
     filled_in_on: Optional[str] = None
     parent_event_id: Optional[str] = None
@@ -94,8 +103,17 @@ class KaizenSyncStatus:
 _EVIDENCE_COLUMNS = (
     "id, user_id, surface, event_type, category, state, "
     "date_occurred_on, end_date, description, linked_kc_tags, "
+    "section_states, state_since, previous_state, "
     "filled_in_by, filled_in_on, parent_event_id, detail_url, "
     "last_seen_at, first_seen_at"
+)
+
+# Columns added after the first indexes shipped. Existing databases are migrated
+# in place rather than rebuilt, so a user's indexed history survives the upgrade.
+_EVIDENCE_ADDED_COLUMNS = (
+    ("section_states", "TEXT"),
+    ("state_since", "TEXT"),
+    ("previous_state", "TEXT"),
 )
 
 
@@ -123,6 +141,9 @@ async def _ensure_db() -> None:
                 end_date TEXT,
                 description TEXT,
                 linked_kc_tags TEXT,
+                section_states TEXT,
+                state_since TEXT,
+                previous_state TEXT,
                 filled_in_by TEXT,
                 filled_in_on TEXT,
                 parent_event_id TEXT,
@@ -133,9 +154,20 @@ async def _ensure_db() -> None:
             )
             """
         )
+        async with db.execute("PRAGMA table_info(evidence_items)") as cursor:
+            existing = {row[1] for row in await cursor.fetchall()}
+        for column, column_type in _EVIDENCE_ADDED_COLUMNS:
+            if column not in existing:
+                await db.execute(
+                    f"ALTER TABLE evidence_items ADD COLUMN {column} {column_type}"
+                )
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_evidence_user_surface "
             "ON evidence_items(user_id, surface)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_evidence_user_state "
+            "ON evidence_items(user_id, state)"
         )
         await db.execute(
             """
@@ -178,20 +210,35 @@ async def upsert_evidence_item(item: EvidenceItemRow) -> None:
     first_seen = item.first_seen_at or now
     last_seen = item.last_seen_at or now
     kc_json = json.dumps(item.linked_kc_tags or [])
+    sections_json = json.dumps(item.section_states or [])
     async with aiosqlite.connect(_current_db_path()) as db:
         await db.execute(
             f"""
             INSERT INTO evidence_items ({_EVIDENCE_COLUMNS})
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id, id) DO UPDATE SET
                 surface = excluded.surface,
                 event_type = excluded.event_type,
                 category = excluded.category,
+                -- Record the transition BEFORE overwriting state, so
+                -- "pending since" survives every later re-sync that sees the
+                -- same state. SQLite's IS comparison is NULL-safe.
+                previous_state = CASE
+                    WHEN evidence_items.state IS excluded.state
+                        THEN evidence_items.previous_state
+                    ELSE evidence_items.state
+                END,
+                state_since = CASE
+                    WHEN evidence_items.state IS excluded.state
+                        THEN COALESCE(evidence_items.state_since, excluded.last_seen_at)
+                    ELSE excluded.last_seen_at
+                END,
                 state = excluded.state,
                 date_occurred_on = excluded.date_occurred_on,
                 end_date = excluded.end_date,
                 description = excluded.description,
                 linked_kc_tags = excluded.linked_kc_tags,
+                section_states = excluded.section_states,
                 filled_in_by = excluded.filled_in_by,
                 filled_in_on = excluded.filled_in_on,
                 parent_event_id = excluded.parent_event_id,
@@ -209,6 +256,9 @@ async def upsert_evidence_item(item: EvidenceItemRow) -> None:
                 item.end_date,
                 item.description,
                 kc_json,
+                sections_json,
+                item.state_since or last_seen,
+                item.previous_state,
                 item.filled_in_by,
                 item.filled_in_on,
                 item.parent_event_id,
@@ -218,6 +268,63 @@ async def upsert_evidence_item(item: EvidenceItemRow) -> None:
             ),
         )
         await db.commit()
+
+
+async def refresh_evidence_state(
+    user_id: str | int,
+    item_id: str,
+    state: Optional[str],
+    section_states: Optional[list[dict]] = None,
+) -> bool:
+    """Update only the workflow fields of an already-indexed row.
+
+    Used by incremental sync: when a row's rolled-up state has not moved, its
+    detail page cannot be worth another navigation, but ``last_seen_at`` and
+    the per-section breakdown still need refreshing. Returns False when the
+    row is not indexed yet, so the caller knows to do a full read.
+    """
+    await _ensure_db()
+    now = _now_iso()
+    async with aiosqlite.connect(_current_db_path()) as db:
+        cursor = await db.execute(
+            """
+            UPDATE evidence_items SET
+                previous_state = CASE
+                    WHEN state IS ? THEN previous_state ELSE state
+                END,
+                state_since = CASE
+                    WHEN state IS ? THEN COALESCE(state_since, ?) ELSE ?
+                END,
+                state = ?,
+                section_states = ?,
+                last_seen_at = ?
+            WHERE user_id = ? AND id = ?
+            """,
+            (
+                state,
+                state,
+                now,
+                now,
+                state,
+                json.dumps(section_states or []),
+                now,
+                str(user_id),
+                item_id,
+            ),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+def _json_list(raw) -> list:
+    """Decode a JSON list column, tolerating NULL and pre-migration garbage."""
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    return value if isinstance(value, list) else []
 
 
 def _row_to_evidence_item(row) -> EvidenceItemRow:
@@ -238,6 +345,9 @@ def _row_to_evidence_item(row) -> EvidenceItemRow:
         end_date=row["end_date"],
         description=row["description"],
         linked_kc_tags=tags,
+        section_states=_json_list(row["section_states"]),
+        state_since=row["state_since"],
+        previous_state=row["previous_state"],
         filled_in_by=row["filled_in_by"],
         filled_in_on=row["filled_in_on"],
         parent_event_id=row["parent_event_id"],
@@ -660,17 +770,18 @@ def _kaizen_status_to_evidence_status(state: Optional[str], surface: str) -> str
     if surface == "draft":
         return "drafted"
     value = (state or "").strip().lower()
-    if value in {"complete", "completed", "accepted"}:
-        return "filed"
     if value in {"submitted", "reviewed", "sign-off", "sign_off", "signed-off", "signed_off"}:
         return "reviewed"
-    # "pending" is a timeline workflow state: the item exists in Kaizen and is
-    # waiting on someone else's response. It is filed, not a local draft.
-    if value == "pending":
-        return "filed"
     if value in {"returned", "returned for amendment", "needs_amendment", "amend"}:
         return "needs_work"
-    return "drafted"
+    if value == "draft":
+        return "drafted"
+    # Everything else is filed. Any row that reaches this index was read off a
+    # Kaizen timeline, so it exists in Kaizen by definition — including rows
+    # still awaiting someone else's sign-off ("pending") and rows whose state
+    # we could not classify. Defaulting those to "drafted" told doctors their
+    # filed evidence was an unsaved draft.
+    return "filed"
 
 
 def _kaizen_source_for_surface(surface: str) -> str:

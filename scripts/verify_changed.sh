@@ -79,6 +79,13 @@ JOURNEY_TESTS=(
   #    A silent failure here costs every user's data and is invisible until the
   #    day it matters (see the 53-night incident in scripts/restore_db.md).
   tests/test_backup_offdevice.py
+  # 10. Portfolio Health scan + proactive sign-off chase. The scan feeds every
+  #     health verdict a doctor sees, and a truncated read invents evidence
+  #     gaps that do not exist. The chaser sends unsolicited messages, so a
+  #     regression here either spams doctors or goes silent about real stuck
+  #     evidence — both invisible until a user complains.
+  tests/test_kaizen_sync.py
+  tests/test_health_watch.py
 )
 
 echo

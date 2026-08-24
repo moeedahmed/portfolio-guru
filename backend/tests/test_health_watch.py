@@ -1,0 +1,288 @@
+"""Offline tests for the Portfolio Health sign-off watcher.
+
+No Kaizen, browser, CDP, credentials, Telegram, or network. These guard the
+behaviour a doctor would notice if it regressed: which evidence counts as
+stuck, how long it is reported as waiting, and when the watcher stays silent.
+"""
+
+from __future__ import annotations
+
+import importlib
+from datetime import date
+
+import pytest
+
+
+@pytest.fixture
+def watch_modules(tmp_path, monkeypatch):
+    monkeypatch.setenv("USAGE_DB_PATH", str(tmp_path / "health_watch_test.db"))
+    import kaizen_index
+    import health_watch
+
+    kaizen_index = importlib.reload(kaizen_index)
+    health_watch = importlib.reload(health_watch)
+    return kaizen_index, health_watch
+
+
+async def _store(kaizen_index, **overrides):
+    base = dict(
+        id="item-1",
+        user_id="7",
+        surface="event",
+        event_type="CBD - Case Based Discussion (2025 update)",
+        category="Assessments",
+        state="pending",
+        date_occurred_on="5 Jun, 2026",
+        end_date=None,
+        description="Clinical narrative that must never reach a nudge",
+        linked_kc_tags=[],
+        section_states=[
+            {"state": "complete", "label": "This section is completed"},
+            {"state": "pending", "label": "This section is awaiting a response"},
+        ],
+        filled_in_by=None,
+        filled_in_on=None,
+        parent_event_id=None,
+        detail_url="https://kaizenep.com/events/view-section/item-1",
+    )
+    base.update(overrides)
+    await kaizen_index.upsert_evidence_item(kaizen_index.EvidenceItemRow(**base))
+
+
+@pytest.mark.asyncio
+async def test_pending_item_past_threshold_is_stuck(watch_modules):
+    kaizen_index, health_watch = watch_modules
+    await _store(kaizen_index)
+
+    stuck = await health_watch.find_stuck_signoffs("7", today=date(2026, 8, 24))
+
+    assert len(stuck) == 1
+    assert stuck[0].state == "pending"
+    assert stuck[0].days_waiting == 80
+    assert stuck[0].waits_on_someone_else
+    assert stuck[0].blocking_label == "This section is awaiting a response"
+
+
+@pytest.mark.asyncio
+async def test_completed_evidence_is_never_stuck(watch_modules):
+    kaizen_index, health_watch = watch_modules
+    await _store(kaizen_index, state="complete")
+
+    assert await health_watch.find_stuck_signoffs("7", today=date(2026, 8, 24)) == []
+
+
+@pytest.mark.asyncio
+async def test_recent_pending_item_is_normal_turnaround_not_a_chase(watch_modules):
+    """Chasing a three-day-old assessment would train the doctor to mute us."""
+    kaizen_index, health_watch = watch_modules
+    await _store(kaizen_index, date_occurred_on="21 Aug, 2026")
+
+    assert await health_watch.find_stuck_signoffs("7", today=date(2026, 8, 24)) == []
+
+
+@pytest.mark.asyncio
+async def test_age_is_measured_from_the_event_not_from_first_scan(watch_modules):
+    """state_since is ~now on a first scan; using it would hide months-old items."""
+    kaizen_index, health_watch = watch_modules
+    await _store(kaizen_index, date_occurred_on="12 Oct, 2023", id="old-1")
+
+    stuck = await health_watch.find_stuck_signoffs("7", today=date(2026, 8, 24))
+
+    assert stuck[0].days_waiting == 1047
+    assert stuck[0].is_stale
+
+
+@pytest.mark.asyncio
+async def test_stuck_items_are_scoped_to_one_user(watch_modules):
+    kaizen_index, health_watch = watch_modules
+    await _store(kaizen_index, user_id="7", id="mine")
+    await _store(kaizen_index, user_id="8", id="theirs")
+
+    stuck = await health_watch.find_stuck_signoffs("7", today=date(2026, 8, 24))
+
+    assert [item.id for item in stuck] == ["mine"]
+
+
+@pytest.mark.asyncio
+async def test_stuck_items_are_ordered_oldest_first(watch_modules):
+    kaizen_index, health_watch = watch_modules
+    await _store(kaizen_index, id="newer", date_occurred_on="5 Jul, 2026")
+    await _store(kaizen_index, id="older", date_occurred_on="5 Jun, 2026")
+
+    stuck = await health_watch.find_stuck_signoffs("7", today=date(2026, 8, 24))
+
+    assert [item.id for item in stuck] == ["older", "newer"]
+
+
+@pytest.mark.asyncio
+async def test_drafts_and_pending_are_counted_separately(watch_modules):
+    kaizen_index, health_watch = watch_modules
+    await _store(kaizen_index, id="waiting", state="pending")
+    await _store(kaizen_index, id="unfinished", state="draft")
+
+    stuck = await health_watch.find_stuck_signoffs("7", today=date(2026, 8, 24))
+    counts = health_watch.summarise_stuck(stuck)
+
+    assert counts == {
+        "total": 2,
+        "awaiting_others": 1,
+        "own_drafts": 1,
+        "stale": 0,
+        "oldest_days": 80,
+    }
+
+
+def test_chase_copy_is_none_when_nothing_is_stuck(watch_modules):
+    """Silence when there is no news is what earns the right to interrupt."""
+    _, health_watch = watch_modules
+    assert health_watch.format_signoff_chase([]) is None
+
+
+@pytest.mark.asyncio
+async def test_chase_copy_never_leaks_clinical_narrative(watch_modules):
+    kaizen_index, health_watch = watch_modules
+    await _store(kaizen_index)
+
+    stuck = await health_watch.find_stuck_signoffs("7", today=date(2026, 8, 24))
+    text = health_watch.format_signoff_chase(stuck)
+
+    assert "Clinical narrative" not in text
+    assert "CBD - Case Based Discussion (2025 update)" in text
+    assert "80 days" in text
+
+
+@pytest.mark.asyncio
+async def test_chase_copy_truncates_and_says_how_many_it_hid(watch_modules):
+    kaizen_index, health_watch = watch_modules
+    for index in range(7):
+        await _store(kaizen_index, id=f"item-{index}", date_occurred_on="5 Jun, 2026")
+
+    stuck = await health_watch.find_stuck_signoffs("7", today=date(2026, 8, 24))
+    text = health_watch.format_signoff_chase(stuck, limit=5)
+
+    assert text.count("• ") == 5
+    assert "and 2 more" in text
+
+
+# ── The proactive job itself ────────────────────────────────────────────────
+
+
+class _RecordingBot:
+    def __init__(self):
+        self.messages = []
+
+    async def send_message(self, chat_id, text, **kwargs):
+        self.messages.append((chat_id, text))
+
+
+class _Context:
+    def __init__(self, bot):
+        self.bot = bot
+
+
+@pytest.fixture
+def chase_job(tmp_path, monkeypatch):
+    """Import the job with the run sentinel redirected away from the real home."""
+    monkeypatch.setenv("USAGE_DB_PATH", str(tmp_path / "chase_job.db"))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    import bot as bot_module
+
+    return bot_module
+
+
+@pytest.mark.asyncio
+async def test_chase_job_stays_silent_when_nothing_is_stuck(chase_job, monkeypatch):
+    """A user with a clean portfolio must never be messaged."""
+    recording = _RecordingBot()
+
+    async def no_stuck(_user_id, **_kwargs):
+        return []
+
+    monkeypatch.setattr("health_watch.find_stuck_signoffs", no_stuck)
+
+    async def one_user():
+        return [4242]
+
+    monkeypatch.setattr(chase_job, "get_all_active_users", one_user)
+
+    await chase_job.signoff_chase_push(_Context(recording))
+
+    assert recording.messages == []
+
+
+@pytest.mark.asyncio
+async def test_chase_job_messages_only_the_user_with_stuck_evidence(chase_job, monkeypatch):
+    recording = _RecordingBot()
+    import health_watch
+
+    stuck_item = health_watch.StuckItem(
+        id="x",
+        event_type="Mini-CEX (2025 Update)",
+        category="Assessments",
+        state="pending",
+        event_date=date(2026, 6, 5),
+        days_waiting=80,
+        detail_url=None,
+        blocking_label="This section is awaiting a response",
+    )
+
+    async def stuck_for_one(user_id, **_kwargs):
+        return [stuck_item] if user_id == 111 else []
+
+    monkeypatch.setattr("health_watch.find_stuck_signoffs", stuck_for_one)
+
+    async def two_users():
+        return [111, 222]
+
+    monkeypatch.setattr(chase_job, "get_all_active_users", two_users)
+
+    await chase_job.signoff_chase_push(_Context(recording))
+
+    assert [chat_id for chat_id, _ in recording.messages] == [111]
+    assert "Mini-CEX" in recording.messages[0][1]
+
+
+@pytest.mark.asyncio
+async def test_chase_job_does_not_resend_within_the_week(chase_job, monkeypatch):
+    """A bot restart must not turn a weekly cadence into a daily one."""
+    recording = _RecordingBot()
+    import health_watch
+
+    async def always_stuck(_user_id, **_kwargs):
+        return [
+            health_watch.StuckItem(
+                id="x",
+                event_type="CBD",
+                category="Assessments",
+                state="pending",
+                event_date=date(2026, 6, 5),
+                days_waiting=80,
+                detail_url=None,
+                blocking_label=None,
+            )
+        ]
+
+    monkeypatch.setattr("health_watch.find_stuck_signoffs", always_stuck)
+
+    async def one_user():
+        return [999]
+
+    monkeypatch.setattr(chase_job, "get_all_active_users", one_user)
+
+    await chase_job.signoff_chase_push(_Context(recording))
+    await chase_job.signoff_chase_push(_Context(recording))
+
+    assert len(recording.messages) == 1
+
+
+def test_chase_job_is_registered_on_a_different_day_from_the_weekly_digest(chase_job):
+    """Two proactive messages in one evening reads as spam, not as help."""
+    import inspect
+
+    source = inspect.getsource(chase_job.main)
+    assert 'name="signoff_chase"' in source
+    assert 'name="weekly_push"' in source
+    chase_day = source.index('name="signoff_chase"')
+    digest_day = source.index('name="weekly_push"')
+    assert source[digest_day - 400 : digest_day].count("days=(6,)") == 1
+    assert source[chase_day - 400 : chase_day].count("days=(2,)") == 1

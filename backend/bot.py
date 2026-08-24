@@ -729,6 +729,71 @@ async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info("weekly_push complete: %d sent, %d failed", sent, failed)
 
 
+# ── Sign-off chase (proactive Portfolio Health watcher) ─────────────────────
+
+
+async def signoff_chase_push(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Message users whose Kaizen evidence has been sitting unsigned.
+
+    Read-only and self-gating: users with no Kaizen index, or with nothing
+    stuck past the threshold, are never messaged. That silence is the point —
+    a watcher that pings every week regardless of whether anything is wrong
+    gets muted, and then it cannot warn about the thing that matters.
+
+    Guarded by the same file-sentinel pattern as ``weekly_push`` so a bot
+    restart cannot turn a weekly cadence into a daily one.
+    """
+    import os
+
+    from health_watch import find_stuck_signoffs, format_signoff_chase
+
+    sentinel = os.path.expanduser("~/.openclaw/data/portfolio-guru/signoff_chase_last_run")
+    os.makedirs(os.path.dirname(sentinel), exist_ok=True)
+    now = time.time()
+    if os.path.exists(sentinel):
+        try:
+            last_run = float(open(sentinel).read().strip())
+        except (OSError, ValueError):
+            last_run = 0.0
+        if now - last_run < 518400:
+            logger.info("signoff_chase skipped — ran %.1f days ago", (now - last_run) / 86400)
+            return
+
+    with open(sentinel, "w") as fh:
+        fh.write(str(now))
+    logger.info("signoff_chase starting")
+
+    sent = 0
+    skipped = 0
+    failed = 0
+    for user_id in await get_all_active_users():
+        try:
+            stuck = await find_stuck_signoffs(user_id)
+            text = format_signoff_chase(stuck)
+            if not text:
+                skipped += 1
+                continue
+            logger.info(
+                "Portfolio Guru funnel event=signoff_chase_sent user_id=%s stuck=%d",
+                user_id,
+                len(stuck),
+            )
+            await context.bot.send_message(
+                chat_id=user_id, text=text, parse_mode="Markdown"
+            )
+            sent += 1
+        except Exception as exc:
+            logger.warning("signoff_chase failed for %s: %s", user_id, exc)
+            failed += 1
+
+    logger.info(
+        "signoff_chase complete: %d sent, %d with nothing stuck, %d failed",
+        sent,
+        skipped,
+        failed,
+    )
+
+
 async def _edit_last_bot_msg(context, chat_id, text, reply_markup=None, parse_mode=None):
     """Edit the last bot ack message in place. Falls back to new message if not found."""
     msg_id = context.user_data.get("last_bot_msg_id")
@@ -15200,6 +15265,15 @@ def main():
         time=_dtime(hour=20, minute=0, tzinfo=_uk_tz),
         days=(6,),
         name="weekly_push",
+    )
+
+    # Sign-off chase — Wednesday 19:00 UK, deliberately away from the Sunday
+    # digest so a user never gets two proactive messages in one evening.
+    application.job_queue.run_daily(
+        signoff_chase_push,
+        time=_dtime(hour=19, minute=0, tzinfo=_uk_tz),
+        days=(2,),
+        name="signoff_chase",
     )
 
     # Clinical Supervisor poll — read-only, inert unless there is at least

@@ -26,6 +26,8 @@ from urllib.parse import quote, urljoin
 from kaizen_index import (
     EvidenceItemRow,
     finish_index_run,
+    list_evidence_items,
+    refresh_evidence_state,
     start_index_run,
     upsert_evidence_item,
 )
@@ -73,6 +75,7 @@ class KaizenTimelineRow:
     href: Optional[str]
     uuid: Optional[str]
     state: Optional[str] = None
+    section_states: list[dict] = field(default_factory=list)
     date_text: Optional[str] = None
     surface: str = "event"
     category: Optional[str] = None
@@ -87,6 +90,7 @@ class KaizenSyncResult:
     rows_seen: int = 0
     rows_written: int = 0
     rows_drifted: int = 0
+    rows_refreshed: int = 0
     notes: list[str] = field(default_factory=list)
 
 
@@ -171,6 +175,7 @@ def _row_from_payload(payload: dict[str, Any], *, category: str, surface: str = 
         uuid=uuid or _normalise_text(payload.get("uuid")),
         state=_rollup_section_states(payload.get("section_states"))
         or _normalise_text(payload.get("state")),
+        section_states=_coerce_section_states(payload.get("section_states")),
         date_text=_normalise_text(payload.get("date_text") or payload.get("date")),
         surface=surface if surface != "event" else href_surface,
         category=category,
@@ -208,6 +213,7 @@ def _evidence_from_detail(
         end_date=end_date,
         description=description,
         linked_kc_tags=tags,
+        section_states=row.section_states,
         filled_in_by=filled_in_by,
         filled_in_on=filled_in_on,
         parent_event_id=None,
@@ -317,6 +323,21 @@ SECTION_STATE_PRECEDENCE: tuple[str, ...] = (
 )
 
 _STATE_CLASS_PREFIX = "event-section-progress-state--"
+
+
+def _coerce_section_states(states: Any) -> list[dict]:
+    """Keep only well-formed {state, label} entries from the scraped payload."""
+    if not isinstance(states, list):
+        return []
+    cleaned: list[dict] = []
+    for entry in states:
+        if not isinstance(entry, dict):
+            continue
+        state = _normalise_text(entry.get("state"))
+        if not state:
+            continue
+        cleaned.append({"state": state, "label": _normalise_text(entry.get("label"))})
+    return cleaned
 
 
 def _rollup_section_states(states: Any) -> Optional[str]:
@@ -458,8 +479,16 @@ async def sync_kaizen_portfolio_index(
     categories: Iterable[str] = PORTFOLIO_HEALTH_TIMELINE_CATEGORIES,
     include_activities: bool = True,
     row_limit_per_category: int | None = None,
+    full_refresh: bool = False,
 ) -> KaizenSyncResult:
     """Run one read-only sync into ``evidence_items`` using an existing page.
+
+    By default this is incremental: a row already indexed at the same workflow
+    state has its state and timestamps refreshed from the listing without
+    re-opening its detail page. Reading every listing row in full made scans
+    several times longer, and a row whose sign-off state has not moved has
+    nothing new on its detail page. Pass ``full_refresh=True`` when the user
+    explicitly asks for a complete re-read.
 
     The page must already be authenticated. This function only navigates to
     Kaizen read surfaces and reads DOM state.
@@ -467,6 +496,14 @@ async def sync_kaizen_portfolio_index(
     run_id = await start_index_run(user_id)
     result = KaizenSyncResult(run_id=run_id, status="running")
     seen_ids: set[str] = set()
+    prior_states: dict[str, str | None] = {}
+    if not full_refresh:
+        try:
+            prior_states = {
+                item.id: item.state for item in await list_evidence_items(user_id)
+            }
+        except Exception as exc:  # pragma: no cover - defensive
+            result.notes.append(f"incremental baseline unavailable: {exc}")
 
     try:
         for category in categories:
@@ -490,6 +527,16 @@ async def sync_kaizen_portfolio_index(
                     if not row_key or row_key in seen_ids:
                         continue
                     seen_ids.add(row_key)
+                    if (
+                        not full_refresh
+                        and row_key in prior_states
+                        and prior_states[row_key] == row.state
+                    ):
+                        if await refresh_evidence_state(
+                            user_id, row_key, row.state, row.section_states
+                        ):
+                            result.rows_refreshed += 1
+                            continue
                     try:
                         evidence = await extract_event_detail(page, row, user_id=user_id)
                         await upsert_evidence_item(evidence)

@@ -681,3 +681,138 @@ async def test_sync_flags_truncation_when_listing_never_finishes_loading(sync_mo
     latest = await kaizen_index.latest_index_run("79")
     assert latest is not None
     assert latest.status == "partial"
+
+
+@pytest.mark.asyncio
+async def test_second_sync_skips_detail_pages_for_unchanged_rows(sync_modules):
+    """Reading every listing row in full made scans several times longer. A row
+    whose sign-off state has not moved has nothing new on its detail page."""
+    kaizen_index, kaizen_sync = sync_modules
+    href = "/events/view-section/77777777-7777-7777-7777-777777777777"
+    detail_url = f"https://kaizenep.com{href}"
+    listing = {
+        "https://kaizenep.com/events/list/Assessments": [
+            {
+                "title": "CBD",
+                "href": href,
+                "section_states": [{"state": "pending", "label": "This section is awaiting a response"}],
+                "date_text": "5 Jun, 2026",
+            }
+        ]
+    }
+    page = FakeKaizenPage(lists=listing, details={detail_url: _detail(state=None, url=detail_url)})
+
+    first = await kaizen_sync.sync_kaizen_portfolio_index(
+        81, page, categories=("Assessments",), include_activities=False
+    )
+    second = await kaizen_sync.sync_kaizen_portfolio_index(
+        81, page, categories=("Assessments",), include_activities=False
+    )
+
+    assert first.rows_written == 1 and first.rows_refreshed == 0
+    assert second.rows_written == 0 and second.rows_refreshed == 1
+    assert page.visited.count(detail_url) == 1
+
+    rows = await kaizen_index.list_evidence_items("81")
+    assert len(rows) == 1
+    # The cheap refresh must not blank the fields the detail read supplied.
+    assert rows[0].description == "Senior-led resus case"
+    assert rows[0].state == "pending"
+
+
+@pytest.mark.asyncio
+async def test_full_refresh_reopens_detail_pages(sync_modules):
+    kaizen_index, kaizen_sync = sync_modules
+    href = "/events/view-section/88888888-8888-8888-8888-888888888888"
+    detail_url = f"https://kaizenep.com{href}"
+    listing = {
+        "https://kaizenep.com/events/list/Assessments": [
+            {
+                "title": "CBD",
+                "href": href,
+                "section_states": [{"state": "pending", "label": "awaiting"}],
+                "date_text": "5 Jun, 2026",
+            }
+        ]
+    }
+    page = FakeKaizenPage(lists=listing, details={detail_url: _detail(state=None, url=detail_url)})
+
+    await kaizen_sync.sync_kaizen_portfolio_index(
+        82, page, categories=("Assessments",), include_activities=False
+    )
+    await kaizen_sync.sync_kaizen_portfolio_index(
+        82, page, categories=("Assessments",), include_activities=False, full_refresh=True
+    )
+
+    assert page.visited.count(detail_url) == 2
+
+
+@pytest.mark.asyncio
+async def test_sync_records_the_moment_a_pending_item_gets_signed_off(sync_modules):
+    """The transition is the event a proactive watcher reacts to."""
+    kaizen_index, kaizen_sync = sync_modules
+    href = "/events/view-section/99999999-9999-9999-9999-999999999999"
+    detail_url = f"https://kaizenep.com{href}"
+
+    def listing(state):
+        return {
+            "https://kaizenep.com/events/list/Assessments": [
+                {
+                    "title": "CBD",
+                    "href": href,
+                    "section_states": [{"state": state, "label": state}],
+                    "date_text": "5 Jun, 2026",
+                }
+            ]
+        }
+
+    details = {detail_url: _detail(state=None, url=detail_url)}
+    await kaizen_sync.sync_kaizen_portfolio_index(
+        83, FakeKaizenPage(lists=listing("pending"), details=details),
+        categories=("Assessments",), include_activities=False,
+    )
+    before = (await kaizen_index.list_evidence_items("83"))[0]
+
+    await kaizen_sync.sync_kaizen_portfolio_index(
+        83, FakeKaizenPage(lists=listing("complete"), details=details),
+        categories=("Assessments",), include_activities=False,
+    )
+    after = (await kaizen_index.list_evidence_items("83"))[0]
+
+    assert before.state == "pending" and before.previous_state is None
+    assert after.state == "complete"
+    assert after.previous_state == "pending"
+    assert after.state_since != before.state_since
+
+
+@pytest.mark.asyncio
+async def test_state_since_holds_still_while_an_item_stays_stuck(sync_modules):
+    """"Pending since" must survive every re-sync that sees the same state."""
+    kaizen_index, kaizen_sync = sync_modules
+    href = "/events/view-section/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    detail_url = f"https://kaizenep.com{href}"
+    listing = {
+        "https://kaizenep.com/events/list/Assessments": [
+            {
+                "title": "CBD",
+                "href": href,
+                "section_states": [{"state": "pending", "label": "awaiting"}],
+                "date_text": "5 Jun, 2026",
+            }
+        ]
+    }
+    details = {detail_url: _detail(state=None, url=detail_url)}
+
+    await kaizen_sync.sync_kaizen_portfolio_index(
+        84, FakeKaizenPage(lists=listing, details=details),
+        categories=("Assessments",), include_activities=False,
+    )
+    first_seen_pending = (await kaizen_index.list_evidence_items("84"))[0].state_since
+
+    for _ in range(3):
+        await kaizen_sync.sync_kaizen_portfolio_index(
+            84, FakeKaizenPage(lists=listing, details=details),
+            categories=("Assessments",), include_activities=False,
+        )
+
+    assert (await kaizen_index.list_evidence_items("84"))[0].state_since == first_seen_pending
