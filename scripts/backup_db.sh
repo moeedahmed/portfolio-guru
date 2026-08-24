@@ -74,7 +74,13 @@ GPG_PASS="${PG_BACKUP_GPG_PASSPHRASE:-}"
 [ -z "$GPG_PASS" ] && GPG_PASS="$(bws_key PG_BACKUP_GPG_PASSPHRASE)"
 
 # Dead-man's-switch ping URL (Healthchecks.io). Optional; absent = no-op.
-PG_BACKUP_HEALTHCHECK_URL="${PG_BACKUP_HEALTHCHECK_URL:-$(bws_key PG_BACKUP_HEALTHCHECK_URL)}"
+# Skipped entirely when notifications are disabled: the BWS lookup is itself a
+# network call, and this script runs inside the OFFLINE verification gates.
+if [ "${PG_BACKUP_DISABLE_ALERTS:-0}" = "1" ]; then
+  PG_BACKUP_HEALTHCHECK_URL=""
+else
+  PG_BACKUP_HEALTHCHECK_URL="${PG_BACKUP_HEALTHCHECK_URL:-$(bws_key PG_BACKUP_HEALTHCHECK_URL)}"
+fi
 
 # Alert the operator on Telegram. A backup that fails quietly is worse than no
 # backup, because it also buys false confidence — so every failure path below
@@ -191,6 +197,10 @@ find "$LOCAL_DEST" -name 'portfolio-guru-backup-*.tar.gz' -mtime +"$RETAIN_DAYS"
 # disk full). Healthchecks.io alerts on the ABSENCE of a ping, which covers the
 # case no in-script check ever can. No-op when unset.
 ping_healthcheck() {
+  if [ "${PG_BACKUP_DISABLE_ALERTS:-0}" = "1" ]; then
+    echo "healthcheck: skipped (alerts disabled)"
+    return 0
+  fi
   [ -n "${PG_BACKUP_HEALTHCHECK_URL:-}" ] || return 0
   curl -sS -m 10 --retry 3 "${PG_BACKUP_HEALTHCHECK_URL}${1:-}" >/dev/null 2>&1 || true
 }

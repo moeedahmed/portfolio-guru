@@ -128,6 +128,27 @@ def test_successful_offdevice_copy_lands_and_is_encrypted(tmp_path):
     )
 
 
+def test_test_runs_never_ping_the_live_healthcheck(tmp_path):
+    """The offline gate must not touch the real monitoring endpoint.
+
+    These tests run the real backup script, which pings Healthchecks.io on
+    success and /fail on failure. Once the ping URL was wired up, every gate
+    run fired four pings — two of them failures — flapping the live check and
+    spamming the operator's Telegram. A monitor that cries wolf during CI is
+    worse than no monitor: it trains the operator to ignore it.
+
+    It also broke the offline guarantee: fetching the URL from BWS is itself a
+    network call, inside a suite that is documented as making none.
+    """
+    result = _run_backup(tmp_path, str(tmp_path / "offdevice-ok"))
+
+    # Both the success and failure paths route through ping_healthcheck, and
+    # both must announce that they skipped rather than reaching the network.
+    assert "healthcheck: skipped (alerts disabled)" in result.stdout, (
+        f"test run attempted a live healthcheck ping:\n{result.stdout}"
+    )
+
+
 def test_local_archive_survives_offdevice_failure(tmp_path):
     """Failing the run must not cost the local backup we did successfully take."""
     result = _run_backup(tmp_path, str(_unreachable_remote(tmp_path)))
