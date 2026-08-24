@@ -8,9 +8,11 @@ import dogfood_audit
 def test_record_event_writes_redacted_local_ndjson(tmp_path):
     path = tmp_path / "dogfood-audit.ndjson"
 
+    # Operator traffic: the cohort gate only admits the operator and synthetic
+    # fixtures, and redaction has to hold for the traffic that IS logged.
     dogfood_audit.record_event(
         "user_input",
-        user_id=123,
+        user_id=6912896590,
         username="doctor@example.com",
         session_id="session-1",
         payload={
@@ -25,7 +27,7 @@ def test_record_event_writes_redacted_local_ndjson(tmp_path):
     assert len(records) == 1
     record = records[0]
     assert record["event_type"] == "user_input"
-    assert record["user_id"] == 123
+    assert record["user_id"] == 6912896590
     assert record["username"] == "[REDACTED_EMAIL]"
     preview = record["payload"]["text_preview"]
     assert "test@example.com" not in preview
@@ -56,9 +58,9 @@ def test_draft_payload_summary_keeps_fields_without_raw_paths():
 
 def test_count_by_event(tmp_path):
     path = tmp_path / "audit.ndjson"
-    dogfood_audit.record_event("user_input", log_path=path)
-    dogfood_audit.record_event("decision_path", log_path=path)
-    dogfood_audit.record_event("decision_path", log_path=path)
+    dogfood_audit.record_event("user_input", user_id=99999999, log_path=path)
+    dogfood_audit.record_event("decision_path", user_id=99999999, log_path=path)
+    dogfood_audit.record_event("decision_path", user_id=99999999, log_path=path)
 
     assert dogfood_audit.count_by_event(dogfood_audit.iter_records(path)) == {
         "user_input": 1,

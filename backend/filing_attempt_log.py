@@ -36,7 +36,12 @@ from typing import Any, Dict, Iterable, Iterator, List, Optional
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_TEST_USER_IDS = frozenset({99999999})
+# Synthetic fixture ids. 99999 is the id the offline QA transcript harness
+# drives the whole PTB stack as; leaving it unclassified made every harness run
+# count as a real beta user in /filingreport. Note 12345 is deliberately NOT
+# here — the unit suite uses it to mean "a genuine beta user", and several tests
+# assert exactly that.
+_DEFAULT_TEST_USER_IDS = frozenset({99999999, 99999})
 
 # Moeed's operator/admin Telegram id — mirrors bot.ADMIN_USER_ID. Kept here
 # (rather than imported from bot.py) to avoid a circular import; bot.py
