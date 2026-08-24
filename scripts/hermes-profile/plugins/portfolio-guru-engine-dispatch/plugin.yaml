@@ -1,10 +1,16 @@
 name: portfolio-guru-engine-dispatch
 label: Portfolio Guru Engine Dispatch
 kind: standalone
-version: 1.0.0
+version: 2.0.0
 description: >
-  Routes Portfolio Guru WhatsApp DMs through the repo-owned Portfolio Guru
-  engine command and sends the rendered reply through Hermes WhatsApp.
+  Portfolio Guru test-bot surface. Telegram DMs reach the normal Hermes agent,
+  which calls three repo-owned tools for source-tied analysis, the draft
+  preview, and the approval-bound mobile Kaizen handoff. WhatsApp DMs keep the
+  deterministic reply path. The production Portfolio Guru bot is untouched.
 author: Solvoro Labs
 provides_hooks:
   - pre_gateway_dispatch
+provides_tools:
+  - portfolio_case_analyze
+  - portfolio_draft_preview
+  - portfolio_handoff_create

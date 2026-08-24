@@ -18,6 +18,7 @@ _KEY_LABELS: dict[str, str] = {
     "age": "Age",
     "sex": "Sex",
     "setting": "Setting",
+    "case_scope": "Scope",
     "presenting_complaint": "Presenting complaint",
     "diagnosis": "Diagnosis",
     "procedure": "Procedure/intervention",

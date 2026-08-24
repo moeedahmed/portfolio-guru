@@ -333,3 +333,37 @@ def test_extracted_values_appear_verbatim_in_source(text):
             assert v.lower() in text.lower(), f"{k}: sex {v!r} not in source"
         else:
             assert v in text, f"{k}: value {v!r} not found verbatim in {text!r}"
+
+
+# ---------------------------------------------------------------------------
+# Case scope — multi-patient / shift-level evidence
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("Managed four patients across the shift in resus.", "four patients"),
+        ("Busy acute take, clerked and prioritised throughout.", "acute take"),
+        ("I was in charge of the department all evening.", "in charge of the department"),
+        # Period phrase alone does not qualify; it needs plural patients too.
+        ("On a night shift I saw several unwell patients.", "night shift"),
+    ],
+)
+def test_multi_patient_and_shift_signals_emit_case_scope(text, expected):
+    facts = dict(extract_text_facts(text))
+    assert facts.get("case_scope") == expected
+    assert expected in text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "On a night shift I saw a 62M with chest pain in ED.",
+        "During my shift I clerked one patient with sepsis.",
+        "62M chest pain in ED, STEMI on ECG, consultant supervised",
+        "Reflected on a difficult conversation with a patient's family.",
+    ],
+)
+def test_single_encounters_never_emit_case_scope(text):
+    assert "case_scope" not in dict(extract_text_facts(text))

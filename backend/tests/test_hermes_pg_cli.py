@@ -10,6 +10,10 @@ These tests pin the contract the Hermes profile shim relies on:
   the same user conversation while still blocking Kaizen writes.
 * ``whatsapp-reply`` renders the Portfolio Guru reply for a Hermes WhatsApp
   transport, without sending WhatsApp messages or writing to Kaizen.
+* ``case-analyze`` / ``draft-preview`` / ``handoff-create`` are the tool
+  surface the Hermes agent calls: facts and options rather than prose, a
+  preview receipt that binds to the exact reviewed draft, and a handoff that
+  fails closed without that binding plus a matching approval phrase.
 * ``recommend`` / ``draft`` / ``health`` always return ``blocked`` so
   the test bot cannot drift away from the live engine via local
   heuristics.
@@ -565,6 +569,121 @@ def test_save_returns_blocked_with_kaizen_safety_reason():
     assert data["command"] == "save"
     assert data["kaizen_writes"] is False
     assert "Kaizen" in data["reason"]
+
+
+TELEGRAM_CASE_PAYLOAD = {
+    "channel": "telegram",
+    "conversation_id": "tg:test",
+    "gateway_user_id": "user-1",
+    "scope": "direct",
+    "private": True,
+    "text": (
+        "In ED I managed an anonymised patient with chest pain and NSTEMI, "
+        "discussed it with the consultant, and learned to escalate earlier."
+    ),
+    "media": [],
+}
+
+
+def test_case_analyze_returns_facts_and_options_not_clinician_prose():
+    code, response = _run_cli(
+        "case-analyze", "--payload", json.dumps(TELEGRAM_CASE_PAYLOAD)
+    )
+
+    assert code == 0
+    assert response["status"] == "ok"
+    data = response["data"]
+    assert data["form_type"] == "CBD"
+    assert data["kaizen_writes"] is False
+    assert "setting" in data["fact_keys"]
+    # The agent writes the words; the CLI supplies facts and open questions.
+    assert isinstance(data["clarification_options"], list)
+    assert data["guidance"]
+
+
+def test_case_analyze_offers_a_scope_question_before_demanding_a_diagnosis():
+    payload = dict(TELEGRAM_CASE_PAYLOAD, text="I had a really busy shift in ED.")
+    code, response = _run_cli("case-analyze", "--payload", json.dumps(payload))
+
+    assert code == 0
+    data = response["data"]
+    assert data["needs_clarification"] is True
+    joined = " ".join(data["clarification_options"]).lower()
+    assert "shift" in joined
+    assert len(set(data["clarification_options"])) > 1
+
+
+def test_draft_preview_returns_a_binding_receipt_without_kaizen_writes():
+    code, response = _run_cli(
+        "draft-preview", "--payload", json.dumps(TELEGRAM_CASE_PAYLOAD)
+    )
+
+    assert code == 0
+    assert response["status"] == "ok"
+    data = response["data"]
+    assert data["kaizen_writes"] is False
+    assert len(data["preview_hash"]) == 64
+    assert data["preview_id"]
+    assert data["approval_phrase"].startswith("APPROVE-")
+    assert "NSTEMI" in data["preview_text"]
+
+
+def test_draft_preview_binding_is_stable_for_the_same_case_and_changes_with_it():
+    _, first = _run_cli("draft-preview", "--payload", json.dumps(TELEGRAM_CASE_PAYLOAD))
+    _, repeat = _run_cli("draft-preview", "--payload", json.dumps(TELEGRAM_CASE_PAYLOAD))
+    edited = dict(
+        TELEGRAM_CASE_PAYLOAD,
+        text=TELEGRAM_CASE_PAYLOAD["text"] + " The registrar also reviewed him.",
+    )
+    _, changed = _run_cli("draft-preview", "--payload", json.dumps(edited))
+
+    assert first["data"]["preview_hash"] == repeat["data"]["preview_hash"]
+    assert changed["data"]["preview_hash"] != first["data"]["preview_hash"]
+    assert changed["data"]["approval_phrase"] != first["data"]["approval_phrase"]
+
+
+def test_handoff_create_is_blocked_without_a_binding_and_confirmation():
+    code, response = _run_cli(
+        "handoff-create", "--payload", json.dumps(TELEGRAM_CASE_PAYLOAD)
+    )
+
+    assert code == 0
+    assert response["status"] == "blocked"
+    assert response["data"]["kaizen_writes"] is False
+
+
+def test_handoff_create_is_blocked_when_the_case_changed_after_review():
+    _, preview = _run_cli(
+        "draft-preview", "--payload", json.dumps(TELEGRAM_CASE_PAYLOAD)
+    )
+    tampered = dict(
+        TELEGRAM_CASE_PAYLOAD,
+        text=TELEGRAM_CASE_PAYLOAD["text"] + " Also intubated in resus.",
+        preview_hash=preview["data"]["preview_hash"],
+        confirmation_phrase=preview["data"]["approval_phrase"],
+    )
+    code, response = _run_cli("handoff-create", "--payload", json.dumps(tampered))
+
+    assert code == 0
+    assert response["status"] == "blocked"
+    assert "changed" in response["data"]["reason"].lower()
+    assert response["data"]["kaizen_writes"] is False
+
+
+def test_handoff_create_is_blocked_when_the_approval_phrase_does_not_match():
+    _, preview = _run_cli(
+        "draft-preview", "--payload", json.dumps(TELEGRAM_CASE_PAYLOAD)
+    )
+    payload = dict(
+        TELEGRAM_CASE_PAYLOAD,
+        preview_hash=preview["data"]["preview_hash"],
+        confirmation_phrase="APPROVE-000000",
+    )
+    code, response = _run_cli("handoff-create", "--payload", json.dumps(payload))
+
+    assert code == 0
+    assert response["status"] == "blocked"
+    assert response["data"]["kaizen_writes"] is False
 
 
 # ---------------------------------------------------------------------------

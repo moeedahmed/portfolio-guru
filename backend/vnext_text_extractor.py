@@ -47,6 +47,43 @@ _SETTING_PHRASE_RE = re.compile(
 )
 
 # ---------------------------------------------------------------------------
+# Case scope — shift-level / multi-patient evidence rather than one encounter
+#
+# Two ways to qualify, both requiring verbatim source words:
+#   (a) an explicit multi-patient phrase ("four patients", "acute take"), or
+#   (b) a period phrase ("shift", "ward round") *and* a plural "patients"
+#       token in the same text.
+# A single-patient encounter that merely happens to mention a shift never
+# qualifies, because "a patient" is singular and matches neither branch.
+# ---------------------------------------------------------------------------
+
+_MULTI_PATIENT_RE = re.compile(
+    r"\b("
+    r"multiple\s+patients|several\s+patients|many\s+patients|"
+    r"a\s+number\s+of\s+patients|"
+    r"back[\s\-]to[\s\-]back\s+patients|"
+    r"\d{1,2}\s+patients|"
+    r"(?:two|three|four|five|six|seven|eight|nine|ten)\s+patients|"
+    r"acute\s+take|medical\s+take|ward\s+round|"
+    r"(?:ran|running|led|leading|in\s+charge\s+of)\s+the\s+"
+    r"(?:department|floor|shop|majors|take|resus(?:\s+room)?)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_PERIOD_RE = re.compile(
+    r"\b("
+    r"resus\s+shift|night\s+shift|day\s+shift|late\s+shift|twilight\s+shift|"
+    r"whole\s+shift|entire\s+shift|full\s+shift|busy\s+shift|"
+    r"across\s+the\s+shift|throughout\s+the\s+shift|during\s+my\s+shift|"
+    r"ward\s+round|acute\s+take|medical\s+take|on\s+call"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_PLURAL_PATIENTS_RE = re.compile(r"\bpatients\b", re.IGNORECASE)
+
+# ---------------------------------------------------------------------------
 # Presenting complaint — common EM chief complaints, matched verbatim
 # ---------------------------------------------------------------------------
 
@@ -170,6 +207,7 @@ def extract_text_facts(text: str) -> tuple[tuple[str, str], ...]:
     facts: list[tuple[str, str]] = []
     facts.extend(_extract_demographics(text))
     facts.extend(_extract_setting(text))
+    facts.extend(_extract_case_scope(text))
     facts.extend(_extract_presenting_complaint(text))
     facts.extend(_extract_diagnosis(text))
     facts.extend(_extract_procedure(text))
@@ -209,6 +247,17 @@ def _extract_setting(text: str) -> list[tuple[str, str]]:
     m = _SETTING_PHRASE_RE.search(text)
     if m:
         return [("setting", m.group(1))]
+    return []
+
+
+def _extract_case_scope(text: str) -> list[tuple[str, str]]:
+    """Emit ``case_scope`` only for defensible multi-patient/shift evidence."""
+    explicit = _MULTI_PATIENT_RE.search(text)
+    if explicit:
+        return [("case_scope", explicit.group(1))]
+    period = _PERIOD_RE.search(text)
+    if period and _PLURAL_PATIENTS_RE.search(text):
+        return [("case_scope", period.group(1))]
     return []
 
 

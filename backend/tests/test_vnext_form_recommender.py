@@ -313,3 +313,49 @@ def test_recommend_is_deterministic():
     """Same facts always produce the same result."""
     facts = _make_facts(setting="ED", diagnosis="STEMI")
     assert recommend(facts) == recommend(facts)
+
+
+# ---------------------------------------------------------------------------
+# ACAT — shift-level / multi-patient acute care
+# ---------------------------------------------------------------------------
+
+
+def test_multi_patient_shift_scope_recommends_acat():
+    """A period of acute care over several patients is ACAT, not CBD."""
+    facts = _make_facts(setting="resus", case_scope="four patients")
+    result = recommend(facts)
+    assert isinstance(result, FormRecommendation)
+    assert result.form_type == "ACAT"
+    assert "four patients" in result.reason
+
+
+def test_shift_scope_outranks_the_cbd_rule_that_would_demand_a_diagnosis():
+    """The observed defect: a shift with one named problem must not become CBD."""
+    facts = _make_facts(
+        setting="resus",
+        case_scope="multiple patients",
+        presenting_complaint="cardiac arrest",
+    )
+    result = recommend(facts)
+    assert isinstance(result, FormRecommendation)
+    assert result.form_type == "ACAT"
+
+
+def test_shift_scope_does_not_override_a_trainee_procedure():
+    """A procedure performed during a shift is still assessed as a procedure."""
+    facts = _make_facts(
+        setting="resus",
+        case_scope="several patients",
+        procedure="RSI",
+        supervision="consultant",
+    )
+    result = recommend(facts)
+    assert isinstance(result, FormRecommendation)
+    assert result.form_type == "DOPS"
+
+
+def test_single_encounter_without_scope_is_unaffected():
+    facts = _make_facts(setting="ED", diagnosis="NSTEMI")
+    result = recommend(facts)
+    assert isinstance(result, FormRecommendation)
+    assert result.form_type == "CBD"

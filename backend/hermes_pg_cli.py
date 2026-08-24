@@ -40,6 +40,21 @@ Commands
     back to the user, not written to a shadow log. Kaizen writes remain
     blocked.
 
+``case-analyze --payload '<json>'`` / ``--payload-file <path|->``
+    Return the deterministic reading of a case: source-tied facts, the form
+    the engine would recommend, and the questions still open. It returns data,
+    not clinician-facing prose — the Hermes agent owns the words.
+
+``draft-preview --payload '<json>'`` / ``--payload-file <path|->``
+    Build the source-tied draft preview plus the binding receipt
+    (``preview_hash``, ``preview_id``, ``approval_phrase``) that a later
+    handoff must reproduce exactly.
+
+``handoff-create --payload '<json>'`` / ``--payload-file <path|->``
+    Create the one-time mobile Kaizen login, but only when the payload carries
+    a ``preview_hash`` that still binds to the supplied case text and the
+    matching ``confirmation_phrase``. Fails closed otherwise.
+
 ``recommend`` / ``draft`` / ``health``
     Returns ``blocked``. These responsibilities belong to the
     deterministic engine reached through ``shadow``; the CLI intentionally
@@ -47,15 +62,18 @@ Commands
     from the live engine's behaviour.
 
 ``save``
-    Returns ``blocked`` with an explicit Kaizen-safety reason. Kaizen
-    drafts are saved only by the live engine process after explicit user
-    Approve, never from this offline CLI.
+    Remains blocked by default.  In the explicitly enabled test environment,
+    an approved private Telegram payload may create a one-time mobile Kaizen
+    login handoff through the loopback-only broker.  The command itself never
+    receives credentials and does not save a draft; the isolated browser
+    service resumes the deterministic filer only after the clinician logs in.
 
 Safety
 ------
 * No Telegram client import, no live-bot token reference, no Kaizen API
-  call, no Stripe call, no BWS read. The module is importable inside a
-  Hermes process that has none of those available.
+  call, no Stripe call, no BWS read. The optional mobile handoff reaches only
+  a loopback HTTP broker on the same host. The module is importable inside a
+  Hermes process that has none of those integrations available.
 * ``shadow`` output is JSON-safe metadata only; raw inbound text is never
   echoed there. ``preview`` is the deliberate user-visible exception and
   still performs no network, Telegram, Kaizen, Stripe, or BWS work.
@@ -65,6 +83,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import sys
@@ -78,6 +97,9 @@ SUPPORTED_COMMANDS = (
     "shadow",
     "preview",
     "whatsapp-reply",
+    "case-analyze",
+    "draft-preview",
+    "handoff-create",
     "recommend",
     "draft",
     "health",
@@ -249,6 +271,64 @@ def cmd_whatsapp_reply(
             "kaizen_writes": False,
         },
     }
+
+
+def _case_tool_command(
+    name: str,
+    handler_name: str,
+    *,
+    payload_json: str | None,
+    payload_path: str | None,
+) -> dict[str, Any]:
+    """Run one repo-owned Hermes case tool over a Hermes-shaped payload."""
+    try:
+        payload = _load_payload(
+            command=name,
+            payload_json=payload_json,
+            payload_path=payload_path,
+        )
+    except _PayloadError as exc:
+        return {"status": "error", "error": str(exc)}
+
+    import hermes_case_tools
+
+    return getattr(hermes_case_tools, handler_name)(payload)
+
+
+def cmd_case_analyze(
+    *, payload_json: str | None = None, payload_path: str | None = None
+) -> dict[str, Any]:
+    """Return deterministic facts, form recommendation, and open questions."""
+    return _case_tool_command(
+        "case-analyze",
+        "analyze_case",
+        payload_json=payload_json,
+        payload_path=payload_path,
+    )
+
+
+def cmd_draft_preview(
+    *, payload_json: str | None = None, payload_path: str | None = None
+) -> dict[str, Any]:
+    """Return the source-tied draft preview plus its binding receipt."""
+    return _case_tool_command(
+        "draft-preview",
+        "draft_preview",
+        payload_json=payload_json,
+        payload_path=payload_path,
+    )
+
+
+def cmd_handoff_create(
+    *, payload_json: str | None = None, payload_path: str | None = None
+) -> dict[str, Any]:
+    """Create the mobile Kaizen login only for a bound, approved draft."""
+    return _case_tool_command(
+        "handoff-create",
+        "create_handoff",
+        payload_json=payload_json,
+        payload_path=payload_path,
+    )
 
 
 def _state_path() -> Path:
@@ -678,22 +758,183 @@ def cmd_deferred(name: str) -> dict[str, Any]:
     }
 
 
-def cmd_save() -> dict[str, Any]:
+def _blocked_save(reason: str | None = None) -> dict[str, Any]:
     return {
         "status": "blocked",
         "data": {
             "command": "save",
-            "reason": (
-                "Kaizen draft writes are never performed by the Hermes "
-                "test path. The live engine (backend/bot.py + "
-                "backend/filer_router.py) is the only surface that "
-                "writes to Kaizen, and only after an explicit user "
-                "Approve in that process."
+            "reason": reason
+            or (
+                "Kaizen draft writes remain disabled on this Hermes test path. "
+                "The mobile login broker is not active, so no handoff or draft "
+                "save was attempted."
             ),
             "kaizen_writes": False,
             "guide": "docs/hermes/INTEGRATION_GUIDE.md",
         },
     }
+
+
+def cmd_save(
+    *,
+    payload_json: str | None = None,
+    payload_path: str | None = None,
+    approved: bool = False,
+    environ: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Create a test-only mobile login handoff after explicit approval."""
+    env = os.environ if environ is None else environ
+    broker_url = str(env.get("PG_MOBILE_HANDOFF_INTERNAL_URL") or "").strip()
+    if not broker_url:
+        from mobile_kaizen_handoff import DEFAULT_INTERNAL_KEY_FILE
+
+        if DEFAULT_INTERNAL_KEY_FILE.exists():
+            broker_url = "http://127.0.0.1:8100"
+        else:
+            return _blocked_save()
+    if not approved:
+        return _blocked_save(
+            "Explicit approval is required before a mobile Kaizen login "
+            "handoff can be created."
+        )
+
+    parsed_broker = _validated_loopback_url(broker_url)
+    if parsed_broker is None:
+        return {
+            "status": "error",
+            "error": "mobile handoff broker must use a loopback http URL",
+        }
+
+    try:
+        payload = _load_payload(
+            command="save",
+            payload_json=payload_json,
+            payload_path=payload_path,
+        )
+    except _PayloadError as exc:
+        return {"status": "error", "error": str(exc)}
+
+    if (
+        payload.get("channel") != "telegram"
+        or payload.get("private") is not True
+        or payload.get("scope") != "direct"
+    ):
+        return _blocked_save(
+            "Mobile Kaizen handoff is limited to a private Telegram test-bot "
+            "conversation."
+        )
+    gateway_user_id = str(payload.get("gateway_user_id") or "").strip()
+    if not gateway_user_id:
+        return _blocked_save("The private Telegram user identity is unavailable.")
+
+    from hermes_shadow_adapter import process_payload
+    from mobile_kaizen_handoff import DEFAULT_INTERNAL_KEY_FILE, build_cbd_fields
+    from vnext_form_recommender import FormRecommendation, recommend
+
+    try:
+        result = process_payload(payload)
+    except ValueError as exc:
+        return {"status": "error", "error": f"invalid Hermes payload: {exc}"}
+    if result.workspace is None or result.metadata.get("disposition") != "handle":
+        return _blocked_save("The engine did not accept this payload for a draft.")
+
+    facts = tuple(result.workspace.draft_eligible_facts())
+    recommendation = recommend(facts)
+    if not isinstance(recommendation, FormRecommendation):
+        return _blocked_save(recommendation.missing_prompt)
+    if recommendation.form_type != "CBD":
+        return _blocked_save(
+            "The controlled mobile-login proof currently supports CBD only. "
+            f"The engine recommended {recommendation.form_type}, so nothing was filed."
+        )
+
+    source_text = str(payload.get("text") or "").strip()
+    fields = build_cbd_fields(
+        source_text=source_text,
+        facts={fact.key: fact.value for fact in facts},
+    )
+    if not fields.get("clinical_reasoning"):
+        return _blocked_save("A source-tied CBD narrative is required before handoff.")
+
+    key_path = Path(
+        env.get("PG_MOBILE_HANDOFF_INTERNAL_KEY_FILE")
+        or str(DEFAULT_INTERNAL_KEY_FILE)
+    ).expanduser()
+    try:
+        internal_key = key_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return _blocked_save("The local mobile handoff broker is not ready.")
+    if len(internal_key) < 12:
+        return {"status": "error", "error": "mobile handoff broker key is invalid"}
+
+    request = {
+        "approved": True,
+        "channel": "telegram",
+        "private": True,
+        "form_type": "CBD",
+        "subject_key": hashlib.sha256(gateway_user_id.encode()).hexdigest(),
+        "fields": fields,
+    }
+    try:
+        created = _post_mobile_handoff(
+            parsed_broker,
+            internal_key=internal_key,
+            request=request,
+        )
+    except Exception:
+        return _blocked_save(
+            "The local mobile handoff broker is not reachable. Nothing was filed."
+        )
+    return {
+        "status": "ok",
+        "data": {
+            "command": "save",
+            "handoff_url": str(created["url"]),
+            "expires_in_seconds": int(created.get("expires_in_seconds") or 600),
+            "kaizen_writes": False,
+            "draft_save_pending": True,
+            "message": (
+                "Open the one-time link to sign in to Kaizen yourself. "
+                "Portfolio Guru will then fill and save the approved CBD draft."
+            ),
+        },
+    }
+
+
+def _validated_loopback_url(value: str) -> str | None:
+    from urllib.parse import urlparse
+
+    parsed = urlparse(value)
+    if parsed.scheme != "http" or parsed.hostname not in {
+        "127.0.0.1",
+        "localhost",
+        "::1",
+    }:
+        return None
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        return None
+    return value.rstrip("/")
+
+
+def _post_mobile_handoff(
+    url: str,
+    *,
+    internal_key: str,
+    request: dict[str, Any],
+) -> dict[str, Any]:
+    import httpx
+
+    response = httpx.post(
+        f"{url}/internal/handoffs",
+        headers={"X-Portfolio-Handoff-Key": internal_key},
+        json=request,
+        timeout=5.0,
+    )
+    response.raise_for_status()
+    data = response.json()
+    if not isinstance(data, dict) or not str(data.get("url") or "").startswith("https://"):
+        raise ValueError("broker returned an invalid handoff URL")
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -777,13 +1018,47 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path to a JSON payload file, or '-' for stdin.",
     )
 
+    for name, help_text in (
+        (
+            "case-analyze",
+            "Return deterministic facts, form recommendation, open questions.",
+        ),
+        (
+            "draft-preview",
+            "Build the source-tied draft preview and its binding receipt.",
+        ),
+        (
+            "handoff-create",
+            "Create the mobile Kaizen login for a bound, approved draft.",
+        ),
+    ):
+        case_tool = sub.add_parser(name, help=help_text)
+        case_tool.add_argument("--payload", help="Inline JSON payload string.")
+        case_tool.add_argument(
+            "--payload-file",
+            help="Path to a JSON payload file, or '-' for stdin.",
+        )
+
     for name in DEFERRED_COMMANDS:
         sub.add_parser(
             name,
             help=f"Deferred to the engine via 'shadow' (returns blocked).",
         )
 
-    sub.add_parser("save", help="Always blocked — Kaizen writes happen in the live engine only.")
+    save = sub.add_parser(
+        "save",
+        help="Create the test-only mobile Kaizen login handoff when enabled.",
+    )
+    save.add_argument("--payload", help="Inline JSON payload string.")
+    save.add_argument(
+        "--payload-file",
+        help="Path to a JSON payload file, or '-' for stdin.",
+    )
+    save.add_argument(
+        "--approved",
+        action="store_true",
+        help="Required explicit approval gate for the one-time handoff.",
+    )
 
     return parser
 
@@ -806,10 +1081,29 @@ def _dispatch(args: argparse.Namespace) -> dict[str, Any]:
             payload_json=args.payload,
             payload_path=args.payload_file,
         )
+    if args.command == "case-analyze":
+        return cmd_case_analyze(
+            payload_json=args.payload,
+            payload_path=args.payload_file,
+        )
+    if args.command == "draft-preview":
+        return cmd_draft_preview(
+            payload_json=args.payload,
+            payload_path=args.payload_file,
+        )
+    if args.command == "handoff-create":
+        return cmd_handoff_create(
+            payload_json=args.payload,
+            payload_path=args.payload_file,
+        )
     if args.command in DEFERRED_COMMANDS:
         return cmd_deferred(args.command)
     if args.command == "save":
-        return cmd_save()
+        return cmd_save(
+            payload_json=args.payload,
+            payload_path=args.payload_file,
+            approved=args.approved,
+        )
     return {
         "status": "error",
         "error": f"unknown command: {args.command!r}",

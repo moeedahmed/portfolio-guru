@@ -102,6 +102,7 @@ def recommend(facts: tuple[CaseFact, ...]) -> RecommendResult:
     complaint = fd.get("presenting_complaint", "")
     supervision = fd.get("supervision", "")
     learning = fd.get("learning_point", "")
+    case_scope = fd.get("case_scope", "")
 
     # Rule 1: POCUS / ultrasound - highest priority, orthogonal signal.
     if procedure and _is_us_procedure(procedure):
@@ -126,6 +127,21 @@ def recommend(facts: tuple[CaseFact, ...]) -> RecommendResult:
             form_type="PROC_LOG",
             confidence="medium",
             reason=f"trainee-performed {procedure} without confirmed direct observer",
+        )
+
+    # Rule 2b: Shift-level / multi-patient acute care -> ACAT.
+    # ACAT assesses performance across a period involving several patients
+    # (acute take, ward round, busy resus session). A single diagnosis is the
+    # wrong thing to ask for here, so this rule runs before the CBD rules that
+    # would otherwise demand one.
+    if case_scope:
+        return FormRecommendation(
+            form_type="ACAT",
+            confidence="medium",
+            reason=(
+                f"shift-level acute care across several patients ({case_scope}) - "
+                "assessed as a period of practice rather than one encounter"
+            ),
         )
 
     # Rule 3: Clinical case management (CBD) - setting + diagnosis or complaint.

@@ -11,25 +11,39 @@ which you must stop and investigate before proceeding.
 
 ## Architecture overview
 
+Telegram is a **hybrid** surface: Hermes owns the conversation, Python owns
+the product facts and every irreversible boundary.
+
 ```
 Telegram test bot (@portfolio_guru_test_bot)
   ↓  receives message
-Hermes agent  ←— PROFILE_PROMPT.md (this profile, not the live beta)
-  ↓  calls bridge
-hermes_bridge_contract.inbound_from_payload(payload)
-  ↓  returns InboundDecision
-channel_contract.accept_inbound(message)
+portfolio-guru-engine-dispatch  pre_gateway_dispatch
+  ↓  observes raw text for an outstanding approval phrase, returns no directive
+Hermes agent turn (normal conversation, session memory, clarification)
+  ↓  calls a Portfolio Guru tool when it needs a fact, a draft, or an action
+portfolio_case_analyze / portfolio_draft_preview / portfolio_handoff_create
+  ↓  identity from gateway.session_context, never from the model
+`pg <case-analyze|draft-preview|handoff-create>`  (profile shim)
+  ↓
+backend/hermes_case_tools.py
+  ↓  hermes_shadow_adapter.process_payload
+hermes_bridge_contract.inbound_from_payload → channel_contract.accept_inbound
   ↓  disposition == HANDLE
-Hermes passes InboundMessage to the next engine layer
+telegram_vnext_adapter.event_from_telegram_message → IngestEvent
   ↓
-telegram_vnext_adapter.event_from_telegram_message(msg)   ← Telegram-specific
-  ↓  IngestEvent
-conversational_case_engine.apply_event(workspace, event)
-  ↓  EngineSnapshot + NextAction list
-Hermes renders the appropriate ChannelReply
+conversational_case_engine.apply_event  →  vnext_form_recommender.recommend
+  ↓                                          vnext_draft_preview.build_draft_preview
+facts / form / preview + binding receipt back to the agent
   ↓
-Test bot sends reply to the trainee
+Hermes writes the reply in its own words
 ```
+
+The plugin never sends a Telegram message and never returns `skip` for
+Telegram. It previously did both, which made the test bot a Python state
+machine: a multi-patient resus shift was flattened to a setting, the same
+diagnosis prompt replayed, and `/new` only reset Python. The archived
+implementation is at
+`backend/_archived/20260824T041500Z-hermes-telegram-turn-state-machine/`.
 
 The three components and their responsibilities:
 
@@ -43,6 +57,20 @@ The live beta bot and the Hermes test bot are **entirely separate
 processes** with **separate tokens**. They must never poll the same
 token, share state, or be wired to the same Telegram webhook or polling
 loop.
+
+The `portfolio-guru-engine-dispatch` plugin is profile-local and patches no
+Hermes core. It registers one narrow toolset (`portfolio_guru`) and one
+`pre_gateway_dispatch` hook. On Telegram the hook takes no dispatch decision at
+all; it only records that an approval phrase appeared in an authorised
+trainee's own words, so the handoff tool can prove approval. On WhatsApp it
+still renders and sends the deterministic reply, unchanged. Unsupported media
+and production-only surfaces remain explicit parity gaps.
+
+The optional mobile Kaizen handoff does not change that ownership. Hermes
+remains the only test-bot poller; the handoff service owns no Telegram token.
+It accepts an approved CBD payload only through a protected loopback endpoint,
+returns a one-time mobile link, and resumes the existing deterministic filer
+only after the clinician signs into an isolated Kaizen browser themselves.
 
 ---
 
@@ -116,20 +144,43 @@ The `channel_actions` module also provides `to_telegram_keyboard` and
 plain-text numbered lists — use these when the Hermes adapter is
 producing Telegram messages directly.
 
-For a user-visible draft preview, the Hermes profile must call the
-repo-owned preview command with the original case payload:
+### The Telegram tool seam
+
+The agent never builds these payloads itself. The plugin builds them from the
+gateway session identity and passes only the trainee's own case wording:
 
 ```bash
-pg preview --payload "$ORIGINAL_CASE_PAYLOAD_JSON"
+pg case-analyze   --payload-file -   # facts, recommended form, open questions
+pg draft-preview  --payload-file -   # preview_text + preview_hash/id + approval_phrase
+pg handoff-create --payload-file -   # requires preview_hash + confirmation_phrase
 ```
 
-`pg shadow` remains metadata-only and must be used for shadow logs and
-engine-backed option discovery. Do not pass a numeric selection such as
-`1` through `pg shadow` as a fresh message; that loses the original case
-facts and produces the unhelpful "metadata only" failure mode. The
-preview command may return the user's own source-tied clinical facts
-because it is rendered back to the same user, but it still performs no
-Telegram send, Kaizen write, Stripe call, BWS read, or network operation.
+`pg shadow` remains metadata-only and is for shadow logs, not for the
+conversational path. `pg preview` is retained for the WhatsApp/legacy preview
+call; `case-analyze` and `draft-preview` are the Telegram surface. All of them
+perform no Telegram send, Kaizen write, Stripe call, BWS read, or network
+operation beyond the loopback handoff broker.
+
+#### Approval binding
+
+`draft-preview` hashes the exact reviewed draft (`PREVIEW_HASH_VERSION`, form
+type, normalised case text, rendered preview) and derives an approval phrase
+from it. `handoff-create` recomputes that hash from the supplied case text and
+refuses unless it matches and the phrase matches.
+
+That alone proves *which* draft was approved, not *who* approved it. The
+second half is the hook: it watches raw inbound Telegram text — a channel the
+model cannot write to — for the outstanding phrase, and only a receipt with an
+observed confirmation can be spent, once, within 15 minutes.
+
+Both halves must hold. A model asserting approval in tool arguments is not
+evidence and is refused.
+
+**Known limitation.** The supported plugin APIs give a tool no way to read the
+result of Hermes' native clarify/confirmation surface as trusted evidence —
+`clarify` returns through the model. The typed phrase is therefore the
+approval channel, and it fails closed rather than accepting a model-mediated
+"the user said yes".
 
 ---
 
@@ -203,6 +254,48 @@ following:
    channel contract, and the engine are all designed to never log
    clinical content. If you see patient-identifiable information in any
    log file, stop, rotate the token, and audit the log pipeline.
+
+5. **A mobile handoff for anything other than a private, approved CBD.**
+   The initial proof is deliberately narrow. Stop if a group conversation,
+   unapproved preview, unsupported form, reused link, expired link, or payload
+   containing credential fields reaches the browser service.
+
+6. **A handoff created without the trainee typing the approval phrase.**
+   The phrase is the only approval channel the gate can verify. If a link is
+   ever produced from a model-asserted approval, stop and audit both halves of
+   the binding before continuing.
+
+7. **The plugin answering a Telegram message.** The hook must never send text
+   or return `skip` on Telegram. A templated Portfolio Guru reply appearing
+   alongside the agent's own means the state machine has been reintroduced.
+
+---
+
+## Test-only mobile Kaizen handoff
+
+The handoff is disabled when its local broker is not running. With the broker
+active, the profile uses this sequence:
+
+1. The agent calls `portfolio_draft_preview` with the trainee's own wording.
+2. It shows the source-tied CBD preview and the approval phrase.
+3. The trainee types that exact phrase in the same private conversation; the
+   plugin hook records it from the raw inbound text.
+4. The agent calls `portfolio_handoff_create` with the `preview_id`; the tool
+   verifies the binding and the observed confirmation, then runs
+   `pg handoff-create`, which re-verifies both before reaching the broker.
+5. The agent sends the returned one-time URL without rewriting it.
+6. The clinician signs into Kaizen through the temporary mobile browser.
+7. The service reuses that authenticated session for one deterministic CBD
+   draft save, reports the outcome on the mobile page, and destroys the
+   browser/session state.
+
+`pg handoff-create` creates a handoff, not a success receipt. It remains
+blocked when the broker is absent, the preview hash no longer binds, the
+approval phrase does not match, the confirmation was never observed on the raw
+inbound channel, the receipt was already spent or has expired, the
+conversation is not a private Telegram DM, the engine cannot recommend CBD, or
+the draft lacks a source-tied narrative. Passwords are never included in the CLI payload or stored by the
+service. The live beta process, token, database, and polling loop are untouched.
 
 ---
 
@@ -279,6 +372,8 @@ an explicit user Approve.
 ```bash
 cd ~/projects/portfolio-guru/backend && venv/bin/python3 -m pytest \
   tests/test_hermes_pg_cli.py \
+  tests/test_hermes_hybrid_telegram_seam.py \
+  tests/test_hermes_profile_telegram_dispatch.py \
   tests/test_hermes_shadow_adapter.py \
   tests/test_hermes_integration.py \
   tests/test_channel_contract.py \
