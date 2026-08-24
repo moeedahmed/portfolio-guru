@@ -45,18 +45,23 @@ TZ = "Europe/London"
 
 # The manifest. One entry per scheduled job that must not fail silently.
 #
-# `name` mirrors the launchd label exactly — an alert saying
-# "com.portfolioguru.backup is down" tells you precisely what to restart.
+# Naming follows the convention already established in this Healthchecks
+# project by the OpenClaw/Hermes gateway checks: "Mac Mini <Service>", tagged
+# `mac-mini <project> <role> critical`. The launchd label lives in `desc`
+# instead, so an alert still names the exact thing to restart without breaking
+# the dashboard's existing scheme.
 #
 # Use `schedule` (cron) for jobs that run on a clock, `timeout` for jobs that
 # ping continuously. `grace` is how late is allowed before alerting: generous
 # enough to absorb a slow run, tight enough to matter.
 CHECKS = [
     {
-        "name": "com.portfolioguru.bot",
-        "tags": "portfolio-guru mac-mini liveness",
+        "name": "Mac Mini Portfolio Guru Bot",
+        "slug": "mac-mini-portfolio-guru-bot",
+        "tags": "mac-mini portfolio-guru liveness critical",
         "desc": (
-            "Telegram bot liveness. bot.py pings every 5 min from a job-queue "
+            "Telegram bot liveness (launchd: com.portfolioguru.bot). bot.py pings "
+            "every 5 min from a job-queue "
             "task. Silence means the process is gone or the event loop has "
             "wedged — launchd's KeepAlive only catches the former. "
             "Restart: launchctl bootout/bootstrap com.portfolioguru.bot. "
@@ -67,10 +72,12 @@ CHECKS = [
         "bws_secret": "PG_HEARTBEAT_URL",
     },
     {
-        "name": "com.portfolioguru.backup",
-        "tags": "portfolio-guru mac-mini backup",
+        "name": "Mac Mini Portfolio Guru Backup",
+        "slug": "mac-mini-portfolio-guru-backup",
+        "tags": "mac-mini portfolio-guru backup critical",
         "desc": (
-            "Nightly encrypted off-device backup to gs://portfolio-guru-eu-backups. "
+            "Nightly encrypted off-device backup (launchd: com.portfolioguru.backup) "
+            "to gs://portfolio-guru-eu-backups. "
             "Pings on verified upload, /fail on failure. Silence means the job "
             "never ran at all — the case no in-script check can report. "
             "This check exists because off-device upload failed silently for 53 "
