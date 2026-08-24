@@ -1105,7 +1105,10 @@ async def test_video_reaches_filer_without_a_second_consent_prompt():
             "attachment_name": "portfolio-video.mp4",
             "attachment_kind": "video",
             "chosen_form": "US_CASE",
-            "case_text": "I performed a focused ultrasound and documented my own findings.",
+                "case_text": (
+                    "I performed a focused ultrasound and documented my own findings. "
+                    "I learned to record the findings contemporaneously and will do that next time."
+                ),
         }
     )
     draft = FormDraft(
@@ -1287,7 +1290,10 @@ async def test_every_attached_file_reaches_the_filer():
         bot._add_case_attachment(context, path, os.path.basename(path), kind)
     context.user_data.update({
         "chosen_form": "US_CASE",
-        "case_text": "I performed the scan, escalated to cardiology, and documented my findings.",
+        "case_text": (
+            "I performed the scan, escalated to cardiology, and documented my findings. "
+            "I learned to document sooner and will do that next time."
+        ),
         "attachment_upload_confirmed": True,
     })
 
@@ -1328,11 +1334,17 @@ async def test_a_single_attachment_still_files_as_a_plain_string():
     bot._add_case_attachment(context, path, "notes.pdf", "document")
     context.user_data.update({
         "chosen_form": "CBD",
-        "case_text": "I led the assessment and escalated appropriately.",
+        "case_text": (
+            "I led the assessment and escalated appropriately. "
+            "I learned to document the escalation decision more clearly next time."
+        ),
         "attachment_upload_confirmed": True,
     })
 
-    draft = FormDraft(form_type="CBD", fields={"reflection": "Documented."})
+    draft = FormDraft(
+        form_type="CBD",
+        fields={"reflection": "I learned to document the escalation decision more clearly."},
+    )
 
     with patch("bot.get_credentials", return_value=("u", "p")), \
          patch("bot._load_draft", return_value=draft), \

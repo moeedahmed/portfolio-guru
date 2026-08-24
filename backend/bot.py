@@ -60,6 +60,11 @@ from workflow_turn_policy import (
     decide_workflow_turn,
 )
 from message_policy import render_message, safety_redirect_text, style_grounded_answer
+from rcem_ai_policy import (
+    AI_USE_DECLARATION,
+    has_personal_reflective_input,
+    with_ai_use_declaration,
+)
 from runtime_identity import write_runtime_identity
 import chase_guard
 import dogfood_audit
@@ -1157,7 +1162,7 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
             "attachment_path",
             "attachment_name",
             "attachment_kind",
-            "needs_reflection_detail",
+            "needs_reflection_detail", "rcem_personal_reflection_confirmed",
         ):
             context.user_data.pop(key, None)
 
@@ -3719,10 +3724,6 @@ def _build_approval_keyboard(
         rows.append([
             InlineKeyboardButton("✍️ Add reflection/context", callback_data="ACTION|add_reflection_detail"),
         ])
-        if not improved_once:
-            rows.append([
-                InlineKeyboardButton("💡 Improve reflection", callback_data="IMPROVE|reflection"),
-            ])
     elif improved_once:
         # After Quick Improve is used, remove the improve button entirely
         rows.append([
@@ -4155,6 +4156,35 @@ def _draft_reflection_text(draft) -> str:
     return ""
 
 
+def _draft_has_reflection_fields(draft) -> bool:
+    fields = _draft_fields_for_review(draft)
+    return bool(_find_reflection_keys(fields, _draft_form_type(draft)))
+
+
+def _with_rcem_ai_declaration(draft):
+    """Return a copy with RCEM's declaration in one populated reflection field."""
+    if isinstance(draft, CBDData):
+        declared = with_ai_use_declaration(draft.reflection)
+        return draft.model_copy(update={"reflection": declared}) if declared != draft.reflection else draft
+    if not isinstance(draft, FormDraft):
+        return draft
+
+    fields = dict(draft.fields)
+    reflection_keys = _find_reflection_keys(fields, draft.form_type)
+    declaration_key = next(
+        (key for key in reflection_keys if not _is_missing_field_value(fields.get(key))),
+        None,
+    )
+    if not declaration_key:
+        return draft
+    current = fields.get(declaration_key)
+    declared = with_ai_use_declaration(current)
+    if declared == str(current or "").strip():
+        return draft
+    fields[declaration_key] = declared
+    return FormDraft(form_type=draft.form_type, fields=fields, uuid=draft.uuid)
+
+
 def _draft_coach_note(draft) -> str:
     """Return a coach note only when the reflection genuinely needs help.
     Returns "" for solid reflections so the preview isn't padded with noise."""
@@ -4268,10 +4298,28 @@ def _build_attachment_confirm_keyboard() -> InlineKeyboardMarkup:
 
 
 def _draft_needs_reflection_detail_before_save(context, draft) -> bool:
-    source = str(context.user_data.get("case_input_source") or "").strip().lower()
-    if source not in {"photo", "image"}:
+    if not _draft_has_reflection_fields(draft):
         return False
-    return _image_source_without_user_context(context) or _draft_reflection_needs_user_detail(draft)
+
+    source = str(context.user_data.get("case_input_source") or "").strip().lower()
+    if source in {"photo", "image"} and _image_source_without_user_context(context):
+        return True
+
+    case_text = str(context.user_data.get("case_text") or "").strip()
+    if case_text:
+        context.user_data["rcem_personal_reflection_confirmed"] = (
+            has_personal_reflective_input(case_text)
+        )
+
+    # Existing persisted drafts created before this control may not retain the
+    # original case text. Preserve their explicit review/save path; every new
+    # draft has case_text and is evaluated above.
+    confirmed = context.user_data.get("rcem_personal_reflection_confirmed")
+    if confirmed is False:
+        return True
+    if confirmed is None:
+        return source in {"photo", "image"} and _draft_reflection_needs_user_detail(draft)
+    return not bool(_draft_reflection_text(draft).strip())
 
 
 def _remember_case_context_source(
@@ -4319,10 +4367,15 @@ def _format_draft_preview(
     name_check_degraded: bool = False,
 ) -> str:
     """Format draft data as a preview message. Dispatches based on type."""
-    preview = _format_generic_draft(draft) if isinstance(draft, FormDraft) else _format_cbd_draft(draft)
+    preview_draft = _with_rcem_ai_declaration(draft) if include_safety_layer else draft
+    preview = (
+        _format_generic_draft(preview_draft)
+        if isinstance(preview_draft, FormDraft)
+        else _format_cbd_draft(preview_draft)
+    )
     layer = (
         _draft_transparency_layer(
-            draft,
+            preview_draft,
             input_source=input_source,
             needs_reflection_detail=needs_reflection_detail,
             has_user_context=has_user_context,
@@ -4548,10 +4601,17 @@ def _draft_transparency_layer(
     Names the source *type* only — it never quotes raw case text, so
     patient-identifying detail in the source is not surfaced in the preview.
     """
-    if not needs_reflection_detail:
+    if not _draft_has_reflection_fields(draft):
         return ""
 
-    lines = ["", "⚠️ *Review needed before saving*"]
+    lines = ["", "🤖 *RCEM AI use*"]
+    lines.append("• An AI-use declaration has been added to the reflection field.")
+    lines.append("• You remain responsible for its accuracy, authenticity and insight.")
+
+    if not needs_reflection_detail:
+        return "\n".join(lines)
+
+    lines.extend(["", "⚠️ *Your reflection is needed before saving*"])
 
     if (
         str(input_source or "").strip().lower() in _USER_CONTEXT_REQUIRED_SOURCES
@@ -12258,6 +12318,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 parse_mode="Markdown",
             )
         return AWAIT_APPROVAL
+    filing_draft = _with_rcem_ai_declaration(draft)
     if _needs_filing_curriculum_choice(user_id):
         context.user_data.pop("filing_in_progress", None)
         context.user_data.pop("retry_filing_requested", None)
@@ -12273,10 +12334,10 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
 
     # Handle FormDraft (non-CBD forms)
     # Unified filing for ALL forms (CBD and non-CBD)
-    if isinstance(draft, FormDraft):
-        form_type = _filing_form_type_for_user(user_id, draft.form_type)
-        fields = draft.fields
-        curriculum_links = draft.fields.get("curriculum_links", [])
+    if isinstance(filing_draft, FormDraft):
+        form_type = _filing_form_type_for_user(user_id, filing_draft.form_type)
+        fields = filing_draft.fields
+        curriculum_links = filing_draft.fields.get("curriculum_links", [])
     else:
         # CBDData hard-codes form_type="CBD". When the user picked the 2021
         # variant via the category picker, chosen_form preserves that — route
@@ -12287,14 +12348,14 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             chosen_form if chosen_form in ("CBD", "CBD_2021") else "CBD",
         )
         fields = {
-            "date_of_encounter": draft.date_of_encounter,
-            "end_date": draft.date_of_encounter,
-            "date_of_event": draft.date_of_encounter,
-            "stage_of_training": draft.stage_of_training,
-            "clinical_reasoning": draft.clinical_reasoning,
-            "reflection": draft.reflection,
+            "date_of_encounter": filing_draft.date_of_encounter,
+            "end_date": filing_draft.date_of_encounter,
+            "date_of_event": filing_draft.date_of_encounter,
+            "stage_of_training": filing_draft.stage_of_training,
+            "clinical_reasoning": filing_draft.clinical_reasoning,
+            "reflection": filing_draft.reflection,
         }
-        curriculum_links = draft.curriculum_links or []
+        curriculum_links = filing_draft.curriculum_links or []
     _audit_event(
         context,
         "draft_payload",
@@ -13228,8 +13289,6 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
     if query.data == "IMPROVE|used" or context.user_data.get("quick_improve_used"):
         await query.answer("Already improved once — save, edit, or cancel this draft.", show_alert=False)
         return AWAIT_APPROVAL
-    await query.edit_message_reply_markup(reply_markup=None)
-
     draft = _load_draft(context)
     if not draft:
         return await _resume_paused_flow(
@@ -13246,6 +13305,18 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=_active_draft_keyboard(context),
         )
         return AWAIT_APPROVAL
+
+    _set_reflection_detail_gate(context, draft)
+    if context.user_data.get("rcem_personal_reflection_confirmed") is not True:
+        context.user_data["awaiting_reflection_detail"] = True
+        await query.message.reply_text(
+            "Before AI can improve this, add your own learning point, interpretation, "
+            "or what you would do differently.",
+            reply_markup=_active_draft_keyboard(context),
+        )
+        return AWAIT_APPROVAL
+
+    await query.edit_message_reply_markup(reply_markup=None)
 
     ack = await query.message.reply_text("💡 Improving the reflection only…")
     case_text = context.user_data.get("case_text", "")

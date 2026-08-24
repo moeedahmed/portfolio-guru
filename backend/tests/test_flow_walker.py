@@ -819,15 +819,18 @@ class TestFlowWalker:
         assert draft.fields['clinical_setting'] == ''
         assert draft.fields['procedural_skill'] == ''
 
-    def test_draft_preview_omits_ai_reflection_check_by_default(self, thin_draft):
+    def test_draft_preview_declares_ai_use_by_default(self, thin_draft):
         from bot import _format_draft_preview
+        from rcem_ai_policy import AI_USE_DECLARATION
 
         preview = _format_draft_preview(
             thin_draft,
             input_source='voice',
         )
 
-        assert 'AI reflection check' not in preview
+        assert AI_USE_DECLARATION in preview
+        assert 'RCEM AI use' in preview
+        assert 'You remain responsible for its accuracy, authenticity and insight.' in preview
         assert 'Review needed before saving' not in preview
         assert 'Save as draft only runs after you review' not in preview
 
@@ -850,7 +853,7 @@ class TestFlowWalker:
 
         preview = _format_draft_preview_for_context(thin_draft, context, 'CBD')
 
-        assert 'Review needed before saving' in preview
+        assert 'Your reflection is needed before saving' in preview
         assert 'AI reflection check' not in preview
         assert 'Source cue' not in preview
         assert 'John Smith' not in preview
@@ -874,7 +877,7 @@ class TestFlowWalker:
             for button in row
         }
 
-        assert 'Review needed before saving' in preview
+        assert 'Your reflection is needed before saving' in preview
         assert 'Add your own interpretation/reflection' in preview
         assert 'ACTION|add_reflection_detail' in buttons
         assert 'APPROVE|draft' not in buttons
@@ -912,12 +915,14 @@ class TestFlowWalker:
 
     def test_draft_preview_safety_layer_can_be_omitted_for_llm_feedback(self, thin_draft):
         from bot import _format_draft_preview
+        from rcem_ai_policy import AI_USE_DECLARATION
 
         preview = _format_draft_preview(thin_draft, include_safety_layer=False)
 
         assert 'AI reflection check' not in preview
         assert 'Source cue' not in preview
         assert 'Save as draft only runs after you review' not in preview
+        assert AI_USE_DECLARATION not in preview
 
     @staticmethod
     def _assert_no_transparency_copy(current_draft: str) -> None:
@@ -1054,7 +1059,10 @@ class TestFlowWalker:
         sim = BotSimulator()
         update = sim._make_callback_update('IMPROVE|reflection')
         context = sim._make_context()
-        context.user_data['case_text'] = 'I completed ATLS and have a certificate.'
+        context.user_data['case_text'] = (
+            'I completed ATLS and learned to use a clearer primary survey under pressure. '
+            'I will use that structure when leading trauma assessments.'
+        )
         context.user_data['draft_data'] = {
             '_type': 'FORM',
             'form_type': 'FORMAL_COURSE',
@@ -1701,7 +1709,9 @@ class TestFlowWalker:
             'fields': thin_draft.fields,
             'uuid': thin_draft.uuid,
         }
-        context.user_data['last_amend_case_text'] = 'Original case text.'
+        context.user_data['last_amend_case_text'] = (
+            'Original case text. I learned to escalate earlier and will document the plan next time.'
+        )
         context.user_data['last_amend_chosen_form'] = thin_draft.form_type
         context.user_data['last_filing_status'] = 'partial'
         context.user_data['last_filing_form_name'] = 'Case-Based Discussion'
@@ -1911,7 +1921,9 @@ class TestFlowWalker:
         sim = BotSimulator()
         update = sim._make_callback_update('APPROVE|draft')
         context = sim._make_context()
-        context.user_data['case_text'] = 'DOPS cardioversion case'
+        context.user_data['case_text'] = (
+            'DOPS cardioversion case. I learned to rehearse the safety checks and will keep using closed-loop communication.'
+        )
         context.user_data['draft_data'] = {
             '_type': 'FORM',
             'form_type': dops_draft.form_type,
@@ -2009,7 +2021,10 @@ class TestFlowWalker:
         sim = BotSimulator()
         update = sim._make_callback_update('APPROVE|draft')
         context = sim._make_context()
-        context.user_data['case_text'] = 'Observed procedural sedation and ankle fracture reduction.'
+        context.user_data['case_text'] = (
+            'Observed procedural sedation and ankle fracture reduction. '
+            'I learned to make the team brief more explicit and will use it next time.'
+        )
         context.user_data['draft_data'] = {
             '_type': 'FORM',
             'form_type': dops_draft.form_type,
@@ -2383,7 +2398,9 @@ class TestFlowWalker:
                 'fields': thin_draft.fields,
                 'uuid': thin_draft.uuid,
             },
-            'case_text': 'Original LAT flow-management case',
+            'case_text': (
+                'Original LAT flow-management case. I learned to state escalation thresholds earlier next time.'
+            ),
             'chosen_form': thin_draft.form_type,
         })
 

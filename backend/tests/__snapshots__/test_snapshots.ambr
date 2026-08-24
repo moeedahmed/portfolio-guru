@@ -3,12 +3,8 @@
   dict({
     'buttons': list([
       tuple(
-        '📤 Save as draft',
-        'APPROVE|draft',
-      ),
-      tuple(
-        '💡 Improve reflection',
-        'IMPROVE|reflection',
+        '✍️ Add reflection/context',
+        'ACTION|add_reflection_detail',
       ),
       tuple(
         '❌ Cancel',
@@ -30,6 +26,8 @@
       💭 *Reflection of event:*
       I would involve the cath lab team earlier if the ECG remains dynamic.
       
+      AI was used to help structure and edit this reflection.
+      
       🎚️ *Level of Supervision:* Indirect
       
       📚 *Curriculum:*
@@ -37,7 +35,12 @@
         ↳ KC1: assessing & managing adult patients
       • *SLO2 — Clinical questions & safe decisions*
         ↳ KC1: supporting the team's safe decisions
-      💡 This reflection is brief. Tap 'Improve reflection' if you'd like to expand it.
+      🤖 *RCEM AI use*
+      • An AI-use declaration has been added to the reflection field.
+      • You remain responsible for its accuracy, authenticity and insight.
+      
+      ⚠️ *Your reflection is needed before saving*
+      • Add what you learned or what you would do differently before saving.
       
       💬 Reply to refine this draft, or use the buttons below to save.
     ''',
