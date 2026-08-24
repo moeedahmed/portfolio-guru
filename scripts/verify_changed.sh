@@ -79,6 +79,10 @@ JOURNEY_TESTS=(
   #    A silent failure here costs every user's data and is invisible until the
   #    day it matters (see the 53-night incident in scripts/restore_db.md).
   tests/test_backup_offdevice.py
+  # 10. Release-state awareness. The deploy checkout doubles as a dev
+  #     workspace, so a crash-restart can serve users unreleased code. This
+  #     guards the detection the startup warning depends on.
+  tests/test_runtime_release_state.py
 )
 
 echo

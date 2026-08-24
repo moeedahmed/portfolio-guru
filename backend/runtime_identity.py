@@ -33,6 +33,26 @@ def git_identity(repo_root: str | Path) -> tuple[str, str]:
     return commit, branch
 
 
+def working_tree_dirty(repo_root: str | Path) -> bool:
+    """True when tracked files differ from the checked-out commit.
+
+    The deploy checkout doubles as a dev workspace, so it can be sitting on a
+    feature branch with uncommitted edits. The bot loads its code at startup,
+    which means a crash-restart (launchd KeepAlive) would silently put that
+    unreleased code in front of real users. Untracked files are ignored — they
+    are not importable code paths.
+    """
+    try:
+        out = subprocess.check_output(
+            ["git", "-C", str(repo_root), "status", "--porcelain", "--untracked-files=no"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except (subprocess.CalledProcessError, OSError):
+        return False
+    return bool(out.strip())
+
+
 def build_runtime_identity(
     repo_root: str | Path,
     *,
@@ -42,6 +62,7 @@ def build_runtime_identity(
     repo_path = Path(repo_root).resolve()
     commit, branch = git_identity(repo_path)
     return {
+        "dirty": working_tree_dirty(repo_path),
         "app": "portfolio-guru",
         "pid": pid if pid is not None else os.getpid(),
         "parent_pid": os.getppid(),

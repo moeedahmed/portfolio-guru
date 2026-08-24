@@ -15175,6 +15175,31 @@ def main():
             identity["pid"],
             os.environ.get("PORTFOLIO_GURU_RUNTIME_IDENTITY", "/tmp/portfolio-guru-runtime.json"),
         )
+        # The deploy checkout is also a dev workspace, so a crash-restart can
+        # boot the bot from a feature branch or uncommitted edits without
+        # anyone noticing. Warn loudly rather than refusing to start: an
+        # unreleased bot serving users is bad, a bot that will not start at all
+        # is worse.
+        released_branch = os.environ.get("PORTFOLIO_GURU_RELEASE_BRANCH", "main")
+        if identity["branch"] != released_branch or identity["dirty"]:
+            reason = []
+            if identity["branch"] != released_branch:
+                reason.append(f"branch is '{identity['branch']}', expected '{released_branch}'")
+            if identity["dirty"]:
+                reason.append("working tree has uncommitted changes")
+            detail = "; ".join(reason)
+            logger.warning("RUNNING UNRELEASED CODE — %s (commit %s)", detail, identity["commit"][:8])
+            try:
+                import ops_alert
+
+                ops_alert.notify_operator_sync(
+                    f"bot started from UNRELEASED code — {detail} (commit {identity['commit'][:8]}). "
+                    "Users are being served this. Deploy main or restart from a clean checkout.",
+                    key="unreleased_runtime",
+                    cooldown=3600,
+                )
+            except Exception:
+                logger.warning("could not alert operator about unreleased runtime", exc_info=True)
     except Exception:
         logger.info("Portfolio Guru live commit: unavailable")
 
