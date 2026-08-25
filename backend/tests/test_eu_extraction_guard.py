@@ -63,3 +63,22 @@ def test_production_startup_does_not_carry_a_deepseek_key():
         or line.strip().startswith("DEEPSEEK_API_KEY=")
     ]
     assert exports == [], f"run_local.sh still loads a DeepSeek key: {exports}"
+
+
+def test_startup_refuses_to_build_the_bot_when_routing_is_off_region(monkeypatch):
+    """A per-request raise would leave a deployed bot up with every case broken.
+    Failing at startup is what makes deploy_mac.sh roll back instead."""
+    import gemini_client
+
+    monkeypatch.setattr(gemini_client, "use_vertex", lambda: False)
+
+    with pytest.raises(RuntimeError, match="EU-only extraction guard"):
+        extractor.assert_eu_routing()
+
+
+def test_startup_passes_when_vertex_routing_is_on(monkeypatch):
+    import gemini_client
+
+    monkeypatch.setattr(gemini_client, "use_vertex", lambda: True)
+
+    extractor.assert_eu_routing()  # must not raise

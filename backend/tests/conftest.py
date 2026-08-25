@@ -7,6 +7,18 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 
+@pytest.fixture(autouse=True)
+def _allow_non_eu_extraction_in_tests(monkeypatch):
+    """The offline suite drives the provider chain against mocks and fixtures,
+    never real clinical text, so the EU-only routing guard would otherwise make
+    every build_application() and _select_providers() call raise.
+
+    Production has no such opt-out: with PG_USE_VERTEX unset the bot refuses to
+    start. Tests that pin that behaviour delete this var in their own fixture.
+    """
+    monkeypatch.setenv("PG_ALLOW_NON_EU_EXTRACTION", "1")
+
+
 def pytest_configure(config):
     config.addinivalue_line("markers", "e2e: end-to-end tests requiring Telegram credentials")
     config.addinivalue_line("markers", "live: live Telegram tests (requires personal account session)")

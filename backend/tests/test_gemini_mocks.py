@@ -7,10 +7,6 @@ import respx
 def reset_extractor_client(monkeypatch):
     import extractor
 
-    # These cases deliberately drive the non-Vertex provider chain against
-    # mock endpoints and fixtures, never real clinical text. Production has
-    # no such opt-out: extractor._select_providers refuses to run off-region.
-    monkeypatch.setenv("PG_ALLOW_NON_EU_EXTRACTION", "1")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-api-key")
     monkeypatch.delenv("PG_USE_VERTEX", raising=False)
     monkeypatch.delenv("GCP_PROJECT_ID", raising=False)

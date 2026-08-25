@@ -152,6 +152,18 @@ def _non_eu_providers(providers):
     return [p for p in providers if p["type"] != "gemini"]
 
 
+def assert_eu_routing() -> None:
+    """Raise at STARTUP if clinical extraction would route off-region.
+
+    _select_providers raises too, but per-request: a deploy where the BWS
+    secrets failed to load would leave the bot up and every case failing with a
+    generic error. Failing here instead crash-loops the service, which is what
+    deploy_mac.sh's post-deploy smoke watches for, so the deploy rolls back to
+    the last known-good commit on its own.
+    """
+    _select_providers()
+
+
 def _select_providers(tier: str = ""):
     from gemini_client import use_vertex
 

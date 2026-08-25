@@ -14776,6 +14776,13 @@ def build_application() -> Application:
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN env var not set")
 
+    # Refuse to start rather than serve cases through an off-region model. If
+    # the Vertex secrets failed to load, crash-looping here is what triggers
+    # deploy_mac.sh's automatic rollback; staying up would mean a live bot whose
+    # every case either fails or routes clinical text outside the UK.
+    from extractor import assert_eu_routing
+    assert_eu_routing()
+
     persistence_path = os.path.expanduser("~/.openclaw/data/portfolio-guru/bot_persistence")
     os.makedirs(os.path.dirname(persistence_path), exist_ok=True)
     # Clinical content stays in memory for the conversation and never reaches

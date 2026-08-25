@@ -12,10 +12,6 @@ import gemini_client
 def _clear(monkeypatch):
     for k in ("PG_USE_VERTEX", "GCP_PROJECT_ID", "GCP_VERTEX_LOCATION", "GEMINI_VERTEX_MODEL"):
         monkeypatch.delenv(k, raising=False)
-    # These cases deliberately drive the non-Vertex provider chain against
-    # mock endpoints and fixtures, never real clinical text. Production has
-    # no such opt-out: extractor._select_providers refuses to run off-region.
-    monkeypatch.setenv("PG_ALLOW_NON_EU_EXTRACTION", "1")
 
 
 def test_use_vertex_off_by_default(monkeypatch):
