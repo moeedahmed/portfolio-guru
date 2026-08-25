@@ -111,6 +111,19 @@ fi
 FERNET_SECRET_KEY="$(get_secret 9e653679-9a33-4c23-a15c-b405015713de)"
 export FERNET_SECRET_KEY
 
+# --- Durable mirror: Portfolio Guru's own Supabase project (London) ---------
+# SQLite stays the hot path; this is the copy that survives the Mac Mini. Keyed
+# on telegram_user_id, so it works for every doctor without an account link.
+# Absent secrets degrade to "no mirror", never "bot won't start".
+SUPABASE_URL="$(get_secret_by_key SUPABASE_PORTFOLIO_GURU_URL)"
+SUPABASE_SERVICE_ROLE_KEY="$(get_secret_by_key SUPABASE_PORTFOLIO_GURU_SERVICE_ROLE_KEY)"
+if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+  export SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY
+  echo "Supabase mirror: configured (${SUPABASE_URL})"
+else
+  echo "Supabase mirror: NOT configured (bot runs SQLite-only)"
+fi
+
 # Liveness heartbeat target (Healthchecks.io ping URL). bot.py already schedules
 # the 5-minute ping; without this the whole mechanism is a silent no-op, which
 # is exactly how it sat unused until 2026-08-18. Non-fatal when absent so a
