@@ -53,9 +53,10 @@ TZ = "Europe/London"
 # enough to absorb a slow run, tight enough to matter.
 CHECKS = [
     {
-        "name": "com.portfolioguru.bot",
-        "tags": "portfolio-guru mac-mini liveness",
+        "name": "Mac Mini Portfolio Guru Bot",
+        "tags": "mac-mini portfolio-guru liveness critical",
         "desc": (
+            "launchd: com.portfolioguru.bot. "
             "Telegram bot liveness. bot.py pings every 5 min from a job-queue "
             "task. Silence means the process is gone or the event loop has "
             "wedged — launchd's KeepAlive only catches the former. "
@@ -67,9 +68,10 @@ CHECKS = [
         "bws_secret": "PG_HEARTBEAT_URL",
     },
     {
-        "name": "com.portfolioguru.backup",
-        "tags": "portfolio-guru mac-mini backup",
+        "name": "Mac Mini Portfolio Guru Backup",
+        "tags": "mac-mini portfolio-guru backup critical",
         "desc": (
+            "launchd: com.portfolioguru.backup. "
             "Nightly encrypted off-device backup to gs://portfolio-guru-eu-backups. "
             "Pings on verified upload, /fail on failure. Silence means the job "
             "never ran at all — the case no in-script check can report. "
@@ -81,16 +83,14 @@ CHECKS = [
         "bws_secret": "PG_BACKUP_HEALTHCHECK_URL",
     },
     {
-        # NOTE (2026-08-24): the two entries above are named after launchd
-        # labels; the healthchecks skill was corrected the same day to say the
-        # dashboard convention is "Mac Mini <Service>". Run --list and
-        # reconcile before the next apply — if the dashboard uses the other
-        # scheme, re-running this manifest creates duplicates rather than
-        # updating. This entry is left in the file's existing scheme so one
-        # apply cannot silently split the naming three ways.
-        "name": "com.portfolioguru.bot.signoff-chase",
-        "tags": "portfolio-guru mac-mini nudge",
+        # Names below match the live dashboard exactly (verified with --list on
+        # 2026-08-25). `unique: ["name"]` upserts BY NAME, so a manifest name
+        # that does not match an existing check creates a duplicate instead of
+        # updating it. Both entries above were mismatched until 2026-08-25.
+        "name": "Mac Mini Portfolio Guru Sign-off Chase",
+        "tags": "mac-mini portfolio-guru nudge critical",
         "desc": (
+            "launchd: com.portfolioguru.bot (job-queue task). "
             "Weekly Portfolio Health sign-off chase (Wed 19:00 Europe/London), "
             "a job-queue task inside bot.py. Pings on EVERY completed run, "
             "including runs that message nobody, and /fail if the run aborts. "

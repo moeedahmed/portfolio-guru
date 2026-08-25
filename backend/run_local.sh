@@ -122,6 +122,22 @@ if [ -n "$PG_HEARTBEAT_URL" ]; then
 else
   echo "Liveness heartbeat: NOT configured (set PG_HEARTBEAT_URL in BWS to enable)"
 fi
+
+# Weekly Portfolio Health sign-off chase. The chase itself is OFF unless
+# PG_ENABLE_SIGNOFF_CHASE is set — it messages doctors unprompted, so it stays
+# opt-in. The ping URL is loaded regardless so that enabling the chase is a
+# one-line change and never ships an unmonitored job: this feature's success
+# signal is silence, so a dead job and a clean portfolio look identical
+# without it.
+PG_SIGNOFF_CHASE_HEALTHCHECK_URL="$(get_secret_by_key PG_SIGNOFF_CHASE_HEALTHCHECK_URL)"
+export PG_SIGNOFF_CHASE_HEALTHCHECK_URL
+export PG_ENABLE_SIGNOFF_CHASE="${PG_ENABLE_SIGNOFF_CHASE:-}"
+export PG_SIGNOFF_CHASE_USER_IDS="${PG_SIGNOFF_CHASE_USER_IDS:-}"
+if [ -n "$PG_ENABLE_SIGNOFF_CHASE" ]; then
+  echo "Sign-off chase: ENABLED${PG_SIGNOFF_CHASE_USER_IDS:+ (users: $PG_SIGNOFF_CHASE_USER_IDS)}"
+else
+  echo "Sign-off chase: off (set PG_ENABLE_SIGNOFF_CHASE=1 to enable)"
+fi
 # DEEPSEEK_API_KEY is deliberately NOT exported. Clinical extraction runs on
 # Vertex AI in europe-west2; DeepSeek is a Chinese endpoint with no UK adequacy
 # decision and no DPA, and having the key present meant one unset PG_USE_VERTEX
