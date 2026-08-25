@@ -116,6 +116,38 @@ create index if not exists idx_pg_filings_user
 comment on table pg_filings is
   'Replaces portfolio_cases. Holds no case_text and no extracted_fields by design.';
 
+-- ── Assessor chase log ──────────────────────────────────────────────────────
+-- Holds a THIRD party's name and email (the supervisor being chased), not just
+-- the doctor's. That is personal data about someone who never used the product,
+-- so it carries its own ROPA line and its own erasure story.
+create table if not exists pg_chase_log (
+  id                bigserial primary key,
+  telegram_user_id  bigint not null,
+  assessor_name     text,
+  assessor_email    text,
+  chase_date        date,
+  method            text not null default 'manual',
+  ticket_summary    text,
+  chase_number      integer not null default 1,
+  created_at        timestamptz not null default now()
+);
+create index if not exists idx_pg_chase_log_user
+  on pg_chase_log (telegram_user_id, created_at desc);
+
+-- ── Beta access requests ────────────────────────────────────────────────────
+create table if not exists pg_beta_requests (
+  id                bigserial primary key,
+  telegram_user_id  bigint not null,
+  username          text not null default '',
+  tier_requested    text not null default 'beta',
+  status            text not null default 'pending'
+                      check (status in ('pending', 'approved', 'declined')),
+  created_at        timestamptz not null default now(),
+  approved_at       timestamptz
+);
+create index if not exists idx_pg_beta_requests_pending
+  on pg_beta_requests (status, username);
+
 -- ── Stripe webhook idempotency ──────────────────────────────────────────────
 create table if not exists pg_stripe_webhook_events (
   event_id      text primary key,
@@ -131,6 +163,8 @@ alter table pg_profile              enable row level security;
 alter table pg_usage                enable row level security;
 alter table pg_kc_coverage          enable row level security;
 alter table pg_filings              enable row level security;
+alter table pg_chase_log            enable row level security;
+alter table pg_beta_requests        enable row level security;
 alter table pg_stripe_webhook_events enable row level security;
 
 commit;

@@ -409,6 +409,12 @@ async def save_kc_coverage(user_id: int, form_type: str, kcs) -> None:
         )
         await db.commit()
 
+    try:
+        from supabase_sync import mirror_kc_coverage
+        mirror_kc_coverage(user_id, form_type, cleaned)
+    except Exception:
+        pass
+
 
 async def get_kc_coverage(user_id: int) -> dict:
     """Return {slo_number: [kc_string, ...]} for every KC the user has demonstrated.

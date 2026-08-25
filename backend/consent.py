@@ -53,6 +53,25 @@ def consent_text_hash() -> str:
     return hashlib.sha256(CONSENT_TEXT.encode("utf-8")).hexdigest()
 
 
+def _mirror(action: str, user_id: int, channel: str) -> None:
+    """Best-effort durable copy of a consent record. Never raises: a mirror
+    failure must not stop a doctor consenting, and the local row is written
+    first either way."""
+    try:
+        from supabase_sync import mirror_consent
+
+        mirror_consent(
+            user_id,
+            consent_version=CONSENT_VERSION,
+            consent_text_hash=consent_text_hash(),
+            action=action,
+            channel=channel,
+            lawful_basis=LAWFUL_BASIS,
+        )
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+
 async def _ensure_table():
     os.makedirs(os.path.dirname(usage.DB_PATH), exist_ok=True)
     async with aiosqlite.connect(usage.DB_PATH) as db:
@@ -113,6 +132,9 @@ async def record_consent(user_id: int, channel: str = "telegram") -> None:
             ),
         )
         await db.commit()
+    # Consent is the evidence of the lawful basis for every past act of
+    # processing. Local SQLite on one unencrypted disk was its only home.
+    _mirror("re-granted" if has_history else "granted", user_id, channel)
 
 
 async def record_withdrawal(user_id: int, channel: str = "telegram") -> None:
@@ -134,6 +156,7 @@ async def record_withdrawal(user_id: int, channel: str = "telegram") -> None:
             (user_id, CONSENT_VERSION, consent_text_hash(), channel, LAWFUL_BASIS),
         )
         await db.commit()
+    _mirror("withdrawn", user_id, channel)
 
 
 async def get_consent_status(user_id: int) -> dict | None:

@@ -50,7 +50,6 @@ class _CapturingClient:
 def _patch(monkeypatch, sink):
     monkeypatch.setattr(credentials, "FERNET_KEY", Fernet.generate_key())
     monkeypatch.setattr(supabase_sync, "_supabase", lambda: _CapturingClient(sink))
-    monkeypatch.setattr(supabase_sync, "_resolve_emgurus_user_id", lambda _uid: "uuid-123")
     return sink
 
 
@@ -95,7 +94,7 @@ def test_the_filing_fact_and_taxonomy_still_mirror(monkeypatch):
     assert payload["kaizen_event_id"] == "evt-77"
     assert payload["curriculum_links"] == ["SLO1"]
     assert payload["key_capabilities"] == ["SLO1 KC1"]
-    assert payload["emgurus_user_id"] == "uuid-123"
+    assert payload["telegram_user_id"] == 12345
 
 
 def test_no_encryption_helper_remains_to_be_reintroduced(monkeypatch):

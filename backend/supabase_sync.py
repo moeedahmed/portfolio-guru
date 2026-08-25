@@ -1,55 +1,50 @@
-"""
-Supabase dual-write mirror for Portfolio Guru.
+"""Durable mirror of Portfolio Guru's account layer, keyed on the Telegram id.
 
-The bot's canonical store is still SQLite (credentials.db, profile_store db,
-usage.db, chase_log.json). Every write goes there first. THIS module then
-mirrors the write to the EM Gurus Hub Supabase project so the web app can
-read it without depending on the Mac Mini.
+WHAT CHANGED AND WHY (2026-08-25)
+---------------------------------
+This module used to write to the EM Gurus Hub project and resolve every call
+through ``emgurus_user_id`` — a UUID the doctor only obtained by completing a
+``/link`` on emgurus.com. Exactly one person had done that. So every mirror
+function returned early for every beta doctor, silently, and the "cloud mirror"
+in the ROPA had never held a single user's data.
 
-DESIGN PRINCIPLES
------------------
+It now writes to Portfolio Guru's own project in London (eu-west-2), keyed on
+``telegram_user_id`` directly. No link, no resolver, nothing to no-op against.
 
-1. **Best-effort, never raise.** Any failure here is logged and swallowed.
-   The bot's user-facing flow must NEVER break because Supabase was slow
-   or unreachable.
+DESIGN
+------
 
-2. **Lazy / gated.** If SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env vars
-   are not set, every mirror function returns immediately. This keeps the
-   bot working offline, in tests, and in setups where Supabase isn't yet
-   configured.
+1. **Best-effort, never raise.** A Supabase failure must never break a doctor
+   mid-case. Everything here logs and swallows.
 
-3. **Telegram-keyed in, UUID-keyed out.** The bot writes by telegram_user_id;
-   Supabase needs emgurus_user_id (the auth.users UUID). The resolver
-   `_resolve_emgurus_user_id` looks up portfolio_users and caches the
-   answer in-memory.
+2. **SQLite stays on the hot path.** Reads are local, so the bot works offline
+   and never blocks a filing on the network. This is the durable copy, not the
+   query path.
 
-4. **Skip when unlinked.** If a telegram_user_id has no portfolio_users row
-   (i.e. the user hasn't linked their EM Gurus Hub account yet), mirror
-   functions silently no-op. The link is established later via the /link
-   command (Sprint 3+).
+3. **Gated on config.** No ``SUPABASE_URL`` / ``SUPABASE_SERVICE_ROLE_KEY`` and
+   every function returns immediately.
 
-5. **Idempotent upserts** wherever the schema allows them. Usage and chase
-   inserts are append-only; everything else is upserted by primary key.
+4. **No clinical content, ever.** ``mirror_case`` records the fact of a filing.
+   The case narrative is not sent, not encrypted-and-sent, not summarised. See
+   docs/data-architecture-plan-2026-08-24.md, decision 2.
 """
 from __future__ import annotations
 
 import json
 import logging
 import os
-import time
+from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_CACHE_TTL_SECONDS = 300  # 5 min — small cache to avoid hammering Supabase
-_id_cache: dict[int, tuple[str | None, float]] = {}
 _client = None
 _client_init_failed = False
 
 
 def _supabase() -> Any | None:
-    """Return a cached Supabase client, or None if not configured. Safe to
-    call repeatedly — caches both success and failure."""
+    """Cached Supabase client, or None when not configured. Caches failure too,
+    so an unconfigured bot doesn't retry on every write."""
     global _client, _client_init_failed
     if _client is not None:
         return _client
@@ -59,7 +54,6 @@ def _supabase() -> Any | None:
     url = os.environ.get("SUPABASE_URL", "").strip()
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
     if not url or not key:
-        # Not configured — bot runs SQLite-only.
         _client_init_failed = True
         return None
 
@@ -73,61 +67,41 @@ def _supabase() -> Any | None:
         return None
 
 
-def _resolve_emgurus_user_id(telegram_user_id: int) -> str | None:
-    """Return the auth.users UUID linked to this Telegram user, or None if
-    the user hasn't linked yet. Cached for 5 minutes."""
-    now = time.monotonic()
-    cached = _id_cache.get(telegram_user_id)
-    if cached and (now - cached[1]) < _CACHE_TTL_SECONDS:
-        return cached[0]
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
+
+def _upsert(table: str, payload: dict[str, Any], *, on_conflict: str) -> None:
     sb = _supabase()
     if sb is None:
-        return None
+        return
     try:
-        resp = (
-            sb.table("portfolio_users")
-            .select("emgurus_user_id")
-            .eq("telegram_user_id", telegram_user_id)
-            .limit(1)
-            .execute()
-        )
-        emgurus_user_id = resp.data[0]["emgurus_user_id"] if resp.data else None
+        sb.table(table).upsert(payload, on_conflict=on_conflict).execute()
     except Exception as exc:
-        logger.debug("portfolio_users lookup failed for %s: %s", telegram_user_id, exc)
-        emgurus_user_id = None
-
-    _id_cache[telegram_user_id] = (emgurus_user_id, now)
-    return emgurus_user_id
+        logger.warning("%s upsert failed: %s", table, exc)
 
 
-def _ensure_user(telegram_user_id: int, emgurus_user_id: str | None = None) -> str | None:
-    """Resolve or create the portfolio_users row. If emgurus_user_id is
-    provided (e.g. after a /link completion), upsert with that mapping.
-    Otherwise return whatever's currently linked (or None)."""
-    if emgurus_user_id is None:
-        return _resolve_emgurus_user_id(telegram_user_id)
-
+def _insert(table: str, payload: dict[str, Any]) -> None:
     sb = _supabase()
     if sb is None:
-        return None
+        return
     try:
-        # Use the security-definer helper so we don't fight RLS on insert.
-        sb.rpc("ensure_portfolio_user", {
-            "p_emgurus_user_id": emgurus_user_id,
-            "p_telegram_user_id": telegram_user_id,
-        }).execute()
-        # Invalidate cache so subsequent reads see the new mapping.
-        _id_cache.pop(telegram_user_id, None)
-        return emgurus_user_id
+        sb.table(table).insert(payload).execute()
     except Exception as exc:
-        logger.warning("ensure_portfolio_user failed for %s -> %s: %s",
-                       telegram_user_id, emgurus_user_id, exc)
-        return None
+        logger.warning("%s insert failed: %s", table, exc)
+
+
+def ensure_user(telegram_user_id: int) -> None:
+    """Make sure an anchor row exists before writing satellite rows."""
+    _upsert(
+        "pg_users",
+        {"telegram_user_id": telegram_user_id, "updated_at": _now()},
+        on_conflict="telegram_user_id",
+    )
 
 
 # ---------------------------------------------------------------------------
-# Mirror functions — one per store path.
+# Mirror functions — one per local store path.
 # ---------------------------------------------------------------------------
 
 def mirror_credentials(
@@ -135,22 +109,19 @@ def mirror_credentials(
     encrypted_username: bytes,
     encrypted_password: bytes,
 ) -> None:
-    """Mirror a credential save to portfolio_credentials. Bytes are passed
-    through AS-IS — same Fernet key is shared, no re-encryption."""
-    sb = _supabase()
-    if sb is None:
-        return
-    uid = _resolve_emgurus_user_id(telegram_user_id)
-    if uid is None:
-        return
-    try:
-        sb.table("portfolio_credentials").upsert({
-            "emgurus_user_id": uid,
-            "encrypted_username": encrypted_username.decode("latin1"),
-            "encrypted_password": encrypted_password.decode("latin1"),
-        }, on_conflict="emgurus_user_id").execute()
-    except Exception as exc:
-        logger.warning("mirror_credentials failed for %s: %s", telegram_user_id, exc)
+    """Mirror Fernet ciphertext as-is. The key lives in BWS and is never stored
+    alongside what it protects, so this column is opaque to Supabase."""
+    ensure_user(telegram_user_id)
+    _upsert(
+        "pg_credentials",
+        {
+            "telegram_user_id": telegram_user_id,
+            "kaizen_username_enc": encrypted_username.decode("latin1"),
+            "kaizen_password_enc": encrypted_password.decode("latin1"),
+            "updated_at": _now(),
+        },
+        on_conflict="telegram_user_id",
+    )
 
 
 def mirror_profile(
@@ -158,24 +129,18 @@ def mirror_profile(
     *,
     training_level: str | None = None,
     curriculum: str | None = None,
+    kaizen_role: str | None = None,
     voice_profile_json: str | dict | None = None,
     voice_examples_count: int | None = None,
 ) -> None:
-    """Mirror a partial profile update to portfolio_profile. Only the fields
-    passed (non-None) are upserted; existing values for other columns are
-    preserved server-side via JSON merge."""
-    sb = _supabase()
-    if sb is None:
-        return
-    uid = _resolve_emgurus_user_id(telegram_user_id)
-    if uid is None:
-        return
-
-    payload: dict[str, Any] = {"emgurus_user_id": uid}
+    """Upsert the fields actually supplied; leave the rest untouched."""
+    payload: dict[str, Any] = {"telegram_user_id": telegram_user_id, "updated_at": _now()}
     if training_level is not None:
         payload["training_level"] = training_level
     if curriculum is not None:
         payload["curriculum"] = curriculum
+    if kaizen_role is not None:
+        payload["kaizen_role"] = kaizen_role
     if voice_profile_json is not None:
         if isinstance(voice_profile_json, str):
             try:
@@ -183,37 +148,32 @@ def mirror_profile(
             except (TypeError, ValueError):
                 voice_profile_json = None
         if voice_profile_json is not None:
-            payload["voice_profile_json"] = voice_profile_json
+            payload["voice_profile"] = voice_profile_json
     if voice_examples_count is not None:
         payload["voice_examples_count"] = voice_examples_count
 
-    if len(payload) == 1:
-        # Only the user id is set — nothing to upsert.
+    if len(payload) == 2:  # id + updated_at only
         return
-
-    try:
-        sb.table("portfolio_profile").upsert(
-            payload, on_conflict="emgurus_user_id"
-        ).execute()
-    except Exception as exc:
-        logger.warning("mirror_profile failed for %s: %s", telegram_user_id, exc)
+    ensure_user(telegram_user_id)
+    _upsert("pg_profile", payload, on_conflict="telegram_user_id")
 
 
-def mirror_usage(telegram_user_id: int, form_type: str) -> None:
-    """Mirror a single case-filed event to portfolio_usage. Append-only."""
-    sb = _supabase()
-    if sb is None:
-        return
-    uid = _resolve_emgurus_user_id(telegram_user_id)
-    if uid is None:
-        return
-    try:
-        sb.table("portfolio_usage").insert({
-            "emgurus_user_id": uid,
-            "form_type": form_type,
-        }).execute()
-    except Exception as exc:
-        logger.warning("mirror_usage failed for %s: %s", telegram_user_id, exc)
+def mirror_usage(telegram_user_id: int, form_type: str, status: str = "filed") -> None:
+    ensure_user(telegram_user_id)
+    _insert("pg_usage", {
+        "telegram_user_id": telegram_user_id,
+        "form_type": form_type,
+        "status": status,
+    })
+
+
+def mirror_kc_coverage(telegram_user_id: int, form_type: str, kcs_selected: list) -> None:
+    ensure_user(telegram_user_id)
+    _insert("pg_kc_coverage", {
+        "telegram_user_id": telegram_user_id,
+        "form_type": form_type,
+        "kcs_selected": kcs_selected or [],
+    })
 
 
 def mirror_tier(
@@ -221,116 +181,48 @@ def mirror_tier(
     tier: str,
     stripe_customer_id: str | None = None,
     stripe_subscription_id: str | None = None,
+    is_beta: bool | None = None,
 ) -> None:
-    """Mirror a tier change (Stripe webhook or /settier) to portfolio_users."""
-    sb = _supabase()
-    if sb is None:
-        return
-    uid = _resolve_emgurus_user_id(telegram_user_id)
-    if uid is None:
-        return
-    payload: dict[str, Any] = {"emgurus_user_id": uid, "tier": tier}
+    payload: dict[str, Any] = {
+        "telegram_user_id": telegram_user_id,
+        "tier": tier,
+        "updated_at": _now(),
+    }
     if stripe_customer_id is not None:
         payload["stripe_customer_id"] = stripe_customer_id
     if stripe_subscription_id is not None:
         payload["stripe_subscription_id"] = stripe_subscription_id
-    try:
-        sb.table("portfolio_users").upsert(
-            payload, on_conflict="emgurus_user_id"
-        ).execute()
-    except Exception as exc:
-        logger.warning("mirror_tier failed for %s: %s", telegram_user_id, exc)
+    if is_beta is not None:
+        payload["is_beta"] = is_beta
+    _upsert("pg_users", payload, on_conflict="telegram_user_id")
 
 
-# --- Beta request helpers ---
-
-
-def store_beta_request(user_id: int, username: str | None) -> None:
-    """Record a beta access request from a user."""
-    from datetime import datetime
-    sb = _supabase()
-    if sb is None:
-        return
-    try:
-        sb.table("beta_requests").insert({
-            "user_id": user_id,
-            "username": username or "",
-            "tier_requested": "beta",
-            "status": "pending",
-            "created_at": datetime.utcnow().isoformat(),
-        }).execute()
-    except Exception as exc:
-        logger.warning("store_beta_request failed for %s: %s", user_id, exc)
-
-
-def get_beta_request_by_username(username: str) -> dict | None:
-    """Find a pending beta request by Telegram @username."""
-    sb = _supabase()
-    if sb is None:
-        return None
-    clean = username.lstrip("@")
-    try:
-        result = (
-            sb.table("beta_requests")
-            .select("*")
-            .eq("username", clean)
-            .eq("status", "pending")
-            .execute()
-        )
-        rows = result.data
-        return rows[0] if rows else None
-    except Exception as exc:
-        logger.warning("get_beta_request_by_username failed for %s: %s", username, exc)
-        return None
-
-
-def approve_beta_request(user_id: int, tier: str = "pro") -> bool:
-    """Mark a beta request as approved and update the user's tier.
-    Returns True if the request was found and updated."""
-    from datetime import datetime
-    sb = _supabase()
-    if sb is None:
-        return False
-    try:
-        sb.table("beta_requests").update({
-            "status": "approved",
-            "approved_at": datetime.utcnow().isoformat(),
-        }).eq("user_id", user_id).eq("status", "pending").execute()
-        return True
-    except Exception as exc:
-        logger.warning("approve_beta_request failed for %s: %s", user_id, exc)
-        return False
-
-
-
-def mirror_chase(
+def mirror_consent(
     telegram_user_id: int,
-    assessor_email: str,
-    assessor_name: str,
-    chase_date: str,
-    method: str = "manual",
-    ticket_summary: str = "",
-    chase_number: int = 1,
+    *,
+    consent_version: str,
+    consent_text_hash: str,
+    action: str,
+    channel: str = "telegram",
+    lawful_basis: str = "art9_2a_explicit_consent",
 ) -> None:
-    """Mirror an assessor chase log entry to portfolio_chase_log."""
-    sb = _supabase()
-    if sb is None:
-        return
-    uid = _resolve_emgurus_user_id(telegram_user_id)
-    if uid is None:
-        return
-    try:
-        sb.table("portfolio_chase_log").insert({
-            "emgurus_user_id": uid,
-            "assessor_email": assessor_email,
-            "assessor_name": assessor_name,
-            "chase_date": chase_date,
-            "method": method,
-            "ticket_summary": ticket_summary,
-            "chase_number": chase_number,
-        }).execute()
-    except Exception as exc:
-        logger.warning("mirror_chase failed for %s: %s", telegram_user_id, exc)
+    """Mirror a consent grant or withdrawal.
+
+    Consent records were the one legally load-bearing store with no durable copy
+    at all — they existed only in SQLite on a single unencrypted disk. They are
+    the evidence of the lawful basis for every past act of processing, so losing
+    that disk meant losing the ability to demonstrate compliance. Append-only,
+    here as locally: a withdrawal adds a row, it never overwrites the grant.
+    """
+    ensure_user(telegram_user_id)
+    _insert("pg_consent_records", {
+        "telegram_user_id": telegram_user_id,
+        "consent_version": consent_version,
+        "consent_text_hash": consent_text_hash,
+        "action": action,
+        "channel": channel,
+        "lawful_basis": lawful_basis,
+    })
 
 
 def mirror_case(
@@ -345,26 +237,15 @@ def mirror_case(
     key_capabilities: list | None = None,
     source: str = "bot",
 ) -> None:
-    """Mirror the FACT of a filed case — never its content.
+    """Mirror the FACT of a filing — never its content.
 
-    Portfolio Guru no longer keeps clinical narrative once Kaizen has confirmed
-    the save (docs/data-architecture-plan-2026-08-24.md, decision 2). Kaizen
-    holds the evidence; a second encrypted copy in a mirror bought nothing and
-    made every downstream store an Art. 9 store.
-
-    ``case_text_encrypted`` and ``extracted_fields`` are still accepted so the
-    call sites don't have to change, and are deliberately DISCARDED here. The
-    row keeps form type, status, Kaizen event id and RCEM taxonomy references,
-    which is everything /health, KC coverage and ARCP projection actually read.
+    ``case_text_encrypted`` and ``extracted_fields`` are still accepted so call
+    sites need not change, and are deliberately DISCARDED. Kaizen holds the
+    evidence; a second copy here would make this an Art. 9 store for no gain.
     """
-    sb = _supabase()
-    if sb is None:
-        return
-    uid = _resolve_emgurus_user_id(telegram_user_id)
-    if uid is None:
-        return
+    ensure_user(telegram_user_id)
     payload: dict[str, Any] = {
-        "emgurus_user_id": uid,
+        "telegram_user_id": telegram_user_id,
         "form_type": form_type,
         "status": status,
         "source": source,
@@ -373,175 +254,168 @@ def mirror_case(
     }
     if kaizen_event_id:
         payload["kaizen_event_id"] = kaizen_event_id
+    _insert("pg_filings", payload)
+
+
+def mirror_chase(
+    telegram_user_id: int,
+    assessor_email: str,
+    assessor_name: str,
+    chase_date: str,
+    method: str = "manual",
+    ticket_summary: str = "",
+    chase_number: int = 1,
+) -> None:
+    """Mirror an assessor chase. Note this row holds a THIRD party's name and
+    email — someone who never used the product — so it has its own ROPA line."""
+    ensure_user(telegram_user_id)
+    _insert("pg_chase_log", {
+        "telegram_user_id": telegram_user_id,
+        "assessor_email": assessor_email,
+        "assessor_name": assessor_name,
+        "chase_date": chase_date,
+        "method": method,
+        "ticket_summary": ticket_summary,
+        "chase_number": chase_number,
+    })
+
+
+# --- Beta access requests ---------------------------------------------------
+
+
+def store_beta_request(user_id: int, username: str | None) -> None:
+    _insert("pg_beta_requests", {
+        "telegram_user_id": user_id,
+        "username": (username or "").lstrip("@"),
+        "tier_requested": "beta",
+        "status": "pending",
+    })
+
+
+def get_beta_request_by_username(username: str) -> dict | None:
+    sb = _supabase()
+    if sb is None:
+        return None
     try:
-        sb.table("portfolio_cases").insert(payload).execute()
+        result = (
+            sb.table("pg_beta_requests")
+            .select("*")
+            .eq("username", username.lstrip("@"))
+            .eq("status", "pending")
+            .execute()
+        )
+        return result.data[0] if result.data else None
     except Exception as exc:
-        logger.warning("mirror_case failed for %s: %s", telegram_user_id, exc)
+        logger.warning("get_beta_request_by_username failed for %s: %s", username, exc)
+        return None
+
+
+def approve_beta_request(user_id: int, tier: str = "pro") -> bool:
+    sb = _supabase()
+    if sb is None:
+        return False
+    try:
+        sb.table("pg_beta_requests").update({
+            "status": "approved",
+            "approved_at": _now(),
+        }).eq("telegram_user_id", user_id).eq("status", "pending").execute()
+        return True
+    except Exception as exc:
+        logger.warning("approve_beta_request failed for %s: %s", user_id, exc)
+        return False
 
 
 # ---------------------------------------------------------------------------
-# Erasure — GDPR Art. 17 / right to be forgotten.
+# Erasure — GDPR Art. 17.
 # ---------------------------------------------------------------------------
+
+# Consent records are deliberately absent: they are the evidence of the lawful
+# basis for processing that already happened, and deleting them would destroy
+# the ability to demonstrate compliance. A withdrawal is recorded as a new row.
+ERASABLE_TABLES = (
+    "pg_credentials",
+    "pg_filings",
+    "pg_profile",
+    "pg_usage",
+    "pg_kc_coverage",
+    "pg_chase_log",
+    "pg_beta_requests",
+)
+
 
 def delete_user_data(telegram_user_id: int, *, include_billing_link: bool = False) -> dict:
-    """Erase this user's mirrored data from Supabase (supports GDPR Art. 17).
+    """Erase this user's mirrored data. Best-effort; never raises.
 
-    Deletes the special-category and sensitive personal data the bot mirrors:
-    Kaizen credentials, clinical cases, training profile, usage history, chase
-    log, and any outstanding link tokens — all keyed by ``emgurus_user_id``.
-
-    By default the ``portfolio_users`` row (identity link + tier + Stripe IDs)
-    is KEPT, because deleting it would orphan an active subscription and the
-    billing relationship has its own retention basis. Pass
-    ``include_billing_link=True`` for a full erasure (e.g. a verified data-
-    subject request from a user with no active subscription).
-
-    Best-effort and never raises — mirrors the module's design principle. The
-    service-role key bypasses RLS, so the deletes apply. Returns a
-    ``{table: "deleted"|"error: ..."}`` map for logging/audit.
+    ``pg_users`` (identity, tier, Stripe ids) is KEPT by default so a /reset
+    doesn't orphan an active subscription — the billing relationship has its own
+    retention basis. Pass ``include_billing_link=True`` for a full erasure.
     """
     result: dict[str, Any] = {}
     sb = _supabase()
     if sb is None:
-        result["_skipped"] = "supabase not configured"
-        return result
-    uid = _resolve_emgurus_user_id(telegram_user_id)
-    if uid is None:
-        result["_skipped"] = "user not linked"
-        return result
+        return {"_skipped": "supabase not configured"}
 
-    tables = [
-        "portfolio_credentials",
-        "portfolio_cases",
-        "portfolio_profile",
-        "portfolio_usage",
-        "portfolio_chase_log",
-        "portfolio_link_tokens",
-    ]
+    tables = list(ERASABLE_TABLES)
     if include_billing_link:
-        tables.append("portfolio_users")
+        tables.append("pg_users")
 
     for table in tables:
         try:
-            sb.table(table).delete().eq("emgurus_user_id", uid).execute()
+            sb.table(table).delete().eq("telegram_user_id", telegram_user_id).execute()
             result[table] = "deleted"
         except Exception as exc:
-            logger.warning(
-                "delete_user_data: %s purge failed for %s: %s", table, telegram_user_id, exc
-            )
+            logger.warning("delete_user_data: %s purge failed for %s: %s",
+                           table, telegram_user_id, exc)
             result[table] = f"error: {exc}"
 
-    # Drop the cached telegram->uuid mapping so a future re-link re-resolves.
-    _id_cache.pop(telegram_user_id, None)
     logger.info("delete_user_data for %s: %s", telegram_user_id, result)
     return result
 
 
 # ---------------------------------------------------------------------------
-# Diagnostics — handy for /admin commands later.
+# Diagnostics.
 # ---------------------------------------------------------------------------
 
 def is_enabled() -> bool:
-    """True when the Supabase mirror is configured and reachable."""
     return _supabase() is not None
 
 
 def link_status(telegram_user_id: int) -> dict:
-    """Return a small dict describing the mirror status for a user. Useful
-    in /status or admin diagnostics."""
-    sb = _supabase()
-    info: dict[str, Any] = {
-        "mirror_enabled": sb is not None,
-        "emgurus_user_id": None,
-    }
-    if sb is None:
-        return info
-    uid = _resolve_emgurus_user_id(telegram_user_id)
-    info["emgurus_user_id"] = uid
-    return info
+    """Mirror status for a user. There is no account link any more — the
+    Telegram id IS the key — so this reports configuration only."""
+    return {"mirror_enabled": _supabase() is not None, "telegram_user_id": telegram_user_id}
+
 
 def consume_link_token(token: str, telegram_user_id: int) -> tuple[bool, str]:
-    """Consume a portfolio_link_token row, link the Telegram user to the
-    emgurus_user_id it points at, and mark it consumed. Returns
-    (success: bool, message: str) where the message is shown to the user.
-    Best-effort backfill: any existing SQLite credentials / profile rows for
-    this telegram_user_id are immediately mirrored to Supabase after the
-    link is established."""
-    sb = _supabase()
-    if sb is None:
-        return False, "Web sync isn't configured on this bot. Try again later."
+    """Retired. /link existed to bind a Telegram user to an EM Gurus Hub UUID
+    because the mirror was keyed on it. It no longer is.
 
-    try:
-        resp = (
-            sb.table("portfolio_link_tokens")
-            .select("emgurus_user_id, expires_at, consumed_at")
-            .eq("token", token)
-            .limit(1)
-            .execute()
-        )
-    except Exception as exc:
-        logger.warning("consume_link_token lookup failed: %s", exc)
-        return False, "Couldn't reach the web service. Try again in a moment."
-
-    if not resp.data:
-        return False, "That link code wasn't recognised. Generate a new one on emgurus.com/portfolio and try again."
-
-    row = resp.data[0]
-    if row.get("consumed_at"):
-        return False, "That link code has already been used. Generate a fresh one if you need to re-link."
-
-    from datetime import datetime, timezone
-    expires_at = row.get("expires_at")
-    if expires_at:
-        try:
-            exp_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-            if datetime.now(timezone.utc) > exp_dt:
-                return False, "That link code has expired. Generate a fresh one on the web."
-        except (ValueError, TypeError):
-            pass
-
-    emgurus_user_id = row["emgurus_user_id"]
-    linked_uid = _ensure_user(telegram_user_id, emgurus_user_id)
-    if not linked_uid:
-        return False, "Couldn't link your account just now. Try again in a moment."
-
-    try:
-        sb.table("portfolio_link_tokens").update({
-            "consumed_at": datetime.now(timezone.utc).isoformat(),
-        }).eq("token", token).execute()
-    except Exception as exc:
-        logger.debug("token mark-consumed failed (non-fatal): %s", exc)
-
-    _backfill_existing_user(telegram_user_id)
-    return True, "Linked to your EM Gurus Hub account. Your portfolio data is now visible at emgurus.com/portfolio."
+    The command stays registered and answers plainly rather than erroring,
+    because doctors may still be holding old instructions telling them to link.
+    """
+    return (
+        False,
+        "You don't need to link anything any more — Portfolio Guru already "
+        "recognises you here. Just send a case whenever you're ready.",
+    )
 
 
-def _backfill_existing_user(telegram_user_id: int) -> None:
-    """After a fresh link, copy whatever the bot already has for this user
-    in SQLite into the corresponding Supabase tables. Skips silently on any
-    failure - the bot keeps working either way."""
-    try:
-        from credentials import engine as cred_engine, UserCredential
-        from sqlmodel import Session, select as sm_select
-        with Session(cred_engine) as session:
-            row = session.exec(sm_select(UserCredential).where(UserCredential.telegram_user_id == telegram_user_id)).first()
-            if row:
-                mirror_credentials(telegram_user_id, bytes(row.kaizen_username_enc), bytes(row.kaizen_password_enc))
-    except Exception as exc:
-        logger.debug("backfill credentials failed: %s", exc)
-
-    try:
-        from profile_store import engine as prof_engine, UserProfile
-        from sqlmodel import Session, select as sm_select
-        with Session(prof_engine) as session:
-            row = session.exec(sm_select(UserProfile).where(UserProfile.telegram_user_id == telegram_user_id)).first()
-            if row:
-                mirror_profile(
-                    telegram_user_id,
-                    training_level=row.training_level,
-                    curriculum=row.curriculum or "2025",
-                    voice_profile_json=row.voice_profile,
-                    voice_examples_count=row.voice_examples_count or 0,
-                )
-    except Exception as exc:
-        logger.debug("backfill profile failed: %s", exc)
+__all__ = [
+    "ERASABLE_TABLES",
+    "approve_beta_request",
+    "consume_link_token",
+    "delete_user_data",
+    "ensure_user",
+    "get_beta_request_by_username",
+    "is_enabled",
+    "link_status",
+    "mirror_case",
+    "mirror_chase",
+    "mirror_consent",
+    "mirror_credentials",
+    "mirror_kc_coverage",
+    "mirror_profile",
+    "mirror_tier",
+    "mirror_usage",
+    "store_beta_request",
+]
