@@ -12912,27 +12912,16 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         except Exception:
             logger.warning("KC coverage save failed", exc_info=True)
 
-        # Mirror the filed case to Supabase portfolio_cases so the web app's
-        # case browser can render it. Both the case_text and the structured
-        # extracted_fields are Fernet-encrypted (case_text here, fields inside
-        # mirror_case) with the same key used for credentials — no plaintext
-        # clinical content leaves the bot. See feedback-no-fabrication.
+        # Mirror the FACT of the filing — form type, status, Kaizen event id and
+        # RCEM taxonomy. The case narrative is deliberately not sent: Kaizen holds
+        # the evidence, and a second copy would make the mirror an Art. 9 store.
         try:
             from supabase_sync import mirror_case
-            from credentials import _fernet
-            case_text_encrypted = None
-            if filed_case_text:
-                try:
-                    case_text_encrypted = _fernet().encrypt(filed_case_text.encode())
-                except Exception:
-                    case_text_encrypted = None
             mirror_case(
                 user_id,
                 form_type=form_type,
                 status=status,
                 kaizen_event_id=result.get("event_id") or result.get("kaizen_event_id"),
-                case_text_encrypted=case_text_encrypted,
-                extracted_fields=fields,
                 curriculum_links=fields.get("curriculum_links") or curriculum_links or [],
                 key_capabilities=fields.get("key_capabilities") or [],
             )
@@ -14789,7 +14778,12 @@ def build_application() -> Application:
 
     persistence_path = os.path.expanduser("~/.openclaw/data/portfolio-guru/bot_persistence")
     os.makedirs(os.path.dirname(persistence_path), exist_ok=True)
-    persistence = PicklePersistence(filepath=persistence_path)
+    # Clinical content stays in memory for the conversation and never reaches
+    # the pickle; see clinical_persistence.py. The one-shot purge repairs files
+    # written before that was true.
+    from clinical_persistence import ClinicalScrubbingPersistence, purge_existing_file
+    logger.info("Persistence clinical purge: %s", purge_existing_file(persistence_path))
+    persistence = ClinicalScrubbingPersistence(filepath=persistence_path)
 
     application = (
         Application.builder()
