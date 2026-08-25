@@ -1730,6 +1730,74 @@ TICK_KC_FALLBACK_JS = """(prefix) => {
     return { found: false };
 }"""
 
+# TEACH uses Kaizen's inline curriculum tree. Its labels are repeated in other
+# page regions, so the generic page-wide fuzzy scripts above are unsafe. These
+# scripts resolve the exact stage/SLO node first and inspect only its KC rows.
+EXPAND_EXACT_INLINE_SLO_JS = """(target) => {
+    function normalise(s) {
+        return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\\s+/g, ' ').trim();
+    }
+    var wanted = normalise(target.stage + ' ' + target.slo_code);
+    var nodes = document.querySelectorAll('a, button, [ng-click], [role="button"]');
+    for (var i = 0; i < nodes.length; i++) {
+        var text = normalise(nodes[i].textContent || '');
+        if (text === wanted || text.indexOf(wanted + ' ') === 0) {
+            nodes[i].click();
+            return true;
+        }
+    }
+    return false;
+}"""
+
+TICK_EXACT_INLINE_KC_JS = """(target) => {
+    function normalise(s) {
+        return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\\s+/g, ' ').trim();
+    }
+    var branchWanted = normalise(target.stage + ' ' + target.slo_code);
+    var kcWanted = normalise(target.kc_code);
+    var branchNodes = document.querySelectorAll('a, button, [ng-click], [role="button"]');
+    for (var i = 0; i < branchNodes.length; i++) {
+        var branchText = normalise(branchNodes[i].textContent || '');
+        if (!(branchText === branchWanted || branchText.indexOf(branchWanted + ' ') === 0)) continue;
+        var branch = branchNodes[i].closest('li, .tree-node, .panel, .accordion-group, .ng-scope');
+        if (!branch) continue;
+        var rows = branch.querySelectorAll('li, label, .checkbox, .list-group-item');
+        for (var j = 0; j < rows.length; j++) {
+            var rowText = normalise(rows[j].textContent || '');
+            if (!(rowText === kcWanted || rowText.indexOf(kcWanted + ' ') === 0)) continue;
+            var cb = rows[j].querySelector('input[type="checkbox"]');
+            if (!cb) continue;
+            if (!cb.checked) cb.click();
+            return {found: true, checked: !!cb.checked};
+        }
+        return {found: false};
+    }
+    return {found: false};
+}"""
+
+READ_EXACT_INLINE_KC_JS = """(target) => {
+    function normalise(s) {
+        return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\\s+/g, ' ').trim();
+    }
+    var branchWanted = normalise(target.stage + ' ' + target.slo_code);
+    var kcWanted = normalise(target.kc_code);
+    var branchNodes = document.querySelectorAll('a, button, [ng-click], [role="button"]');
+    for (var i = 0; i < branchNodes.length; i++) {
+        var branchText = normalise(branchNodes[i].textContent || '');
+        if (!(branchText === branchWanted || branchText.indexOf(branchWanted + ' ') === 0)) continue;
+        var branch = branchNodes[i].closest('li, .tree-node, .panel, .accordion-group, .ng-scope');
+        if (!branch) continue;
+        var rows = branch.querySelectorAll('li, label, .checkbox, .list-group-item');
+        for (var j = 0; j < rows.length; j++) {
+            var rowText = normalise(rows[j].textContent || '');
+            if (!(rowText === kcWanted || rowText.indexOf(kcWanted + ' ') === 0)) continue;
+            var cb = rows[j].querySelector('input[type="checkbox"]');
+            return !!(cb && cb.checked);
+        }
+    }
+    return false;
+}"""
+
 COUNT_TICKED_JS = """() => {
     var cbs = document.querySelectorAll('input[type="checkbox"]:checked');
     return cbs.length;
@@ -2619,6 +2687,7 @@ async def _fill_curriculum_links(
     slo_codes: List[str],
     kc_targets: List[str],
     stage_label: str,
+    exact_inline: bool = False,
 ) -> tuple:
     """Expand the relevant SLO accordions and tick the matching KCs.
 
@@ -2654,8 +2723,16 @@ async def _fill_curriculum_links(
     await _await_curriculum_tree(page)
     for slo in sorted(slos):
         slo_text = f"{stage_prefix} {slo}:"
-        expanded = await page.evaluate(EXPAND_SLO_JS, slo_text)
+        exact_target = {"stage": stage_prefix, "slo_code": slo}
+        expanded = await page.evaluate(
+            EXPAND_EXACT_INLINE_SLO_JS if exact_inline else EXPAND_SLO_JS,
+            exact_target if exact_inline else slo_text,
+        )
         if not expanded:
+            if exact_inline:
+                errors.append(f"SLO expand failed: {slo_text}")
+                logger.warning(f"Could not expand exact inline branch: {slo_text}")
+                continue
             # edit-existing-draft view renders SLO anchors with different
             # classes; the strict selector misses them. Try the broader scan.
             expanded = await page.evaluate(EXPAND_SLO_FALLBACK_JS, slo_text)
@@ -2669,8 +2746,24 @@ async def _fill_curriculum_links(
         await asyncio.sleep(3)  # MUST wait 3s for Angular to render KCs
 
     for target in kc_targets:
-        result = await page.evaluate(TICK_KC_JS, target)
+        code = canonical_kc_code(str(target))
+        exact_payload = None
+        if exact_inline and code:
+            slo_code, kc_code = code.split()
+            exact_payload = {
+                "stage": stage_prefix,
+                "slo_code": slo_code,
+                "kc_code": kc_code,
+            }
+        result = await page.evaluate(
+            TICK_EXACT_INLINE_KC_JS if exact_payload else TICK_KC_JS,
+            exact_payload or target,
+        )
         if not (result.get("found") and result.get("checked")):
+            if exact_inline:
+                errors.append(f"KC exact leaf not found: {target}")
+                await asyncio.sleep(0.5)
+                continue
             # Either the KC row was not located, or it was found without a
             # reachable checkbox. Re-scan with the broader selector set.
             fallback = await page.evaluate(TICK_KC_FALLBACK_JS, target)
@@ -2883,7 +2976,11 @@ async def _fill_curriculum_for_form(
         return await _fill_curriculum_tags(page, slo_codes, kc_targets, stage_label)
 
     ticked, errors = await _fill_curriculum_links(
-        page, slo_codes, kc_targets, stage_label
+        page,
+        slo_codes,
+        kc_targets,
+        stage_label,
+        exact_inline=_curriculum_base_form_type(form_type) == "TEACH",
     )
     if ticked or not errors or not _can_fallback_to_tag_based_curriculum(form_type):
         return ticked, errors
@@ -3074,7 +3171,13 @@ _QA_READ_FIELD_JS = """(domId) => {
     if (!el) return {missing: true};
     const tag = el.tagName;
     if (tag === 'SELECT') {
-        return {tag, selectedIndex: el.selectedIndex, value: el.value || ''};
+        const selected = el.options && el.selectedIndex >= 0 ? el.options[el.selectedIndex] : null;
+        return {
+            tag,
+            selectedIndex: el.selectedIndex,
+            value: el.value || '',
+            selectedText: selected ? (selected.textContent || '').trim() : '',
+        };
     }
     if (tag === 'INPUT' && el.type === 'checkbox') {
         return {tag, type: 'checkbox', checked: !!el.checked};
@@ -3158,6 +3261,7 @@ async def _verify_filing_qa(
     filled: List[str] = []
     empty_expected: List[str] = []
     empty_acceptable: List[str] = []
+    verified_n_a: List[str] = []
     gaps: List[Dict[str, Any]] = []
     field_states: Dict[str, Dict[str, Any]] = {}
 
@@ -3183,6 +3287,18 @@ async def _verify_filing_qa(
 
     def _normalise_text(text: Any) -> str:
         return re.sub(r"\s+", " ", str(text or "").lower()).strip()
+
+    def _is_verified_n_a(expected_value: Any, state: Dict[str, Any]) -> bool:
+        expected = re.sub(r"[^a-z0-9]+", "", str(expected_value or "").lower())
+        selected = re.sub(
+            r"[^a-z0-9]+",
+            "",
+            str(state.get("selectedText") or state.get("value") or "").lower(),
+        )
+        return expected in {"na", "notapplicable"} and selected in {
+            "na",
+            "notapplicable",
+        }
 
     async def _stage_is_visible_in_saved_summary(expected_value: Any) -> bool:
         """Kaizen's saved draft summary may show stage text after the select
@@ -3238,6 +3354,10 @@ async def _verify_filing_qa(
 
         expected_value = expected_fields.get(key)
         was_drafted = _is_meaningful(expected_value)
+
+        if state.get("tag") == "SELECT" and _is_verified_n_a(expected_value, state):
+            verified_n_a.append(key)
+            continue
 
         if (
             not is_filled
@@ -3311,7 +3431,19 @@ async def _verify_filing_qa(
         for target in kc_targets:
             target_str = str(target)
             try:
-                is_checked = await page.evaluate(_QA_READ_KC_JS, target_str)
+                code = canonical_kc_code(target_str)
+                if _curriculum_base_form_type(form_type) == "TEACH" and code:
+                    slo_code, kc_code = code.split()
+                    is_checked = await page.evaluate(
+                        READ_EXACT_INLINE_KC_JS,
+                        {
+                            "stage": _curriculum_stage_label(expected_fields, None),
+                            "slo_code": slo_code,
+                            "kc_code": kc_code,
+                        },
+                    )
+                else:
+                    is_checked = await page.evaluate(_QA_READ_KC_JS, target_str)
             except Exception as exc:
                 logger.warning(f"QA[{form_type}]: error reading KC {target_str}: {exc}")
                 is_checked = False
@@ -3343,7 +3475,9 @@ async def _verify_filing_qa(
                     )
 
     score = score_qa_buckets(
-        filled=filled,
+        # N/A is a completed, persisted choice for scoring, but remains a
+        # distinct contract state instead of being misreported as populated.
+        filled=filled + [f"n/a:{key}" for key in verified_n_a],
         empty_expected=empty_expected,
         empty_acceptable=empty_acceptable,
     )
@@ -3361,11 +3495,12 @@ async def _verify_filing_qa(
 
     return {
         "filled": filled,
+        "verified_n_a": verified_n_a,
         "empty_expected": empty_expected,
         "empty_acceptable": empty_acceptable,
         "counts": {
             "filled": len(filled),
-            "drafted": len(filled) + len(empty_expected),
+            "drafted": len(filled) + len(verified_n_a) + len(empty_expected),
             "empty_but_drafted": len(empty_expected),
             "empty_not_drafted": len(empty_acceptable),
         },
@@ -3907,9 +4042,39 @@ async def _submit_entry(page: Page) -> bool:
 
 def _saved_draft_url(url: str) -> bool:
     """Return True when Kaizen has moved from new form creation to a saved draft URL."""
-    if not url:
+    if not _is_kaizen_app_url(url):
         return False
-    return "/events/fillin/" in url or ("kaizenep.com/events/" in url and "doc=" in url)
+    parsed = urllib.parse.urlparse(url)
+    query = urllib.parse.parse_qs(parsed.query)
+    return "/events/fillin/" in parsed.path or (
+        parsed.path.startswith("/events/") and bool(query.get("doc"))
+    )
+
+
+def _canonical_saved_draft_url(url: str) -> Optional[str]:
+    """Return the exact safe edit URL and discard unrelated query state."""
+    if not _saved_draft_url(url):
+        return None
+    parsed = urllib.parse.urlparse(url)
+    query = urllib.parse.parse_qs(parsed.query)
+    if "/events/fillin/" in parsed.path:
+        doc_id = parsed.path.rstrip("/").split("/")[-1]
+    else:
+        doc_id = (query.get("doc") or [""])[0]
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", doc_id or ""):
+        return None
+    autosave = (query.get("autosave") or [""])[0]
+    canonical = f"https://kaizenep.com/events/fillin/{doc_id}"
+    if autosave and re.fullmatch(r"[A-Za-z0-9_-]+", autosave):
+        canonical += "?" + urllib.parse.urlencode({"autosave": autosave})
+    return canonical
+
+
+def _draft_handle(url: Optional[str]) -> Optional[str]:
+    canonical = _canonical_saved_draft_url(url or "")
+    if not canonical:
+        return None
+    return urllib.parse.urlparse(canonical).path.rstrip("/").split("/")[-1]
 
 
 def _activity_date_variants(fields: Optional[Dict[str, Any]] = None) -> List[str]:
@@ -3992,9 +4157,23 @@ async def _verify_entry_saved(page: Page, form_type: str, fields: Optional[Dict[
     keywords = form_type_keywords.get(form_type, [form_type.lower().replace("_", " ")])
     expected_dates = _activity_date_variants(fields)
 
-    if _saved_draft_url(page.url):
-        logger.info(f"Post-save verification: saved draft URL detected ({page.url})")
-        return True
+    saved_url = _canonical_saved_draft_url(page.url)
+    if saved_url:
+        try:
+            # A redirect proves only that Save ran. Reopen the exact handle so
+            # all subsequent field/KC QA reads persisted server state rather
+            # than the still-mutated create form DOM.
+            await page.goto(saved_url, wait_until="domcontentloaded", timeout=30000)
+            await asyncio.sleep(2)
+            reopened = _canonical_saved_draft_url(page.url)
+            if reopened == saved_url:
+                logger.info("Post-save verification: reopened exact saved draft")
+                return True
+            logger.warning("Post-save verification: exact draft reopen redirected away")
+            return False
+        except Exception as exc:
+            logger.warning(f"Post-save verification: exact draft reopen failed: {exc}")
+            return False
 
     try:
         await page.goto("https://kaizenep.com/activities", wait_until="domcontentloaded", timeout=40000)
@@ -4433,6 +4612,7 @@ async def file_to_kaizen(
     attachment_path: Optional[str | list[str]] = None,
     attachment_drive_url: Optional[str] = None,
     reuse_draft: bool = False,
+    draft_url: Optional[str] = None,
     telegram_user_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
@@ -4506,11 +4686,30 @@ async def file_to_kaizen(
                 ),
             )
 
-        # Navigate to a new form by default. Reusing same-form drafts can
-        # overwrite repeated ARCP tickets that legitimately share form type/date.
+        # Repair requests must identify one exact saved draft. Never search by
+        # form type and never fall back to create: both can overwrite or
+        # duplicate a different TEACH entry.
         reused_draft = False
         if reuse_draft:
-            reused_draft = await _find_existing_draft(page, form_type)
+            repair_url = _canonical_saved_draft_url(draft_url or "")
+            if not repair_url:
+                return _early_filing_failure(
+                    form_type,
+                    "Repair refused: an exact Kaizen saved draft URL is required. No new draft was created.",
+                )
+            await page.goto(repair_url, wait_until="networkidle", timeout=30000)
+            await asyncio.sleep(5)
+            if _canonical_saved_draft_url(page.url) != repair_url:
+                return _early_filing_failure(
+                    form_type,
+                    "Repair refused: Kaizen did not open the exact saved draft. No new draft was created.",
+                )
+            reused_draft = True
+        elif draft_url:
+            return _early_filing_failure(
+                form_type,
+                "A saved draft URL may only be used with reuse_draft=true.",
+            )
 
         if not reused_draft:
             form_url = f"https://kaizenep.com/events/new-section/{uuid}"
@@ -4647,7 +4846,7 @@ async def file_to_kaizen(
         else:
             saved = await _save_form(page, True)
 
-        saved_url = page.url if saved and not submit else None
+        saved_url = _canonical_saved_draft_url(page.url) if saved and not submit else None
 
         # Post-save verification
         verified = None
@@ -4683,6 +4882,10 @@ async def file_to_kaizen(
             save_error = "No fields were filled"
 
         qa_gaps = list((filing_qa or {}).get("gaps") or [])
+        verified_n_a = list((filing_qa or {}).get("verified_n_a") or [])
+        if verified_n_a:
+            filled = [entry for entry in filled if entry not in verified_n_a]
+            skipped = [entry for entry in skipped if entry not in verified_n_a]
         if saved and qa_gaps:
             gap_fields = set()
             kc_gap_count = 0
@@ -4740,6 +4943,8 @@ async def file_to_kaizen(
             "skipped": skipped,
             "error": save_error,
             "saved_url": saved_url,
+            "draft_handle": _draft_handle(saved_url),
+            "verified_n_a": verified_n_a,
             "filing_qa": filing_qa,
             **header_meta,
         }

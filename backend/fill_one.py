@@ -34,9 +34,9 @@ TICKET JSON SCHEMA
     {
       "form_type": "TEACH",         # must be a key in FORM_UUIDS
       "save_as_draft": true,        # must be true — draft-only is the invariant
-      "reuse_draft": false,         # optional — if true, edit an existing draft of
-                                    # the same form_type instead of creating a new
-                                    # one. Form-type based, not UUID based.
+      "reuse_draft": false,         # optional — repair one existing draft
+      "draft_url": null,            # required with reuse_draft=true; exact
+                                    # https://kaizenep.com/events/fillin/... URL
       "fields": {
         # Universal headers (all forms):
         "date_of_encounter": "15/4/2026",   # maps to startDate
@@ -65,7 +65,10 @@ RESULT JSON (stdout)
       "filled":     ["date_of_teaching", "title_of_session", ...],
       "skipped":    [...],
       "errors":     [...],
-      "screenshot": null
+      "screenshot": null,
+      "saved_url":  "https://kaizenep.com/events/fillin/...",
+      "draft_handle": "...",
+      "verified_n_a": ["recognised_courses"]
     }
 
 EXIT CODES
@@ -76,6 +79,7 @@ import asyncio
 import json
 import os
 import sys
+import urllib.parse
 from pathlib import Path
 
 # Ensure peer imports (filer_router, kaizen_form_filer) resolve when invoked
@@ -184,10 +188,9 @@ def _load_ticket() -> dict:
 def _validate(ticket: dict) -> tuple[str, dict, str | None, bool, str | None, str | None]:
     """Validate ticket shape.
 
-    Returns (form_type, fields, draft_uuid, save_as_draft, attachment_drive_url,
-    attachment_path). draft_uuid is preserved in the return tuple for backwards
-    compatibility with existing tests, but the router does not support UUID-based
-    draft targeting — tickets that include a non-empty draft_uuid are rejected.
+    Returns (form_type, fields, draft_url, save_as_draft, attachment_drive_url,
+    attachment_path). Repairs require the exact saved-draft URL; form-type
+    searching is deliberately unsupported because it can select the wrong draft.
     """
     form_type = ticket.get("form_type")
     if not form_type:
@@ -221,12 +224,22 @@ def _validate(ticket: dict) -> tuple[str, dict, str | None, bool, str | None, st
 
     draft_uuid = ticket.get("draft_uuid")
     if draft_uuid:
-        # filer_router.route_filing exposes reuse_draft (form-type based) but
-        # not UUID-based draft targeting. Refuse rather than silently dropping
-        # the targeting — the caller intended a specific draft.
         _die(3, "draft_uuid is not supported by filer_router.route_filing. "
-                "Use reuse_draft=true to edit an existing draft of the same form_type, "
-                "or remove draft_uuid to create a new draft.")
+                "Pass the exact saved draft_url with reuse_draft=true instead.")
+    reuse_draft = bool(ticket.get("reuse_draft", False))
+    draft_url = ticket.get("draft_url")
+    if reuse_draft and not draft_url:
+        _die(3, "reuse_draft=true requires the exact Kaizen saved draft_url. No create fallback is allowed.")
+    if draft_url:
+        parsed = urllib.parse.urlparse(str(draft_url))
+        if (
+            parsed.scheme != "https"
+            or parsed.netloc.lower() != "kaizenep.com"
+            or not parsed.path.startswith("/events/fillin/")
+        ):
+            _die(3, "draft_url must be an exact https://kaizenep.com/events/fillin/... saved draft URL")
+        if not reuse_draft:
+            _die(3, "draft_url requires reuse_draft=true")
     save_as_draft = ticket.get("save_as_draft", True)
     # Draft-only is the product invariant for non-bot entrypoints. fill_one is
     # a CLI for external callers; submit/sign-off happens manually in Kaizen UI.
@@ -238,7 +251,7 @@ def _validate(ticket: dict) -> tuple[str, dict, str | None, bool, str | None, st
     # file_to_kaizen, which handles the upload on the deterministic path.
     attachment_drive_url = ticket.get("attachment_drive_url")
     attachment_path = ticket.get("attachment_path")
-    return form_type, fields, draft_uuid, save_as_draft, attachment_drive_url, attachment_path
+    return form_type, fields, draft_url, save_as_draft, attachment_drive_url, attachment_path
 
 
 async def _run(
@@ -246,6 +259,7 @@ async def _run(
     fields: dict,
     save_as_draft: bool,
     reuse_draft: bool = False,
+    draft_url: str | None = None,
     attachment_drive_url: str | None = None,
     attachment_path: str | None = None,
 ) -> dict:
@@ -263,6 +277,7 @@ async def _run(
         credentials={"username": username, "password": password},
         submit=False,
         reuse_draft=reuse_draft,
+        draft_url=draft_url,
         attachment_path=attachment_path,
         attachment_drive_url=attachment_drive_url,
     )
@@ -270,7 +285,7 @@ async def _run(
 
 def main() -> None:
     ticket = _load_ticket()
-    form_type, fields, draft_uuid, save_as_draft, attachment_drive_url, attachment_path = _validate(ticket)
+    form_type, fields, draft_url, save_as_draft, attachment_drive_url, attachment_path = _validate(ticket)
     reuse_draft = bool(ticket.get("reuse_draft", False))
     clinical_text_preflight = _run_clinical_text_preflight(fields)
     if clinical_text_preflight["status"] == "blocked":
@@ -302,7 +317,7 @@ def main() -> None:
             "kc_count": len(fields.get("curriculum_links") or []),
             "save_as_draft": save_as_draft,
             "reuse_draft": reuse_draft,
-            "draft_uuid": draft_uuid,
+            "draft_url": draft_url,
             "clinical_text_preflight": clinical_text_preflight,
         }, indent=2))
         sys.exit(0)
@@ -313,6 +328,7 @@ def main() -> None:
             fields,
             save_as_draft,
             reuse_draft=reuse_draft,
+            draft_url=draft_url,
             attachment_drive_url=attachment_drive_url,
             attachment_path=attachment_path,
         ))
@@ -335,6 +351,9 @@ def main() -> None:
         "errors": errors,
         "screenshot": result.get("screenshot") or result.get("screenshot_path"),
         "method": result.get("method"),
+        "saved_url": result.get("saved_url"),
+        "draft_handle": result.get("draft_handle"),
+        "verified_n_a": result.get("verified_n_a", []),
         "clinical_text_preflight": clinical_text_preflight,
     }
     print(json.dumps(output, indent=2))

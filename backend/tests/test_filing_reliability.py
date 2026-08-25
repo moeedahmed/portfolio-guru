@@ -295,6 +295,7 @@ async def test_route_filing_does_not_reuse_drafts_by_default():
 async def test_route_filing_reuses_drafts_when_explicitly_requested():
     from filer_router import route_filing
 
+    draft_url = "https://kaizenep.com/events/fillin/draft-doc-id?autosave=auto-1"
     deterministic = AsyncMock(return_value={
         "status": "success",
         "filled": ["reflection"],
@@ -307,8 +308,12 @@ async def test_route_filing_reuses_drafts_when_explicitly_requested():
             fields={"reflection": "Sample"},
             credentials={"username": "u", "password": "p"},
             reuse_draft=True,
+            draft_url=draft_url,
         )
-    assert deterministic.await_args.kwargs["reuse_draft"] is True
+    call = deterministic.await_args
+    assert call is not None
+    assert call.kwargs["reuse_draft"] is True
+    assert call.kwargs["draft_url"] == draft_url
 
 
 @pytest.mark.asyncio
@@ -329,6 +334,7 @@ async def test_retry_after_dom_drift_reuses_draft_and_surfaces_changed_field():
         calls.append({
             "fields": dict(fields),
             "reuse_draft": kwargs["reuse_draft"],
+            "draft_url": kwargs["draft_url"],
         })
         if kwargs["reuse_draft"]:
             return {
@@ -365,6 +371,7 @@ async def test_retry_after_dom_drift_reuses_draft_and_surfaces_changed_field():
             },
             credentials={"username": "u", "password": "p"},
             reuse_draft=True,
+            draft_url=draft_url,
         )
 
     assert calls == [
@@ -374,6 +381,7 @@ async def test_retry_after_dom_drift_reuses_draft_and_surfaces_changed_field():
                 "clinical_reasoning": "Initial reasoning",
             },
             "reuse_draft": False,
+            "draft_url": None,
         },
         {
             "fields": {
@@ -381,6 +389,7 @@ async def test_retry_after_dom_drift_reuses_draft_and_surfaces_changed_field():
                 "clinical_reasoning_renamed": "DOM drifted field",
             },
             "reuse_draft": True,
+            "draft_url": draft_url,
         },
     ]
     assert first["saved_url"] == draft_url

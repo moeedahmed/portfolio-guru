@@ -1137,7 +1137,12 @@ def _clear_filing_retry_state(context) -> None:
     not offered for a draft that never had a filing attempt. PicklePersistence
     keeps user_data across turns, so a stale 'failed'/'partial' status from an
     earlier case would otherwise make a brand-new draft look retryable."""
-    for key in ("last_filing_status", "last_filing_form_name", "last_filing_report"):
+    for key in (
+        "last_filing_status",
+        "last_filing_form_name",
+        "last_filing_report",
+        "last_filing_draft_url",
+    ):
         context.user_data.pop(key, None)
 
 
@@ -12519,6 +12524,11 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     # Determine platform (default: kaizen; future: from user profile)
     platform = "kaizen"
     reuse_existing_draft = bool(context.user_data.pop("retry_filing_requested", False))
+    repair_draft_url = (
+        context.user_data.get("last_filing_draft_url")
+        if reuse_existing_draft
+        else None
+    )
     alternative_curriculum_retry = bool(
         context.user_data.pop("alternative_curriculum_retry_requested", False)
     )
@@ -12615,6 +12625,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 curriculum_links=curriculum_links,
                 form_name=form_name,
                 reuse_draft=reuse_existing_draft,
+                draft_url=repair_draft_url,
                 attachment_path=attachment_path,
                 telegram_user_id=user_id,
             ),
@@ -12731,6 +12742,9 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     filled = result.get("filled", [])
     skipped = result.get("skipped", [])
     error = result.get("error")
+    exact_saved_url = result.get("saved_url")
+    if exact_saved_url:
+        context.user_data["last_filing_draft_url"] = exact_saved_url
 
     # SAVE_FAILURE auto-rescue (max 1 retry per filing).
     # When the filer reports that fields filled but the save click/verify
@@ -12741,6 +12755,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     if (
         status in ("failed", "partial")
         and len(filled) > 0
+        and bool(exact_saved_url)
         and _classify_filing_failure(error, skipped, status, filled) == "SAVE_FAILURE"
     ):
         try:
@@ -12764,6 +12779,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                     curriculum_links=curriculum_links,
                     form_name=form_name,
                     reuse_draft=True,
+                    draft_url=exact_saved_url,
                     attachment_path=attachment_path,
                     telegram_user_id=user_id,
                 ),
@@ -12779,6 +12795,9 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             filled = result.get("filled", [])
             skipped = result.get("skipped", [])
             error = result.get("error")
+            if result.get("saved_url"):
+                exact_saved_url = result["saved_url"]
+                context.user_data["last_filing_draft_url"] = exact_saved_url
         except Exception as retry_exc:
             logger.warning(
                 "Save-rescue retry for %s failed: %s", form_type, retry_exc

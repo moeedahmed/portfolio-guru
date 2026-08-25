@@ -34,13 +34,17 @@ async def test_verify_entry_saved_uses_activity_date_not_today():
 
 
 @pytest.mark.asyncio
-async def test_verify_entry_saved_accepts_saved_draft_url_fallback():
+async def test_verify_entry_saved_reopens_exact_saved_draft_before_readback():
     page = FakePage(url="https://kaizenep.com/events/fillin/document-id?autosave=autosave-id")
 
     result = await _verify_entry_saved(page, "PROC_LOG", {"date_of_activity": "2026-03-17"})
 
     assert result is True
-    page.goto.assert_not_called()
+    page.goto.assert_awaited_once_with(
+        "https://kaizenep.com/events/fillin/document-id?autosave=autosave-id",
+        wait_until="domcontentloaded",
+        timeout=30000,
+    )
 
 
 def test_activity_date_variants_include_backdated_arcp_formats():

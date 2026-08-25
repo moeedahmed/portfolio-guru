@@ -2231,6 +2231,7 @@ class TestFlowWalker:
     async def test_failed_filing_try_again_reuses_active_draft(self, thin_draft):
         from bot import AWAIT_APPROVAL, handle_approval_approve, handle_callback
 
+        draft_url = 'https://kaizenep.com/events/fillin/teach-draft?autosave=auto-1'
         sim = BotSimulator()
         context = sim._make_context()
         context.user_data['draft_data'] = {
@@ -2247,12 +2248,14 @@ class TestFlowWalker:
                 'skipped': [],
                 'method': 'deterministic',
                 'error': 'Save button not found or click failed',
+                'saved_url': draft_url,
             },
             {
                 'status': 'success',
                 'filled': ['date_of_encounter'],
                 'skipped': [],
                 'method': 'deterministic',
+                'saved_url': draft_url,
             },
         ])
 
@@ -2265,7 +2268,9 @@ class TestFlowWalker:
         assert first == AWAIT_APPROVAL
         assert route_filing.await_count == 2
         assert route_filing.await_args_list[0].kwargs['reuse_draft'] is False
+        assert route_filing.await_args_list[0].kwargs['draft_url'] is None
         assert route_filing.await_args_list[1].kwargs['reuse_draft'] is True
+        assert route_filing.await_args_list[1].kwargs['draft_url'] == draft_url
         assert second == ConversationHandler.END
 
     @pytest.mark.asyncio
