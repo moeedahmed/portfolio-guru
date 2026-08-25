@@ -368,3 +368,30 @@ async def test_aborted_run_pings_fail_not_success(chase_job, monkeypatch):
 
     assert "/fail" in pings
     assert "success" not in pings
+
+
+# ── Login-timeout copy ──────────────────────────────────────────────────────
+
+
+def test_login_timeout_copy_does_not_blame_kaizen(chase_job):
+    """The 60s login timeout fires for local causes too.
+
+    On 2026-08-25 the automation browser wedged: it still answered HTTP but
+    could no longer hand out a session, so CDP attach hung past the timeout
+    while kaizenep.com was fully up. The old copy told doctors it was "usually
+    a brief outage on their side", sending them away to wait on a service that
+    was working. Copy must state what happened, not guess why.
+    """
+    import inspect
+
+    source = inspect.getsource(chase_job)
+    assert "brief outage on their side" not in source
+    assert "The login check timed out before it finished" in source
+
+
+def test_login_timeout_copy_says_credentials_were_not_rejected(chase_job):
+    """A timeout is not a rejection — users must not retype good passwords."""
+    import inspect
+
+    source = inspect.getsource(chase_job)
+    assert "haven't been rejected" in source

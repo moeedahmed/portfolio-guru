@@ -5551,8 +5551,16 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         _stash_setup_retry_credentials(context, username, password)
         await _flow_edit(
             update, context,
-            "⏱ Kaizen took too long to respond. This is usually a brief outage on their side.\n\n"
-            "Tap Try again to check the same login, or Cancel and connect later.",
+            # Do not blame Kaizen. This timeout fires whenever the check does
+            # not finish in 60s, and the cause is just as often local — a
+            # wedged automation browser that still answers HTTP but can no
+            # longer hand out a session. Telling users it is "an outage on
+            # their side" sends them away to wait on Kaizen when Kaizen is
+            # fine. (Observed 2026-08-25: CDP attach hung for 45s+ while
+            # kaizenep.com was fully up.)
+            "⏱ The login check timed out before it finished.\n\n"
+            "Your details haven't been rejected — nothing got far enough to check them. "
+            "Tap Try again to retry the same login, or Cancel and connect later.",
             reply_markup=_KB_RETRY_SETUP,
             flow_key="setup",
         )
@@ -14241,7 +14249,9 @@ async def _run_unsigned_scan(
             timeout=90,
         )
     except asyncio.TimeoutError:
-        await msg.edit_text("⏱ Kaizen took too long to respond. Try again in a moment.")
+        # Same reasoning as the setup-flow timeout above: the cause may be
+        # local, so the copy states what happened rather than guessing why.
+        await msg.edit_text("⏱ The login check timed out before it finished. Try again in a moment.")
         return
     except Exception as exc:
         logger.warning("Unsigned scrape errored: %s", exc, exc_info=True)

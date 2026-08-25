@@ -268,7 +268,11 @@ async def test_setup_password_timeout_retry_keeps_same_login(monkeypatch):
     assert result == AWAIT_PASSWORD
     store_creds.assert_not_called()
     last = sim.get_last_text().lower()
-    assert "took too long" in last
+    # Copy must not blame Kaizen: this timeout also fires when the local
+    # automation browser wedges while kaizenep.com is perfectly up.
+    assert "timed out" in last
+    assert "haven't been rejected" in last
+    assert "outage on their side" not in last
     assert "same login" in last
     assert ("🔄 Try again", "ACTION|retry_setup_login") in sim.get_last_buttons()
     assert ("❌ Cancel", "ACTION|cancel") in sim.get_last_buttons()
