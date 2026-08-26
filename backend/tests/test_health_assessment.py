@@ -445,3 +445,18 @@ def test_untagged_disclosure_says_why_it_matters():
     ]
     detail = format_domain_detail(compute_health_assessment(items, today=TODAY), today=TODAY)
     assert "may not count toward curriculum coverage" in detail
+
+
+def test_untagged_disclosure_names_the_forms_to_go_and_fix():
+    """A count says there is a problem; the forms say where to start."""
+    items = [_tagged([3], ident="a", form_type="REFLECT_LOG")]
+    items += [_item(ident=f"r-{n}", form_type="REFLECT_LOG") for n in range(4)]
+    items += [_tagged([3], ident="p", form_type="PROC_LOG")]
+    items += [_item(ident=f"p-{n}", form_type="PROC_LOG") for n in range(2)]
+
+    assessment = compute_health_assessment(items, today=TODAY)
+    detail = format_domain_detail(assessment, today=TODAY)
+
+    assert assessment.untagged_by_form == {"REFLECT_LOG": 4, "PROC_LOG": 2}
+    assert "Reflective Log 4" in detail
+    assert "Procedure Log 2" in detail

@@ -279,10 +279,16 @@ def _slo_block(assessment: HealthAssessment) -> list[str]:
     if assessment.untagged_items:
         # Untagged items are invisible to this view. Saying so stops a doctor
         # reading a thin SLO as a gap when the evidence may simply be untagged.
+        # Name the forms. A count says there is a problem; the forms say where
+        # to go and fix it.
+        worst = sorted(
+            assessment.untagged_by_form.items(), key=lambda kv: -kv[1]
+        )[:3]
+        where = ", ".join(f"{form_label(form)} {count}" for form, count in worst)
         lines.append(
             f"_{assessment.untagged_items} items are untagged despite being a "
-            "form you tag elsewhere — they may not count toward curriculum "
-            "coverage. Evidence that never carries tags (MSF, e-learning, "
-            "exams, uploads) is excluded from this figure._"
+            f"form you tag elsewhere: {where}. They may not count toward "
+            "curriculum coverage. Evidence that never carries tags (MSF, "
+            "e-learning, exams, uploads) is excluded from this figure._"
         )
     return lines

@@ -499,3 +499,61 @@ def test_weekly_refresh_is_bounded(chase_job):
     assert "asyncio.wait_for" in source
     # Only refresh a stale index — a fresh one has nothing new to tell us.
     assert "_health_needs_kaizen_refresh" in source
+
+
+# ── Deadline-scaled cadence ─────────────────────────────────────────────────
+
+
+def test_chase_speaks_monthly_by_default(chase_job, monkeypatch):
+    """The spec makes monthly the default proactive cadence; weekly is reserved
+    for deadline mode. Unfinished evidence six months out is worth a monthly
+    mention, not a weekly one."""
+    monkeypatch.setattr(chase_job, "_stored_review_date", lambda _p: None)
+    monkeypatch.setattr(chase_job, "_get_or_default_health_profile", lambda _u: object())
+
+    assert chase_job._chase_interval_days(7) == chase_job.CHASE_INTERVAL_DEFAULT_DAYS
+
+
+def test_chase_speaks_weekly_near_a_review(chase_job, monkeypatch):
+    """The evidence has not changed, but the cost of not knowing has."""
+    from datetime import date, timedelta
+
+    soon = date.today() + timedelta(days=30)
+    monkeypatch.setattr(chase_job, "_stored_review_date", lambda _p: soon)
+    monkeypatch.setattr(chase_job, "_get_or_default_health_profile", lambda _u: object())
+
+    assert chase_job._chase_interval_days(7) == chase_job.CHASE_INTERVAL_DEADLINE_DAYS
+
+
+def test_a_review_far_away_does_not_trigger_deadline_mode(chase_job, monkeypatch):
+    from datetime import date, timedelta
+
+    far = date.today() + timedelta(days=200)
+    monkeypatch.setattr(chase_job, "_stored_review_date", lambda _p: far)
+    monkeypatch.setattr(chase_job, "_get_or_default_health_profile", lambda _u: object())
+
+    assert chase_job._chase_interval_days(7) == chase_job.CHASE_INTERVAL_DEFAULT_DAYS
+
+
+def test_a_passed_review_date_does_not_trigger_deadline_mode(chase_job, monkeypatch):
+    """A date left behind is not a deadline approaching."""
+    from datetime import date, timedelta
+
+    past = date.today() - timedelta(days=10)
+    monkeypatch.setattr(chase_job, "_stored_review_date", lambda _p: past)
+    monkeypatch.setattr(chase_job, "_get_or_default_health_profile", lambda _u: object())
+
+    assert chase_job._chase_interval_days(7) == chase_job.CHASE_INTERVAL_DEFAULT_DAYS
+
+
+def test_held_news_is_not_swallowed(chase_job):
+    """News found while the cadence says "too soon" must survive to the next
+    send. The diff is taken against the last message sent, not the last look,
+    so holding back cannot lose anything."""
+    import inspect
+
+    source = inspect.getsource(chase_job.signoff_chase_push)
+    hold = source.index("holding news for")
+    stamp = source.index('seen[str(user_id)] = datetime.now(UTC).isoformat()')
+    # The last-sent stamp must be written after the cadence gate, never before.
+    assert hold < stamp

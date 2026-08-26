@@ -740,6 +740,28 @@ async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
 SIGNOFF_CHASE_MAX_REFRESH_PER_RUN = 5
 SIGNOFF_CHASE_REFRESH_TIMEOUT_S = 900
 
+# How often the chase may speak to one doctor, by distance to their review.
+# docs/PORTFOLIO_HEALTH_SPEC.md: monthly is the default proactive cadence and
+# weekly is reserved for deadline mode. Unfinished evidence six months out is
+# worth a monthly mention; six weeks out it is worth a weekly one, because the
+# cost of not knowing has changed even though the evidence has not.
+CHASE_DEADLINE_WEEKS = 8
+CHASE_INTERVAL_DEFAULT_DAYS = 28
+CHASE_INTERVAL_DEADLINE_DAYS = 7
+
+
+def _chase_interval_days(user_id: int) -> int:
+    """Minimum days between chase messages for this user."""
+    from datetime import date as _date
+
+    review = _stored_review_date(_get_or_default_health_profile(user_id))
+    if not review:
+        return CHASE_INTERVAL_DEFAULT_DAYS
+    days_away = (review - _date.today()).days
+    if 0 <= days_away <= CHASE_DEADLINE_WEEKS * 7:
+        return CHASE_INTERVAL_DEADLINE_DAYS
+    return CHASE_INTERVAL_DEFAULT_DAYS
+
 
 def _signoff_chase_enabled() -> bool:
     """The proactive chase is opt-in.
@@ -851,8 +873,10 @@ async def signoff_chase_push(context: ContextTypes.DEFAULT_TYPE) -> None:
                     except ValueError:
                         since = None
 
+                # Diff against the last message sent, not the last look. News
+                # found while the cadence says "too soon" has to survive to the
+                # next send rather than being quietly swallowed.
                 changes = await detect_changes(user_id, since=since)
-                seen[str(user_id)] = datetime.now(UTC).isoformat()
 
                 text = format_change_report(changes)
                 if not text:
@@ -861,6 +885,17 @@ async def signoff_chase_push(context: ContextTypes.DEFAULT_TYPE) -> None:
                     # report the week something actually moves.
                     skipped += 1
                     continue
+                interval = _chase_interval_days(user_id)
+                if since is not None and (datetime.now(UTC) - since).days < interval:
+                    logger.info(
+                        "signoff_chase holding news for %s: %d-day cadence not elapsed",
+                        user_id,
+                        interval,
+                    )
+                    skipped += 1
+                    continue
+
+                seen[str(user_id)] = datetime.now(UTC).isoformat()
                 logger.info(
                     "Portfolio Guru funnel event=signoff_chase_sent user_id=%s "
                     "new=%d cleared=%d waiting=%d",

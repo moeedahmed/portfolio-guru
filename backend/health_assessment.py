@@ -101,6 +101,7 @@ class HealthAssessment:
     patterns: list[str] = field(default_factory=list)
     slo_counts: dict[int, int] = field(default_factory=dict)
     untagged_items: int = 0
+    untagged_by_form: dict[str, int] = field(default_factory=dict)
 
     @property
     def stuck_total(self) -> int:
@@ -213,7 +214,8 @@ def compute_health_assessment(
     for item in items:
         for slo in getattr(item, "slo_numbers", None) or []:
             slo_counts[slo] = slo_counts.get(slo, 0) + 1
-    untagged = _untagged_but_taggable(items)
+    untagged_forms = _untagged_by_form(items)
+    untagged = sum(untagged_forms.values())
 
     reasons: list[str] = []
     for stat in stats:
@@ -263,6 +265,7 @@ def compute_health_assessment(
         patterns=_patterns(awaiting, drafts, stats, items),
         slo_counts=slo_counts,
         untagged_items=untagged,
+        untagged_by_form=untagged_forms,
     )
 
 
@@ -271,6 +274,25 @@ def compute_health_assessment(
 # CBDs in a portfolio of 250 clinical items is proportionate, not a finding.
 REPEAT_PATTERN_MIN = 3
 REPEAT_PATTERN_RATE_MULTIPLE = 2.0
+
+
+def _untagged_by_form(items: list[EvidenceItem]) -> dict[str, int]:
+    """Which forms the untagged evidence actually is.
+
+    A count on its own tells a doctor there is a problem but not where to go.
+    Naming the forms turns "158 items are untagged" into "your reflective logs
+    are untagged", which is somewhere to start.
+    """
+    taggable_forms = {
+        item.form_type
+        for item in items
+        if item.form_type and (getattr(item, "slo_numbers", None) or [])
+    }
+    counts: dict[str, int] = {}
+    for item in items:
+        if item.form_type in taggable_forms and not (getattr(item, "slo_numbers", None) or []):
+            counts[item.form_type] = counts.get(item.form_type, 0) + 1
+    return counts
 
 
 def _untagged_but_taggable(items: list[EvidenceItem]) -> int:
