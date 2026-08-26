@@ -54,7 +54,7 @@ Hermes framing: one agent reachable across many channels.
 Portfolio Guru: a single Telegram agent accepts text, voice note, audio,
 photo, and document for the same case-capture flow.
 
-- Evidence `[live]`: `backend/bot.py:12553-12558` registers
+- Evidence `[live]`: `backend/bot.py` `build_application` registers
   `MessageHandler`s for `TEXT`, `VOICE`, `AUDIO`, `PHOTO`, and
   `Document.ALL`, all routed into one `handle_case_input` entry point.
 - Honesty: WhatsApp and other surfaces are later routed convenience, not a
@@ -83,7 +83,7 @@ Portfolio Guru: vision reads a photographed note; deterministic browser
 automation drives the third-party Kaizen form.
 
 - Evidence `[live]`: photo/document capture feeds the same extraction
-  path (`backend/bot.py:12556-12558`); `backend/browser_filer.py` fills
+  path (`backend/bot.py` `build_application`); `backend/browser_filer.py` fills
   the Kaizen form via Playwright over CDP; `backend/filer_router.py`
   selects the filing method per form type.
 - Honesty: deterministic DOM mapping is preferred over generic browser
@@ -112,7 +112,7 @@ concepts.
 Portfolio Guru: no external write happens without an explicit human tap,
 and the agent never submits on a supervisor's behalf.
 
-- Evidence `[live]`: `backend/bot.py:12541` `handle_approval_approve` is
+- Evidence `[live]`: `backend/bot.py` `handle_approval_approve` is
   the only path that proceeds to a Kaizen draft save, and it saves a draft
   only. The agent does not submit, sign, send, approve, reject, or delete
   on a supervisor's behalf — that boundary is the hard line.
@@ -142,7 +142,7 @@ reset-state rehearsal path keep the demo and the product honest.
 - Evidence `[test]`: the Stripe checkout → webhook → tier-flip path is
   covered by `backend/tests/test_stripe_webhook_e2e.py`; the demo assets
   are copy-scanned by `backend/tests/test_demo_assets.py`.
-- Evidence `[live]`: `backend/bot.py:3596` `_track_funnel_event` emits
+- Evidence `[live]`: `backend/bot.py` `_track_funnel_event` emits
   PHI-free funnel events (`draft_shown`, `checkout_started`,
   `checkout_completed`, `bot_linked`, `credentials_connected`) so beta
   friction is measurable; `voice_profile.py` improves drafts per user

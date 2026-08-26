@@ -483,3 +483,19 @@ def test_login_timeout_copy_says_credentials_were_not_rejected(chase_job):
 
     source = inspect.getsource(chase_job)
     assert "haven't been rejected" in source
+
+
+def test_weekly_refresh_is_bounded(chase_job):
+    """A Kaizen scan is minutes of browser work and this job shares the bot's
+    event loop. Refreshing every user every week would tie the bot up for hours
+    and make it unresponsive to the doctors actually using it."""
+    assert chase_job.SIGNOFF_CHASE_MAX_REFRESH_PER_RUN <= 10
+    assert chase_job.SIGNOFF_CHASE_REFRESH_TIMEOUT_S <= 1800
+
+    import inspect
+
+    source = inspect.getsource(chase_job.signoff_chase_push)
+    assert "SIGNOFF_CHASE_MAX_REFRESH_PER_RUN" in source
+    assert "asyncio.wait_for" in source
+    # Only refresh a stale index — a fresh one has nothing new to tell us.
+    assert "_health_needs_kaizen_refresh" in source

@@ -734,6 +734,13 @@ async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
 # ── Sign-off chase (proactive Portfolio Health watcher) ─────────────────────
 
 
+# A Kaizen scan is minutes of browser work and this job shares the bot's event
+# loop. These bound the damage: at most this many users refreshed per weekly
+# run, each given at most this long.
+SIGNOFF_CHASE_MAX_REFRESH_PER_RUN = 5
+SIGNOFF_CHASE_REFRESH_TIMEOUT_S = 900
+
+
 def _signoff_chase_enabled() -> bool:
     """The proactive chase is opt-in.
 
@@ -797,6 +804,7 @@ async def signoff_chase_push(context: ContextTypes.DEFAULT_TYPE) -> None:
     sent = 0
     skipped = 0
     failed = 0
+    refreshed = 0
     try:
         seen: dict = {}
         if os.path.exists(seen_path):
@@ -810,9 +818,28 @@ async def signoff_chase_push(context: ContextTypes.DEFAULT_TYPE) -> None:
                 # Change detection needs current data. Without a refresh the
                 # watcher could never learn that an assessor signed something
                 # off, and would only ever repeat what the last /health saw.
-                if has_credentials(user_id):
+                #
+                # But a Kaizen scan is minutes of browser work, and this job
+                # runs inside the bot's event loop. Refreshing every user every
+                # week would tie the bot up for hours and make it unresponsive
+                # to the doctors actually using it, so the refresh is capped
+                # per run, skipped when the index is already fresh, and bounded
+                # by a timeout. Users not refreshed this week are simply
+                # refreshed next week.
+                if (
+                    refreshed < SIGNOFF_CHASE_MAX_REFRESH_PER_RUN
+                    and has_credentials(user_id)
+                    and await _health_needs_kaizen_refresh(user_id)
+                ):
                     try:
-                        await sync_kaizen_portfolio_index_for_user(user_id)
+                        await asyncio.wait_for(
+                            sync_kaizen_portfolio_index_for_user(user_id),
+                            timeout=SIGNOFF_CHASE_REFRESH_TIMEOUT_S,
+                        )
+                        refreshed += 1
+                    except asyncio.TimeoutError:
+                        logger.warning("signoff_chase refresh timed out for %s", user_id)
+                        refreshed += 1
                     except Exception as exc:
                         logger.warning("signoff_chase refresh failed for %s: %s", user_id, exc)
 
@@ -861,10 +888,11 @@ async def signoff_chase_push(context: ContextTypes.DEFAULT_TYPE) -> None:
         raise
 
     logger.info(
-        "signoff_chase complete: %d sent, %d with nothing new, %d failed",
+        "signoff_chase complete: %d sent, %d with nothing new, %d failed, %d refreshed",
         sent,
         skipped,
         failed,
+        refreshed,
     )
     # Ping on EVERY completed run, including runs that messaged nobody. This
     # feature's success signal is silence, so a dead job and a clean portfolio

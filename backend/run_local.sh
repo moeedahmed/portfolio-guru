@@ -131,7 +131,9 @@ fi
 # without it.
 PG_SIGNOFF_CHASE_HEALTHCHECK_URL="$(get_secret_by_key PG_SIGNOFF_CHASE_HEALTHCHECK_URL)"
 export PG_SIGNOFF_CHASE_HEALTHCHECK_URL
-export PG_ENABLE_SIGNOFF_CHASE="${PG_ENABLE_SIGNOFF_CHASE:-}"
+# Enabled 2026-08-26 for the whole beta cohort, once the chase stopped
+# re-listing and began reporting only what moved. Set to empty to disable.
+export PG_ENABLE_SIGNOFF_CHASE="${PG_ENABLE_SIGNOFF_CHASE:-1}"
 export PG_SIGNOFF_CHASE_USER_IDS="${PG_SIGNOFF_CHASE_USER_IDS:-}"
 if [ -n "$PG_ENABLE_SIGNOFF_CHASE" ]; then
   echo "Sign-off chase: ENABLED${PG_SIGNOFF_CHASE_USER_IDS:+ (users: $PG_SIGNOFF_CHASE_USER_IDS)}"
