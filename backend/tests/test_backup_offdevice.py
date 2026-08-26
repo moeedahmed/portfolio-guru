@@ -46,7 +46,12 @@ def _make_data_dir(tmp_path: Path) -> Path:
     return data_dir
 
 
-def _run_backup(tmp_path: Path, remote: str) -> subprocess.CompletedProcess:
+def _run_backup(
+    tmp_path: Path,
+    remote: str,
+    *,
+    extra_env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
     env = {
         **os.environ,
         "PORTFOLIO_GURU_DATA_DIR": str(_make_data_dir(tmp_path)),
@@ -56,6 +61,7 @@ def _run_backup(tmp_path: Path, remote: str) -> subprocess.CompletedProcess:
         # Never page the operator or touch BWS from a test run.
         "PG_BACKUP_DISABLE_ALERTS": "1",
     }
+    env.update(extra_env or {})
     return subprocess.run(
         ["bash", str(BACKUP_SCRIPT)],
         env=env,
@@ -63,6 +69,11 @@ def _run_backup(tmp_path: Path, remote: str) -> subprocess.CompletedProcess:
         text=True,
         timeout=120,
     )
+
+
+def _write_executable(path: Path, content: str) -> None:
+    path.write_text(content)
+    path.chmod(0o755)
 
 
 def _unreachable_remote(tmp_path: Path) -> Path:
@@ -137,3 +148,118 @@ def test_local_archive_survives_offdevice_failure(tmp_path):
     assert len(archives) == 1, f"local archive should still exist, got {archives}"
     # And the transient encrypted copy must be cleaned up, not left on disk.
     assert not list((tmp_path / "archives").glob("*.gpg"))
+
+
+@pytest.mark.parametrize(
+    "leaked_url",
+    [None, "https://example.invalid/live-check"],
+    ids=["bws-configured", "environment-leak"],
+)
+def test_disabled_alerts_never_touch_bws_or_healthchecks(tmp_path, leaked_url):
+    """Offline tests stay isolated whether the live URL comes from BWS or env."""
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    calls = tmp_path / "external-calls"
+    fake_home = tmp_path / "home"
+    (fake_home / ".openclaw").mkdir(parents=True)
+    (fake_home / ".openclaw" / ".bws-token").write_text("fixture-token")
+
+    for command in ("bws", "curl"):
+        _write_executable(
+            fake_bin / command,
+            "#!/usr/bin/env bash\n"
+            f"printf '{command}\\n' >> \"$PG_TEST_EXTERNAL_CALLS\"\n"
+            "exit 86\n",
+        )
+    # Avoid a real gpg-agent while still exercising the complete success path.
+    _write_executable(
+        fake_bin / "gpg",
+        "#!/usr/bin/env bash\n"
+        "while [ \"$#\" -gt 0 ]; do\n"
+        "  if [ \"$1\" = '-o' ]; then out=\"$2\"; shift 2; else shift; fi\n"
+        "done\n"
+        "printf 'encrypted-fixture' > \"$out\"\n",
+    )
+
+    remote = tmp_path / "offdevice"
+    remote.mkdir()
+    extra_env = {
+        "HOME": str(fake_home),
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        "PG_TEST_EXTERNAL_CALLS": str(calls),
+    }
+    if leaked_url is not None:
+        extra_env["PG_BACKUP_HEALTHCHECK_URL"] = leaked_url
+
+    result = _run_backup(tmp_path, str(remote), extra_env=extra_env)
+
+    assert result.returncode == 0, result.stderr
+    assert not calls.exists(), "test mode invoked BWS or a live healthcheck"
+
+
+@pytest.mark.parametrize("remote_fails", [False, True])
+def test_healthchecks_is_the_only_external_signal_and_fires_once(tmp_path, remote_fails):
+    """Each production-style run emits one success or failure transition."""
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    calls = tmp_path / "healthcheck-calls"
+    _write_executable(
+        fake_bin / "curl",
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' \"${@: -1}\" >> \"$PG_TEST_EXTERNAL_CALLS\"\n",
+    )
+
+    if remote_fails:
+        remote = _unreachable_remote(tmp_path)
+    else:
+        remote = tmp_path / "offdevice"
+        remote.mkdir()
+
+    result = _run_backup(
+        tmp_path,
+        str(remote),
+        extra_env={
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            "PG_TEST_EXTERNAL_CALLS": str(calls),
+            "PG_BACKUP_DISABLE_ALERTS": "0",
+            "PG_BACKUP_HEALTHCHECK_URL": "https://example.invalid/live-check",
+        },
+    )
+
+    assert result.returncode != 0 if remote_fails else result.returncode == 0
+    assert calls.read_text().splitlines() == [
+        "https://example.invalid/live-check/fail"
+        if remote_fails
+        else "https://example.invalid/live-check"
+    ]
+
+
+def test_unexpected_failure_is_reported_once_by_exit_trap(tmp_path):
+    """An early shell failure still reaches the single incident producer once."""
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    calls = tmp_path / "healthcheck-calls"
+    _write_executable(
+        fake_bin / "curl",
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' \"${@: -1}\" >> \"$PG_TEST_EXTERNAL_CALLS\"\n",
+    )
+    _write_executable(fake_bin / "gpg", "#!/usr/bin/env bash\nexit 7\n")
+    remote = tmp_path / "offdevice"
+    remote.mkdir()
+
+    result = _run_backup(
+        tmp_path,
+        str(remote),
+        extra_env={
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            "PG_TEST_EXTERNAL_CALLS": str(calls),
+            "PG_BACKUP_DISABLE_ALERTS": "0",
+            "PG_BACKUP_HEALTHCHECK_URL": "https://example.invalid/live-check",
+        },
+    )
+
+    assert result.returncode != 0
+    assert calls.read_text().splitlines() == [
+        "https://example.invalid/live-check/fail"
+    ]
