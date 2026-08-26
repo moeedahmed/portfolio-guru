@@ -65,6 +65,32 @@ Both admin reports append a `Revision: <branch>@<commit>` line sourced from
 the existing `runtime_identity` mechanism (admin-only; never shown to
 ordinary users).
 
+## Where To Work
+
+This repo is worked on by several agents — Claude Code sessions and Hermes
+profile agents — all acting for Moeed. On 2026-08-25/26 three of them shared one
+working directory and produced three separate incidents and two failed deploys:
+a feature branch pulled uncommitted work out from under the sync robot's
+main-branch protection, a branch switch landed one session's commit on another's
+branch, and commits made in the live deployment checkout diverged `main` and
+blocked deploys twice. Nothing was caused by the agents being different tools.
+Every one was concurrent writers on shared mutable state.
+
+- **One writer per file set, one directory per writer.** Never work in
+  `~/projects/portfolio-guru` itself and never in the live checkout. Get your
+  own with `scripts/new_worktree.sh <short-name>` — it takes seconds and shares
+  a prepared venv and `.env`.
+- **`~/projects/portfolio-guru-live` is the deployment, not a workspace.** It is
+  pinned to `main`, only `deploy_mac.sh` writes to it, and a pre-commit hook
+  refuses commits there. A commit made there diverges `main` from origin and the
+  next deploy fails closed with "expected SHA is not a safe fast-forward".
+- **Product work belongs in an interactive Claude Code session**, where context
+  compounds across a long investigation. Bounded, fully-briefable jobs —
+  backups, healthchecks, digests, scheduled maintenance — belong in Hermes.
+- **Do not run Hermes product work on this repo while a Claude Code session is
+  open on it.** Not a technical limit: two agents will each be right about their
+  own change and wrong about the other's.
+
 ## Safety
 
 - Never log credentials, decrypted values, or tokens.
