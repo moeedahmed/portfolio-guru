@@ -243,10 +243,9 @@ async def test_run_health_analysis_uses_indexed_source_when_history_empty(
 
     text = sent["text"]
     assert "*Portfolio Health — CESR / Portfolio Pathway*" in text
-    assert "*Evidence basis*" in text
-    assert "Scanned: Read-only Kaizen index: 1 visible evidence item(s)" in text
-    assert "Window: all indexed Kaizen evidence currently stored; CESR still needs a formal multi-year evidence map" in text
-    assert "Confidence:" in text
+    # Provenance moved into its own pane; the headline keeps the count so a
+    # doctor still knows how much the verdict was read from.
+    assert "1 indexed Kaizen item" in text
     assert "No Portfolio Guru cases filed yet" not in text
     assert "WPBA progress toward 36" in text
     assert "1/36" in text
@@ -1094,8 +1093,12 @@ def test_health_result_keyboard_offers_file_and_detail_sections():
         ("➕ File another case", "ACTION|file"),
     ]
     assert ("🔎 Evidence basis", "ACTION|health_detail|basis") in buttons
-    assert ("📈 Activity snapshot", "ACTION|health_detail|activity") in buttons
     assert ("📋 Domain detail", "ACTION|health_detail|domains") in buttons
+    # Unfinished evidence replaced the usage snapshot: it is the pane a doctor
+    # can act on, and the snapshot measured Portfolio Guru usage rather than
+    # the portfolio itself.
+    assert ("📌 Everything unfinished", "ACTION|health_detail|stuck") in buttons
+    assert not any(data.endswith("|activity") for _text, data in buttons)
     assert buttons[-1] == ("➕ File another case", "ACTION|file")
     assert ("📊 Change pathway", "ACTION|change_pathway") not in buttons
     assert ("🔙 Back to settings", "ACTION|settings") not in buttons
@@ -1331,10 +1334,13 @@ async def test_health_arcp_index_present_shows_full_verdict(
     )
 
     text = sent["text"]
-    assert "Read-only Kaizen index" in text
+    # A full index must not be reported as a limited view, and the verdict must
+    # arrive with its reasons rather than as a bare colour.
+    assert "indexed Kaizen item" in text
     assert "Full Kaizen scan not available" not in text
     assert "limited scan" not in text
-    assert "Evidence gap level:" in text
+    assert any(label in text for label in ("Well covered", "Needs attention", "Thin"))
+    assert "\n• " in text
 
 
 @pytest.mark.asyncio

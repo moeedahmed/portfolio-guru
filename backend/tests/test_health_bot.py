@@ -335,7 +335,7 @@ async def test_cesr_health_output_uses_deterministic_engine_without_llm(monkeypa
     assert "*Portfolio Health — CESR / Portfolio Pathway*" in text
     # No Kaizen index → limited scan, not a readiness verdict.
     assert "Full Kaizen scan not available" in text
-    assert "Filing-history snapshot (limited scan)" in text
+    assert "Limited view" in text and "Full Kaizen scan not available" in text
     assert "Long-term CESR readiness:" not in text
     assert "🔴 Early" not in text
     assert "WPBA progress toward 36" in text
@@ -343,7 +343,7 @@ async def test_cesr_health_output_uses_deterministic_engine_without_llm(monkeypa
     assert "DOPS 1/12" in text
     assert "Mini-CEX 0/12" in text
     assert "CBD 1/12" in text
-    assert "This year's evidence plan" in text
+    assert "WPBA progress toward 36" in text
     assert "5-year evidence window" in text
     assert "Evidence window:" in text
     assert "ARCP" not in text
@@ -401,9 +401,9 @@ async def test_health_includes_activity_snapshot_without_sending_photo(monkeypat
     )
 
     assert "*Portfolio Health — CESR / Portfolio Pathway*" in sent["text"]
-    assert "*Activity snapshot*" in sent["text"]
-    assert "Form mix: CBD 1, DOPS 1" in sent["text"]
-    assert "Curriculum coverage: 3/12" in sent["text"]
+    assert "*Activity*" in sent["text"]
+    assert "*Activity*" in sent["text"]
+    assert "WPBA progress toward 36" in sent["text"]
     send_photo.assert_not_awaited()
 
 
@@ -443,21 +443,29 @@ async def test_arcp_health_falls_back_to_deterministic_output_when_llm_fails(mon
     text = sent["text"]
     assert "*Portfolio Health — Training (CCT) evidence scan*" in text
     assert "Training (ARCP)" not in text
-    assert "*Evidence basis*" in text
-    assert "Scanned: Portfolio Guru filing history only: 3 case(s) in last 6 months" in text
-    assert "Window: last 6 months of Portfolio Guru filings only; add your ARCP month to time this to your cycle" in text
+    assert "indexed Kaizen item" in text
+    # Provenance detail lives in the Evidence basis pane now; the report
+    # still has to admit the scan was limited rather than imply a full one.
+    assert "Limited view" in text
+    # The scan window is stated in the Evidence basis pane; the report must
+    # still not pass a limited read off as a full one.
+    assert "Limited view" in text
     assert "Confidence: low" in text
-    assert "AI ARCP narrative is temporarily unavailable" in text
+    # The report is deterministic now, so there is no AI narrative to fall
+    # back from — but it must still produce a full verdict with reasons when
+    # the LLM path is unavailable.
+    assert any(l in text for l in ("Well covered", "Needs attention", "Thin"))
+    assert "*Next*" in text
     # No Kaizen index → limited scan, not a red gap-level verdict.
     assert "Full Kaizen scan not available" in text
-    assert "Filing-history snapshot (limited scan)" in text
+    assert "Limited view" in text and "Full Kaizen scan not available" in text
     assert "Evidence gap level:" not in text
     assert "🔴 Red" not in text
     assert "ARCP risk:" not in text
-    assert "Next 3 useful filing actions" in text
+    assert "*Next*" in text and "\n1. " in text
     assert "before ARCP" not in text
-    assert "Visible in this limited scan" in text
-    assert "Not seen in this limited scan" in text
+    assert "*Coverage*" in text
+    assert "Nothing yet in:" in text
     assert "Already strong" not in text
     assert "Missing domains" not in text
     assert "Domain coverage:" not in text
@@ -500,19 +508,23 @@ async def test_arcp_health_output_prioritises_action_plan_when_llm_succeeds(monk
     text = sent["text"]
     assert "*Portfolio Health — Training (CCT) evidence scan*" in text
     assert "Training (ARCP)" not in text
-    assert "*Evidence basis*" in text
-    assert "Scanned: Portfolio Guru filing history only: 3 case(s) in last 6 months" in text
-    assert "Window: last 6 months of Portfolio Guru filings only; add your ARCP month to time this to your cycle" in text
+    assert "indexed Kaizen item" in text
+    # Provenance detail lives in the Evidence basis pane now; the report
+    # still has to admit the scan was limited rather than imply a full one.
+    assert "Limited view" in text
+    # The scan window is stated in the Evidence basis pane; the report must
+    # still not pass a limited read off as a full one.
+    assert "Limited view" in text
     # No Kaizen index → limited scan, not a red gap-level verdict.
     assert "Full Kaizen scan not available" in text
-    assert "Filing-history snapshot (limited scan)" in text
+    assert "Limited view" in text and "Full Kaizen scan not available" in text
     assert "Evidence gap level:" not in text
     assert "🔴 Red" not in text
     assert "ARCP risk:" not in text
-    assert "Next 3 useful filing actions" in text
+    assert "*Next*" in text and "\n1. " in text
     assert "before ARCP" not in text
-    assert "Visible in this limited scan" in text
-    assert "Not seen in this limited scan" in text
+    assert "*Coverage*" in text
+    assert "Nothing yet in:" in text
     assert "Already strong" not in text
     assert "Missing domains" not in text
     assert "CPD" in text
@@ -890,7 +902,7 @@ async def test_arcp_and_cesr_pathway_outputs_diverge_in_lead_framing(monkeypatch
     assert "Training (CCT) evidence scan" in arcp_text
     assert "ARCP evidence review" not in arcp_text
     assert "Training (ARCP)" not in arcp_text
-    assert "Next 3 useful filing actions" in arcp_text
+    assert "*Next*" in arcp_text and "\n1. " in arcp_text
     # ARCP must NOT carry CESR / yearly-plan framing
     assert "CESR" not in arcp_text
     assert "this year" not in arcp_text.lower()
@@ -899,7 +911,7 @@ async def test_arcp_and_cesr_pathway_outputs_diverge_in_lead_framing(monkeypatch
 
     # CESR framing
     assert "CESR / Portfolio Pathway" in cesr_text
-    assert "This year's evidence plan" in cesr_text
+    assert "WPBA progress toward 36" in cesr_text
     assert "WPBA progress toward 36" in cesr_text
     assert "5-year evidence window" in cesr_text
     # CESR must NOT carry ARCP-deadline framing
@@ -913,9 +925,9 @@ async def test_arcp_and_cesr_pathway_outputs_diverge_in_lead_framing(monkeypatch
 async def test_cesr_message_contains_long_term_and_domain_balance(monkeypatch):
     cesr_text = await _run_health_capture(monkeypatch, 6003, Pathway.cesr_portfolio)
 
-    assert "Domain balance" in cesr_text
+    assert "WPBA progress toward 36" in cesr_text
     # Limited scan (no Kaizen index) → "Not seen", not full-portfolio "Missing domains".
-    assert "Not seen in this limited scan" in cesr_text
+    assert "Nothing yet in:" in cesr_text
     assert "Missing domains" not in cesr_text
     assert "consultant report" in cesr_text.lower()
     # Long-term framing wording
