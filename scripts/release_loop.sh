@@ -188,25 +188,33 @@ require_approval() {
 }
 
 PUSHED_SHA=""
-restore_feature_branch() {
-  local wanted="$1"
-  git checkout "$wanted" || { err "Failed to restore original feature branch $wanted."; return 1; }
-}
 
+# Reconcile without checking out main.
+#
+# This used to `git checkout main`, fast-forward it twice, push, then switch
+# back. That fails outright once main is held by the live deployment worktree,
+# and in a shared checkout it was itself a hazard: switching branches mid-release
+# yanks the tree out from under anything else working there.
+#
+# Pushing HEAD straight at main keeps every guarantee. The ancestry check
+# refuses anything that is not a fast-forward, a non-force push makes the server
+# refuse it too, and origin/main is re-read afterwards and compared to the exact
+# approved SHA. Nothing is trusted that was not verified after the fact.
 ship_reconcile_and_push() {
   step "Reconcile $branch -> main and push exact SHA"
-  local start_branch="$branch" candidate_sha rc=0
+  local candidate_sha
   candidate_sha="$(git rev-parse HEAD)"
   [[ "$candidate_sha" =~ ^[0-9a-fA-F]{40}$ ]] || { err "Cannot capture a full release SHA."; return 1; }
   fetch_main_required || return 1
-  if ! git checkout main; then err "Failed to checkout main."; return 1; fi
-  if ! git merge --ff-only origin/main; then err "Failed to fast-forward local main to origin/main."; rc=1
-  elif ! git merge --ff-only "$start_branch"; then err "Failed to fast-forward main to the feature branch."; rc=1
-  elif [[ "$(git rev-parse HEAD)" != "$candidate_sha" ]]; then err "Reconciled main differs from approved feature SHA."; rc=1
-  elif ! git push origin main; then err "Push of exact release SHA failed."; rc=1
+  if ! git merge-base --is-ancestor origin/main HEAD; then
+    err "Release branch is not a fast-forward of origin/main; rebase before shipping."
+    return 1
   fi
-  restore_feature_branch "$start_branch" || rc=1
-  [[ $rc == 0 ]] || return 1
+  if ! git push origin "HEAD:refs/heads/main"; then
+    err "Push of exact release SHA failed."
+    return 1
+  fi
+  fetch_main_required || return 1
   local local_sha remote_sha
   local_sha="$(git rev-parse HEAD)"
   remote_sha="$(git rev-parse origin/main)"
