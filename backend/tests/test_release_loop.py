@@ -639,20 +639,44 @@ def test_resume_exact_sha_runs_proof_without_duplicate_push(ship_harness):
     assert f"RESUMING_RELEASE_SHA={PUSHED_SHA}" in result.stdout
 
 
-def test_push_failure_restores_original_feature_branch(ship_harness):
+def test_push_failure_blocks_and_leaves_the_checkout_alone(ship_harness):
+    """A failed push must block, and must not have moved the working tree.
+
+    The reconcile used to check out main and switch back afterwards, so a
+    failure could strand the checkout on the wrong branch. It no longer
+    switches at all — which is also what lets a release run while the live
+    deployment worktree holds main."""
     result = _ship(ship_harness, "internal", extra_env={"FAKE_GIT_FAIL_COMMAND": "push origin"})
     assert result.returncode == 1
     assert "FINAL_RELEASE_STATE=blocked" in result.stdout
     log = ship_harness["git_log"].read_text()
-    assert "push origin main" in log
-    assert "checkout fix/release-proof" in log
+    assert "push origin HEAD:refs/heads/main" in log
+    assert "checkout main" not in log
 
 
-def test_branch_restoration_failure_is_blocking(ship_harness):
-    result = _ship(ship_harness, "internal", extra_env={"FAKE_GIT_FAIL_COMMAND": "checkout fix/release-proof"})
-    assert result.returncode == 1
-    assert "Failed to restore original feature branch" in result.stderr
-    assert "FINAL_RELEASE_STATE=blocked" in result.stdout
+def test_reconcile_never_checks_out_main(ship_harness):
+    """main is held by the live deployment worktree; checking it out here would
+    fail outright, and in a shared checkout it would yank the tree out from
+    under anything else working there."""
+    _ship(ship_harness, "internal")
+    log = ship_harness["git_log"].read_text()
+    assert "checkout main" not in log
+    assert "merge --ff-only" not in log
+    assert "push origin HEAD:refs/heads/main" in log
+
+
+def test_non_fast_forward_release_is_refused_before_any_push(ship_harness):
+    """Refused up front by the pre-flight ancestry guard, so nothing is pushed
+    and nothing is mutated. The reconcile carries its own second check for the
+    same property, since it is the last thing standing before the push."""
+    result = _ship(
+        ship_harness,
+        "internal",
+        extra_env={"FAKE_GIT_FAIL_COMMAND": "merge-base --is-ancestor"},
+    )
+    assert result.returncode == 3
+    assert "not an ancestor of HEAD" in result.stderr
+    assert "push origin" not in ship_harness["git_log"].read_text()
 
 
 def test_resume_refuses_sha_that_does_not_equal_head_and_origin_main(ship_harness):
