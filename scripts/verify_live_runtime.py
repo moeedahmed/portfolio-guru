@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 
-DEFAULT_PROJECT_ROOT = Path("/Users/moeedahmed/projects/portfolio-guru")
+DEFAULT_PROJECT_ROOT = Path("/Users/moeedahmed/projects/portfolio-guru-live")
 DEFAULT_SERVICE_LABEL = "com.portfolioguru.bot"
 DEFAULT_IDENTITY_PATH = Path("/tmp/portfolio-guru-runtime.json")
 FULL_SHA = re.compile(r"^[0-9a-fA-F]{40}$")

@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_DIR="${PORTFOLIO_GURU_APP_DIR:-/Users/moeedahmed/projects/portfolio-guru}"
+# The live deployment has its own checkout. It used to share the dev
+# workspace, which meant a deploy ran "git checkout main" on a directory
+# agents were actively editing — switching branches under them — and a
+# dirty dev tree could only ever block the deploy or boot unreviewed code.
+APP_DIR="${PORTFOLIO_GURU_APP_DIR:-/Users/moeedahmed/projects/portfolio-guru-live}"
 SERVICE_LABEL="${PORTFOLIO_GURU_SERVICE_LABEL:-com.portfolioguru.bot}"
 PLIST_PATH="${HOME}/Library/LaunchAgents/${SERVICE_LABEL}.plist"
 LOCK_DIR="${PORTFOLIO_GURU_DEPLOY_LOCK:-/tmp/portfolio-guru-deploy.lock}"

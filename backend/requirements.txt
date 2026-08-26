@@ -8,7 +8,14 @@ browser-use==0.11.13
 playwright==1.60.0
 pydantic==2.12.5
 httpx==0.28.1
-python-telegram-bot==22.6
+# The [job-queue] extra pulls APScheduler, which the bot needs for every
+# scheduled task: the liveness heartbeat, retention purge, Stripe
+# reconciliation, the weekly digest and the sign-off chase. Without it
+# Application.job_queue is None and startup dies on run_daily. The dev
+# machine had APScheduler installed by hand, so a plain
+# "pip install -r requirements.txt" had been broken here since before
+# 2026-08-26 and nobody noticed until a clean environment was built.
+python-telegram-bot[job-queue]==22.6
 cryptography==46.0.5
 sqlmodel==0.0.37
 google-generativeai==0.8.6

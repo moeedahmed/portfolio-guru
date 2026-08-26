@@ -43,5 +43,5 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          PORTFOLIO_GURU_APP_DIR=/Users/moeedahmed/projects/portfolio-guru \
+          PORTFOLIO_GURU_APP_DIR=/Users/moeedahmed/projects/portfolio-guru-live \
             bash "$GITHUB_WORKSPACE/release-source/scripts/deploy_mac.sh"
