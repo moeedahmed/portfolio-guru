@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_DIR="${PORTFOLIO_GURU_APP_DIR:-/Users/moeedahmed/projects/portfolio-guru}"
+APP_DIR="${PORTFOLIO_GURU_APP_DIR:-/Users/moeedahmed/projects/portfolio-guru-live}"
 SERVICE_LABEL="${PORTFOLIO_GURU_SERVICE_LABEL:-com.portfolioguru.bot}"
 PLIST_PATH="${HOME}/Library/LaunchAgents/${SERVICE_LABEL}.plist"
 # start-bot.sh redirects the whole service (secrets, Chrome, webhook, bot) into
