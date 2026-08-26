@@ -509,29 +509,7 @@ async def _retire_clicked_keyboard(query) -> None:
 # ---------------------------------------------------------------------------
 # Weekly nudge — FORM_LABELS + helpers ported from weekly_check.py
 # ---------------------------------------------------------------------------
-FORM_LABELS = {
-    "CBD": "CBD", "DOPS": "DOPS", "MINI_CEX": "Mini-CEX", "ACAT": "ACAT",
-    "LAT": "LAT", "ACAF": "ACAF", "STAT": "STAT", "MSF": "MSF",
-    "QIAT": "QIAT", "JCF": "JCF", "ESLE_ASSESS": "ESLE", "AUDIT": "Audit",
-    "REFLECT_LOG": "Reflective Log", "COMPLAINT": "Complaint",
-    "SERIOUS_INC": "Serious Incident", "CRIT_INCIDENT": "Critical Incident",
-    "PDP": "PDP", "APPRAISAL": "Appraisal", "TEACH": "Teaching",
-    "TEACH_OBS": "Teaching Observation", "TEACH_CONFID": "Confidentiality",
-    "SDL": "SDL", "EDU_ACT": "Educational Activity", "EDU_MEETING": "ES Meeting",
-    "EDU_MEETING_SUPP": "ES Meeting (Supp)", "FORMAL_COURSE": "Formal Course",
-    "PROC_LOG": "Procedure Log", "US_CASE": "Ultrasound Case",
-    "RESEARCH": "Research", "CLIN_GOV": "Clinical Governance",
-    "COST_IMPROVE": "Cost Improvement", "EQUIP_SERVICE": "Equipment/Service",
-    "BUSINESS_CASE": "Business Case",
-    "MGMT_ROTA": "Rota Management", "MGMT_RISK": "Risk Management",
-    "MGMT_RISK_PROC": "Risk Procedure", "MGMT_INFO": "Information Management",
-    "MGMT_EXPERIENCE": "Management Experience", "MGMT_REPORT": "Management Report",
-    "MGMT_COMPLAINT": "Management Complaint", "MGMT_GUIDELINE": "Guideline Development",
-    "MGMT_INDUCTION": "Induction", "MGMT_PROJECT": "Management Project",
-    "MGMT_RECRUIT": "Recruitment", "MGMT_TRAINING_EVT": "Training Event",
-    "OOP": "Out of Programme", "ABSENCE": "Absence", "CCT": "CCT Application",
-    "HIGHER_PROG": "Higher Programme", "FILE_UPLOAD": "File Upload",
-}
+from form_labels import FORM_LABELS  # single source of truth
 
 
 def _nudge_label(form_type: str) -> str:

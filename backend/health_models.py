@@ -68,6 +68,12 @@ class EvidenceItem(BaseModel):
     source: EvidenceSource
     source_ref: Optional[str] = None
     status: EvidenceStatus
+    # Kaizen's own sign-off workflow state for this item — "complete",
+    # "pending" (submitted, waiting on someone else), "draft" (the doctor's own
+    # unfinished work), and so on. ``status`` deliberately flattens these into
+    # the pathway-agnostic vocabulary; this keeps the distinction the doctor
+    # actually acts on. None for evidence that did not come from a Kaizen scan.
+    workflow_state: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
