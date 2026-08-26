@@ -14,6 +14,29 @@ Send the bot a message on Telegram. If it replies, it is up.
 If it does not reply within a minute, work down this list. Each step is
 independent — do them in order and stop at the first one that fixes it.
 
+### 0. Has the Mac rebooted and not been logged into?
+
+Check this first after any power cut, because it looks identical to a crash and
+no command will tell you from another machine.
+
+With FileVault on, macOS disables auto-login. The bot runs inside the user
+session (`gui/<uid>`), so until someone physically logs in at the Mac, the disk
+stays locked, the session never starts, and the bot cannot run. Nothing is
+broken — the machine is doing exactly what disk encryption is for.
+
+**Fix:** log in at the Mac. The bot comes up on its own from there.
+
+Before a _planned_ reboot, this unlocks the disk once on the next boot so the
+bot returns without you being present:
+
+```bash
+sudo fdesetup authrestart
+```
+
+There is no equivalent for an unplanned power cut. That is the accepted cost of
+FileVault on a home-hosted service; the 15-minute heartbeat alert is what makes
+sure you find out rather than discovering it hours later.
+
 ### 1. Is the bot process running?
 
 ```bash
@@ -135,14 +158,14 @@ The two worst failures here have both been failures of _silence_, not of
 crashing. Anything added to this system should be judged on whether it fails
 loudly.
 
-| Risk                               | What watches it                                      | Alerts via                                          |
-| ---------------------------------- | ---------------------------------------------------- | --------------------------------------------------- |
-| Bot process dies                   | launchd `KeepAlive` restarts it                      | — (automatic)                                       |
-| Bot alive but wedged (not polling) | 5-min heartbeat ping from `bot.py`                   | Healthchecks.io, if `PG_HEARTBEAT_URL` set          |
-| Bad deploy                         | post-deploy smoke + auto-rollback in `deploy_mac.sh` | CI turns red                                        |
-| Off-device backup fails            | upload verified + non-zero exit                      | Telegram, and Healthchecks.io `/fail`               |
+| Risk                               | What watches it                                      | Alerts via                                                     |
+| ---------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------- |
+| Bot process dies                   | launchd `KeepAlive` restarts it                      | — (automatic)                                                  |
+| Bot alive but wedged (not polling) | 5-min heartbeat ping from `bot.py`                   | Healthchecks.io, if `PG_HEARTBEAT_URL` set                     |
+| Bad deploy                         | post-deploy smoke + auto-rollback in `deploy_mac.sh` | CI turns red                                                   |
+| Off-device backup fails            | upload verified + non-zero exit                      | Telegram, and Healthchecks.io `/fail`                          |
 | Backup never runs at all           | absence of a ping                                    | Healthchecks.io, if `PG_BACKUP_HEALTHCHECK_URL_PRODUCTION` set |
-| Whole machine offline              | nothing on the machine can report this               | Healthchecks.io absence alerts                      |
+| Whole machine offline              | nothing on the machine can report this               | Healthchecks.io absence alerts                                 |
 
 The last row is the point of an external monitor: no check that runs _on_ the
 Mac Mini can tell you the Mac Mini is gone.
@@ -174,3 +197,11 @@ Honest list, so nobody discovers these during an incident:
    notice. Not recoverable from here; it needs a code fix.
 4. **Only Moeed has done this.** Steps above are written for someone else, but
    nobody else has actually executed them.
+5. **The FileVault recovery key.** With FileVault on, losing both this key and
+   the login password makes the disk unrecoverable — no support call fixes it.
+   It belongs in Bitwarden, and it must not be the iCloud-escrowed variant:
+   that hands Apple a key to special-category health data.
+6. **A power cut is now a manual recovery.** FileVault disables auto-login, so
+   the bot cannot return on its own — see step 0. This is the one failure mode
+   that got worse in exchange for encryption at rest, and it was a deliberate
+   trade (2026-08-26).
