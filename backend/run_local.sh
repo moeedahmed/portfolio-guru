@@ -51,6 +51,22 @@ get_secret_by_key() {
     | python3 -c "import json,sys; d=json.load(sys.stdin); print(next((s['value'] for s in d if s.get('key')=='$key'), ''))" 2>/dev/null || true
 }
 
+require_secret_by_key() {
+  # Look up a REQUIRED secret by its KEY name. Fails loudly rather than
+  # exporting an empty value: an empty FERNET_SECRET_KEY starts a bot that
+  # cannot decrypt anyone's Kaizen login, which looks like a Kaizen outage.
+  # Key names (not BWS ids) so secrets can be moved between projects — which is
+  # exactly what scoping Portfolio Guru to its own machine account requires.
+  local key="$1"
+  local value
+  value="$(get_secret_by_key "$key")"
+  if [ -z "$value" ]; then
+    echo "FATAL: required secret $key not found in BWS (check the machine account's project access)" >&2
+    exit 1
+  fi
+  printf '%s' "$value"
+}
+
 get_mapped_secret() {
   local key="$1"
   local map_path="${OPENCLAW_SECRETS_MAP:-$HOME/.openclaw/workspace/secrets.json}"
@@ -70,9 +86,9 @@ PY
   get_secret "$id"
 }
 
-TELEGRAM_BOT_TOKEN="$(get_secret af553b7d-5c05-418a-b80e-b405015708ed)"
+TELEGRAM_BOT_TOKEN="$(require_secret_by_key TELEGRAM_BOT_TOKEN_PORTFOLIO)"
 export TELEGRAM_BOT_TOKEN
-GOOGLE_API_KEY="$(get_secret af6579a0-2cbe-4cef-94b3-b405017b48fe)"
+GOOGLE_API_KEY="$(require_secret_by_key GEMINI_API_KEY_PORTFOLIO)"
 export GOOGLE_API_KEY
 echo "Google key loaded for OCR/voice utilities (last4): ${GOOGLE_API_KEY: -4}"
 # Clinical extraction runs on Vertex AI (europe-west2). This label is what the
@@ -108,7 +124,7 @@ if [ -n "$GCP_PROJECT_ID" ]; then
   echo "Vertex AI (EU) creds present: project=$GCP_PROJECT_ID location=$GCP_VERTEX_LOCATION use_vertex=${PG_USE_VERTEX:-off}"
 fi
 
-FERNET_SECRET_KEY="$(get_secret 9e653679-9a33-4c23-a15c-b405015713de)"
+FERNET_SECRET_KEY="$(require_secret_by_key FERNET_SECRET_KEY_PORTFOLIO)"
 export FERNET_SECRET_KEY
 
 # --- Durable mirror: Portfolio Guru's own Supabase project (London) ---------
@@ -164,9 +180,9 @@ fi
 #   export OPENAI_API_KEY
 # fi
 # Stripe (Portfolio Guru account)
-STRIPE_SECRET_KEY="$(get_secret 4450d6ac-f7a2-4802-a27a-b428006488c9)"
+STRIPE_SECRET_KEY="$(require_secret_by_key STRIPE_API_KEY_PORTFOLIO)"
 export STRIPE_SECRET_KEY
-STRIPE_WEBHOOK_SECRET="$(get_secret 3ffc5e11-f4d6-4ff8-872f-b428006e7126)"
+STRIPE_WEBHOOK_SECRET="$(require_secret_by_key STRIPE_WEBHOOK_SECRET_PORTFOLIO)"
 export STRIPE_WEBHOOK_SECRET
 # Price IDs are BWS-overridable so going live is a secrets-only change (no code
 # edit). Falls back to the current test-mode prices when the BWS key is unset.
