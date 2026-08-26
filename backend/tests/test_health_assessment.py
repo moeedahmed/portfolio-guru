@@ -387,17 +387,61 @@ def test_curriculum_spread_reports_counts_not_a_tick():
 
 
 def test_untagged_items_are_disclosed_not_silently_dropped():
-    """Over half a real portfolio carried no curriculum tag. Without saying so,
-    a thin SLO reads as a gap when the evidence may simply be untagged."""
+    """Without saying so, a thin SLO reads as a gap in the doctor's evidence
+    when it may only be a gap in their tagging."""
     items = [_tagged([6], ident="a")] + [_item(ident=f"u-{n}") for n in range(5)]
 
     assessment = compute_health_assessment(items, today=TODAY)
     detail = format_domain_detail(assessment, today=TODAY)
 
+    # All six are CBDs and one is tagged, so the other five are a real gap.
     assert assessment.untagged_items == 5
-    assert "5 items carry no curriculum tag" in detail
+    assert "5 items are untagged" in detail
 
 
 def test_curriculum_block_is_absent_when_nothing_is_tagged():
     detail = format_domain_detail(compute_health_assessment(_balanced(), today=TODAY), today=TODAY)
     assert "Curriculum spread" not in detail
+
+
+# ── Recency and the taggable split ──────────────────────────────────────────
+
+
+def test_domain_detail_separates_a_live_domain_from_a_historical_one():
+    """250 items built years ago is not the same portfolio as 250 with most of
+    them this year, and a total alone cannot tell them apart."""
+    items = [_item(days_ago=30, ident=f"new-{n}") for n in range(5)]
+    items += [_item(days_ago=365 * 2, ident=f"old-{n}") for n in range(20)]
+
+    assessment = compute_health_assessment(items, today=TODAY)
+    detail = format_domain_detail(assessment, today=TODAY)
+
+    clinical = next(s for s in assessment.domains if s.domain == HealthDomain.clinical)
+    assert clinical.count == 25 and clinical.recent_count == 5
+    assert "Clinical: 25, 5 in last 12m" in detail
+
+
+def test_untagged_count_excludes_forms_that_never_carry_tags():
+    """MSF, e-learning, exams and uploads cannot be KC-tagged. Counting them as
+    untagged turned a structural fact into an alarming number — 247 rather than
+    the 158 that actually represent a gap."""
+    items = [
+        _tagged([3], ident="ref-tagged", form_type="REFLECT_LOG"),
+        _item(ident="ref-untagged", form_type="REFLECT_LOG"),
+        _item(ident="msf-1", form_type="MSF"),
+        _item(ident="msf-2", form_type="MSF"),
+    ]
+
+    assessment = compute_health_assessment(items, today=TODAY)
+
+    # Only the untagged reflection counts: MSF is never tagged in this portfolio.
+    assert assessment.untagged_items == 1
+
+
+def test_untagged_disclosure_says_why_it_matters():
+    items = [
+        _tagged([3], ident="a", form_type="REFLECT_LOG"),
+        _item(ident="b", form_type="REFLECT_LOG"),
+    ]
+    detail = format_domain_detail(compute_health_assessment(items, today=TODAY), today=TODAY)
+    assert "may not count toward curriculum coverage" in detail

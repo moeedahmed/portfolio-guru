@@ -78,6 +78,7 @@ class DomainStat:
     newest: Optional[date]
     is_thin: bool
     is_stale: bool
+    recent_count: int = 0
 
     @property
     def is_empty(self) -> bool:
@@ -145,8 +146,18 @@ def _domain_stats(items: list[EvidenceItem], today: date) -> list[DomainStat]:
             count and count < THIN_MAX_ITEMS and (not total or count / total < THIN_MAX_SHARE)
         )
         stale = bool(newest and (today - newest).days > STALE_AFTER_DAYS)
+        recent = sum(
+            1 for item in in_domain if (today - item.event_date).days <= RECENT_WINDOW_DAYS
+        )
         stats.append(
-            DomainStat(domain=domain, count=count, newest=newest, is_thin=thin, is_stale=stale)
+            DomainStat(
+                domain=domain,
+                count=count,
+                newest=newest,
+                is_thin=thin,
+                is_stale=stale,
+                recent_count=recent,
+            )
         )
     return stats
 
@@ -199,13 +210,10 @@ def compute_health_assessment(
     newest = max((item.event_date for item in items), default=None)
 
     slo_counts: dict[int, int] = {}
-    untagged = 0
     for item in items:
-        numbers = getattr(item, "slo_numbers", None) or []
-        if not numbers:
-            untagged += 1
-        for slo in numbers:
+        for slo in getattr(item, "slo_numbers", None) or []:
             slo_counts[slo] = slo_counts.get(slo, 0) + 1
+    untagged = _untagged_but_taggable(items)
 
     reasons: list[str] = []
     for stat in stats:
@@ -263,6 +271,29 @@ def compute_health_assessment(
 # CBDs in a portfolio of 250 clinical items is proportionate, not a finding.
 REPEAT_PATTERN_MIN = 3
 REPEAT_PATTERN_RATE_MULTIPLE = 2.0
+
+
+def _untagged_but_taggable(items: list[EvidenceItem]) -> int:
+    """Count untagged items of a kind the doctor does tag elsewhere.
+
+    Much evidence cannot carry curriculum tags at all — MSF, e-learning, exams,
+    document uploads — and counting those as untagged turns a structural fact
+    into an alarming number. On a real portfolio that was ~100 of 247. What is
+    worth flagging is the other kind: 66 untagged reflections next to 24 tagged
+    ones is not structure, it is evidence that may not count toward curriculum
+    coverage. A form type counts as taggable here only because this doctor has
+    tagged one of them before.
+    """
+    taggable_forms = {
+        item.form_type
+        for item in items
+        if item.form_type and (getattr(item, "slo_numbers", None) or [])
+    }
+    return sum(
+        1
+        for item in items
+        if item.form_type in taggable_forms and not (getattr(item, "slo_numbers", None) or [])
+    )
 
 
 def _patterns(

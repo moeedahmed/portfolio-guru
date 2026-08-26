@@ -246,7 +246,11 @@ def format_domain_detail(assessment: HealthAssessment, *, today: Optional[date] 
         recency = f"latest {newest}"
         if age_days is not None and age_days > 365:
             recency += f" ({age_days // 365}y ago)"
-        lines.append(f"• {label}: {stat.count}, {recency}{suffix}")
+        # A total says how much exists; the recent count says whether the
+        # domain is still alive. 250 items built years ago is not the same
+        # portfolio as 250 with 58 this year.
+        recent = f", {stat.recent_count} in last 12m" if stat.count else ""
+        lines.append(f"• {label}: {stat.count}{recent}, {recency}{suffix}")
     lines.extend(_slo_block(assessment))
     lines.append("")
     lines.append(
@@ -276,7 +280,9 @@ def _slo_block(assessment: HealthAssessment) -> list[str]:
         # Untagged items are invisible to this view. Saying so stops a doctor
         # reading a thin SLO as a gap when the evidence may simply be untagged.
         lines.append(
-            f"_{assessment.untagged_items} items carry no curriculum tag and "
-            "are not counted here._"
+            f"_{assessment.untagged_items} items are untagged despite being a "
+            "form you tag elsewhere — they may not count toward curriculum "
+            "coverage. Evidence that never carries tags (MSF, e-learning, "
+            "exams, uploads) is excluded from this figure._"
         )
     return lines
