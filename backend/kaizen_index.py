@@ -848,6 +848,7 @@ def evidence_row_to_health_item(row: EvidenceItemRow) -> EvidenceItem:
         source=source,  # type: ignore[arg-type]
         source_ref=row.detail_url,
         status=status,  # type: ignore[arg-type]
+        workflow_state=(row.state or "").strip().lower() or None,
         created_at=now,
         updated_at=now,
     )
