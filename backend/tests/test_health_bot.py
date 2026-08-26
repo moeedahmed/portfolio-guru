@@ -1211,7 +1211,9 @@ def test_evidence_basis_shows_last_scanned_and_arcp_month_setup_prompt():
 
     assert context.startswith("*Evidence basis*")
     assert "Last scanned: 2026-06-01 12:38 BST" in context
-    assert "add your ARCP month to time this to your cycle" in context
+    # The prompt must name the command that sets it. It used to instruct
+    # doctors to add their ARCP month while offering no way to do so.
+    assert "set your review month with /arcp" in context
     assert "not set yet" not in context
 
 

@@ -247,9 +247,36 @@ def format_domain_detail(assessment: HealthAssessment, *, today: Optional[date] 
         if age_days is not None and age_days > 365:
             recency += f" ({age_days // 365}y ago)"
         lines.append(f"• {label}: {stat.count}, {recency}{suffix}")
+    lines.extend(_slo_block(assessment))
     lines.append("")
     lines.append(
         "_\"Thin\" is measured against your own portfolio, not a curriculum "
         "requirement — check your stage's minimums separately._"
     )
     return "\n".join(lines).strip()
+
+
+def _slo_block(assessment: HealthAssessment) -> list[str]:
+    """Curriculum spread, stated as counts rather than a tick.
+
+    "12/12 SLOs covered" is technically true of a portfolio holding 298 tags
+    against one outcome and 13 against another. The count is the finding.
+    """
+    counts = assessment.slo_counts
+    if not counts:
+        return []
+    ranked = sorted(counts.items(), key=lambda kv: kv[1])
+    strongest_slo, strongest = ranked[-1]
+    lines = ["", "*Curriculum spread*", f"{len(counts)} of 12 SLOs have tagged evidence, by item:"]
+    thinnest = [f"SLO{slo} ({count})" for slo, count in ranked[:3]]
+    lines.append(
+        f"Strongest SLO{strongest_slo} ({strongest}) · thinnest {' · '.join(thinnest)}"
+    )
+    if assessment.untagged_items:
+        # Untagged items are invisible to this view. Saying so stops a doctor
+        # reading a thin SLO as a gap when the evidence may simply be untagged.
+        lines.append(
+            f"_{assessment.untagged_items} items carry no curriculum tag and "
+            "are not counted here._"
+        )
+    return lines

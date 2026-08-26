@@ -74,6 +74,10 @@ class EvidenceItem(BaseModel):
     # the pathway-agnostic vocabulary; this keeps the distinction the doctor
     # actually acts on. None for evidence that did not come from a Kaizen scan.
     workflow_state: Optional[str] = None
+    # RCEM SLO numbers this item is tagged against in Kaizen. Empty when the
+    # item carries no curriculum tag, which is common for documents and
+    # uploads — absence here means "not tagged", never "not relevant".
+    slo_numbers: list[int] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 

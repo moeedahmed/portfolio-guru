@@ -8288,8 +8288,8 @@ def _health_window_label(pathway: Pathway, source: str) -> str:
             return "all indexed Kaizen evidence currently stored; CESR still needs a formal multi-year evidence map"
         return "last 6 months of Portfolio Guru filings only; not enough for a CESR judgement"
     if source == "kaizen_index":
-        return "all indexed Kaizen evidence currently stored; add your ARCP month to time this to your cycle"
-    return "last 6 months of Portfolio Guru filings only; add your ARCP month to time this to your cycle"
+        return "all indexed Kaizen evidence currently stored; set your review month with /arcp to time this to your cycle"
+    return "last 6 months of Portfolio Guru filings only; set your review month with /arcp to time this to your cycle"
 
 
 def _health_confidence_label(

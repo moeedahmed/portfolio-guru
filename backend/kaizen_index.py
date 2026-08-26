@@ -849,6 +849,7 @@ def evidence_row_to_health_item(row: EvidenceItemRow) -> EvidenceItem:
         source_ref=row.detail_url,
         status=status,  # type: ignore[arg-type]
         workflow_state=(row.state or "").strip().lower() or None,
+        slo_numbers=sorted(slo_coverage_from_evidence_rows([row])),
         created_at=now,
         updated_at=now,
     )
@@ -879,6 +880,20 @@ def slo_numbers_from_kc_tag(tag: Optional[str]) -> set[int]:
         if 1 <= number <= _MAX_SLO:
             covered.add(number)
     return covered
+
+
+def slo_counts_from_evidence_rows(rows: Iterable[EvidenceItemRow]) -> dict[int, int]:
+    """Count KC tags per SLO across indexed rows.
+
+    Presence alone ("12/12 SLOs covered") reads as complete while hiding an
+    order-of-magnitude imbalance — 298 tags against 13 is not equal coverage.
+    """
+    counts: dict[int, int] = {}
+    for row in rows:
+        for tag in row.linked_kc_tags or []:
+            for slo in slo_numbers_from_kc_tag(tag):
+                counts[slo] = counts.get(slo, 0) + 1
+    return counts
 
 
 def slo_coverage_from_evidence_rows(rows: Iterable[EvidenceItemRow]) -> set[int]:

@@ -98,6 +98,8 @@ class HealthAssessment:
     newest_evidence: Optional[date] = None
     next_actions: list[str] = field(default_factory=list)
     patterns: list[str] = field(default_factory=list)
+    slo_counts: dict[int, int] = field(default_factory=dict)
+    untagged_items: int = 0
 
     @property
     def stuck_total(self) -> int:
@@ -196,6 +198,15 @@ def compute_health_assessment(
     )
     newest = max((item.event_date for item in items), default=None)
 
+    slo_counts: dict[int, int] = {}
+    untagged = 0
+    for item in items:
+        numbers = getattr(item, "slo_numbers", None) or []
+        if not numbers:
+            untagged += 1
+        for slo in numbers:
+            slo_counts[slo] = slo_counts.get(slo, 0) + 1
+
     reasons: list[str] = []
     for stat in stats:
         if stat.is_empty:
@@ -242,6 +253,8 @@ def compute_health_assessment(
         newest_evidence=newest,
         next_actions=_next_actions(awaiting, drafts, stats),
         patterns=_patterns(awaiting, drafts, stats, items),
+        slo_counts=slo_counts,
+        untagged_items=untagged,
     )
 
 

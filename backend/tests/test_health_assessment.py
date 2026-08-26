@@ -362,3 +362,42 @@ def test_missing_review_date_offers_the_command_that_sets_it():
 def test_passed_review_date_asks_for_the_next_one():
     _, text = _render(_balanced(), review_date=date(2026, 5, 1), today=TODAY)
     assert "has passed" in text and "/arcp" in text
+
+
+# ── Curriculum spread ───────────────────────────────────────────────────────
+
+
+def _tagged(slos, **kwargs):
+    item = _item(**kwargs)
+    return item.model_copy(update={"slo_numbers": list(slos)})
+
+
+def test_curriculum_spread_reports_counts_not_a_tick():
+    """"12/12 SLOs covered" is true of a portfolio holding 138 items against
+    one outcome and 13 against another. The count is the finding."""
+    items = [_tagged([6], ident=f"a-{n}") for n in range(40)]
+    items += [_tagged([10], ident=f"b-{n}") for n in range(3)]
+
+    assessment = compute_health_assessment(items, today=TODAY)
+    detail = format_domain_detail(assessment, today=TODAY)
+
+    assert assessment.slo_counts == {6: 40, 10: 3}
+    assert "Strongest SLO6 (40)" in detail
+    assert "SLO10 (3)" in detail
+
+
+def test_untagged_items_are_disclosed_not_silently_dropped():
+    """Over half a real portfolio carried no curriculum tag. Without saying so,
+    a thin SLO reads as a gap when the evidence may simply be untagged."""
+    items = [_tagged([6], ident="a")] + [_item(ident=f"u-{n}") for n in range(5)]
+
+    assessment = compute_health_assessment(items, today=TODAY)
+    detail = format_domain_detail(assessment, today=TODAY)
+
+    assert assessment.untagged_items == 5
+    assert "5 items carry no curriculum tag" in detail
+
+
+def test_curriculum_block_is_absent_when_nothing_is_tagged():
+    detail = format_domain_detail(compute_health_assessment(_balanced(), today=TODAY), today=TODAY)
+    assert "Curriculum spread" not in detail
