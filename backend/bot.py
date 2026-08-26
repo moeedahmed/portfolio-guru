@@ -768,12 +768,15 @@ async def signoff_chase_push(context: ContextTypes.DEFAULT_TYPE) -> None:
     Guarded by the same file-sentinel pattern as ``weekly_push`` so a bot
     restart cannot turn a weekly cadence into a daily one.
     """
+    import json
     import os
+    from datetime import UTC, datetime
 
     import ops_alert
-    from health_watch import find_stuck_signoffs, format_signoff_chase
+    from health_watch import detect_changes, format_change_report
 
     heartbeat_url = os.environ.get("PG_SIGNOFF_CHASE_HEALTHCHECK_URL", "")
+    seen_path = os.path.expanduser("~/.openclaw/data/portfolio-guru/signoff_chase_seen.json")
     sentinel = os.path.expanduser("~/.openclaw/data/portfolio-guru/signoff_chase_last_run")
     os.makedirs(os.path.dirname(sentinel), exist_ok=True)
     now = time.time()
@@ -795,17 +798,49 @@ async def signoff_chase_push(context: ContextTypes.DEFAULT_TYPE) -> None:
     skipped = 0
     failed = 0
     try:
+        seen: dict = {}
+        if os.path.exists(seen_path):
+            try:
+                seen = json.load(open(seen_path))
+            except (OSError, ValueError):
+                seen = {}
+
         for user_id in _signoff_chase_audience(await get_all_active_users()):
             try:
-                stuck = await find_stuck_signoffs(user_id)
-                text = format_signoff_chase(stuck)
+                # Change detection needs current data. Without a refresh the
+                # watcher could never learn that an assessor signed something
+                # off, and would only ever repeat what the last /health saw.
+                if has_credentials(user_id):
+                    try:
+                        await sync_kaizen_portfolio_index_for_user(user_id)
+                    except Exception as exc:
+                        logger.warning("signoff_chase refresh failed for %s: %s", user_id, exc)
+
+                previous = seen.get(str(user_id))
+                since = None
+                if previous:
+                    try:
+                        since = datetime.fromisoformat(str(previous))
+                    except ValueError:
+                        since = None
+
+                changes = await detect_changes(user_id, since=since)
+                seen[str(user_id)] = datetime.now(UTC).isoformat()
+
+                text = format_change_report(changes)
                 if not text:
+                    # Silence is the feature: a weekly repeat of an unchanged
+                    # list is what gets muted, and a muted watcher cannot
+                    # report the week something actually moves.
                     skipped += 1
                     continue
                 logger.info(
-                    "Portfolio Guru funnel event=signoff_chase_sent user_id=%s stuck=%d",
+                    "Portfolio Guru funnel event=signoff_chase_sent user_id=%s "
+                    "new=%d cleared=%d waiting=%d",
                     user_id,
-                    len(stuck),
+                    len(changes.newly_stuck),
+                    len(changes.cleared),
+                    changes.still_waiting,
                 )
                 await context.bot.send_message(
                     chat_id=user_id, text=text, parse_mode="Markdown"
@@ -814,13 +849,19 @@ async def signoff_chase_push(context: ContextTypes.DEFAULT_TYPE) -> None:
             except Exception as exc:
                 logger.warning("signoff_chase failed for %s: %s", user_id, exc)
                 failed += 1
+
+        try:
+            with open(seen_path, "w") as fh:
+                json.dump(seen, fh)
+        except OSError as exc:
+            logger.warning("signoff_chase could not persist seen state: %s", exc)
     except Exception:
         logger.error("signoff_chase aborted", exc_info=True)
         ops_alert.ping_check(heartbeat_url, "/fail")
         raise
 
     logger.info(
-        "signoff_chase complete: %d sent, %d with nothing stuck, %d failed",
+        "signoff_chase complete: %d sent, %d with nothing new, %d failed",
         sent,
         skipped,
         failed,

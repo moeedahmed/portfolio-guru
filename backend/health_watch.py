@@ -26,8 +26,10 @@ Design notes:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Optional
+
+from form_labels import form_label
 
 from kaizen_index import _parse_kaizen_date, list_evidence_items
 
@@ -169,3 +171,149 @@ def format_signoff_chase(items: list[StuckItem], *, limit: int = 5) -> Optional[
         "Kaizen portfolio so you can decide what to follow up."
     )
     return "\n".join(lines)
+
+
+# ── Change detection ────────────────────────────────────────────────────────
+#
+# A weekly message that re-lists the same stuck items is the thing that gets
+# muted, and once muted it can no longer report the item that just went
+# unsigned. The index records every transition (``state_since``,
+# ``previous_state``), so the watcher can speak only about what moved.
+
+
+@dataclass(frozen=True)
+class PortfolioChange:
+    """One thing that moved since the watcher last spoke."""
+
+    title: str
+    form_type: Optional[str]
+    event_date: date
+    kind: str  # "stuck" | "cleared"
+    url: Optional[str]
+
+
+@dataclass(frozen=True)
+class ChangeSet:
+    newly_stuck: list[PortfolioChange]
+    cleared: list[PortfolioChange]
+    still_waiting: int
+
+    @property
+    def has_news(self) -> bool:
+        return bool(self.newly_stuck or self.cleared)
+
+
+def _transitioned_after(row, since: Optional[datetime]) -> bool:
+    """True when the row's current state was first seen after ``since``."""
+    if since is None:
+        return True
+    raw = (row.state_since or "").strip()
+    if not raw:
+        return False
+    try:
+        seen = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if seen.tzinfo is None:
+        seen = seen.replace(tzinfo=UTC)
+    return seen > since
+
+
+async def detect_changes(
+    user_id: str | int,
+    *,
+    since: Optional[datetime] = None,
+    min_days: int = DEFAULT_CHASE_AFTER_DAYS,
+    today: Optional[date] = None,
+) -> ChangeSet:
+    """What moved since ``since``: newly stuck evidence, and evidence cleared.
+
+    ``since`` of None means "first run" — everything currently stuck counts as
+    news, because the doctor has never been told.
+    """
+    reference = today or date.today()
+    rows = await list_evidence_items(user_id)
+
+    newly_stuck: list[PortfolioChange] = []
+    cleared: list[PortfolioChange] = []
+    still_waiting = 0
+
+    for row in rows:
+        state = (row.state or "").strip().lower()
+        event_date = _parse_kaizen_date(row.date_occurred_on) if row.date_occurred_on else None
+
+        if state in BLOCKED_STATES and event_date:
+            if (reference - event_date).days < min_days:
+                continue
+            still_waiting += 1
+            if _transitioned_after(row, since):
+                newly_stuck.append(
+                    PortfolioChange(
+                        title=row.event_type or "Portfolio evidence",
+                        form_type=row.event_type,
+                        event_date=event_date,
+                        kind="stuck",
+                        url=row.detail_url,
+                    )
+                )
+        elif (
+            state
+            and state not in BLOCKED_STATES
+            and (row.previous_state or "").strip().lower() in BLOCKED_STATES
+            and _transitioned_after(row, since)
+            and event_date
+        ):
+            # Good news is worth sending too: it tells the doctor the chase
+            # worked, and a watcher that only ever reports problems is one more
+            # source of dread.
+            cleared.append(
+                PortfolioChange(
+                    title=row.event_type or "Portfolio evidence",
+                    form_type=row.event_type,
+                    event_date=event_date,
+                    kind="cleared",
+                    url=row.detail_url,
+                )
+            )
+
+    newly_stuck.sort(key=lambda c: c.event_date)
+    cleared.sort(key=lambda c: c.event_date)
+    return ChangeSet(newly_stuck=newly_stuck, cleared=cleared, still_waiting=still_waiting)
+
+
+def format_change_report(changes: ChangeSet, *, limit: int = 4) -> Optional[str]:
+    """Message the change, or return None and stay quiet.
+
+    Returning None is the feature. A weekly repetition of an unchanged list
+    trains the reader to ignore it, and then it cannot deliver the one week
+    something actually moved.
+    """
+    if not changes.has_news:
+        return None
+
+    lines: list[str] = []
+    if changes.cleared:
+        lines.append(f"\u2705 *{len(changes.cleared)} signed off since last time*")
+        for change in changes.cleared[:limit]:
+            lines.append(f"\u2022 {_change_label(change)}")
+        lines.append("")
+
+    if changes.newly_stuck:
+        lines.append(f"\U0001F4CC *{len(changes.newly_stuck)} newly waiting*")
+        for change in changes.newly_stuck[:limit]:
+            lines.append(f"\u2022 {_change_label(change)}")
+        if len(changes.newly_stuck) > limit:
+            lines.append(f"\u2026and {len(changes.newly_stuck) - limit} more")
+        lines.append("")
+
+    if changes.still_waiting:
+        lines.append(f"_{changes.still_waiting} unfinished in total \u2014 /health for the list._")
+    lines.append("_Nothing has been chased or submitted for you._")
+    return "\n".join(lines).strip()
+
+
+def _change_label(change: PortfolioChange) -> str:
+    name = form_label(change.form_type, fallback=change.title)
+    when = change.event_date.strftime("%-d %b %Y")
+    label = f"{name} \u2014 {when}"
+    return f"[{label}]({change.url})" if change.url else label

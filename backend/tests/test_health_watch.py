@@ -191,14 +191,100 @@ def chase_job(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_chase_stays_silent_when_nothing_moved(watch_modules):
+    """The whole point. A weekly repeat of an unchanged list is what gets
+    muted, and a muted watcher cannot report the week something moves."""
+    kaizen_index, health_watch = watch_modules
+    await _store(kaizen_index, id="old", state="pending")
+    from datetime import datetime, timezone
+
+    # Everything was already seen: state_since predates the last run.
+    later = datetime.now(timezone.utc)
+    changes = await health_watch.detect_changes("7", since=later, today=date(2026, 8, 24))
+
+    assert not changes.has_news
+    assert changes.still_waiting == 1
+    assert health_watch.format_change_report(changes) is None
+
+
+@pytest.mark.asyncio
+async def test_first_run_treats_everything_stuck_as_news(watch_modules):
+    """A doctor who has never been told still needs telling."""
+    kaizen_index, health_watch = watch_modules
+    await _store(kaizen_index, id="a", state="pending")
+
+    changes = await health_watch.detect_changes("7", since=None, today=date(2026, 8, 24))
+
+    assert len(changes.newly_stuck) == 1
+    assert changes.has_news
+
+
+@pytest.mark.asyncio
+async def test_newly_stuck_item_is_reported(watch_modules):
+    kaizen_index, health_watch = watch_modules
+    from datetime import datetime, timedelta, timezone
+
+    before = datetime.now(timezone.utc) - timedelta(days=7)
+    await _store(kaizen_index, id="fresh", state="pending")
+
+    changes = await health_watch.detect_changes("7", since=before, today=date(2026, 8, 24))
+    text = health_watch.format_change_report(changes)
+
+    assert "newly waiting" in text
+    assert "CBD" in text
+
+
+@pytest.mark.asyncio
+async def test_signed_off_item_is_reported_as_good_news(watch_modules):
+    """A watcher that only ever reports problems is one more source of dread,
+    and never tells the doctor their chasing worked."""
+    kaizen_index, health_watch = watch_modules
+    from datetime import datetime, timedelta, timezone
+
+    before = datetime.now(timezone.utc) - timedelta(days=7)
+    await _store(kaizen_index, id="done", state="pending")
+    await _store(kaizen_index, id="done", state="complete")
+
+    changes = await health_watch.detect_changes("7", since=before, today=date(2026, 8, 24))
+    text = health_watch.format_change_report(changes)
+
+    assert len(changes.cleared) == 1
+    assert "signed off since last time" in text
+
+
+@pytest.mark.asyncio
+async def test_change_report_links_items_and_hides_clinical_detail(watch_modules):
+    kaizen_index, health_watch = watch_modules
+    await _store(kaizen_index, id="a", state="pending")
+
+    changes = await health_watch.detect_changes("7", since=None, today=date(2026, 8, 24))
+    text = health_watch.format_change_report(changes)
+
+    assert "https://kaizenep.com" in text
+    assert "Clinical narrative" not in text
+
+
+@pytest.mark.asyncio
+async def test_recent_item_is_not_news_yet(watch_modules):
+    kaizen_index, health_watch = watch_modules
+    await _store(kaizen_index, id="new", state="pending", date_occurred_on="21 Aug, 2026")
+
+    changes = await health_watch.detect_changes("7", since=None, today=date(2026, 8, 24))
+
+    assert not changes.has_news
+
+
+@pytest.mark.asyncio
 async def test_chase_job_stays_silent_when_nothing_is_stuck(chase_job, monkeypatch):
     """A user with a clean portfolio must never be messaged."""
     recording = _RecordingBot()
 
-    async def no_stuck(_user_id, **_kwargs):
-        return []
+    async def nothing_moved(_user_id, **_kwargs):
+        import health_watch
 
-    monkeypatch.setattr("health_watch.find_stuck_signoffs", no_stuck)
+        return health_watch.ChangeSet(newly_stuck=[], cleared=[], still_waiting=3)
+
+    monkeypatch.setattr("health_watch.detect_changes", nothing_moved)
 
     async def one_user():
         return [4242]
@@ -215,21 +301,20 @@ async def test_chase_job_messages_only_the_user_with_stuck_evidence(chase_job, m
     recording = _RecordingBot()
     import health_watch
 
-    stuck_item = health_watch.StuckItem(
-        id="x",
-        event_type="Mini-CEX (2025 Update)",
-        category="Assessments",
-        state="pending",
+    change = health_watch.PortfolioChange(
+        title="Mini-CEX (2025 Update)",
+        form_type="MINI_CEX",
         event_date=date(2026, 6, 5),
-        days_waiting=80,
-        detail_url=None,
-        blocking_label="This section is awaiting a response",
+        kind="stuck",
+        url=None,
     )
+    news = health_watch.ChangeSet(newly_stuck=[change], cleared=[], still_waiting=1)
+    quiet = health_watch.ChangeSet(newly_stuck=[], cleared=[], still_waiting=0)
 
-    async def stuck_for_one(user_id, **_kwargs):
-        return [stuck_item] if user_id == 111 else []
+    async def moved_for_one(user_id, **_kwargs):
+        return news if user_id == 111 else quiet
 
-    monkeypatch.setattr("health_watch.find_stuck_signoffs", stuck_for_one)
+    monkeypatch.setattr("health_watch.detect_changes", moved_for_one)
 
     async def two_users():
         return [111, 222]
@@ -248,21 +333,22 @@ async def test_chase_job_does_not_resend_within_the_week(chase_job, monkeypatch)
     recording = _RecordingBot()
     import health_watch
 
-    async def always_stuck(_user_id, **_kwargs):
-        return [
-            health_watch.StuckItem(
-                id="x",
-                event_type="CBD",
-                category="Assessments",
-                state="pending",
-                event_date=date(2026, 6, 5),
-                days_waiting=80,
-                detail_url=None,
-                blocking_label=None,
-            )
-        ]
+    async def always_news(_user_id, **_kwargs):
+        return health_watch.ChangeSet(
+            newly_stuck=[
+                health_watch.PortfolioChange(
+                    title="CBD",
+                    form_type="CBD",
+                    event_date=date(2026, 6, 5),
+                    kind="stuck",
+                    url=None,
+                )
+            ],
+            cleared=[],
+            still_waiting=1,
+        )
 
-    monkeypatch.setattr("health_watch.find_stuck_signoffs", always_stuck)
+    monkeypatch.setattr("health_watch.detect_changes", always_news)
 
     async def one_user():
         return [999]
@@ -335,10 +421,12 @@ async def test_run_that_messages_nobody_still_pings_the_alarm(chase_job, monkeyp
         "ops_alert.ping_check", lambda url, suffix="": pings.append(suffix or "success")
     )
 
-    async def no_stuck(_user_id, **_kwargs):
-        return []
+    async def nothing_moved(_user_id, **_kwargs):
+        import health_watch
 
-    monkeypatch.setattr("health_watch.find_stuck_signoffs", no_stuck)
+        return health_watch.ChangeSet(newly_stuck=[], cleared=[], still_waiting=3)
+
+    monkeypatch.setattr("health_watch.detect_changes", nothing_moved)
 
     async def one_user():
         return [4242]
