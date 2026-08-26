@@ -192,18 +192,22 @@ def test_report_never_shows_a_verdict_without_reasons():
     assert text.splitlines()[verdict_line + 1].startswith("•")
 
 
-def test_report_leads_with_stuck_items_when_there_are_any():
+def test_report_leads_with_stuck_counts_and_points_at_the_list():
     items = _balanced() + [
         _item(state="pending", days_ago=200, ident="a", form_type="MINI_CEX"),
         _item(state="draft", days_ago=900, ident="b", form_type="JCF"),
     ]
-    _, text = _render(items)
+    assessment, text = _render(items)
 
-    assert "Waiting on someone else — 1" in text
-    assert "Your own unfinished drafts — 1" in text
-    # Kaizen's internal codes mean nothing to a doctor.
-    assert "Mini-CEX" in text and "MINI_CEX" not in text
-    assert "Journal Club" in text and "JCF" not in text
+    # Counts and ages lead; the items themselves live in the pane.
+    assert "1 item waiting on someone else" in text
+    assert "1 draft of your own unfinished" in text
+    assert "for all 2" in text
+
+    # Kaizen's internal codes mean nothing to a doctor, wherever they appear.
+    pane = format_stuck_detail(assessment)
+    assert "Mini-CEX" in pane and "MINI_CEX" not in pane
+    assert "Journal Club" in pane and "JCF" not in pane
 
 
 def test_report_never_leaks_clinical_narrative():
@@ -272,3 +276,89 @@ def test_stuck_detail_lists_every_item_not_just_the_preview():
 def test_stuck_detail_is_reassuring_when_nothing_is_waiting():
     assessment = compute_health_assessment(_balanced(), today=TODAY)
     assert "Nothing waiting" in format_stuck_detail(assessment)
+
+
+# ── Patterns, links, countdown ──────────────────────────────────────────────
+
+
+def test_a_form_that_never_completes_is_flagged_as_a_pattern():
+    """Three stuck Teaching Observations out of three filed is not three
+    incidents; it says that form never gets signed off."""
+    items = _balanced(40)
+    items += [
+        _item(state="pending", days_ago=800 + n, ident=f"to-{n}", form_type="TEACH_OBS")
+        for n in range(3)
+    ]
+
+    patterns = compute_health_assessment(items, today=TODAY).patterns
+
+    assert any("Teaching Observation: 3 of your 3" in p for p in patterns)
+
+
+def test_a_common_form_stuck_at_the_normal_rate_is_not_a_pattern():
+    """Six unfinished CBDs among hundreds is proportionate, not a finding.
+    Flagging it would bury the real signal under noise."""
+    items = [_item(ident=f"cbd-{n}", form_type="CBD") for n in range(200)]
+    items += [
+        _item(state="pending", days_ago=100, ident=f"p-{n}", form_type="CBD") for n in range(6)
+    ]
+
+    patterns = compute_health_assessment(items, today=TODAY).patterns
+
+    assert not any("CBD" in p for p in patterns)
+
+
+def test_a_thin_domain_blocked_by_its_own_unfinished_items_is_called_out():
+    """Changes the action from "file more" to "chase what you filed"."""
+    items = _balanced(40)
+    items = [i for i in items if i.domain != HealthDomain.qi]
+    items += [
+        _item(domain=HealthDomain.qi, state="pending", days_ago=100, ident=f"q-{n}", form_type="QIAT")
+        for n in range(3)
+    ]
+
+    patterns = compute_health_assessment(items, today=TODAY).patterns
+
+    assert any("QI looks thin partly because" in p for p in patterns)
+
+
+def test_main_report_does_not_repeat_the_item_lists():
+    """The same item used to appear three times: in the reasons, in a section,
+    and again as an action. The lists belong in the drill-down pane."""
+    items = _balanced() + [
+        _item(state="pending", days_ago=300, ident="a", form_type="MINI_CEX"),
+        _item(state="draft", days_ago=900, ident="b", form_type="JCF"),
+    ]
+    _, text = _render(items)
+
+    assert "Waiting on someone else — " not in text
+    assert "Your own unfinished drafts — " not in text
+    assert "Everything unfinished" in text
+
+
+def test_stuck_items_link_to_kaizen():
+    """Telling a doctor to chase a form from 2023 and leaving them to find it
+    is half a feature. The URL is indexed for every item."""
+    items = _balanced() + [_item(state="pending", days_ago=300, ident="a")]
+    assessment = compute_health_assessment(items, today=TODAY)
+
+    detail = format_stuck_detail(assessment)
+
+    assert "](https://kaizenep.com/events/view/x)" in detail
+
+
+def test_review_countdown_is_shown_when_a_date_is_set():
+    _, text = _render(_balanced(), review_date=date(2026, 10, 1), today=TODAY)
+    assert "weeks to your review (October 2026)" in text
+
+
+def test_missing_review_date_offers_the_command_that_sets_it():
+    """The old report told doctors to add their ARCP month while offering no
+    way to do it."""
+    _, text = _render(_balanced())
+    assert "/arcp" in text
+
+
+def test_passed_review_date_asks_for_the_next_one():
+    _, text = _render(_balanced(), review_date=date(2026, 5, 1), today=TODAY)
+    assert "has passed" in text and "/arcp" in text

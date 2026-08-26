@@ -37,11 +37,17 @@ SCORE_LABEL: dict[HealthScore, str] = {
 STUCK_PREVIEW = 4
 
 
-def _describe(item: StuckEvidence) -> str:
+def _describe(item: StuckEvidence, *, link: bool = True) -> str:
     # Doctors recognise "Teaching Observation", not "TEACH_OBS".
     name = form_label(item.form_type, fallback=None) if item.form_type else item.title
     when = item.event_date.strftime("%-d %b %Y")
-    return f"• {name} — {when}, {item.days_waiting} days"
+    label = f"{name} — {when}, {item.days_waiting} days"
+    # Telling someone to chase a form from 2023 and leaving them to find it is
+    # half a feature. The URL is already indexed for every item.
+    if link and item.url:
+        safe = label.replace("[", "(").replace("]", ")")
+        return f"• [{safe}]({item.url})"
+    return f"• {label}"
 
 
 def _stuck_block(title: str, items: list[StuckEvidence], note: str) -> list[str]:
@@ -102,30 +108,45 @@ def format_health_report(
     pathway_assumed: bool = False,
     pathway_readiness: Optional[dict] = None,
     pathway_name: Optional[str] = None,
+    review_date: Optional[date] = None,
+    today: Optional[date] = None,
 ) -> str:
     """Build the main /health message."""
     lines = [f"📊 *Portfolio Health — {pathway_label}*", month_label, ""]
     lines.append(f"*{SCORE_LABEL[assessment.score]}*")
+    if review_date:
+        days = (review_date - (today or date.today())).days
+        when = review_date.strftime("%B %Y")
+        if days < 0:
+            lines.append(f"_Review date {when} has passed — set the next one with /arcp._")
+        else:
+            weeks = days // 7
+            lines.append(
+                f"_{weeks} weeks to your review ({when})._"
+                if weeks >= 2
+                else f"_{days} days to your review ({when})._"
+            )
 
     # The reasons are the report. The colour is only an index into them.
     for reason in assessment.reasons[:4]:
         lines.append(f"• {reason}")
     lines.append("")
 
-    lines.extend(
-        _stuck_block(
-            "Waiting on someone else",
-            assessment.stuck_awaiting,
-            "Filed in Kaizen, not yet signed off",
+    # The item lists live in the "Everything unfinished" pane. Repeating them
+    # here made the same Teaching Observation appear three times in one report
+    # — in the reasons, in a section, and again as an action — and pushed the
+    # whole thing onto a second phone screen.
+    if assessment.stuck_total:
+        lines.append(
+            f"_Tap *Everything unfinished* for all {assessment.stuck_total}, "
+            "each linked to Kaizen._"
         )
-    )
-    lines.extend(
-        _stuck_block(
-            "Your own unfinished drafts",
-            assessment.stuck_drafts,
-            "Started but never completed — yours to close",
-        )
-    )
+        lines.append("")
+
+    if assessment.patterns:
+        lines.append("*Worth noticing*")
+        lines.extend(f"• {pattern}" for pattern in assessment.patterns)
+        lines.append("")
 
     covered = [stat for stat in assessment.domains if stat.count]
     if covered:
@@ -159,6 +180,8 @@ def format_health_report(
     if last_scanned:
         basis += f", scanned {last_scanned}"
     lines.append(f"_{basis}._")
+    if not review_date:
+        lines.append("_No review date set — /arcp Oct 2026 times this to your cycle._")
     # State the confidence explicitly. A limited read that looks identical to a
     # full one invites a doctor to trust a partial picture.
     lines.append(

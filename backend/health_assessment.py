@@ -60,6 +60,7 @@ RECENT_WINDOW_DAYS = 365
 class StuckEvidence:
     """One piece of evidence that has not completed its Kaizen workflow."""
 
+    id: str
     title: str
     form_type: Optional[str]
     event_date: date
@@ -96,6 +97,7 @@ class HealthAssessment:
     items_last_year: int = 0
     newest_evidence: Optional[date] = None
     next_actions: list[str] = field(default_factory=list)
+    patterns: list[str] = field(default_factory=list)
 
     @property
     def stuck_total(self) -> int:
@@ -120,6 +122,7 @@ def _stuck_from(item: EvidenceItem, today: date) -> Optional[StuckEvidence]:
     if days < STUCK_AFTER_DAYS:
         return None
     return StuckEvidence(
+        id=item.id,
         title=item.title,
         form_type=item.form_type,
         event_date=item.event_date,
@@ -238,7 +241,76 @@ def compute_health_assessment(
         items_last_year=recent,
         newest_evidence=newest,
         next_actions=_next_actions(awaiting, drafts, stats),
+        patterns=_patterns(awaiting, drafts, stats, items),
     )
+
+
+# Three stuck items of the same type is not three incidents, it is one habit —
+# but only if that form type gets stuck more often than the rest. Six unfinished
+# CBDs in a portfolio of 250 clinical items is proportionate, not a finding.
+REPEAT_PATTERN_MIN = 3
+REPEAT_PATTERN_RATE_MULTIPLE = 2.0
+
+
+def _patterns(
+    awaiting: list[StuckEvidence],
+    drafts: list[StuckEvidence],
+    stats: list[DomainStat],
+    items: list[EvidenceItem],
+) -> list[str]:
+    """Findings that only appear when you look across items rather than at them.
+
+    A list of facts is not a diagnosis. Three Teaching Observations stuck for
+    1112, 937 and 798 days is not bad luck three times; it says teaching
+    observations do not get signed off. And a domain can read as thin partly
+    because its evidence is sitting unsigned, which changes the action from
+    "file more" to "chase what you filed".
+    """
+    found: list[str] = []
+
+    stuck_all = awaiting + drafts
+    total = len(items)
+    overall_rate = len(stuck_all) / total if total else 0
+
+    filed_by_form: dict[str, int] = {}
+    for item in items:
+        if item.form_type:
+            filed_by_form[item.form_type] = filed_by_form.get(item.form_type, 0) + 1
+    stuck_by_form: dict[str, int] = {}
+    for stuck in stuck_all:
+        if stuck.form_type:
+            stuck_by_form[stuck.form_type] = stuck_by_form.get(stuck.form_type, 0) + 1
+
+    # Ranked by how often the form gets stuck, not by how many are stuck:
+    # 3 of 3 is a finding, 6 of 43 is a cluster. State the ratio and let the
+    # reader draw the conclusion rather than editorialising over their data.
+    ranked = sorted(
+        (
+            (form_type, count, filed_by_form.get(form_type, count))
+            for form_type, count in stuck_by_form.items()
+        ),
+        key=lambda row: -(row[1] / row[2] if row[2] else 0),
+    )
+    for form_type, count, filed in ranked:
+        rate = count / filed if filed else 0
+        if count >= REPEAT_PATTERN_MIN and rate >= overall_rate * REPEAT_PATTERN_RATE_MULTIPLE:
+            found.append(
+                f"{form_label(form_type)}: {count} of your {filed} are still outstanding"
+            )
+
+    blocked_ids = {stuck.id for stuck in stuck_all}
+    for stat in stats:
+        if not (stat.is_thin or stat.is_empty):
+            continue
+        stuck_here = sum(
+            1 for item in items if item.domain == stat.domain and item.id in blocked_ids
+        )
+        if stuck_here:
+            found.append(
+                f"{DOMAIN_LABELS[stat.domain]} looks thin partly because "
+                f"{stuck_here} of its items are unfinished — chase before filing more"
+            )
+    return found[:2]
 
 
 def _next_actions(

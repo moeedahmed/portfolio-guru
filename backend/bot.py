@@ -3113,6 +3113,82 @@ def _health_compact_report_text(full_text: str) -> str:
     return text
 
 
+REVIEW_DATE_KEY = "review_date"
+
+
+def _parse_review_month(raw: str):
+    """Accept "Oct 2026", "October 2026", "10/2026" or "2026-10".
+
+    Stored as the first of the month: a doctor knows the month of their ARCP
+    long before the day, and a made-up day would read as precision we do not
+    have.
+    """
+    from datetime import datetime as _d
+
+    text = (raw or "").strip()
+    if not text:
+        return None
+    for fmt in ("%b %Y", "%B %Y", "%m/%Y", "%Y-%m", "%b%Y", "%B%Y"):
+        try:
+            return _d.strptime(text, fmt).date().replace(day=1)
+        except ValueError:
+            continue
+    return None
+
+
+def _stored_review_date(profile):
+    """Read the review date off a health profile, tolerating older records."""
+    from datetime import date as _date
+
+    raw = (getattr(profile, "pathway_config", None) or {}).get(REVIEW_DATE_KEY)
+    if not raw:
+        return None
+    try:
+        parts = str(raw).split("-")
+        return _date(int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 1)
+    except (ValueError, IndexError):
+        return None
+
+
+async def arcp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Set the review month everything else is timed against."""
+    user_id = update.effective_user.id
+    raw = " ".join(context.args) if getattr(context, "args", None) else ""
+    parsed = _parse_review_month(raw)
+    if not parsed:
+        current = _stored_review_date(_get_or_default_health_profile(user_id))
+        shown = current.strftime("%B %Y") if current else "not set"
+        await update.message.reply_text(
+            f"\U0001F4C5 *Review date*\n\nCurrently: {shown}\n\n"
+            "Set it with the month of your next ARCP or review, for example:\n"
+            "`/arcp Oct 2026`\n\n"
+            "_Portfolio Health uses it to count down and to time reminders. "
+            "The month is enough — no day needed._",
+            parse_mode="Markdown",
+        )
+        return
+
+    profile = _get_or_default_health_profile(user_id)
+    config = dict(profile.pathway_config or {})
+    config[REVIEW_DATE_KEY] = parsed.isoformat()
+    from datetime import UTC, datetime as _dt
+
+    save_health_profile(
+        HealthProfile(
+            user_id=str(user_id),
+            pathway=profile.pathway,
+            pathway_config=config,
+            created_at=profile.created_at,
+            updated_at=_dt.now(UTC),
+        )
+    )
+    await update.message.reply_text(
+        f"\u2705 Review date set to *{parsed.strftime('%B %Y')}*.\n\n"
+        "Run /health to see everything timed to it.",
+        parse_mode="Markdown",
+    )
+
+
 def _format_last_scanned(sync_status) -> str | None:
     """Human "scanned at" stamp for the report footer, or None if never run."""
     run = getattr(sync_status, "last_run", None) if sync_status else None
@@ -7717,6 +7793,7 @@ async def _run_health_analysis(
         pathway_assumed=profile_is_default,
         pathway_readiness=snapshot.pathway_readiness,
         pathway_name=_pathway_label(profile.pathway),
+        review_date=_stored_review_date(profile),
     )
     await send_progress()
     sections = {
@@ -15090,6 +15167,10 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("chase", chase_command))
     application.add_handler(CommandHandler("curriculum", curriculum_command))
     application.add_handler(CommandHandler("health", health_command))
+    # Deliberately absent from BOT_COMMANDS: the public menu is core-only, and
+    # /arcp is a once-a-cycle setup step. The health report names it at the
+    # moment it becomes relevant, which is better discovery than a menu entry.
+    application.add_handler(CommandHandler("arcp", arcp_command))
     application.add_handler(CommandHandler("upgrade", upgrade_command))
     application.add_handler(CommandHandler("plan", upgrade_command))
     application.add_handler(CommandHandler("settier", settier_command))
