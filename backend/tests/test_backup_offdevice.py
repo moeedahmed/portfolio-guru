@@ -189,12 +189,51 @@ def test_disabled_alerts_never_touch_bws_or_healthchecks(tmp_path, leaked_url):
         "PG_TEST_EXTERNAL_CALLS": str(calls),
     }
     if leaked_url is not None:
-        extra_env["PG_BACKUP_HEALTHCHECK_URL"] = leaked_url
+        extra_env["PG_BACKUP_HEALTHCHECK_URL_PRODUCTION"] = leaked_url
 
     result = _run_backup(tmp_path, str(remote), extra_env=extra_env)
 
     assert result.returncode == 0, result.stderr
     assert not calls.exists(), "test mode invoked BWS or a live healthcheck"
+
+
+def test_retired_healthcheck_variable_cannot_ping_from_stale_worktree(tmp_path):
+    """The predecessor credential is ignored even with alerts enabled."""
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    calls = tmp_path / "healthcheck-calls"
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    _write_executable(
+        fake_bin / "curl",
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' \"${@: -1}\" >> \"$PG_TEST_EXTERNAL_CALLS\"\n",
+    )
+    _write_executable(
+        fake_bin / "gpg",
+        "#!/usr/bin/env bash\n"
+        "while [ \"$#\" -gt 0 ]; do\n"
+        "  if [ \"$1\" = '-o' ]; then out=\"$2\"; shift 2; else shift; fi\n"
+        "done\n"
+        "printf 'encrypted-fixture' > \"$out\"\n",
+    )
+    remote = tmp_path / "offdevice"
+    remote.mkdir()
+
+    result = _run_backup(
+        tmp_path,
+        str(remote),
+        extra_env={
+            "HOME": str(fake_home),
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            "PG_TEST_EXTERNAL_CALLS": str(calls),
+            "PG_BACKUP_DISABLE_ALERTS": "0",
+            "PG_BACKUP_HEALTHCHECK_URL": "https://example.invalid/retired-check",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not calls.exists(), "retired healthcheck credential emitted a ping"
 
 
 @pytest.mark.parametrize("remote_fails", [False, True])
@@ -222,7 +261,7 @@ def test_healthchecks_is_the_only_external_signal_and_fires_once(tmp_path, remot
             "PATH": f"{fake_bin}:{os.environ['PATH']}",
             "PG_TEST_EXTERNAL_CALLS": str(calls),
             "PG_BACKUP_DISABLE_ALERTS": "0",
-            "PG_BACKUP_HEALTHCHECK_URL": "https://example.invalid/live-check",
+            "PG_BACKUP_HEALTHCHECK_URL_PRODUCTION": "https://example.invalid/live-check",
         },
     )
 
@@ -255,7 +294,7 @@ def test_unexpected_failure_is_reported_once_by_exit_trap(tmp_path):
             "PATH": f"{fake_bin}:{os.environ['PATH']}",
             "PG_TEST_EXTERNAL_CALLS": str(calls),
             "PG_BACKUP_DISABLE_ALERTS": "0",
-            "PG_BACKUP_HEALTHCHECK_URL": "https://example.invalid/live-check",
+            "PG_BACKUP_HEALTHCHECK_URL_PRODUCTION": "https://example.invalid/live-check",
         },
     )
 
