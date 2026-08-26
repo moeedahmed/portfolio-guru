@@ -39,6 +39,8 @@ from documents import extract_from_document, is_supported_attachment, is_support
 from profile_store import init_profile_db, store_training_level, get_training_level, get_voice_profile, store_voice_profile, clear_voice_profile, store_curriculum, get_curriculum, get_kaizen_role
 from health_models import CORE_DOMAINS, HealthProfile, HealthDomain, Pathway
 from health_engine import case_history_to_evidence_items, compute_snapshot
+from health_assessment import compute_health_assessment
+from health_report import format_domain_detail, format_health_report, format_stuck_detail
 from health_profile_store import get_health_profile, save_health_profile, delete_health_profile
 from kaizen_index import (
     KaizenSyncStatus,
@@ -2963,8 +2965,8 @@ def _health_refresh_confirm_keyboard() -> InlineKeyboardMarkup:
 def _health_result_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
+            InlineKeyboardButton("📌 Everything unfinished", callback_data="ACTION|health_detail|stuck"),
             InlineKeyboardButton("🔎 Evidence basis", callback_data="ACTION|health_detail|basis"),
-            InlineKeyboardButton("📈 Activity snapshot", callback_data="ACTION|health_detail|activity"),
         ],
         [
             InlineKeyboardButton("📋 Domain detail", callback_data="ACTION|health_detail|domains"),
@@ -3094,11 +3096,36 @@ def _health_compact_report_text(full_text: str) -> str:
     return text
 
 
-def _store_health_report_context(context, full_text: str) -> str:
-    summary = _health_compact_report_text(full_text)
+def _format_last_scanned(sync_status) -> str | None:
+    """Human "scanned at" stamp for the report footer, or None if never run."""
+    run = getattr(sync_status, "last_run", None) if sync_status else None
+    finished = getattr(run, "finished_at", None) if run else None
+    if not finished:
+        return None
+    try:
+        from datetime import datetime as _d
+        parsed = _d.fromisoformat(str(finished).replace("Z", "+00:00"))
+        return parsed.astimezone().strftime("%-d %b %Y %H:%M")
+    except Exception:
+        return None
+
+
+def _store_health_report_context(context, full_text: str, sections: dict | None = None) -> str:
+    """Remember the last report so the drill-down buttons have something to show.
+
+    ``sections`` lets the caller pass panes built from the assessment itself.
+    Parsing them back out of the rendered Markdown (the fallback) breaks the
+    moment a heading is reworded, which is how the detail buttons ended up
+    answering "no longer available".
+    """
+    if sections is None:
+        summary = _health_compact_report_text(full_text)
+        sections = _health_report_sections(full_text)
+    else:
+        summary = full_text
     context.user_data["last_health_report"] = {
         "summary": summary,
-        "sections": _health_report_sections(full_text),
+        "sections": sections,
     }
     return summary
 
@@ -6590,7 +6617,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 pass
 
         async def send_result(text, reply_markup):
-            text = _store_health_report_context(context, text)
+            # Panes are stored by _run_health_analysis from the assessment.
             await _safe_edit_text(
                 query.message,
                 text,
@@ -6611,6 +6638,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 send_progress=send_progress,
                 send_result=send_result,
                 fail_fn=fail_fn,
+                context_store=context,
             )
         else:
             await _run_health_with_optional_kaizen_sync(
@@ -6621,6 +6649,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 send_result=send_result,
                 fail_fn=fail_fn,
                 show_recovery=show_recovery,
+                context_store=context,
             )
         return ConversationHandler.END
 
@@ -6774,7 +6803,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 pass
 
         async def send_result(text, reply_markup):
-            text = _store_health_report_context(context, text)
+            # Panes are stored by _run_health_analysis from the assessment.
             await _safe_edit_text(
                 query.message,
                 text,
@@ -6791,6 +6820,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             send_progress=send_progress,
             send_result=send_result,
             fail_fn=fail_fn,
+            context_store=context,
         )
         return ConversationHandler.END
 
@@ -7594,6 +7624,7 @@ async def _run_health_analysis(
     send_result,
     fail_fn,
     send_photo_fn=None,
+    context_store=None,
 ) -> None:
     """Shared portfolio health pipeline.
 
@@ -7644,6 +7675,45 @@ async def _run_health_analysis(
     snapshot = compute_snapshot(profile, evidence_items)
     limited_view = evidence_source == "case_history"
     sync_status = await _safe_kaizen_sync_status(user_id)
+
+    # Deterministic assessment first. The old path scored presence only — five
+    # of six domains holding anything earned Green — then asked an LLM for
+    # prose, which is why a portfolio with 27 unfinished items and QI at 7
+    # against 250 clinical read as "Green, missing domains: none obvious" and
+    # why _reconcile_action_severity had to exist to stop the narrative
+    # contradicting the score. The assessment answers from the evidence, so
+    # score and copy cannot disagree.
+    from datetime import datetime as _dt_module
+    assessment = compute_health_assessment(evidence_items)
+    report_text = format_health_report(
+        assessment,
+        pathway_label=pathway_label,
+        month_label=_dt_module.now().strftime("%B %Y"),
+        scanned_count=len(evidence_items),
+        last_scanned=_format_last_scanned(sync_status),
+        limited_view=limited_view,
+        pathway_assumed=profile_is_default,
+        pathway_readiness=snapshot.pathway_readiness,
+        pathway_name=_pathway_label(profile.pathway),
+    )
+    await send_progress()
+    sections = {
+        "stuck": format_stuck_detail(assessment),
+        "domains": format_domain_detail(assessment),
+        "basis": _format_health_evidence_context(
+            source=evidence_source,
+            evidence_count=len(evidence_items),
+            history_count=len(history),
+            profile_is_default=profile_is_default,
+            sync_status=sync_status,
+            pathway=profile.pathway,
+        ),
+    }
+    if context_store is not None:
+        _store_health_report_context(context_store, report_text, sections=sections)
+    await send_result(report_text, _health_result_keyboard())
+    return
+
     evidence_context = _format_health_evidence_context(
         source=evidence_source,
         evidence_count=len(evidence_items),
@@ -7721,6 +7791,7 @@ async def _run_health_with_optional_kaizen_sync(
     send_result,
     fail_fn,
     show_recovery,
+    context_store=None,
 ) -> None:
     """Autonomous /health: read-only Kaizen scan first when the local index is
     missing or stale, then the normal analysis — both rendered into the same
@@ -7769,6 +7840,7 @@ async def _run_health_with_optional_kaizen_sync(
         send_progress=send_progress,
         send_result=send_result,
         fail_fn=fail_fn,
+        context_store=context_store,
     )
 
 
@@ -8502,7 +8574,7 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await _set_progress_text("📊 Analysing your portfolio...")
 
     async def send_result(text, reply_markup):
-        text = _store_health_report_context(context, text)
+        # Panes are stored by _run_health_analysis from the assessment.
         msg = progress_holder.get("msg")
         if msg is not None:
             await _safe_edit_text(msg, text, parse_mode="Markdown", reply_markup=reply_markup)
@@ -8537,6 +8609,7 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         send_result=send_result,
         fail_fn=fail_fn,
         show_recovery=show_recovery,
+        context_store=context,
     )
     return ConversationHandler.END
 

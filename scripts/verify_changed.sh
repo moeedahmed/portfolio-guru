@@ -86,6 +86,7 @@ JOURNEY_TESTS=(
   #     evidence — both invisible until a user complains.
   tests/test_kaizen_sync.py
   tests/test_health_watch.py
+  tests/test_health_assessment.py
 )
 
 echo
