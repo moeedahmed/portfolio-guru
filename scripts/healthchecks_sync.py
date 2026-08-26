@@ -68,19 +68,22 @@ CHECKS = [
         "bws_secret": "PG_HEARTBEAT_URL",
     },
     {
-        "name": "Mac Mini Portfolio Guru Backup",
-        "tags": "mac-mini portfolio-guru backup critical",
+        "name": "Mac Mini Portfolio Guru Verified Backup",
+        "tags": "mac-mini portfolio-guru backup verified critical production-only",
         "desc": (
             "launchd: com.portfolioguru.backup. "
             "Nightly encrypted off-device backup to gs://portfolio-guru-eu-backups. "
             "Pings on verified upload, /fail on failure. Silence means the job "
             "never ran at all — the case no in-script check can report. "
             "This check exists because off-device upload failed silently for 53 "
-            "nights (2026-06-26 to 2026-08-17). Runbook: scripts/restore_db.md"
+            "nights (2026-06-26 to 2026-08-17). The ping credential is "
+            "production-only; tests must never resolve it. The retired "
+            "predecessor check remains paused. Runbook: scripts/restore_db.md"
         ),
         "schedule": "30 3 * * *",
         "grace": 7200,
-        "bws_secret": "PG_BACKUP_HEALTHCHECK_URL",
+        "manual_resume": True,
+        "bws_secret": "PG_BACKUP_HEALTHCHECK_URL_PRODUCTION",
     },
     {
         # Names below match the live dashboard exactly (verified with --list on

@@ -141,7 +141,7 @@ loudly.
 | Bot alive but wedged (not polling) | 5-min heartbeat ping from `bot.py`                   | Healthchecks.io, if `PG_HEARTBEAT_URL` set          |
 | Bad deploy                         | post-deploy smoke + auto-rollback in `deploy_mac.sh` | CI turns red                                        |
 | Off-device backup fails            | upload verified + non-zero exit                      | Telegram, and Healthchecks.io `/fail`               |
-| Backup never runs at all           | absence of a ping                                    | Healthchecks.io, if `PG_BACKUP_HEALTHCHECK_URL` set |
+| Backup never runs at all           | absence of a ping                                    | Healthchecks.io, if `PG_BACKUP_HEALTHCHECK_URL_PRODUCTION` set |
 | Whole machine offline              | nothing on the machine can report this               | Healthchecks.io absence alerts                      |
 
 The last row is the point of an external monitor: no check that runs _on_ the
@@ -153,8 +153,9 @@ Both hooks are wired and inert until given URLs. To turn them on, create two
 checks at healthchecks.io (free tier covers 20) and store the ping URLs in BWS:
 
 - `PG_HEARTBEAT_URL` — period 5 min, grace 15 min. Pinged by the bot.
-- `PG_BACKUP_HEALTHCHECK_URL` — cron `30 3 * * *`, grace 2 h. Pinged by the
-  nightly backup, with `/fail` on failure.
+- `PG_BACKUP_HEALTHCHECK_URL_PRODUCTION` — production-only cron `30 3 * * *`,
+  grace 2 h. Pinged by the nightly backup, with `/fail` on failure. Tests must
+  set `PG_BACKUP_DISABLE_ALERTS=1` and must never resolve this BWS secret.
 
 Point both at Moeed's phone. Restart the bot after adding the secrets.
 
