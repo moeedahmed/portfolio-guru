@@ -56,7 +56,19 @@ async def test_e2e_start_shows_welcome(telethon_client):
 
 @pytest.mark.asyncio
 async def test_e2e_case_text_enters_draft_flow(telethon_client):
-    async with telethon_client.conversation(BOT_USERNAME, timeout=90) as conv:
+    # Reset the conversation first. This is the release gate's only live proof
+    # and it runs on its own, so it inherits whatever state the chat was left
+    # in — a half-finished /health, an open settings menu, a pending prompt. On
+    # 2026-08-27 it failed for exactly that: the case text arrived, the bot
+    # replied once, and the draft offer never came because the chat was not at
+    # the start of a case journey. A user opening a fresh case is the journey
+    # worth proving, so the test has to start there rather than wherever the
+    # last human left off.
+    async with telethon_client.conversation(BOT_USERNAME, timeout=60) as reset:
+        await reset.send_message("/cancel")
+        await reset.get_response()
+
+    async with telethon_client.conversation(BOT_USERNAME, timeout=180) as conv:
         sent = await conv.send_message(
             "I reviewed an emergency department patient with acute chest pain. "
             "I took a focused history and examination, reviewed the ECG, arranged serial troponins, "
@@ -66,7 +78,9 @@ async def test_e2e_case_text_enters_draft_flow(telethon_client):
         reply = await wait_for_matching_message(
             telethon_client,
             BOT_USERNAME,
-            90,
+            # Live extraction is a real Vertex call, not the mock the offline
+            # transcript uses.
+            180,
             expect_buttons=True,
             expect_button_any=("Draft now",),
             min_id=getattr(sent, "id", None),
