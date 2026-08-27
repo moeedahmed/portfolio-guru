@@ -15568,8 +15568,19 @@ def main():
         logger.warning("Could not schedule Stripe reconciliation", exc_info=True)
 
     # Weekly portfolio digest — Sunday 20:00 UK time (handles BST/GMT).
-    # JobQueue.run_daily uses ISO weekdays: Monday=0 … Sunday=6.
+    #
+    # JobQueue.run_daily days are indexed from SUNDAY, not Monday: PTB maps them
+    # through _CRON_MAPPING = ("sun", "mon", "tue", "wed", "thu", "fri", "sat").
+    # The comment here previously claimed ISO weekdays (Monday=0), so days=(6,)
+    # sent the "Sunday" digest every Saturday — confirmed by the last-run stamp
+    # sitting on Sat 22 Aug 2026 — and the sign-off chase added on 2026-08-26
+    # was scheduled for Tuesday while its comment said Wednesday, which is why
+    # it never fired. Both corrected; SUNDAY/WEDNESDAY below are named so the
+    # next reader does not have to know the convention.
     from datetime import time as _dtime
+
+    # Named for readability; values follow PTB's Sunday-indexed mapping.
+    SUNDAY, WEDNESDAY = 0, 3
     try:
         from zoneinfo import ZoneInfo as _ZoneInfo
         _uk_tz = _ZoneInfo("Europe/London")
@@ -15578,7 +15589,7 @@ def main():
     application.job_queue.run_daily(
         weekly_push,
         time=_dtime(hour=20, minute=0, tzinfo=_uk_tz),
-        days=(6,),
+        days=(SUNDAY,),
         name="weekly_push",
     )
 
@@ -15591,7 +15602,7 @@ def main():
         application.job_queue.run_daily(
             signoff_chase_push,
             time=_dtime(hour=19, minute=0, tzinfo=_uk_tz),
-            days=(2,),
+            days=(WEDNESDAY,),
             name="signoff_chase",
         )
         logger.info("signoff_chase job registered (PG_ENABLE_SIGNOFF_CHASE set)")

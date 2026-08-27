@@ -370,8 +370,10 @@ def test_chase_job_is_registered_on_a_different_day_from_the_weekly_digest(chase
     assert 'name="weekly_push"' in source
     chase_day = source.index('name="signoff_chase"')
     digest_day = source.index('name="weekly_push"')
-    assert source[digest_day - 400 : digest_day].count("days=(6,)") == 1
-    assert source[chase_day - 400 : chase_day].count("days=(2,)") == 1
+    # Named constants, not bare integers: PTB indexes days from Sunday and the
+    # raw numbers were misread as ISO weekdays for months.
+    assert source[digest_day - 400 : digest_day].count("days=(SUNDAY,)") == 1
+    assert source[chase_day - 400 : chase_day].count("days=(WEDNESDAY,)") == 1
 
 
 # ── Off-switch and failure alarm ────────────────────────────────────────────
@@ -557,3 +559,37 @@ def test_held_news_is_not_swallowed(chase_job):
     stamp = source.index('seen[str(user_id)] = datetime.now(UTC).isoformat()')
     # The last-sent stamp must be written after the cadence gate, never before.
     assert hold < stamp
+
+
+# ── Scheduled weekdays ──────────────────────────────────────────────────────
+
+
+def test_scheduled_jobs_land_on_the_days_their_comments_claim(chase_job):
+    """PTB indexes run_daily days from Sunday, not Monday.
+
+    The comment in bot.py claimed ISO weekdays for months, so the "Sunday"
+    digest went out every Saturday and the sign-off chase was scheduled for
+    Tuesday while its comment said Wednesday — which is why it never fired on
+    its first week. Assert against PTB's own mapping so a library change or a
+    careless edit cannot quietly move either job again.
+    """
+    import inspect
+
+    from telegram.ext import JobQueue
+
+    mapping = JobQueue._CRON_MAPPING
+    source = inspect.getsource(chase_job.main)
+
+    assert mapping[0] == "sun", "PTB day indexing changed; re-check both jobs"
+
+    # The named constants must match the mapping the library actually uses.
+    assert f"SUNDAY, WEDNESDAY = {mapping.index('sun')}, {mapping.index('wed')}" in source
+    assert "days=(SUNDAY,)" in source
+    assert "days=(WEDNESDAY,)" in source
+    # No bare integers left in the code to be misread as ISO weekdays. Comments
+    # are stripped first: the explanation of the old bug names those literals.
+    code = "\n".join(
+        line for line in source.splitlines() if not line.lstrip().startswith("#")
+    )
+    assert "days=(6,)" not in code
+    assert "days=(2,)" not in code
