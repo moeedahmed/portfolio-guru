@@ -15213,7 +15213,7 @@ def build_application() -> Application:
             CommandHandler("help", help_command),
             CommandHandler("settings", settings_command),
             CommandHandler("gather", gather_command),
-            CommandHandler("cancel", setup_cancel),
+            CommandHandler("cancel", cancel_command),
             CallbackQueryHandler(
                 handle_callback,
                 pattern=(
@@ -15256,7 +15256,6 @@ def build_application() -> Application:
     )
 
     # Register handlers
-    application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(CommandHandler("reset", reset_data))
     # /delete kept as a hidden, backwards-compatible alias for users who learned
     # it before the public command was consolidated to /reset. Not advertised in
@@ -15373,6 +15372,10 @@ def build_application() -> Application:
     application.add_handler(voice_conv)
     application.add_handler(pathway_conv)
     application.add_handler(case_conv)
+    # Active conversations must see /cancel first so ConversationHandler can
+    # consume the END return and remove its persisted state. This standalone
+    # handler is only the idle fallback.
+    application.add_handler(CommandHandler("cancel", cancel_command))
     # Register the global SETLEVEL handler AFTER every conversation handler that
     # owns an AWAIT_TRAINING_LEVEL state — BOTH setup_conv AND case_conv. The
     # reset→setup flow runs inside case_conv (handle_case_input is a case_conv
