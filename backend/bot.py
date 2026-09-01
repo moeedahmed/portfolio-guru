@@ -1976,8 +1976,8 @@ def _combined_gathering_case(context) -> tuple[str, str]:
 
 def _gathering_done_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("Choose form", callback_data="GATHER|done"),
-        InlineKeyboardButton("Discard case", callback_data="ACTION|cancel"),
+        InlineKeyboardButton("📋 Choose form", callback_data="GATHER|done"),
+        InlineKeyboardButton("❌ Discard case", callback_data="ACTION|cancel"),
     ]])
 
 

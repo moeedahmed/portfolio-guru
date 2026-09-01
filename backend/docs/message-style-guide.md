@@ -12,7 +12,7 @@
 - **Draft-only framing** — all entries are described as saved to Kaizen as drafts, never as filed or submitted. Supervisor submission is never automatic.
 - **Professional emoji only** — avoid decorative/consumer emoji (✨ sparkles, 🤖 robot, ⭐ stars, 🎉 party). Prefer functional emoji that signal message type (✅, ⚠️, 📋, 📤).
 - **Emoji headings, plain rows** — use one functional emoji on the message header, and on secondary section headings only when the section changes meaning. Do not put emojis on every row, sentence, metadata label, or body line.
-- **Buttons carry outcomes** — the message explains the object and context; the button names the action or result. Button labels are plain by default. Use a functional emoji only when it materially improves recognition, never as decoration.
+- **Buttons carry outcomes** — the message explains the object and context; the button names the action or result. Retain a functional emoji when it materially improves recognition, especially for primary progression and destructive actions; never add one as decoration.
 
 ## Mobile Button Standard
 
@@ -24,7 +24,7 @@
 - Do not use bare `Yes` / `No` where the outcome is safer. Use labels such as `Delete data` / `Keep data`.
 - Keep protected actions explicit even when that needs more than two words or a full row. This includes saving to Kaizen, payment or upgrade, consent, credential connection, deletion/reset, and opening an external page. Preserve every confirmation gate.
 - Form recommendations state the best fit in the message. The first row contains the compact form choices, for example `CBD` and `Reflective log`; the best-fit button keeps its existing action ID. Selecting any form starts drafting immediately, with no extra confirmation step.
-- Gathering does not promise a draft before the form is selected: use `Choose form` and `Discard case`, then show the recommended form choices.
+- Gathering does not promise a draft before the form is selected: use `📋 Choose form` and `❌ Discard case`, then show the recommended form choices.
 - Decorative emoji, including stars, do not belong in button labels.
 
 Canonical compact labels:
@@ -94,7 +94,7 @@ Send another anonymised message to add details.
 When you're ready, tap Choose form.
 ```
 
-Buttons: `Choose form` · `Discard case`
+Buttons: `📋 Choose form` · `❌ Discard case`
 
 Attachment-only capture:
 
@@ -106,7 +106,7 @@ Add anonymised case details before choosing a form.
 For ECGs, ultrasound, X-rays, wounds or procedure images, send your own interpretation/context before drafting.
 ```
 
-Buttons: `Choose form` · `Discard case`
+Buttons: `📋 Choose form` · `❌ Discard case`
 
 If the user selects `Choose form` before sending any readable case context, keep
 the attachment saved and ask for anonymised text or voice context instead of
