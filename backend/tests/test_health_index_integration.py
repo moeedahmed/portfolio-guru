@@ -692,8 +692,8 @@ async def test_refresh_portfolio_shows_read_only_confirmation(monkeypatch):
     text = sim.get_last_text()
     assert "Sync Kaizen evidence" in text
     assert "no saving or submitting" in text
-    assert ("Sync Kaizen", "ACTION|confirm_refresh_portfolio") in sim.get_last_buttons()
-    assert ("Back", "ACTION|settings") in sim.get_last_buttons()
+    assert ('🔄 Sync Kaizen', "ACTION|confirm_refresh_portfolio") in sim.get_last_buttons()
+    assert ('🔙 Back', "ACTION|settings") in sim.get_last_buttons()
     sync.assert_not_awaited()
 
 
@@ -749,8 +749,8 @@ async def test_confirm_refresh_portfolio_runs_sync_and_shows_success(monkeypatch
     assert "Kaizen evidence synced" in text
     assert "Read from Kaizen: 12 items" in text
     assert "Portfolio Guru now has: 99 indexed items" in text
-    assert ("Portfolio health", "ACTION|health") in sim.get_last_buttons()
-    assert ("Back", "ACTION|settings") in sim.get_last_buttons()
+    assert ('📊 Portfolio health', "ACTION|health") in sim.get_last_buttons()
+    assert ('🔙 Back', "ACTION|settings") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio
@@ -783,8 +783,8 @@ async def test_confirm_refresh_portfolio_handles_auth_required(monkeypatch):
 
     text = sim.get_last_text()
     assert "Kaizen needs reconnecting" in text
-    assert ("Reconnect Kaizen", "ACTION|setup") in sim.get_last_buttons()
-    assert ("Back", "ACTION|settings") in sim.get_last_buttons()
+    assert ('🔗 Reconnect Kaizen', "ACTION|setup") in sim.get_last_buttons()
+    assert ('🔙 Back', "ACTION|settings") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio
@@ -810,7 +810,7 @@ async def test_confirm_refresh_portfolio_handles_failure_without_traceback(monke
     text = sim.get_last_text()
     assert "Sync did not complete" in text
     assert "secret low-level failure" not in text
-    assert ("Retry", "ACTION|refresh_portfolio") in sim.get_last_buttons()
+    assert ('🔄 Retry', "ACTION|refresh_portfolio") in sim.get_last_buttons()
 
 
 def _make_sync_status(finished_at: str, *, run_status: str = "ok", items_indexed: int = 5):
@@ -942,7 +942,7 @@ async def test_health_command_auth_required_shows_reconnect_without_running_heal
 
     text = sim.get_last_text()
     assert "Kaizen needs reconnecting" in text
-    assert ("Reconnect Kaizen", "ACTION|setup") in sim.get_last_buttons()
+    assert ('🔗 Reconnect Kaizen', "ACTION|setup") in sim.get_last_buttons()
     run_health.assert_not_awaited()
 
 
@@ -972,8 +972,8 @@ async def test_health_command_scan_failure_shows_safe_recovery_without_traceback
     assert "Sync did not complete" in text
     assert "hidden internal detail" not in text
     buttons = sim.get_last_buttons()
-    assert ("Retry", "ACTION|health") in buttons
-    assert ("Limited view", "ACTION|health_limited") in buttons
+    assert ('🔄 Retry', "ACTION|health") in buttons
+    assert ('📊 Limited view', "ACTION|health_limited") in buttons
     run_health.assert_not_awaited()
 
 
@@ -1008,10 +1008,10 @@ async def test_inline_health_button_auto_scans_when_stale(monkeypatch):
 
     send_result = run_health.await_args.kwargs["send_result"]
     await send_result("Health result", None)
-    assert ("New case", "ACTION|file") in sim.get_last_buttons()
-    assert ("Evidence basis", "ACTION|health_detail|basis") in sim.get_last_buttons()
+    assert ('➕ New case', "ACTION|file") in sim.get_last_buttons()
+    assert ('🔎 Evidence basis', "ACTION|health_detail|basis") in sim.get_last_buttons()
     assert ("🔙 Back", "ACTION|back_to_menu") not in sim.get_last_buttons()
-    assert ("Back", "ACTION|settings") not in sim.get_last_buttons()
+    assert ('🔙 Back', "ACTION|settings") not in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio
@@ -1071,7 +1071,7 @@ async def test_inline_health_button_auth_required_shows_reconnect(monkeypatch):
 
     text = sim.get_last_text()
     assert "Kaizen needs reconnecting" in text
-    assert ("Reconnect Kaizen", "ACTION|setup") in sim.get_last_buttons()
+    assert ('🔗 Reconnect Kaizen', "ACTION|setup") in sim.get_last_buttons()
     run_health.assert_not_awaited()
 
 
@@ -1088,19 +1088,19 @@ def test_health_result_keyboard_offers_file_and_detail_sections():
         for button in row
     ]
     assert rows[-1] == [
-        ("Domains", "ACTION|health_detail|domains"),
-        ("New case", "ACTION|file"),
+        ('📋 Domains', "ACTION|health_detail|domains"),
+        ('➕ New case', "ACTION|file"),
     ]
-    assert ("Evidence basis", "ACTION|health_detail|basis") in buttons
-    assert ("Domains", "ACTION|health_detail|domains") in buttons
+    assert ('🔎 Evidence basis', "ACTION|health_detail|basis") in buttons
+    assert ('📋 Domains', "ACTION|health_detail|domains") in buttons
     # Unfinished evidence replaced the usage snapshot: it is the pane a doctor
     # can act on, and the snapshot measured Portfolio Guru usage rather than
     # the portfolio itself.
-    assert ("Unfinished", "ACTION|health_detail|stuck") in buttons
+    assert ('📌 Unfinished', "ACTION|health_detail|stuck") in buttons
     assert not any(data.endswith("|activity") for _text, data in buttons)
-    assert buttons[-1] == ("New case", "ACTION|file")
+    assert buttons[-1] == ('➕ New case', "ACTION|file")
     assert ("📊 Change pathway", "ACTION|change_pathway") not in buttons
-    assert ("Back", "ACTION|settings") not in buttons
+    assert ('🔙 Back', "ACTION|settings") not in buttons
 
 
 def test_health_compact_report_moves_audit_detail_behind_buttons():
@@ -1362,8 +1362,8 @@ async def test_health_detail_buttons_restore_last_report(monkeypatch):
     )
 
     assert sim.get_last_text() == "*Evidence basis*\nScanned: Portfolio Guru only"
-    assert ("New case", "ACTION|file") in sim.get_last_buttons()
-    assert ("Back", "ACTION|health_back_to_report") in sim.get_last_buttons()
+    assert ('➕ New case', "ACTION|file") in sim.get_last_buttons()
+    assert ('🔙 Back', "ACTION|health_back_to_report") in sim.get_last_buttons()
 
     await bot.handle_action_button(
         sim._make_callback_update("ACTION|health_back_to_report"),
@@ -1371,7 +1371,7 @@ async def test_health_detail_buttons_restore_last_report(monkeypatch):
     )
 
     assert sim.get_last_text() == "Main health report"
-    assert ("New case", "ACTION|file") in sim.get_last_buttons()
+    assert ('➕ New case', "ACTION|file") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio
@@ -1429,7 +1429,7 @@ def test_health_refresh_confirm_back_returns_to_settings():
         for row in bot._health_refresh_confirm_keyboard().inline_keyboard
         for button in row
     ]
-    assert ("Back", "ACTION|settings") in buttons
+    assert ('🔙 Back', "ACTION|settings") in buttons
     assert ("🔙 Back", "ACTION|back_to_menu") not in buttons
 
 
@@ -1468,7 +1468,7 @@ async def test_confirm_refresh_for_health_handles_auth_required(monkeypatch):
 
     text = sim.get_last_text()
     assert "Kaizen needs reconnecting" in text
-    assert ("Reconnect Kaizen", "ACTION|setup") in sim.get_last_buttons()
+    assert ('🔗 Reconnect Kaizen', "ACTION|setup") in sim.get_last_buttons()
     run_health.assert_not_awaited()
 
 
@@ -1535,8 +1535,8 @@ def test_health_sync_recovery_keyboard_offers_retry_and_limited_view():
             for row in bot._health_sync_recovery_keyboard(status).inline_keyboard
             for button in row
         ]
-        assert ("Retry", "ACTION|health") in buttons
-        assert ("Limited view", "ACTION|health_limited") in buttons
+        assert ('🔄 Retry', "ACTION|health") in buttons
+        assert ('📊 Limited view', "ACTION|health_limited") in buttons
 
 
 def test_health_sync_recovery_keyboard_offers_reconnect_on_auth_required():
@@ -1547,4 +1547,4 @@ def test_health_sync_recovery_keyboard_offers_reconnect_on_auth_required():
         for row in bot._health_sync_recovery_keyboard("auth_required").inline_keyboard
         for button in row
     ]
-    assert buttons == [("Reconnect Kaizen", "ACTION|setup")]
+    assert buttons == [('🔗 Reconnect Kaizen', "ACTION|setup")]

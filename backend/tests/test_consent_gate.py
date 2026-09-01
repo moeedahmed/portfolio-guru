@@ -155,9 +155,9 @@ async def test_photo_that_triggered_consent_resumes_to_image_intent(tmp_consent_
     assert Path(pending_doc["path"]).exists()
     assert context.user_data["_pending_doc_context"] == update.message.caption
     buttons = sim.get_last_buttons()
-    assert ("Read text", "DOCUSE|info") in buttons
-    assert ("Attach only", "DOCUSE|attach") in buttons
-    assert ("Read + attach", "DOCUSE|both") in buttons
+    assert ('📝 Read text', "DOCUSE|info") in buttons
+    assert ('📎 Attach only', "DOCUSE|attach") in buttons
+    assert ('📎 Read + attach', "DOCUSE|both") in buttons
     assert "_consent_pending_input" not in context.user_data
 
     Path(pending_doc["path"]).unlink(missing_ok=True)
@@ -207,8 +207,8 @@ async def test_video_that_triggered_consent_resumes_to_video_intent(tmp_consent_
     assert Path(pending_doc["path"]).exists()
     assert context.user_data["_pending_doc_context"] == update.message.caption
     buttons = sim.get_last_buttons()
-    assert ("Attach", "DOCUSE|attach") in buttons
-    assert ("Remove", "DOCUSE|ignore") in buttons
+    assert ('📎 Attach', "DOCUSE|attach") in buttons
+    assert ('❌ Remove', "DOCUSE|ignore") in buttons
     assert "_consent_pending_input" not in context.user_data
 
     Path(pending_doc["path"]).unlink(missing_ok=True)
@@ -259,8 +259,8 @@ async def test_video_document_that_triggered_consent_resumes_to_video_intent(tmp
     assert Path(pending_doc["path"]).exists()
     assert context.user_data["_pending_doc_context"] == update.message.caption
     buttons = sim.get_last_buttons()
-    assert ("Attach", "DOCUSE|attach") in buttons
-    assert ("Remove", "DOCUSE|ignore") in buttons
+    assert ('📎 Attach', "DOCUSE|attach") in buttons
+    assert ('❌ Remove', "DOCUSE|ignore") in buttons
     assert "Couldn't transcribe voice note" not in _all_visible_text(sim)
     assert "_consent_pending_input" not in context.user_data
 
@@ -502,7 +502,7 @@ async def test_legacy_review_button_opens_full_consent_notice(tmp_consent_db):
     assert "Step 3 of 3" not in edited
     assert context.user_data["_consent_prompt_pending"] is True
     assert context.user_data["_consent_prompt_source"] == "setup"
-    assert ("I consent", f"CONSENT|accept|{sim.user_id}") in sim.get_last_buttons()
+    assert ("🛡️ I consent", f"CONSENT|accept|{sim.user_id}") in sim.get_last_buttons()
     assert ("🔐 Review consent", f"CONSENT|review|{sim.user_id}") not in sim.get_last_buttons()
 
 
@@ -556,8 +556,8 @@ async def test_successful_setup_prompts_consent_before_ready_state(tmp_consent_d
     assert "has not been processed" not in text
     assert context.user_data["_consent_prompt_pending"] is True
     assert context.user_data["_consent_prompt_source"] == "setup"
-    assert ("I consent", f"CONSENT|accept|{sim.user_id}") in sim.get_last_buttons()
-    assert ("Not now", f"CONSENT|decline|{sim.user_id}") in sim.get_last_buttons()
+    assert ("🛡️ I consent", f"CONSENT|accept|{sim.user_id}") in sim.get_last_buttons()
+    assert ("❌ Not now", f"CONSENT|decline|{sim.user_id}") in sim.get_last_buttons()
     assert ("🔐 Review consent", f"CONSENT|review|{sim.user_id}") not in sim.get_last_buttons()
 
 
@@ -678,8 +678,8 @@ async def test_start_continues_step_3_when_setup_consent_pending(tmp_consent_db)
     assert "Full details: /privacy" in text
     assert "Portfolio Guru is ready" not in text
     assert bot.consent.CONSENT_VERSION not in text
-    assert ("I consent", f"CONSENT|accept|{sim.user_id}") in sim.get_last_buttons()
-    assert ("Not now", f"CONSENT|decline|{sim.user_id}") in sim.get_last_buttons()
+    assert ("🛡️ I consent", f"CONSENT|accept|{sim.user_id}") in sim.get_last_buttons()
+    assert ("❌ Not now", f"CONSENT|decline|{sim.user_id}") in sim.get_last_buttons()
     assert ("🔐 Review consent", f"CONSENT|review|{sim.user_id}") not in sim.get_last_buttons()
 
 

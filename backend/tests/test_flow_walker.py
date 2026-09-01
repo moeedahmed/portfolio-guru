@@ -228,7 +228,7 @@ class TestFlowWalker:
         assert context.user_data['chosen_form'] == 'CBD'
         assert 'Case-Based Discussion' in (sim.get_last_text() or '')
         assert 'Leadership Assessment Tool is supported' not in (sim.get_last_text() or '')
-        assert ('CBD', 'FORM|CBD') in sim.get_last_buttons()
+        assert ('🩺 CBD', 'FORM|CBD') in sim.get_last_buttons()
         answer.assert_not_awaited()
         recommend.assert_not_awaited()
 
@@ -252,8 +252,8 @@ class TestFlowWalker:
         assert "/login" not in text
         assert "Safety notes:" in text
         assert "**" not in text
-        assert ("Connect Kaizen", "ACTION|setup") in sim.get_last_buttons()
-        assert ("Settings", "ACTION|settings") in sim.get_last_buttons()
+        assert ('🔗 Connect Kaizen', "ACTION|setup") in sim.get_last_buttons()
+        assert ('⚙️ Settings', "ACTION|settings") in sim.get_last_buttons()
         answer.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -326,7 +326,7 @@ class TestFlowWalker:
         assert original_case in context.user_data['case_text']
         assert context.user_data.get('awaiting_detail') is not True
         assert 'Send rough notes' not in (sim.get_last_text() or '')
-        assert ('CBD', 'FORM|CBD') in sim.get_last_buttons()
+        assert ('🩺 CBD', 'FORM|CBD') in sim.get_last_buttons()
         recommend.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -545,7 +545,7 @@ class TestFlowWalker:
         text = sim.get_last_text()
         assert 'Self-directed Learning' in text
         assert 'clinical detail' not in text.lower()
-        assert ('Self-directed Learning', 'FORM|SDL') in sim.get_last_buttons()
+        assert ('📖 Self-directed Learning', 'FORM|SDL') in sim.get_last_buttons()
 
     @pytest.mark.asyncio
     async def test_detailed_self_directed_learning_reflection_opens_sdl_choice(self):
@@ -577,7 +577,7 @@ class TestFlowWalker:
         assert result == AWAIT_FORM_CHOICE
         text = sim.get_last_text()
         assert 'Self-directed Learning' in text
-        assert ('Self-directed Learning', 'FORM|SDL') in sim.get_last_buttons()
+        assert ('📖 Self-directed Learning', 'FORM|SDL') in sim.get_last_buttons()
 
     @pytest.mark.asyncio
     async def test_explicit_sdl_see_all_forms_back_restores_same_choice(self):
@@ -646,7 +646,7 @@ class TestFlowWalker:
 
         assert result == AWAIT_FORM_CHOICE
         assert 'rate-limited' in sim.get_last_text()
-        assert ('Retry', 'ACTION|retry_template') in sim.get_last_buttons()
+        assert ('🔄 Retry', 'ACTION|retry_template') in sim.get_last_buttons()
         assert context.user_data['chosen_form'] == 'MINI_CEX'
 
     @pytest.mark.asyncio
@@ -663,7 +663,7 @@ class TestFlowWalker:
 
         assert result == ConversationHandler.END
         assert 'Could not review that template' in sim.get_last_text()
-        assert ('Cancel', 'ACTION|cancel') in sim.get_last_buttons()
+        assert ('❌ Cancel', 'ACTION|cancel') in sim.get_last_buttons()
 
     @pytest.mark.asyncio
     async def test_retry_template_reuses_selected_form_and_case_text(self):
@@ -1283,7 +1283,7 @@ class TestFlowWalker:
 
         assert result == AWAIT_FORM_CHOICE
         buttons = sim.get_last_buttons()
-        assert ('Self-directed Learning', 'FORM|SDL') in buttons
+        assert ('📖 Self-directed Learning', 'FORM|SDL') in buttons
         assert all(label != '📖 SDL' for label, _ in buttons)
 
     @pytest.mark.asyncio
@@ -1654,7 +1654,7 @@ class TestFlowWalker:
         assert 'filing finished' not in sim.get_last_text().lower()
         buttons = sim.get_last_buttons()
         # First button may be New case or the amend button row
-        assert ('New case', 'ACTION|file') in buttons
+        assert ('➕ New case', 'ACTION|file') in buttons
         assert ('👍 It worked', 'FEEDBACK|good|CBD|success') not in buttons
         assert ("👎 Didn't work", 'FEEDBACK|bad|CBD|success') not in buttons
         assert ('🧰 More options', 'ACTION|post_file_more|CBD|success') not in buttons
@@ -1909,8 +1909,8 @@ class TestFlowWalker:
         buttons = sim.get_last_buttons()
         assert ('👍 It worked', 'FEEDBACK|good|CBD|partial') not in buttons
         assert ("👎 Didn't work", 'FEEDBACK|bad|CBD|partial') not in buttons
-        assert ('New case', 'ACTION|file') in buttons
-        assert ('Cancel', 'ACTION|cancel') in buttons
+        assert ('➕ New case', 'ACTION|file') in buttons
+        assert ('❌ Cancel', 'ACTION|cancel') in buttons
         assert ('🧰 More options', 'ACTION|post_file_more|CBD|partial') not in buttons
         assert not any(label in {'💬 Something missing?', '⚙️ Settings', '🏠 Main menu'} for label, _ in buttons)
         # Button URLs must never lead to /events/new-section/ on uncertain
@@ -2120,9 +2120,9 @@ class TestFlowWalker:
         await handle_action_button(update, context)
 
         buttons = sim.get_last_buttons()
-        assert ('Retry', 'ACTION|retry_filing') in buttons
-        assert ('New case', 'ACTION|file') in buttons
-        assert ('Cancel', 'ACTION|cancel') in buttons
+        assert ('🔄 Retry', 'ACTION|retry_filing') in buttons
+        assert ('➕ New case', 'ACTION|file') in buttons
+        assert ('❌ Cancel', 'ACTION|cancel') in buttons
         assert ('💬 Something missing?', 'FILING|feedback|CBD') not in buttons
         assert ('🚩 Flag a missed field', 'FILING|feedback|CBD') not in buttons
         assert ('⚙️ Settings', 'ACTION|settings') not in buttons
@@ -2198,8 +2198,8 @@ class TestFlowWalker:
         assert recovery_line in text
         assert "Filing didn't complete" in text
         buttons = sim.get_last_buttons()
-        assert ('New case', 'ACTION|file') in buttons
-        assert ('Cancel', 'ACTION|cancel') in buttons
+        assert ('➕ New case', 'ACTION|file') in buttons
+        assert ('❌ Cancel', 'ACTION|cancel') in buttons
 
     @pytest.mark.asyncio
     async def test_failed_login_shows_reconnect_keyboard(self, thin_draft):
@@ -2228,9 +2228,9 @@ class TestFlowWalker:
         assert "Kaizen session has expired" in text
         assert "Reconnect Kaizen" in text
         buttons = sim.get_last_buttons()
-        assert ('Reconnect Kaizen', 'ACTION|setup') in buttons
-        assert ('Retry', 'ACTION|retry_filing') in buttons
-        assert ('New case', 'ACTION|reset') in buttons
+        assert ('🔗 Reconnect Kaizen', 'ACTION|setup') in buttons
+        assert ('🔄 Retry', 'ACTION|retry_filing') in buttons
+        assert ('➕ New case', 'ACTION|reset') in buttons
         # Draft must be preserved so Try again can pick it up
         assert context.user_data.get('draft_data') is not None
         assert context.user_data.get('force_reconnect') is True
@@ -2463,10 +2463,10 @@ class TestFlowWalker:
         text = (sim.get_last_text() or '').lower()
         assert 'kept that draft open' in text
         buttons = sim.get_last_buttons()
-        assert ('Retry', 'ACTION|retry_filing') in buttons
-        assert ('Edit', 'CASE|improve') in buttons
-        assert ('New case', 'CASE|new') in buttons
-        assert ('Cancel', 'ACTION|cancel') in buttons
+        assert ('🔄 Retry', 'ACTION|retry_filing') in buttons
+        assert ('✏️ Edit', 'CASE|improve') in buttons
+        assert ('➕ New case', 'CASE|new') in buttons
+        assert ('❌ Cancel', 'ACTION|cancel') in buttons
 
     @pytest.mark.asyncio
     async def test_failed_filing_start_new_choice_processes_pending_text(self, thin_draft):
@@ -2547,8 +2547,8 @@ class TestFlowWalker:
         review_labels = labels(_build_approval_keyboard())
         gate_labels = labels(_build_failed_filing_input_gate_keyboard())
 
-        assert 'Retry' not in review_labels
-        assert 'Retry' in gate_labels
+        assert '🔄 Retry' not in review_labels
+        assert '🔄 Retry' in gate_labels
 
     @pytest.mark.asyncio
     async def test_media_feedback_on_fresh_draft_skips_retry_gate(self, thin_draft):
@@ -2676,9 +2676,9 @@ class TestFlowWalker:
         assert result == AWAIT_APPROVAL
         assert context.user_data['amend_mode'] is True
         buttons = sim.get_last_buttons()
-        assert ('Save to Kaizen', 'APPROVE|draft') in buttons
-        assert ('Cancel', 'AMEND|cancel') in buttons
-        assert ('New case', 'ACTION|file') not in buttons
+        assert ('💾 Save to Kaizen', 'APPROVE|draft') in buttons
+        assert ('❌ Cancel', 'AMEND|cancel') in buttons
+        assert ('➕ New case', 'ACTION|file') not in buttons
 
         updated = thin_draft.model_copy(update={
             'fields': {**thin_draft.fields, 'reflection': 'Updated with leadership learning.'}
@@ -2697,8 +2697,8 @@ class TestFlowWalker:
         assert 'Original filed CBD context' in context.user_data['case_text']
         assert 'delegated nursing tasks' in context.user_data['case_text']
         buttons = sim.get_last_buttons()
-        assert ('Save to Kaizen', 'APPROVE|draft') in buttons
-        assert ('New case', 'ACTION|file') not in buttons
+        assert ('💾 Save to Kaizen', 'APPROVE|draft') in buttons
+        assert ('➕ New case', 'ACTION|file') not in buttons
 
     @pytest.mark.asyncio
     async def test_amend_mode_explicit_new_case_requires_choice(self, thin_draft):
@@ -2727,8 +2727,8 @@ class TestFlowWalker:
         assert context.user_data['amend_pending_feedback'] == new_case_text
         assert 'update this draft or start a new case' in sim.get_last_text().lower()
         buttons = sim.get_last_buttons()
-        assert ('Update draft', 'AMEND|update_current') in buttons
-        assert ('New case', 'AMEND|start_new') in buttons
+        assert ('✏️ Update draft', 'AMEND|update_current') in buttons
+        assert ('➕ New case', 'AMEND|start_new') in buttons
 
         choice_update = sim._make_callback_update('AMEND|start_new')
         with patch('bot._process_case_text', new=AsyncMock(return_value=AWAIT_FORM_CHOICE)) as process_case:
@@ -3250,7 +3250,7 @@ class TestFlowWalker:
         recommend.assert_not_awaited()
         assert context.user_data['chosen_form'] == 'MINI_CEX'
         assert 'pleuritic chest pain' in context.user_data['case_text']
-        assert ('Mini-CEX', 'FORM|MINI_CEX') in sim.get_last_buttons()
+        assert ('🏥 Mini-CEX', 'FORM|MINI_CEX') in sim.get_last_buttons()
 
         draft = FormDraft(
             form_type='MINI_CEX',
@@ -3328,7 +3328,7 @@ class TestRecentPortfolioFixes:
         # After one use, the improve button is removed entirely
         assert ('Improved once ✅', 'IMPROVE|used') not in buttons
         assert ('Improve', 'IMPROVE|reflection') not in buttons
-        assert ('Save to Kaizen', 'APPROVE|draft') in buttons
+        assert ('💾 Save to Kaizen', 'APPROVE|draft') in buttons
 
     def test_dops_pre_file_guard_blocks_blank_voice_draft(self):
         from bot import _universal_pre_file_gate
@@ -3388,14 +3388,14 @@ class TestRecentPortfolioFixes:
         keyboard = _build_post_filing_keyboard('CBD', 'success', same_case_available=True)
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
 
-        assert ('Another form', 'ACTION|same_case_another') in buttons
-        assert ('New case', 'ACTION|file') in buttons
+        assert ('📋 Another form', 'ACTION|same_case_another') in buttons
+        assert ('➕ New case', 'ACTION|file') in buttons
         assert [
             [(b.text, b.callback_data) for b in row]
             for row in keyboard.inline_keyboard
         ][:1] == [[
-            ('Another form', 'ACTION|same_case_another'),
-            ('New case', 'ACTION|file'),
+            ('📋 Another form', 'ACTION|same_case_another'),
+            ('➕ New case', 'ACTION|file'),
         ]]
 
     def test_post_filing_keyboard_puts_open_saved_draft_first(self):
@@ -3414,10 +3414,10 @@ class TestRecentPortfolioFixes:
             for row in keyboard.inline_keyboard
         ]
 
-        assert rows[0] == [('Open saved draft', None, saved_url)]
+        assert rows[0] == [('🔗 Open saved draft', None, saved_url)]
         assert rows[1] == [
-            ('Another form', 'ACTION|same_case_another', None),
-            ('New case', 'ACTION|file', None),
+            ('📋 Another form', 'ACTION|same_case_another', None),
+            ('➕ New case', 'ACTION|file', None),
         ]
 
     def test_attachment_skip_receipt_reads_as_secondary_status(self):
@@ -3437,7 +3437,7 @@ class TestRecentPortfolioFixes:
         keyboard = _build_post_filing_keyboard('CBD', 'partial', same_case_available=True)
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
 
-        assert ('Another form', 'ACTION|same_case_another') in buttons
+        assert ('📋 Another form', 'ACTION|same_case_another') in buttons
 
     def test_post_filing_keyboard_no_same_case_for_uncertain_partial(self):
         """Uncertain partial (partial + error) must NOT offer Same case
@@ -3447,8 +3447,8 @@ class TestRecentPortfolioFixes:
         keyboard = _build_post_filing_keyboard('CBD', 'partial', uncertain=True, same_case_available=True)
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
 
-        assert ('Another form', 'ACTION|same_case_another') not in buttons
-        assert ('Retry', 'ACTION|retry_filing') in buttons
+        assert ('📋 Another form', 'ACTION|same_case_another') not in buttons
+        assert ('🔄 Retry', 'ACTION|retry_filing') in buttons
 
     def test_post_filing_keyboard_links_to_saved_draft_url_when_present(self):
         """When the filer captures the post-save Kaizen URL, the Open button
@@ -3468,7 +3468,7 @@ class TestRecentPortfolioFixes:
                 if getattr(button, 'url', None)
             ]
 
-            assert ('Open saved draft', saved_url) in labelled_urls
+            assert ('🔗 Open saved draft', saved_url) in labelled_urls
             # No stale "Open in Kaizen" label that falsely promises to open the draft.
             assert not any(text == 'Open in Kaizen' for text, _ in labelled_urls)
             # The new-section URL (blank form) must not appear when we have a
@@ -3489,7 +3489,7 @@ class TestRecentPortfolioFixes:
             if getattr(button, 'url', None)
         ]
 
-        assert ('Open Kaizen', 'https://kaizenep.com/activities') in labelled_urls
+        assert ('🔗 Open Kaizen', 'https://kaizenep.com/activities') in labelled_urls
         # No label claiming the button opens the saved draft, since it
         # actually opens the activities list.
         assert not any(text == 'Open saved draft' for text, _ in labelled_urls)
@@ -3504,7 +3504,7 @@ class TestRecentPortfolioFixes:
             for button in row
             if getattr(button, 'url', None)
         ]
-        assert ('Open Kaizen', 'https://kaizenep.com/activities') in success_urls
+        assert ('🔗 Open Kaizen', 'https://kaizenep.com/activities') in success_urls
         assert not any('events/new-section/' in url for _, url in success_urls)
 
     def test_post_filing_keyboard_uncertain_uses_saved_url_or_activities_fallback(self):
@@ -3661,7 +3661,7 @@ class TestRecentPortfolioFixes:
             for row in sim.messages_sent[-1][2].inline_keyboard
             if row
         ]
-        assert ('Another form', 'ACTION|same_case_another') in buttons, (
+        assert ('📋 Another form', 'ACTION|same_case_another') in buttons, (
             f"Clean partial should surface 'Same case' button. Got: {buttons!r}"
         )
 
@@ -3714,7 +3714,7 @@ class TestRecentPortfolioFixes:
             for row in sim.messages_sent[-1][2].inline_keyboard
             if row
         ]
-        assert ('Another form', 'ACTION|same_case_another') in buttons, (
+        assert ('📋 Another form', 'ACTION|same_case_another') in buttons, (
             f"Success should surface 'Same case' button. Got: {buttons!r}"
         )
         """Successful save reads as a calm completion report with row-based
@@ -4151,9 +4151,9 @@ class TestTrainingStageGroups:
         await handle_action_button(update, context)
 
         buttons = sim.get_last_buttons()
-        assert ('ACCS', 'SETLEVEL|ACCS') in buttons
-        assert ('Intermediate profile', 'SETLEVEL|INTERMEDIATE') in buttons
-        assert ('HST', 'SETLEVEL|HIGHER') in buttons
+        assert ('🎓 ACCS', 'SETLEVEL|ACCS') in buttons
+        assert ('🎓 Intermediate profile', 'SETLEVEL|INTERMEDIATE') in buttons
+        assert ('🎓 HST', 'SETLEVEL|HIGHER') in buttons
 
     def test_settings_layout_prioritises_voice_profile(self):
         from bot import _settings_view_components
@@ -4164,8 +4164,8 @@ class TestTrainingStageGroups:
             text, keyboard = _settings_view_components(123)
 
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
-        assert ('Writing style', 'ACTION|voice') in buttons
-        assert ('Portfolio defaults', 'ACTION|portfolio_defaults') in buttons
+        assert ('✍️ Writing style', 'ACTION|voice') in buttons
+        assert ('📋 Portfolio defaults', 'ACTION|portfolio_defaults') in buttons
         assert 'Helps drafts match your portfolio writing' in text
 
 
@@ -4881,10 +4881,10 @@ class TestVoiceProfileTwoPathFlow:
 
         assert result == AWAIT_VOICE_EXAMPLES
         buttons = sim.get_last_buttons()
-        assert ('Kaizen entries', 'VOICE|path_kaizen') in buttons
-        assert ('Manual examples', 'VOICE|path_manual') in buttons
-        assert ('Back', 'VOICE|back_to_settings') in buttons
-        assert ('Cancel', 'VOICE|cancel') not in buttons
+        assert ('📖 Kaizen entries', 'VOICE|path_kaizen') in buttons
+        assert ('✍️ Manual examples', 'VOICE|path_manual') in buttons
+        assert ('🔙 Back', 'VOICE|back_to_settings') in buttons
+        assert ('❌ Cancel', 'VOICE|cancel') not in buttons
         text = sim.get_last_text() or ''
         assert 'Writing style setup' in text
         assert 'read-only' in text.lower()
@@ -4909,9 +4909,9 @@ class TestVoiceProfileTwoPathFlow:
         update.callback_query.answer.assert_awaited_once()
         assert sim.messages_sent[-1][0] == 'bot_edit'
         buttons = sim.get_last_buttons()
-        assert ('Kaizen entries', 'VOICE|path_kaizen') in buttons
-        assert ('Manual examples', 'VOICE|path_manual') in buttons
-        assert ('Back', 'VOICE|back_to_settings') in buttons
+        assert ('📖 Kaizen entries', 'VOICE|path_kaizen') in buttons
+        assert ('✍️ Manual examples', 'VOICE|path_manual') in buttons
+        assert ('🔙 Back', 'VOICE|back_to_settings') in buttons
 
     @pytest.mark.asyncio
     async def test_voice_command_for_existing_profile_offers_paths_and_remove(self):
@@ -4926,11 +4926,11 @@ class TestVoiceProfileTwoPathFlow:
 
         assert result == AWAIT_VOICE_EXAMPLES
         buttons = sim.get_last_buttons()
-        assert ('Kaizen entries', 'VOICE|path_kaizen') in buttons
-        assert ('Manual examples', 'VOICE|path_manual') in buttons
-        assert ('Remove profile', 'VOICE|remove') in buttons
-        assert ('Back', 'VOICE|back_to_settings') in buttons
-        assert ('Cancel', 'VOICE|cancel') not in buttons
+        assert ('📖 Kaizen entries', 'VOICE|path_kaizen') in buttons
+        assert ('✍️ Manual examples', 'VOICE|path_manual') in buttons
+        assert ('🗑️ Remove profile', 'VOICE|remove') in buttons
+        assert ('🔙 Back', 'VOICE|back_to_settings') in buttons
+        assert ('❌ Cancel', 'VOICE|cancel') not in buttons
 
     @pytest.mark.asyncio
     async def test_manual_path_preserves_existing_3_to_5_examples_flow(self):
@@ -4947,7 +4947,7 @@ class TestVoiceProfileTwoPathFlow:
         text = sim.get_last_text() or ''
         assert 'Add examples manually' in text
         assert 'Send 3-5 examples' in text
-        assert ('Back', 'VOICE|back_to_choice') in sim.get_last_buttons()
+        assert ('🔙 Back', 'VOICE|back_to_choice') in sim.get_last_buttons()
         # The Kaizen path gate must NOT be set from the manual path — those
         # are independent contracts.
         assert context.user_data.get('voice_kaizen_path_started') is None
@@ -4996,10 +4996,10 @@ class TestVoiceProfileTwoPathFlow:
 
         buttons = sim.get_last_buttons()
         assert ('✅ I consent — pick sample', 'VOICE|kaizen_consent') not in buttons
-        assert ('Recent 10', 'VOICE|kaizen_sample|recent_10') in buttons
-        assert ('6 months', 'VOICE|kaizen_sample|last_6m') in buttons
-        assert ('12 months', 'VOICE|kaizen_sample|last_12m') in buttons
-        assert ('Back', 'VOICE|back_to_choice') in buttons
+        assert ('📋 Recent 10', 'VOICE|kaizen_sample|recent_10') in buttons
+        assert ('📅 6 months', 'VOICE|kaizen_sample|last_6m') in buttons
+        assert ('📅 12 months', 'VOICE|kaizen_sample|last_12m') in buttons
+        assert ('🔙 Back', 'VOICE|back_to_choice') in buttons
         assert context.user_data.get('voice_kaizen_path_started') is True
 
     @pytest.mark.asyncio
@@ -5046,7 +5046,7 @@ class TestVoiceProfileTwoPathFlow:
         text = sim.get_last_text() or ''
         assert "isn't switched on yet" in text or 'manually' in text
         buttons = sim.get_last_buttons()
-        assert ('Manual examples', 'VOICE|path_manual') in buttons
+        assert ('✍️ Manual examples', 'VOICE|path_manual') in buttons
 
     @pytest.mark.asyncio
     async def test_kaizen_login_required_offers_inline_reconnect(self):
@@ -5073,9 +5073,9 @@ class TestVoiceProfileTwoPathFlow:
 
         assert result == AWAIT_VOICE_EXAMPLES
         buttons = sim.get_last_buttons()
-        assert ('Reconnect Kaizen', 'ACTION|setup') in buttons
-        assert ('Manual examples', 'VOICE|path_manual') in buttons
-        assert ('Back', 'VOICE|back_to_choice') in buttons
+        assert ('🔗 Reconnect Kaizen', 'ACTION|setup') in buttons
+        assert ('✍️ Manual examples', 'VOICE|path_manual') in buttons
+        assert ('🔙 Back', 'VOICE|back_to_choice') in buttons
 
     @pytest.mark.asyncio
     async def test_build_voice_profile_activates_immediately_without_approval_gate(self):
@@ -5244,7 +5244,7 @@ class TestVoiceProfileTwoPathFlow:
         button_data = {data for _, data in buttons}
         # Old retry path must not reappear
         assert ('🔄 Try Again', 'VOICE|path_manual') not in buttons
-        assert ('Retry', 'VOICE|path_manual') not in buttons
+        assert ('🔄 Retry', 'VOICE|path_manual') not in buttons
         # Must offer a path back into voice setup without crashing
         assert 'ACTION|voice' in button_data
         # Must not echo the old "Does this sound like you?" framing
@@ -5374,6 +5374,6 @@ class TestVoiceProfileTwoPathFlow:
         assert result == AWAIT_VOICE_EXAMPLES
         assert context.user_data.get('voice_kaizen_path_started') is None
         buttons = sim.get_last_buttons()
-        assert ('Kaizen entries', 'VOICE|path_kaizen') in buttons
-        assert ('Manual examples', 'VOICE|path_manual') in buttons
-        assert ('Back', 'VOICE|back_to_settings') in buttons
+        assert ('📖 Kaizen entries', 'VOICE|path_kaizen') in buttons
+        assert ('✍️ Manual examples', 'VOICE|path_manual') in buttons
+        assert ('🔙 Back', 'VOICE|back_to_settings') in buttons

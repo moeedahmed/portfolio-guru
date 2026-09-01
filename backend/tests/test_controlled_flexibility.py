@@ -109,7 +109,7 @@ async def test_template_review_classifier_failure_does_not_refresh_pending_draft
     assert context.user_data == before
     refresh.assert_not_awaited()
     assert "didn't change your case" in sim.get_last_text().lower()
-    assert ("Show draft", "ACTION|continue_thin") in sim.get_last_buttons()
+    assert ('📄 Show draft', "ACTION|continue_thin") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio
@@ -135,7 +135,7 @@ async def test_unclear_text_on_explicit_form_choice_restores_form_choice_buttons
 
     assert result == AWAIT_FORM_CHOICE
     assert context.user_data == before
-    assert ("CBD", "FORM|CBD") in sim.get_last_buttons()
+    assert ('🩺 CBD', "FORM|CBD") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio
@@ -162,7 +162,7 @@ async def test_ambiguous_cancel_language_requires_button_confirmation():
     assert result == AWAIT_APPROVAL
     assert context.user_data == before
     assert "haven't cancelled" in sim.get_last_text().lower()
-    assert ("Cancel", "CANCEL|draft") in sim.get_last_buttons()
+    assert ('❌ Cancel', "CANCEL|draft") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio
@@ -188,8 +188,8 @@ async def test_explicit_new_case_with_open_draft_uses_choice_gate():
     assert result == AWAIT_TEMPLATE_REVIEW
     assert context.user_data["draft_data"] == _draft_payload()
     assert "current draft is still open" in sim.get_last_text().lower()
-    assert ("New case", "CASE|new") in sim.get_last_buttons()
-    assert ("Add to draft", "CASE|improve") in sim.get_last_buttons()
+    assert ('➕ New case', "CASE|new") in sim.get_last_buttons()
+    assert ('✏️ Add to draft', "CASE|improve") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio

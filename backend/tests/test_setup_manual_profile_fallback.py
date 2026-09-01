@@ -148,7 +148,7 @@ async def test_handle_set_level_still_routes_back_to_settings_outside_setup(
         for row in markup.inline_keyboard
         for btn in row
     ]
-    assert ("Back", "ACTION|settings") in buttons, (
+    assert ('🔙 Back', "ACTION|settings") in buttons, (
         f"handle_set_level lost its settings return route: {buttons!r}"
     )
 

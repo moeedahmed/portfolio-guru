@@ -442,7 +442,7 @@ async def test_grounded_voice_transcript_can_reach_recommendations(monkeypatch):
 
     assert result == AWAIT_FORM_CHOICE
     assert context.user_data.get("awaiting_source_detail") is None
-    assert ("Procedural Log", "FORM|best") in sim.get_last_buttons()
+    assert ('🔬 Procedural Log', "FORM|best") in sim.get_last_buttons()
 
 
 def test_source_grounding_accepts_detailed_dog_bite_case_not_animal_story():
@@ -609,7 +609,7 @@ async def test_source_detail_retry_dog_bite_case_can_reach_recommendations(monke
     recommend.assert_awaited_once()
     assert context.user_data.get("awaiting_source_detail") is None
     assert "intubated in resus" in context.user_data["case_text"]
-    assert ("CBD", "FORM|best") in sim.get_last_buttons()
+    assert ('🩺 CBD', "FORM|best") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio
@@ -818,7 +818,7 @@ async def test_explicit_new_case_during_thin_detail_state_prompts_choice(monkeyp
     assert context.user_data["pending_new_case_text"].startswith("This is a new case")
     assert "current draft is still open" in sim.get_last_text()
     assert sim.get_last_buttons() == [
-        ("New case", "CASE|new"),
-        ("Add to draft", "CASE|improve"),
-        ("Cancel", "ACTION|cancel"),
+        ('➕ New case', "CASE|new"),
+        ('✏️ Add to draft', "CASE|improve"),
+        ('❌ Cancel', "ACTION|cancel"),
     ]

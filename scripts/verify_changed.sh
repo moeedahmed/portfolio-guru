@@ -59,6 +59,7 @@ JOURNEY_TESTS=(
   tests/test_channel_contract.py
   tests/test_channel_reply_policy.py
   tests/test_channel_actions.py
+  tests/test_action_label_emoji_policy.py
   tests/test_controlled_flexibility.py
   tests/test_concurrent_user_isolation.py
   # 4. Consent / beta gating

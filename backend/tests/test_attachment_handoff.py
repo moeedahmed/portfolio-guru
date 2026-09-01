@@ -68,9 +68,9 @@ async def test_document_case_stores_attachment_path():
     assert os.path.exists(context.user_data["_pending_doc"]["path"])
     extract_mock.assert_not_called()
     buttons = sim.get_last_buttons()
-    assert ("Use as case", "DOCUSE|info") in buttons
-    assert ("Attach only", "DOCUSE|attach") in buttons
-    assert ("Read + attach", "DOCUSE|both") in buttons
+    assert ('📝 Use as case', "DOCUSE|info") in buttons
+    assert ('📎 Attach only', "DOCUSE|attach") in buttons
+    assert ('📎 Read + attach', "DOCUSE|both") in buttons
     assert "clinical-notes.pdf" not in _all_visible_text(sim)
     
     # Clean up the cached file
@@ -114,10 +114,10 @@ async def test_photo_case_stores_pending_image_and_asks_intent():
     # any text to offer. Text was found here, so the choice is real and shown.
     extract_mock.assert_called_once()
     buttons = sim.get_last_buttons()
-    assert ("Read text", "DOCUSE|info") in buttons
-    assert ("Attach only", "DOCUSE|attach") in buttons
-    assert ("Read + attach", "DOCUSE|both") in buttons
-    assert ("Remove", "DOCUSE|ignore") in buttons
+    assert ('📝 Read text', "DOCUSE|info") in buttons
+    assert ('📎 Attach only', "DOCUSE|attach") in buttons
+    assert ('📎 Read + attach', "DOCUSE|both") in buttons
+    assert ('❌ Remove', "DOCUSE|ignore") in buttons
 
     path = context.user_data["_pending_doc"]["path"]
     if os.path.exists(path):

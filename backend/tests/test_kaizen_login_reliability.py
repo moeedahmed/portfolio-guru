@@ -217,8 +217,8 @@ async def test_setup_password_credential_failure_shows_login_failed(monkeypatch)
     last = sim.get_last_text().lower()
     assert "login failed" in last
     assert "couldn't reach" not in last  # explicitly NOT the infra copy
-    assert ("Retry", "ACTION|setup") in sim.get_last_buttons()
-    assert ("Cancel", "ACTION|cancel") in sim.get_last_buttons()
+    assert ('🔄 Retry', "ACTION|setup") in sim.get_last_buttons()
+    assert ('❌ Cancel', "ACTION|cancel") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio
@@ -245,8 +245,8 @@ async def test_setup_password_infra_failure_does_not_show_login_failed(monkeypat
     assert "couldn't reach kaizen" in last
     assert "login failed" not in last  # the exact regression we're guarding
     assert "same login" in last
-    assert ("Retry", "ACTION|retry_setup_login") in sim.get_last_buttons()
-    assert ("Cancel", "ACTION|cancel") in sim.get_last_buttons()
+    assert ('🔄 Retry', "ACTION|retry_setup_login") in sim.get_last_buttons()
+    assert ('❌ Cancel', "ACTION|cancel") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio
@@ -274,8 +274,8 @@ async def test_setup_password_timeout_retry_keeps_same_login(monkeypatch):
     assert "haven't been rejected" in last
     assert "outage on their side" not in last
     assert "same login" in last
-    assert ("Retry", "ACTION|retry_setup_login") in sim.get_last_buttons()
-    assert ("Cancel", "ACTION|cancel") in sim.get_last_buttons()
+    assert ('🔄 Retry', "ACTION|retry_setup_login") in sim.get_last_buttons()
+    assert ('❌ Cancel', "ACTION|cancel") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio
@@ -296,7 +296,7 @@ async def test_setup_retry_login_reuses_captured_credentials_after_infra_failure
 
     assert result == AWAIT_PASSWORD
     store_creds.assert_not_called()
-    assert ("Retry", "ACTION|retry_setup_login") in sim.get_last_buttons()
+    assert ('🔄 Retry', "ACTION|retry_setup_login") in sim.get_last_buttons()
     sim.clear_messages()
 
     retry_update = sim._make_callback_update("ACTION|retry_setup_login")

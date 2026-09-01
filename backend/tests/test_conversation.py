@@ -46,12 +46,12 @@ class TestKeyboardBuilding:
         rows = keyboard.inline_keyboard
 
         assert [(button.text, button.callback_data) for button in rows[0]] == [
-            ("CBD", "FORM|best"),
-            ("Reflective log", "FORM|REFLECT_LOG"),
+            ('🩺 CBD', "FORM|best"),
+            ('💭 Reflective log', "FORM|REFLECT_LOG"),
         ]
         assert [(button.text, button.callback_data) for button in rows[-1]] == [
-            ("Forms", "FORM|show_all"),
-            ("Restart", "CANCEL|form"),
+            ('📋 Forms', "FORM|show_all"),
+            ('🔄 Restart', "CANCEL|form"),
         ]
         assert all(len(row) <= 2 for row in rows)
 
@@ -97,7 +97,7 @@ class TestKeyboardBuilding:
         assert (
             keyboard.inline_keyboard[0][0].text,
             keyboard.inline_keyboard[0][0].callback_data,
-        ) == ("CBD", "FORM|best")
+        ) == ('🩺 CBD', "FORM|best")
 
     def test_active_end_user_keyboards_never_exceed_two_buttons_per_row(self):
         from bot import (
@@ -253,11 +253,11 @@ class TestMessagePolicy:
         rows = _build_approval_keyboard().inline_keyboard
 
         assert [(button.text, button.callback_data) for button in rows[0]] == [
-            ("Save to Kaizen", "APPROVE|draft"),
+            ('💾 Save to Kaizen', "APPROVE|draft"),
         ]
         assert [(button.text, button.callback_data) for button in rows[1]] == [
-            ("Improve reflection", "IMPROVE|reflection"),
-            ("Cancel", "CANCEL|draft"),
+            ('✏️ Improve reflection', "IMPROVE|reflection"),
+            ('❌ Cancel', "CANCEL|draft"),
         ]
 
     def test_failed_filing_actions_are_compact_without_losing_choices(self):
@@ -271,10 +271,10 @@ class TestMessagePolicy:
             for row in rows
             for button in row
         ] == [
-            ("Retry", "ACTION|retry_filing"),
-            ("Edit", "CASE|improve"),
-            ("New case", "CASE|new"),
-            ("Cancel", "ACTION|cancel"),
+            ('🔄 Retry', "ACTION|retry_filing"),
+            ('✏️ Edit', "CASE|improve"),
+            ('➕ New case', "CASE|new"),
+            ('❌ Cancel', "ACTION|cancel"),
         ]
 
     def test_form_recommendation_copy_hides_default_curriculum_and_finishes_lines(self):
@@ -440,7 +440,7 @@ class TestExplicitFormRouting:
         sent_keyboard = message.reply_text.await_args.kwargs["reply_markup"]
         first_button = sent_keyboard.inline_keyboard[0][0]
         assert first_button.callback_data == "FORM|best"
-        assert first_button.text == "QIAT"
+        assert first_button.text == "🎓 QIAT"
         assert "Teaching Session" not in first_button.text
 
     @pytest.mark.asyncio
@@ -488,7 +488,7 @@ class TestExplicitFormRouting:
         assert state == bot.AWAIT_FORM_CHOICE
         assert context.user_data["form_recommendations"][0].form_type == "QIAT"
         sent_keyboard = message.reply_text.await_args.kwargs["reply_markup"]
-        assert sent_keyboard.inline_keyboard[0][0].text == "QIAT"
+        assert sent_keyboard.inline_keyboard[0][0].text == "🎓 QIAT"
 
     @pytest.mark.asyncio
     async def test_question_about_case_recommendation_uses_same_plain_photo_copy(self, monkeypatch):

@@ -3,11 +3,11 @@
   dict({
     'buttons': list([
       tuple(
-        'Add reflection',
+        '✍️ Add reflection',
         'ACTION|add_reflection_detail',
       ),
       tuple(
-        'Cancel',
+        '❌ Cancel',
         'CANCEL|draft',
       ),
     ]),
@@ -50,19 +50,19 @@
   dict({
     'buttons': list([
       tuple(
-        'CBD',
+        '🩺 CBD',
         'FORM|best',
       ),
       tuple(
-        'ACAT',
+        '📋 ACAT',
         'FORM|ACAT',
       ),
       tuple(
-        'Forms',
+        '📋 Forms',
         'FORM|show_all',
       ),
       tuple(
-        'Restart',
+        '🔄 Restart',
         'CANCEL|form',
       ),
     ]),

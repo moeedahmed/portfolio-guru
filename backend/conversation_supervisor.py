@@ -39,8 +39,8 @@ from vnext_dialogue_policy import is_completion_request
 
 # The gathering action advances to form choice. The same stable action id is
 # also used after recommendation, where the visible outcome is drafting.
-CHOOSE_FORM_ACTION = ChannelAction(action_id="GATHER|done", label="Choose form")
-DRAFT_NOW_ACTION = ChannelAction(action_id="GATHER|done", label="Draft")
+CHOOSE_FORM_ACTION = ChannelAction(action_id="GATHER|done", label="📋 Choose form")
+DRAFT_NOW_ACTION = ChannelAction(action_id="GATHER|done", label="📝 Draft")
 
 AnswerFn = Callable[[str], Awaitable[str]]
 

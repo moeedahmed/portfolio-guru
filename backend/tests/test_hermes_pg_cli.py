@@ -397,12 +397,12 @@ def test_whatsapp_reply_continues_after_form_recommendation_to_preview():
     assert fourth[1]["status"] == "ok"
 
     captured_reply = second[1]["data"]["rendered_reply"]
-    assert "1. Choose form" in captured_reply
+    assert "1. 📋 Choose form" in captured_reply
 
     recommendation = third[1]["data"]["rendered_reply"]
     assert "recommended WPBA form is" in recommendation
     assert "Case-Based Discussion (CBD)" in recommendation
-    assert "1. Draft" in recommendation
+    assert "1. 📝 Draft" in recommendation
 
     preview = fourth[1]["data"]["rendered_reply"]
     assert "vNext local preview" in preview
@@ -459,7 +459,7 @@ def test_whatsapp_reply_setup_choice_resolves_from_persisted_actions(tmp_path):
 
     code, first = _run_cli("whatsapp-reply", "--payload", json.dumps(payload), env=env)
     assert code == 0
-    assert "1. Connect Kaizen" in first["data"]["rendered_reply"]
+    assert "1. 🔗 Connect Kaizen" in first["data"]["rendered_reply"]
 
     payload["text"] = "1"
     code, second = _run_cli("whatsapp-reply", "--payload", json.dumps(payload), env=env)
@@ -487,7 +487,7 @@ def test_whatsapp_reply_gathering_persists_across_cli_processes(tmp_path):
     code, followup = _run_cli("whatsapp-reply", "--payload", json.dumps(payload), env=env)
     assert code == 0
     assert "Case captured" in followup["data"]["rendered_reply"]
-    assert "1. Choose form" in followup["data"]["rendered_reply"]
+    assert "1. 📋 Choose form" in followup["data"]["rendered_reply"]
 
 
 def test_whatsapp_reply_draft_now_uses_accumulated_state_without_kaizen(tmp_path):
@@ -521,7 +521,7 @@ def test_whatsapp_reply_draft_now_uses_accumulated_state_without_kaizen(tmp_path
     assert data["kaizen_writes"] is False
     rendered = data["rendered_reply"]
     assert "recommended WPBA form" in rendered
-    assert "1. Draft" in rendered
+    assert "1. 📝 Draft" in rendered
 
     payload["text"] = "1"
     code, preview_response = _run_cli(

@@ -20,6 +20,42 @@ import re
 from dataclasses import dataclass, field
 
 
+_ACTION_EMOJI_BASE = (
+    "\U0001F300-\U0001FAFF"
+    "\U00002600-\U000027BF"
+    "\U00002100-\U000021FF"
+    "\U00002300-\U000025FF"
+    "\U00002B00-\U00002BFF"
+    "\U0001F1E6-\U0001F1FF"
+)
+_ACTION_EMOJI_CLUSTER = re.compile(
+    rf"^[{_ACTION_EMOJI_BASE}]"
+    rf"[\ufe0e\ufe0f]?"
+    rf"[\U0001F3FB-\U0001F3FF]?"
+    rf"(?:\u200d[{_ACTION_EMOJI_BASE}][\ufe0e\ufe0f]?[\U0001F3FB-\U0001F3FF]?)*"
+)
+_BANNED_ACTION_EMOJI = frozenset({"⭐", "✨", "🤖", "🎉"})
+
+
+def _render_action_label(label: str) -> str:
+    """Return one functional leading icon without rejecting legacy state.
+
+    Current production constructors are held to the stricter source policy.
+    This renderer keeps previously persisted or externally deserialised plain,
+    decorative, or multiply-prefixed labels usable across a deployment instead
+    of turning a visual-standard change into a compatibility failure.
+    """
+    wording = label.strip()
+    icons: list[str] = []
+    while match := _ACTION_EMOJI_CLUSTER.match(wording):
+        icons.append(match.group(0))
+        wording = wording[match.end():].lstrip()
+
+    if len(icons) == 1 and icons[0] not in _BANNED_ACTION_EMOJI:
+        return f"{icons[0]} {wording}" if wording else f"{icons[0]} Continue"
+    return f"➡️ {wording or 'Continue'}"
+
+
 @dataclass(frozen=True)
 class ChannelAction:
     """A single offered action.
@@ -68,7 +104,7 @@ def to_telegram_keyboard(reply: ChannelReply):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
     buttons = [
-        InlineKeyboardButton(action.label, callback_data=action.action_id)
+        InlineKeyboardButton(_render_action_label(action.label), callback_data=action.action_id)
         for action in reply.actions
     ]
     rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
@@ -83,7 +119,7 @@ def to_telegram_button_rows(reply: ChannelReply) -> list[list[dict[str, str]]]:
     ``python-telegram-bot`` object.
     """
     buttons = [
-        {"text": action.label, "callback_data": action.action_id}
+        {"text": _render_action_label(action.label), "callback_data": action.action_id}
         for action in reply.actions
     ]
     return [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
@@ -98,7 +134,7 @@ def render_numbered(reply: ChannelReply) -> str:
     blocks = [reply.full_text()]
     if reply.actions:
         options = "\n".join(
-            f"{index}. {action.label}"
+            f"{index}. {_render_action_label(action.label)}"
             for index, action in enumerate(reply.actions, start=1)
         )
         blocks.append(options)
