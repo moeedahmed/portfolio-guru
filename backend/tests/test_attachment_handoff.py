@@ -405,7 +405,7 @@ async def test_image_attach_only_prompt_rejoins_gathering_loop_on_next_text(monk
         kind=GatheringTurnKind.CONTINUE_GATHERING,
         intent=ConversationalIntent.NEW_CASE,
         add_to_case=True,
-        reply=ChannelReply(body="📥 Captured. Add anything else, or choose a form."),
+        reply=ChannelReply(body="📥 Case captured.\n\nSend another anonymised message to add details.\n\nWhen you're ready, tap Choose form."),
     )
     with patch("bot.decide_gathering_turn", new=AsyncMock(return_value=decision)):
         result = await handle_gathering_input(text_update, context)
@@ -416,7 +416,7 @@ async def test_image_attach_only_prompt_rejoins_gathering_loop_on_next_text(monk
     assert context.bot.edit_message_text.await_args.kwargs["reply_markup"] is None
     assert context.user_data["gathering_msg_id"] != attached_prompt_id
     assert context.user_data["attachment_path"] == temp_path
-    assert sim.get_last_text() == "📥 Captured. Add anything else, or choose a form."
+    assert sim.get_last_text() == "📥 Case captured.\n\nSend another anonymised message to add details.\n\nWhen you're ready, tap Choose form."
     assert sim.get_last_buttons() == [
         ("Choose form", "GATHER|done"),
         ("Discard case", "ACTION|cancel"),

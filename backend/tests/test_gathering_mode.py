@@ -56,7 +56,7 @@ async def test_gathering_mode_starts_collection_instead_of_recommending(monkeypa
     assert result == AWAIT_GATHERING
     assert process_case.await_count == 0
     assert context.user_data["gathering_case"]["parts"][0]["text"] == _FIRST_CASE
-    assert any("Captured" in message for _, message, _ in sim.messages_sent)
+    assert any("Case captured" in message for _, message, _ in sim.messages_sent)
 
 
 @pytest.mark.asyncio
@@ -187,7 +187,7 @@ async def test_gathering_reply_offers_done_button(monkeypatch):
          patch("bot._process_case_text", new=AsyncMock(return_value=AWAIT_FORM_CHOICE)):
         await handle_case_input(update, context)
 
-    assert sim.messages_sent[-1][1] == "📥 Captured. Add anything else, or choose a form."
+    assert sim.messages_sent[-1][1] == "📥 Case captured.\n\nSend another anonymised message to add details.\n\nWhen you're ready, tap Choose form."
     assert sim.get_last_buttons() == [
         ("Choose form", "GATHER|done"),
         ("Discard case", "ACTION|cancel"),
@@ -241,7 +241,7 @@ async def test_gathering_switches_to_draft_button_once_context_is_grounded(monke
     assert context.user_data["last_bot_msg_id"] != first_prompt_id
     assert "source_detail_prompt_refs" not in context.user_data
     assert any(kind == "bot_delete" for kind, _, _ in sim.messages_sent)
-    assert "Captured" in sim.get_last_text()
+    assert "Case captured" in sim.get_last_text()
     assert sim.messages_sent[-1][0] == "reply"
     assert sim.get_last_buttons() == [
         ("Choose form", "GATHER|done"),
@@ -262,7 +262,7 @@ async def test_gathering_ready_prompt_is_resent_below_new_case_detail(monkeypatc
 
     assert result == AWAIT_GATHERING
     first_ready_id = context.user_data["last_bot_msg_id"]
-    assert "Captured" in sim.get_last_text()
+    assert "Case captured" in sim.get_last_text()
 
     second = sim._make_text_update("I also documented consultant discussion and safety-netting.")
     result = await handle_gathering_input(second, context)
@@ -271,7 +271,7 @@ async def test_gathering_ready_prompt_is_resent_below_new_case_detail(monkeypatc
     assert context.user_data["last_bot_msg_id"] != first_ready_id
     assert any(kind == "bot_delete" for kind, _, _ in sim.messages_sent)
     assert sim.messages_sent[-1][0] == "reply"
-    assert sim.get_last_text() == "📥 Captured. Add anything else, or choose a form."
+    assert sim.get_last_text() == "📥 Case captured.\n\nSend another anonymised message to add details.\n\nWhen you're ready, tap Choose form."
     assert sim.get_last_buttons() == [
         ("Choose form", "GATHER|done"),
         ("Discard case", "ACTION|cancel"),
@@ -670,7 +670,7 @@ async def test_second_text_addition_keeps_both_buttons(monkeypatch):
     result = await handle_gathering_input(update, context)
 
     assert result == AWAIT_GATHERING
-    assert "Captured" in sim.get_last_text()
+    assert "Case captured" in sim.get_last_text()
     assert sim.get_last_buttons() == [
         ("Choose form", "GATHER|done"),
         ("Discard case", "ACTION|cancel"),

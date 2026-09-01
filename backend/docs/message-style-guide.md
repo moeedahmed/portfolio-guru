@@ -87,7 +87,11 @@ Canonical compact labels:
 First capture:
 
 ```
-📥 Captured. Add anything else, or choose a form.
+📥 Case captured.
+
+Send another anonymised message to add details.
+
+When you're ready, tap Choose form.
 ```
 
 Buttons: `Choose form` · `Discard case`
@@ -118,7 +122,11 @@ the standard ready state.
 After subsequent messages:
 
 ```
-📥 Noted. Add anything else, or choose a form.
+📥 Case captured.
+
+Send another anonymised message to add details.
+
+When you're ready, tap Choose form.
 ```
 
 Completion prompt (when user says "done" or taps button):

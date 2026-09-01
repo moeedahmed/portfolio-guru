@@ -73,8 +73,8 @@ def test_collecting_reply_asks_for_done_without_raw_state():
 
     reply = collecting_reply(workspace)
 
-    assert "Captured" in reply
-    assert "choose a form" in reply.lower()
+    assert "Case captured" in reply
+    assert "choose form" in reply.lower()
     assert "state" not in reply.lower()
 
 

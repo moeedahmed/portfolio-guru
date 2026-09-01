@@ -751,7 +751,7 @@ def test_whatsapp_followup_case_detail_is_captured_with_choose_form_action(
     assert followup.status_code == 200
     assert len(captured) == 2
     assert "clinical case" in captured[0][1].lower()
-    assert "Captured" in captured[1][1]
+    assert "Case captured" in captured[1][1]
     assert "1. Choose form" in captured[1][1]
     assert "Reply with the number of your choice." in captured[1][1]
 

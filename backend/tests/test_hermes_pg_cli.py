@@ -486,7 +486,7 @@ def test_whatsapp_reply_gathering_persists_across_cli_processes(tmp_path):
     payload["text"] = "62M came to ED with chest pain and I assessed him with my consultant."
     code, followup = _run_cli("whatsapp-reply", "--payload", json.dumps(payload), env=env)
     assert code == 0
-    assert "Captured" in followup["data"]["rendered_reply"]
+    assert "Case captured" in followup["data"]["rendered_reply"]
     assert "1. Choose form" in followup["data"]["rendered_reply"]
 
 
