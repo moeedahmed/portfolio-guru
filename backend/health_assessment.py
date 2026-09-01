@@ -9,20 +9,22 @@ oldest for 1112 days.
 
 This module computes what a doctor would actually act on:
 
-- **Stuck evidence**, split by who can move it. An item waiting on an assessor
-  needs chasing; an unfinished draft is theirs to close. Those are different
-  actions, so they are never pooled into one number.
+- **Stuck evidence**, split by who can move it. Only the assessor can complete
+  an item that sits with them; an unfinished draft is the doctor's own. Those
+  are different situations, so they are never pooled into one number.
 - **Balance against the portfolio's own baseline**, not an absolute target.
   Requirements differ by stage and pathway, and this layer is deliberately
   pathway-agnostic, so "thin" means thin *relative to what this doctor has
-  filed* — a claim the evidence supports without importing curriculum rules.
+  filed* — a claim the evidence supports without importing curriculum rules —
+  and is not computed at all below ``IMBALANCE_MIN_ITEMS``.
 - **Staleness**, per domain, so a domain that was covered years ago and left
   alone does not read as covered today.
 
-The score stays coarse and the reasons stay precise. Every assessment carries
-the concrete reasons for its verdict; the spec's rule is that a traffic light
-never appears alone, and the reasons — not the colour — are what tell a doctor
-what to do.
+There is no overall score. A green/amber/red light is a readiness claim, and
+nothing here verifies readiness against a pathway's own rules — the same
+evidence means different things to an ST4, a CESR applicant and an SAS doctor.
+The findings are stated as facts about the scanned evidence and the views
+render them directly.
 
 Pure: no I/O, no network, no clock beyond the injectable ``today``.
 """
@@ -34,7 +36,7 @@ from datetime import date
 from typing import Optional
 
 from form_labels import form_label
-from health_models import CORE_DOMAINS, EvidenceItem, HealthDomain, HealthScore
+from health_models import CORE_DOMAINS, EvidenceItem, HealthDomain
 
 # Kaizen workflow states that mean the item has not finished its journey.
 AWAITING_OTHERS = "pending"
@@ -49,6 +51,13 @@ STUCK_AFTER_DAYS = 21
 # next to 30, and a new portfolio should not be scolded for being small.
 THIN_MAX_ITEMS = 10
 THIN_MAX_SHARE = 0.05
+
+# Below this many scanned core-domain items, a comparison between domains says
+# more about the size of the sample than about the portfolio: with 12 items,
+# one domain holding 1 and another 6 is noise. The minimum is deliberately a
+# single explicit number rather than a derived threshold, so the rule can be
+# stated to the doctor in one line.
+IMBALANCE_MIN_ITEMS = 20
 
 # A covered domain whose newest evidence is older than this is not current.
 STALE_AFTER_DAYS = 365 * 3
@@ -87,10 +96,8 @@ class DomainStat:
 
 @dataclass(frozen=True)
 class HealthAssessment:
-    """Everything the report renders, computed once, deterministically."""
+    """Everything the views render, computed once, deterministically."""
 
-    score: HealthScore
-    reasons: list[str] = field(default_factory=list)
     stuck_awaiting: list[StuckEvidence] = field(default_factory=list)
     stuck_drafts: list[StuckEvidence] = field(default_factory=list)
     domains: list[DomainStat] = field(default_factory=list)
@@ -100,8 +107,12 @@ class HealthAssessment:
     next_actions: list[str] = field(default_factory=list)
     patterns: list[str] = field(default_factory=list)
     slo_counts: dict[int, int] = field(default_factory=dict)
+    tagged_items: int = 0
     untagged_items: int = 0
     untagged_by_form: dict[str, int] = field(default_factory=dict)
+    # False when the portfolio is too small for a domain comparison to mean
+    # anything. Coverage renders the reason instead of the comparison.
+    balance_is_comparable: bool = False
 
     @property
     def stuck_total(self) -> int:
@@ -138,13 +149,17 @@ def _stuck_from(item: EvidenceItem, today: date) -> Optional[StuckEvidence]:
 
 def _domain_stats(items: list[EvidenceItem], today: date) -> list[DomainStat]:
     total = sum(1 for item in items if item.domain in CORE_DOMAINS)
+    comparable = total >= IMBALANCE_MIN_ITEMS
     stats: list[DomainStat] = []
     for domain in CORE_DOMAINS:
         in_domain = [item for item in items if item.domain == domain]
         count = len(in_domain)
         newest = max((item.event_date for item in in_domain), default=None)
         thin = bool(
-            count and count < THIN_MAX_ITEMS and (not total or count / total < THIN_MAX_SHARE)
+            comparable
+            and count
+            and count < THIN_MAX_ITEMS
+            and count / total < THIN_MAX_SHARE
         )
         stale = bool(newest and (today - newest).days > STALE_AFTER_DAYS)
         recent = sum(
@@ -163,25 +178,6 @@ def _domain_stats(items: list[EvidenceItem], today: date) -> list[DomainStat]:
     return stats
 
 
-def _presence_score(stats: list[DomainStat]) -> HealthScore:
-    covered = sum(1 for stat in stats if stat.count > 0)
-    if covered >= 5:
-        return HealthScore.green
-    if covered >= 3:
-        return HealthScore.amber
-    if covered >= 1:
-        return HealthScore.red
-    return HealthScore.grey
-
-
-def _demote(score: HealthScore) -> HealthScore:
-    if score == HealthScore.green:
-        return HealthScore.amber
-    if score == HealthScore.amber:
-        return HealthScore.red
-    return score
-
-
 def _plural(count: int, word: str) -> str:
     return f"{count} {word}" if count == 1 else f"{count} {word}s"
 
@@ -193,14 +189,15 @@ def compute_health_assessment(
     reference = today or date.today()
     if not items:
         return HealthAssessment(
-            score=HealthScore.grey,
-            reasons=["No portfolio evidence has been scanned yet"],
-            next_actions=["Connect Kaizen and run a scan to see your portfolio"],
+            next_actions=["No portfolio evidence has been scanned yet"],
         )
 
     stats = _domain_stats(items, reference)
     stuck = [s for s in (_stuck_from(item, reference) for item in items) if s]
-    stuck.sort(key=lambda s: s.days_waiting, reverse=True)
+    # Total order, not just a sort by age: two items filed on the same day must
+    # land in the same position on every render, or a doctor paging through
+    # Actions sees items move between pages.
+    stuck.sort(key=lambda s: (-s.days_waiting, s.form_type or "", s.id))
     awaiting = [s for s in stuck if s.waits_on_others]
     drafts = [s for s in stuck if not s.waits_on_others]
 
@@ -216,45 +213,9 @@ def compute_health_assessment(
             slo_counts[slo] = slo_counts.get(slo, 0) + 1
     untagged_forms = _untagged_by_form(items)
     untagged = sum(untagged_forms.values())
-
-    reasons: list[str] = []
-    for stat in stats:
-        if stat.is_empty:
-            reasons.append(f"No {DOMAIN_LABELS[stat.domain]} evidence")
-    if awaiting:
-        reasons.append(
-            f"{_plural(len(awaiting), 'item')} waiting on someone else, "
-            f"oldest {awaiting[0].days_waiting} days"
-        )
-    if drafts:
-        reasons.append(
-            f"{_plural(len(drafts), 'draft')} of your own unfinished, "
-            f"oldest {drafts[0].days_waiting} days"
-        )
-    biggest = max((stat.count for stat in stats), default=0)
-    for stat in stats:
-        if stat.is_thin:
-            reasons.append(
-                f"{DOMAIN_LABELS[stat.domain]} is thin: {stat.count} against {biggest} at your strongest"
-            )
-        elif stat.is_stale and stat.newest:
-            reasons.append(
-                f"{DOMAIN_LABELS[stat.domain]} evidence stops at {stat.newest.strftime('%b %Y')}"
-            )
-
-    score = _presence_score(stats)
-    # One demotion, however many concerns fire. The colour is a coarse signal;
-    # stacking demotions would drive every large portfolio to red and teach
-    # doctors to ignore it. The reasons above carry the detail.
-    if stuck or any(stat.is_thin or stat.is_stale for stat in stats):
-        score = _demote(score)
-
-    if not reasons:
-        reasons.append("Every core domain is covered, current, and nothing is waiting")
+    tagged = sum(1 for item in items if getattr(item, "slo_numbers", None))
 
     return HealthAssessment(
-        score=score,
-        reasons=reasons,
         stuck_awaiting=awaiting,
         stuck_drafts=drafts,
         domains=stats,
@@ -264,8 +225,10 @@ def compute_health_assessment(
         next_actions=_next_actions(awaiting, drafts, stats),
         patterns=_patterns(awaiting, drafts, stats, items),
         slo_counts=slo_counts,
+        tagged_items=tagged,
         untagged_items=untagged,
         untagged_by_form=untagged_forms,
+        balance_is_comparable=core_total >= IMBALANCE_MIN_ITEMS,
     )
 
 
@@ -282,6 +245,12 @@ def _untagged_by_form(items: list[EvidenceItem]) -> dict[str, int]:
     A count on its own tells a doctor there is a problem but not where to go.
     Naming the forms turns "158 items are untagged" into "your reflective logs
     are untagged", which is somewhere to start.
+
+    Much evidence cannot carry curriculum tags at all — MSF, e-learning, exams,
+    document uploads — and counting those as untagged turns a structural fact
+    into an alarming number: on a real portfolio that was ~100 of 247. A form
+    type counts as taggable here only because this doctor has tagged one of
+    them before.
     """
     taggable_forms = {
         item.form_type
@@ -295,29 +264,6 @@ def _untagged_by_form(items: list[EvidenceItem]) -> dict[str, int]:
     return counts
 
 
-def _untagged_but_taggable(items: list[EvidenceItem]) -> int:
-    """Count untagged items of a kind the doctor does tag elsewhere.
-
-    Much evidence cannot carry curriculum tags at all — MSF, e-learning, exams,
-    document uploads — and counting those as untagged turns a structural fact
-    into an alarming number. On a real portfolio that was ~100 of 247. What is
-    worth flagging is the other kind: 66 untagged reflections next to 24 tagged
-    ones is not structure, it is evidence that may not count toward curriculum
-    coverage. A form type counts as taggable here only because this doctor has
-    tagged one of them before.
-    """
-    taggable_forms = {
-        item.form_type
-        for item in items
-        if item.form_type and (getattr(item, "slo_numbers", None) or [])
-    }
-    return sum(
-        1
-        for item in items
-        if item.form_type in taggable_forms and not (getattr(item, "slo_numbers", None) or [])
-    )
-
-
 def _patterns(
     awaiting: list[StuckEvidence],
     drafts: list[StuckEvidence],
@@ -329,8 +275,9 @@ def _patterns(
     A list of facts is not a diagnosis. Three Teaching Observations stuck for
     1112, 937 and 798 days is not bad luck three times; it says teaching
     observations do not get signed off. And a domain can read as thin partly
-    because its evidence is sitting unsigned, which changes the action from
-    "file more" to "chase what you filed".
+    because its evidence is sitting unsigned, which is a different problem from
+    having filed nothing — so the finding names which one it is and leaves the
+    decision to the doctor.
     """
     found: list[str] = []
 
@@ -361,7 +308,7 @@ def _patterns(
         rate = count / filed if filed else 0
         if count >= REPEAT_PATTERN_MIN and rate >= overall_rate * REPEAT_PATTERN_RATE_MULTIPLE:
             found.append(
-                f"{form_label(form_type)}: {count} of your {filed} are still outstanding"
+                f"{form_label(form_type)}: {count} of your {filed} are unfinished"
             )
 
     blocked_ids = {stuck.id for stuck in stuck_all}
@@ -373,8 +320,8 @@ def _patterns(
         )
         if stuck_here:
             found.append(
-                f"{DOMAIN_LABELS[stat.domain]} looks thin partly because "
-                f"{stuck_here} of its items are unfinished — chase before filing more"
+                f"{DOMAIN_LABELS[stat.domain]} looks small partly because "
+                f"{stuck_here} of its items are unfinished rather than missing"
             )
     return found[:2]
 
@@ -384,41 +331,46 @@ def _next_actions(
     drafts: list[StuckEvidence],
     stats: list[DomainStat],
 ) -> list[str]:
-    """Actions derived from this portfolio, never generic filler.
+    """Findings derived from this portfolio, never generic filler.
 
     The old report suggested "File a CBD from a recent supervised case" to a
     doctor with 250 clinical items, because the suggestions were fallback
     strings rather than a reading of the evidence.
+
+    They are stated as findings with exact dates rather than as instructions.
+    Nothing here knows whether a 2023 draft is still worth completing, whether
+    an assessor has already been asked, or whether any deadline exists, so
+    "chase this" and "overdue" would be claims the evidence cannot support.
+    Relative domain size is deliberately absent: it belongs in Coverage, where
+    it can be qualified as a comparison with the doctor's own portfolio.
     """
     actions: list[str] = []
 
     if awaiting:
         oldest = awaiting[0]
         actions.append(
-            f"Chase sign-off on your {form_label(oldest.form_type, 'oldest item')} from "
-            f"{oldest.event_date.strftime('%-d %b %Y')} — waiting {oldest.days_waiting} days"
+            f"{_plural(len(awaiting), 'item')} with someone else — oldest a "
+            f"{form_label(oldest.form_type, 'form')} dated "
+            f"{oldest.event_date.strftime('%-d %b %Y')}"
         )
     if drafts:
         oldest = drafts[0]
         actions.append(
-            f"Finish or delete your {form_label(oldest.form_type, 'draft')} from "
-            f"{oldest.event_date.strftime('%-d %b %Y')} — unfinished for {oldest.days_waiting} days"
+            f"{_plural(len(drafts), 'draft')} of your own unfinished — oldest a "
+            f"{form_label(oldest.form_type, 'form')} dated "
+            f"{oldest.event_date.strftime('%-d %b %Y')}"
         )
 
     for stat in stats:
         if stat.is_empty:
-            actions.append(f"Add {DOMAIN_LABELS[stat.domain]} evidence — you have none")
+            actions.append(f"No {DOMAIN_LABELS[stat.domain]} evidence in this scan")
     for stat in stats:
-        if stat.is_thin:
+        if stat.is_stale and stat.newest:
             actions.append(
-                f"Add {DOMAIN_LABELS[stat.domain]} evidence — only {stat.count} items"
-            )
-        elif stat.is_stale and stat.newest:
-            actions.append(
-                f"Refresh {DOMAIN_LABELS[stat.domain]} — nothing since "
+                f"{DOMAIN_LABELS[stat.domain]} evidence stops at "
                 f"{stat.newest.strftime('%b %Y')}"
             )
 
     if not actions:
-        actions.append("Nothing is outstanding — keep filing as you go")
+        actions.append("Nothing in this scan is unfinished")
     return actions[:5]

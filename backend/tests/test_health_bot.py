@@ -271,8 +271,8 @@ async def test_change_pathway_back_button_returns_to_portfolio_defaults(isolated
 
 
 @pytest.mark.asyncio
-async def test_health_empty_state_clarifies_portfolio_guru_scope(monkeypatch):
-    """Empty state must say cases are absent in Portfolio Guru, not in Kaizen."""
+async def test_health_empty_state_clarifies_scan_scope_and_offers_next_routes(monkeypatch):
+    """No visible evidence is not a claim that the doctor's Kaizen is empty."""
     import bot
 
     user_id = 5150
@@ -281,22 +281,37 @@ async def test_health_empty_state_clarifies_portfolio_guru_scope(monkeypatch):
     monkeypatch.setattr(bot, "get_health_profile", lambda _user_id: _profile(user_id, Pathway.training_arcp))
     monkeypatch.setattr(bot, "get_training_level", lambda _user_id: "ST6")
 
-    sent: dict[str, str] = {}
+    sent: dict[str, object] = {}
 
     await bot._run_health_analysis(
         user_id=user_id,
         chat=SimpleNamespace(send_action=AsyncMock()),
         send_progress=AsyncMock(),
-        send_result=AsyncMock(side_effect=lambda text, reply_markup: sent.setdefault("text", text)),
+        send_result=AsyncMock(
+            side_effect=lambda text, reply_markup: sent.update(
+                text=text, reply_markup=reply_markup
+            )
+        ),
         send_photo_fn=AsyncMock(),
         fail_fn=AsyncMock(),
     )
 
     text = sent["text"]
-    assert "No Portfolio Guru cases filed yet" in text
-    assert "existing Kaizen cases aren't affected" in text
-    # Must not read as "you have no cases in Kaizen".
-    assert "No cases filed yet." not in text
+    assert isinstance(text, str)
+    assert text.startswith("📍 *Portfolio priorities*")
+    assert "No evidence was visible in this scan" in text
+    assert "does not mean your Kaizen portfolio is empty" in text
+    assert "readiness" not in text.lower()
+    keyboard = sent["reply_markup"]
+    assert isinstance(keyboard, bot.InlineKeyboardMarkup)
+    buttons = [
+        (button.text, button.callback_data)
+        for row in keyboard.inline_keyboard
+        for button in row
+    ]
+    assert ("🔄 Refresh health", "ACTION|health") in buttons
+    assert ("➕ New case", "ACTION|file") in buttons
+    assert ("⚙️ Settings", "ACTION|settings") in buttons
 
 
 @pytest.mark.asyncio
@@ -320,6 +335,7 @@ async def test_cesr_health_output_uses_deterministic_engine_without_llm(monkeypa
     monkeypatch.setattr(bot, "analyse_portfolio_health", analysis)
 
     sent: dict[str, str] = {}
+    store = SimpleNamespace(user_data={})
 
     await bot._run_health_analysis(
         user_id=user_id,
@@ -328,29 +344,32 @@ async def test_cesr_health_output_uses_deterministic_engine_without_llm(monkeypa
         send_result=AsyncMock(side_effect=lambda text, reply_markup: sent.setdefault("text", text)),
         send_photo_fn=AsyncMock(),
         fail_fn=AsyncMock(),
+        context_store=store,
     )
 
     text = sent["text"]
-    assert "*Portfolio Health — CESR / Portfolio Pathway*" in text
-    # No Kaizen index → limited scan, not a readiness verdict.
-    assert "Full Kaizen scan not available" in text
-    assert "Limited view" in text and "Full Kaizen scan not available" in text
-    assert "Long-term CESR readiness:" not in text
-    assert "🔴 Early" not in text
-    assert "WPBA progress toward 36" in text
-    assert "2/36" in text
+    views = store.user_data["last_health_report"]["views"]
+    assert text.startswith("📍 *Portfolio priorities*")
+    # A verified pathway overlay may still count its own requirement, named
+    # as that pathway's rule rather than as a readiness verdict.
+    assert "*Portfolio Pathway requirement*" in text
+    assert "2/36 WPBAs counted in this scan" in text
     assert "DOPS 1/12" in text
     assert "Mini-CEX 0/12" in text
     assert "CBD 1/12" in text
-    assert "WPBA progress toward 36" in text
-    assert "5-year evidence window" in text
-    assert "Evidence window:" in text
+    assert "Long-term CESR readiness:" not in text
+    assert "🔴 Early" not in text
+    # No Kaizen index → a partial scan, disclosed on Priorities and in full on
+    # Scan info, never a readiness verdict.
+    assert "Partial scan: Portfolio Guru filings only" in text
+    assert "Limited view: based on Portfolio Guru filings only" in views["scan"]
+    assert "5-year evidence window" in views["scan"]
     assert "ARCP" not in text
     analysis.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_health_includes_activity_snapshot_without_sending_photo(monkeypatch):
+async def test_health_renders_one_message_without_sending_a_chart_photo(monkeypatch):
     import sys
     import bot
 
@@ -399,10 +418,8 @@ async def test_health_includes_activity_snapshot_without_sending_photo(monkeypat
         fail_fn=AsyncMock(),
     )
 
-    assert "*Portfolio Health — CESR / Portfolio Pathway*" in sent["text"]
-    assert "*Activity*" in sent["text"]
-    assert "*Activity*" in sent["text"]
-    assert "WPBA progress toward 36" in sent["text"]
+    assert sent["text"].startswith("📍 *Portfolio priorities*")
+    assert "*Portfolio Pathway requirement*" in sent["text"]
     send_photo.assert_not_awaited()
 
 
@@ -428,6 +445,7 @@ async def test_arcp_health_falls_back_to_deterministic_output_when_llm_fails(mon
     monkeypatch.setattr(bot, "analyse_portfolio_health", fail_analysis)
 
     sent: dict[str, str] = {}
+    store = SimpleNamespace(user_data={})
     fail_fn = AsyncMock()
 
     await bot._run_health_analysis(
@@ -437,37 +455,27 @@ async def test_arcp_health_falls_back_to_deterministic_output_when_llm_fails(mon
         send_result=AsyncMock(side_effect=lambda text, reply_markup: sent.setdefault("text", text)),
         send_photo_fn=AsyncMock(),
         fail_fn=fail_fn,
+        context_store=store,
     )
 
     text = sent["text"]
-    assert "*Portfolio Health — Training (CCT) evidence scan*" in text
+    views = store.user_data["last_health_report"]["views"]
+    # The reading is deterministic, so an unavailable LLM is not a failure
+    # path: there is nothing to fall back from.
+    assert text.startswith("📍 *Portfolio priorities*")
     assert "Training (ARCP)" not in text
-    assert "indexed Kaizen item" in text
-    # Provenance detail lives in the Evidence basis pane now; the report
-    # still has to admit the scan was limited rather than imply a full one.
-    assert "Limited view" in text
-    # The scan window is stated in the Evidence basis pane; the report must
-    # still not pass a limited read off as a full one.
-    assert "Limited view" in text
-    assert "Confidence: low" in text
-    # The report is deterministic now, so there is no AI narrative to fall
-    # back from — but it must still produce a full verdict with reasons when
-    # the LLM path is unavailable.
-    assert any(l in text for l in ("Well covered", "Needs attention", "Thin"))
-    assert "*Next*" in text
-    # No Kaizen index → limited scan, not a red gap-level verdict.
-    assert "Full Kaizen scan not available" in text
-    assert "Limited view" in text and "Full Kaizen scan not available" in text
-    assert "Evidence gap level:" not in text
-    assert "🔴 Red" not in text
-    assert "ARCP risk:" not in text
-    assert "*Next*" in text and "\n1. " in text
+    # A partial scan is disclosed and stops the view ranking anything.
+    assert "Partial scan: Portfolio Guru filings only" in text
+    assert "Listed, not ranked" in text
+    assert "\n1. " not in text
+    assert "Confidence: low" in views["scan"]
+    assert "Limited view: based on Portfolio Guru filings only" in views["scan"]
+    # No readiness verdict, in any of its old spellings.
+    for verdict in ("Well covered", "Needs attention", "Evidence gap level:", "ARCP risk:", "🔴 Red"):
+        assert verdict not in text
     assert "before ARCP" not in text
-    assert "*Coverage*" in text
-    assert "Nothing yet in:" in text
-    assert "Already strong" not in text
-    assert "Missing domains" not in text
-    assert "Domain coverage:" not in text
+    assert "*Coverage*" in views["coverage"]
+    assert "CPD: none scanned" in views["coverage"]
     fail_fn.assert_not_called()
 
 
@@ -494,6 +502,7 @@ async def test_arcp_health_output_prioritises_action_plan_when_llm_succeeds(monk
     )
 
     sent: dict[str, str] = {}
+    store = SimpleNamespace(user_data={})
 
     await bot._run_health_analysis(
         user_id=user_id,
@@ -502,36 +511,22 @@ async def test_arcp_health_output_prioritises_action_plan_when_llm_succeeds(monk
         send_result=AsyncMock(side_effect=lambda text, reply_markup: sent.setdefault("text", text)),
         send_photo_fn=AsyncMock(),
         fail_fn=AsyncMock(),
+        context_store=store,
     )
 
     text = sent["text"]
-    assert "*Portfolio Health — Training (CCT) evidence scan*" in text
+    views = store.user_data["last_health_report"]["views"]
+    # An available LLM changes nothing: the views are computed from the
+    # evidence, so narrative and numbers cannot disagree.
+    assert text.startswith("📍 *Portfolio priorities*")
+    assert "Book a supervisor review" not in text
     assert "Training (ARCP)" not in text
-    assert "indexed Kaizen item" in text
-    # Provenance detail lives in the Evidence basis pane now; the report
-    # still has to admit the scan was limited rather than imply a full one.
-    assert "Limited view" in text
-    # The scan window is stated in the Evidence basis pane; the report must
-    # still not pass a limited read off as a full one.
-    assert "Limited view" in text
-    # No Kaizen index → limited scan, not a red gap-level verdict.
-    assert "Full Kaizen scan not available" in text
-    assert "Limited view" in text and "Full Kaizen scan not available" in text
-    assert "Evidence gap level:" not in text
-    assert "🔴 Red" not in text
-    assert "ARCP risk:" not in text
-    assert "*Next*" in text and "\n1. " in text
+    assert "Partial scan: Portfolio Guru filings only" in text
+    assert "Evidence gap level:" not in text and "ARCP risk:" not in text
     assert "before ARCP" not in text
-    assert "*Coverage*" in text
-    assert "Nothing yet in:" in text
-    assert "Already strong" not in text
-    assert "Missing domains" not in text
-    assert "CPD" in text
-    assert "QI" in text
-    assert "Form types:" not in text
-    assert "Domain coverage:" not in text
     assert "CESR" not in text
-    assert "yearly" not in text.lower()
+    assert "CPD" in views["coverage"] and "QI" in views["coverage"]
+    assert "Form types:" not in views["coverage"]
 
 
 # ── _pathway_for_detected_role / _autoset_health_pathway_from_role ───────────
@@ -836,6 +831,7 @@ async def _run_health_capture(monkeypatch, user_id: int, pathway: Pathway) -> st
     )
 
     sent: dict[str, str] = {}
+    store = SimpleNamespace(user_data={})
 
     await bot._run_health_analysis(
         user_id=user_id,
@@ -844,8 +840,9 @@ async def _run_health_capture(monkeypatch, user_id: int, pathway: Pathway) -> st
         send_result=AsyncMock(side_effect=lambda text, reply_markup: sent.setdefault("text", text)),
         send_photo_fn=AsyncMock(),
         fail_fn=AsyncMock(),
+        context_store=store,
     )
-    return sent["text"]
+    return sent["text"], store.user_data["last_health_report"]["views"]
 
 
 @pytest.mark.asyncio
@@ -867,6 +864,7 @@ async def test_health_default_pathway_is_labelled_as_assumed(monkeypatch):
     )
 
     sent: dict[str, str] = {}
+    store = SimpleNamespace(user_data={})
 
     await bot._run_health_analysis(
         user_id=user_id,
@@ -875,64 +873,61 @@ async def test_health_default_pathway_is_labelled_as_assumed(monkeypatch):
         send_result=AsyncMock(side_effect=lambda text, reply_markup: sent.setdefault("text", text)),
         send_photo_fn=AsyncMock(),
         fail_fn=AsyncMock(),
+        context_store=store,
     )
 
-    assert "Assumed pathway: Training (CCT) — change if wrong" in sent["text"]
-    assert "Pathway: default Training (CCT)" not in sent["text"]
+    # Health is pathway-agnostic, so the pathway — and the fact that it was
+    # assumed rather than chosen — belongs with the rest of the provenance.
+    scan = store.user_data["last_health_report"]["views"]["scan"]
+    assert "Assumed pathway: Training (CCT) — change if wrong" in scan
+    assert "Pathway: default Training (CCT)" not in scan
+    assert "pathway" not in sent["text"].lower()
 
 
 @pytest.mark.asyncio
 async def test_arcp_and_cesr_pathway_outputs_diverge_in_lead_framing(monkeypatch):
-    """Same evidence, different pathway. With no Kaizen index both lead with the
-    sync-needed banner, but their bodies still diverge: ARCP shows the next
-    useful filing actions; CESR shows a yearly evidence plan and WPBA progress.
-    """
-    arcp_text = await _run_health_capture(monkeypatch, 6001, Pathway.training_arcp)
-    cesr_text = await _run_health_capture(monkeypatch, 6002, Pathway.cesr_portfolio)
+    """Same evidence, different pathway. The universal views read the same
+    evidence the same way; only the verified pathway overlay differs, and with
+    no overlay nothing pathway-specific is rendered at all."""
+    arcp_text, arcp_views = await _run_health_capture(monkeypatch, 6001, Pathway.training_arcp)
+    cesr_text, cesr_views = await _run_health_capture(monkeypatch, 6002, Pathway.cesr_portfolio)
 
-    # Both lead with the limited-scan banner (no full verdict).
-    assert "Full Kaizen scan not available" in arcp_text
-    assert "Full Kaizen scan not available" in cesr_text
+    # Both disclose the partial scan, and neither claims a readiness level.
+    assert "Partial scan: Portfolio Guru filings only" in arcp_text
+    assert "Partial scan: Portfolio Guru filings only" in cesr_text
     assert "Evidence gap level:" not in arcp_text
     assert "Long-term CESR readiness:" not in cesr_text
 
-    # Training (CCT) pathway framing — ARCP is a checkpoint inside this pathway,
-    # not a standalone pathway label.
-    assert "Training (CCT) evidence scan" in arcp_text
-    assert "ARCP evidence review" not in arcp_text
-    assert "Training (ARCP)" not in arcp_text
-    assert "*Next*" in arcp_text and "\n1. " in arcp_text
-    # ARCP must NOT carry CESR / yearly-plan framing
+    # No verified overlay for Training (CCT): no counter, not an empty one.
+    assert "requirement" not in arcp_text
     assert "CESR" not in arcp_text
-    assert "this year" not in arcp_text.lower()
     assert "5-year" not in arcp_text.lower()
-    assert "yearly" not in arcp_text.lower()
+    assert "Training (CCT)" in arcp_views["scan"]
+    assert "Training (ARCP)" not in arcp_views["scan"]
 
-    # CESR framing
-    assert "CESR / Portfolio Pathway" in cesr_text
-    assert "WPBA progress toward 36" in cesr_text
-    assert "WPBA progress toward 36" in cesr_text
-    assert "5-year evidence window" in cesr_text
+    # CESR overlay: its own published counter, labelled as that pathway's rule.
+    assert "*Portfolio Pathway requirement*" in cesr_text
+    assert "WPBAs counted in this scan" in cesr_text
+    assert "5-year evidence window" in cesr_views["scan"]
     # CESR must NOT carry ARCP-deadline framing
     assert "ARCP risk" not in cesr_text
-    assert "next ARCP" not in cesr_text.lower()
     assert "before ARCP" not in cesr_text
     assert "ARCP" not in cesr_text
 
 
 @pytest.mark.asyncio
 async def test_cesr_message_contains_long_term_and_domain_balance(monkeypatch):
-    cesr_text = await _run_health_capture(monkeypatch, 6003, Pathway.cesr_portfolio)
+    cesr_text, cesr_views = await _run_health_capture(monkeypatch, 6003, Pathway.cesr_portfolio)
 
-    assert "WPBA progress toward 36" in cesr_text
-    # Limited scan (no Kaizen index) → "Not seen", not full-portfolio "Missing domains".
-    assert "Nothing yet in:" in cesr_text
-    assert "Missing domains" not in cesr_text
-    assert "consultant report" in cesr_text.lower()
-    # Long-term framing wording
-    assert "multi-year" in cesr_text or "long-term" in cesr_text.lower()
-    # Evidence-window framing present
-    assert "Evidence window:" in cesr_text
+    assert "WPBAs counted in this scan" in cesr_text
+    # The counter stays on Priorities; the long-term expectations it cannot
+    # count sit in Scan info with the rest of the caveats.
+    assert "consultant report" in cesr_views["scan"].lower()
+    assert "multi-year" in cesr_views["scan"]
+    assert "5-year evidence window" in cesr_views["scan"]
+    # Domain totals belong to Coverage, not to the opening view.
+    assert "none scanned" in cesr_views["coverage"]
+    assert "Missing domains" not in cesr_views["coverage"]
 
 
 def test_health_paywall_copy_is_pathway_neutral():

@@ -231,6 +231,7 @@ async def test_run_health_analysis_uses_indexed_source_when_history_empty(
     )
 
     sent: dict[str, str] = {}
+    store = SimpleNamespace(user_data={})
 
     await bot._run_health_analysis(
         user_id=user_id,
@@ -239,16 +240,16 @@ async def test_run_health_analysis_uses_indexed_source_when_history_empty(
         send_result=AsyncMock(side_effect=lambda text, reply_markup: sent.setdefault("text", text)),
         send_photo_fn=AsyncMock(),
         fail_fn=AsyncMock(),
+        context_store=store,
     )
 
     text = sent["text"]
-    assert "*Portfolio Health — CESR / Portfolio Pathway*" in text
-    # Provenance moved into its own pane; the headline keeps the count so a
-    # doctor still knows how much the verdict was read from.
-    assert "1 indexed Kaizen item" in text
+    assert text.startswith("📍 *Portfolio priorities*")
+    # Provenance moved into Scan info; the counted evidence is still stated
+    # there, so a doctor knows how much this was read from.
+    assert "1 visible evidence item(s)" in store.user_data["last_health_report"]["views"]["scan"]
     assert "No Portfolio Guru cases filed yet" not in text
-    assert "WPBA progress toward 36" in text
-    assert "1/36" in text
+    assert "1/36 WPBAs counted in this scan" in text
 
 
 @pytest.mark.asyncio
@@ -1008,8 +1009,8 @@ async def test_inline_health_button_auto_scans_when_stale(monkeypatch):
 
     send_result = run_health.await_args.kwargs["send_result"]
     await send_result("Health result", None)
-    assert ('➕ New case', "ACTION|file") in sim.get_last_buttons()
-    assert ('🔎 Evidence basis', "ACTION|health_detail|basis") in sim.get_last_buttons()
+    assert ('📌 Actions', "ACTION|health_view|actions") in sim.get_last_buttons()
+    assert ('🔎 Scan info', "ACTION|health_view|scan") in sim.get_last_buttons()
     assert ("🔙 Back", "ACTION|back_to_menu") not in sim.get_last_buttons()
     assert ('🔙 Back', "ACTION|settings") not in sim.get_last_buttons()
 
@@ -1075,32 +1076,74 @@ async def test_inline_health_button_auth_required_shows_reconnect(monkeypatch):
     run_health.assert_not_awaited()
 
 
-def test_health_result_keyboard_offers_file_and_detail_sections():
-    import bot
-
-    rows = [
-        [(button.text, button.callback_data) for button in row]
-        for row in bot._health_result_keyboard().inline_keyboard
-    ]
-    buttons = [
+def _buttons(markup):
+    return [
         (button.text, button.callback_data)
-        for row in bot._health_result_keyboard().inline_keyboard
+        for row in markup.inline_keyboard
         for button in row
     ]
-    assert rows[-1] == [
-        ('📋 Domains', "ACTION|health_detail|domains"),
-        ('➕ New case', "ACTION|file"),
+
+
+def test_every_health_view_can_switch_directly_to_the_other_three():
+    """Back-then-forward is two taps and one lost place. The four views are
+    always one tap apart, in the same position on every view."""
+    import bot
+
+    nav = [
+        ('📍 Priorities', "ACTION|health_view|priorities"),
+        ('📌 Actions', "ACTION|health_view|actions"),
+        ('📊 Coverage', "ACTION|health_view|coverage"),
+        ('🔎 Scan info', "ACTION|health_view|scan"),
     ]
-    assert ('🔎 Evidence basis', "ACTION|health_detail|basis") in buttons
-    assert ('📋 Domains', "ACTION|health_detail|domains") in buttons
-    # Unfinished evidence replaced the usage snapshot: it is the pane a doctor
-    # can act on, and the snapshot measured Portfolio Guru usage rather than
-    # the portfolio itself.
-    assert ('📌 Unfinished', "ACTION|health_detail|stuck") in buttons
-    assert not any(data.endswith("|activity") for _text, data in buttons)
-    assert buttons[-1] == ('➕ New case', "ACTION|file")
-    assert ("📊 Change pathway", "ACTION|change_pathway") not in buttons
-    assert ('🔙 Back', "ACTION|settings") not in buttons
+    for view in ("priorities", "actions", "coverage", "curriculum", "scan"):
+        buttons = _buttons(bot._health_view_keyboard(view))
+        assert buttons[-4:] == nav
+        # Exactly one meaningful functional emoji per active button — no
+        # decorative stars, sparkles, robots or party icons riding along.
+        for text, _data in buttons:
+            symbols = [ch for ch in text.replace("\ufe0f", "") if ord(ch) > 0x2000]
+            assert len(symbols) == 1 and text.startswith(symbols[0])
+
+    assert (
+        '🏷️ Curriculum tags', "ACTION|health_view|curriculum"
+    ) in _buttons(bot._health_view_keyboard("coverage"))
+
+    # Generic filing actions are gone: a New case button on a Coverage pane is
+    # not justified by anything the scan found.
+    assert ('➕ New case', "ACTION|file") not in _buttons(bot._health_view_keyboard("coverage"))
+    assert ('🔙 Back', "ACTION|health_back_to_report") not in _buttons(
+        bot._health_view_keyboard("scan")
+    )
+
+
+def test_actions_pager_appears_only_where_there_is_another_page():
+    import bot
+
+    first = _buttons(bot._health_view_keyboard("actions", page=0, page_count=4))
+    middle = _buttons(bot._health_view_keyboard("actions", page=1, page_count=4))
+    last = _buttons(bot._health_view_keyboard("actions", page=3, page_count=4))
+    single = _buttons(bot._health_view_keyboard("actions", page=0, page_count=1))
+
+    assert ('➡️ Next', "ACTION|health_page|1") in first
+    assert not any(text == '⬅️ Previous' for text, _ in first)
+    assert ('⬅️ Previous', "ACTION|health_page|0") in middle
+    assert ('➡️ Next', "ACTION|health_page|2") in middle
+    assert not any(text == '➡️ Next' for text, _ in last)
+    assert ('⬅️ Previous', "ACTION|health_page|2") in last
+    assert not any(data.startswith("ACTION|health_page") for _text, data in single)
+
+    # Telegram rejects callback data over 64 bytes; every one of ours is tiny.
+    assert all(len(data.encode()) <= 64 for _text, data in first + middle + last)
+
+
+def test_review_month_button_is_offered_only_when_no_month_is_set():
+    import bot
+
+    with_route = _buttons(bot._health_view_keyboard("priorities", needs_review_month=True))
+    without = _buttons(bot._health_view_keyboard("priorities", needs_review_month=False))
+
+    assert ('📅 Review month', "ACTION|health_review_setup") in with_route
+    assert not any(data == "ACTION|health_review_setup" for _text, data in without)
 
 
 def test_health_compact_report_moves_audit_detail_behind_buttons():
@@ -1285,11 +1328,11 @@ async def test_limited_activity_snapshot_notes_low_confidence(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_health_arcp_index_present_shows_full_verdict(
+async def test_health_arcp_index_present_is_not_reported_as_a_partial_scan(
     kaizen_index, isolated_health_store, monkeypatch
 ):
-    """With a Kaizen index present the ARCP path keeps the normal gap-level
-    verdict and must not show the no-index sync banner."""
+    """With a Kaizen index present the reading is of the real portfolio and
+    must not carry the partial-scan notice."""
     import bot
     import sys
 
@@ -1322,6 +1365,7 @@ async def test_health_arcp_index_present_shows_full_verdict(
     )
 
     sent: dict[str, str] = {}
+    store = SimpleNamespace(user_data={})
 
     await bot._run_health_analysis(
         user_id=user_id,
@@ -1330,48 +1374,112 @@ async def test_health_arcp_index_present_shows_full_verdict(
         send_result=AsyncMock(side_effect=lambda text, reply_markup: sent.setdefault("text", text)),
         send_photo_fn=AsyncMock(),
         fail_fn=AsyncMock(),
+        context_store=store,
     )
 
     text = sent["text"]
-    # A full index must not be reported as a limited view, and the verdict must
-    # arrive with its reasons rather than as a bare colour.
-    assert "indexed Kaizen item" in text
-    assert "Full Kaizen scan not available" not in text
-    assert "limited scan" not in text
-    assert any(label in text for label in ("Well covered", "Needs attention", "Thin"))
-    assert "\n• " in text
+    scan = store.user_data["last_health_report"]["views"]["scan"]
+    # A full index must not be reported as a limited view, and no view may
+    # claim a readiness level the scan cannot support.
+    assert "visible evidence item(s)" in scan
+    assert "Partial scan" not in text
+    assert "Limited view" not in scan
+    assert not any(label in text for label in ("Well covered", "Needs attention", "Thin"))
+    assert "A planning aid, not a formal training" in text
 
 
 @pytest.mark.asyncio
-async def test_health_detail_buttons_restore_last_report(monkeypatch):
+async def test_health_view_buttons_render_the_stored_views(monkeypatch):
     import bot
 
     sim = BotSimulator(user_id=4242)
     context = sim._make_context()
     context.user_data["last_health_report"] = {
-        "summary": "Main health report",
-        "sections": {
-            "basis": "*Evidence basis*\nScanned: Portfolio Guru only",
-            "activity": "*Activity snapshot*\n- This month: 3 cases",
+        "views": {
+            "priorities": "📍 Priorities view",
+            "coverage": "📊 Coverage view",
+            "curriculum": "🏷️ Curriculum view",
+            "scan": "🔎 Scan info view",
         },
+        "action_pages": ["📌 Actions page 1", "📌 Actions page 2"],
+        "page": 0,
+        "needs_review_month": True,
     }
 
+    for action, expected in (
+        ("ACTION|health_view|coverage", "📊 Coverage view"),
+        ("ACTION|health_view|curriculum", "🏷️ Curriculum view"),
+        ("ACTION|health_view|scan", "🔎 Scan info view"),
+        ("ACTION|health_view|actions", "📌 Actions page 1"),
+        ("ACTION|health_page|1", "📌 Actions page 2"),
+        ("ACTION|health_view|priorities", "📍 Priorities view"),
+    ):
+        await bot.handle_action_button(sim._make_callback_update(action), context)
+        assert sim.get_last_text() == expected
+        assert ('📌 Actions', "ACTION|health_view|actions") in sim.get_last_buttons()
+
+    assert ('📅 Review month', "ACTION|health_review_setup") in sim.get_last_buttons()
+
+
+@pytest.mark.asyncio
+async def test_stale_health_buttons_recover_instead_of_dead_ending(monkeypatch):
+    """Buttons outlive the report they were sent with. An old page number, a
+    button from the previous layout, and a report this chat no longer holds
+    each have to land somewhere real."""
+    import bot
+
+    sim = BotSimulator(user_id=4243)
+    context = sim._make_context()
+    context.user_data["last_health_report"] = {
+        "views": {"priorities": "📍 Priorities view", "coverage": "📊 Coverage view",
+                  "scan": "🔎 Scan info view"},
+        "action_pages": ["📌 Actions page 1", "📌 Actions page 2"],
+        "page": 0,
+        "needs_review_month": False,
+    }
+
+    # A page beyond the stored report clamps onto the last real page.
+    await bot.handle_action_button(sim._make_callback_update("ACTION|health_page|9"), context)
+    assert sim.get_last_text() == "📌 Actions page 2"
+
+    # Buttons from the pre-V2 layout route to the view that replaced them,
+    # and Actions resumes the page the doctor had reached.
+    for legacy, expected in (
+        ("ACTION|health_detail|stuck", "📌 Actions page 2"),
+        ("ACTION|health_detail|domains", "📊 Coverage view"),
+        ("ACTION|health_detail|basis", "🔎 Scan info view"),
+        ("ACTION|health_back_to_report", "📍 Priorities view"),
+    ):
+        await bot.handle_action_button(sim._make_callback_update(legacy), context)
+        assert sim.get_last_text() == expected
+
+    # With no stored report at all, the way back is one button, not a retype.
+    fresh = BotSimulator(user_id=4243)
     await bot.handle_action_button(
-        sim._make_callback_update("ACTION|health_detail|basis"),
-        context,
+        fresh._make_callback_update("ACTION|health_view|coverage"), fresh._make_context()
+    )
+    assert "no longer in memory" in fresh.get_last_text()
+    assert ('🔄 Refresh health', "ACTION|health") in fresh.get_last_buttons()
+
+
+@pytest.mark.asyncio
+async def test_review_month_button_explains_the_command_and_changes_nothing(monkeypatch):
+    """Health reads the review month; only the doctor sets it."""
+    import bot
+
+    sim = BotSimulator(user_id=4244)
+    context = sim._make_context()
+    saved = []
+    monkeypatch.setattr(bot, "save_health_profile", lambda profile: saved.append(profile))
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_review_setup"), context
     )
 
-    assert sim.get_last_text() == "*Evidence basis*\nScanned: Portfolio Guru only"
-    assert ('➕ New case', "ACTION|file") in sim.get_last_buttons()
-    assert ('🔙 Back', "ACTION|health_back_to_report") in sim.get_last_buttons()
-
-    await bot.handle_action_button(
-        sim._make_callback_update("ACTION|health_back_to_report"),
-        context,
-    )
-
-    assert sim.get_last_text() == "Main health report"
-    assert ('➕ New case', "ACTION|file") in sim.get_last_buttons()
+    assert "/arcp Oct 2026" in sim.get_last_text()
+    assert "Nothing has been changed." in sim.get_last_text()
+    assert saved == []
+    assert ('📍 Priorities', "ACTION|health_view|priorities") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio

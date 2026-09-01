@@ -1,9 +1,11 @@
-"""Offline tests for the Portfolio Health assessment and report.
+"""Offline tests for the Portfolio Health assessment and its four views.
 
 These guard the failures found on a real 501-item portfolio on 2026-08-26,
 where the old report said "Green — main evidence domains are covered" and
 "Missing domains: None obvious" while 27 items sat unfinished, the oldest for
-1112 days, and QI held 7 items against 250 clinical.
+1112 days, and QI held 7 items against 250 clinical — and the safety rules the
+independent review then required: no readiness colour, no unbacked ranking, no
+overdue language, no curriculum claim, and pagination a doctor can trust.
 
 No Kaizen, browser, network, or Telegram.
 """
@@ -14,9 +16,17 @@ from datetime import date, datetime, timezone
 
 import pytest
 
-from health_assessment import compute_health_assessment
-from health_models import EvidenceItem, HealthDomain, HealthScore
-from health_report import format_domain_detail, format_health_report, format_stuck_detail
+from health_assessment import IMBALANCE_MIN_ITEMS, compute_health_assessment
+from health_models import EvidenceItem, HealthDomain
+from health_report import (
+    actions_page_count,
+    format_actions,
+    format_coverage,
+    format_curriculum,
+    format_priorities,
+    format_scan_info,
+    ordered_actions,
+)
 
 TODAY = date(2026, 8, 26)
 
@@ -59,64 +69,124 @@ def _balanced(per_domain=20):
     return items
 
 
-# ── Scoring ─────────────────────────────────────────────────────────────────
 
 
-def test_balanced_current_portfolio_is_green():
-    assessment = compute_health_assessment(_balanced(), today=TODAY)
-    assert assessment.score == HealthScore.green
-    assert assessment.reasons  # never a colour on its own
+def _tagged(slos, **kwargs):
+    item = _item(**kwargs)
+    return item.model_copy(update={"slo_numbers": list(slos)})
 
 
-def test_imbalance_alone_moves_the_score():
-    """The old score was a presence check: every domain holding anything earned
-    Green, so 250 clinical against 7 QI scored the same as a balanced
-    portfolio. Imbalance must be able to move the light by itself."""
+def _assess(items):
+    return compute_health_assessment(items, today=TODAY)
+
+
+def _priorities(items, **kwargs):
+    assessment = _assess(items)
+    return assessment, format_priorities(
+        assessment, month_label="August 2026", today=TODAY, **kwargs
+    )
+
+
+def _coverage(items):
+    assessment = _assess(items)
+    return assessment, format_coverage(assessment, today=TODAY)
+
+
+def _curriculum(items):
+    assessment = _assess(items)
+    return assessment, format_curriculum(assessment)
+
+
+BASIS = (
+    "*Evidence basis*\n"
+    "Scanned: Read-only Kaizen index: 12 visible evidence item(s)\n"
+    "Last scanned: 26 Aug 2026 09:00\n"
+    "Window: all indexed Kaizen evidence currently stored\n"
+    "Pathway: Training (CCT)\n"
+    "Confidence: high for scanned evidence"
+)
+
+
+def _scan_info(items, **kwargs):
+    assessment = _assess(items)
+    return assessment, format_scan_info(
+        assessment, basis=BASIS, today=TODAY, **kwargs
+    )
+
+
+def _all_views(items):
+    assessment = _assess(items)
+    return "\n".join([
+        format_priorities(assessment, month_label="August 2026", today=TODAY),
+        format_actions(assessment),
+        format_coverage(assessment, today=TODAY),
+        format_curriculum(assessment),
+        format_scan_info(assessment, basis=BASIS, today=TODAY),
+    ])
+
+
+# ── No readiness verdict ────────────────────────────────────────────────────
+
+
+def test_no_view_shows_a_readiness_colour_or_verdict():
+    """A traffic light is a readiness claim, and nothing here verifies
+    readiness against any pathway's rules. The same evidence means different
+    things to an ST4, a CESR applicant and an SAS doctor."""
+    items = _balanced(40) + [_item(state="pending", days_ago=400, ident="p1")]
+    text = _all_views(items)
+
+    assert not any(colour in text for colour in ("🟢", "🟠", "🔴", "⚪", "🟡"))
+    for verdict in ("Well covered", "Needs attention", "Not enough scanned yet", "on track"):
+        assert verdict not in text
+    assert not hasattr(_assess(items), "score")
+
+
+def test_imbalance_is_reported_as_a_coverage_comparison_not_a_verdict():
+    """The old score demoted the whole portfolio for one small domain. The
+    finding is real; the verdict on top of it was not."""
     items = _balanced(40)
     items = [i for i in items if i.domain != HealthDomain.qi]
     items += [_item(domain=HealthDomain.qi, ident=f"qi-{n}") for n in range(3)]
 
-    assessment = compute_health_assessment(items, today=TODAY)
+    assessment, coverage = _coverage(items)
 
-    assert assessment.score == HealthScore.amber
-    assert any("QI is thin" in reason for reason in assessment.reasons)
+    assert any(stat.is_thin for stat in assessment.domains)
+    assert "QI is your smallest area: 3 against 40 at your largest" in coverage
+    assert "Compared with your own portfolio only" in coverage
 
 
-def test_stale_domain_moves_the_score():
+def test_stale_domain_is_reported_with_the_date_its_evidence_stops():
     items = _balanced(30)
     items = [i for i in items if i.domain != HealthDomain.teaching]
     items += [
         _item(domain=HealthDomain.teaching, days_ago=365 * 4, ident=f"t-{n}") for n in range(30)
     ]
 
-    assessment = compute_health_assessment(items, today=TODAY)
+    _, coverage = _coverage(items)
 
-    assert assessment.score == HealthScore.amber
-    assert any("Teaching evidence stops at" in reason for reason in assessment.reasons)
-
-
-def test_score_drops_only_one_step_however_many_concerns():
-    """Stacking demotions would send every large portfolio to red and teach
-    doctors to ignore the colour. The reasons carry the detail instead."""
-    items = _balanced(40)
-    items = [i for i in items if i.domain not in (HealthDomain.qi, HealthDomain.teaching)]
-    items += [_item(domain=HealthDomain.qi, ident=f"qi-{n}") for n in range(2)]
-    items += [_item(domain=HealthDomain.teaching, ident=f"t-{n}") for n in range(2)]
-    items += [
-        _item(state="pending", days_ago=900, ident=f"p-{n}", form_type="MINI_CEX")
-        for n in range(15)
-    ]
-
-    assessment = compute_health_assessment(items, today=TODAY)
-
-    assert assessment.score == HealthScore.amber
-    assert len(assessment.reasons) >= 3
+    assert "Teaching evidence stops at" in coverage
 
 
-def test_empty_portfolio_is_grey_with_a_reason():
+def test_domain_comparison_is_suppressed_for_a_small_portfolio():
+    """With a dozen items, "QI is thin" says more about the size of the scan
+    than about the doctor. The minimum is one explicit number, and the view
+    says which."""
+    items = [_item(ident=f"c-{n}") for n in range(12)]
+    items += [_item(domain=HealthDomain.qi, ident="qi-1")]
+
+    assessment, coverage = _coverage(items)
+
+    assert IMBALANCE_MIN_ITEMS == 20
+    assert not assessment.balance_is_comparable
+    assert not any(stat.is_thin for stat in assessment.domains)
+    assert f"fewer than {IMBALANCE_MIN_ITEMS} scanned items" in coverage
+    assert "smallest area" not in coverage
+
+
+def test_empty_portfolio_says_nothing_was_scanned():
     assessment = compute_health_assessment([], today=TODAY)
-    assert assessment.score == HealthScore.grey
-    assert assessment.reasons and assessment.next_actions
+    assert assessment.next_actions == ["No portfolio evidence has been scanned yet"]
+    assert assessment.stuck_total == 0
 
 
 # ── Stuck evidence ──────────────────────────────────────────────────────────
@@ -130,7 +200,7 @@ def test_pending_and_draft_are_reported_separately():
         _item(state="draft", days_ago=400, ident="draft-1", form_type="JCF"),
     ]
 
-    assessment = compute_health_assessment(items, today=TODAY)
+    assessment = _assess(items)
 
     assert len(assessment.stuck_awaiting) == 1
     assert len(assessment.stuck_drafts) == 1
@@ -140,285 +210,334 @@ def test_pending_and_draft_are_reported_separately():
 
 def test_recent_pending_item_is_normal_turnaround():
     items = _balanced() + [_item(state="pending", days_ago=3, ident="fresh")]
-    assessment = compute_health_assessment(items, today=TODAY)
-    assert assessment.stuck_total == 0
-    assert assessment.score == HealthScore.green
+    assert _assess(items).stuck_total == 0
 
 
 def test_completed_evidence_is_never_stuck():
     items = _balanced() + [_item(state="complete", days_ago=900, ident="done")]
-    assert compute_health_assessment(items, today=TODAY).stuck_total == 0
+    assert _assess(items).stuck_total == 0
 
 
-# ── Actions ─────────────────────────────────────────────────────────────────
+# ── Findings ────────────────────────────────────────────────────────────────
 
 
-def test_actions_come_from_the_portfolio_not_a_fixed_list():
+def test_findings_come_from_the_portfolio_not_a_fixed_list():
     """The old report told a doctor with 250 clinical items to "File a CBD from
     a recent supervised case" because the suggestions were fallback strings."""
     items = _balanced() + [
         _item(state="pending", days_ago=120, ident="await-1", form_type="MINI_CEX")
     ]
 
-    actions = compute_health_assessment(items, today=TODAY).next_actions
+    findings = _assess(items).next_actions
 
-    assert any("Chase sign-off" in action and "120 days" in action for action in actions)
-    assert not any("File a CBD from a recent supervised case" == action for action in actions)
-
-
-def test_clean_portfolio_gets_a_confirmatory_action_not_an_invented_gap():
-    actions = compute_health_assessment(_balanced(), today=TODAY).next_actions
-    assert actions == ["Nothing is outstanding — keep filing as you go"]
+    assert findings[0] == "1 item with someone else — oldest a Mini-CEX dated 28 Apr 2026"
+    assert not any("File a CBD from a recent supervised case" == f for f in findings)
 
 
-# ── Report rendering ────────────────────────────────────────────────────────
-
-
-def _render(items, **kwargs):
-    assessment = compute_health_assessment(items, today=TODAY)
-    return assessment, format_health_report(
-        assessment,
-        pathway_label="Training (CCT)",
-        month_label="August 2026",
-        scanned_count=len(items),
-        **kwargs,
-    )
-
-
-def test_report_never_shows_a_verdict_without_reasons():
-    _, text = _render(_balanced())
-    assert "Well covered" in text
-    verdict_line = next(i for i, l in enumerate(text.splitlines()) if "Well covered" in l)
-    assert text.splitlines()[verdict_line + 1].startswith("•")
-
-
-def test_report_leads_with_stuck_counts_and_points_at_the_list():
+def test_findings_state_dates_and_never_instruct_a_chase():
+    """Nothing scanned says a deadline exists, who has already been asked, or
+    whether a 2023 draft is still worth finishing."""
     items = _balanced() + [
-        _item(state="pending", days_ago=200, ident="a", form_type="MINI_CEX"),
+        _item(state="pending", days_ago=1112, ident="a", form_type="TEACH_OBS"),
         _item(state="draft", days_ago=900, ident="b", form_type="JCF"),
     ]
-    assessment, text = _render(items)
 
-    # Counts and ages lead; the items themselves live in the pane.
-    assert "1 item waiting on someone else" in text
-    assert "1 draft of your own unfinished" in text
-    assert "for all 2" in text
+    _, text = _priorities(items)
 
-    # Kaizen's internal codes mean nothing to a doctor, wherever they appear.
-    pane = format_stuck_detail(assessment)
-    assert "Mini-CEX" in pane and "MINI_CEX" not in pane
-    assert "Journal Club" in pane and "JCF" not in pane
+    assert "dated 10 Aug 2023" in text
+    for word in ("Chase", "chase", "overdue", "stale", "neglected", "Finish or delete"):
+        assert word not in text
 
 
-def test_report_never_leaks_clinical_narrative():
+def test_clean_portfolio_is_not_given_an_invented_gap():
+    assert _assess(_balanced()).next_actions == ["Nothing in this scan is unfinished"]
+
+
+# ── Priorities ──────────────────────────────────────────────────────────────
+
+
+def test_priorities_keeps_its_title_and_names_what_the_order_means():
+    """"Priorities" without a basis reads as clinical or curriculum importance.
+    The order is workflow state and dates, and it says so."""
+    items = _balanced() + [_item(state="pending", days_ago=300, ident="a")]
+    _, text = _priorities(items)
+
+    assert text.startswith("📍 *Portfolio priorities*")
+    assert "not by training or curriculum importance" in text
+    assert text.splitlines()[3].startswith("1. ")
+
+
+def test_partial_scan_shows_one_factual_notice_and_stops_ranking():
+    """An incomplete scan cannot rank anything: the item that would have come
+    first may not have been read at all."""
+    items = _balanced() + [_item(state="pending", days_ago=300, ident="a")]
+    _, text = _priorities(items, limited_view=True)
+
+    assert "Partial scan: Portfolio Guru filings only" in text
+    assert "Listed, not ranked" in text
+    assert "1. " not in text
+    assert "not by training or curriculum importance" not in text
+
+
+def test_unconfirmed_scan_freshness_is_stated_and_also_stops_ranking():
+    items = _balanced() + [_item(state="pending", days_ago=300, ident="a")]
+    _, text = _priorities(items, scan_is_fresh=False)
+
+    assert "Scan freshness unconfirmed" in text
+    assert "1. " not in text
+
+
+def test_priorities_stays_on_one_phone_screen():
+    """Two screens of prose is where the previous report lost the doctor."""
+    items = _balanced(40)
+    items = [i for i in items if i.domain not in (HealthDomain.qi, HealthDomain.teaching)]
+    items += [
+        _item(state="pending", days_ago=900 + n, ident=f"p-{n}", form_type="MINI_CEX")
+        for n in range(15)
+    ]
+    _, text = _priorities(items)
+
+    assert len(text.splitlines()) <= 14
+    assert len(text) < 700
+    assert text.count("\n1. ") + text.count("\n2. ") + text.count("\n3. ") == 3
+    assert "\n4. " not in text
+
+
+def test_priorities_points_at_the_actions_view_rather_than_listing_items():
+    """The same Teaching Observation used to appear as a reason, a section and
+    an action in one message."""
+    items = _balanced() + [
+        _item(state="pending", days_ago=300, ident="a", form_type="MINI_CEX"),
+        _item(state="draft", days_ago=900, ident="b", form_type="JCF"),
+    ]
+    _, text = _priorities(items)
+
+    assert "Tap 📌 Actions for all 2" in text
+    assert "kaizenep.com" not in text
+
+
+def test_priorities_never_leaks_clinical_narrative():
     items = _balanced() + [_item(state="pending", days_ago=200, ident="a")]
-    _, text = _render(items)
+    _, text = _priorities(items)
     assert "Clinical narrative" not in text
 
 
-def test_report_activity_describes_the_portfolio_not_product_usage():
-    """The old snapshot counted Portfolio Guru filings and rendered as all
-    zeros for a doctor who had filed 191 items in the same year."""
-    items = _balanced(10)
-    _, text = _render(items)
-    assert "60 items in the last 12 months" in text
+def test_priorities_carries_one_safety_line():
+    _, text = _priorities(_balanced())
+    assert text.count("A planning aid, not a formal training") == 1
 
 
-def test_limited_scan_is_disclosed_and_confidence_stated():
-    _, text = _render(_balanced(), limited_view=True)
-    assert "Limited view" in text
-    assert "Confidence: low" in text
+def test_review_countdown_is_shown_when_a_month_is_set():
+    _, text = _priorities(_balanced(), review_date=date(2026, 10, 1))
+    assert "Next review: October 2026 — 5 weeks away." in text
 
 
-def test_assumed_pathway_is_disclosed():
-    _, text = _render(_balanced(), pathway_assumed=True, pathway_name="Training (CCT)")
-    assert "Assumed pathway: Training (CCT)" in text
+def test_missing_review_month_offers_the_button_that_sets_it():
+    """The old report told doctors to add their ARCP month while offering only
+    a typed command."""
+    _, text = _priorities(_balanced())
+    assert "No review month set — tap 📅 Review month" in text
 
 
-def test_cesr_pathway_block_only_appears_for_cesr():
+def test_passed_review_month_asks_for_the_next_one():
+    _, text = _priorities(_balanced(), review_date=date(2026, 5, 1))
+    assert "Review month May 2026 has passed — tap 📅 Review month" in text
+
+
+def test_scan_info_points_at_the_command_because_it_has_no_button():
+    """Naming a button that is not on this view sends a doctor hunting."""
+    _, text = _scan_info(_balanced())
+    assert "No review month set — set it with /arcp" in text
+    assert "📅 Review month" not in text
+
+
+def test_pathway_requirement_counter_appears_only_with_a_verified_overlay():
+    """With no overlay the counter renders nothing at all. An empty counter
+    would read as an unmet requirement to a doctor whose pathway has no such
+    rule."""
     readiness = {
         "pathway": "cesr_portfolio",
         "wpba_count": 4,
         "wpba_target": 36,
         "wpba_breakdown": {"dops": 2, "mini_cex": 1, "cbd": 1},
     }
-    _, cesr = _render(_balanced(), pathway_readiness=readiness)
-    _, training = _render(_balanced(), pathway_readiness={"pathway": "training_arcp"})
+    _, cesr = _priorities(_balanced(), pathway_readiness=readiness)
+    _, training = _priorities(_balanced(), pathway_readiness={"pathway": "training_arcp"})
+    _, none_at_all = _priorities(_balanced())
 
-    assert "WPBA progress toward 36" in cesr and "4/36" in cesr
+    assert "*Portfolio Pathway requirement*" in cesr
+    assert "4/36 WPBAs counted in this scan" in cesr
     assert "DOPS 2/12" in cesr
-    assert "WPBA progress" not in training
+    assert "requirement" not in training
+    assert "requirement" not in none_at_all
 
 
-def test_domain_detail_shows_recency_not_just_counts():
-    items = _balanced(30)
-    items = [i for i in items if i.domain != HealthDomain.qi]
-    items += [_item(domain=HealthDomain.qi, days_ago=365 * 4, ident=f"q-{n}") for n in range(2)]
-    assessment = compute_health_assessment(items, today=TODAY)
-
-    detail = format_domain_detail(assessment, today=TODAY)
-
-    assert "latest" in detail
-    assert "thin" in detail and "not current" in detail
+# ── Actions ─────────────────────────────────────────────────────────────────
 
 
-def test_stuck_detail_lists_every_item_not_just_the_preview():
+def _many_stuck(count=17):
+    items = _balanced()
+    items += [
+        _item(state="pending", days_ago=1000 - n, ident=f"a-{n:02d}", form_type="MINI_CEX")
+        for n in range(10)
+    ]
+    items += [
+        _item(state="draft", days_ago=900 - n, ident=f"d-{n:02d}", form_type="JCF")
+        for n in range(count - 10)
+    ]
+    return items
+
+
+def test_actions_shows_the_visible_range_of_a_bounded_page():
+    assessment = _assess(_many_stuck())
+
+    first = format_actions(assessment, page=0)
+    second = format_actions(assessment, page=1)
+
+    assert actions_page_count(assessment) == 4
+    assert "Showing 1–5 of 17 unfinished items" in first
+    assert "Showing 6–10 of 17 unfinished items" in second
+    assert first.count("\n• ") == 5
+
+
+def test_actions_pages_partition_the_items_with_no_gap_or_repeat():
+    assessment = _assess(_many_stuck())
+    pages = [format_actions(assessment, page=p) for p in range(actions_page_count(assessment))]
+
+    listed = [line for page in pages for line in page.splitlines() if line.startswith("• ")]
+
+    assert len(listed) == 17
+    assert len(set(listed)) == 17
+
+
+def test_actions_order_is_stable_whatever_order_the_evidence_arrives_in():
+    """Items filed on the same day must not swap places between renders, or a
+    doctor paging through Actions sees page 2 repeat page 1."""
+    same_day = [
+        _item(state="pending", days_ago=300, ident=f"s-{n}", form_type="CBD")
+        for n in range(6)
+    ]
+    forward = ordered_actions(_assess(_balanced() + same_day))
+    backward = ordered_actions(_assess(_balanced() + list(reversed(same_day))))
+
+    assert [item.id for _group, item in forward] == [item.id for _group, item in backward]
+
+
+def test_actions_separates_awaiting_from_your_own_drafts():
+    assessment = _assess(_many_stuck())
+
+    first = format_actions(assessment, page=0)
+    last = format_actions(assessment, page=3)
+
+    assert "*Awaiting someone else — 10*" in first
+    assert "Submitted and not yet completed by someone else." in first
+    assert "*Your own drafts — 7*" in last
+    assert "Started by you and not completed." in last
+
+
+def test_actions_names_items_by_form_and_exact_date_without_deadline_language():
     items = _balanced() + [
-        _item(state="pending", days_ago=100 + n, ident=f"p{n}", form_type="CBD") for n in range(9)
-    ]
-    assessment = compute_health_assessment(items, today=TODAY)
-
-    detail = format_stuck_detail(assessment)
-
-    assert detail.count("• ") == 9
-
-
-def test_stuck_detail_is_reassuring_when_nothing_is_waiting():
-    assessment = compute_health_assessment(_balanced(), today=TODAY)
-    assert "Nothing waiting" in format_stuck_detail(assessment)
-
-
-# ── Patterns, links, countdown ──────────────────────────────────────────────
-
-
-def test_a_form_that_never_completes_is_flagged_as_a_pattern():
-    """Three stuck Teaching Observations out of three filed is not three
-    incidents; it says that form never gets signed off."""
-    items = _balanced(40)
-    items += [
-        _item(state="pending", days_ago=800 + n, ident=f"to-{n}", form_type="TEACH_OBS")
-        for n in range(3)
-    ]
-
-    patterns = compute_health_assessment(items, today=TODAY).patterns
-
-    assert any("Teaching Observation: 3 of your 3" in p for p in patterns)
-
-
-def test_a_common_form_stuck_at_the_normal_rate_is_not_a_pattern():
-    """Six unfinished CBDs among hundreds is proportionate, not a finding.
-    Flagging it would bury the real signal under noise."""
-    items = [_item(ident=f"cbd-{n}", form_type="CBD") for n in range(200)]
-    items += [
-        _item(state="pending", days_ago=100, ident=f"p-{n}", form_type="CBD") for n in range(6)
-    ]
-
-    patterns = compute_health_assessment(items, today=TODAY).patterns
-
-    assert not any("CBD" in p for p in patterns)
-
-
-def test_a_thin_domain_blocked_by_its_own_unfinished_items_is_called_out():
-    """Changes the action from "file more" to "chase what you filed"."""
-    items = _balanced(40)
-    items = [i for i in items if i.domain != HealthDomain.qi]
-    items += [
-        _item(domain=HealthDomain.qi, state="pending", days_ago=100, ident=f"q-{n}", form_type="QIAT")
-        for n in range(3)
-    ]
-
-    patterns = compute_health_assessment(items, today=TODAY).patterns
-
-    assert any("QI looks thin partly because" in p for p in patterns)
-
-
-def test_main_report_does_not_repeat_the_item_lists():
-    """The same item used to appear three times: in the reasons, in a section,
-    and again as an action. The lists belong in the drill-down pane."""
-    items = _balanced() + [
-        _item(state="pending", days_ago=300, ident="a", form_type="MINI_CEX"),
+        _item(state="pending", days_ago=1112, ident="a", form_type="MINI_CEX"),
         _item(state="draft", days_ago=900, ident="b", form_type="JCF"),
     ]
-    _, text = _render(items)
+    text = format_actions(_assess(items))
 
-    assert "Waiting on someone else — " not in text
-    assert "Your own unfinished drafts — " not in text
-    assert "Everything unfinished" in text
+    # Kaizen's internal codes mean nothing to a doctor, wherever they appear.
+    assert "Mini-CEX — 10 Aug 2023" in text and "MINI_CEX" not in text
+    assert "Journal Club" in text and "JCF" not in text
+    for word in ("overdue", "days waiting", "Chase", "neglected"):
+        assert word not in text
+    assert "worth reviewing before acting" in text
+    # The only mention of chasing is the boundary: Portfolio Guru does not.
+    boundary = "_Nothing is chased, submitted, edited or deleted for you._"
+    assert boundary in text and "chas" not in text.replace(boundary, "")
 
 
-def test_stuck_items_link_to_kaizen():
-    """Telling a doctor to chase a form from 2023 and leaving them to find it
-    is half a feature. The URL is indexed for every item."""
+def test_actions_link_every_item_to_kaizen():
+    """Naming a form from 2023 and leaving a doctor to find it is half a
+    feature. The URL is indexed for every item."""
     items = _balanced() + [_item(state="pending", days_ago=300, ident="a")]
-    assessment = compute_health_assessment(items, today=TODAY)
-
-    detail = format_stuck_detail(assessment)
-
-    assert "](https://kaizenep.com/events/view/x)" in detail
+    assert "](https://kaizenep.com/events/view/x)" in format_actions(_assess(items))
 
 
-def test_review_countdown_is_shown_when_a_date_is_set():
-    _, text = _render(_balanced(), review_date=date(2026, 10, 1), today=TODAY)
-    assert "weeks to your review (October 2026)" in text
+def test_actions_page_beyond_the_end_falls_back_to_the_last_real_page():
+    """A stale button on an old message must land on evidence, not an error."""
+    assessment = _assess(_many_stuck())
+    assert format_actions(assessment, page=99) == format_actions(assessment, page=3)
+    assert format_actions(assessment, page=-4) == format_actions(assessment, page=0)
 
 
-def test_missing_review_date_offers_the_command_that_sets_it():
-    """The old report told doctors to add their ARCP month while offering no
-    way to do it."""
-    _, text = _render(_balanced())
-    assert "/arcp" in text
+def test_actions_is_reassuring_when_nothing_is_unfinished():
+    text = format_actions(_assess(_balanced()))
+    assert "Nothing scanned is unfinished" in text
+    assert actions_page_count(_assess(_balanced())) == 1
 
 
-def test_passed_review_date_asks_for_the_next_one():
-    _, text = _render(_balanced(), review_date=date(2026, 5, 1), today=TODAY)
-    assert "has passed" in text and "/arcp" in text
+# ── Coverage ────────────────────────────────────────────────────────────────
 
 
-# ── Curriculum spread ───────────────────────────────────────────────────────
+def test_coverage_separates_a_live_domain_from_a_historical_one():
+    """250 items built years ago is not the same portfolio as 250 with most of
+    them this year, and a total alone cannot tell them apart."""
+    items = [_item(days_ago=30, ident=f"new-{n}") for n in range(5)]
+    items += [_item(days_ago=365 * 2, ident=f"old-{n}") for n in range(20)]
+    items += [
+        _item(domain=HealthDomain.teaching, days_ago=365 * 2, ident=f"t-{n}")
+        for n in range(2)
+    ]
+
+    assessment, coverage = _coverage(items)
+
+    clinical = next(s for s in assessment.domains if s.domain == HealthDomain.clinical)
+    assert clinical.count == 25 and clinical.recent_count == 5
+    assert "Clinical: 25 · 5" in coverage
+    assert "Teaching: 2 · 0 · latest Aug 2024" in coverage
+    assert "QI: none scanned" in coverage
 
 
-def _tagged(slos, **kwargs):
-    item = _item(**kwargs)
-    return item.model_copy(update={"slo_numbers": list(slos)})
+def test_coverage_recent_counts_describe_the_portfolio_not_product_usage():
+    """Recency is derived from the scanned portfolio, not bot usage."""
+    _, coverage = _coverage(_balanced(10))
+    assert "Clinical: 10 · 10" in coverage
 
 
-def test_curriculum_spread_reports_counts_not_a_tick():
+def test_coverage_cannot_be_mistaken_for_a_curriculum_minimum():
+    _, coverage = _coverage(_balanced(40))
+    assert "Nothing here is a curriculum requirement or a minimum" in coverage
+
+
+def test_curriculum_spread_reports_counts_over_tagged_items_only():
     """"12/12 SLOs covered" is true of a portfolio holding 138 items against
     one outcome and 13 against another. The count is the finding."""
     items = [_tagged([6], ident=f"a-{n}") for n in range(40)]
     items += [_tagged([10], ident=f"b-{n}") for n in range(3)]
 
-    assessment = compute_health_assessment(items, today=TODAY)
-    detail = format_domain_detail(assessment, today=TODAY)
+    assessment, curriculum = _curriculum(items)
 
     assert assessment.slo_counts == {6: 40, 10: 3}
-    assert "Strongest SLO6 (40)" in detail
-    assert "SLO10 (3)" in detail
+    assert assessment.tagged_items == 43
+    assert "2 of 12 SLOs represented across 43 tagged item(s)" in curriculum
+    assert "Largest SLO6 (40)" in curriculum
+    assert "SLO10 (3)" in curriculum
 
 
 def test_untagged_items_are_disclosed_not_silently_dropped():
-    """Without saying so, a thin SLO reads as a gap in the doctor's evidence
+    """Without saying so, a small SLO reads as a gap in the doctor's evidence
     when it may only be a gap in their tagging."""
     items = [_tagged([6], ident="a")] + [_item(ident=f"u-{n}") for n in range(5)]
 
-    assessment = compute_health_assessment(items, today=TODAY)
-    detail = format_domain_detail(assessment, today=TODAY)
+    assessment, curriculum = _curriculum(items)
 
     # All six are CBDs and one is tagged, so the other five are a real gap.
     assert assessment.untagged_items == 5
-    assert "5 items are untagged" in detail
+    assert "Untagged: 5 item(s)" in curriculum
+    assert "may not count toward curriculum coverage" in curriculum
 
 
-def test_curriculum_block_is_absent_when_nothing_is_tagged():
-    detail = format_domain_detail(compute_health_assessment(_balanced(), today=TODAY), today=TODAY)
-    assert "Curriculum spread" not in detail
-
-
-# ── Recency and the taggable split ──────────────────────────────────────────
-
-
-def test_domain_detail_separates_a_live_domain_from_a_historical_one():
-    """250 items built years ago is not the same portfolio as 250 with most of
-    them this year, and a total alone cannot tell them apart."""
-    items = [_item(days_ago=30, ident=f"new-{n}") for n in range(5)]
-    items += [_item(days_ago=365 * 2, ident=f"old-{n}") for n in range(20)]
-
-    assessment = compute_health_assessment(items, today=TODAY)
-    detail = format_domain_detail(assessment, today=TODAY)
-
-    clinical = next(s for s in assessment.domains if s.domain == HealthDomain.clinical)
-    assert clinical.count == 25 and clinical.recent_count == 5
-    assert "Clinical: 25, 5 in last 12m" in detail
+def test_untagged_count_is_stated_even_when_it_is_zero():
+    items = [_tagged([6], ident=f"a-{n}") for n in range(4)]
+    _, curriculum = _curriculum(items)
+    assert "Untagged: 0 items" in curriculum
 
 
 def test_untagged_count_excludes_forms_that_never_carry_tags():
@@ -432,19 +551,10 @@ def test_untagged_count_excludes_forms_that_never_carry_tags():
         _item(ident="msf-2", form_type="MSF"),
     ]
 
-    assessment = compute_health_assessment(items, today=TODAY)
+    assessment = _assess(items)
 
     # Only the untagged reflection counts: MSF is never tagged in this portfolio.
     assert assessment.untagged_items == 1
-
-
-def test_untagged_disclosure_says_why_it_matters():
-    items = [
-        _tagged([3], ident="a", form_type="REFLECT_LOG"),
-        _item(ident="b", form_type="REFLECT_LOG"),
-    ]
-    detail = format_domain_detail(compute_health_assessment(items, today=TODAY), today=TODAY)
-    assert "may not count toward curriculum coverage" in detail
 
 
 def test_untagged_disclosure_names_the_forms_to_go_and_fix():
@@ -454,9 +564,87 @@ def test_untagged_disclosure_names_the_forms_to_go_and_fix():
     items += [_tagged([3], ident="p", form_type="PROC_LOG")]
     items += [_item(ident=f"p-{n}", form_type="PROC_LOG") for n in range(2)]
 
-    assessment = compute_health_assessment(items, today=TODAY)
-    detail = format_domain_detail(assessment, today=TODAY)
+    assessment, curriculum = _curriculum(items)
 
     assert assessment.untagged_by_form == {"REFLECT_LOG": 4, "PROC_LOG": 2}
-    assert "Reflective Log 4" in detail
-    assert "Procedure Log 2" in detail
+    assert "Reflective Log 4" in curriculum
+    assert "Procedure Log 2" in curriculum
+
+
+def test_curriculum_block_is_absent_when_nothing_is_tagged():
+    _, coverage = _coverage(_balanced())
+    assert "Curriculum spread" not in coverage
+
+
+def test_a_form_that_never_completes_is_shown_as_a_pattern_in_coverage():
+    """Three unfinished Teaching Observations out of three filed is not three
+    incidents; it says that form never gets signed off."""
+    items = _balanced(40)
+    items += [
+        _item(state="pending", days_ago=800 + n, ident=f"to-{n}", form_type="TEACH_OBS")
+        for n in range(3)
+    ]
+
+    assessment, priorities = _priorities(items)
+
+    assert any("Teaching Observation: 3 of your 3 are unfinished" in p for p in assessment.patterns)
+    assert "Teaching Observation: 3 of your 3 are unfinished" in priorities
+
+
+def test_a_common_form_stuck_at_the_normal_rate_is_not_a_pattern():
+    """Six unfinished CBDs among hundreds is proportionate, not a finding.
+    Flagging it would bury the real signal under noise."""
+    items = [_item(ident=f"cbd-{n}", form_type="CBD") for n in range(200)]
+    items += [
+        _item(state="pending", days_ago=100, ident=f"p-{n}", form_type="CBD") for n in range(6)
+    ]
+
+    assert not any("CBD" in p for p in _assess(items).patterns)
+
+
+def test_a_small_domain_held_back_by_unfinished_items_is_called_out_neutrally():
+    """Changes the reading from "you have no QI" to "your QI is unfinished"
+    without instructing a chase."""
+    items = _balanced(40)
+    items = [i for i in items if i.domain != HealthDomain.qi]
+    items += [
+        _item(domain=HealthDomain.qi, state="pending", days_ago=100, ident=f"q-{n}", form_type="QIAT")
+        for n in range(3)
+    ]
+
+    patterns = _assess(items).patterns
+
+    assert any(
+        "QI looks small partly because 3 of its items are unfinished" in p for p in patterns
+    )
+    assert not any("chase" in p.lower() for p in patterns)
+
+
+# ── Scan info ───────────────────────────────────────────────────────────────
+
+
+def test_scan_info_carries_the_basis_review_timing_and_limits():
+    _, text = _scan_info(_balanced(), review_date=date(2026, 10, 1))
+
+    assert text.startswith("🔎 *Scan info*")
+    assert "Confidence: high for scanned evidence" in text
+    assert "Last scanned: 26 Aug 2026 09:00" in text
+    assert "Next review: October 2026" in text
+    assert "*What this cannot see*" in text
+    assert "no item here is described as overdue" in text
+    assert "neither is a requirement" in text
+
+
+def test_scan_info_discloses_a_limited_view():
+    _, text = _scan_info(_balanced(), limited_view=True)
+    assert "Limited view: based on Portfolio Guru filings only" in text
+
+
+def test_scan_info_holds_the_fuller_pathway_expectations():
+    readiness = {"pathway": "cesr_portfolio", "wpba_count": 4, "wpba_target": 36}
+    _, cesr = _scan_info(_balanced(), pathway_readiness=readiness)
+    _, training = _scan_info(_balanced())
+
+    assert "ESLEs across core specialties" in cesr
+    assert "5-year evidence window" in cesr
+    assert "ESLEs" not in training

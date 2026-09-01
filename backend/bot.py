@@ -40,7 +40,14 @@ from profile_store import init_profile_db, store_training_level, get_training_le
 from health_models import CORE_DOMAINS, HealthProfile, HealthDomain, Pathway
 from health_engine import case_history_to_evidence_items, compute_snapshot
 from health_assessment import compute_health_assessment
-from health_report import format_domain_detail, format_health_report, format_stuck_detail
+from health_report import (
+    actions_page_count,
+    format_actions,
+    format_coverage,
+    format_curriculum,
+    format_priorities,
+    format_scan_info,
+)
 from health_profile_store import get_health_profile, save_health_profile, delete_health_profile
 from kaizen_index import (
     KaizenSyncStatus,
@@ -3083,26 +3090,93 @@ def _health_refresh_confirm_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def _health_result_keyboard() -> InlineKeyboardMarkup:
+# Callbacks still sitting in older chat messages, mapped onto their successor
+# view so tapping one never dead-ends.
+LEGACY_HEALTH_DETAIL_VIEWS = {"stuck": "actions", "domains": "coverage", "basis": "scan"}
+
+
+def _health_nav_rows() -> list[list[InlineKeyboardButton]]:
+    """The four Health views, in the same two rows on every view.
+
+    Stable positions matter more than hiding whichever view is open: a doctor
+    who has learned that Coverage is bottom-left should not find the buttons
+    have moved under their thumb when they get there.
+    """
+    return [
+        [
+            InlineKeyboardButton("📍 Priorities", callback_data="ACTION|health_view|priorities"),
+            InlineKeyboardButton("📌 Actions", callback_data="ACTION|health_view|actions"),
+        ],
+        [
+            InlineKeyboardButton("📊 Coverage", callback_data="ACTION|health_view|coverage"),
+            InlineKeyboardButton("🔎 Scan info", callback_data="ACTION|health_view|scan"),
+        ],
+    ]
+
+
+def _health_view_keyboard(
+    view: str = "priorities",
+    *,
+    page: int = 0,
+    page_count: int = 1,
+    needs_review_month: bool = False,
+) -> InlineKeyboardMarkup:
+    """Persistent navigation across the four views, plus this view's controls."""
+    rows: list[list[InlineKeyboardButton]] = []
+
+    if view == "coverage":
+        rows.append([
+            InlineKeyboardButton(
+                "🏷️ Curriculum tags", callback_data="ACTION|health_view|curriculum"
+            )
+        ])
+
+    if view == "actions" and page_count > 1:
+        pager: list[InlineKeyboardButton] = []
+        if page > 0:
+            pager.append(InlineKeyboardButton(
+                "⬅️ Previous", callback_data=f"ACTION|health_page|{page - 1}"
+            ))
+        if page < page_count - 1:
+            pager.append(InlineKeyboardButton(
+                "➡️ Next", callback_data=f"ACTION|health_page|{page + 1}"
+            ))
+        if pager:
+            rows.append(pager)
+
+    if view == "priorities" and needs_review_month:
+        # Routes into the existing user-driven /arcp copy. Health reads
+        # settings; it never writes them behind a doctor's back.
+        rows.append([InlineKeyboardButton(
+            "📅 Review month", callback_data="ACTION|health_review_setup"
+        )])
+
+    rows.extend(_health_nav_rows())
+    return InlineKeyboardMarkup(rows)
+
+
+def _health_refresh_route_keyboard() -> InlineKeyboardMarkup:
+    """Offered when a tapped button belongs to a report this chat no longer holds."""
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("📌 Unfinished", callback_data="ACTION|health_detail|stuck"),
-            InlineKeyboardButton("🔎 Evidence basis", callback_data="ACTION|health_detail|basis"),
-        ],
-        [
-            InlineKeyboardButton("📋 Domains", callback_data="ACTION|health_detail|domains"),
-            InlineKeyboardButton("➕ New case", callback_data="ACTION|file"),
-        ],
+        [InlineKeyboardButton("🔄 Refresh health", callback_data="ACTION|health")],
     ])
 
 
-def _health_detail_keyboard() -> InlineKeyboardMarkup:
+def _health_empty_keyboard() -> InlineKeyboardMarkup:
+    """Useful next routes when a scan can see no portfolio evidence."""
     return InlineKeyboardMarkup([
         [
+            InlineKeyboardButton("🔄 Refresh health", callback_data="ACTION|health"),
             InlineKeyboardButton("➕ New case", callback_data="ACTION|file"),
-            InlineKeyboardButton("🔙 Back", callback_data="ACTION|health_back_to_report"),
         ],
+        [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")],
     ])
+
+
+_HEALTH_REPORT_EXPIRED = (
+    "That health report is no longer in memory for this chat.\n\n"
+    "Tap Refresh health to run a new read-only scan."
+)
 
 
 def _heading_key(line: str) -> str:
@@ -3309,24 +3383,60 @@ def _format_last_scanned(sync_status) -> str | None:
         return None
 
 
-def _store_health_report_context(context, full_text: str, sections: dict | None = None) -> str:
-    """Remember the last report so the drill-down buttons have something to show.
+def _store_health_report_context(
+    context,
+    *,
+    views: dict[str, str],
+    action_pages: list[str],
+    needs_review_month: bool,
+) -> None:
+    """Remember the rendered views so the navigation buttons have something to show.
 
-    ``sections`` lets the caller pass panes built from the assessment itself.
-    Parsing them back out of the rendered Markdown (the fallback) breaks the
-    moment a heading is reworded, which is how the detail buttons ended up
-    answering "no longer available".
+    Every view — including each Actions page — is rendered once, from the
+    assessment, at scan time. Nothing is re-derived from the sent Markdown: a
+    reworded heading used to break the detail buttons into "no longer
+    available", and re-running the assessment on a button press would let the
+    page a doctor is paging through change underneath them.
     """
-    if sections is None:
-        summary = _health_compact_report_text(full_text)
-        sections = _health_report_sections(full_text)
-    else:
-        summary = full_text
     context.user_data["last_health_report"] = {
-        "summary": summary,
-        "sections": sections,
+        "views": views,
+        "action_pages": action_pages,
+        "page": 0,
+        "needs_review_month": needs_review_month,
     }
-    return summary
+
+
+def _health_view_payload(context, view: str, *, page: int | None = None):
+    """Return ``(text, keyboard)`` for a stored view, or ``None`` if it is gone.
+
+    ``page`` of ``None`` means "wherever they were": coming back to Actions
+    from another view resumes the page they left, rather than sending someone
+    who had paged to item 16 back to item 1.
+
+    Also the recovery path for a button tapped on an old message: a page number
+    beyond what is stored is clamped to the stored report rather than treated
+    as an error, so the doctor lands on real evidence instead of a dead end.
+    """
+    report = context.user_data.get("last_health_report") or {}
+    views = report.get("views") or {}
+    pages = report.get("action_pages") or []
+    if not views or not pages:
+        return None
+
+    if view == "actions":
+        page = report.get("page", 0) if page is None else page
+        page = max(0, min(int(page), len(pages) - 1))
+        report["page"] = page
+        return pages[page], _health_view_keyboard(
+            "actions", page=page, page_count=len(pages)
+        )
+
+    text = views.get(view)
+    if text is None:
+        return None
+    return text, _health_view_keyboard(
+        view, needs_review_month=bool(report.get("needs_review_month"))
+    )
 
 
 def _health_sync_recovery_keyboard(status: str) -> InlineKeyboardMarkup:
@@ -6849,7 +6959,8 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
 
         if not await _health_gate_check(user_id):
             await query.message.edit_text(
-                "📊 Portfolio Health is included in Portfolio Guru Unlimited.\n\nUpgrade to get gap analysis and evidence review.",
+                "📊 Portfolio Health is included in Portfolio Guru Unlimited.\n\n"
+                "Upgrade for portfolio priorities, unfinished-item review and evidence coverage.",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("💳 Upgrade — £9.99/mo", callback_data="UPGRADE|pro_plus")],
                     [back_btn],
@@ -6875,7 +6986,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 query.message,
                 text,
                 parse_mode="Markdown",
-                reply_markup=reply_markup or _health_result_keyboard(),
+                reply_markup=reply_markup or _health_view_keyboard("priorities"),
             )
 
         async def fail_fn(text):
@@ -6906,31 +7017,61 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             )
         return ConversationHandler.END
 
-    elif action.startswith("health_detail|"):
-        detail_key = action.split("|", 1)[1]
-        report = context.user_data.get("last_health_report") or {}
-        sections = report.get("sections") or {}
-        detail_text = sections.get(detail_key)
-        if not detail_text:
-            detail_text = "This health detail is no longer available. Run /health again to refresh the report."
+    elif (
+        action.startswith("health_view|")
+        or action.startswith("health_page|")
+        or action.startswith("health_detail|")
+        or action == "health_back_to_report"
+    ):
+        # One branch for every Health navigation button, including the ones
+        # left behind on messages sent before the four-view layout: an old
+        # "Unfinished" tap lands on Actions rather than a dead end.
+        page = None
+        if action.startswith("health_page|"):
+            view = "actions"
+            try:
+                page = int(action.split("|", 1)[1])
+            except ValueError:
+                page = 0
+        elif action.startswith("health_view|"):
+            view = action.split("|", 1)[1]
+        elif action.startswith("health_detail|"):
+            view = LEGACY_HEALTH_DETAIL_VIEWS.get(action.split("|", 1)[1], "priorities")
+        else:
+            view = "priorities"
+
+        payload = _health_view_payload(context, view, page=page)
+        if payload is None:
+            await _safe_edit_text(
+                query.message,
+                _HEALTH_REPORT_EXPIRED,
+                reply_markup=_health_refresh_route_keyboard(),
+            )
+            return ConversationHandler.END
+
+        text, keyboard = payload
         await _safe_edit_text(
             query.message,
-            detail_text,
+            text,
             parse_mode="Markdown",
-            reply_markup=_health_detail_keyboard(),
+            reply_markup=keyboard,
         )
         return ConversationHandler.END
 
-    elif action == "health_back_to_report":
-        report = context.user_data.get("last_health_report") or {}
-        summary = report.get("summary")
-        if not summary:
-            summary = "This health report is no longer available. Run /health again to refresh it."
+    elif action == "health_review_setup":
+        # Shows the same instructions /arcp gives and changes nothing. The
+        # doctor sets their own review month; Health only reads it.
+        current = _stored_review_date(_get_or_default_health_profile(user_id))
+        shown = current.strftime("%B %Y") if current else "not set"
         await _safe_edit_text(
             query.message,
-            summary,
+            f"📅 *Review month*\n\nCurrently: {shown}\n\n"
+            "Set it with the month of your next ARCP or review, for example:\n"
+            "`/arcp Oct 2026`\n\n"
+            "_Portfolio Health uses it to count down and to time reminders. "
+            "Nothing has been changed._",
             parse_mode="Markdown",
-            reply_markup=_health_result_keyboard(),
+            reply_markup=_health_view_keyboard("priorities"),
         )
         return ConversationHandler.END
 
@@ -7015,7 +7156,8 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
 
         if not await _health_gate_check(user_id):
             await query.message.edit_text(
-                "📊 Portfolio Health is included in Portfolio Guru Unlimited.\n\nUpgrade to get gap analysis and evidence review.",
+                "📊 Portfolio Health is included in Portfolio Guru Unlimited.\n\n"
+                "Upgrade for portfolio priorities, unfinished-item review and evidence coverage.",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("💳 Upgrade — £9.99/mo", callback_data="UPGRADE|pro_plus")],
                     [back_btn],
@@ -7061,7 +7203,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 query.message,
                 text,
                 parse_mode="Markdown",
-                reply_markup=reply_markup or _health_result_keyboard(),
+                reply_markup=reply_markup or _health_view_keyboard("priorities"),
             )
 
         async def fail_fn(text):
@@ -7534,7 +7676,7 @@ async def upgrade_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         "*Portfolio Guru Unlimited* — £9.99/month\n"
         "• Unlimited Kaizen WPBA filing\n"
         "• Draft Review (AI critique before filing)\n"
-        "• Portfolio Health — pathway-aware analysis (Training/CCT ARCP evidence review or CESR / Portfolio Pathway evidence plan)\n"
+        "• Portfolio Health — read-only priorities, unfinished-item review and evidence coverage\n"
         "• Unsigned ticket scanning\n"
     )
 
@@ -7909,18 +8051,6 @@ async def _run_health_analysis(
     stored_profile = get_health_profile(user_id)
     profile = stored_profile or _get_or_default_health_profile(user_id)
     profile_is_default = stored_profile is None
-    is_cesr = profile.pathway == Pathway.cesr_portfolio
-    pathway_label = (
-        "CESR / Portfolio Pathway"
-        if is_cesr
-        else "Training (CCT) evidence scan"
-    )
-
-    empty_state_label = (
-        "CESR / Portfolio Pathway"
-        if profile.pathway == Pathway.cesr_portfolio
-        else "ARCP evidence review within the Training (CCT) pathway"
-    )
 
     training_level = get_training_level(user_id)
     if not training_level:
@@ -7932,11 +8062,14 @@ async def _run_health_analysis(
     evidence_items, history, evidence_source = await _resolve_health_evidence(user_id)
     if not evidence_items:
         await send_result(
-            f"📊 *Portfolio Health — {pathway_label}*\n\n"
-            f"No Portfolio Guru cases filed yet. Start filing here and come back to check your {empty_state_label} readiness.\n\n"
-            "This only reflects cases filed through Portfolio Guru — your existing Kaizen cases aren't affected.\n\n"
-            "Tip: Send a clinical case to get started.",
-            None,
+            "📍 *Portfolio priorities*\n\n"
+            "No evidence was visible in this scan, so Portfolio Guru cannot "
+            "prioritise it yet.\n\n"
+            "If you already have Kaizen evidence, refresh the read-only scan. "
+            "Otherwise, send a case to create your first draft.\n\n"
+            "_This does not mean your Kaizen portfolio is empty. A planning aid, "
+            "not a formal training, registration or appraisal outcome._",
+            _health_empty_keyboard(),
         )
         return
 
@@ -7949,38 +8082,58 @@ async def _run_health_analysis(
     # prose, which is why a portfolio with 27 unfinished items and QI at 7
     # against 250 clinical read as "Green, missing domains: none obvious" and
     # why _reconcile_action_severity had to exist to stop the narrative
-    # contradicting the score. The assessment answers from the evidence, so
-    # score and copy cannot disagree.
+    # contradicting the score. The assessment answers from the evidence, and
+    # no colour is claimed on top of it.
     from datetime import datetime as _dt_module
     assessment = compute_health_assessment(evidence_items)
-    report_text = format_health_report(
+    review_date = _stored_review_date(profile)
+    scan_is_fresh = _sync_status_is_fresh(sync_status)
+
+    # All four views are rendered here, once, from one assessment. A button
+    # press then only reads what this scan already decided.
+    priorities_text = format_priorities(
         assessment,
-        pathway_label=pathway_label,
         month_label=_dt_module.now().strftime("%B %Y"),
-        scanned_count=len(evidence_items),
-        last_scanned=_format_last_scanned(sync_status),
+        review_date=review_date,
         limited_view=limited_view,
-        pathway_assumed=profile_is_default,
+        scan_is_fresh=scan_is_fresh,
         pathway_readiness=snapshot.pathway_readiness,
-        pathway_name=_pathway_label(profile.pathway),
-        review_date=_stored_review_date(profile),
     )
     await send_progress()
-    sections = {
-        "stuck": format_stuck_detail(assessment),
-        "domains": format_domain_detail(assessment),
-        "basis": _format_health_evidence_context(
-            source=evidence_source,
-            evidence_count=len(evidence_items),
-            history_count=len(history),
-            profile_is_default=profile_is_default,
-            sync_status=sync_status,
-            pathway=profile.pathway,
+    views = {
+        "priorities": priorities_text,
+        "coverage": format_coverage(assessment),
+        "curriculum": format_curriculum(assessment),
+        "scan": format_scan_info(
+            assessment,
+            basis=_format_health_evidence_context(
+                source=evidence_source,
+                evidence_count=len(evidence_items),
+                history_count=len(history),
+                profile_is_default=profile_is_default,
+                sync_status=sync_status,
+                pathway=profile.pathway,
+            ),
+            review_date=review_date,
+            limited_view=limited_view,
+            pathway_readiness=snapshot.pathway_readiness,
         ),
     }
+    action_pages = [
+        format_actions(assessment, page=page)
+        for page in range(actions_page_count(assessment))
+    ]
     if context_store is not None:
-        _store_health_report_context(context_store, report_text, sections=sections)
-    await send_result(report_text, _health_result_keyboard())
+        _store_health_report_context(
+            context_store,
+            views=views,
+            action_pages=action_pages,
+            needs_review_month=review_date is None,
+        )
+    await send_result(
+        priorities_text,
+        _health_view_keyboard("priorities", needs_review_month=review_date is None),
+    )
     return
 
     evidence_context = _format_health_evidence_context(
@@ -8002,7 +8155,7 @@ async def _run_health_analysis(
             snapshot, history, month_label, evidence_context, limited_view=limited_view
         )
         msg = await _append_health_activity_snapshot(msg, user_id, history, training_level, limited_view=limited_view)
-        await send_result(msg, _health_result_keyboard())
+        await send_result(msg, _health_view_keyboard("priorities"))
         return
 
     try:
@@ -8021,7 +8174,7 @@ async def _run_health_analysis(
             limited_view=limited_view,
         )
         msg = await _append_health_activity_snapshot(msg, user_id, history, training_level, limited_view=limited_view)
-        await send_result(msg, _health_result_keyboard())
+        await send_result(msg, _health_view_keyboard("priorities"))
         return
     except Exception as e:
         logger.error(f"Portfolio health analysis failed: {e}", exc_info=True)
@@ -8035,7 +8188,7 @@ async def _run_health_analysis(
             limited_view=limited_view,
         )
         msg = await _append_health_activity_snapshot(msg, user_id, history, training_level, limited_view=limited_view)
-        await send_result(msg, _health_result_keyboard())
+        await send_result(msg, _health_view_keyboard("priorities"))
         return
 
     msg = _format_arcp_action_plan_message(
@@ -8048,7 +8201,7 @@ async def _run_health_analysis(
         limited_view=limited_view,
     )
     msg = await _append_health_activity_snapshot(msg, user_id, history, training_level, limited_view=limited_view)
-    await send_result(msg, _health_result_keyboard())
+    await send_result(msg, _health_view_keyboard("priorities"))
 
 
 async def _run_health_with_optional_kaizen_sync(

@@ -70,6 +70,10 @@ Source checks on 2026-06-27:
 
 ## Status / copy consistency rule (2026-06-30)
 
+Scope note (2026-09-01): this rule governs the legacy LLM-narrative ARCP
+message only. The four `/health` views carry no score and no LLM narrative, so
+there is nothing to reconcile — see "No universal health score" below.
+
 The deterministic health score and the report's action copy must never
 contradict each other. The ARCP report merges the LLM narrative's free-text
 `suggestions` into the "Next 3 useful filing actions"; that text is reconciled
@@ -214,16 +218,37 @@ Product decision, 2026-06-30:
 
 Portfolio Health knows nothing about ARCP dates, RCEM SLOs, CESR requirements, or training stages. It is pure evidence inventory. This is the key architectural difference from the original ARCP Health spec.
 
-### Health score
+### No universal health score (superseded 2026-09-01)
 
-A simple, universal health signal independent of any pathway:
+The universal layer previously carried a green/amber/red/grey signal. It no
+longer does, and `compute_health_assessment` no longer computes one.
 
-- **Green — Well covered:** evidence in 5–6 domains, balanced, recent items, regular cadence
-- **Amber — Needs attention:** 3–4 domains, some gaps, or ageing evidence
-- **Red — Thin:** ≤2 domains, large gaps, or mostly stale evidence
-- **Grey — Unknown:** not enough data entered yet
+A colour is a readiness claim, and this layer verifies nothing against any
+pathway's rules: the same evidence means different things to an ST4, a CESR
+applicant and an SAS doctor. What it can state honestly are facts about the
+scanned evidence — what is unfinished and since when, what each domain holds
+and how recently, how the portfolio compares with itself, and what the scan
+could not see. Those are what the views render.
 
-The health score is always shown with the concrete reasons. Never a label alone.
+Requirement counters still exist, but only where a **verified pathway overlay**
+supplies them (Layer 2), labelled as that pathway's own rule. With no overlay,
+nothing pathway-specific is rendered at all — an empty counter would read as an
+unmet requirement to a doctor whose pathway has no such rule.
+
+Related rules the universal layer holds to:
+
+- Ordering in `Portfolio priorities` is by workflow state and dates, and says
+  so; it is not training or curriculum importance.
+- A partial, unrefreshed or low-confidence scan shows a one-line factual notice
+  and drops ranking language entirely.
+- Old evidence is named with its exact date and offered for review. Nothing is
+  called overdue or stale, and no chase is instructed: no scanned field carries
+  a deadline.
+- Relative domain balance is stated as a comparison with the doctor's own
+  portfolio, is never a curriculum minimum, and is suppressed below
+  `health_assessment.IMBALANCE_MIN_ITEMS` scanned items.
+- Curriculum spread is computed over tagged items only, and the untagged count
+  is always stated alongside it.
 
 ---
 
@@ -398,13 +423,30 @@ next_actions              3–5 concrete suggested actions
 
 ### Telegram (MVP)
 
-- `/health` — compact summary card: health score, domain bar, top 2 gaps, next action
-- `/health domains` — domain breakdown with counts and dates
-- `/health gaps` — what's missing, ordered by impact
+- `/health` — opens `📍 Priorities`: at most three findings, scan notice when
+  the read is partial, review-month line, safety line. One phone screen.
+- `📌 Actions` — every unfinished item, awaiting-others separated from own
+  drafts, five per page in one stable total order, visible range (`1–5 of 17`),
+  each linked to Kaizen.
+- `📊 Coverage` — domain totals and 12-month recency, relative balance, plus a
+  compact tagged/untagged curriculum summary. `🏷️ Curriculum tags` is an
+  optional drill-down for the tagged SLO spread and its limits, keeping the
+  default Coverage pane to one phone-screen decision surface.
+- `🔎 Scan info` — source, freshness, window, pathway, confidence, review
+  timing and the fuller limitations.
+
 - `/pathway` — select or change pathway
 - `Add evidence` button — quick manual entry flow
 - After each WPBA filing → "Evidence added to Portfolio Health. [View health]"
 - Weekly nudge (already exists) → enhanced with health context
+
+All four views are one tap from each other on every view; there is no
+Back-first navigation. They are rendered once per scan and stored, so a button
+press never re-derives them and paging cannot shift items between pages.
+Buttons on messages older than this layout route to the view that replaced
+them; a report this chat no longer holds offers `🔄 Refresh health` rather than
+a dead end. The `📅 Review month` control shows the `/arcp` instructions and
+changes nothing by itself.
 
 ### Future Web Dashboard
 
