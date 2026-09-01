@@ -3,11 +3,11 @@
   dict({
     'buttons': list([
       tuple(
-        '✍️ Add reflection/context',
+        'Add reflection',
         'ACTION|add_reflection_detail',
       ),
       tuple(
-        '❌ Cancel',
+        'Cancel',
         'CANCEL|draft',
       ),
     ]),
@@ -50,29 +50,29 @@
   dict({
     'buttons': list([
       tuple(
-        '✅ Use best fit: CBD',
+        'CBD',
         'FORM|best',
       ),
       tuple(
-        '📋 ACAT',
+        'ACAT',
         'FORM|ACAT',
       ),
       tuple(
-        '📋 See all forms',
+        'Forms',
         'FORM|show_all',
       ),
       tuple(
-        '❌ Cancel',
+        'Restart',
         'CANCEL|form',
       ),
     ]),
     'text': '''
-      📋 Here are the forms that fit your case:
+      📋 Best fit: Case-Based Discussion
       
       - Case-Based Discussion: Best fit for a reflective clinical case. Strongest match for the main event.
       - Acute Care Assessment Tool: The case spans multiple patients across a shift.
       
-      Tap "Use best fit" for a quick draft, or select a different form below.
+      Select a form to draft it.
     ''',
   })
 # ---

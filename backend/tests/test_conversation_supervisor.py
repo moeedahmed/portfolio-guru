@@ -96,6 +96,7 @@ async def test_continue_decision_adds_to_case_and_offers_draft_now():
     assert decision.add_to_case is True
     assert decision.reply is not None
     assert decision.reply.actions == (DRAFT_NOW_ACTION,)
+    assert DRAFT_NOW_ACTION.label == "Draft"
 
 
 @pytest.mark.asyncio

@@ -125,7 +125,7 @@ async def test_gathering_mode_treats_detailed_airway_case_as_case_detail(monkeyp
     answer.assert_not_awaited()
     assert "airway management" in context.user_data["case_text"]
     assert "Leadership Assessment Tool" not in (sim.get_last_text() or "")
-    assert ("✅ Draft now", "GATHER|done") in sim.get_last_buttons()
+    assert ("Draft", "GATHER|done") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio
@@ -189,8 +189,8 @@ async def test_gathering_reply_offers_done_button(monkeypatch):
 
     assert sim.messages_sent[-1][1] == "📥 Captured. Add anything else before I draft this?"
     assert sim.get_last_buttons() == [
-        ("✅ Draft now", "GATHER|done"),
-        ("❌ Cancel", "ACTION|cancel"),
+        ("Draft", "GATHER|done"),
+        ("Cancel", "ACTION|cancel"),
     ]
 
 
@@ -210,7 +210,7 @@ async def test_weak_first_text_gets_context_gate_not_draft_button(monkeypatch):
     process_case.assert_not_awaited()
     assert "More clinical context needed" in sim.get_last_text()
     assert "presentation" in sim.get_last_text()
-    assert ("✅ Draft now", "GATHER|done") not in sim.get_last_buttons()
+    assert ("Draft", "GATHER|done") not in sim.get_last_buttons()
     assert context.user_data["gathering_case"]["parts"][0]["text"].startswith("I saw a dog")
 
 
@@ -244,8 +244,8 @@ async def test_gathering_switches_to_draft_button_once_context_is_grounded(monke
     assert "Captured" in sim.get_last_text()
     assert sim.messages_sent[-1][0] == "reply"
     assert sim.get_last_buttons() == [
-        ("✅ Draft now", "GATHER|done"),
-        ("❌ Cancel", "ACTION|cancel"),
+        ("Draft", "GATHER|done"),
+        ("Cancel", "ACTION|cancel"),
     ]
 
 
@@ -273,8 +273,8 @@ async def test_gathering_ready_prompt_is_resent_below_new_case_detail(monkeypatc
     assert sim.messages_sent[-1][0] == "reply"
     assert sim.get_last_text() == "📥 Captured. Add anything else before I draft this?"
     assert sim.get_last_buttons() == [
-        ("✅ Draft now", "GATHER|done"),
-        ("❌ Cancel", "ACTION|cancel"),
+        ("Draft", "GATHER|done"),
+        ("Cancel", "ACTION|cancel"),
     ]
 
 
@@ -442,7 +442,7 @@ async def test_grounded_voice_transcript_can_reach_recommendations(monkeypatch):
 
     assert result == AWAIT_FORM_CHOICE
     assert context.user_data.get("awaiting_source_detail") is None
-    assert ("✅ Use best fit: Procedural Log", "FORM|best") in sim.get_last_buttons()
+    assert ("Procedural Log", "FORM|best") in sim.get_last_buttons()
 
 
 def test_source_grounding_accepts_detailed_dog_bite_case_not_animal_story():
@@ -609,12 +609,12 @@ async def test_source_detail_retry_dog_bite_case_can_reach_recommendations(monke
     recommend.assert_awaited_once()
     assert context.user_data.get("awaiting_source_detail") is None
     assert "intubated in resus" in context.user_data["case_text"]
-    assert ("✅ Use best fit: CBD", "FORM|best") in sim.get_last_buttons()
+    assert ("CBD", "FORM|best") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio
 async def test_stale_gather_done_callback_keeps_current_case(monkeypatch):
-    """Old Draft now buttons must not finish the latest gathering case."""
+    """Old Draft buttons must not finish the latest gathering case."""
     monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
     sim = BotSimulator()
     context = sim._make_context()
@@ -632,7 +632,7 @@ async def test_stale_gather_done_callback_keeps_current_case(monkeypatch):
     assert "gathering_case" in context.user_data
     assert context.user_data["gathering_msg_id"] == 999
     update.callback_query.answer.assert_awaited()
-    assert "earlier Draft now button" in sim.get_last_text()
+    assert "earlier Draft button" in sim.get_last_text()
 
 
 @pytest.mark.asyncio
@@ -672,8 +672,8 @@ async def test_second_text_addition_keeps_both_buttons(monkeypatch):
     assert result == AWAIT_GATHERING
     assert "Captured" in sim.get_last_text()
     assert sim.get_last_buttons() == [
-        ("✅ Draft now", "GATHER|done"),
-        ("❌ Cancel", "ACTION|cancel"),
+        ("Draft", "GATHER|done"),
+        ("Cancel", "ACTION|cancel"),
     ]
 
 
@@ -699,14 +699,14 @@ async def test_second_text_addition_disarms_previous_gathering_prompt(monkeypatc
     )
     assert context.user_data["gathering_msg_id"] != 123
     assert sim.get_last_buttons() == [
-        ("✅ Draft now", "GATHER|done"),
-        ("❌ Cancel", "ACTION|cancel"),
+        ("Draft", "GATHER|done"),
+        ("Cancel", "ACTION|cancel"),
     ]
 
 
 @pytest.mark.asyncio
 async def test_voice_addition_disarms_previous_gathering_prompt(monkeypatch):
-    """A second voice note must not leave the previous Draft now button visible."""
+    """A second voice note must not leave the previous Draft button visible."""
     monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
     sim = BotSimulator()
     context = sim._make_context()
@@ -734,8 +734,8 @@ async def test_voice_addition_disarms_previous_gathering_prompt(monkeypatch):
         "chat_id": sim.user_id,
     }]
     assert sim.get_last_buttons() == [
-        ("✅ Draft now", "GATHER|done"),
-        ("❌ Cancel", "ACTION|cancel"),
+        ("Draft", "GATHER|done"),
+        ("Cancel", "ACTION|cancel"),
     ]
 
 
@@ -779,8 +779,8 @@ async def test_gathering_prompt_idempotent_across_repeated_additions(monkeypatch
         "Reflection: I should escalate high-risk ACS cases earlier in future.",
     ]
     expected_buttons = [
-        ("✅ Draft now", "GATHER|done"),
-        ("❌ Cancel", "ACTION|cancel"),
+        ("Draft", "GATHER|done"),
+        ("Cancel", "ACTION|cancel"),
     ]
     for text in additions:
         sim.clear_messages()
@@ -818,7 +818,7 @@ async def test_explicit_new_case_during_thin_detail_state_prompts_choice(monkeyp
     assert context.user_data["pending_new_case_text"].startswith("This is a new case")
     assert "current draft is still open" in sim.get_last_text()
     assert sim.get_last_buttons() == [
-        ("📋 Start new case", "CASE|new"),
-        ("✏️ Add to current draft", "CASE|improve"),
-        ("❌ Cancel current draft", "ACTION|cancel"),
+        ("New case", "CASE|new"),
+        ("Add to draft", "CASE|improve"),
+        ("Cancel", "ACTION|cancel"),
     ]

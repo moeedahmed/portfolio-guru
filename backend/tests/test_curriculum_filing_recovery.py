@@ -101,8 +101,8 @@ async def test_legacy_higher_profile_must_choose_curriculum_before_filing():
         route_filing.assert_not_awaited()
         assert context.user_data["draft_data"] == _active_cbd_draft()
         assert "Nothing has been sent to Kaizen yet" in sim.get_last_text()
-        assert ("📗 2021 Curriculum", "FILING_CURRICULUM|select|2021") in sim.get_last_buttons()
-        assert ("📘 2025 Update", "FILING_CURRICULUM|select|2025") in sim.get_last_buttons()
+        assert ("2021 Curriculum", "FILING_CURRICULUM|select|2021") in sim.get_last_buttons()
+        assert ("2025 Update", "FILING_CURRICULUM|select|2025") in sim.get_last_buttons()
 
         second = await handle_callback(
             sim._make_callback_update("FILING_CURRICULUM|select|2021"), context
@@ -171,7 +171,7 @@ async def test_form_unavailable_requires_explicit_alternative_curriculum_retry()
         assert first == AWAIT_APPROVAL
         assert route_filing.await_count == 1
         assert route_filing.await_args_list[0].kwargs["form_type"] == "CBD"
-        assert ("🔄 Try 2021 curriculum", "FILING_CURRICULUM|retry|2021") in sim.get_last_buttons()
+        assert ("Try 2021", "FILING_CURRICULUM|retry|2021") in sim.get_last_buttons()
         assert "Nothing was written" in sim.get_last_text()
         assert context.user_data["draft_data"] == _active_cbd_draft()
 

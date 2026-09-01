@@ -140,11 +140,10 @@ def test_settings_shows_pathway_change_control(isolated_health_store, monkeypatc
 
     buttons = [(button.text, button.callback_data) for row in keyboard.inline_keyboard for button in row]
     assert "Training (CCT)" in text
-    assert ("📋 Portfolio defaults", "ACTION|portfolio_defaults") in buttons
+    assert ("Defaults", "ACTION|portfolio_defaults") in buttons
     assert [[button.callback_data for button in row] for row in keyboard.inline_keyboard] == [
         ["ACTION|setup"],
-        ["ACTION|voice"],
-        ["ACTION|portfolio_defaults"],
+        ["ACTION|voice", "ACTION|portfolio_defaults"],
         ["ACTION|delete"],
     ]
 
@@ -174,8 +173,8 @@ async def test_settings_pathway_change_saves_and_returns_to_settings(isolated_he
     assert ("Portfolio (CESR)", "PATHWAY_SETTINGS|cesr_portfolio") in sim.get_last_buttons()
     # The pathway picker is a section under Portfolio defaults, so its Back
     # button must return to the Portfolio defaults submenu, not main /settings.
-    assert ("🔙 Back to portfolio defaults", "ACTION|portfolio_defaults") in sim.get_last_buttons()
-    assert ("🔙 Back to settings", "ACTION|settings") not in sim.get_last_buttons()
+    assert ("Back", "ACTION|portfolio_defaults") in sim.get_last_buttons()
+    assert ("Back", "ACTION|settings") not in sim.get_last_buttons()
 
     result = await bot.handle_pathway_choice(
         sim._make_callback_update("PATHWAY_SETTINGS|cesr_portfolio"),
@@ -187,7 +186,7 @@ async def test_settings_pathway_change_saves_and_returns_to_settings(isolated_he
     assert stored is not None
     assert stored.pathway == Pathway.cesr_portfolio
     assert "Portfolio (CESR)" in sim.get_last_text()
-    assert ("📋 Portfolio defaults", "ACTION|portfolio_defaults") in sim.get_last_buttons()
+    assert ("Defaults", "ACTION|portfolio_defaults") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio
@@ -209,7 +208,7 @@ async def test_portfolio_defaults_back_button_returns_to_settings(isolated_healt
     )
 
     buttons = sim.get_last_buttons()
-    assert ("🔙 Back to settings", "ACTION|settings") in buttons
+    assert ("Back", "ACTION|settings") in buttons
     # The submenu must not strand the user with a bare "Back" label.
     assert ("🔙 Back", "ACTION|settings") not in buttons
 
@@ -229,8 +228,8 @@ async def test_change_level_back_button_returns_to_portfolio_defaults(monkeypatc
     )
 
     buttons = sim.get_last_buttons()
-    assert ("🔙 Back to portfolio defaults", "ACTION|portfolio_defaults") in buttons
-    assert ("🔙 Back to settings", "ACTION|settings") not in buttons
+    assert ("Back", "ACTION|portfolio_defaults") in buttons
+    assert ("Back", "ACTION|settings") not in buttons
 
 
 @pytest.mark.asyncio
@@ -248,8 +247,8 @@ async def test_change_curriculum_back_button_returns_to_portfolio_defaults(monke
     )
 
     buttons = sim.get_last_buttons()
-    assert ("🔙 Back to portfolio defaults", "ACTION|portfolio_defaults") in buttons
-    assert ("🔙 Back to settings", "ACTION|settings") not in buttons
+    assert ("Back", "ACTION|portfolio_defaults") in buttons
+    assert ("Back", "ACTION|settings") not in buttons
 
 
 @pytest.mark.asyncio
@@ -267,8 +266,8 @@ async def test_change_pathway_back_button_returns_to_portfolio_defaults(isolated
     )
 
     buttons = sim.get_last_buttons()
-    assert ("🔙 Back to portfolio defaults", "ACTION|portfolio_defaults") in buttons
-    assert ("🔙 Back to settings", "ACTION|settings") not in buttons
+    assert ("Back", "ACTION|portfolio_defaults") in buttons
+    assert ("Back", "ACTION|settings") not in buttons
 
 
 @pytest.mark.asyncio

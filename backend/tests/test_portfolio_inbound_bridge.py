@@ -483,8 +483,8 @@ def test_whatsapp_setup_choice_resolves_previous_actions(
     assert len(captured) == 2
 
     _, setup_text = captured[0]
-    assert "1. 🔗 Connect Kaizen" in setup_text
-    assert "2. ⚙️ Settings" in setup_text
+    assert "1. Connect Kaizen" in setup_text
+    assert "2. Settings" in setup_text
     assert "Reply with the number of your choice." in setup_text
 
     _, choice_reply_text = captured[1]
@@ -516,7 +516,7 @@ def test_whatsapp_action_memory_clears_after_reply_without_actions(outbound_clie
     assert generic_reply.status_code == 200
     assert stale_choice.status_code == 200
     assert len(captured) == 3
-    assert "1. 🔗 Connect Kaizen" in captured[0][1]
+    assert "1. Connect Kaizen" in captured[0][1]
     assert "clinical case" in captured[1][1].lower()
     assert "option is no longer available" in captured[2][1]
     assert "anonymised case details" in captured[2][1]
@@ -540,7 +540,7 @@ def test_whatsapp_settings_choice_resolves_to_static_guidance(outbound_client):
     assert setup_prompt.status_code == 200
     assert settings_choice.status_code == 200
     assert len(captured) == 2
-    assert "2. ⚙️ Settings" in captured[0][1]
+    assert "2. Settings" in captured[0][1]
     assert "clinical case" not in captured[1][1].lower()
     assert "I can't change settings or collect credentials in WhatsApp." in captured[1][1]
     assert "Reply with the number of your choice." not in captured[1][1]
@@ -752,7 +752,7 @@ def test_whatsapp_followup_case_detail_is_captured_with_draft_now_action(
     assert len(captured) == 2
     assert "clinical case" in captured[0][1].lower()
     assert "Captured" in captured[1][1]
-    assert "1. ✅ Draft now" in captured[1][1]
+    assert "1. Draft" in captured[1][1]
     assert "Reply with the number of your choice." in captured[1][1]
 
 

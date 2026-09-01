@@ -121,14 +121,12 @@ async def test_setup_training_level_ends_setup_conv_for_every_manual_button(
 
 
 @pytest.mark.asyncio
-async def test_handle_set_level_still_emits_back_to_settings_outside_setup(
+async def test_handle_set_level_still_routes_back_to_settings_outside_setup(
     mock_callback_update, mock_context, monkeypatch
 ):
-    """The /settings → change portfolio path must keep its "Back to
-    settings" pop-back button. Pin this so a future "just unify them"
-    refactor doesn't silently strip the settings round-trip — the only
-    behavioural signal that this handler is the settings one (not the
-    setup one) is the button copy on its response.
+    """The /settings → change portfolio path keeps a compact Back button
+    whose callback returns to settings. Pin the route rather than verbose copy
+    so the mobile label can stay concise without losing the round-trip.
     """
     import bot
 
@@ -145,9 +143,13 @@ async def test_handle_set_level_still_emits_back_to_settings_outside_setup(
         "handle_set_level dropped its reply_markup — without it the user "
         "has no path back to /settings."
     )
-    buttons = [btn.text for row in markup.inline_keyboard for btn in row]
-    assert any("Back to settings" in b for b in buttons), (
-        f"handle_set_level lost its 'Back to settings' button: {buttons!r}"
+    buttons = [
+        (btn.text, btn.callback_data)
+        for row in markup.inline_keyboard
+        for btn in row
+    ]
+    assert ("Back", "ACTION|settings") in buttons, (
+        f"handle_set_level lost its settings return route: {buttons!r}"
     )
 
 

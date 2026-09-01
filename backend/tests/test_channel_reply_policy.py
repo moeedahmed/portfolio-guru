@@ -59,11 +59,13 @@ def test_kaizen_setup_reply_has_same_core_copy_across_channel_renderers():
     assert reply is not None
     assert reply.body == render_message("kaizen_setup_guide")
     assert reply.full_text() in render_numbered(reply)
-    assert "1. 🔗 Connect Kaizen" in render_numbered(reply)
-    assert "2. ⚙️ Settings" in render_numbered(reply)
+    assert "1. Connect Kaizen" in render_numbered(reply)
+    assert "2. Settings" in render_numbered(reply)
     assert to_telegram_button_rows(reply) == [
-        [{"text": "🔗 Connect Kaizen", "callback_data": "ACTION|setup"}],
-        [{"text": "⚙️ Settings", "callback_data": "ACTION|settings"}],
+        [
+            {"text": "Connect Kaizen", "callback_data": "ACTION|setup"},
+            {"text": "Settings", "callback_data": "ACTION|settings"},
+        ],
     ]
 
 

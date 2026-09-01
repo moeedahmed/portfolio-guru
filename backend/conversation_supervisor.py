@@ -37,8 +37,8 @@ from message_policy import render_message, safety_redirect_text, style_grounded_
 from vnext_dialogue_policy import is_completion_request
 
 # Stable id mirrors the existing Telegram callback (``GATHER|done``) so the
-# inline button and a WhatsApp "reply 1 / draft now" resolve to one action.
-DRAFT_NOW_ACTION = ChannelAction(action_id="GATHER|done", label="✅ Draft now")
+# inline button and a WhatsApp "reply 1 / draft" resolve to one action.
+DRAFT_NOW_ACTION = ChannelAction(action_id="GATHER|done", label="Draft")
 
 AnswerFn = Callable[[str], Awaitable[str]]
 

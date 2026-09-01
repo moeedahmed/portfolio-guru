@@ -220,7 +220,7 @@ def test_intermediate_qi_audit_project_keeps_qiat_as_best_fit():
     keyboard = _build_form_choice_keyboard(filtered)
     best_button = keyboard.inline_keyboard[0][0]
     assert best_button.callback_data == "FORM|best"
-    assert "Use best fit: QIAT" in best_button.text
+    assert best_button.text == "QIAT"
     assert "Teaching" not in best_button.text
 
 

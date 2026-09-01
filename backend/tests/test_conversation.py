@@ -38,20 +38,22 @@ class TestKeyboardBuilding:
 
         recs = [
             FormTypeRecommendation(form_type="CBD", rationale="test", uuid=FORM_UUIDS.get("CBD")),
-            FormTypeRecommendation(form_type="DOPS", rationale="test", uuid=FORM_UUIDS.get("DOPS")),
+            FormTypeRecommendation(form_type="REFLECT_LOG", rationale="test", uuid=FORM_UUIDS.get("REFLECT_LOG")),
             FormTypeRecommendation(form_type="LAT", rationale="test", uuid=FORM_UUIDS.get("LAT")),
             FormTypeRecommendation(form_type="ACAT", rationale="test", uuid=FORM_UUIDS.get("ACAT")),
         ]
         keyboard = _build_form_choice_keyboard(recs, curriculum="2025")
         rows = keyboard.inline_keyboard
 
-        assert rows[0][0].callback_data == "FORM|best"
-        assert rows[0][0].text.startswith("✅ Use best fit")
-
-        form_rows = [r for r in rows[1:] if any("FORM|" in (b.callback_data or "") for b in r)
-                     and not any("show_all" in (b.callback_data or "") for b in r)]
-        for row in form_rows:
-            assert len(row) <= 2, f"Row has {len(row)} buttons — expected max 2"
+        assert [(button.text, button.callback_data) for button in rows[0]] == [
+            ("CBD", "FORM|best"),
+            ("Reflection", "FORM|REFLECT_LOG"),
+        ]
+        assert [(button.text, button.callback_data) for button in rows[-1]] == [
+            ("Forms", "FORM|show_all"),
+            ("Restart", "CANCEL|form"),
+        ]
+        assert all(len(row) <= 2 for row in rows)
 
     def test_single_strong_recommendation_keeps_manual_escape_hatch(self):
         from bot import _build_form_choice_keyboard
@@ -73,6 +75,99 @@ class TestKeyboardBuilding:
         ]
         assert "FORM|best" in button_data
         assert "FORM|show_all" in button_data
+
+    def test_best_fit_stays_first_when_an_earlier_recommendation_is_unavailable(self):
+        from bot import _build_form_choice_keyboard
+        from extractor import FORM_UUIDS
+        from models import FormTypeRecommendation
+
+        keyboard = _build_form_choice_keyboard([
+            FormTypeRecommendation(
+                form_type="TEACH_OBS",
+                rationale="Unavailable candidate.",
+                uuid=None,
+            ),
+            FormTypeRecommendation(
+                form_type="CBD",
+                rationale="Available best fit.",
+                uuid=FORM_UUIDS["CBD"],
+            ),
+        ])
+
+        assert (
+            keyboard.inline_keyboard[0][0].text,
+            keyboard.inline_keyboard[0][0].callback_data,
+        ) == ("CBD", "FORM|best")
+
+    def test_active_end_user_keyboards_never_exceed_two_buttons_per_row(self):
+        from bot import (
+            _build_amend_keyboard,
+            _build_amend_new_case_choice_keyboard,
+            _build_approval_keyboard,
+            _build_attachment_confirm_keyboard,
+            _build_consent_keyboard,
+            _build_curriculum_keyboard,
+            _build_doc_intent_keyboard,
+            _build_edit_field_keyboard,
+            _build_explicit_form_keyboard,
+            _build_failed_filing_input_gate_keyboard,
+            _build_image_intent_keyboard,
+            _build_open_case_new_case_keyboard,
+            _build_pathway_keyboard,
+            _build_post_filing_keyboard,
+            _build_template_review_keyboard,
+            _build_video_intent_keyboard,
+            _gathering_done_keyboard,
+            _health_detail_keyboard,
+            _health_result_keyboard,
+            _health_sync_recovery_keyboard,
+            _refresh_portfolio_confirm_keyboard,
+            _refresh_portfolio_result_keyboard,
+            _voice_choice_keyboard,
+            _voice_kaizen_sample_keyboard,
+            _voice_post_activation_keyboard,
+            _voice_rebuild_keyboard,
+        )
+
+        keyboards = [
+            _gathering_done_keyboard(),
+            _build_curriculum_keyboard(),
+            _build_template_review_keyboard(),
+            _build_explicit_form_keyboard("CBD"),
+            _build_approval_keyboard(),
+            _build_approval_keyboard(can_back_to_missing=True),
+            _build_amend_keyboard(),
+            _build_doc_intent_keyboard(),
+            _build_image_intent_keyboard(),
+            _build_video_intent_keyboard(),
+            _build_amend_new_case_choice_keyboard(),
+            _build_failed_filing_input_gate_keyboard(),
+            _build_open_case_new_case_keyboard(),
+            _build_edit_field_keyboard(),
+            _build_attachment_confirm_keyboard(),
+            _health_result_keyboard(),
+            _health_detail_keyboard(),
+            _health_sync_recovery_keyboard("failed"),
+            _refresh_portfolio_confirm_keyboard(),
+            _refresh_portfolio_result_keyboard("failed"),
+            _build_pathway_keyboard(from_settings=True),
+            _voice_choice_keyboard(),
+            _voice_rebuild_keyboard(),
+            _voice_kaizen_sample_keyboard(),
+            _voice_post_activation_keyboard(),
+            _build_consent_keyboard(123),
+        ]
+        keyboards.extend(
+            _build_post_filing_keyboard("CBD", status, **kwargs)
+            for status, kwargs in (
+                ("success", {"same_case_available": True}),
+                ("partial", {"uncertain": True}),
+                ("failed", {}),
+            )
+        )
+
+        for keyboard in keyboards:
+            assert all(len(row) <= 2 for row in keyboard.inline_keyboard)
 
 
 class TestMessagePolicy:
@@ -148,8 +243,39 @@ class TestMessagePolicy:
 
         assert "Procedural Log" in text
         assert "Privacy check" in text
-        assert "Use best fit" in text
+        assert "Best fit: Procedural Log" in text
+        assert "Select a form to draft it." in text
         assert "*" not in text
+
+    def test_draft_approval_keeps_kaizen_save_explicit(self):
+        from bot import _build_approval_keyboard
+
+        rows = _build_approval_keyboard().inline_keyboard
+
+        assert [(button.text, button.callback_data) for button in rows[0]] == [
+            ("Save to Kaizen", "APPROVE|draft"),
+        ]
+        assert [(button.text, button.callback_data) for button in rows[1]] == [
+            ("Improve", "IMPROVE|reflection"),
+            ("Cancel", "CANCEL|draft"),
+        ]
+
+    def test_failed_filing_actions_are_compact_without_losing_choices(self):
+        from bot import _build_failed_filing_input_gate_keyboard
+
+        rows = _build_failed_filing_input_gate_keyboard().inline_keyboard
+
+        assert all(len(row) <= 2 for row in rows)
+        assert [
+            (button.text, button.callback_data)
+            for row in rows
+            for button in row
+        ] == [
+            ("Retry", "ACTION|retry_filing"),
+            ("Edit", "CASE|improve"),
+            ("New case", "CASE|new"),
+            ("Cancel", "ACTION|cancel"),
+        ]
 
     def test_form_recommendation_copy_hides_default_curriculum_and_finishes_lines(self):
         from bot import _build_form_recommendation_text
@@ -314,7 +440,7 @@ class TestExplicitFormRouting:
         sent_keyboard = message.reply_text.await_args.kwargs["reply_markup"]
         first_button = sent_keyboard.inline_keyboard[0][0]
         assert first_button.callback_data == "FORM|best"
-        assert "Use best fit: QIAT" in first_button.text
+        assert first_button.text == "QIAT"
         assert "Teaching Session" not in first_button.text
 
     @pytest.mark.asyncio
@@ -362,7 +488,7 @@ class TestExplicitFormRouting:
         assert state == bot.AWAIT_FORM_CHOICE
         assert context.user_data["form_recommendations"][0].form_type == "QIAT"
         sent_keyboard = message.reply_text.await_args.kwargs["reply_markup"]
-        assert "Use best fit: QIAT" in sent_keyboard.inline_keyboard[0][0].text
+        assert sent_keyboard.inline_keyboard[0][0].text == "QIAT"
 
     @pytest.mark.asyncio
     async def test_question_about_case_recommendation_uses_same_plain_photo_copy(self, monkeypatch):

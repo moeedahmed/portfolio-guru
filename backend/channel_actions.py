@@ -56,7 +56,7 @@ class ChannelReply:
 
 
 def to_telegram_keyboard(reply: ChannelReply):
-    """Render actions as a one-button-per-row Telegram inline keyboard.
+    """Render actions as compact two-button Telegram rows.
 
     Returns ``None`` when there are no actions so callers can pass it
     straight to ``reply_text(..., reply_markup=...)``. Telegram is
@@ -67,10 +67,11 @@ def to_telegram_keyboard(reply: ChannelReply):
         return None
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-    rows = [
-        [InlineKeyboardButton(action.label, callback_data=action.action_id)]
+    buttons = [
+        InlineKeyboardButton(action.label, callback_data=action.action_id)
         for action in reply.actions
     ]
+    rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
     return InlineKeyboardMarkup(rows)
 
 
@@ -81,10 +82,11 @@ def to_telegram_button_rows(reply: ChannelReply) -> list[list[dict[str, str]]]:
     Hermes/profile boundaries that need a plain JSON payload instead of a
     ``python-telegram-bot`` object.
     """
-    return [
-        [{"text": action.label, "callback_data": action.action_id}]
+    buttons = [
+        {"text": action.label, "callback_data": action.action_id}
         for action in reply.actions
     ]
+    return [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
 
 
 def render_numbered(reply: ChannelReply) -> str:

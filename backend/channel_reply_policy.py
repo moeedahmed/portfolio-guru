@@ -24,11 +24,11 @@ from portfolio_first_contact import classify_first_contact, first_contact_reply
 
 CONNECT_KAIZEN_ACTION = ChannelAction(
     action_id="ACTION|setup",
-    label="🔗 Connect Kaizen",
+    label="Connect Kaizen",
 )
 SETTINGS_ACTION = ChannelAction(
     action_id="ACTION|settings",
-    label="⚙️ Settings",
+    label="Settings",
 )
 
 STATIC_COPY_INTENTS = frozenset(
