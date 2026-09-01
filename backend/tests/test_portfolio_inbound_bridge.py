@@ -723,7 +723,7 @@ def test_rich_case_without_outbound_config_still_returns_handle(client: TestClie
 # WhatsApp gathering-state parity tests
 # ---------------------------------------------------------------------------
 # WhatsApp cannot use Telegram inline-state, so the bridge keeps a small
-# per-conversation case bundle and resolves the same "Draft now" action from a
+# per-conversation case bundle and resolves the same "Choose form" action from a
 # numbered reply. This stays offline and stops at form recommendation/gathering:
 # no Kaizen save and no refined draft generation.
 

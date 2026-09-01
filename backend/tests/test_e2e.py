@@ -82,12 +82,12 @@ async def test_e2e_case_text_enters_draft_flow(telethon_client):
             # transcript uses.
             180,
             expect_buttons=True,
-            expect_button_any=("Draft now",),
+            expect_button_any=("Choose form",),
             min_id=getattr(sent, "id", None),
         )
 
     buttons = [button.text for row in (reply.buttons or []) for button in row]
-    assert any("Draft now" in text for text in buttons)
+    assert any("Choose form" in text for text in buttons)
 
 
 @pytest.mark.asyncio
