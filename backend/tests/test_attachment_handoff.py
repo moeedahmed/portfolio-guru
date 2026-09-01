@@ -68,8 +68,8 @@ async def test_document_case_stores_attachment_path():
     assert os.path.exists(context.user_data["_pending_doc"]["path"])
     extract_mock.assert_not_called()
     buttons = sim.get_last_buttons()
-    assert ("Read", "DOCUSE|info") in buttons
-    assert ("Attach", "DOCUSE|attach") in buttons
+    assert ("Use as case", "DOCUSE|info") in buttons
+    assert ("Attach only", "DOCUSE|attach") in buttons
     assert ("Read + attach", "DOCUSE|both") in buttons
     assert "clinical-notes.pdf" not in _all_visible_text(sim)
     
@@ -115,7 +115,7 @@ async def test_photo_case_stores_pending_image_and_asks_intent():
     extract_mock.assert_called_once()
     buttons = sim.get_last_buttons()
     assert ("Read text", "DOCUSE|info") in buttons
-    assert ("Attach", "DOCUSE|attach") in buttons
+    assert ("Attach only", "DOCUSE|attach") in buttons
     assert ("Read + attach", "DOCUSE|both") in buttons
     assert ("Remove", "DOCUSE|ignore") in buttons
 
@@ -331,10 +331,10 @@ async def test_document_attach_only_does_not_extract_and_waits_for_case_details(
     assert context.user_data["attachment_name"] == "evidence.pdf"
     assert "case_text" not in context.user_data
     assert sim.get_last_text().startswith("📎 Document attached.")
-    assert "Add anonymised case details before I draft this." in sim.get_last_text()
+    assert "Add anonymised case details before choosing a form." in sim.get_last_text()
     assert sim.get_last_buttons() == [
-        ("Draft", "GATHER|done"),
-        ("Cancel", "ACTION|cancel"),
+        ("Choose form", "GATHER|done"),
+        ("Discard case", "ACTION|cancel"),
     ]
     assert context.user_data["gathering_msg_id"] == update.callback_query.message.message_id
     assert "evidence.pdf" not in _all_visible_text(sim)
@@ -369,8 +369,8 @@ async def test_image_attach_only_does_not_extract_and_waits_for_case_details():
     assert sim.get_last_text().startswith("📎 Image attached.")
     assert "send your own interpretation/context" in sim.get_last_text()
     assert sim.get_last_buttons() == [
-        ("Draft", "GATHER|done"),
-        ("Cancel", "ACTION|cancel"),
+        ("Choose form", "GATHER|done"),
+        ("Discard case", "ACTION|cancel"),
     ]
     assert context.user_data["gathering_msg_id"] == update.callback_query.message.message_id
     assert "portfolio-image.jpg" not in _all_visible_text(sim)
@@ -405,7 +405,7 @@ async def test_image_attach_only_prompt_rejoins_gathering_loop_on_next_text(monk
         kind=GatheringTurnKind.CONTINUE_GATHERING,
         intent=ConversationalIntent.NEW_CASE,
         add_to_case=True,
-        reply=ChannelReply(body="📥 Captured. Add anything else before I draft this?"),
+        reply=ChannelReply(body="📥 Captured. Add anything else, or choose a form."),
     )
     with patch("bot.decide_gathering_turn", new=AsyncMock(return_value=decision)):
         result = await handle_gathering_input(text_update, context)
@@ -416,10 +416,10 @@ async def test_image_attach_only_prompt_rejoins_gathering_loop_on_next_text(monk
     assert context.bot.edit_message_text.await_args.kwargs["reply_markup"] is None
     assert context.user_data["gathering_msg_id"] != attached_prompt_id
     assert context.user_data["attachment_path"] == temp_path
-    assert sim.get_last_text() == "📥 Captured. Add anything else before I draft this?"
+    assert sim.get_last_text() == "📥 Captured. Add anything else, or choose a form."
     assert sim.get_last_buttons() == [
-        ("Draft", "GATHER|done"),
-        ("Cancel", "ACTION|cancel"),
+        ("Choose form", "GATHER|done"),
+        ("Discard case", "ACTION|cancel"),
     ]
 
     if os.path.exists(temp_path):
@@ -488,8 +488,8 @@ async def test_video_attach_only_waits_for_user_context_without_extracting():
     assert sim.get_last_text().startswith("📎 Video attached.")
     assert "won't interpret clinical videos" in sim.get_last_text()
     assert sim.get_last_buttons() == [
-        ("Draft", "GATHER|done"),
-        ("Cancel", "ACTION|cancel"),
+        ("Choose form", "GATHER|done"),
+        ("Discard case", "ACTION|cancel"),
     ]
     assert context.user_data["gathering_msg_id"] == update.callback_query.message.message_id
     assert "portfolio-video.mp4" not in _all_visible_text(sim)

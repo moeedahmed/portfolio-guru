@@ -227,6 +227,7 @@ from channel_contract import (
     accept_inbound,
 )
 from conversation_supervisor import (
+    CHOOSE_FORM_ACTION,
     DRAFT_NOW_ACTION,
     GatheringTurnKind,
     decide_gathering_turn,
@@ -583,7 +584,7 @@ def _make_gathering_captured_reply() -> ChannelReply:
     """Channel-neutral capture acknowledgement with a WhatsApp-resolvable action."""
     return ChannelReply(
         body=render_message("gathering_captured"),
-        actions=(DRAFT_NOW_ACTION,),
+        actions=(CHOOSE_FORM_ACTION,),
     )
 
 
@@ -608,14 +609,14 @@ def _looks_like_unmatched_plain_choice(text: str | None) -> bool:
 async def _make_workflow_finish_reply(
     state: _InboundWorkflowState | None,
 ) -> ChannelReply:
-    """Resolve a WhatsApp Draft now/done turn without saving or generating a draft."""
+    """Resolve a WhatsApp choose-form/done turn without saving or generating a draft."""
     case_text = state.combined_text() if state is not None else ""
     if not case_text.strip():
         return ChannelReply(
             body=(
                 "📋 Case details needed\n\n"
                 "I do not have a case captured for that option yet. Send "
-                "anonymised case details, then choose Draft now."
+                "anonymised case details, then choose a form."
             )
         )
     return await _make_case_insight_reply(case_text)

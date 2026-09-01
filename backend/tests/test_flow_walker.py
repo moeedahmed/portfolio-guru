@@ -2727,7 +2727,7 @@ class TestFlowWalker:
         assert context.user_data['amend_pending_feedback'] == new_case_text
         assert 'update this draft or start a new case' in sim.get_last_text().lower()
         buttons = sim.get_last_buttons()
-        assert ('Update', 'AMEND|update_current') in buttons
+        assert ('Update draft', 'AMEND|update_current') in buttons
         assert ('New case', 'AMEND|start_new') in buttons
 
         choice_update = sim._make_callback_update('AMEND|start_new')
@@ -4152,7 +4152,7 @@ class TestTrainingStageGroups:
 
         buttons = sim.get_last_buttons()
         assert ('ACCS', 'SETLEVEL|ACCS') in buttons
-        assert ('Intermediate', 'SETLEVEL|INTERMEDIATE') in buttons
+        assert ('Intermediate profile', 'SETLEVEL|INTERMEDIATE') in buttons
         assert ('HST', 'SETLEVEL|HIGHER') in buttons
 
     def test_settings_layout_prioritises_voice_profile(self):
@@ -4165,7 +4165,7 @@ class TestTrainingStageGroups:
 
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
         assert ('Writing style', 'ACTION|voice') in buttons
-        assert ('Defaults', 'ACTION|portfolio_defaults') in buttons
+        assert ('Portfolio defaults', 'ACTION|portfolio_defaults') in buttons
         assert 'Helps drafts match your portfolio writing' in text
 
 

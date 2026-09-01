@@ -156,7 +156,7 @@ async def test_photo_that_triggered_consent_resumes_to_image_intent(tmp_consent_
     assert context.user_data["_pending_doc_context"] == update.message.caption
     buttons = sim.get_last_buttons()
     assert ("Read text", "DOCUSE|info") in buttons
-    assert ("Attach", "DOCUSE|attach") in buttons
+    assert ("Attach only", "DOCUSE|attach") in buttons
     assert ("Read + attach", "DOCUSE|both") in buttons
     assert "_consent_pending_input" not in context.user_data
 

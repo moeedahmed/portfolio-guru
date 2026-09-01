@@ -125,7 +125,7 @@ async def test_gathering_mode_treats_detailed_airway_case_as_case_detail(monkeyp
     answer.assert_not_awaited()
     assert "airway management" in context.user_data["case_text"]
     assert "Leadership Assessment Tool" not in (sim.get_last_text() or "")
-    assert ("Draft", "GATHER|done") in sim.get_last_buttons()
+    assert ("Choose form", "GATHER|done") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio
@@ -187,10 +187,10 @@ async def test_gathering_reply_offers_done_button(monkeypatch):
          patch("bot._process_case_text", new=AsyncMock(return_value=AWAIT_FORM_CHOICE)):
         await handle_case_input(update, context)
 
-    assert sim.messages_sent[-1][1] == "📥 Captured. Add anything else before I draft this?"
+    assert sim.messages_sent[-1][1] == "📥 Captured. Add anything else, or choose a form."
     assert sim.get_last_buttons() == [
-        ("Draft", "GATHER|done"),
-        ("Cancel", "ACTION|cancel"),
+        ("Choose form", "GATHER|done"),
+        ("Discard case", "ACTION|cancel"),
     ]
 
 
@@ -210,7 +210,7 @@ async def test_weak_first_text_gets_context_gate_not_draft_button(monkeypatch):
     process_case.assert_not_awaited()
     assert "More clinical context needed" in sim.get_last_text()
     assert "presentation" in sim.get_last_text()
-    assert ("Draft", "GATHER|done") not in sim.get_last_buttons()
+    assert ("Choose form", "GATHER|done") not in sim.get_last_buttons()
     assert context.user_data["gathering_case"]["parts"][0]["text"].startswith("I saw a dog")
 
 
@@ -244,8 +244,8 @@ async def test_gathering_switches_to_draft_button_once_context_is_grounded(monke
     assert "Captured" in sim.get_last_text()
     assert sim.messages_sent[-1][0] == "reply"
     assert sim.get_last_buttons() == [
-        ("Draft", "GATHER|done"),
-        ("Cancel", "ACTION|cancel"),
+        ("Choose form", "GATHER|done"),
+        ("Discard case", "ACTION|cancel"),
     ]
 
 
@@ -271,10 +271,10 @@ async def test_gathering_ready_prompt_is_resent_below_new_case_detail(monkeypatc
     assert context.user_data["last_bot_msg_id"] != first_ready_id
     assert any(kind == "bot_delete" for kind, _, _ in sim.messages_sent)
     assert sim.messages_sent[-1][0] == "reply"
-    assert sim.get_last_text() == "📥 Captured. Add anything else before I draft this?"
+    assert sim.get_last_text() == "📥 Captured. Add anything else, or choose a form."
     assert sim.get_last_buttons() == [
-        ("Draft", "GATHER|done"),
-        ("Cancel", "ACTION|cancel"),
+        ("Choose form", "GATHER|done"),
+        ("Discard case", "ACTION|cancel"),
     ]
 
 
@@ -672,8 +672,8 @@ async def test_second_text_addition_keeps_both_buttons(monkeypatch):
     assert result == AWAIT_GATHERING
     assert "Captured" in sim.get_last_text()
     assert sim.get_last_buttons() == [
-        ("Draft", "GATHER|done"),
-        ("Cancel", "ACTION|cancel"),
+        ("Choose form", "GATHER|done"),
+        ("Discard case", "ACTION|cancel"),
     ]
 
 
@@ -699,8 +699,8 @@ async def test_second_text_addition_disarms_previous_gathering_prompt(monkeypatc
     )
     assert context.user_data["gathering_msg_id"] != 123
     assert sim.get_last_buttons() == [
-        ("Draft", "GATHER|done"),
-        ("Cancel", "ACTION|cancel"),
+        ("Choose form", "GATHER|done"),
+        ("Discard case", "ACTION|cancel"),
     ]
 
 
@@ -734,8 +734,8 @@ async def test_voice_addition_disarms_previous_gathering_prompt(monkeypatch):
         "chat_id": sim.user_id,
     }]
     assert sim.get_last_buttons() == [
-        ("Draft", "GATHER|done"),
-        ("Cancel", "ACTION|cancel"),
+        ("Choose form", "GATHER|done"),
+        ("Discard case", "ACTION|cancel"),
     ]
 
 
@@ -779,8 +779,8 @@ async def test_gathering_prompt_idempotent_across_repeated_additions(monkeypatch
         "Reflection: I should escalate high-risk ACS cases earlier in future.",
     ]
     expected_buttons = [
-        ("Draft", "GATHER|done"),
-        ("Cancel", "ACTION|cancel"),
+        ("Choose form", "GATHER|done"),
+        ("Discard case", "ACTION|cancel"),
     ]
     for text in additions:
         sim.clear_messages()

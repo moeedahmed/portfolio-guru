@@ -1976,8 +1976,8 @@ def _combined_gathering_case(context) -> tuple[str, str]:
 
 def _gathering_done_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("Draft", callback_data="GATHER|done"),
-        InlineKeyboardButton("Cancel", callback_data="ACTION|cancel"),
+        InlineKeyboardButton("Choose form", callback_data="GATHER|done"),
+        InlineKeyboardButton("Discard case", callback_data="ACTION|cancel"),
     ]])
 
 
@@ -3087,7 +3087,7 @@ def _health_result_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("Unfinished", callback_data="ACTION|health_detail|stuck"),
-            InlineKeyboardButton("Evidence", callback_data="ACTION|health_detail|basis"),
+            InlineKeyboardButton("Evidence basis", callback_data="ACTION|health_detail|basis"),
         ],
         [
             InlineKeyboardButton("Domains", callback_data="ACTION|health_detail|domains"),
@@ -3352,7 +3352,7 @@ def _refresh_portfolio_result_keyboard(status: str) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     if status in {"ok", "partial"}:
         rows.append([
-            InlineKeyboardButton("Health", callback_data="ACTION|health"),
+            InlineKeyboardButton("Portfolio health", callback_data="ACTION|health"),
             InlineKeyboardButton("Back", callback_data="ACTION|settings"),
         ])
     elif status == "auth_required":
@@ -3481,7 +3481,7 @@ def _settings_view_components(
         [InlineKeyboardButton(setup_button_label, callback_data="ACTION|setup")],
         [
             InlineKeyboardButton(voice_cta, callback_data="ACTION|voice"),
-            InlineKeyboardButton("Defaults", callback_data="ACTION|portfolio_defaults"),
+            InlineKeyboardButton("Portfolio defaults", callback_data="ACTION|portfolio_defaults"),
         ],
         [InlineKeyboardButton("Reset data", callback_data="ACTION|delete")],
     ]
@@ -3567,7 +3567,7 @@ FORM_BUTTON_LABELS = {
     "PDP": "PDP",
     "RPL": "Reflective Practice Log",
     # Newly visible forms
-    "REFLECT_LOG": "Reflection",
+    "REFLECT_LOG": "Reflective log",
     "TEACH_OBS": "Teaching Observation",
     "ESLE_ASSESS": "ESLE",
     "TEACH_CONFID": "Confidentiality",
@@ -4048,7 +4048,7 @@ def _build_approval_keyboard(
         rows.append([InlineKeyboardButton("Save to Kaizen", callback_data="APPROVE|draft")])
     else:
         rows.append([InlineKeyboardButton("Save to Kaizen", callback_data="APPROVE|draft")])
-        rows.append([InlineKeyboardButton("Improve", callback_data="IMPROVE|reflection")])
+        rows.append([InlineKeyboardButton("Improve reflection", callback_data="IMPROVE|reflection")])
     if can_back_to_missing:
         rows.append(_nav_row("Back", "ACTION|back_to_missing", "Cancel", "CANCEL|draft"))
     elif rows[-1][0].callback_data == "IMPROVE|reflection":
@@ -4064,7 +4064,7 @@ def _build_amend_keyboard(improved_once: bool = False) -> InlineKeyboardMarkup:
     rows = [[InlineKeyboardButton("Save to Kaizen", callback_data="APPROVE|draft")]]
     if not improved_once:
         rows.append([
-            InlineKeyboardButton("Improve", callback_data="IMPROVE|reflection"),
+            InlineKeyboardButton("Improve reflection", callback_data="IMPROVE|reflection"),
             InlineKeyboardButton("Cancel", callback_data="AMEND|cancel"),
         ])
     else:
@@ -4075,8 +4075,8 @@ def _build_amend_keyboard(improved_once: bool = False) -> InlineKeyboardMarkup:
 def _build_doc_intent_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Read", callback_data="DOCUSE|info"),
-            InlineKeyboardButton("Attach", callback_data="DOCUSE|attach"),
+            InlineKeyboardButton("Use as case", callback_data="DOCUSE|info"),
+            InlineKeyboardButton("Attach only", callback_data="DOCUSE|attach"),
         ],
         [
             InlineKeyboardButton("Read + attach", callback_data="DOCUSE|both"),
@@ -4093,7 +4093,7 @@ def _build_image_intent_keyboard() -> InlineKeyboardMarkup:
             # refuses to read the clinical picture itself without the doctor's
             # own account. The label now says what actually happens.
             InlineKeyboardButton("Read text", callback_data="DOCUSE|info"),
-            InlineKeyboardButton("Attach", callback_data="DOCUSE|attach"),
+            InlineKeyboardButton("Attach only", callback_data="DOCUSE|attach"),
         ],
         [
             InlineKeyboardButton("Read + attach", callback_data="DOCUSE|both"),
@@ -4123,7 +4123,7 @@ def _active_draft_keyboard(context) -> InlineKeyboardMarkup:
 def _build_amend_new_case_choice_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Update", callback_data="AMEND|update_current"),
+            InlineKeyboardButton("Update draft", callback_data="AMEND|update_current"),
             InlineKeyboardButton("New case", callback_data="AMEND|start_new"),
         ],
         [InlineKeyboardButton("Cancel", callback_data="AMEND|cancel_choice")],
@@ -4313,7 +4313,7 @@ def _build_edit_field_keyboard(draft=None):
         ],
         [
             InlineKeyboardButton("Presentation", callback_data="FIELD|patient_presentation"),
-            InlineKeyboardButton("Discussion", callback_data="FIELD|clinical_reasoning"),
+            InlineKeyboardButton("Case discussion", callback_data="FIELD|clinical_reasoning"),
         ],
         [
             InlineKeyboardButton("Reflection", callback_data="FIELD|reflection"),
@@ -5930,7 +5930,7 @@ async def _complete_setup_login(
             reply_markup=InlineKeyboardMarkup([
                 [
                     InlineKeyboardButton("ACCS", callback_data="SETLEVEL|ACCS"),
-                    InlineKeyboardButton("Intermediate", callback_data="SETLEVEL|INTERMEDIATE"),
+                    InlineKeyboardButton("Intermediate profile", callback_data="SETLEVEL|INTERMEDIATE"),
                 ],
                 [
                     InlineKeyboardButton("HST", callback_data="SETLEVEL|HIGHER"),
@@ -7115,7 +7115,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         keyboard = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("ACCS", callback_data="SETLEVEL|ACCS"),
-                InlineKeyboardButton("Intermediate", callback_data="SETLEVEL|INTERMEDIATE"),
+                InlineKeyboardButton("Intermediate profile", callback_data="SETLEVEL|INTERMEDIATE"),
             ],
             [
                 InlineKeyboardButton("HST", callback_data="SETLEVEL|HIGHER"),
@@ -7245,7 +7245,7 @@ async def handle_filing_feedback(update: Update, context: ContextTypes.DEFAULT_T
     field_buttons = [
         [
             InlineKeyboardButton("Curriculum links", callback_data=f"PUSHBACK|{form_type}|curriculum_links"),
-            InlineKeyboardButton("Capabilities", callback_data=f"PUSHBACK|{form_type}|key_capabilities"),
+            InlineKeyboardButton("Key Capabilities", callback_data=f"PUSHBACK|{form_type}|key_capabilities"),
         ],
         [
             InlineKeyboardButton("Reflection", callback_data=f"PUSHBACK|{form_type}|reflection"),

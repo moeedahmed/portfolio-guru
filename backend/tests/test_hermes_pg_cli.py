@@ -397,7 +397,7 @@ def test_whatsapp_reply_continues_after_form_recommendation_to_preview():
     assert fourth[1]["status"] == "ok"
 
     captured_reply = second[1]["data"]["rendered_reply"]
-    assert "1. Draft" in captured_reply
+    assert "1. Choose form" in captured_reply
 
     recommendation = third[1]["data"]["rendered_reply"]
     assert "recommended WPBA form is" in recommendation
@@ -487,7 +487,7 @@ def test_whatsapp_reply_gathering_persists_across_cli_processes(tmp_path):
     code, followup = _run_cli("whatsapp-reply", "--payload", json.dumps(payload), env=env)
     assert code == 0
     assert "Captured" in followup["data"]["rendered_reply"]
-    assert "1. Draft" in followup["data"]["rendered_reply"]
+    assert "1. Choose form" in followup["data"]["rendered_reply"]
 
 
 def test_whatsapp_reply_draft_now_uses_accumulated_state_without_kaizen(tmp_path):

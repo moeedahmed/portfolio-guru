@@ -47,7 +47,7 @@ class TestKeyboardBuilding:
 
         assert [(button.text, button.callback_data) for button in rows[0]] == [
             ("CBD", "FORM|best"),
-            ("Reflection", "FORM|REFLECT_LOG"),
+            ("Reflective log", "FORM|REFLECT_LOG"),
         ]
         assert [(button.text, button.callback_data) for button in rows[-1]] == [
             ("Forms", "FORM|show_all"),
@@ -256,7 +256,7 @@ class TestMessagePolicy:
             ("Save to Kaizen", "APPROVE|draft"),
         ]
         assert [(button.text, button.callback_data) for button in rows[1]] == [
-            ("Improve", "IMPROVE|reflection"),
+            ("Improve reflection", "IMPROVE|reflection"),
             ("Cancel", "CANCEL|draft"),
         ]
 

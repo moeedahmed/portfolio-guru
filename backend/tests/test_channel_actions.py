@@ -20,10 +20,10 @@ from channel_actions import (
 def _reply() -> ChannelReply:
     return ChannelReply(
         body="Here is what I can do.",
-        continuation="💬 Back to your case — add detail or choose Draft.",
+        continuation="💬 Back to your case — add detail or choose a form.",
         actions=(
-            ChannelAction(action_id="GATHER|done", label="Draft"),
-            ChannelAction(action_id="ACTION|cancel", label="Cancel"),
+            ChannelAction(action_id="GATHER|done", label="Choose form"),
+            ChannelAction(action_id="ACTION|cancel", label="Discard case"),
         ),
     )
 
@@ -33,7 +33,7 @@ def test_full_text_joins_body_and_continuation_without_action_text():
     text = reply.full_text()
     assert text.startswith("Here is what I can do.")
     assert "Back to your case" in text
-    assert "Draft" in text  # only via continuation copy, not an option list
+    assert "choose a form" in text  # only via continuation copy, not an option list
     assert "1." not in text
 
 
@@ -43,8 +43,8 @@ def test_telegram_keyboard_uses_action_id_as_callback_data():
     buttons = [b for row in markup.inline_keyboard for b in row]
 
     assert [(b.text, b.callback_data) for b in buttons] == [
-        ("Draft", "GATHER|done"),
-        ("Cancel", "ACTION|cancel"),
+        ("Choose form", "GATHER|done"),
+        ("Discard case", "ACTION|cancel"),
     ]
     assert len(markup.inline_keyboard) == 1
 
@@ -52,8 +52,8 @@ def test_telegram_keyboard_uses_action_id_as_callback_data():
 def test_plain_telegram_button_rows_use_action_id_as_callback_data():
     assert to_telegram_button_rows(_reply()) == [
         [
-            {"text": "Draft", "callback_data": "GATHER|done"},
-            {"text": "Cancel", "callback_data": "ACTION|cancel"},
+            {"text": "Choose form", "callback_data": "GATHER|done"},
+            {"text": "Discard case", "callback_data": "ACTION|cancel"},
         ],
     ]
 
@@ -69,8 +69,8 @@ def test_numbered_render_preserves_every_label_and_context():
     assert "Here is what I can do." in rendered
     assert "Back to your case" in rendered
     # Same labels as the Telegram buttons, just numbered.
-    assert "1. Draft" in rendered
-    assert "2. Cancel" in rendered
+    assert "1. Choose form" in rendered
+    assert "2. Discard case" in rendered
     assert "Reply with the number" in rendered
 
 
@@ -95,7 +95,7 @@ def test_channel_renderers_do_not_require_identical_body_copy_for_stable_actions
     assert original.full_text() != variant.full_text()
     assert to_telegram_button_rows(original) == to_telegram_button_rows(variant)
     assert resolve_numbered_choice(variant, "1") == "GATHER|done"
-    assert resolve_numbered_choice(variant, "cancel") == "ACTION|cancel"
+    assert resolve_numbered_choice(variant, "discard case") == "ACTION|cancel"
 
 
 def test_resolve_numbered_choice_by_number():
@@ -106,8 +106,8 @@ def test_resolve_numbered_choice_by_number():
 
 def test_resolve_numbered_choice_by_label_ignoring_emoji_and_case():
     reply = _reply()
-    assert resolve_numbered_choice(reply, "Draft") == "GATHER|done"
-    assert resolve_numbered_choice(reply, "  cancel  ") == "ACTION|cancel"
+    assert resolve_numbered_choice(reply, "Choose form") == "GATHER|done"
+    assert resolve_numbered_choice(reply, "  discard case  ") == "ACTION|cancel"
 
 
 def test_resolve_numbered_choice_returns_none_for_no_match():

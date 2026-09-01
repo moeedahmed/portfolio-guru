@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from conversation_supervisor import (
+    CHOOSE_FORM_ACTION,
     DRAFT_NOW_ACTION,
     GatheringTurnKind,
     classify_gathering_turn,
@@ -88,14 +89,15 @@ async def test_finish_decision_defers_to_caller():
 
 
 @pytest.mark.asyncio
-async def test_continue_decision_adds_to_case_and_offers_draft_now():
+async def test_continue_decision_adds_to_case_and_offers_form_choice():
     decision = await decide_gathering_turn(
         "Then the patient was admitted to ICU.", answer_question=_unused_answer
     )
     assert decision.kind is GatheringTurnKind.CONTINUE_GATHERING
     assert decision.add_to_case is True
     assert decision.reply is not None
-    assert decision.reply.actions == (DRAFT_NOW_ACTION,)
+    assert decision.reply.actions == (CHOOSE_FORM_ACTION,)
+    assert CHOOSE_FORM_ACTION.label == "Choose form"
     assert DRAFT_NOW_ACTION.label == "Draft"
 
 

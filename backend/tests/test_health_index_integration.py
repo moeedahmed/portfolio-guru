@@ -749,7 +749,7 @@ async def test_confirm_refresh_portfolio_runs_sync_and_shows_success(monkeypatch
     assert "Kaizen evidence synced" in text
     assert "Read from Kaizen: 12 items" in text
     assert "Portfolio Guru now has: 99 indexed items" in text
-    assert ("Health", "ACTION|health") in sim.get_last_buttons()
+    assert ("Portfolio health", "ACTION|health") in sim.get_last_buttons()
     assert ("Back", "ACTION|settings") in sim.get_last_buttons()
 
 
@@ -1009,7 +1009,7 @@ async def test_inline_health_button_auto_scans_when_stale(monkeypatch):
     send_result = run_health.await_args.kwargs["send_result"]
     await send_result("Health result", None)
     assert ("New case", "ACTION|file") in sim.get_last_buttons()
-    assert ("Evidence", "ACTION|health_detail|basis") in sim.get_last_buttons()
+    assert ("Evidence basis", "ACTION|health_detail|basis") in sim.get_last_buttons()
     assert ("🔙 Back", "ACTION|back_to_menu") not in sim.get_last_buttons()
     assert ("Back", "ACTION|settings") not in sim.get_last_buttons()
 
@@ -1091,7 +1091,7 @@ def test_health_result_keyboard_offers_file_and_detail_sections():
         ("Domains", "ACTION|health_detail|domains"),
         ("New case", "ACTION|file"),
     ]
-    assert ("Evidence", "ACTION|health_detail|basis") in buttons
+    assert ("Evidence basis", "ACTION|health_detail|basis") in buttons
     assert ("Domains", "ACTION|health_detail|domains") in buttons
     # Unfinished evidence replaced the usage snapshot: it is the pane a doctor
     # can act on, and the snapshot measured Portfolio Guru usage rather than

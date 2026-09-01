@@ -223,14 +223,14 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
     "gathering_captured": MessageTemplate(
         key="gathering_captured",
         message_class=MessageClass.FIXED,
-        text="📥 Captured. Add anything else before I draft this?",
+        text="📥 Captured. Add anything else, or choose a form.",
     ),
     "attachment_captured": MessageTemplate(
         key="attachment_captured",
         message_class=MessageClass.TEMPLATED,
         text=(
             "📎 {attachment_label} attached.\n\n"
-            "Add anonymised case details before I draft this.{context_note}"
+            "Add anonymised case details before choosing a form.{context_note}"
         ),
     ),
     "gathering_continuation": MessageTemplate(

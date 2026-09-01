@@ -36,8 +36,10 @@ from conversational_router import ConversationalIntent, route_message
 from message_policy import render_message, safety_redirect_text, style_grounded_answer
 from vnext_dialogue_policy import is_completion_request
 
-# Stable id mirrors the existing Telegram callback (``GATHER|done``) so the
-# inline button and a WhatsApp "reply 1 / draft" resolve to one action.
+
+# The gathering action advances to form choice. The same stable action id is
+# also used after recommendation, where the visible outcome is drafting.
+CHOOSE_FORM_ACTION = ChannelAction(action_id="GATHER|done", label="Choose form")
 DRAFT_NOW_ACTION = ChannelAction(action_id="GATHER|done", label="Draft")
 
 AnswerFn = Callable[[str], Awaitable[str]]
@@ -110,7 +112,7 @@ async def decide_gathering_turn(
     text: str | None,
     *,
     answer_question: AnswerFn,
-    actions: tuple[ChannelAction, ...] = (DRAFT_NOW_ACTION,),
+    actions: tuple[ChannelAction, ...] = (CHOOSE_FORM_ACTION,),
 ) -> GatheringDecision:
     """Resolve one gathering turn into a channel-agnostic decision.
 
