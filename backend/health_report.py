@@ -7,7 +7,8 @@ without reimplementing the logic.
 Four views, each with one job:
 
 - **Priorities** — what is worth a doctor's attention now, in a few lines.
-- **Actions** — every unfinished item, paginated, each linked to Kaizen.
+- **Actions** — agency-first landing plus independent draft and sign-off queues,
+  five per page, each item linked to Kaizen.
 - **Coverage** — what the portfolio holds, and what that does and does not say.
 - **Scan info** — where the reading came from and what it could not see.
 
@@ -20,9 +21,9 @@ Three rules shape all of them:
 - **Nothing instructs an action the data cannot justify.** Old evidence is
   described with its exact date and offered for review. "Overdue", "stale" and
   "chase this" all assert a deadline that no scanned field contains.
-- **Every comparison names what it is a comparison with.** Domain balance is
-  relative to this doctor's own portfolio; curriculum spread covers tagged
-  items only.
+- **Every denominator is explicit.** Coverage states what sits outside the six
+  categories; curriculum spread covers tagged items only and says what it
+  excludes.
 
 Clinical narrative never appears. Items are named by form type and date only —
 descriptions hold patient detail.
@@ -36,7 +37,6 @@ from typing import Optional
 from form_labels import form_label
 from health_assessment import (
     DOMAIN_LABELS,
-    IMBALANCE_MIN_ITEMS,
     HealthAssessment,
     StuckEvidence,
 )
@@ -77,15 +77,14 @@ def _describe(item: StuckEvidence, *, link: bool = True) -> str:
 def ordered_actions(assessment: HealthAssessment) -> list[tuple[str, StuckEvidence]]:
     """Every unfinished item in one stable total order.
 
-    Awaiting-others first because those are the ones a doctor cannot finish
-    alone, then their own drafts; within each group the assessment's own total
-    order (oldest first, then form type, then id) already breaks every tie. The
-    order must not depend on dict iteration or on anything that changes between
-    two renders of the same stored report, or page 2 will show an item page 1
-    already showed.
+    Doctor-controlled drafts come first, then items awaiting somebody else;
+    within each group the assessment's own total order (oldest first, then form
+    type, then id) already breaks every tie. The order must not depend on dict
+    iteration or on anything that changes between two renders of the same
+    stored report, or page 2 will show an item page 1 already showed.
     """
-    return [("awaiting", item) for item in assessment.stuck_awaiting] + [
-        ("draft", item) for item in assessment.stuck_drafts
+    return [("draft", item) for item in assessment.stuck_drafts] + [
+        ("awaiting", item) for item in assessment.stuck_awaiting
     ]
 
 
@@ -99,8 +98,13 @@ def actions_page_count(
 
 
 GROUP_HEADINGS = {
-    "awaiting": ("Awaiting someone else", "Submitted and not yet completed by someone else."),
-    "draft": ("Your own drafts", "Started by you and not completed."),
+    "draft": ("Your drafts", "Started by you and not completed."),
+    "awaiting": ("Awaiting sign-off", "Submitted and waiting for someone else."),
+}
+
+QUEUE_LABELS = {
+    "draft": "drafts",
+    "awaiting": "awaiting sign-off",
 }
 
 # Entries older than this are offered for review rather than listed as work
@@ -109,13 +113,80 @@ GROUP_HEADINGS = {
 REVIEW_AFTER_DAYS = 365
 
 
-def format_actions(
+def _queue_items(
+    assessment: HealthAssessment, queue: str
+) -> list[StuckEvidence]:
+    if queue == "draft":
+        return assessment.stuck_drafts
+    if queue == "awaiting":
+        return assessment.stuck_awaiting
+    raise ValueError(f"Unknown Health action queue: {queue}")
+
+
+def action_queue_page_count(
     assessment: HealthAssessment,
+    queue: str,
+    *,
+    page_size: int = ACTIONS_PAGE_SIZE,
+) -> int:
+    total = len(_queue_items(assessment, queue))
+    return max(1, (total + page_size - 1) // page_size)
+
+
+def _old_item_note(items: list[StuckEvidence]) -> Optional[str]:
+    if not any(item.days_waiting > REVIEW_AFTER_DAYS for item in items):
+        return None
+    return (
+        "_Entries dated more than a year ago are worth reviewing before "
+        "acting: some will no longer be worth completing._"
+    )
+
+
+def format_action_queue(
+    assessment: HealthAssessment,
+    queue: str,
     *,
     page: int = 0,
     page_size: int = ACTIONS_PAGE_SIZE,
 ) -> str:
-    """One page of unfinished evidence, deterministically ordered."""
+    """One independently paginated queue of unfinished evidence."""
+    items = _queue_items(assessment, queue)
+    heading, note = GROUP_HEADINGS[queue]
+    label = QUEUE_LABELS[queue]
+    if not items:
+        return (
+            f"📌 *{heading}*\n\n"
+            f"No {label} were visible in this scan."
+        )
+
+    pages = action_queue_page_count(assessment, queue, page_size=page_size)
+    page = max(0, min(page, pages - 1))
+    start = page * page_size
+    window = items[start:start + page_size]
+
+    lines = [
+        f"📌 *{heading} — {len(items)}*",
+        f"Showing {start + 1}–{start + len(window)} of {len(items)} {label}",
+        f"_{note}_",
+        "",
+    ]
+    lines.extend(_describe(item) for item in window)
+    lines.append("")
+
+    old_note = _old_item_note(window)
+    if old_note:
+        lines.append(old_note)
+    lines.append("_Nothing is chased, submitted, edited or deleted for you._")
+    return "\n".join(lines).strip()
+
+
+def _format_legacy_actions_page(
+    assessment: HealthAssessment,
+    *,
+    page: int,
+    page_size: int,
+) -> str:
+    """Combined pages kept only for callbacks on older Health messages."""
     items = ordered_actions(assessment)
     if not items:
         return (
@@ -123,12 +194,10 @@ def format_actions(
             "Nothing scanned is unfinished — every item has completed its "
             "Kaizen workflow."
         )
-
     pages = actions_page_count(assessment, page_size=page_size)
     page = max(0, min(page, pages - 1))
     start = page * page_size
     window = items[start:start + page_size]
-
     lines = [
         "📌 *Actions*",
         f"Showing {start + 1}–{start + len(window)} of {len(items)} unfinished items",
@@ -139,17 +208,54 @@ def format_actions(
         if group != current_group:
             current_group = group
             heading, note = GROUP_HEADINGS[group]
-            total_in_group = sum(1 for g, _ in items if g == group)
-            lines.append(f"*{heading} — {total_in_group}*")
-            lines.append(f"_{note}_")
+            total_in_group = sum(1 for item_group, _ in items if item_group == group)
+            lines.extend([f"*{heading} — {total_in_group}*", f"_{note}_"])
         lines.append(_describe(item))
     lines.append("")
+    old_note = _old_item_note([item for _group, item in window])
+    if old_note:
+        lines.append(old_note)
+    lines.append("_Nothing is chased, submitted, edited or deleted for you._")
+    return "\n".join(lines).strip()
 
-    if any(item.days_waiting > REVIEW_AFTER_DAYS for _group, item in window):
-        lines.append(
-            "_Entries dated more than a year ago are worth reviewing before "
-            "acting: some will no longer be worth completing._"
+
+def format_actions(
+    assessment: HealthAssessment,
+    *,
+    page: Optional[int] = None,
+    page_size: int = ACTIONS_PAGE_SIZE,
+) -> str:
+    """Agency-first Actions landing; ``page`` preserves legacy callbacks."""
+    if page is not None:
+        return _format_legacy_actions_page(
+            assessment, page=page, page_size=page_size
         )
+    if not assessment.stuck_total:
+        return (
+            "📌 *Actions*\n\n"
+            "Nothing scanned is unfinished — every item has completed its "
+            "Kaizen workflow."
+        )
+
+    lines = ["📌 *Actions*", ""]
+    shown: list[StuckEvidence] = []
+    for queue in ("draft", "awaiting"):
+        items = _queue_items(assessment, queue)
+        heading, note = GROUP_HEADINGS[queue]
+        lines.extend([f"*{heading} — {len(items)}*", f"_{note}_"])
+        if items:
+            examples = items[:3]
+            shown.extend(examples)
+            lines.extend(_describe(item) for item in examples)
+            if len(items) > len(examples):
+                lines.append(f"_{len(items) - len(examples)} more in this queue._")
+        else:
+            lines.append("• None visible in this scan")
+        lines.append("")
+
+    old_note = _old_item_note(shown)
+    if old_note:
+        lines.extend([old_note, ""])
     lines.append("_Nothing is chased, submitted, edited or deleted for you._")
     return "\n".join(lines).strip()
 
@@ -303,18 +409,27 @@ def format_coverage(
         )
 
     lines.append("")
-    lines.extend(_balance_block(assessment))
+    scanned_total = assessment.total_items + assessment.outside_core_items
+    lines.append(
+        f"{assessment.outside_core_items} of {scanned_total} scanned items sit "
+        "outside these six core categories; they remain in the scan but are "
+        "not assigned to a category above."
+    )
+    lines.append("")
 
     represented = len(assessment.slo_counts)
-    if represented or assessment.untagged_items:
-        lines.append("*Curriculum tags*")
-        lines.append(
-            f"{represented} of 12 SLOs represented across "
-            f"{assessment.tagged_items} tagged item(s) · "
-            f"{assessment.untagged_items} usually-taggable item(s) untagged"
-        )
-        lines.append("_Open the curriculum detail for the tagged spread and limits._")
-        lines.append("")
+    lines.append("*Curriculum tag scope*")
+    lines.append(
+        f"{represented}/12 SLOs represented across "
+        f"{assessment.tagged_items} tagged item(s). Presence does not assess adequacy."
+    )
+    lines.append(
+        f"{assessment.untagged_items} usually-taggable item(s) are untagged and "
+        "excluded from the SLO spread; evidence types that cannot carry tags "
+        "are also outside it."
+    )
+    lines.append("_Open the curriculum detail for the tagged spread and limits._")
+    lines.append("")
 
     lines.append(
         "_Nothing here is a curriculum requirement or a minimum. Check your "
@@ -337,45 +452,6 @@ def format_curriculum(assessment: HealthAssessment) -> str:
     return "\n".join(lines).strip()
 
 
-def _balance_block(assessment: HealthAssessment) -> list[str]:
-    """Relative domain size, or an honest reason it is not shown.
-
-    Below the minimum the comparison describes the sample rather than the
-    portfolio, and "QI is thin" is a heavy thing to tell someone on the
-    strength of twelve items.
-    """
-    if not assessment.balance_is_comparable:
-        return [
-            "*Balance*",
-            f"Not compared: fewer than {IMBALANCE_MIN_ITEMS} scanned items, "
-            "too few for a domain comparison to mean anything.",
-            "",
-        ]
-
-    smallest = [stat for stat in assessment.domains if stat.is_thin]
-    aged = [stat for stat in assessment.domains if stat.is_stale and stat.newest]
-    if not smallest and not aged:
-        return []
-
-    biggest = max((stat.count for stat in assessment.domains), default=0)
-    lines = ["*Balance*"]
-    for stat in smallest:
-        lines.append(
-            f"• {DOMAIN_LABELS[stat.domain]} is your smallest area: "
-            f"{stat.count} against {biggest} at your largest"
-        )
-    for stat in aged:
-        lines.append(
-            f"• {DOMAIN_LABELS[stat.domain]} evidence stops at "
-            f"{stat.newest.strftime('%b %Y')}"
-        )
-    lines.append(
-        "_Compared with your own portfolio only. Not a required ratio and not "
-        "a curriculum minimum._"
-    )
-    return lines + [""]
-
-
 def _curriculum_block(assessment: HealthAssessment) -> list[str]:
     """Curriculum spread, stated as counts over tagged items only.
 
@@ -385,13 +461,21 @@ def _curriculum_block(assessment: HealthAssessment) -> list[str]:
     """
     counts = assessment.slo_counts
     if not counts:
-        return []
+        return [
+            "*Curriculum tags*",
+            "0/12 SLOs represented across 0 tagged items. Presence does not "
+            "assess adequacy.",
+            f"_Untagged: {assessment.untagged_items} usually-taggable item(s) "
+            "are excluded from this view. Evidence types that cannot carry "
+            "tags are outside it._",
+            "",
+        ]
     ranked = sorted(counts.items(), key=lambda kv: kv[1])
     strongest_slo, strongest = ranked[-1]
     lines = [
         "*Curriculum tags*",
-        f"{len(counts)} of 12 SLOs represented across "
-        f"{assessment.tagged_items} tagged item(s).",
+        f"{len(counts)}/12 SLOs represented across "
+        f"{assessment.tagged_items} tagged item(s). Presence does not assess adequacy.",
     ]
     spread = f"Largest SLO{strongest_slo} ({strongest})"
     # With one tagged outcome the largest is also the smallest, and printing it
@@ -471,8 +555,16 @@ def format_scan_info(
         "deadline, so no item here is described as overdue."
     )
     lines.append(
-        "• Curriculum spread covers tagged items only, and domain balance "
-        "compares your portfolio with itself — neither is a requirement."
+        "• Curriculum spread covers tagged items only; category and SLO counts "
+        "are inventory, not a requirement."
+    )
+    lines.append(
+        "• Automated classification is not certified; check the source item "
+        "if a category looks wrong."
+    )
+    lines.append(
+        "• Curriculum adequacy is not certified. SLO presence and tag counts "
+        "do not assess the quality, sufficiency or currency of evidence."
     )
     if limited_view:
         lines.append(

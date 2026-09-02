@@ -41,7 +41,9 @@ from health_models import CORE_DOMAINS, HealthProfile, HealthDomain, Pathway
 from health_engine import case_history_to_evidence_items, compute_snapshot
 from health_assessment import compute_health_assessment
 from health_report import (
+    action_queue_page_count,
     actions_page_count,
+    format_action_queue,
     format_actions,
     format_coverage,
     format_curriculum,
@@ -354,6 +356,12 @@ async def _safe_edit_text(target, text: str, **kwargs):
             )
             return result
         except BadRequest as exc:
+            if _telegram_message_not_modified_error(exc):
+                # Telegram reports an identical text + reply-markup edit as a
+                # BadRequest even though the requested end state is already
+                # present. Callback navigation treats that as a successful
+                # idempotent no-op; every other BadRequest still propagates.
+                return None
             if "can't parse entities" in str(exc).lower() and kwargs.get("parse_mode"):
                 plain_kwargs = {k: v for k, v in kwargs.items() if k != "parse_mode"}
                 result = await target.edit_text(text, **plain_kwargs)
@@ -3119,6 +3127,8 @@ def _health_view_keyboard(
     *,
     page: int = 0,
     page_count: int = 1,
+    queue: str | None = None,
+    queue_totals: dict[str, int] | None = None,
     needs_review_month: bool = False,
 ) -> InlineKeyboardMarkup:
     """Persistent navigation across the four views, plus this view's controls."""
@@ -3131,7 +3141,41 @@ def _health_view_keyboard(
             )
         ])
 
-    if view == "actions" and page_count > 1:
+    if view == "actions" and queue_totals is not None:
+        totals = queue_totals or {}
+        rows.extend([
+            [InlineKeyboardButton(
+                f"📝 Your drafts ({int(totals.get('draft', 0))})",
+                callback_data="ACTION|health_queue|draft|0",
+            )],
+            [InlineKeyboardButton(
+                f"⏳ Awaiting sign-off ({int(totals.get('awaiting', 0))})",
+                callback_data="ACTION|health_queue|awaiting|0",
+            )],
+        ])
+
+    if view == "action_queue" and queue in {"draft", "awaiting"}:
+        pager: list[InlineKeyboardButton] = []
+        if page > 0:
+            pager.append(InlineKeyboardButton(
+                "⬅️ Previous",
+                callback_data=f"ACTION|health_queue|{queue}|{page - 1}",
+            ))
+        if page < page_count - 1:
+            pager.append(InlineKeyboardButton(
+                "➡️ Next",
+                callback_data=f"ACTION|health_queue|{queue}|{page + 1}",
+            ))
+        if pager:
+            rows.append(pager)
+        rows.append([
+            InlineKeyboardButton("↩️ All actions", callback_data="ACTION|health_view|actions")
+        ])
+
+    # Direct callers and buttons sent before V2.1 used one combined page
+    # number. Keep their previous/next route alive while new reports pass
+    # queue totals and use the independent queue controls above.
+    if view == "actions" and queue_totals is None and page_count > 1:
         pager: list[InlineKeyboardButton] = []
         if page > 0:
             pager.append(InlineKeyboardButton(
@@ -3143,6 +3187,24 @@ def _health_view_keyboard(
             ))
         if pager:
             rows.append(pager)
+
+    # Buttons sent before V2.1 used one combined page number. Keep their
+    # previous/next route alive while new reports use independent queues.
+    if view == "legacy_actions" and page_count > 1:
+        pager: list[InlineKeyboardButton] = []
+        if page > 0:
+            pager.append(InlineKeyboardButton(
+                "⬅️ Previous", callback_data=f"ACTION|health_page|{page - 1}"
+            ))
+        if page < page_count - 1:
+            pager.append(InlineKeyboardButton(
+                "➡️ Next", callback_data=f"ACTION|health_page|{page + 1}"
+            ))
+        if pager:
+            rows.append(pager)
+        rows.append([
+            InlineKeyboardButton("↩️ All actions", callback_data="ACTION|health_view|actions")
+        ])
 
     if view == "priorities" and needs_review_month:
         # Routes into the existing user-driven /arcp copy. Health reads
@@ -3283,12 +3345,12 @@ def _health_compact_report_text(full_text: str) -> str:
     sections = _health_report_sections(full_text)
     basis_lines = [
         line for line in sections["basis"].splitlines()
-        if line.startswith("Scanned:") or line.startswith("Confidence:")
+        if line.startswith("Scanned:") or line.startswith("Refresh:")
     ]
     basis_summary = "\n".join(basis_lines[:2])
 
     if basis_summary and "Scanned:" not in text:
-        text = f"{text}\n\n*Scan confidence*\n{basis_summary}"
+        text = f"{text}\n\n*Scan facts*\n{basis_summary}"
 
     return text
 
@@ -3330,6 +3392,56 @@ def _stored_review_date(profile):
         return None
 
 
+def _save_review_month(user_id: int, review_month) -> None:
+    """Persist one confirmed review month through the existing profile store."""
+    profile = _get_or_default_health_profile(user_id)
+    config = dict(profile.pathway_config or {})
+    config[REVIEW_DATE_KEY] = review_month.replace(day=1).isoformat()
+    save_health_profile(
+        HealthProfile(
+            user_id=str(user_id),
+            pathway=profile.pathway,
+            pathway_config=config,
+            created_at=profile.created_at,
+            updated_at=datetime.now(UTC),
+        )
+    )
+
+
+def _health_review_month_picker_keyboard(reference=None) -> InlineKeyboardMarkup:
+    """The next twelve calendar months; tapping one only previews it."""
+    from datetime import date as _date
+
+    current = reference or _date.today()
+    choices = []
+    for offset in range(12):
+        absolute_month = current.year * 12 + current.month - 1 + offset
+        choice = _date(absolute_month // 12, absolute_month % 12 + 1, 1)
+        choices.append(InlineKeyboardButton(
+            f"📅 {choice.strftime('%b %Y')}",
+            callback_data=f"ACTION|health_review_select|{choice.strftime('%Y-%m')}",
+        ))
+    rows = [choices[index:index + 3] for index in range(0, len(choices), 3)]
+    rows.append([
+        InlineKeyboardButton("🔙 Cancel", callback_data="ACTION|health_view|priorities")
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def _health_review_month_confirmation_keyboard(review_month) -> InlineKeyboardMarkup:
+    token = review_month.strftime("%Y-%m")
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            "✅ Confirm",
+            callback_data=f"ACTION|health_review_confirm|{token}",
+        )],
+        [InlineKeyboardButton(
+            "📅 Choose another month", callback_data="ACTION|health_review_setup"
+        )],
+        [InlineKeyboardButton("🔙 Cancel", callback_data="ACTION|health_view|priorities")],
+    ])
+
+
 async def arcp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Set the review month everything else is timed against."""
     user_id = update.effective_user.id
@@ -3348,20 +3460,7 @@ async def arcp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         return
 
-    profile = _get_or_default_health_profile(user_id)
-    config = dict(profile.pathway_config or {})
-    config[REVIEW_DATE_KEY] = parsed.isoformat()
-    from datetime import UTC, datetime as _dt
-
-    save_health_profile(
-        HealthProfile(
-            user_id=str(user_id),
-            pathway=profile.pathway,
-            pathway_config=config,
-            created_at=profile.created_at,
-            updated_at=_dt.now(UTC),
-        )
-    )
+    _save_review_month(user_id, parsed)
     await update.message.reply_text(
         f"\u2705 Review date set to *{parsed.strftime('%B %Y')}*.\n\n"
         "Run /health to see everything timed to it.",
@@ -3388,6 +3487,8 @@ def _store_health_report_context(
     *,
     views: dict[str, str],
     action_pages: list[str],
+    action_queue_pages: dict[str, list[str]],
+    action_queue_totals: dict[str, int],
     needs_review_month: bool,
 ) -> None:
     """Remember the rendered views so the navigation buttons have something to show.
@@ -3402,11 +3503,20 @@ def _store_health_report_context(
         "views": views,
         "action_pages": action_pages,
         "page": 0,
+        "action_queue_pages": action_queue_pages,
+        "action_queue_totals": action_queue_totals,
+        "queue_page": {"draft": 0, "awaiting": 0},
         "needs_review_month": needs_review_month,
     }
 
 
-def _health_view_payload(context, view: str, *, page: int | None = None):
+def _health_view_payload(
+    context,
+    view: str,
+    *,
+    page: int | None = None,
+    queue: str | None = None,
+):
     """Return ``(text, keyboard)`` for a stored view, or ``None`` if it is gone.
 
     ``page`` of ``None`` means "wherever they were": coming back to Actions
@@ -3420,15 +3530,49 @@ def _health_view_payload(context, view: str, *, page: int | None = None):
     report = context.user_data.get("last_health_report") or {}
     views = report.get("views") or {}
     pages = report.get("action_pages") or []
-    if not views or not pages:
+    queue_pages = report.get("action_queue_pages") or {}
+    queue_totals = report.get("action_queue_totals") or {}
+    if not views:
         return None
 
     if view == "actions":
+        text = views.get("actions")
+        if text is None:
+            # Reports stored before V2.1 did not have an Actions landing.
+            if not pages:
+                return None
+            page = max(0, min(int(report.get("page", 0)), len(pages) - 1))
+            report["page"] = page
+            return pages[page], _health_view_keyboard(
+                "legacy_actions", page=page, page_count=len(pages)
+            )
+        return text, _health_view_keyboard(
+            "actions", queue_totals=queue_totals
+        )
+
+    if view == "action_queue" and queue in {"draft", "awaiting"}:
+        selected_pages = queue_pages.get(queue) or []
+        if not selected_pages:
+            return None
+        positions = report.setdefault("queue_page", {"draft": 0, "awaiting": 0})
+        page = positions.get(queue, 0) if page is None else page
+        page = max(0, min(int(page), len(selected_pages) - 1))
+        positions[queue] = page
+        return selected_pages[page], _health_view_keyboard(
+            "action_queue",
+            page=page,
+            page_count=len(selected_pages),
+            queue=queue,
+        )
+
+    if view == "legacy_actions":
+        if not pages:
+            return None
         page = report.get("page", 0) if page is None else page
         page = max(0, min(int(page), len(pages) - 1))
         report["page"] = page
         return pages[page], _health_view_keyboard(
-            "actions", page=page, page_count=len(pages)
+            "legacy_actions", page=page, page_count=len(pages)
         )
 
     text = views.get(view)
@@ -3778,12 +3922,30 @@ def _recommendation_form_display_name(form_type: str, curriculum: str = "2025") 
     return name
 
 
+_FUNNEL_METADATA_KEYS = frozenset({
+    "source",
+    "form_type",
+    "state",
+    "count",
+    "has_draft",
+    "has_missing",
+    "tier",
+    "reason",
+    # Health interaction telemetry is structural only. Values at each call
+    # site are bounded pane/queue names or page indexes. The chosen review
+    # month is deliberately not retained in analytics.
+    "view",
+    "queue",
+    "page",
+})
+
+
 def _track_funnel_event(context, event: str, *, update_last: bool = True, **metadata) -> None:
     """Log PHI-free UX funnel events for friction analysis."""
     safe = {
         key: value
         for key, value in metadata.items()
-        if key in {"source", "form_type", "state", "count", "has_draft", "has_missing", "tier", "reason"}
+        if key in _FUNNEL_METADATA_KEYS
     }
     try:
         if update_last:
@@ -6845,6 +7007,10 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     action = query.data.split("|", 1)[1] if "|" in query.data else ""
     user_id = update.effective_user.id
+    # A callback can be the first interaction after /start. Seed the existing
+    # audit identity before structural Health telemetry is persisted so a real
+    # doctor is not recorded as an unattributed event.
+    _remember_audit_user(context, update, user_id)
     logger.info(
         "Global ACTION callback: action=%s user=%s state=%s",
         action,
@@ -7019,6 +7185,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
 
     elif (
         action.startswith("health_view|")
+        or action.startswith("health_queue|")
         or action.startswith("health_page|")
         or action.startswith("health_detail|")
         or action == "health_back_to_report"
@@ -7027,8 +7194,17 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         # left behind on messages sent before the four-view layout: an old
         # "Unfinished" tap lands on Actions rather than a dead end.
         page = None
-        if action.startswith("health_page|"):
-            view = "actions"
+        queue = None
+        if action.startswith("health_queue|"):
+            parts = action.split("|")
+            queue = parts[1] if len(parts) > 1 and parts[1] in {"draft", "awaiting"} else None
+            try:
+                page = int(parts[2]) if len(parts) > 2 else 0
+            except ValueError:
+                page = 0
+            view = "action_queue" if queue else "actions"
+        elif action.startswith("health_page|"):
+            view = "legacy_actions"
             try:
                 page = int(action.split("|", 1)[1])
             except ValueError:
@@ -7040,7 +7216,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         else:
             view = "priorities"
 
-        payload = _health_view_payload(context, view, page=page)
+        payload = _health_view_payload(context, view, page=page, queue=queue)
         if payload is None:
             await _safe_edit_text(
                 query.message,
@@ -7048,6 +7224,28 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 reply_markup=_health_refresh_route_keyboard(),
             )
             return ConversationHandler.END
+
+        if view == "action_queue" and queue:
+            actual_page = (
+                (context.user_data.get("last_health_report") or {})
+                .get("queue_page", {})
+                .get(queue, 0)
+            )
+            _track_funnel_event(
+                context,
+                "health_queue_selected",
+                update_last=False,
+                queue=queue,
+                page=int(actual_page),
+            )
+        else:
+            tracked_view = "actions" if view == "legacy_actions" else view
+            _track_funnel_event(
+                context,
+                "health_pane_selected",
+                update_last=False,
+                view=tracked_view,
+            )
 
         text, keyboard = payload
         await _safe_edit_text(
@@ -7059,19 +7257,74 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
 
     elif action == "health_review_setup":
-        # Shows the same instructions /arcp gives and changes nothing. The
-        # doctor sets their own review month; Health only reads it.
         current = _stored_review_date(_get_or_default_health_profile(user_id))
         shown = current.strftime("%B %Y") if current else "not set"
+        _track_funnel_event(
+            context,
+            "health_review_month_setup",
+            update_last=False,
+        )
         await _safe_edit_text(
             query.message,
             f"📅 *Review month*\n\nCurrently: {shown}\n\n"
-            "Set it with the month of your next ARCP or review, for example:\n"
-            "`/arcp Oct 2026`\n\n"
-            "_Portfolio Health uses it to count down and to time reminders. "
-            "Nothing has been changed._",
+            "Choose the month of your next ARCP or review. Selecting a month "
+            "only previews it; nothing changes until you tap Confirm.\n\n"
+            "_Cancel returns to Health without changing the current setting._",
             parse_mode="Markdown",
-            reply_markup=_health_view_keyboard("priorities"),
+            reply_markup=_health_review_month_picker_keyboard(),
+        )
+        return ConversationHandler.END
+
+    elif action.startswith("health_review_select|"):
+        parsed = _parse_review_month(action.rsplit("|", 1)[-1])
+        if parsed is None:
+            await _safe_edit_text(
+                query.message,
+                "📅 That month option is no longer valid. Choose again.",
+                reply_markup=_health_review_month_picker_keyboard(),
+            )
+            return ConversationHandler.END
+        _track_funnel_event(
+            context,
+            "health_review_month_selected",
+            update_last=False,
+        )
+        await _safe_edit_text(
+            query.message,
+            f"📅 *Review month*\n\nSelected: *{parsed.strftime('%B %Y')}*\n\n"
+            "Nothing has been saved yet. Tap Confirm to use this month, choose "
+            "another month, or cancel without changing your setting.",
+            parse_mode="Markdown",
+            reply_markup=_health_review_month_confirmation_keyboard(parsed),
+        )
+        return ConversationHandler.END
+
+    elif action.startswith("health_review_confirm|"):
+        parsed = _parse_review_month(action.rsplit("|", 1)[-1])
+        if parsed is None:
+            await _safe_edit_text(
+                query.message,
+                "📅 That month option is no longer valid. Choose again.",
+                reply_markup=_health_review_month_picker_keyboard(),
+            )
+            return ConversationHandler.END
+        _save_review_month(user_id, parsed)
+        _track_funnel_event(
+            context,
+            "health_review_month_confirmed",
+            update_last=False,
+        )
+        await _safe_edit_text(
+            query.message,
+            f"✅ Review month set to *{parsed.strftime('%B %Y')}*.\n\n"
+            "Return to Priorities to see the new countdown.",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(
+                    "📍 Back to priorities",
+                    callback_data="ACTION|health_view|priorities",
+                )
+            ]]),
         )
         return ConversationHandler.END
 
@@ -8087,6 +8340,10 @@ async def _run_health_analysis(
     from datetime import datetime as _dt_module
     assessment = compute_health_assessment(evidence_items)
     review_date = _stored_review_date(profile)
+    review_month_needs_setup = (
+        review_date is None
+        or review_date < _dt_module.now().date().replace(day=1)
+    )
     scan_is_fresh = _sync_status_is_fresh(sync_status)
 
     # All four views are rendered here, once, from one assessment. A button
@@ -8102,6 +8359,7 @@ async def _run_health_analysis(
     await send_progress()
     views = {
         "priorities": priorities_text,
+        "actions": format_actions(assessment),
         "coverage": format_coverage(assessment),
         "curriculum": format_curriculum(assessment),
         "scan": format_scan_info(
@@ -8123,16 +8381,31 @@ async def _run_health_analysis(
         format_actions(assessment, page=page)
         for page in range(actions_page_count(assessment))
     ]
+    action_queue_pages = {
+        queue: [
+            format_action_queue(assessment, queue, page=page)
+            for page in range(action_queue_page_count(assessment, queue))
+        ]
+        for queue in ("draft", "awaiting")
+    }
+    action_queue_totals = {
+        "draft": len(assessment.stuck_drafts),
+        "awaiting": len(assessment.stuck_awaiting),
+    }
     if context_store is not None:
         _store_health_report_context(
             context_store,
             views=views,
             action_pages=action_pages,
-            needs_review_month=review_date is None,
+            action_queue_pages=action_queue_pages,
+            action_queue_totals=action_queue_totals,
+            needs_review_month=review_month_needs_setup,
         )
     await send_result(
         priorities_text,
-        _health_view_keyboard("priorities", needs_review_month=review_date is None),
+        _health_view_keyboard(
+            "priorities", needs_review_month=review_month_needs_setup
+        ),
     )
     return
 
@@ -8286,8 +8559,8 @@ async def _append_health_activity_snapshot(
     if limited_view:
         snapshot = (
             f"{snapshot}\n"
-            "- Confidence: low — based on Portfolio Guru filings only; "
-            "full Kaizen scan not available"
+            "- Scope: partial — based on Portfolio Guru filings only; "
+            "Kaizen index not available"
         )
     return f"{msg}\n\n{snapshot}"
 
@@ -8558,19 +8831,20 @@ def _format_health_evidence_context(
         if history_count:
             scanned += f"; Portfolio Guru filings for activity: {history_count} in last 6 months"
         window = _health_window_label(pathway, source)
-        confidence = _health_confidence_label(
-            has_index=True,
-            profile_is_default=profile_is_default,
-            sync_is_fresh=_sync_status_is_fresh(sync_status),
+        run_status = getattr(getattr(sync_status, "last_run", None), "status", None)
+        scope = (
+            "partial indexed scan — the last refresh reported partial results"
+            if run_status == "partial"
+            else "indexed Kaizen evidence currently stored"
         )
     else:
-        scanned = f"Portfolio Guru filing history only: {history_count} case(s) in last 6 months"
-        window = _health_window_label(pathway, source)
-        confidence = _health_confidence_label(
-            has_index=False,
-            profile_is_default=profile_is_default,
-            sync_is_fresh=False,
+        scanned = (
+            "Portfolio Guru filing history only: "
+            f"{evidence_count} visible evidence item(s) from {history_count} "
+            "case(s) in last 6 months"
         )
+        window = _health_window_label(pathway, source)
+        scope = "partial — the Kaizen index was unavailable"
 
     if profile_is_default:
         pathway_line = "Assumed pathway: Training (CCT) — change if wrong"
@@ -8581,30 +8855,48 @@ def _format_health_evidence_context(
         "*Evidence basis*",
         f"Scanned: {scanned}",
     ]
-    last_scanned = _health_last_scanned_line(sync_status)
-    if last_scanned:
-        lines.append(last_scanned)
+    if source == "kaizen_index":
+        lines.append(_health_last_scanned_line(sync_status))
+    else:
+        lines.append("Refresh: no Kaizen refresh available; this is a partial local view")
     lines.extend([
         f"Window: {window}",
         f"{pathway_line}",
-        f"Confidence: {confidence}",
+        f"Scope: {scope}",
     ])
     return "\n".join(lines)
 
 
-def _health_last_scanned_line(sync_status: KaizenSyncStatus | None) -> str | None:
-    """Concise "Last scanned" line for the Evidence basis page.
-
-    Only shown when a real Kaizen index run exists, so the user can see how
-    fresh the scanned evidence is. Reuses the same local-time format as the
-    /settings sync row.
-    """
+def _health_last_scanned_line(sync_status: KaizenSyncStatus | None) -> str:
+    """Exact refresh timestamp plus freshness or partiality."""
     if sync_status is None or sync_status.last_run is None:
-        return None
+        return "Refresh: freshness unconfirmed — no completed refresh timestamp is available"
     when = (sync_status.last_run.finished_at or sync_status.last_run.started_at or "").strip()
     if not when:
-        return None
-    return f"Last scanned: {_format_user_local_timestamp(when)}"
+        return "Refresh: freshness unconfirmed — no completed refresh timestamp is available"
+    stamp = _format_user_local_timestamp(when)
+    status = (sync_status.last_run.status or "").lower()
+    if status == "partial":
+        return f"Refresh: {stamp} — partial; some Kaizen evidence may be missing"
+    unsuccessful = {
+        "failed": "failed",
+        "drift": "stopped because the source changed unexpectedly",
+        "auth_required": "needs Kaizen reconnection",
+        "running": "is still running",
+    }
+    if status in unsuccessful:
+        return (
+            f"Refresh: {stamp} — latest refresh {unsuccessful[status]}; "
+            "existing indexed evidence may be older"
+        )
+    if status != "ok":
+        return (
+            f"Refresh: {stamp} — latest refresh did not complete successfully; "
+            "existing indexed evidence may be older"
+        )
+    if _sync_status_is_fresh(sync_status):
+        return f"Refresh: {stamp} — fresh within 24 hours"
+    return f"Refresh: {stamp} — older than 24 hours; recent activity may be missing"
 
 
 def _health_window_label(pathway: Pathway, source: str) -> str:
@@ -8615,21 +8907,6 @@ def _health_window_label(pathway: Pathway, source: str) -> str:
     if source == "kaizen_index":
         return "all indexed Kaizen evidence currently stored; set your review month with /arcp to time this to your cycle"
     return "last 6 months of Portfolio Guru filings only; set your review month with /arcp to time this to your cycle"
-
-
-def _health_confidence_label(
-    *,
-    has_index: bool,
-    profile_is_default: bool,
-    sync_is_fresh: bool,
-) -> str:
-    if not has_index:
-        return "low — Kaizen index not available, so this cannot reflect your full portfolio"
-    if profile_is_default:
-        return "medium — evidence was scanned, but the pathway is still the default"
-    if not sync_is_fresh:
-        return "medium — evidence was scanned, but the Kaizen index is not confirmed fresh"
-    return "high for scanned evidence; still cross-check against Kaizen and ARCP/CESR guidance"
 
 
 def _format_arcp_risk_reason(snapshot) -> str:

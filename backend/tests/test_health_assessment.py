@@ -19,7 +19,9 @@ import pytest
 from health_assessment import IMBALANCE_MIN_ITEMS, compute_health_assessment
 from health_models import EvidenceItem, HealthDomain
 from health_report import (
+    action_queue_page_count,
     actions_page_count,
+    format_action_queue,
     format_actions,
     format_coverage,
     format_curriculum,
@@ -100,10 +102,10 @@ def _curriculum(items):
 BASIS = (
     "*Evidence basis*\n"
     "Scanned: Read-only Kaizen index: 12 visible evidence item(s)\n"
-    "Last scanned: 26 Aug 2026 09:00\n"
+    "Refresh: 26 Aug 2026 09:00 — fresh within 24 hours\n"
     "Window: all indexed Kaizen evidence currently stored\n"
     "Pathway: Training (CCT)\n"
-    "Confidence: high for scanned evidence"
+    "Scope: full indexed scan"
 )
 
 
@@ -141,9 +143,9 @@ def test_no_view_shows_a_readiness_colour_or_verdict():
     assert not hasattr(_assess(items), "score")
 
 
-def test_imbalance_is_reported_as_a_coverage_comparison_not_a_verdict():
-    """The old score demoted the whole portfolio for one small domain. The
-    finding is real; the verdict on top of it was not."""
+def test_imbalance_is_computed_but_not_turned_into_a_largest_smallest_warning():
+    """Relative thinness can remain available to assessment consumers, but
+    Coverage must not turn it into a misleading largest/smallest comparison."""
     items = _balanced(40)
     items = [i for i in items if i.domain != HealthDomain.qi]
     items += [_item(domain=HealthDomain.qi, ident=f"qi-{n}") for n in range(3)]
@@ -151,8 +153,8 @@ def test_imbalance_is_reported_as_a_coverage_comparison_not_a_verdict():
     assessment, coverage = _coverage(items)
 
     assert any(stat.is_thin for stat in assessment.domains)
-    assert "QI is your smallest area: 3 against 40 at your largest" in coverage
-    assert "Compared with your own portfolio only" in coverage
+    assert "QI is your smallest area" not in coverage
+    assert "at your largest" not in coverage
 
 
 def test_stale_domain_is_reported_with_the_date_its_evidence_stops():
@@ -164,7 +166,7 @@ def test_stale_domain_is_reported_with_the_date_its_evidence_stops():
 
     _, coverage = _coverage(items)
 
-    assert "Teaching evidence stops at" in coverage
+    assert "Teaching: 30 · 0 · latest Aug 2022" in coverage
 
 
 def test_domain_comparison_is_suppressed_for_a_small_portfolio():
@@ -179,7 +181,7 @@ def test_domain_comparison_is_suppressed_for_a_small_portfolio():
     assert IMBALANCE_MIN_ITEMS == 20
     assert not assessment.balance_is_comparable
     assert not any(stat.is_thin for stat in assessment.domains)
-    assert f"fewer than {IMBALANCE_MIN_ITEMS} scanned items" in coverage
+    assert "*Balance*" not in coverage
     assert "smallest area" not in coverage
 
 
@@ -232,6 +234,19 @@ def test_findings_come_from_the_portfolio_not_a_fixed_list():
 
     assert findings[0] == "1 item with someone else — oldest a Mini-CEX dated 28 Apr 2026"
     assert not any("File a CBD from a recent supervised case" == f for f in findings)
+
+
+def test_priorities_puts_doctor_controlled_drafts_before_awaiting_signoff():
+    items = _balanced() + [
+        _item(state="pending", days_ago=900, ident="await-1", form_type="MINI_CEX"),
+        _item(state="draft", days_ago=100, ident="draft-1", form_type="JCF"),
+    ]
+
+    _, text = _priorities(items)
+
+    assert text.index("draft of your own unfinished") < text.index("item with someone else")
+    assert text.count("\n1. ") + text.count("\n2. ") + text.count("\n3. ") <= 3
+    assert "not by training or curriculum importance" in text
 
 
 def test_findings_state_dates_and_never_instruct_a_chase():
@@ -391,18 +406,22 @@ def _many_stuck(count=17):
 def test_actions_shows_the_visible_range_of_a_bounded_page():
     assessment = _assess(_many_stuck())
 
-    first = format_actions(assessment, page=0)
-    second = format_actions(assessment, page=1)
+    first = format_action_queue(assessment, "awaiting", page=0)
+    second = format_action_queue(assessment, "awaiting", page=1)
 
-    assert actions_page_count(assessment) == 4
-    assert "Showing 1–5 of 17 unfinished items" in first
-    assert "Showing 6–10 of 17 unfinished items" in second
+    assert action_queue_page_count(assessment, "awaiting") == 2
+    assert "Showing 1–5 of 10 awaiting sign-off" in first
+    assert "Showing 6–10 of 10 awaiting sign-off" in second
     assert first.count("\n• ") == 5
 
 
 def test_actions_pages_partition_the_items_with_no_gap_or_repeat():
     assessment = _assess(_many_stuck())
-    pages = [format_actions(assessment, page=p) for p in range(actions_page_count(assessment))]
+    pages = [
+        format_action_queue(assessment, queue, page=page)
+        for queue in ("draft", "awaiting")
+        for page in range(action_queue_page_count(assessment, queue))
+    ]
 
     listed = [line for page in pages for line in page.splitlines() if line.startswith("• ")]
 
@@ -426,13 +445,16 @@ def test_actions_order_is_stable_whatever_order_the_evidence_arrives_in():
 def test_actions_separates_awaiting_from_your_own_drafts():
     assessment = _assess(_many_stuck())
 
-    first = format_actions(assessment, page=0)
-    last = format_actions(assessment, page=3)
+    landing = format_actions(assessment)
+    drafts = format_action_queue(assessment, "draft", page=0)
+    awaiting = format_action_queue(assessment, "awaiting", page=0)
 
-    assert "*Awaiting someone else — 10*" in first
-    assert "Submitted and not yet completed by someone else." in first
-    assert "*Your own drafts — 7*" in last
-    assert "Started by you and not completed." in last
+    assert landing.index("*Your drafts — 7*") < landing.index("*Awaiting sign-off — 10*")
+    assert landing.count("\n• ") == 6  # Up to three direct-linked examples per queue.
+    assert "*Your drafts — 7*" in drafts
+    assert "Started by you and not completed." in drafts
+    assert "*Awaiting sign-off — 10*" in awaiting
+    assert "Submitted and waiting for someone else." in awaiting
 
 
 def test_actions_names_items_by_form_and_exact_date_without_deadline_language():
@@ -440,7 +462,14 @@ def test_actions_names_items_by_form_and_exact_date_without_deadline_language():
         _item(state="pending", days_ago=1112, ident="a", form_type="MINI_CEX"),
         _item(state="draft", days_ago=900, ident="b", form_type="JCF"),
     ]
-    text = format_actions(_assess(items))
+    assessment = _assess(items)
+    text = "\n".join(
+        [
+            format_actions(assessment),
+            format_action_queue(assessment, "draft"),
+            format_action_queue(assessment, "awaiting"),
+        ]
+    )
 
     # Kaizen's internal codes mean nothing to a doctor, wherever they appear.
     assert "Mini-CEX — 10 Aug 2023" in text and "MINI_CEX" not in text
@@ -463,14 +492,31 @@ def test_actions_link_every_item_to_kaizen():
 def test_actions_page_beyond_the_end_falls_back_to_the_last_real_page():
     """A stale button on an old message must land on evidence, not an error."""
     assessment = _assess(_many_stuck())
-    assert format_actions(assessment, page=99) == format_actions(assessment, page=3)
-    assert format_actions(assessment, page=-4) == format_actions(assessment, page=0)
+    assert format_action_queue(assessment, "draft", page=99) == format_action_queue(
+        assessment, "draft", page=1
+    )
+    assert format_action_queue(assessment, "awaiting", page=-4) == format_action_queue(
+        assessment, "awaiting", page=0
+    )
 
 
 def test_actions_is_reassuring_when_nothing_is_unfinished():
     text = format_actions(_assess(_balanced()))
     assert "Nothing scanned is unfinished" in text
     assert actions_page_count(_assess(_balanced())) == 1
+
+
+def test_action_queues_paginate_independently_at_five_per_page():
+    assessment = _assess(_many_stuck())
+
+    assert action_queue_page_count(assessment, "draft") == 2
+    assert action_queue_page_count(assessment, "awaiting") == 2
+    assert "Showing 6–7 of 7 drafts" in format_action_queue(
+        assessment, "draft", page=1
+    )
+    assert "Showing 6–10 of 10 awaiting sign-off" in format_action_queue(
+        assessment, "awaiting", page=1
+    )
 
 
 # ── Coverage ────────────────────────────────────────────────────────────────
@@ -495,6 +541,19 @@ def test_coverage_separates_a_live_domain_from_a_historical_one():
     assert "QI: none scanned" in coverage
 
 
+def test_coverage_states_six_category_denominator_and_outside_count():
+    items = _balanced(2) + [
+        _item(domain=HealthDomain.unclassified, ident=f"outside-{index}")
+        for index in range(3)
+    ]
+
+    assessment, coverage = _coverage(items)
+
+    assert assessment.outside_core_items == 3
+    assert "3 of 15 scanned items sit outside these six core categories" in coverage
+    assert "Clinical: 2 · 2" in coverage
+
+
 def test_coverage_recent_counts_describe_the_portfolio_not_product_usage():
     """Recency is derived from the scanned portfolio, not bot usage."""
     _, coverage = _coverage(_balanced(10))
@@ -504,6 +563,18 @@ def test_coverage_recent_counts_describe_the_portfolio_not_product_usage():
 def test_coverage_cannot_be_mistaken_for_a_curriculum_minimum():
     _, coverage = _coverage(_balanced(40))
     assert "Nothing here is a curriculum requirement or a minimum" in coverage
+
+
+def test_coverage_removes_largest_versus_smallest_domain_warning():
+    items = _balanced(40)
+    items = [item for item in items if item.domain != HealthDomain.qi]
+    items += [_item(domain=HealthDomain.qi, ident=f"qi-{n}") for n in range(3)]
+
+    _, coverage = _coverage(items)
+
+    assert "smallest area" not in coverage
+    assert "at your largest" not in coverage
+    assert "Compared with your own portfolio" not in coverage
 
 
 def test_curriculum_spread_reports_counts_over_tagged_items_only():
@@ -516,9 +587,21 @@ def test_curriculum_spread_reports_counts_over_tagged_items_only():
 
     assert assessment.slo_counts == {6: 40, 10: 3}
     assert assessment.tagged_items == 43
-    assert "2 of 12 SLOs represented across 43 tagged item(s)" in curriculum
+    assert "2/12 SLOs represented across 43 tagged item(s)" in curriculum
     assert "Largest SLO6 (40)" in curriculum
     assert "SLO10 (3)" in curriculum
+
+
+def test_twelve_of_twelve_slos_does_not_claim_curriculum_adequacy():
+    items = [_tagged([slo], ident=f"slo-{slo}") for slo in range(1, 13)]
+
+    _, coverage = _coverage(items)
+    _, curriculum = _curriculum(items)
+
+    for text in (coverage, curriculum):
+        assert "12/12 SLOs represented" in text
+        assert "presence does not assess adequacy" in text.lower()
+        assert "12/12 SLOs covered" not in text
 
 
 def test_untagged_items_are_disclosed_not_silently_dropped():
@@ -627,12 +710,15 @@ def test_scan_info_carries_the_basis_review_timing_and_limits():
     _, text = _scan_info(_balanced(), review_date=date(2026, 10, 1))
 
     assert text.startswith("🔎 *Scan info*")
-    assert "Confidence: high for scanned evidence" in text
-    assert "Last scanned: 26 Aug 2026 09:00" in text
+    assert "Confidence:" not in text
+    assert "Scanned: Read-only Kaizen index: 12 visible evidence item(s)" in text
+    assert "Refresh: 26 Aug 2026 09:00 — fresh within 24 hours" in text
     assert "Next review: October 2026" in text
     assert "*What this cannot see*" in text
     assert "no item here is described as overdue" in text
-    assert "neither is a requirement" in text
+    assert "category and SLO counts are inventory, not a requirement" in text
+    assert "classification is not certified" in text.lower()
+    assert "curriculum adequacy is not certified" in text.lower()
 
 
 def test_scan_info_discloses_a_limited_view():

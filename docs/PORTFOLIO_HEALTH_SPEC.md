@@ -1,7 +1,7 @@
-# Portfolio Health + Pathway Guidance — Product Spec v2
+# Portfolio Health + Pathway Guidance — Product Spec v2.1
 
 **Status:** Product spec. Replaces the narrower ARCP Health design (now superseded).
-**Last updated:** 2026-06-30
+**Last updated:** 2026-09-02
 **Supersedes:** `docs/ARCP_HEALTH_DESIGN.md` — retained as historical design artefact.
 
 ---
@@ -29,9 +29,9 @@ not an official readiness judgement. The report must disclose:
 - **Evidence window** — current implementation does not yet know the user's
   ARCP cycle month, LTFT extension, appraisal month, or target Portfolio
   Pathway application window.
-- **Confidence** — high only when a fresh Kaizen index and confirmed pathway
-  are present; lower when the report falls back to Portfolio Guru history or a
-  default pathway.
+- **Scan facts** — item count and source, refresh timestamp plus freshness or
+  partiality, and whether the view is an indexed Kaizen scan or a limited local
+  fallback. Do not collapse these separate facts into a confidence label.
 - **Inference boundary** — missing domains are inferred from visible evidence
   in the scan and must not be presented as an official ARCP, Portfolio Pathway,
   appraisal, or revalidation outcome.
@@ -119,7 +119,9 @@ profile.
 
 Portfolio Health and Pathway Readiness are two layers:
 
-**Portfolio Health** = the universal evidence tracker. It answers: "What evidence do I have? What's missing? What domains are thin?"
+**Portfolio Health** = the universal evidence tracker. It answers: "What did
+this scan see, what is unfinished, what can I act on myself, and what is waiting
+on somebody else?"
 
 **Pathway Guidance** = two RCEM views on the same Kaizen data:
 
@@ -244,11 +246,14 @@ Related rules the universal layer holds to:
 - Old evidence is named with its exact date and offered for review. Nothing is
   called overdue or stale, and no chase is instructed: no scanned field carries
   a deadline.
-- Relative domain balance is stated as a comparison with the doctor's own
-  portfolio, is never a curriculum minimum, and is suppressed below
-  `health_assessment.IMBALANCE_MIN_ITEMS` scanned items.
-- Curriculum spread is computed over tagged items only, and the untagged count
-  is always stated alongside it.
+- Coverage shows each of the six core category totals with last-12-month
+  activity. It does not issue a largest-versus-smallest domain warning.
+- The denominator is explicit: evidence outside the six core categories stays
+  in the scanned-item total and is stated separately rather than disappearing.
+- Curriculum spread is computed over tagged items only. Tagged and untagged
+  scope is stated together, evidence types that cannot carry tags are named as
+  outside the comparison, and `12/12 SLOs represented` explicitly says that
+  presence does not assess adequacy.
 
 ---
 
@@ -425,15 +430,19 @@ next_actions              3–5 concrete suggested actions
 
 - `/health` — opens `📍 Priorities`: at most three findings, scan notice when
   the read is partial, review-month line, safety line. One phone screen.
-- `📌 Actions` — every unfinished item, awaiting-others separated from own
-  drafts, five per page in one stable total order, visible range (`1–5 of 17`),
-  each linked to Kaizen.
-- `📊 Coverage` — domain totals and 12-month recency, relative balance, plus a
-  compact tagged/untagged curriculum summary. `🏷️ Curriculum tags` is an
-  optional drill-down for the tagged SLO spread and its limits, keeping the
-  default Coverage pane to one phone-screen decision surface.
-- `🔎 Scan info` — source, freshness, window, pathway, confidence, review
-  timing and the fuller limitations.
+- `📌 Actions` — agency-first landing: `Your drafts` before `Awaiting sign-off`,
+  clear totals, and up to three direct Kaizen-linked examples from each. Each
+  queue opens separately and paginates independently at five items per page.
+  Old items retain neutral review language; Health does not chase, submit,
+  edit or delete anything.
+- `📊 Coverage` — each core category's total and last-12-month activity, the
+  count outside the six-category denominator, and a tagged-versus-untagged
+  curriculum scope statement. The largest-versus-smallest domain warning is
+  absent. `🏷️ Curriculum tags` remains an optional drill-down.
+- `🔎 Scan info` — source and item count, refresh time plus freshness or
+  partiality, window, pathway, review timing and fuller limitations. It states
+  that automated classification and curriculum adequacy are not certified;
+  it has no `High confidence` label.
 
 - `/pathway` — select or change pathway
 - `Add evidence` button — quick manual entry flow
@@ -445,8 +454,19 @@ Back-first navigation. They are rendered once per scan and stored, so a button
 press never re-derives them and paging cannot shift items between pages.
 Buttons on messages older than this layout route to the view that replaced
 them; a report this chat no longer holds offers `🔄 Refresh health` rather than
-a dead end. The `📅 Review month` control shows the `/arcp` instructions and
-changes nothing by itself.
+a dead end. Legacy combined Actions page callbacks continue to open stored
+evidence where practical.
+
+The `📅 Review month` control opens an inline picker. Selecting a month only
+previews it. The existing health-profile review-date storage path is called
+only after an explicit `Confirm`; Back and Cancel make no persisted change.
+The typed `/arcp <month> <year>` route remains compatible.
+
+Health interaction telemetry uses the existing PHI-free funnel logger. It may
+record only allowlisted structural values for pane, queue, page and review-month
+selection/confirmation events. It does not retain the chosen month or year. It
+must never record message text, portfolio content, Kaizen links, credentials,
+or any new raw identifier.
 
 ### Future Web Dashboard
 
@@ -468,6 +488,9 @@ changes nothing by itself.
 - Pathway switching never deletes evidence.
 - No automated submission to Kaizen, GMC, deanery, or recruitment portal.
 - Clinical content, supervisor names, and patient details must not appear in analytics or health snapshots.
+- Health funnel events contain structural navigation/setup metadata only; no
+  message text, portfolio content, link, credential or new identifier is
+  permitted.
 
 ---
 

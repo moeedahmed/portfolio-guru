@@ -1116,21 +1116,29 @@ def test_every_health_view_can_switch_directly_to_the_other_three():
     )
 
 
-def test_actions_pager_appears_only_where_there_is_another_page():
+def test_action_queue_pager_appears_only_where_there_is_another_page():
     import bot
 
-    first = _buttons(bot._health_view_keyboard("actions", page=0, page_count=4))
-    middle = _buttons(bot._health_view_keyboard("actions", page=1, page_count=4))
-    last = _buttons(bot._health_view_keyboard("actions", page=3, page_count=4))
-    single = _buttons(bot._health_view_keyboard("actions", page=0, page_count=1))
+    first = _buttons(bot._health_view_keyboard(
+        "action_queue", queue="draft", page=0, page_count=4
+    ))
+    middle = _buttons(bot._health_view_keyboard(
+        "action_queue", queue="draft", page=1, page_count=4
+    ))
+    last = _buttons(bot._health_view_keyboard(
+        "action_queue", queue="draft", page=3, page_count=4
+    ))
+    single = _buttons(bot._health_view_keyboard(
+        "action_queue", queue="draft", page=0, page_count=1
+    ))
 
-    assert ('➡️ Next', "ACTION|health_page|1") in first
+    assert ('➡️ Next', "ACTION|health_queue|draft|1") in first
     assert not any(text == '⬅️ Previous' for text, _ in first)
-    assert ('⬅️ Previous', "ACTION|health_page|0") in middle
-    assert ('➡️ Next', "ACTION|health_page|2") in middle
+    assert ('⬅️ Previous', "ACTION|health_queue|draft|0") in middle
+    assert ('➡️ Next', "ACTION|health_queue|draft|2") in middle
     assert not any(text == '➡️ Next' for text, _ in last)
-    assert ('⬅️ Previous', "ACTION|health_page|2") in last
-    assert not any(data.startswith("ACTION|health_page") for _text, data in single)
+    assert ('⬅️ Previous', "ACTION|health_queue|draft|2") in last
+    assert not any(data.startswith("ACTION|health_queue|draft") for _text, data in single)
 
     # Telegram rejects callback data over 64 bytes; every one of ours is tiny.
     assert all(len(data.encode()) <= 64 for _text, data in first + middle + last)
@@ -1156,7 +1164,8 @@ def test_health_compact_report_moves_audit_detail_behind_buttons():
         "Scanned: Portfolio Guru filing history only: 3 case(s) in last 6 months\n"
         "Window: last 6 months of Portfolio Guru filings only; add your ARCP month to time this to your cycle\n"
         "Assumed pathway: Training (CCT) — change if wrong\n"
-        "Confidence: low — Kaizen index not available, so this cannot reflect your full portfolio\n\n"
+        "Refresh: no Kaizen refresh available; this is a partial local view\n"
+        "Scope: partial — the Kaizen index was unavailable\n\n"
         "*Evidence gap level:* 🔴 Red\n"
         "*Why:* Red because CPD evidence is missing.\n\n"
         "*Next 3 useful filing actions*\n"
@@ -1178,9 +1187,10 @@ def test_health_compact_report_moves_audit_detail_behind_buttons():
     assert "*Evidence basis*" not in summary
     assert "*Activity snapshot*" not in summary
     assert "*Visible domain coverage*" not in summary
-    assert "*Scan confidence*" in summary
+    assert "*Scan facts*" in summary
     assert "Scanned: Portfolio Guru filing history only" in summary
-    assert "Confidence: low" in summary
+    assert "Refresh: no Kaizen refresh available" in summary
+    assert "Confidence:" not in summary
 
 
 def test_health_compact_report_no_index_leads_with_sync_needed():
@@ -1298,9 +1308,8 @@ def test_limited_detail_pages_have_consistent_emoji_headings():
 
 
 @pytest.mark.asyncio
-async def test_limited_activity_snapshot_notes_low_confidence(monkeypatch):
-    """The limited-mode activity snapshot must read like product UX and disclose
-    low confidence because the full Kaizen scan is unavailable."""
+async def test_limited_activity_snapshot_states_partial_scope(monkeypatch):
+    """The limited-mode activity snapshot states the exact missing source."""
     import bot
 
     async def _snapshot(*_a, **_k):
@@ -1318,13 +1327,14 @@ async def test_limited_activity_snapshot_notes_low_confidence(monkeypatch):
         "BODY", 9700, [], "ST6", limited_view=True
     )
     assert "*Activity snapshot*" in appended
-    assert "Confidence: low" in appended
-    assert "full Kaizen scan not available" in appended
+    assert "Scope: partial" in appended
+    assert "Kaizen index not available" in appended
+    assert "Confidence:" not in appended
 
     not_limited = await bot._append_health_activity_snapshot(
         "BODY", 9700, [], "ST6", limited_view=False
     )
-    assert "Confidence: low" not in not_limited
+    assert "Scope: partial" not in not_limited
 
 
 @pytest.mark.asyncio
@@ -1427,6 +1437,7 @@ async def test_stale_health_buttons_recover_instead_of_dead_ending(monkeypatch):
     button from the previous layout, and a report this chat no longer holds
     each have to land somewhere real."""
     import bot
+    monkeypatch.setattr(bot, "_track_funnel_event", lambda *_args, **_kwargs: None)
 
     sim = BotSimulator(user_id=4243)
     context = sim._make_context()
@@ -1463,23 +1474,27 @@ async def test_stale_health_buttons_recover_instead_of_dead_ending(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_review_month_button_explains_the_command_and_changes_nothing(monkeypatch):
-    """Health reads the review month; only the doctor sets it."""
+async def test_review_month_button_opens_picker_and_changes_nothing(monkeypatch):
+    """Opening the picker is non-mutating; only Confirm can persist."""
     import bot
 
     sim = BotSimulator(user_id=4244)
     context = sim._make_context()
     saved = []
     monkeypatch.setattr(bot, "save_health_profile", lambda profile: saved.append(profile))
+    monkeypatch.setattr(bot, "_track_funnel_event", lambda *_args, **_kwargs: None)
 
     await bot.handle_action_button(
         sim._make_callback_update("ACTION|health_review_setup"), context
     )
 
-    assert "/arcp Oct 2026" in sim.get_last_text()
-    assert "Nothing has been changed." in sim.get_last_text()
+    assert "nothing changes until you tap Confirm" in sim.get_last_text()
     assert saved == []
-    assert ('📍 Priorities', "ACTION|health_view|priorities") in sim.get_last_buttons()
+    assert any(
+        callback.startswith("ACTION|health_review_select|")
+        for _label, callback in sim.get_last_buttons()
+    )
+    assert ('🔙 Cancel', "ACTION|health_view|priorities") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio

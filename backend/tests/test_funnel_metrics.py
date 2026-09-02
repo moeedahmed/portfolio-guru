@@ -30,6 +30,19 @@ def test_safe_metadata_strips_unknown_keys():
     ) == {"source": "voice", "form_type": "CBD"}
 
 
+def test_safe_metadata_keeps_health_navigation_but_not_review_month():
+    assert fm.safe_metadata(
+        {
+            "view": "coverage",
+            "queue": "draft",
+            "page": 2,
+            "month": 10,
+            "year": 2026,
+            "evidence_title": "clinical content",
+        }
+    ) == {"view": "coverage", "queue": "draft", "page": 2}
+
+
 def test_log_event_writes_phi_free_record(log_path):
     record = fm.log_event(
         user_id=12345,

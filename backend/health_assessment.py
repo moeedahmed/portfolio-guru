@@ -110,6 +110,10 @@ class HealthAssessment:
     tagged_items: int = 0
     untagged_items: int = 0
     untagged_by_form: dict[str, int] = field(default_factory=dict)
+    # Evidence that the classifier could not place in one of the six universal
+    # Health categories. It remains in the scan denominator and is disclosed in
+    # Coverage rather than disappearing from the report.
+    outside_core_items: int = 0
     # False when the portfolio is too small for a domain comparison to mean
     # anything. Coverage renders the reason instead of the comparison.
     balance_is_comparable: bool = False
@@ -228,6 +232,7 @@ def compute_health_assessment(
         tagged_items=tagged,
         untagged_items=untagged,
         untagged_by_form=untagged_forms,
+        outside_core_items=sum(1 for item in items if item.domain not in CORE_DOMAINS),
         balance_is_comparable=core_total >= IMBALANCE_MIN_ITEMS,
     )
 
@@ -346,17 +351,17 @@ def _next_actions(
     """
     actions: list[str] = []
 
-    if awaiting:
-        oldest = awaiting[0]
-        actions.append(
-            f"{_plural(len(awaiting), 'item')} with someone else — oldest a "
-            f"{form_label(oldest.form_type, 'form')} dated "
-            f"{oldest.event_date.strftime('%-d %b %Y')}"
-        )
     if drafts:
         oldest = drafts[0]
         actions.append(
             f"{_plural(len(drafts), 'draft')} of your own unfinished — oldest a "
+            f"{form_label(oldest.form_type, 'form')} dated "
+            f"{oldest.event_date.strftime('%-d %b %Y')}"
+        )
+    if awaiting:
+        oldest = awaiting[0]
+        actions.append(
+            f"{_plural(len(awaiting), 'item')} with someone else — oldest a "
             f"{form_label(oldest.form_type, 'form')} dated "
             f"{oldest.event_date.strftime('%-d %b %Y')}"
         )

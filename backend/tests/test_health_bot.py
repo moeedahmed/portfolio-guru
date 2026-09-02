@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from telegram.error import BadRequest
@@ -69,6 +69,276 @@ async def test_safe_edit_text_retries_plain_text_when_markdown_is_invalid():
     assert result == "ok"
     assert target.edit_text.await_count == 2
     assert target.edit_text.await_args_list[1].kwargs == {}
+
+
+@pytest.mark.asyncio
+async def test_safe_edit_text_swallows_identical_text_and_markup_bad_request():
+    import bot
+
+    target = SimpleNamespace(
+        edit_text=AsyncMock(
+            side_effect=BadRequest(
+                "Message is not modified: specified new message content and "
+                "reply markup are exactly the same as the current content"
+            )
+        )
+    )
+
+    assert await bot._safe_edit_text(target, "Same", reply_markup=None) is None
+    target.edit_text.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_safe_edit_text_reraises_other_bad_request():
+    import bot
+
+    target = SimpleNamespace(
+        edit_text=AsyncMock(side_effect=BadRequest("Chat not found"))
+    )
+
+    with pytest.raises(BadRequest, match="Chat not found"):
+        await bot._safe_edit_text(target, "Changed")
+
+
+def _seed_health_navigation(bot, context) -> None:
+    bot._store_health_report_context(
+        context,
+        views={
+            "priorities": "priorities",
+            "actions": "actions landing",
+            "coverage": "coverage",
+            "curriculum": "curriculum",
+            "scan": "scan",
+        },
+        action_pages=["legacy page 1", "legacy page 2"],
+        action_queue_pages={
+            "draft": ["draft page 1", "draft page 2"],
+            "awaiting": ["awaiting page 1", "awaiting page 2"],
+        },
+        action_queue_totals={"draft": 7, "awaiting": 10},
+        needs_review_month=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_health_actions_callbacks_open_independent_paginated_queues(monkeypatch):
+    import bot
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+    _seed_health_navigation(bot, context)
+    track = Mock()
+    monkeypatch.setattr(bot, "_track_funnel_event", track)
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_view|actions"), context
+    )
+    assert sim.get_last_text() == "actions landing"
+    assert ("📝 Your drafts (7)", "ACTION|health_queue|draft|0") in sim.get_last_buttons()
+    assert ("⏳ Awaiting sign-off (10)", "ACTION|health_queue|awaiting|0") in sim.get_last_buttons()
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_queue|draft|1"), context
+    )
+    assert sim.get_last_text() == "draft page 2"
+    assert ("⬅️ Previous", "ACTION|health_queue|draft|0") in sim.get_last_buttons()
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_queue|awaiting|0"), context
+    )
+    assert sim.get_last_text() == "awaiting page 1"
+    assert ("➡️ Next", "ACTION|health_queue|awaiting|1") in sim.get_last_buttons()
+    assert context.user_data["last_health_report"]["queue_page"] == {
+        "draft": 1,
+        "awaiting": 0,
+    }
+    track.assert_any_call(
+        context,
+        "health_pane_selected",
+        update_last=False,
+        view="actions",
+    )
+    track.assert_any_call(
+        context,
+        "health_queue_selected",
+        update_last=False,
+        queue="awaiting",
+        page=0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_legacy_health_page_callback_still_opens_stored_evidence():
+    import bot
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+    _seed_health_navigation(bot, context)
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_page|1"), context
+    )
+
+    assert sim.get_last_text() == "legacy page 2"
+
+
+@pytest.mark.asyncio
+async def test_review_month_selection_and_back_do_not_persist(monkeypatch):
+    import bot
+
+    profile = _profile(4242, Pathway.training_arcp)
+    saved: list[HealthProfile] = []
+    monkeypatch.setattr(bot, "_get_or_default_health_profile", lambda _user_id: profile)
+    monkeypatch.setattr(bot, "save_health_profile", saved.append)
+    track = Mock()
+    monkeypatch.setattr(bot, "_track_funnel_event", track)
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+    _seed_health_navigation(bot, context)
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_review_setup"), context
+    )
+    assert saved == []
+    month_callback = next(
+        callback
+        for _label, callback in sim.get_last_buttons()
+        if callback.startswith("ACTION|health_review_select|")
+    )
+
+    await bot.handle_action_button(sim._make_callback_update(month_callback), context)
+    assert saved == []
+    assert "Nothing has been saved yet" in sim.get_last_text()
+    assert any(
+        callback.startswith("ACTION|health_review_confirm|")
+        for _label, callback in sim.get_last_buttons()
+    )
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_view|priorities"), context
+    )
+    assert saved == []
+    assert sim.get_last_text() == "priorities"
+    track.assert_any_call(
+        context,
+        "health_review_month_setup",
+        update_last=False,
+    )
+    track.assert_any_call(
+        context,
+        "health_review_month_selected",
+        update_last=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_review_month_confirmation_persists_through_existing_profile_path(monkeypatch):
+    import bot
+
+    profile = _profile(4242, Pathway.training_arcp)
+    saved: list[HealthProfile] = []
+    track = Mock()
+    monkeypatch.setattr(bot, "_get_or_default_health_profile", lambda _user_id: profile)
+    monkeypatch.setattr(bot, "save_health_profile", saved.append)
+    monkeypatch.setattr(bot, "_track_funnel_event", track)
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_review_select|2026-10"), context
+    )
+    assert saved == []
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_review_confirm|2026-10"), context
+    )
+
+    assert len(saved) == 1
+    assert saved[0].pathway_config[bot.REVIEW_DATE_KEY] == "2026-10-01"
+    assert (
+        "📍 Back to priorities",
+        "ACTION|health_view|priorities",
+    ) in sim.get_last_buttons()
+    track.assert_any_call(
+        context,
+        "health_review_month_confirmed",
+        update_last=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_arcp_command_remains_a_compatible_review_month_write_path(monkeypatch):
+    import bot
+
+    profile = _profile(4242, Pathway.training_arcp)
+    saved: list[HealthProfile] = []
+    monkeypatch.setattr(bot, "_get_or_default_health_profile", lambda _user_id: profile)
+    monkeypatch.setattr(bot, "save_health_profile", saved.append)
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+    context.args = ["Oct", "2026"]
+    await bot.arcp_command(sim._make_text_update("/arcp Oct 2026"), context)
+
+    assert saved[0].pathway_config[bot.REVIEW_DATE_KEY] == "2026-10-01"
+
+
+def test_health_funnel_metadata_allowlist_keeps_only_structural_fields(monkeypatch):
+    import sys
+    import bot
+
+    logged = Mock()
+    monkeypatch.setitem(sys.modules, "funnel_metrics", SimpleNamespace(log_event=logged))
+    monkeypatch.setattr(bot, "_audit_event", Mock())
+    context = SimpleNamespace(user_data={})
+
+    bot._track_funnel_event(
+        context,
+        "health_queue_selected",
+        update_last=False,
+        view="actions",
+        queue="draft",
+        page=1,
+        month=10,
+        year=2026,
+        message_text="private narrative",
+        portfolio_content="private portfolio content",
+        link="https://kaizen.example/private",
+        credential="secret",
+        raw_user_id="123",
+    )
+
+    assert logged.call_args.kwargs["metadata"] == {
+        "view": "actions",
+        "queue": "draft",
+        "page": 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_health_callback_seeds_user_identity_before_telemetry(monkeypatch):
+    import bot
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+    _seed_health_navigation(bot, context)
+    track = Mock()
+    monkeypatch.setattr(bot, "_track_funnel_event", track)
+
+    assert "_audit_user_id" not in context.user_data
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_view|coverage"), context
+    )
+
+    assert context.user_data["_audit_user_id"] == 4242
+    track.assert_any_call(
+        context,
+        "health_pane_selected",
+        update_last=False,
+        view="coverage",
+    )
 
 
 @pytest.fixture
@@ -468,7 +738,8 @@ async def test_arcp_health_falls_back_to_deterministic_output_when_llm_fails(mon
     assert "Partial scan: Portfolio Guru filings only" in text
     assert "Listed, not ranked" in text
     assert "\n1. " not in text
-    assert "Confidence: low" in views["scan"]
+    assert "Scope: partial — the Kaizen index was unavailable" in views["scan"]
+    assert "Confidence:" not in views["scan"]
     assert "Limited view: based on Portfolio Guru filings only" in views["scan"]
     # No readiness verdict, in any of its old spellings.
     for verdict in ("Well covered", "Needs attention", "Evidence gap level:", "ARCP risk:", "🔴 Red"):
@@ -1173,10 +1444,9 @@ def test_reconcile_action_severity_is_noop_for_amber_and_red():
 # ── Evidence basis / Domain detail button-page copy ──────────────────────────
 
 
-def test_evidence_basis_shows_last_scanned_and_arcp_month_setup_prompt():
-    """The Evidence basis page must show a concise 'Last scanned' line when a
-    Kaizen index timestamp is available, and frame the missing ARCP month as a
-    setup prompt rather than a warning-like defect ('not set yet')."""
+def test_evidence_basis_shows_refresh_freshness_and_arcp_month_setup_prompt():
+    """Scan info dates the refresh and states its freshness precisely, while
+    framing the missing ARCP month as a setup prompt."""
     import bot
     from kaizen_index import IndexRunRow, KaizenSyncStatus
 
@@ -1204,11 +1474,57 @@ def test_evidence_basis_shows_last_scanned_and_arcp_month_setup_prompt():
     )
 
     assert context.startswith("*Evidence basis*")
-    assert "Last scanned: 2026-06-01 12:38 BST" in context
+    assert (
+        "Refresh: 2026-06-01 12:38 BST — older than 24 hours; recent activity may be missing"
+        in context
+    )
+    assert "Confidence:" not in context
     # The prompt must name the command that sets it. It used to instruct
     # doctors to add their ARCP month while offering no way to do so.
     assert "set your review month with /arcp" in context
     assert "not set yet" not in context
+
+
+@pytest.mark.parametrize(
+    ("run_status", "expected"),
+    [
+        ("failed", "latest refresh failed; existing indexed evidence may be older"),
+        (
+            "drift",
+            "latest refresh stopped because the source changed unexpectedly; "
+            "existing indexed evidence may be older",
+        ),
+        (
+            "auth_required",
+            "latest refresh needs Kaizen reconnection; existing indexed evidence may be older",
+        ),
+        (
+            "running",
+            "latest refresh is still running; existing indexed evidence may be older",
+        ),
+    ],
+)
+def test_scan_info_names_unsuccessful_refresh_without_false_age(run_status, expected):
+    import bot
+    from kaizen_index import IndexRunRow, KaizenSyncStatus
+
+    status = KaizenSyncStatus(
+        last_run=IndexRunRow(
+            id=1,
+            user_id="4242",
+            started_at="2026-09-01T22:30:00",
+            finished_at="2026-09-01T22:38:00",
+            status=run_status,
+            rows_seen=412,
+            rows_written=0,
+            rows_drifted=1 if run_status == "drift" else 0,
+        ),
+        items_indexed=412,
+    )
+
+    line = bot._health_last_scanned_line(status)
+    assert expected in line
+    assert "older than 24 hours" not in line
 
 
 def test_evidence_basis_omits_last_scanned_when_no_sync_run():
@@ -1226,7 +1542,8 @@ def test_evidence_basis_omits_last_scanned_when_no_sync_run():
     )
 
     assert context.startswith("*Evidence basis*")
-    assert "Last scanned" not in context
+    assert "Refresh: no Kaizen refresh available; this is a partial local view" in context
+    assert "Confidence:" not in context
 
 
 def test_arcp_domain_detail_uses_visible_coverage_heading_and_title_case():
