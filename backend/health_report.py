@@ -311,7 +311,11 @@ def _review_lines(
     review_date: Optional[date], today: date, *, has_button: bool = True
 ) -> list[str]:
     """Review timing, pointing at whichever route this view actually offers."""
-    route = "tap 📅 Review month" if has_button else "set it with /arcp"
+    route = (
+        "open ☰ More and choose Review month"
+        if has_button
+        else "set it with /arcp"
+    )
     if not review_date:
         return [f"No review month set — {route} to time this to your cycle."]
     when = review_date.strftime("%B %Y")

@@ -1010,7 +1010,7 @@ async def test_inline_health_button_auto_scans_when_stale(monkeypatch):
     send_result = run_health.await_args.kwargs["send_result"]
     await send_result("Health result", None)
     assert ('📌 Actions', "ACTION|health_view|actions") in sim.get_last_buttons()
-    assert ('🔎 Scan info', "ACTION|health_view|scan") in sim.get_last_buttons()
+    assert ('☰ More', "ACTION|health_view|more") in sim.get_last_buttons()
     assert ("🔙 Back", "ACTION|back_to_menu") not in sim.get_last_buttons()
     assert ('🔙 Back', "ACTION|settings") not in sim.get_last_buttons()
 
@@ -1084,20 +1084,19 @@ def _buttons(markup):
     ]
 
 
-def test_every_health_view_can_switch_directly_to_the_other_three():
-    """Back-then-forward is two taps and one lost place. The four views are
-    always one tap apart, in the same position on every view."""
+def test_health_detail_views_do_not_restore_the_global_button_wall():
     import bot
 
-    nav = [
+    old_wall = {
         ('📍 Priorities', "ACTION|health_view|priorities"),
         ('📌 Actions', "ACTION|health_view|actions"),
         ('📊 Coverage', "ACTION|health_view|coverage"),
         ('🔎 Scan info', "ACTION|health_view|scan"),
-    ]
-    for view in ("priorities", "actions", "coverage", "curriculum", "scan"):
-        buttons = _buttons(bot._health_view_keyboard(view))
-        assert buttons[-4:] == nav
+    }
+    for view in ("action_queue", "coverage", "curriculum", "scan"):
+        kwargs = {"queue": "draft"} if view == "action_queue" else {}
+        buttons = _buttons(bot._health_view_keyboard(view, **kwargs))
+        assert not old_wall.issubset(set(buttons))
         # Exactly one meaningful functional emoji per active button — no
         # decorative stars, sparkles, robots or party icons riding along.
         for text, _data in buttons:
@@ -1105,7 +1104,7 @@ def test_every_health_view_can_switch_directly_to_the_other_three():
             assert len(symbols) == 1 and text.startswith(symbols[0])
 
     assert (
-        '🏷️ Curriculum tags', "ACTION|health_view|curriculum"
+        '🏷️ Curriculum', "ACTION|health_view|curriculum"
     ) in _buttons(bot._health_view_keyboard("coverage"))
 
     # Generic filing actions are gone: a New case button on a Coverage pane is
@@ -1144,14 +1143,16 @@ def test_action_queue_pager_appears_only_where_there_is_another_page():
     assert all(len(data.encode()) <= 64 for _text, data in first + middle + last)
 
 
-def test_review_month_button_is_offered_only_when_no_month_is_set():
+def test_review_month_button_lives_in_more_not_priorities():
     import bot
 
     with_route = _buttons(bot._health_view_keyboard("priorities", needs_review_month=True))
     without = _buttons(bot._health_view_keyboard("priorities", needs_review_month=False))
+    more = _buttons(bot._health_view_keyboard("more"))
 
-    assert ('📅 Review month', "ACTION|health_review_setup") in with_route
+    assert not any(data == "ACTION|health_review_setup" for _text, data in with_route)
     assert not any(data == "ACTION|health_review_setup" for _text, data in without)
+    assert ('📅 Review month', "ACTION|health_review_setup") in more
 
 
 def test_health_compact_report_moves_audit_detail_behind_buttons():
@@ -1407,6 +1408,7 @@ async def test_health_view_buttons_render_the_stored_views(monkeypatch):
     context.user_data["last_health_report"] = {
         "views": {
             "priorities": "📍 Priorities view",
+            "more": "☰ More Health view",
             "coverage": "📊 Coverage view",
             "curriculum": "🏷️ Curriculum view",
             "scan": "🔎 Scan info view",
@@ -1417,6 +1419,7 @@ async def test_health_view_buttons_render_the_stored_views(monkeypatch):
     }
 
     for action, expected in (
+        ("ACTION|health_view|more", "☰ More Health view"),
         ("ACTION|health_view|coverage", "📊 Coverage view"),
         ("ACTION|health_view|curriculum", "🏷️ Curriculum view"),
         ("ACTION|health_view|scan", "🔎 Scan info view"),
@@ -1426,8 +1429,10 @@ async def test_health_view_buttons_render_the_stored_views(monkeypatch):
     ):
         await bot.handle_action_button(sim._make_callback_update(action), context)
         assert sim.get_last_text() == expected
-        assert ('📌 Actions', "ACTION|health_view|actions") in sim.get_last_buttons()
 
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_view|more"), context
+    )
     assert ('📅 Review month', "ACTION|health_review_setup") in sim.get_last_buttons()
 
 
@@ -1494,7 +1499,7 @@ async def test_review_month_button_opens_picker_and_changes_nothing(monkeypatch)
         callback.startswith("ACTION|health_review_select|")
         for _label, callback in sim.get_last_buttons()
     )
-    assert ('🔙 Cancel', "ACTION|health_view|priorities") in sim.get_last_buttons()
+    assert ('🔙 Cancel', "ACTION|health_view|more") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio

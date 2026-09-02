@@ -106,6 +106,7 @@ def _seed_health_navigation(bot, context) -> None:
         views={
             "priorities": "priorities",
             "actions": "actions landing",
+            "more": "more",
             "coverage": "coverage",
             "curriculum": "curriculum",
             "scan": "scan",
@@ -118,6 +119,69 @@ def _seed_health_navigation(bot, context) -> None:
         action_queue_totals={"draft": 7, "awaiting": 10},
         needs_review_month=True,
     )
+
+
+def _keyboard_rows(markup) -> list[list[tuple[str, str]]]:
+    return [
+        [(button.text, button.callback_data) for button in row]
+        for row in markup.inline_keyboard
+    ]
+
+
+def test_health_keyboards_are_contextual_in_every_view():
+    import bot
+
+    assert _keyboard_rows(
+        bot._health_view_keyboard("priorities", needs_review_month=True)
+    ) == [[
+        ("📌 Actions", "ACTION|health_view|actions"),
+        ("☰ More", "ACTION|health_view|more"),
+    ]]
+    assert _keyboard_rows(
+        bot._health_view_keyboard(
+            "actions", queue_totals={"draft": 7, "awaiting": 10}
+        )
+    ) == [
+        [
+            ("📝 Drafts (7)", "ACTION|health_queue|draft|0"),
+            ("⏳ Awaiting (10)", "ACTION|health_queue|awaiting|0"),
+        ],
+        [("🔙 Back", "ACTION|health_view|priorities")],
+    ]
+    assert _keyboard_rows(
+        bot._health_view_keyboard(
+            "action_queue", page=1, page_count=3, queue="draft"
+        )
+    ) == [
+        [
+            ("⬅️ Previous", "ACTION|health_queue|draft|0"),
+            ("➡️ Next", "ACTION|health_queue|draft|2"),
+        ],
+        [("🔙 Actions", "ACTION|health_view|actions")],
+    ]
+    assert _keyboard_rows(bot._health_view_keyboard("more")) == [
+        [
+            ("📊 Coverage", "ACTION|health_view|coverage"),
+            ("🏷️ Curriculum", "ACTION|health_view|curriculum"),
+        ],
+        [
+            ("🔎 Scan info", "ACTION|health_view|scan"),
+            ("📅 Review month", "ACTION|health_review_setup"),
+        ],
+        [("🔙 Back", "ACTION|health_view|priorities")],
+    ]
+    assert _keyboard_rows(bot._health_view_keyboard("coverage")) == [
+        [
+            ("🏷️ Curriculum", "ACTION|health_view|curriculum"),
+            ("🔙 More", "ACTION|health_view|more"),
+        ],
+    ]
+    assert _keyboard_rows(bot._health_view_keyboard("curriculum")) == [
+        [("🔙 Coverage", "ACTION|health_view|coverage")],
+    ]
+    assert _keyboard_rows(bot._health_view_keyboard("scan")) == [
+        [("🔙 More", "ACTION|health_view|more")],
+    ]
 
 
 @pytest.mark.asyncio
@@ -134,8 +198,8 @@ async def test_health_actions_callbacks_open_independent_paginated_queues(monkey
         sim._make_callback_update("ACTION|health_view|actions"), context
     )
     assert sim.get_last_text() == "actions landing"
-    assert ("📝 Your drafts (7)", "ACTION|health_queue|draft|0") in sim.get_last_buttons()
-    assert ("⏳ Awaiting sign-off (10)", "ACTION|health_queue|awaiting|0") in sim.get_last_buttons()
+    assert ("📝 Drafts (7)", "ACTION|health_queue|draft|0") in sim.get_last_buttons()
+    assert ("⏳ Awaiting (10)", "ACTION|health_queue|awaiting|0") in sim.get_last_buttons()
 
     await bot.handle_action_button(
         sim._make_callback_update("ACTION|health_queue|draft|1"), context
@@ -168,6 +232,25 @@ async def test_health_actions_callbacks_open_independent_paginated_queues(monkey
 
 
 @pytest.mark.asyncio
+async def test_health_more_and_contextual_back_callbacks_route_to_stored_views():
+    import bot
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+    _seed_health_navigation(bot, context)
+
+    for callback, expected_text in (
+        ("ACTION|health_view|more", "more"),
+        ("ACTION|health_view|coverage", "coverage"),
+        ("ACTION|health_view|curriculum", "curriculum"),
+        ("ACTION|health_view|scan", "scan"),
+        ("ACTION|health_view|priorities", "priorities"),
+    ):
+        await bot.handle_action_button(sim._make_callback_update(callback), context)
+        assert sim.get_last_text() == expected_text
+
+
+@pytest.mark.asyncio
 async def test_legacy_health_page_callback_still_opens_stored_evidence():
     import bot
 
@@ -180,6 +263,43 @@ async def test_legacy_health_page_callback_still_opens_stored_evidence():
     )
 
     assert sim.get_last_text() == "legacy page 2"
+
+
+@pytest.mark.asyncio
+async def test_legacy_health_view_and_detail_callbacks_keep_routing():
+    import bot
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+    _seed_health_navigation(bot, context)
+
+    for callback, expected_text in (
+        ("ACTION|health_view|coverage", "coverage"),
+        ("ACTION|health_view|scan", "scan"),
+        ("ACTION|health_detail|stuck", "actions landing"),
+        ("ACTION|health_detail|domains", "coverage"),
+        ("ACTION|health_detail|basis", "scan"),
+        ("ACTION|health_back_to_report", "priorities"),
+    ):
+        await bot.handle_action_button(sim._make_callback_update(callback), context)
+        assert sim.get_last_text() == expected_text
+
+
+@pytest.mark.asyncio
+async def test_expired_health_report_callback_offers_refresh_recovery():
+    import bot
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_view|coverage"), context
+    )
+
+    assert sim.get_last_text() == bot._HEALTH_REPORT_EXPIRED
+    assert sim.get_last_buttons() == [
+        ("🔄 Refresh health", "ACTION|health"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -201,6 +321,7 @@ async def test_review_month_selection_and_back_do_not_persist(monkeypatch):
         sim._make_callback_update("ACTION|health_review_setup"), context
     )
     assert saved == []
+    assert ("🔙 Cancel", "ACTION|health_view|more") in sim.get_last_buttons()
     month_callback = next(
         callback
         for _label, callback in sim.get_last_buttons()
@@ -214,12 +335,13 @@ async def test_review_month_selection_and_back_do_not_persist(monkeypatch):
         callback.startswith("ACTION|health_review_confirm|")
         for _label, callback in sim.get_last_buttons()
     )
+    assert ("🔙 Cancel", "ACTION|health_view|more") in sim.get_last_buttons()
 
     await bot.handle_action_button(
-        sim._make_callback_update("ACTION|health_view|priorities"), context
+        sim._make_callback_update("ACTION|health_view|more"), context
     )
     assert saved == []
-    assert sim.get_last_text() == "priorities"
+    assert sim.get_last_text() == "more"
     track.assert_any_call(
         context,
         "health_review_month_setup",
@@ -258,7 +380,7 @@ async def test_review_month_confirmation_persists_through_existing_profile_path(
     assert len(saved) == 1
     assert saved[0].pathway_config[bot.REVIEW_DATE_KEY] == "2026-10-01"
     assert (
-        "📍 Back to priorities",
+        "📍 Priorities",
         "ACTION|health_view|priorities",
     ) in sim.get_last_buttons()
     track.assert_any_call(

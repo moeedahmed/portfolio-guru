@@ -429,38 +429,49 @@ next_actions              3–5 concrete suggested actions
 ### Telegram (MVP)
 
 - `/health` — opens `📍 Priorities`: at most three findings, scan notice when
-  the read is partial, review-month line, safety line. One phone screen.
+  the read is partial, review-month line, safety line. One phone screen. Its
+  only controls are one row containing `📌 Actions` and `☰ More`; an unset or
+  passed review month points the doctor to More.
 - `📌 Actions` — agency-first landing: `Your drafts` before `Awaiting sign-off`,
   clear totals, and up to three direct Kaizen-linked examples from each. Each
   queue opens separately and paginates independently at five items per page.
   Old items retain neutral review language; Health does not chase, submit,
-  edit or delete anything.
+  edit or delete anything. The landing keyboard is one row containing
+  `📝 Drafts (N)` and `⏳ Awaiting (N)`, followed by `🔙 Back` to Priorities.
+  Queue pages show only applicable Previous/Next controls and `🔙 Actions`.
+- `☰ More` — a lightweight route to Coverage, Curriculum, Scan info and Review
+  month, arranged two per row where labels remain clear, followed by Back to
+  Priorities.
 - `📊 Coverage` — each core category's total and last-12-month activity, the
   count outside the six-category denominator, and a tagged-versus-untagged
   curriculum scope statement. The largest-versus-smallest domain warning is
-  absent. `🏷️ Curriculum tags` remains an optional drill-down.
+  absent. Its only routes are `🏷️ Curriculum` and Back to More. Curriculum
+  returns to Coverage.
 - `🔎 Scan info` — source and item count, refresh time plus freshness or
   partiality, window, pathway, review timing and fuller limitations. It states
   that automated classification and curriculum adequacy are not certified;
-  it has no `High confidence` label.
+  it has no `High confidence` label and returns to More. `/arcp` remains a
+  compatible typed route from its review-timing guidance.
 
 - `/pathway` — select or change pathway
 - `Add evidence` button — quick manual entry flow
 - After each WPBA filing → "Evidence added to Portfolio Health. [View health]"
 - Weekly nudge (already exists) → enhanced with health context
 
-All four views are one tap from each other on every view; there is no
-Back-first navigation. They are rendered once per scan and stored, so a button
+Navigation is contextual: queue and detail panes never repeat a global Health
+button wall. Evidence views are rendered once per scan and stored, so a button
 press never re-derives them and paging cannot shift items between pages.
-Buttons on messages older than this layout route to the view that replaced
-them; a report this chat no longer holds offers `🔄 Refresh health` rather than
-a dead end. Legacy combined Actions page callbacks continue to open stored
-evidence where practical.
+Buttons on messages older than this layout, including `health_page`,
+`health_detail`, direct Coverage and Scan callbacks, route to the view that
+replaced them; a report this chat no longer holds offers `🔄 Refresh health`
+rather than a dead end. Legacy combined Actions page callbacks continue to open
+stored evidence where practical.
 
 The `📅 Review month` control opens an inline picker. Selecting a month only
 previews it. The existing health-profile review-date storage path is called
-only after an explicit `Confirm`; Back and Cancel make no persisted change.
-The typed `/arcp <month> <year>` route remains compatible.
+only after an explicit `Confirm`; Cancel returns to More and makes no persisted
+change. Successful confirmation offers one route to Priorities so the new
+countdown is visible. The typed `/arcp <month> <year>` route remains compatible.
 
 Health interaction telemetry uses the existing PHI-free funnel logger. It may
 record only allowlisted structural values for pane, queue, page and review-month

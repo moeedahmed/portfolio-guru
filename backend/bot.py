@@ -3103,25 +3103,6 @@ def _health_refresh_confirm_keyboard() -> InlineKeyboardMarkup:
 LEGACY_HEALTH_DETAIL_VIEWS = {"stuck": "actions", "domains": "coverage", "basis": "scan"}
 
 
-def _health_nav_rows() -> list[list[InlineKeyboardButton]]:
-    """The four Health views, in the same two rows on every view.
-
-    Stable positions matter more than hiding whichever view is open: a doctor
-    who has learned that Coverage is bottom-left should not find the buttons
-    have moved under their thumb when they get there.
-    """
-    return [
-        [
-            InlineKeyboardButton("📍 Priorities", callback_data="ACTION|health_view|priorities"),
-            InlineKeyboardButton("📌 Actions", callback_data="ACTION|health_view|actions"),
-        ],
-        [
-            InlineKeyboardButton("📊 Coverage", callback_data="ACTION|health_view|coverage"),
-            InlineKeyboardButton("🔎 Scan info", callback_data="ACTION|health_view|scan"),
-        ],
-    ]
-
-
 def _health_view_keyboard(
     view: str = "priorities",
     *,
@@ -3131,30 +3112,39 @@ def _health_view_keyboard(
     queue_totals: dict[str, int] | None = None,
     needs_review_month: bool = False,
 ) -> InlineKeyboardMarkup:
-    """Persistent navigation across the four views, plus this view's controls."""
+    """Show only the controls that are useful from the current Health view.
+
+    ``needs_review_month`` remains in the signature for callers and stored
+    reports created before contextual navigation. Review-month setup now lives
+    under More regardless of whether a month is already set.
+    """
     rows: list[list[InlineKeyboardButton]] = []
 
-    if view == "coverage":
+    if view == "priorities":
         rows.append([
             InlineKeyboardButton(
-                "🏷️ Curriculum tags", callback_data="ACTION|health_view|curriculum"
-            )
+                "📌 Actions", callback_data="ACTION|health_view|actions"
+            ),
+            InlineKeyboardButton("☰ More", callback_data="ACTION|health_view|more"),
         ])
 
-    if view == "actions" and queue_totals is not None:
+    elif view == "actions" and queue_totals is not None:
         totals = queue_totals or {}
-        rows.extend([
-            [InlineKeyboardButton(
-                f"📝 Your drafts ({int(totals.get('draft', 0))})",
+        rows.append([
+            InlineKeyboardButton(
+                f"📝 Drafts ({int(totals.get('draft', 0))})",
                 callback_data="ACTION|health_queue|draft|0",
-            )],
-            [InlineKeyboardButton(
-                f"⏳ Awaiting sign-off ({int(totals.get('awaiting', 0))})",
+            ),
+            InlineKeyboardButton(
+                f"⏳ Awaiting ({int(totals.get('awaiting', 0))})",
                 callback_data="ACTION|health_queue|awaiting|0",
-            )],
+            ),
+        ])
+        rows.append([
+            InlineKeyboardButton("🔙 Back", callback_data="ACTION|health_view|priorities")
         ])
 
-    if view == "action_queue" and queue in {"draft", "awaiting"}:
+    elif view == "action_queue" and queue in {"draft", "awaiting"}:
         pager: list[InlineKeyboardButton] = []
         if page > 0:
             pager.append(InlineKeyboardButton(
@@ -3169,28 +3159,13 @@ def _health_view_keyboard(
         if pager:
             rows.append(pager)
         rows.append([
-            InlineKeyboardButton("↩️ All actions", callback_data="ACTION|health_view|actions")
+            InlineKeyboardButton("🔙 Actions", callback_data="ACTION|health_view|actions")
         ])
 
     # Direct callers and buttons sent before V2.1 used one combined page
     # number. Keep their previous/next route alive while new reports pass
     # queue totals and use the independent queue controls above.
-    if view == "actions" and queue_totals is None and page_count > 1:
-        pager: list[InlineKeyboardButton] = []
-        if page > 0:
-            pager.append(InlineKeyboardButton(
-                "⬅️ Previous", callback_data=f"ACTION|health_page|{page - 1}"
-            ))
-        if page < page_count - 1:
-            pager.append(InlineKeyboardButton(
-                "➡️ Next", callback_data=f"ACTION|health_page|{page + 1}"
-            ))
-        if pager:
-            rows.append(pager)
-
-    # Buttons sent before V2.1 used one combined page number. Keep their
-    # previous/next route alive while new reports use independent queues.
-    if view == "legacy_actions" and page_count > 1:
+    elif view == "actions" and queue_totals is None:
         pager: list[InlineKeyboardButton] = []
         if page > 0:
             pager.append(InlineKeyboardButton(
@@ -3203,17 +3178,68 @@ def _health_view_keyboard(
         if pager:
             rows.append(pager)
         rows.append([
-            InlineKeyboardButton("↩️ All actions", callback_data="ACTION|health_view|actions")
+            InlineKeyboardButton("🔙 Back", callback_data="ACTION|health_view|priorities")
         ])
 
-    if view == "priorities" and needs_review_month:
-        # Routes into the existing user-driven /arcp copy. Health reads
-        # settings; it never writes them behind a doctor's back.
-        rows.append([InlineKeyboardButton(
-            "📅 Review month", callback_data="ACTION|health_review_setup"
-        )])
+    # Buttons sent before V2.1 used one combined page number. Keep their
+    # previous/next route alive while new reports use independent queues.
+    elif view == "legacy_actions":
+        pager: list[InlineKeyboardButton] = []
+        if page > 0:
+            pager.append(InlineKeyboardButton(
+                "⬅️ Previous", callback_data=f"ACTION|health_page|{page - 1}"
+            ))
+        if page < page_count - 1:
+            pager.append(InlineKeyboardButton(
+                "➡️ Next", callback_data=f"ACTION|health_page|{page + 1}"
+            ))
+        if pager:
+            rows.append(pager)
+        rows.append([
+            InlineKeyboardButton("🔙 Actions", callback_data="ACTION|health_view|actions")
+        ])
 
-    rows.extend(_health_nav_rows())
+    elif view == "more":
+        rows.extend([
+            [
+                InlineKeyboardButton(
+                    "📊 Coverage", callback_data="ACTION|health_view|coverage"
+                ),
+                InlineKeyboardButton(
+                    "🏷️ Curriculum", callback_data="ACTION|health_view|curriculum"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔎 Scan info", callback_data="ACTION|health_view|scan"
+                ),
+                InlineKeyboardButton(
+                    "📅 Review month", callback_data="ACTION|health_review_setup"
+                ),
+            ],
+            [InlineKeyboardButton(
+                "🔙 Back", callback_data="ACTION|health_view|priorities"
+            )],
+        ])
+
+    elif view == "coverage":
+        rows.append([
+            InlineKeyboardButton(
+                "🏷️ Curriculum", callback_data="ACTION|health_view|curriculum"
+            ),
+            InlineKeyboardButton("🔙 More", callback_data="ACTION|health_view|more"),
+        ])
+
+    elif view == "curriculum":
+        rows.append([
+            InlineKeyboardButton("🔙 Coverage", callback_data="ACTION|health_view|coverage")
+        ])
+
+    elif view == "scan":
+        rows.append([
+            InlineKeyboardButton("🔙 More", callback_data="ACTION|health_view|more")
+        ])
+
     return InlineKeyboardMarkup(rows)
 
 
@@ -3238,6 +3264,11 @@ def _health_empty_keyboard() -> InlineKeyboardMarkup:
 _HEALTH_REPORT_EXPIRED = (
     "That health report is no longer in memory for this chat.\n\n"
     "Tap Refresh health to run a new read-only scan."
+)
+
+_HEALTH_MORE_TEXT = (
+    "☰ *More Health*\n\n"
+    "Check coverage, curriculum tags or scan details, or update your review month."
 )
 
 
@@ -3423,7 +3454,7 @@ def _health_review_month_picker_keyboard(reference=None) -> InlineKeyboardMarkup
         ))
     rows = [choices[index:index + 3] for index in range(0, len(choices), 3)]
     rows.append([
-        InlineKeyboardButton("🔙 Cancel", callback_data="ACTION|health_view|priorities")
+        InlineKeyboardButton("🔙 Cancel", callback_data="ACTION|health_view|more")
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -3438,7 +3469,7 @@ def _health_review_month_confirmation_keyboard(review_month) -> InlineKeyboardMa
         [InlineKeyboardButton(
             "📅 Choose another month", callback_data="ACTION|health_review_setup"
         )],
-        [InlineKeyboardButton("🔙 Cancel", callback_data="ACTION|health_view|priorities")],
+        [InlineKeyboardButton("🔙 Cancel", callback_data="ACTION|health_view|more")],
     ])
 
 
@@ -7321,7 +7352,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton(
-                    "📍 Back to priorities",
+                    "📍 Priorities",
                     callback_data="ACTION|health_view|priorities",
                 )
             ]]),
@@ -8346,8 +8377,8 @@ async def _run_health_analysis(
     )
     scan_is_fresh = _sync_status_is_fresh(sync_status)
 
-    # All four views are rendered here, once, from one assessment. A button
-    # press then only reads what this scan already decided.
+    # Every evidence view is rendered here, once, from one assessment. A
+    # button press then only reads what this scan already decided.
     priorities_text = format_priorities(
         assessment,
         month_label=_dt_module.now().strftime("%B %Y"),
@@ -8360,6 +8391,7 @@ async def _run_health_analysis(
     views = {
         "priorities": priorities_text,
         "actions": format_actions(assessment),
+        "more": _HEALTH_MORE_TEXT,
         "coverage": format_coverage(assessment),
         "curriculum": format_curriculum(assessment),
         "scan": format_scan_info(

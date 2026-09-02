@@ -347,16 +347,19 @@ def test_review_countdown_is_shown_when_a_month_is_set():
     assert "Next review: October 2026 — 5 weeks away." in text
 
 
-def test_missing_review_month_offers_the_button_that_sets_it():
-    """The old report told doctors to add their ARCP month while offering only
-    a typed command."""
+def test_missing_review_month_points_to_more_navigation():
     _, text = _priorities(_balanced())
-    assert "No review month set — tap 📅 Review month" in text
+    assert (
+        "No review month set — open ☰ More and choose Review month" in text
+    )
 
 
 def test_passed_review_month_asks_for_the_next_one():
     _, text = _priorities(_balanced(), review_date=date(2026, 5, 1))
-    assert "Review month May 2026 has passed — tap 📅 Review month" in text
+    assert (
+        "Review month May 2026 has passed — open ☰ More and choose Review month"
+        in text
+    )
 
 
 def test_scan_info_points_at_the_command_because_it_has_no_button():
