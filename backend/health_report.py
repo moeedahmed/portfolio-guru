@@ -1,16 +1,18 @@
-"""Render the four Portfolio Health views for Telegram.
+"""Render Portfolio Health views for Telegram.
 
 Separated from the assessment so the reading and the wording can be tested
 apart, and so a future web dashboard renders the same numbers differently
 without reimplementing the logic.
 
-Four views, each with one job:
+The everyday journey has three views, each with one job:
 
-- **Priorities** — what is worth a doctor's attention now, in a few lines.
-- **Actions** — agency-first landing plus independent draft and sign-off queues,
-  five per page, each item linked to Kaizen.
-- **Coverage** — what the portfolio holds, and what that does and does not say.
-- **Scan info** — where the reading came from and what it could not see.
+- **What to do next** — draft and awaiting counts, with doctor-controlled work
+  first.
+- **Draft/Awaiting queues** — five per page, each item linked to Kaizen.
+- **About** — only the provenance and limits needed to trust the report.
+
+Actions, Coverage, Curriculum and Scan info remain renderable for buttons in
+older Telegram messages, but are not routes in the everyday journey.
 
 Three rules shape all of them:
 
@@ -44,13 +46,8 @@ from health_assessment import (
 # One phone screen of items per Actions page.
 ACTIONS_PAGE_SIZE = 5
 
-# How many findings Priorities shows. More than this and it stops being a
-# triage view; a doctor scrolling a list is reading, not deciding.
-PRIORITY_LINES = 3
-
 SAFETY_LINE = (
-    "_A planning aid, not a formal training, registration or appraisal "
-    "outcome._"
+    "_Read-only planning aid, not a formal training or appraisal judgement._"
 )
 
 
@@ -75,7 +72,7 @@ def _describe(item: StuckEvidence, *, link: bool = True) -> str:
 
 
 def ordered_actions(assessment: HealthAssessment) -> list[tuple[str, StuckEvidence]]:
-    """Every unfinished item in one stable total order.
+    """Every older unfinished item selected by the assessment, in stable order.
 
     Doctor-controlled drafts come first, then items awaiting somebody else;
     within each group the assessment's own total order (oldest first, then form
@@ -98,13 +95,19 @@ def actions_page_count(
 
 
 GROUP_HEADINGS = {
-    "draft": ("Your drafts", "Started by you and not completed."),
-    "awaiting": ("Awaiting sign-off", "Submitted and waiting for someone else."),
+    "draft": (
+        "Older drafts",
+        "Started by you, still incomplete, and highlighted after waiting.",
+    ),
+    "awaiting": (
+        "Older items awaiting sign-off",
+        "Submitted, waiting for someone else, and highlighted after waiting.",
+    ),
 }
 
 QUEUE_LABELS = {
-    "draft": "drafts",
-    "awaiting": "awaiting sign-off",
+    "draft": "older drafts",
+    "awaiting": "older items awaiting sign-off",
 }
 
 # Entries older than this are offered for review rather than listed as work
@@ -149,14 +152,14 @@ def format_action_queue(
     page: int = 0,
     page_size: int = ACTIONS_PAGE_SIZE,
 ) -> str:
-    """One independently paginated queue of unfinished evidence."""
+    """One independently paginated queue of older unfinished evidence."""
     items = _queue_items(assessment, queue)
     heading, note = GROUP_HEADINGS[queue]
     label = QUEUE_LABELS[queue]
     if not items:
         return (
             f"📌 *{heading}*\n\n"
-            f"No {label} were visible in this scan."
+            f"No {label} were highlighted in this scan."
         )
 
     pages = action_queue_page_count(assessment, queue, page_size=page_size)
@@ -191,8 +194,7 @@ def _format_legacy_actions_page(
     if not items:
         return (
             "📌 *Actions*\n\n"
-            "Nothing scanned is unfinished — every item has completed its "
-            "Kaizen workflow."
+            "No older unfinished items were highlighted in this scan."
         )
     pages = actions_page_count(assessment, page_size=page_size)
     page = max(0, min(page, pages - 1))
@@ -200,7 +202,7 @@ def _format_legacy_actions_page(
     window = items[start:start + page_size]
     lines = [
         "📌 *Actions*",
-        f"Showing {start + 1}–{start + len(window)} of {len(items)} unfinished items",
+        f"Showing {start + 1}–{start + len(window)} of {len(items)} older unfinished items",
         "",
     ]
     current_group: Optional[str] = None
@@ -233,8 +235,7 @@ def format_actions(
     if not assessment.stuck_total:
         return (
             "📌 *Actions*\n\n"
-            "Nothing scanned is unfinished — every item has completed its "
-            "Kaizen workflow."
+            "No older unfinished items were highlighted in this scan."
         )
 
     lines = ["📌 *Actions*", ""]
@@ -250,7 +251,7 @@ def format_actions(
             if len(items) > len(examples):
                 lines.append(f"_{len(items) - len(examples)} more in this queue._")
         else:
-            lines.append("• None visible in this scan")
+            lines.append("• None highlighted in this scan")
         lines.append("")
 
     old_note = _old_item_note(shown)
@@ -260,7 +261,7 @@ def format_actions(
     return "\n".join(lines).strip()
 
 
-# ── Priorities ──────────────────────────────────────────────────────────────
+# ── Action-first landing ────────────────────────────────────────────────────
 
 
 def _pathway_counter(readiness: Optional[dict]) -> list[str]:
@@ -292,13 +293,17 @@ def _pathway_counter(readiness: Optional[dict]) -> list[str]:
     return lines + [""]
 
 
-def _scan_notice(*, limited_view: bool, scan_is_fresh: bool) -> Optional[str]:
+def _scan_notice(
+    *, limited_view: bool, partial_scan: bool, scan_is_fresh: bool
+) -> Optional[str]:
     """One factual line when the reading cannot claim to be complete."""
     if limited_view:
         return (
             "_Partial scan: Portfolio Guru filings only, so this does not "
             "cover your whole Kaizen portfolio._"
         )
+    if partial_scan:
+        return "_Partial scan: some Kaizen evidence may be missing._"
     if not scan_is_fresh:
         return (
             "_Scan freshness unconfirmed: recent Kaizen activity may be "
@@ -334,56 +339,96 @@ def format_priorities(
     review_date: Optional[date] = None,
     today: Optional[date] = None,
     limited_view: bool = False,
+    partial_scan: bool = False,
     scan_is_fresh: bool = True,
     pathway_readiness: Optional[dict] = None,
 ) -> str:
-    """The default view: the few things worth deciding about, and nothing else.
+    """The compact action-first landing; the legacy signature stays callable."""
+    draft_total = len(assessment.stuck_drafts)
+    awaiting_total = len(assessment.stuck_awaiting)
+    lines = ["*What to do next*", ""]
+    if draft_total:
+        lines.extend([
+            f"*Review older drafts — {draft_total}*",
+            "These have been unfinished long enough to be worth reviewing. Decide whether each is still worth completing.",
+        ])
+    elif awaiting_total:
+        lines.extend([
+            "*No older drafts to review*",
+            "No drafts have been waiting long enough to be highlighted here.",
+        ])
+    else:
+        lines.extend([
+            "*No older unfinished items to review*",
+            "No drafts or awaiting-sign-off items have been waiting long enough to be highlighted here.",
+        ])
 
-    Totals, balance and provenance all have their own view. Repeating them here
-    is what turned the previous report into two phone screens in which the same
-    Teaching Observation appeared as a reason, a section and an action.
-    """
-    reference = today or date.today()
-    lines = ["📍 *Portfolio priorities*", month_label, ""]
+    if awaiting_total:
+        lines.extend([
+            "",
+            f"*Older items awaiting sign-off — {awaiting_total}*",
+            "Review only if follow-up is still needed.",
+        ])
+    lines.append("")
 
-    notice = _scan_notice(limited_view=limited_view, scan_is_fresh=scan_is_fresh)
+    notice = _scan_notice(
+        limited_view=limited_view,
+        partial_scan=partial_scan,
+        scan_is_fresh=scan_is_fresh,
+    )
     if notice:
         lines.extend([notice, ""])
-
-    # Cross-item patterns are often the most useful third finding (for example,
-    # every Teaching Observation remaining unfinished). Keep them on the
-    # decision screen rather than burying them below the Coverage inventory.
-    findings = list(dict.fromkeys(assessment.next_actions + assessment.patterns))[
-        :PRIORITY_LINES
-    ]
-    if notice:
-        # An incomplete scan cannot rank anything: the item that would have
-        # come first may not have been read at all. Bullets, not positions.
-        lines.extend(f"• {finding}" for finding in findings)
-        lines.append("_Listed, not ranked — this scan is incomplete._")
-    else:
-        lines.extend(
-            f"{index}. {finding}" for index, finding in enumerate(findings, start=1)
-        )
-        lines.append(
-            "_Ordered by workflow state and dates, not by training or "
-            "curriculum importance._"
-        )
-    lines.append("")
-
-    if assessment.stuck_total:
-        lines.append(
-            f"_Tap 📌 Actions for all {assessment.stuck_total}, each linked to "
-            "Kaizen._"
-        )
-        lines.append("")
-
-    lines.extend(_review_lines(review_date, reference))
-    lines.append("")
-
-    lines.extend(_pathway_counter(pathway_readiness))
-
     lines.append(SAFETY_LINE)
+    return "\n".join(lines).strip()
+
+
+# ── About ───────────────────────────────────────────────────────────────────
+
+
+def format_about(
+    *,
+    basis: str,
+    limited_view: bool = False,
+    scan_is_fresh: bool = True,
+) -> str:
+    """Concise provenance and limits for the everyday Health journey."""
+    facts = [
+        line
+        for line in basis.strip().splitlines()
+        if line.startswith(("Scanned:", "Refresh:", "Scope:"))
+    ]
+    joined = " ".join(facts).lower()
+    if limited_view and "partial" not in joined:
+        facts.append("Scope: partial — the full Kaizen index was unavailable")
+        joined = " ".join(facts).lower()
+    if not scan_is_fresh and not any(
+        marker in joined
+        for marker in (
+            "freshness unconfirmed",
+            "older than",
+            "may be older",
+            "may be missing",
+            "partial",
+            "failed",
+            "did not complete",
+            "still running",
+            "reconnection",
+        )
+    ):
+        facts.append(
+            "Freshness unconfirmed: recent Kaizen activity may be missing."
+        )
+
+    lines = ["ℹ️ *About Portfolio Health*", ""]
+    lines.extend(facts or ["Source: no scan provenance is available for this report."])
+    lines.extend([
+        "",
+        "Counts highlight older Kaizen workflow items visible to this scan, not every unfinished item.",
+        "Automated classification can be wrong; check the linked Kaizen item if something looks wrong.",
+        "Portfolio Health does not edit, file, chase or delete anything.",
+        "",
+        SAFETY_LINE,
+    ])
     return "\n".join(lines).strip()
 
 
@@ -536,7 +581,7 @@ def format_scan_info(
 
     ``basis`` is the caller's source/freshness/pathway/confidence block — only
     the bot knows the sync state — and this adds the timing and the caveats
-    that would crowd out the decision-relevant lines on Priorities.
+    that would crowd out the action-first landing.
     """
     reference = today or date.today()
     lines = ["🔎 *Scan info*", ""]
@@ -548,6 +593,7 @@ def format_scan_info(
     lines.append("")
 
     lines.extend(_pathway_expectations(pathway_readiness))
+    lines.extend(_pathway_counter(pathway_readiness))
 
     lines.append("*What this cannot see*")
     lines.append(
@@ -555,8 +601,9 @@ def format_scan_info(
         "is absent rather than missing."
     )
     lines.append(
-        "• Unfinished items come from Kaizen workflow states. The scan holds no "
-        "deadline, so no item here is described as overdue."
+        "• Health highlights older unfinished items from Kaizen workflow states; "
+        "it does not show every unfinished item. The scan holds no deadline, so "
+        "nothing here is described as overdue."
     )
     lines.append(
         "• Curriculum spread covers tagged items only; category and SLO counts "

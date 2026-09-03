@@ -43,6 +43,7 @@ from health_assessment import compute_health_assessment
 from health_report import (
     action_queue_page_count,
     actions_page_count,
+    format_about,
     format_action_queue,
     format_actions,
     format_coverage,
@@ -3115,18 +3116,30 @@ def _health_view_keyboard(
     """Show only the controls that are useful from the current Health view.
 
     ``needs_review_month`` remains in the signature for callers and stored
-    reports created before contextual navigation. Review-month setup now lives
-    under More regardless of whether a month is already set.
+    reports created before action-first navigation. It no longer changes the
+    everyday keyboard.
     """
     rows: list[list[InlineKeyboardButton]] = []
 
     if view == "priorities":
-        rows.append([
-            InlineKeyboardButton(
-                "📌 Actions", callback_data="ACTION|health_view|actions"
-            ),
-            InlineKeyboardButton("☰ More", callback_data="ACTION|health_view|more"),
-        ])
+        totals = queue_totals or {}
+        draft_total = int(totals.get("draft", 0))
+        awaiting_total = int(totals.get("awaiting", 0))
+        if draft_total:
+            rows.append([InlineKeyboardButton(
+                f"📝 Review drafts ({draft_total})",
+                callback_data="ACTION|health_queue|draft|0",
+            )])
+        secondary: list[InlineKeyboardButton] = []
+        if awaiting_total:
+            secondary.append(InlineKeyboardButton(
+                f"⏳ Awaiting ({awaiting_total})",
+                callback_data="ACTION|health_queue|awaiting|0",
+            ))
+        secondary.append(InlineKeyboardButton(
+            "ℹ️ About", callback_data="ACTION|health_view|about"
+        ))
+        rows.append(secondary)
 
     elif view == "actions" and queue_totals is not None:
         totals = queue_totals or {}
@@ -3141,7 +3154,7 @@ def _health_view_keyboard(
             ),
         ])
         rows.append([
-            InlineKeyboardButton("🔙 Back", callback_data="ACTION|health_view|priorities")
+            InlineKeyboardButton("🔙 Health", callback_data="ACTION|health_view|priorities")
         ])
 
     elif view == "action_queue" and queue in {"draft", "awaiting"}:
@@ -3159,7 +3172,7 @@ def _health_view_keyboard(
         if pager:
             rows.append(pager)
         rows.append([
-            InlineKeyboardButton("🔙 Actions", callback_data="ACTION|health_view|actions")
+            InlineKeyboardButton("🔙 Health", callback_data="ACTION|health_view|priorities")
         ])
 
     # Direct callers and buttons sent before V2.1 used one combined page
@@ -3178,7 +3191,7 @@ def _health_view_keyboard(
         if pager:
             rows.append(pager)
         rows.append([
-            InlineKeyboardButton("🔙 Back", callback_data="ACTION|health_view|priorities")
+            InlineKeyboardButton("🔙 Health", callback_data="ACTION|health_view|priorities")
         ])
 
     # Buttons sent before V2.1 used one combined page number. Keep their
@@ -3196,48 +3209,12 @@ def _health_view_keyboard(
         if pager:
             rows.append(pager)
         rows.append([
-            InlineKeyboardButton("🔙 Actions", callback_data="ACTION|health_view|actions")
+            InlineKeyboardButton("🔙 Health", callback_data="ACTION|health_view|priorities")
         ])
 
-    elif view == "more":
-        rows.extend([
-            [
-                InlineKeyboardButton(
-                    "📊 Coverage", callback_data="ACTION|health_view|coverage"
-                ),
-                InlineKeyboardButton(
-                    "🏷️ Curriculum", callback_data="ACTION|health_view|curriculum"
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    "🔎 Scan info", callback_data="ACTION|health_view|scan"
-                ),
-                InlineKeyboardButton(
-                    "📅 Review month", callback_data="ACTION|health_review_setup"
-                ),
-            ],
-            [InlineKeyboardButton(
-                "🔙 Back", callback_data="ACTION|health_view|priorities"
-            )],
-        ])
-
-    elif view == "coverage":
+    elif view in {"about", "more", "coverage", "curriculum", "scan"}:
         rows.append([
-            InlineKeyboardButton(
-                "🏷️ Curriculum", callback_data="ACTION|health_view|curriculum"
-            ),
-            InlineKeyboardButton("🔙 More", callback_data="ACTION|health_view|more"),
-        ])
-
-    elif view == "curriculum":
-        rows.append([
-            InlineKeyboardButton("🔙 Coverage", callback_data="ACTION|health_view|coverage")
-        ])
-
-    elif view == "scan":
-        rows.append([
-            InlineKeyboardButton("🔙 More", callback_data="ACTION|health_view|more")
+            InlineKeyboardButton("🔙 Health", callback_data="ACTION|health_view|priorities")
         ])
 
     return InlineKeyboardMarkup(rows)
@@ -3266,9 +3243,18 @@ _HEALTH_REPORT_EXPIRED = (
     "Tap Refresh health to run a new read-only scan."
 )
 
-_HEALTH_MORE_TEXT = (
-    "☰ *More Health*\n\n"
-    "Check coverage, curriculum tags or scan details, or update your review month."
+# Persisted Telegram callbacks can outlive a release. Do not replay text from
+# older Health presentations whose claims no longer match the current filter.
+_HEALTH_REPORT_VERSION = 2
+
+_HEALTH_ABOUT_FALLBACK = (
+    "ℹ️ *About Portfolio Health*\n\n"
+    "Source: this older report has no current read-only scan details.\n"
+    "Freshness unconfirmed: recent Kaizen activity may be missing.\n\n"
+    "Counts highlight older Kaizen workflow items visible to its scan, not every unfinished item.\n"
+    "Automated classification can be wrong; check the linked Kaizen item if something looks wrong.\n"
+    "Portfolio Health does not edit, file, chase or delete anything.\n\n"
+    "_Read-only planning aid, not a formal training or appraisal judgement._"
 )
 
 
@@ -3531,6 +3517,7 @@ def _store_health_report_context(
     page a doctor is paging through change underneath them.
     """
     context.user_data["last_health_report"] = {
+        "version": _HEALTH_REPORT_VERSION,
         "views": views,
         "action_pages": action_pages,
         "page": 0,
@@ -3559,6 +3546,8 @@ def _health_view_payload(
     as an error, so the doctor lands on real evidence instead of a dead end.
     """
     report = context.user_data.get("last_health_report") or {}
+    if report.get("version") != _HEALTH_REPORT_VERSION:
+        return None
     views = report.get("views") or {}
     pages = report.get("action_pages") or []
     queue_pages = report.get("action_queue_pages") or {}
@@ -3579,6 +3568,20 @@ def _health_view_payload(
             )
         return text, _health_view_keyboard(
             "actions", queue_totals=queue_totals
+        )
+
+    if view == "priorities":
+        text = views.get("priorities")
+        if text is None:
+            return None
+        return text, _health_view_keyboard(
+            "priorities", queue_totals=queue_totals
+        )
+
+    if view == "about":
+        return (
+            views.get("about") or _HEALTH_ABOUT_FALLBACK,
+            _health_view_keyboard("about"),
         )
 
     if view == "action_queue" and queue in {"draft", "awaiting"}:
@@ -7222,7 +7225,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         or action == "health_back_to_report"
     ):
         # One branch for every Health navigation button, including the ones
-        # left behind on messages sent before the four-view layout: an old
+        # left behind on messages sent before action-first Health: an old
         # "Unfinished" tap lands on Actions rather than a dead end.
         page = None
         queue = None
@@ -7242,6 +7245,8 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 page = 0
         elif action.startswith("health_view|"):
             view = action.split("|", 1)[1]
+            if view == "more":
+                view = "about"
         elif action.startswith("health_detail|"):
             view = LEGACY_HEALTH_DETAIL_VIEWS.get(action.split("|", 1)[1], "priorities")
         else:
@@ -7348,11 +7353,11 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         await _safe_edit_text(
             query.message,
             f"✅ Review month set to *{parsed.strftime('%B %Y')}*.\n\n"
-            "Return to Priorities to see the new countdown.",
+            "Return to Health.",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton(
-                    "📍 Priorities",
+                    "🔙 Health",
                     callback_data="ACTION|health_view|priorities",
                 )
             ]]),
@@ -8344,18 +8349,6 @@ async def _run_health_analysis(
         level_note = ""
 
     evidence_items, history, evidence_source = await _resolve_health_evidence(user_id)
-    if not evidence_items:
-        await send_result(
-            "📍 *Portfolio priorities*\n\n"
-            "No evidence was visible in this scan, so Portfolio Guru cannot "
-            "prioritise it yet.\n\n"
-            "If you already have Kaizen evidence, refresh the read-only scan. "
-            "Otherwise, send a case to create your first draft.\n\n"
-            "_This does not mean your Kaizen portfolio is empty. A planning aid, "
-            "not a formal training, registration or appraisal outcome._",
-            _health_empty_keyboard(),
-        )
-        return
 
     snapshot = compute_snapshot(profile, evidence_items)
     limited_view = evidence_source == "case_history"
@@ -8376,6 +8369,9 @@ async def _run_health_analysis(
         or review_date < _dt_module.now().date().replace(day=1)
     )
     scan_is_fresh = _sync_status_is_fresh(sync_status)
+    scan_is_partial = (
+        getattr(getattr(sync_status, "last_run", None), "status", None) == "partial"
+    )
 
     # Every evidence view is rendered here, once, from one assessment. A
     # button press then only reads what this scan already decided.
@@ -8384,26 +8380,32 @@ async def _run_health_analysis(
         month_label=_dt_module.now().strftime("%B %Y"),
         review_date=review_date,
         limited_view=limited_view,
+        partial_scan=scan_is_partial,
         scan_is_fresh=scan_is_fresh,
         pathway_readiness=snapshot.pathway_readiness,
     )
     await send_progress()
+    evidence_basis = _format_health_evidence_context(
+        source=evidence_source,
+        evidence_count=len(evidence_items),
+        history_count=len(history),
+        profile_is_default=profile_is_default,
+        sync_status=sync_status,
+        pathway=profile.pathway,
+    )
     views = {
         "priorities": priorities_text,
         "actions": format_actions(assessment),
-        "more": _HEALTH_MORE_TEXT,
+        "about": format_about(
+            basis=evidence_basis,
+            limited_view=limited_view,
+            scan_is_fresh=scan_is_fresh,
+        ),
         "coverage": format_coverage(assessment),
         "curriculum": format_curriculum(assessment),
         "scan": format_scan_info(
             assessment,
-            basis=_format_health_evidence_context(
-                source=evidence_source,
-                evidence_count=len(evidence_items),
-                history_count=len(history),
-                profile_is_default=profile_is_default,
-                sync_status=sync_status,
-                pathway=profile.pathway,
-            ),
+            basis=evidence_basis,
             review_date=review_date,
             limited_view=limited_view,
             pathway_readiness=snapshot.pathway_readiness,
@@ -8436,7 +8438,9 @@ async def _run_health_analysis(
     await send_result(
         priorities_text,
         _health_view_keyboard(
-            "priorities", needs_review_month=review_month_needs_setup
+            "priorities",
+            queue_totals=action_queue_totals,
+            needs_review_month=review_month_needs_setup,
         ),
     )
     return

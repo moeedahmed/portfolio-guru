@@ -200,7 +200,7 @@ async def test_health_falls_back_to_case_history_when_index_empty(
 async def test_run_health_analysis_uses_indexed_source_when_history_empty(
     kaizen_index, isolated_health_store, monkeypatch
 ):
-    """Indexed evidence alone is enough to produce a verdict; history may be empty."""
+    """Indexed evidence alone is enough to produce Health; history may be empty."""
     import bot
     import sys
 
@@ -244,12 +244,13 @@ async def test_run_health_analysis_uses_indexed_source_when_history_empty(
     )
 
     text = sent["text"]
-    assert text.startswith("📍 *Portfolio priorities*")
+    assert text.startswith("*What to do next*")
     # Provenance moved into Scan info; the counted evidence is still stated
     # there, so a doctor knows how much this was read from.
     assert "1 visible evidence item(s)" in store.user_data["last_health_report"]["views"]["scan"]
     assert "No Portfolio Guru cases filed yet" not in text
-    assert "1/36 WPBAs counted in this scan" in text
+    assert "1/36 WPBAs counted in this scan" not in text
+    assert "1/36 WPBAs counted in this scan" in store.user_data["last_health_report"]["views"]["scan"]
 
 
 @pytest.mark.asyncio
@@ -1009,8 +1010,9 @@ async def test_inline_health_button_auto_scans_when_stale(monkeypatch):
 
     send_result = run_health.await_args.kwargs["send_result"]
     await send_result("Health result", None)
-    assert ('📌 Actions', "ACTION|health_view|actions") in sim.get_last_buttons()
-    assert ('☰ More', "ACTION|health_view|more") in sim.get_last_buttons()
+    assert sim.get_last_buttons() == [
+        ("ℹ️ About", "ACTION|health_view|about"),
+    ]
     assert ("🔙 Back", "ACTION|back_to_menu") not in sim.get_last_buttons()
     assert ('🔙 Back', "ACTION|settings") not in sim.get_last_buttons()
 
@@ -1084,7 +1086,7 @@ def _buttons(markup):
     ]
 
 
-def test_health_detail_views_do_not_restore_the_global_button_wall():
+def test_removed_detail_views_are_legacy_only_and_return_to_health():
     import bot
 
     old_wall = {
@@ -1093,7 +1095,7 @@ def test_health_detail_views_do_not_restore_the_global_button_wall():
         ('📊 Coverage', "ACTION|health_view|coverage"),
         ('🔎 Scan info', "ACTION|health_view|scan"),
     }
-    for view in ("action_queue", "coverage", "curriculum", "scan"):
+    for view in ("action_queue", "about", "coverage", "curriculum", "scan"):
         kwargs = {"queue": "draft"} if view == "action_queue" else {}
         buttons = _buttons(bot._health_view_keyboard(view, **kwargs))
         assert not old_wall.issubset(set(buttons))
@@ -1103,16 +1105,10 @@ def test_health_detail_views_do_not_restore_the_global_button_wall():
             symbols = [ch for ch in text.replace("\ufe0f", "") if ord(ch) > 0x2000]
             assert len(symbols) == 1 and text.startswith(symbols[0])
 
-    assert (
-        '🏷️ Curriculum', "ACTION|health_view|curriculum"
-    ) in _buttons(bot._health_view_keyboard("coverage"))
-
-    # Generic filing actions are gone: a New case button on a Coverage pane is
-    # not justified by anything the scan found.
-    assert ('➕ New case', "ACTION|file") not in _buttons(bot._health_view_keyboard("coverage"))
-    assert ('🔙 Back', "ACTION|health_back_to_report") not in _buttons(
-        bot._health_view_keyboard("scan")
-    )
+    for view in ("about", "coverage", "curriculum", "scan"):
+        assert _buttons(bot._health_view_keyboard(view)) == [
+            ('🔙 Health', "ACTION|health_view|priorities")
+        ]
 
 
 def test_action_queue_pager_appears_only_where_there_is_another_page():
@@ -1143,16 +1139,24 @@ def test_action_queue_pager_appears_only_where_there_is_another_page():
     assert all(len(data.encode()) <= 64 for _text, data in first + middle + last)
 
 
-def test_review_month_button_lives_in_more_not_priorities():
+def test_review_month_and_removed_detail_controls_are_absent_from_everyday_health():
     import bot
 
     with_route = _buttons(bot._health_view_keyboard("priorities", needs_review_month=True))
     without = _buttons(bot._health_view_keyboard("priorities", needs_review_month=False))
-    more = _buttons(bot._health_view_keyboard("more"))
+    landing = _buttons(bot._health_view_keyboard(
+        "priorities", queue_totals={"draft": 2, "awaiting": 3}
+    ))
+    old_more = _buttons(bot._health_view_keyboard("more"))
 
     assert not any(data == "ACTION|health_review_setup" for _text, data in with_route)
     assert not any(data == "ACTION|health_review_setup" for _text, data in without)
-    assert ('📅 Review month', "ACTION|health_review_setup") in more
+    assert landing == [
+        ("📝 Review drafts (2)", "ACTION|health_queue|draft|0"),
+        ("⏳ Awaiting (3)", "ACTION|health_queue|awaiting|0"),
+        ("ℹ️ About", "ACTION|health_view|about"),
+    ]
+    assert old_more == [('🔙 Health', "ACTION|health_view|priorities")]
 
 
 def test_health_compact_report_moves_audit_detail_behind_buttons():
@@ -1396,7 +1400,7 @@ async def test_health_arcp_index_present_is_not_reported_as_a_partial_scan(
     assert "Partial scan" not in text
     assert "Limited view" not in scan
     assert not any(label in text for label in ("Well covered", "Needs attention", "Thin"))
-    assert "A planning aid, not a formal training" in text
+    assert "Read-only planning aid, not a formal training or appraisal judgement" in text
 
 
 @pytest.mark.asyncio
@@ -1406,9 +1410,10 @@ async def test_health_view_buttons_render_the_stored_views(monkeypatch):
     sim = BotSimulator(user_id=4242)
     context = sim._make_context()
     context.user_data["last_health_report"] = {
+        "version": bot._HEALTH_REPORT_VERSION,
         "views": {
             "priorities": "📍 Priorities view",
-            "more": "☰ More Health view",
+            "about": "ℹ️ About Health view",
             "coverage": "📊 Coverage view",
             "curriculum": "🏷️ Curriculum view",
             "scan": "🔎 Scan info view",
@@ -1419,7 +1424,8 @@ async def test_health_view_buttons_render_the_stored_views(monkeypatch):
     }
 
     for action, expected in (
-        ("ACTION|health_view|more", "☰ More Health view"),
+        ("ACTION|health_view|more", "ℹ️ About Health view"),
+        ("ACTION|health_view|about", "ℹ️ About Health view"),
         ("ACTION|health_view|coverage", "📊 Coverage view"),
         ("ACTION|health_view|curriculum", "🏷️ Curriculum view"),
         ("ACTION|health_view|scan", "🔎 Scan info view"),
@@ -1433,7 +1439,9 @@ async def test_health_view_buttons_render_the_stored_views(monkeypatch):
     await bot.handle_action_button(
         sim._make_callback_update("ACTION|health_view|more"), context
     )
-    assert ('📅 Review month', "ACTION|health_review_setup") in sim.get_last_buttons()
+    assert sim.get_last_buttons() == [
+        ('🔙 Health', "ACTION|health_view|priorities")
+    ]
 
 
 @pytest.mark.asyncio
@@ -1447,6 +1455,7 @@ async def test_stale_health_buttons_recover_instead_of_dead_ending(monkeypatch):
     sim = BotSimulator(user_id=4243)
     context = sim._make_context()
     context.user_data["last_health_report"] = {
+        "version": bot._HEALTH_REPORT_VERSION,
         "views": {"priorities": "📍 Priorities view", "coverage": "📊 Coverage view",
                   "scan": "🔎 Scan info view"},
         "action_pages": ["📌 Actions page 1", "📌 Actions page 2"],
@@ -1461,6 +1470,7 @@ async def test_stale_health_buttons_recover_instead_of_dead_ending(monkeypatch):
     # Buttons from the pre-V2 layout route to the view that replaced them,
     # and Actions resumes the page the doctor had reached.
     for legacy, expected in (
+        ("ACTION|health_view|more", bot._HEALTH_ABOUT_FALLBACK),
         ("ACTION|health_detail|stuck", "📌 Actions page 2"),
         ("ACTION|health_detail|domains", "📊 Coverage view"),
         ("ACTION|health_detail|basis", "🔎 Scan info view"),
@@ -1468,6 +1478,23 @@ async def test_stale_health_buttons_recover_instead_of_dead_ending(monkeypatch):
     ):
         await bot.handle_action_button(sim._make_callback_update(legacy), context)
         assert sim.get_last_text() == expected
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_view|more"), context
+    )
+    assert sim.get_last_buttons() == [
+        ('🔙 Health', "ACTION|health_view|priorities")
+    ]
+
+    # A report persisted by an older release is invalidated instead of replaying
+    # outdated completion or all-unfinished claims.
+    context.user_data["last_health_report"].pop("version")
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_page|9"), context
+    )
+    assert sim.get_last_text() is not None
+    assert "no longer in memory" in sim.get_last_text()
+    assert ('🔄 Refresh health', "ACTION|health") in sim.get_last_buttons()
 
     # With no stored report at all, the way back is one button, not a retype.
     fresh = BotSimulator(user_id=4243)

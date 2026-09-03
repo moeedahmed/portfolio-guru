@@ -106,7 +106,7 @@ def _seed_health_navigation(bot, context) -> None:
         views={
             "priorities": "priorities",
             "actions": "actions landing",
-            "more": "more",
+            "about": "about",
             "coverage": "coverage",
             "curriculum": "curriculum",
             "scan": "scan",
@@ -132,11 +132,18 @@ def test_health_keyboards_are_contextual_in_every_view():
     import bot
 
     assert _keyboard_rows(
-        bot._health_view_keyboard("priorities", needs_review_month=True)
-    ) == [[
-        ("📌 Actions", "ACTION|health_view|actions"),
-        ("☰ More", "ACTION|health_view|more"),
-    ]]
+        bot._health_view_keyboard(
+            "priorities",
+            queue_totals={"draft": 7, "awaiting": 10},
+            needs_review_month=True,
+        )
+    ) == [
+        [("📝 Review drafts (7)", "ACTION|health_queue|draft|0")],
+        [
+            ("⏳ Awaiting (10)", "ACTION|health_queue|awaiting|0"),
+            ("ℹ️ About", "ACTION|health_view|about"),
+        ],
+    ]
     assert _keyboard_rows(
         bot._health_view_keyboard(
             "actions", queue_totals={"draft": 7, "awaiting": 10}
@@ -146,7 +153,7 @@ def test_health_keyboards_are_contextual_in_every_view():
             ("📝 Drafts (7)", "ACTION|health_queue|draft|0"),
             ("⏳ Awaiting (10)", "ACTION|health_queue|awaiting|0"),
         ],
-        [("🔙 Back", "ACTION|health_view|priorities")],
+        [("🔙 Health", "ACTION|health_view|priorities")],
     ]
     assert _keyboard_rows(
         bot._health_view_keyboard(
@@ -157,35 +164,50 @@ def test_health_keyboards_are_contextual_in_every_view():
             ("⬅️ Previous", "ACTION|health_queue|draft|0"),
             ("➡️ Next", "ACTION|health_queue|draft|2"),
         ],
-        [("🔙 Actions", "ACTION|health_view|actions")],
+        [("🔙 Health", "ACTION|health_view|priorities")],
+    ]
+    assert _keyboard_rows(bot._health_view_keyboard("about")) == [
+        [("🔙 Health", "ACTION|health_view|priorities")],
     ]
     assert _keyboard_rows(bot._health_view_keyboard("more")) == [
-        [
-            ("📊 Coverage", "ACTION|health_view|coverage"),
-            ("🏷️ Curriculum", "ACTION|health_view|curriculum"),
-        ],
-        [
-            ("🔎 Scan info", "ACTION|health_view|scan"),
-            ("📅 Review month", "ACTION|health_review_setup"),
-        ],
-        [("🔙 Back", "ACTION|health_view|priorities")],
+        [("🔙 Health", "ACTION|health_view|priorities")],
     ]
     assert _keyboard_rows(bot._health_view_keyboard("coverage")) == [
-        [
-            ("🏷️ Curriculum", "ACTION|health_view|curriculum"),
-            ("🔙 More", "ACTION|health_view|more"),
-        ],
+        [("🔙 Health", "ACTION|health_view|priorities")],
     ]
     assert _keyboard_rows(bot._health_view_keyboard("curriculum")) == [
-        [("🔙 Coverage", "ACTION|health_view|coverage")],
+        [("🔙 Health", "ACTION|health_view|priorities")],
     ]
     assert _keyboard_rows(bot._health_view_keyboard("scan")) == [
-        [("🔙 More", "ACTION|health_view|more")],
+        [("🔙 Health", "ACTION|health_view|priorities")],
+    ]
+
+    # Empty queues are not rendered as buttons that can only fail on tap.
+    assert _keyboard_rows(
+        bot._health_view_keyboard(
+            "priorities", queue_totals={"draft": 0, "awaiting": 0}
+        )
+    ) == [[("ℹ️ About", "ACTION|health_view|about")]]
+    assert _keyboard_rows(
+        bot._health_view_keyboard(
+            "priorities", queue_totals={"draft": 0, "awaiting": 3}
+        )
+    ) == [[
+        ("⏳ Awaiting (3)", "ACTION|health_queue|awaiting|0"),
+        ("ℹ️ About", "ACTION|health_view|about"),
+    ]]
+    assert _keyboard_rows(
+        bot._health_view_keyboard(
+            "priorities", queue_totals={"draft": 2, "awaiting": 0}
+        )
+    ) == [
+        [("📝 Review drafts (2)", "ACTION|health_queue|draft|0")],
+        [("ℹ️ About", "ACTION|health_view|about")],
     ]
 
 
 @pytest.mark.asyncio
-async def test_health_actions_callbacks_open_independent_paginated_queues(monkeypatch):
+async def test_health_landing_callbacks_open_independent_paginated_queues(monkeypatch):
     import bot
 
     sim = BotSimulator(user_id=4242)
@@ -194,18 +216,22 @@ async def test_health_actions_callbacks_open_independent_paginated_queues(monkey
     track = Mock()
     monkeypatch.setattr(bot, "_track_funnel_event", track)
 
-    await bot.handle_action_button(
-        sim._make_callback_update("ACTION|health_view|actions"), context
-    )
-    assert sim.get_last_text() == "actions landing"
-    assert ("📝 Drafts (7)", "ACTION|health_queue|draft|0") in sim.get_last_buttons()
-    assert ("⏳ Awaiting (10)", "ACTION|health_queue|awaiting|0") in sim.get_last_buttons()
+    landing = bot._health_view_payload(context, "priorities")
+    assert landing is not None
+    assert _keyboard_rows(landing[1]) == [
+        [("📝 Review drafts (7)", "ACTION|health_queue|draft|0")],
+        [
+            ("⏳ Awaiting (10)", "ACTION|health_queue|awaiting|0"),
+            ("ℹ️ About", "ACTION|health_view|about"),
+        ],
+    ]
 
     await bot.handle_action_button(
         sim._make_callback_update("ACTION|health_queue|draft|1"), context
     )
     assert sim.get_last_text() == "draft page 2"
     assert ("⬅️ Previous", "ACTION|health_queue|draft|0") in sim.get_last_buttons()
+    assert ("🔙 Health", "ACTION|health_view|priorities") in sim.get_last_buttons()
 
     await bot.handle_action_button(
         sim._make_callback_update("ACTION|health_queue|awaiting|0"), context
@@ -218,12 +244,6 @@ async def test_health_actions_callbacks_open_independent_paginated_queues(monkey
     }
     track.assert_any_call(
         context,
-        "health_pane_selected",
-        update_last=False,
-        view="actions",
-    )
-    track.assert_any_call(
-        context,
         "health_queue_selected",
         update_last=False,
         queue="awaiting",
@@ -232,7 +252,7 @@ async def test_health_actions_callbacks_open_independent_paginated_queues(monkey
 
 
 @pytest.mark.asyncio
-async def test_health_more_and_contextual_back_callbacks_route_to_stored_views():
+async def test_old_more_maps_to_about_and_legacy_detail_views_remain_safe():
     import bot
 
     sim = BotSimulator(user_id=4242)
@@ -240,7 +260,8 @@ async def test_health_more_and_contextual_back_callbacks_route_to_stored_views()
     _seed_health_navigation(bot, context)
 
     for callback, expected_text in (
-        ("ACTION|health_view|more", "more"),
+        ("ACTION|health_view|more", "about"),
+        ("ACTION|health_view|about", "about"),
         ("ACTION|health_view|coverage", "coverage"),
         ("ACTION|health_view|curriculum", "curriculum"),
         ("ACTION|health_view|scan", "scan"),
@@ -248,6 +269,10 @@ async def test_health_more_and_contextual_back_callbacks_route_to_stored_views()
     ):
         await bot.handle_action_button(sim._make_callback_update(callback), context)
         assert sim.get_last_text() == expected_text
+        if callback != "ACTION|health_view|priorities":
+            assert sim.get_last_buttons() == [
+                ("🔙 Health", "ACTION|health_view|priorities")
+            ]
 
 
 @pytest.mark.asyncio
@@ -341,7 +366,7 @@ async def test_review_month_selection_and_back_do_not_persist(monkeypatch):
         sim._make_callback_update("ACTION|health_view|more"), context
     )
     assert saved == []
-    assert sim.get_last_text() == "more"
+    assert sim.get_last_text() == "about"
     track.assert_any_call(
         context,
         "health_review_month_setup",
@@ -380,7 +405,7 @@ async def test_review_month_confirmation_persists_through_existing_profile_path(
     assert len(saved) == 1
     assert saved[0].pathway_config[bot.REVIEW_DATE_KEY] == "2026-10-01"
     assert (
-        "📍 Priorities",
+        "🔙 Health",
         "ACTION|health_view|priorities",
     ) in sim.get_last_buttons()
     track.assert_any_call(
@@ -425,6 +450,7 @@ def test_health_funnel_metadata_allowlist_keeps_only_structural_fields(monkeypat
         page=1,
         month=10,
         year=2026,
+        review_month="2026-10",
         message_text="private narrative",
         portfolio_content="private portfolio content",
         link="https://kaizen.example/private",
@@ -664,7 +690,7 @@ async def test_change_pathway_back_button_returns_to_portfolio_defaults(isolated
 
 @pytest.mark.asyncio
 async def test_health_empty_state_clarifies_scan_scope_and_offers_next_routes(monkeypatch):
-    """No visible evidence is not a claim that the doctor's Kaizen is empty."""
+    """Zero visible evidence still gets the normal action-first landing."""
     import bot
 
     user_id = 5150
@@ -686,24 +712,20 @@ async def test_health_empty_state_clarifies_scan_scope_and_offers_next_routes(mo
         ),
         send_photo_fn=AsyncMock(),
         fail_fn=AsyncMock(),
+        context_store=SimpleNamespace(user_data={}),
     )
 
     text = sent["text"]
     assert isinstance(text, str)
-    assert text.startswith("📍 *Portfolio priorities*")
-    assert "No evidence was visible in this scan" in text
-    assert "does not mean your Kaizen portfolio is empty" in text
-    assert "readiness" not in text.lower()
+    assert text.startswith("*What to do next*")
+    assert "*No older unfinished items to review*" in text
+    assert "waiting long enough to be highlighted here" in text
+    assert "Partial scan: Portfolio Guru filings only" in text
     keyboard = sent["reply_markup"]
     assert isinstance(keyboard, bot.InlineKeyboardMarkup)
-    buttons = [
-        (button.text, button.callback_data)
-        for row in keyboard.inline_keyboard
-        for button in row
+    assert _keyboard_rows(keyboard) == [
+        [("ℹ️ About", "ACTION|health_view|about")],
     ]
-    assert ("🔄 Refresh health", "ACTION|health") in buttons
-    assert ("➕ New case", "ACTION|file") in buttons
-    assert ("⚙️ Settings", "ACTION|settings") in buttons
 
 
 @pytest.mark.asyncio
@@ -741,14 +763,9 @@ async def test_cesr_health_output_uses_deterministic_engine_without_llm(monkeypa
 
     text = sent["text"]
     views = store.user_data["last_health_report"]["views"]
-    assert text.startswith("📍 *Portfolio priorities*")
-    # A verified pathway overlay may still count its own requirement, named
-    # as that pathway's rule rather than as a readiness verdict.
-    assert "*Portfolio Pathway requirement*" in text
-    assert "2/36 WPBAs counted in this scan" in text
-    assert "DOPS 1/12" in text
-    assert "Mini-CEX 0/12" in text
-    assert "CBD 1/12" in text
+    assert text.startswith("*What to do next*")
+    assert "*Portfolio Pathway requirement*" not in text
+    assert "WPBAs counted in this scan" not in text
     assert "Long-term CESR readiness:" not in text
     assert "🔴 Early" not in text
     # No Kaizen index → a partial scan, disclosed on Priorities and in full on
@@ -810,8 +827,8 @@ async def test_health_renders_one_message_without_sending_a_chart_photo(monkeypa
         fail_fn=AsyncMock(),
     )
 
-    assert sent["text"].startswith("📍 *Portfolio priorities*")
-    assert "*Portfolio Pathway requirement*" in sent["text"]
+    assert sent["text"].startswith("*What to do next*")
+    assert "*Portfolio Pathway requirement*" not in sent["text"]
     send_photo.assert_not_awaited()
 
 
@@ -854,11 +871,10 @@ async def test_arcp_health_falls_back_to_deterministic_output_when_llm_fails(mon
     views = store.user_data["last_health_report"]["views"]
     # The reading is deterministic, so an unavailable LLM is not a failure
     # path: there is nothing to fall back from.
-    assert text.startswith("📍 *Portfolio priorities*")
+    assert text.startswith("*What to do next*")
     assert "Training (ARCP)" not in text
     # A partial scan is disclosed and stops the view ranking anything.
     assert "Partial scan: Portfolio Guru filings only" in text
-    assert "Listed, not ranked" in text
     assert "\n1. " not in text
     assert "Scope: partial — the Kaizen index was unavailable" in views["scan"]
     assert "Confidence:" not in views["scan"]
@@ -911,7 +927,7 @@ async def test_arcp_health_output_prioritises_action_plan_when_llm_succeeds(monk
     views = store.user_data["last_health_report"]["views"]
     # An available LLM changes nothing: the views are computed from the
     # evidence, so narrative and numbers cannot disagree.
-    assert text.startswith("📍 *Portfolio priorities*")
+    assert text.startswith("*What to do next*")
     assert "Book a supervisor review" not in text
     assert "Training (ARCP)" not in text
     assert "Partial scan: Portfolio Guru filings only" in text
@@ -1298,9 +1314,12 @@ async def test_arcp_and_cesr_pathway_outputs_diverge_in_lead_framing(monkeypatch
     assert "Training (CCT)" in arcp_views["scan"]
     assert "Training (ARCP)" not in arcp_views["scan"]
 
-    # CESR overlay: its own published counter, labelled as that pathway's rule.
-    assert "*Portfolio Pathway requirement*" in cesr_text
-    assert "WPBAs counted in this scan" in cesr_text
+    # CESR overlay stays available only through the legacy Scan info callback;
+    # it no longer competes with the everyday action-first landing.
+    assert "*Portfolio Pathway requirement*" not in cesr_text
+    assert "WPBAs counted in this scan" not in cesr_text
+    assert "*Portfolio Pathway requirement*" in cesr_views["scan"]
+    assert "WPBAs counted in this scan" in cesr_views["scan"]
     assert "5-year evidence window" in cesr_views["scan"]
     # CESR must NOT carry ARCP-deadline framing
     assert "ARCP risk" not in cesr_text
@@ -1312,9 +1331,10 @@ async def test_arcp_and_cesr_pathway_outputs_diverge_in_lead_framing(monkeypatch
 async def test_cesr_message_contains_long_term_and_domain_balance(monkeypatch):
     cesr_text, cesr_views = await _run_health_capture(monkeypatch, 6003, Pathway.cesr_portfolio)
 
-    assert "WPBAs counted in this scan" in cesr_text
-    # The counter stays on Priorities; the long-term expectations it cannot
-    # count sit in Scan info with the rest of the caveats.
+    assert "WPBAs counted in this scan" not in cesr_text
+    # Legacy Scan info retains the counter and long-term expectations without
+    # putting system analysis in the everyday journey.
+    assert "WPBAs counted in this scan" in cesr_views["scan"]
     assert "consultant report" in cesr_views["scan"].lower()
     assert "multi-year" in cesr_views["scan"]
     assert "5-year evidence window" in cesr_views["scan"]

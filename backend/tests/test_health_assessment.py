@@ -1,4 +1,4 @@
-"""Offline tests for the Portfolio Health assessment and its four views.
+"""Offline tests for the Portfolio Health assessment and its views.
 
 These guard the failures found on a real 501-item portfolio on 2026-08-26,
 where the old report said "Green — main evidence domains are covered" and
@@ -21,6 +21,7 @@ from health_models import EvidenceItem, HealthDomain
 from health_report import (
     action_queue_page_count,
     actions_page_count,
+    format_about,
     format_action_queue,
     format_actions,
     format_coverage,
@@ -116,6 +117,10 @@ def _scan_info(items, **kwargs):
     )
 
 
+def _about(_items, **kwargs):
+    return format_about(basis=BASIS, **kwargs)
+
+
 def _all_views(items):
     assessment = _assess(items)
     return "\n".join([
@@ -124,6 +129,7 @@ def _all_views(items):
         format_coverage(assessment, today=TODAY),
         format_curriculum(assessment),
         format_scan_info(assessment, basis=BASIS, today=TODAY),
+        format_about(basis=BASIS),
     ])
 
 
@@ -236,7 +242,7 @@ def test_findings_come_from_the_portfolio_not_a_fixed_list():
     assert not any("File a CBD from a recent supervised case" == f for f in findings)
 
 
-def test_priorities_puts_doctor_controlled_drafts_before_awaiting_signoff():
+def test_action_first_landing_puts_doctor_controlled_drafts_before_awaiting_signoff():
     items = _balanced() + [
         _item(state="pending", days_ago=900, ident="await-1", form_type="MINI_CEX"),
         _item(state="draft", days_ago=100, ident="draft-1", form_type="JCF"),
@@ -244,9 +250,9 @@ def test_priorities_puts_doctor_controlled_drafts_before_awaiting_signoff():
 
     _, text = _priorities(items)
 
-    assert text.index("draft of your own unfinished") < text.index("item with someone else")
-    assert text.count("\n1. ") + text.count("\n2. ") + text.count("\n3. ") <= 3
-    assert "not by training or curriculum importance" in text
+    assert text.index("*Review older drafts — 1*") < text.index("*Older items awaiting sign-off — 1*")
+    assert "Decide whether each is still worth completing" in text
+    assert "Review only if follow-up is still needed" in text
 
 
 def test_findings_state_dates_and_never_instruct_a_chase():
@@ -259,7 +265,7 @@ def test_findings_state_dates_and_never_instruct_a_chase():
 
     _, text = _priorities(items)
 
-    assert "dated 10 Aug 2023" in text
+    assert "10 Aug 2023" not in text
     for word in ("Chase", "chase", "overdue", "stale", "neglected", "Finish or delete"):
         assert word not in text
 
@@ -268,33 +274,51 @@ def test_clean_portfolio_is_not_given_an_invented_gap():
     assert _assess(_balanced()).next_actions == ["Nothing in this scan is unfinished"]
 
 
-# ── Priorities ──────────────────────────────────────────────────────────────
+# ── Action-first landing ────────────────────────────────────────────────────
 
 
-def test_priorities_keeps_its_title_and_names_what_the_order_means():
-    """"Priorities" without a basis reads as clinical or curriculum importance.
-    The order is workflow state and dates, and it says so."""
+def test_default_health_text_is_the_two_action_groups_and_trust_line_only():
     items = _balanced() + [_item(state="pending", days_ago=300, ident="a")]
     _, text = _priorities(items)
 
-    assert text.startswith("📍 *Portfolio priorities*")
-    assert "not by training or curriculum importance" in text
-    assert text.splitlines()[3].startswith("1. ")
+    assert text.startswith("*What to do next*")
+    assert "*No older drafts to review*" in text
+    assert "No drafts have been waiting long enough" in text
+    assert "*Older items awaiting sign-off — 1*" in text
+    assert "Read-only planning aid, not a formal training or appraisal judgement" in text
+    for removed in ("Coverage", "Curriculum", "Scan info", "Review month", "More"):
+        assert removed not in text
 
 
-def test_partial_scan_shows_one_factual_notice_and_stops_ranking():
-    """An incomplete scan cannot rank anything: the item that would have come
-    first may not have been read at all."""
+def test_recent_unfinished_items_are_not_misreported_as_absent():
+    items = _balanced() + [
+        _item(state="draft", days_ago=3, ident="recent-draft"),
+        _item(state="pending", days_ago=3, ident="recent-awaiting"),
+    ]
+    assessment, text = _priorities(items)
+
+    assert assessment.stuck_total == 0
+    assert "*No older unfinished items to review*" in text
+    assert "waiting long enough to be highlighted here" in text
+    assert "Nothing unfinished" not in text
+    assert "No drafts or items awaiting sign-off were visible" not in text
+
+
+def test_partial_scan_keeps_one_explicit_limitation_on_the_landing():
     items = _balanced() + [_item(state="pending", days_ago=300, ident="a")]
     _, text = _priorities(items, limited_view=True)
 
     assert "Partial scan: Portfolio Guru filings only" in text
-    assert "Listed, not ranked" in text
     assert "1. " not in text
-    assert "not by training or curriculum importance" not in text
 
 
-def test_unconfirmed_scan_freshness_is_stated_and_also_stops_ranking():
+def test_partial_index_scan_keeps_an_explicit_limitation_on_the_landing():
+    _, text = _priorities(_balanced(), partial_scan=True)
+
+    assert "Partial scan: some Kaizen evidence may be missing" in text
+
+
+def test_unconfirmed_scan_freshness_is_explicit_on_the_landing():
     items = _balanced() + [_item(state="pending", days_ago=300, ident="a")]
     _, text = _priorities(items, scan_is_fresh=False)
 
@@ -302,7 +326,7 @@ def test_unconfirmed_scan_freshness_is_stated_and_also_stops_ranking():
     assert "1. " not in text
 
 
-def test_priorities_stays_on_one_phone_screen():
+def test_action_first_landing_stays_on_one_phone_screen():
     """Two screens of prose is where the previous report lost the doctor."""
     items = _balanced(40)
     items = [i for i in items if i.domain not in (HealthDomain.qi, HealthDomain.teaching)]
@@ -312,54 +336,50 @@ def test_priorities_stays_on_one_phone_screen():
     ]
     _, text = _priorities(items)
 
-    assert len(text.splitlines()) <= 14
-    assert len(text) < 700
-    assert text.count("\n1. ") + text.count("\n2. ") + text.count("\n3. ") == 3
-    assert "\n4. " not in text
+    assert len(text.splitlines()) <= 11
+    assert len(text) < 550
 
 
-def test_priorities_points_at_the_actions_view_rather_than_listing_items():
-    """The same Teaching Observation used to appear as a reason, a section and
-    an action in one message."""
+def test_action_first_landing_uses_counts_not_item_detail():
     items = _balanced() + [
         _item(state="pending", days_ago=300, ident="a", form_type="MINI_CEX"),
         _item(state="draft", days_ago=900, ident="b", form_type="JCF"),
     ]
     _, text = _priorities(items)
 
-    assert "Tap 📌 Actions for all 2" in text
+    assert "*Review older drafts — 1*" in text
+    assert "*Older items awaiting sign-off — 1*" in text
     assert "kaizenep.com" not in text
 
 
-def test_priorities_never_leaks_clinical_narrative():
+def test_action_first_landing_never_leaks_clinical_narrative():
     items = _balanced() + [_item(state="pending", days_ago=200, ident="a")]
     _, text = _priorities(items)
     assert "Clinical narrative" not in text
 
 
-def test_priorities_carries_one_safety_line():
+def test_action_first_landing_carries_one_concise_trust_line():
     _, text = _priorities(_balanced())
-    assert text.count("A planning aid, not a formal training") == 1
+    assert text.count("Read-only planning aid, not a formal training or appraisal judgement") == 1
 
 
-def test_review_countdown_is_shown_when_a_month_is_set():
-    _, text = _priorities(_balanced(), review_date=date(2026, 10, 1))
-    assert "Next review: October 2026 — 5 weeks away." in text
-
-
-def test_missing_review_month_points_to_more_navigation():
-    _, text = _priorities(_balanced())
-    assert (
-        "No review month set — open ☰ More and choose Review month" in text
+def test_system_analysis_and_review_settings_do_not_appear_on_the_landing():
+    readiness = {
+        "pathway": "cesr_portfolio",
+        "wpba_count": 4,
+        "wpba_target": 36,
+        "wpba_breakdown": {"dops": 2, "mini_cex": 1, "cbd": 1},
+    }
+    _, text = _priorities(
+        _balanced(),
+        review_date=date(2026, 10, 1),
+        pathway_readiness=readiness,
     )
 
-
-def test_passed_review_month_asks_for_the_next_one():
-    _, text = _priorities(_balanced(), review_date=date(2026, 5, 1))
-    assert (
-        "Review month May 2026 has passed — open ☰ More and choose Review month"
-        in text
-    )
+    assert "Next review" not in text
+    assert "Review month" not in text
+    assert "Portfolio Pathway requirement" not in text
+    assert "WPBAs counted" not in text
 
 
 def test_scan_info_points_at_the_command_because_it_has_no_button():
@@ -367,27 +387,6 @@ def test_scan_info_points_at_the_command_because_it_has_no_button():
     _, text = _scan_info(_balanced())
     assert "No review month set — set it with /arcp" in text
     assert "📅 Review month" not in text
-
-
-def test_pathway_requirement_counter_appears_only_with_a_verified_overlay():
-    """With no overlay the counter renders nothing at all. An empty counter
-    would read as an unmet requirement to a doctor whose pathway has no such
-    rule."""
-    readiness = {
-        "pathway": "cesr_portfolio",
-        "wpba_count": 4,
-        "wpba_target": 36,
-        "wpba_breakdown": {"dops": 2, "mini_cex": 1, "cbd": 1},
-    }
-    _, cesr = _priorities(_balanced(), pathway_readiness=readiness)
-    _, training = _priorities(_balanced(), pathway_readiness={"pathway": "training_arcp"})
-    _, none_at_all = _priorities(_balanced())
-
-    assert "*Portfolio Pathway requirement*" in cesr
-    assert "4/36 WPBAs counted in this scan" in cesr
-    assert "DOPS 2/12" in cesr
-    assert "requirement" not in training
-    assert "requirement" not in none_at_all
 
 
 # ── Actions ─────────────────────────────────────────────────────────────────
@@ -413,8 +412,8 @@ def test_actions_shows_the_visible_range_of_a_bounded_page():
     second = format_action_queue(assessment, "awaiting", page=1)
 
     assert action_queue_page_count(assessment, "awaiting") == 2
-    assert "Showing 1–5 of 10 awaiting sign-off" in first
-    assert "Showing 6–10 of 10 awaiting sign-off" in second
+    assert "Showing 1–5 of 10 older items awaiting sign-off" in first
+    assert "Showing 6–10 of 10 older items awaiting sign-off" in second
     assert first.count("\n• ") == 5
 
 
@@ -452,12 +451,12 @@ def test_actions_separates_awaiting_from_your_own_drafts():
     drafts = format_action_queue(assessment, "draft", page=0)
     awaiting = format_action_queue(assessment, "awaiting", page=0)
 
-    assert landing.index("*Your drafts — 7*") < landing.index("*Awaiting sign-off — 10*")
+    assert landing.index("*Older drafts — 7*") < landing.index("*Older items awaiting sign-off — 10*")
     assert landing.count("\n• ") == 6  # Up to three direct-linked examples per queue.
-    assert "*Your drafts — 7*" in drafts
-    assert "Started by you and not completed." in drafts
-    assert "*Awaiting sign-off — 10*" in awaiting
-    assert "Submitted and waiting for someone else." in awaiting
+    assert "*Older drafts — 7*" in drafts
+    assert "Started by you, still incomplete, and highlighted after waiting." in drafts
+    assert "*Older items awaiting sign-off — 10*" in awaiting
+    assert "Submitted, waiting for someone else, and highlighted after waiting." in awaiting
 
 
 def test_actions_names_items_by_form_and_exact_date_without_deadline_language():
@@ -503,9 +502,10 @@ def test_actions_page_beyond_the_end_falls_back_to_the_last_real_page():
     )
 
 
-def test_actions_is_reassuring_when_nothing_is_unfinished():
+def test_actions_does_not_misstate_recent_unfinished_items_as_complete():
     text = format_actions(_assess(_balanced()))
-    assert "Nothing scanned is unfinished" in text
+    assert "No older unfinished items were highlighted" in text
+    assert "every item has completed" not in text
     assert actions_page_count(_assess(_balanced())) == 1
 
 
@@ -514,10 +514,10 @@ def test_action_queues_paginate_independently_at_five_per_page():
 
     assert action_queue_page_count(assessment, "draft") == 2
     assert action_queue_page_count(assessment, "awaiting") == 2
-    assert "Showing 6–7 of 7 drafts" in format_action_queue(
+    assert "Showing 6–7 of 7 older drafts" in format_action_queue(
         assessment, "draft", page=1
     )
-    assert "Showing 6–10 of 10 awaiting sign-off" in format_action_queue(
+    assert "Showing 6–10 of 10 older items awaiting sign-off" in format_action_queue(
         assessment, "awaiting", page=1
     )
 
@@ -662,7 +662,7 @@ def test_curriculum_block_is_absent_when_nothing_is_tagged():
     assert "Curriculum spread" not in coverage
 
 
-def test_a_form_that_never_completes_is_shown_as_a_pattern_in_coverage():
+def test_a_form_that_never_completes_remains_an_assessment_pattern_not_landing_copy():
     """Three unfinished Teaching Observations out of three filed is not three
     incidents; it says that form never gets signed off."""
     items = _balanced(40)
@@ -674,7 +674,7 @@ def test_a_form_that_never_completes_is_shown_as_a_pattern_in_coverage():
     assessment, priorities = _priorities(items)
 
     assert any("Teaching Observation: 3 of your 3 are unfinished" in p for p in assessment.patterns)
-    assert "Teaching Observation: 3 of your 3 are unfinished" in priorities
+    assert "Teaching Observation: 3 of your 3 are unfinished" not in priorities
 
 
 def test_a_common_form_stuck_at_the_normal_rate_is_not_a_pattern():
@@ -718,7 +718,7 @@ def test_scan_info_carries_the_basis_review_timing_and_limits():
     assert "Refresh: 26 Aug 2026 09:00 — fresh within 24 hours" in text
     assert "Next review: October 2026" in text
     assert "*What this cannot see*" in text
-    assert "no item here is described as overdue" in text
+    assert "nothing here is described as overdue" in text
     assert "category and SLO counts are inventory, not a requirement" in text
     assert "classification is not certified" in text.lower()
     assert "curriculum adequacy is not certified" in text.lower()
@@ -737,3 +737,39 @@ def test_scan_info_holds_the_fuller_pathway_expectations():
     assert "ESLEs across core specialties" in cesr
     assert "5-year evidence window" in cesr
     assert "ESLEs" not in training
+
+
+# ── About ───────────────────────────────────────────────────────────────────
+
+
+def test_about_contains_only_the_information_needed_to_trust_health():
+    text = _about(_balanced())
+
+    assert text.startswith("ℹ️ *About Portfolio Health*")
+    assert "Read-only Kaizen index: 12 visible evidence item(s)" in text
+    assert "Counts highlight older Kaizen workflow items" in text
+    assert "not every unfinished item" in text
+    assert "Automated classification can be wrong" in text
+    assert "does not edit, file, chase or delete anything" in text
+    assert "not a formal training or appraisal judgement" in text
+    for removed in ("Domains — total", "Curriculum tags", "Review timing", "WPBAs"):
+        assert removed not in text
+
+
+def test_about_keeps_partial_and_unconfirmed_freshness_limits_explicit():
+    partial_basis = (
+        "*Evidence basis*\n"
+        "Scanned: Portfolio Guru filing history only: 3 visible evidence item(s)\n"
+        "Refresh: no Kaizen refresh available; this is a partial local view\n"
+        "Scope: partial — the Kaizen index was unavailable"
+    )
+    partial = format_about(
+        basis=partial_basis,
+        limited_view=True,
+        scan_is_fresh=False,
+    )
+    stale = format_about(basis=BASIS, scan_is_fresh=False)
+
+    assert "partial" in partial.lower()
+    assert "Kaizen index was unavailable" in partial
+    assert "Freshness unconfirmed: recent Kaizen activity may be missing" in stale

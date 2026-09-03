@@ -1,8 +1,25 @@
-# Portfolio Health + Pathway Guidance — Product Spec v2.1
+# Portfolio Health + Pathway Guidance — Product Spec v2.2
 
 **Status:** Product spec. Replaces the narrower ARCP Health design (now superseded).
-**Last updated:** 2026-09-02
+**Last updated:** 2026-09-03
 **Supersedes:** `docs/ARCP_HEALTH_DESIGN.md` — retained as historical design artefact.
+
+## Controlling Telegram UX decision (2026-09-03)
+
+The everyday `/health` journey is action-first and deliberately minimal. A
+doctor should understand one useful next step within five seconds: review
+older unfinished drafts they control. Awaiting sign-off is secondary. Trust limits
+stay concise, and system analysis or settings do not compete with those two
+actions.
+
+The queues preserve the existing 21-day inclusion filter. This is a neutral
+triage threshold for highlighting older workflow items, not an overdue rule;
+the counts do not claim to include every unfinished item.
+
+This decision controls the current Telegram Health presentation wherever older
+journey or surface descriptions in this document conflict with it. Assessment
+calculations, evidence ordering, queue membership and the underlying detail
+reports remain unchanged.
 
 ---
 
@@ -239,15 +256,18 @@ unmet requirement to a doctor whose pathway has no such rule.
 
 Related rules the universal layer holds to:
 
-- Ordering in `Portfolio priorities` is by workflow state and dates, and says
-  so; it is not training or curriculum importance.
-- A partial, unrefreshed or low-confidence scan shows a one-line factual notice
-  and drops ranking language entirely.
+- The default `What to do next` view shows `Review your drafts` first and
+  `Waiting on others` second, with their visible counts and no ranking,
+  coverage, curriculum, scan-detail or review-setting copy.
+- A partial or freshness-unconfirmed scan keeps one concise explicit
+  limitation on the default view rather than implying completeness.
 - Old evidence is named with its exact date and offered for review. Nothing is
   called overdue or stale, and no chase is instructed: no scanned field carries
-  a deadline.
+  a deadline. Older drafts are neutrally described as potentially no longer
+  worth completing.
 - Coverage shows each of the six core category totals with last-12-month
-  activity. It does not issue a largest-versus-smallest domain warning.
+  activity in its legacy-compatible detail report. It does not issue a
+  largest-versus-smallest domain warning.
 - The denominator is explicit: evidence outside the six core categories stays
   in the scanned-item total and is stated separately rather than disappearing.
 - Curriculum spread is computed over tagged items only. Tagged and untagged
@@ -328,30 +348,23 @@ Other pathways (GP, IMT, CST, SAS, foundation) will be added when Portfolio Guru
 
 ## User Journey
 
-### First-time setup
+### Everyday Health
 
-1. User opens Portfolio Health (`/health` or button)
-2. If no profile exists: "Welcome to Portfolio Health. I'll help you track your evidence and understand what's missing. Are you on a training programme or working toward CESR?"
-3. Pathway selector: Training (CCT) / CESR / Portfolio Pathway. ARCP is a
-   yearly review checkpoint inside the Training (CCT) pathway, not a
-   pathway in its own right.
-4. User selects pathway → optional details (training stage + ARCP date for trainees; target application window for CESR)
-5. Initial scan of existing PG activity populates evidence inventory
-6. Health summary shows: domain coverage, recent activity, pathway-specific readiness
+1. The doctor opens `/health` or the Portfolio Health button.
+2. Health refreshes read-only evidence when required, then opens `What to do
+   next`.
+3. `Review your drafts` is the first action and opens the doctor-owned draft
+   queue at its first page (`page 0` in the callback contract).
+4. `Waiting on others` opens the independent awaiting-sign-off queue at its
+   first page (`page 0` in the callback contract).
+5. `About` explains only the source, workflow-state provenance, scan limits,
+   automated-classification limit and read-only judgement boundary.
+6. Every queue and About returns directly to Health. Pagination never changes
+   the other queue's page.
 
-### Ongoing use
-
-- `/health` → quick summary with pathway overlay
-- `/health domains` → domain breakdown
-- `/health gaps` → what's missing, what to file next
-- `Add evidence` → manual entry of CPD, teaching, QI, leadership items
-- After each filing → health updates automatically (existing flow, enhanced)
-
-### Pathway switching
-
-- `/pathway` → select or change between ARCP and CESR views
-- Switching re-interprets the same evidence, no data loss
-- A CESR candidate who later enters training can switch to ARCP view
+Pathway selection, review-month settings and system analysis are outside this
+everyday journey. Existing typed commands and settings routes remain separate;
+switching a pathway still reinterprets the same evidence without deleting it.
 
 ---
 
@@ -428,50 +441,48 @@ next_actions              3–5 concrete suggested actions
 
 ### Telegram (MVP)
 
-- `/health` — opens `📍 Priorities`: at most three findings, scan notice when
-  the read is partial, review-month line, safety line. One phone screen. Its
-  only controls are one row containing `📌 Actions` and `☰ More`; an unset or
-  passed review month points the doctor to More.
-- `📌 Actions` — agency-first landing: `Your drafts` before `Awaiting sign-off`,
-  clear totals, and up to three direct Kaizen-linked examples from each. Each
-  queue opens separately and paginates independently at five items per page.
-  Old items retain neutral review language; Health does not chase, submit,
-  edit or delete anything. The landing keyboard is one row containing
-  `📝 Drafts (N)` and `⏳ Awaiting (N)`, followed by `🔙 Back` to Priorities.
-  Queue pages show only applicable Previous/Next controls and `🔙 Actions`.
-- `☰ More` — a lightweight route to Coverage, Curriculum, Scan info and Review
-  month, arranged two per row where labels remain clear, followed by Back to
-  Priorities.
-- `📊 Coverage` — each core category's total and last-12-month activity, the
-  count outside the six-category denominator, and a tagged-versus-untagged
-  curriculum scope statement. The largest-versus-smallest domain warning is
-  absent. Its only routes are `🏷️ Curriculum` and Back to More. Curriculum
-  returns to Coverage.
-- `🔎 Scan info` — source and item count, refresh time plus freshness or
-  partiality, window, pathway, review timing and fuller limitations. It states
-  that automated classification and curriculum adequacy are not certified;
-  it has no `High confidence` label and returns to More. `/arcp` remains a
-  compatible typed route from its review-timing guidance.
+- `/health` opens `What to do next`. Its text contains only:
+  - `Review your drafts — N`, explaining that these are unfinished items the
+    doctor controls and that older drafts may no longer be worth completing;
+  - `Waiting on others — N`, advising review only when follow-up is still
+    needed;
+  - one concise read-only planning-aid boundary; and
+  - one concise explicit partial/freshness limitation when applicable.
+- The exact landing keyboard is:
+  - first full-width row: `📝 Review drafts (N)`;
+  - second row: `⏳ Awaiting (N)` and `ℹ️ About`.
+- Draft and Awaiting queues open independently at their first page (`page 0` in
+  callback data), paginate independently at five items per page, and retain
+  direct Kaizen links. Their only
+  non-pagination control is `🔙 Health`.
+- `ℹ️ About` contains only the indexed/read-only source scope, the fact that
+  draft and awaiting counts come from visible Kaizen workflow states,
+  partial/stale limitations, the automated-classification limitation, the
+  no-edit/file/chase/delete boundary, and the fact that Health is not a formal
+  training or appraisal judgement. Its only control is `🔙 Health`.
+- Actions, More, Coverage, Curriculum, Scan info and Review month are absent
+  from new everyday navigation.
 
 - `/pathway` — select or change pathway
 - `Add evidence` button — quick manual entry flow
 - After each WPBA filing → "Evidence added to Portfolio Health. [View health]"
 - Weekly nudge (already exists) → enhanced with health context
 
-Navigation is contextual: queue and detail panes never repeat a global Health
-button wall. Evidence views are rendered once per scan and stored, so a button
-press never re-derives them and paging cannot shift items between pages.
-Buttons on messages older than this layout, including `health_page`,
-`health_detail`, direct Coverage and Scan callbacks, route to the view that
-replaced them; a report this chat no longer holds offers `🔄 Refresh health`
-rather than a dead end. Legacy combined Actions page callbacks continue to open
-stored evidence where practical.
+Navigation is contextual. Evidence views are rendered once per scan and stored,
+so a button press never re-derives them and paging cannot shift items between
+pages. Buttons on messages older than this layout remain safe: legacy Actions,
+combined `health_page`, `health_detail`, direct Coverage, Curriculum and Scan
+callbacks still render their stored reports where practical, but those detail
+views are legacy-only and offer only `🔙 Health`. An old `health_view|more`
+callback maps to the new About view and its single Back control instead of
+recreating the removed menu. A report this chat no longer holds offers
+`🔄 Refresh health` rather than a dead end.
 
-The `📅 Review month` control opens an inline picker. Selecting a month only
-previews it. The existing health-profile review-date storage path is called
-only after an explicit `Confirm`; Cancel returns to More and makes no persisted
-change. Successful confirmation offers one route to Priorities so the new
-countdown is visible. The typed `/arcp <month> <year>` route remains compatible.
+Legacy review-month callbacks and the typed `/arcp <month> <year>` route remain
+compatible. Selecting a month only previews it; the existing health-profile
+storage path is called only after explicit confirmation, and no selected month
+or year enters telemetry. These controls are not exposed through the new Health
+navigation.
 
 Health interaction telemetry uses the existing PHI-free funnel logger. It may
 record only allowlisted structural values for pane, queue, page and review-month
