@@ -127,6 +127,20 @@ def test_token_redaction_without_env_token():
     assert "bot<REDACTED_TELEGRAM_TOKEN>/getUpdates" in redacted
 
 
+def test_token_redaction_covers_url_encoded_file_download():
+    import bot
+
+    token = "1234567890:" + "A" * 35
+    encoded_token = token.replace(":", "%3A")
+    url = f"https://api.telegram.org/file/bot{encoded_token}/documents/file.pdf"
+
+    redacted = bot._redact_token_string(url)
+
+    assert token not in redacted
+    assert encoded_token not in redacted
+    assert "file/bot<REDACTED_TELEGRAM_TOKEN>/documents/file.pdf" in redacted
+
+
 def test_token_redaction_preserves_mapping_log_args(monkeypatch):
     import logging
 

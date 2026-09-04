@@ -89,8 +89,9 @@ logging.basicConfig(level=logging.INFO)
 # Token redaction for bot/API logging. Telegram Bot API URLs contain the
 # token immediately after "/bot", so a plain word-boundary regex misses them.
 _token_pattern = re.compile(
-    r"(?<=bot)\d{8,10}:[A-Za-z0-9_-]{30,}|"
-    r"(?<![A-Za-z0-9_])\d{8,10}:[A-Za-z0-9_-]{30,}(?![A-Za-z0-9_])"
+    r"(?<=bot)\d{8,10}(?::|%3A)[A-Za-z0-9_-]{30,}|"
+    r"(?<![A-Za-z0-9_])\d{8,10}(?::|%3A)[A-Za-z0-9_-]{30,}(?![A-Za-z0-9_])",
+    re.IGNORECASE,
 )
 def _redact_token_string(s: str) -> str:
     s = _token_pattern.sub("<REDACTED_TELEGRAM_TOKEN>", s)
