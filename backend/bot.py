@@ -12788,38 +12788,60 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return ConversationHandler.END
 
-    context.user_data["chosen_form"] = form_type
-    context.user_data.pop("quick_improve_used", None)
-
-    await query.edit_message_text(
-        f"🧩 Reviewing {_form_display_name(form_type)} template…",
-        reply_markup=None,
-    )
+    # Fast repeated taps can deliver competing form callbacks from the same
+    # prompt while the first template review is still running. Claim the prompt
+    # synchronously before the next await so only one handler can choose a form,
+    # perform the model call, and render a draft. Telegram's identical-edit
+    # BadRequest is cosmetic, but competing draft generation is not.
+    message_id = getattr(getattr(query, "message", None), "message_id", None)
+    choice_key = str(message_id)
+    if context.user_data.get("form_choice_in_progress"):
+        return AWAIT_FORM_CHOICE
+    context.user_data["form_choice_in_progress"] = choice_key
 
     try:
-        draft = await _analyse_selected_form(context, update.effective_user.id, case_text, form_type)
-    except asyncio.TimeoutError:
-        logger.error("Template review timed out after 45s for %s", form_type)
-        await query.edit_message_text(
-            "⏳ Template review timed out. The model took too long — try again in a moment.",
-            reply_markup=_KB_RETRY_TEMPLATE,
+        context.user_data["chosen_form"] = form_type
+        context.user_data.pop("quick_improve_used", None)
+
+        await _safe_edit_text(
+            query.message,
+            f"🧩 Reviewing {_form_display_name(form_type)} template…",
+            reply_markup=None,
         )
-        return AWAIT_FORM_CHOICE
-    except Exception as e:
-        logger.error("Template review failed in form_choice: %s", e, exc_info=True)
-        if _is_transient_llm_error(e):
-            await query.edit_message_text(
-                "⏳ The drafting model is rate-limited or briefly unavailable. Try again in a moment.",
+
+        try:
+            draft = await _analyse_selected_form(context, update.effective_user.id, case_text, form_type)
+        except asyncio.TimeoutError:
+            logger.error("Template review timed out after 45s for %s", form_type)
+            await _safe_edit_text(
+                query.message,
+                "⏳ Template review timed out. The model took too long — try again in a moment.",
                 reply_markup=_KB_RETRY_TEMPLATE,
             )
             return AWAIT_FORM_CHOICE
-        await query.edit_message_text("⚠️ Could not review that template.", reply_markup=_KB_CANCEL)
-        return ConversationHandler.END
+        except Exception as e:
+            logger.error("Template review failed in form_choice: %s", e, exc_info=True)
+            if _is_transient_llm_error(e):
+                await _safe_edit_text(
+                    query.message,
+                    "⏳ The drafting model is rate-limited or briefly unavailable. Try again in a moment.",
+                    reply_markup=_KB_RETRY_TEMPLATE,
+                )
+                return AWAIT_FORM_CHOICE
+            await _safe_edit_text(
+                query.message,
+                "⚠️ Could not review that template.",
+                reply_markup=_KB_CANCEL,
+            )
+            return ConversationHandler.END
 
-    if not _draft_has_useful_content(draft, form_type):
-        return await _ask_for_more_detail_before_draft(query.message, context, form_type=form_type)
+        if not _draft_has_useful_content(draft, form_type):
+            return await _ask_for_more_detail_before_draft(query.message, context, form_type=form_type)
 
-    return await _show_draft_review(query.message, context, draft, form_type)
+        return await _show_draft_review(query.message, context, draft, form_type)
+    finally:
+        if context.user_data.get("form_choice_in_progress") == choice_key:
+            context.user_data.pop("form_choice_in_progress", None)
 
 
 _FIELD_FRIENDLY = {

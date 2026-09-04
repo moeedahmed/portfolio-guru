@@ -383,6 +383,76 @@ class TestFlowWalker:
         assert 'Blank fields are left blank rather than invented' not in text
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize('second_choice', ['FORM|best', 'FORM|ACAT'])
+    async def test_concurrent_form_choice_runs_one_template_review(
+        self, recommended_forms, thin_draft, second_choice
+    ):
+        """One prompt cannot launch duplicate or competing draft work."""
+        from bot import AWAIT_APPROVAL, AWAIT_FORM_CHOICE, handle_form_choice
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        context.user_data['form_recommendations'] = recommended_forms
+        first_update = sim._make_callback_update('FORM|best')
+        second_update = sim._make_callback_update(second_choice)
+        second_update.callback_query.message.message_id = (
+            first_update.callback_query.message.message_id
+        )
+
+        review_started = asyncio.Event()
+        release_review = asyncio.Event()
+
+        async def slow_review(*_args, **_kwargs):
+            review_started.set()
+            await release_review.wait()
+            return thin_draft
+
+        with patch('bot._analyse_selected_form', new=AsyncMock(side_effect=slow_review)) as analyse:
+            first = asyncio.create_task(handle_form_choice(first_update, context))
+            await asyncio.wait_for(review_started.wait(), timeout=5)
+
+            duplicate_result = await handle_form_choice(second_update, context)
+            assert duplicate_result == AWAIT_FORM_CHOICE
+            analyse.assert_awaited_once()
+
+            release_review.set()
+            assert await first == AWAIT_APPROVAL
+
+        analyse.assert_awaited_once()
+        assert context.user_data['chosen_form'] == 'CBD'
+        assert context.user_data.get('form_choice_in_progress') is None
+
+    @pytest.mark.asyncio
+    async def test_identical_form_progress_edit_does_not_abort_drafting(self, thin_draft):
+        """Telegram's already-achieved progress state is a harmless no-op."""
+        from telegram.error import BadRequest
+
+        from bot import AWAIT_APPROVAL, handle_form_choice
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        update = sim._make_callback_update('FORM|CBD')
+        update.callback_query.message.edit_text.side_effect = [
+            BadRequest(
+                'Message is not modified: specified new message content and '
+                'reply markup are exactly the same as current content'
+            ),
+            None,
+        ]
+
+        with patch(
+            'bot._analyse_selected_form',
+            new=AsyncMock(return_value=thin_draft),
+        ) as analyse:
+            result = await handle_form_choice(update, context)
+
+        assert result == AWAIT_APPROVAL
+        analyse.assert_awaited_once()
+        assert context.user_data.get('form_choice_in_progress') is None
+
+    @pytest.mark.asyncio
     async def test_draft_preview_orders_body_before_reply_hint(self, thin_draft):
         """Portfolio body sits cleanly before the reply hint without any
         intermediate 'missing details' instruction block."""
