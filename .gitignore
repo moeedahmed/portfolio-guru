@@ -30,6 +30,10 @@ __pycache__/
 *.tmp
 *.scratch
 
+# Local release cards and operator attestations (scripts/release_loop.sh).
+# Release state is local proof, not shipped content.
+.release/
+
 # Local generated/debug artefacts
 .artifacts/
 cache/
