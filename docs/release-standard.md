@@ -6,7 +6,7 @@ Portfolio Guru has one operator. Asking him to approve the push, then the CI
 wait, then the deploy, then the runtime check, then the live journey, then the
 resume, spends his attention on mechanics and teaches him to approve without
 reading. This standard collapses that into a single decision he can actually
-make: he reads one card, approves one SHA, and everything mechanical inside
+make: he reads one card, approves its exact contents, and everything mechanical inside
 that unchanged envelope proceeds without asking again.
 
 It removes prompts, not boundaries. Nothing here weakens a live-send,
@@ -31,13 +31,37 @@ by the full `HEAD` SHA. The card records:
 | `exclusions`            | what this approval never covers                                  |
 | `created_at`            | when the card was prepared                                       |
 
+The approval token binds the full canonical card, not just source code. Its
+SHA-256 digest covers every field: sorted JSON keys, compact separators,
+ASCII escapes, UTF-8 and one trailing newline. Whitespace/key-order changes
+are harmless; changing any value invalidates an existing approval. SHA-only,
+dated and bare approvals fail closed. The card also freezes the singleton
+`live_allowlist`, exact `rollback_parent_sha`, and absolute `bootstrap_git`,
+`bootstrap_python`, and `bootstrap_bash` paths. These are internal execution
+bindings, not additional decisions for the founder.
+
 Cards carry no credentials, tokens, private content or patient data.
 `scripts/release_card.py` refuses multi-line, oversized, control-character and
 credential-shaped text before anything is written.
 
+**A card is immutable for its SHA.** Re-preparing the same commit with the same
+content is an ordinary repeat: the existing card is reused byte for byte, and an
+approval already given for that SHA still stands. Re-preparing it with anything
+different — effect, live target, proof mode, known-good SHA, exclusions,
+rollback mode — is refused, and the existing card is left exactly as it was.
+Otherwise one approval could quietly come to cover a release the operator never
+read. A card someone edited by hand is refused for the same reason rather than
+laundered into a fresh one. The refusal exits 2 and says which fields differ;
+the fix is to commit the change and prepare that new SHA.
+
+A prepare that verified the tree, the offline gates and the live runtime ends
+`FINAL_RELEASE_STATE=release-ready`. Nothing else in the loop uses that word: a
+prepare that wrote no card, and a `ship`/`attest`/`rollback` that refused a
+missing or malformed approval, report `blocked`.
+
 ## What one approval covers
 
-Approving the card's SHA — `--approved <40hex>` — covers, once:
+Approving the exact card — `--approved <40hex-sha>:<64hex-card-digest>` — covers, once:
 
 - the push of that exact SHA to `main`;
 - the CI `Tests` run and the Mac Mini deploy bound to it;
@@ -78,6 +102,15 @@ only and is never exported, so nothing else in the run inherits it. The direct
 guard inside `scripts/telegram_bot_qa.sh` is unchanged and still refuses a live
 run on its own.
 
+The approved target is passed to that child explicitly, as `RELEASE_LIVE_TARGET`,
+and the child captures it **before** it loads `backend/.env`. After that load it
+checks the environment actually in force: the effective `TELEGRAM_BOT_USERNAME`
+must still be the approved target, and the allowlist must still name it. A
+dotenv file could otherwise have pointed an approved live proof at a bot the card
+never named. A mismatch exits 21 without sending anything, and the loop reports
+that as `proof-pending` — nothing was sent, so nothing failed — rather than as a
+failed journey.
+
 Offline gates run with fixed throwaway values (the same non-secret Fernet key as
 the CI `Tests` job, plus `fake` token and API key) scoped to those child
 processes with `env`. The deploy, runtime and live children never inherit them —
@@ -101,8 +134,8 @@ read at the worst possible moment.
 ## Rollback
 
 ```
-scripts/release_loop.sh --surface telegram --mode rollback --risk <class> \
-  --approved <released 40hex>
+<the printed pinned bootstrap command> -- --surface telegram --mode rollback \
+  --risk <class> --approved <released-sha>:<card-digest>
 ```
 
 The card that authorised the release already names both ends of this: the
@@ -118,18 +151,43 @@ card naming the released SHA, `HEAD == origin/main ==` that SHA, a known-good SH
 that is a real ancestor of it, and a live runtime that is reconciled and reported
 as the released SHA. Any mismatch blocks before mutation.
 
-The recovery is **one normal forward commit**: parent exactly the released SHA,
-tree exactly the known-good SHA's. Nothing is reset, force-pushed, merged or
-checked out on `main`, and untracked files are never touched. If the tree cannot
-be produced exactly, the tracked preimage is restored and the run refuses.
+The recovery is **one normal forward commit**: its complete parent list is
+exactly one parent, the released SHA, and its tree is exactly the known-good
+SHA's. Checking only the first parent would have accepted a merge, which drags a
+second line of history onto `main` under an approval that named one commit.
+Nothing is reset, force-pushed, merged or checked out on `main`, and untracked
+files are never touched. If the exact rollback commit cannot be produced, the
+run refuses without changing the checkout.
 
-State keyed by the released SHA is written under `.release/` **before** the push,
-so an interruption anywhere afterwards reconciles onto that one commit instead of
-minting a second one. Rerunning the exact same command resumes: it moves a
-committed-but-unpushed rollback forward, skips the push when `origin/main` is
-already the rollback commit, and re-runs proof only. It refuses if `main` is
-neither the released SHA nor the recorded rollback commit, if the state or card
-is tampered, if `HEAD` is unexpected, or if the parent/tree invariant fails.
+### Pinned execution and non-mutating recovery
+
+Ship, attest, rollback and resume use exactly the command printed on the card.
+That command names absolute Git, Python and Bash paths. It reads the bootstrap
+from the approved Git commit; the bootstrap reads the release loop and card
+helper from that same commit, verifies their Git blob identities, and runs them
+from a private unpredictable temporary directory with mode 0700. No mutable
+`.release/runner` cache or checksum manifest is trusted or retained. The
+known-good tree may predate all release helpers without breaking recovery.
+
+This trusts the local Git object database and the original printed command;
+it does not defend against a same-user process altering PATH/interpreter/shell
+rc or the command invocation. Run the original command, not a checkout copy.
+
+Rollback uses `git commit-tree` with deterministic metadata, the exact released
+parent and the known-good tree. It never changes the working tree, index or
+local branch: there is no `read-tree`, branch-move or tree-replacement crash
+window. It pushes only the resulting commit, without force.
+
+### The journal
+
+State keyed by the released SHA progresses through `committed`, `pushed`, and
+`proved`. An interruption after commit creation but before journalling produces
+the same commit on rerun. An interruption after push but before recording it is
+reconciled against remote main before any retry. A recorded commit is checked
+against its complete parent list and expected tree before reuse. A rollback
+already on main is reused even if the local journal was lost; an unexpected
+remote commit blocks instead. Actual local bare-Git tests cover these cases,
+including a known-good tree without the helpers and an untouched checkout.
 
 Proof is the same exact-SHA pipeline as a release — CI `Tests`, the Mac Mini
 deploy, runtime identity — keyed to the rollback commit. **No live journey runs
@@ -146,18 +204,26 @@ reverted. A created or pushed commit is never itself called a rollback.
 ## Manual closure
 
 ```
-scripts/release_loop.sh --surface telegram --mode attest --risk telegram \
-  --approved <40hex> --result pass|fail --note "<one line, no secrets>"
+<the printed pinned bootstrap command> -- --surface telegram --mode attest \
+  --risk telegram --approved <sha>:<card-digest> \
+  --result pass|fail --note "<one line, no secrets>"
 ```
 
 Attest is available only when the card itself freezes `proof_mode = manual`; an
 automated card can never downgrade after approval. It re-verifies the card, the
-SHA, surface, risk, `HEAD == origin/main == SHA`
-and runtime identity, then writes a local attestation. It changes nothing
-external. Its output says `manual proof attested by operator`; it never claims
-the automated journey ran. It refuses internal risk, which has no manual journey,
-and refuses to stand in for every automated card, whether readiness is currently
-complete or not.
+SHA, surface, risk and `HEAD == origin/main == SHA`, then proves the automated
+half of the release for itself — the exact-SHA `push` Tests run, the
+`workflow_run` deploy that started after that Tests run completed, and runtime
+identity — before recording anything. It cannot assume a `ship` run happened, so
+it does not report `live` on the strength of one. A failed Tests or deploy run is
+`blocked`; a missing or still-running one is `proof-pending`, and no attestation
+is written in either case.
+
+Only then does it write a local attestation, and it changes nothing external. Its
+output says `manual proof attested by operator`; it never claims the automated
+journey ran. It refuses internal risk, which has no manual journey, and refuses
+to stand in for every automated card, whether readiness is currently complete or
+not.
 
 ## What this standard is not
 

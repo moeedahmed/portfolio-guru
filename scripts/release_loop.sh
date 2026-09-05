@@ -1,22 +1,43 @@
 #!/usr/bin/env bash
 # Deterministic release closure for Portfolio Guru.
 #
-# One prepared card and one approval of that card's exact SHA cover the whole
-# unchanged release: exact-SHA push to main, CI Tests, deploy, runtime identity,
-# the named proof, an unchanged proof resume, and bounded rollback to the
-# known-good SHA that was verified live before main moved. Anything that drifts
-# from the card — SHA, surface, risk, effect, proof mode, live target, rollback
-# target — needs a new card and a new approval.
+# One prepared card and one approval of that card's exact SHA *and content*
+# cover the whole unchanged release: exact-SHA push to main, CI Tests, deploy,
+# runtime identity, the named proof, an unchanged proof resume, and bounded
+# rollback to the known-good SHA that was verified live before main moved.
+# Anything that drifts from the card — SHA, surface, risk, effect, proof mode,
+# live target, recipient allowlist, rollback target, bootstrap path — needs a
+# new card and a new approval.
+#
+# The approval token is `<sha>:<digest>`, where the digest is the SHA-256 of the
+# card's canonical serialisation (every JSON field; see release_card.py). A card
+# edited by hand, however valid, is therefore not the approved card. A bare SHA
+# approval is a legacy form and fails closed with a message saying so.
+#
+# ship/attest/rollback run only through the printed bootstrap command, which
+# reads this script and its card helper out of the local Git object database at
+# the approved SHA and runs them from a private temporary directory with the
+# absolute git/python/bash paths frozen on the card. No runner copy is kept.
+#
+# Tamper-resistance claim, bounded verbatim: this trusts the local Git object
+# database and the original printed command; it does not defend against a
+# same-user process altering PATH/interpreter/shell rc or the command invocation.
 #
 # prepare makes no remote, runtime, or user-facing change; it refreshes local
-# refs and writes only its local approval card. resume never pushes. attest closes manual proof without
-# touching anything external. rollback is the one bounded recovery the same
-# approval already covers: it is operator-triggered, never silent, and it moves
-# main forward to the known-good tree rather than rewriting history. Live
-# Telegram/Kaizen guards stay authoritative and are never relaxed by a release
-# approval.
+# refs and writes only its local approval card, and it is immutable for a SHA:
+# the same card may be re-prepared, changed content is refused rather than
+# rewritten under an approval given for something else. resume never pushes.
+# attest proves the automated half itself — exact-SHA Tests, the deploy that
+# followed it, runtime identity — and then records only what the operator
+# observed. rollback is the one bounded recovery the same approval already
+# covers: it is operator-triggered, never silent, and it moves main forward to
+# the known-good tree without touching the checkout, the index or any local
+# ref. Live Telegram/Kaizen guards stay authoritative and are never relaxed by
+# a release approval.
 
 set -euo pipefail
+
+ORIGINAL_ARGS=("$@")
 
 banner() { printf '\n=== %s ===\n' "$*"; }
 step()   { printf '\n--- %s\n' "$*"; }
@@ -38,43 +59,52 @@ Portfolio Guru — deterministic release closure.
 Usage:
   scripts/release_loop.sh --surface telegram --mode prepare --risk internal|telegram|broad \
       --effect "<one line about what changes for a doctor>" [--live-target <bot_username>]
-  scripts/release_loop.sh --surface telegram --mode ship --risk <class> --approved <40hex>
-  scripts/release_loop.sh --surface telegram --mode ship --risk <class> --approved <40hex> --release-sha <40hex>
-  scripts/release_loop.sh --surface telegram --mode attest --risk <class> --approved <40hex> \
+  <printed bootstrap command> -- --surface telegram --mode ship --risk <class> --approved <sha>:<digest>
+  <printed bootstrap command> -- --surface telegram --mode ship --risk <class> --approved <sha>:<digest> --release-sha <40hex>
+  <printed bootstrap command> -- --surface telegram --mode attest --risk <class> --approved <sha>:<digest> \
       --result pass|fail --note "<one line, no secrets>"
-  scripts/release_loop.sh --surface telegram --mode rollback --risk <class> --approved <40hex>
+  <printed bootstrap command> -- --surface telegram --mode rollback --risk <class> --approved <sha>:<digest>
 
 Options:
   --surface <name>     Only "telegram" is wired today.
   --mode <mode>        prepare (local ref refresh/card only; no remote or product effect),
                        ship (approval gated), attest (manual proof closure),
                        rollback (bounded operator-triggered recovery to the card's
-                       known-good SHA; never runs itself, never rewrites history).
+                       known-good SHA; never runs itself, never rewrites history,
+                       never touches the checkout or a local ref).
   --risk <class>       internal, telegram, or broad. Required for every mode.
   --effect <line>      prepare only: one plain line naming what this release changes.
   --live-target <name> prepare only: exact bot username for telegram-risk live proof.
   --release-sha <sha>  Resume proof only for an already-pushed exact full SHA.
-  --approved <40hex>   Approval of one prepared card, named by its exact full SHA.
+  --approved <token>   Approval of one prepared card: <40hex sha>:<64hex card digest>.
   --result pass|fail   attest only: the operator's verdict on the named manual proof.
   --note <line>        attest only: one non-sensitive line recording what was observed.
   --no-dogfood         Legacy broad-proof skip; always leaves proof pending.
   -h, --help           Show this help.
 
 Approval for ship/resume/attest/rollback (one of):
-  --approved <40hex>
-  RELEASE_APPROVED=<40hex>
-A dated or bare approval no longer covers a release: an approval names one SHA.
+  --approved <sha>:<digest>
+  RELEASE_APPROVED=<sha>:<digest>
+The token is printed by prepare. It names one SHA and the canonical digest of the
+whole card, so a card changed on disk is not approved. A dated, bare, or SHA-only
+approval no longer covers a release and fails closed.
 Rollback reuses that same approval; the card already names the known-good SHA it
 rolls back to, so this bounded recovery needs no second approval. Rerun the exact
-same rollback command to resume it; --release-sha is not used by rollback.
+rollback command it printed to resume it; --release-sha is not used by rollback.
+
+ship/attest/rollback only run through the printed bootstrap command, which reads
+this script and its card helper from Git objects at the approved SHA. Running the
+checkout copy directly for those modes is refused and the exact command reprinted.
 
 Exit codes:
-  0  ready/live/rolled-back
+  0  release-ready/live/rolled-back
   1  blocked gate or completed CI/deploy failure
-  2  approval missing, malformed, or not covering this card/SHA
-  3  git/reconciliation/resume refusal
+  2  approval missing, malformed, legacy, not covering this card/SHA/digest, or a
+     re-prepare that would change an existing card for the same SHA
+  3  git/reconciliation/resume/bootstrap refusal
   4  retryable proof pending (missing/running/timeout/runtime/live proof)
   64 usage error
+  70 test-mode fault injected at a named checkpoint (never outside test mode)
 EOF
 }
 
@@ -106,11 +136,26 @@ OFFLINE_ENV=(
 
 LIVE_APPROVAL_VALUE="portfolio-guru-live-qa-approved"
 DEFAULT_LIVE_ALLOWLIST="portfolio_guru_bot"
+# scripts/telegram_bot_qa.sh exits with this when the approved live target or its
+# allowlist did not survive the child's own environment load. Nothing was sent,
+# so it is pending proof rather than a failed journey.
+LIVE_TARGET_REFUSED_EXIT=21
 
 # Rollback is covered by the same approval, but it only ever happens because the
 # operator ran the printed command. Nothing here rolls back on its own; the
 # deploy script's own health-check rollback is separate and unchanged.
 ROLLBACK_MODE_VALUE="operator-triggered"
+
+# Fixed identity for the rollback commit. Together with the released commit's
+# own committer date and a fixed message this makes the rollback commit a pure
+# function of (released SHA, known-good tree): every run computes the same
+# object id, so an interruption anywhere — before the journal is written, after
+# the push, wherever — can never lead to a second, different rollback commit.
+ROLLBACK_IDENTITY_NAME="Portfolio Guru release loop"
+ROLLBACK_IDENTITY_EMAIL="release-loop@portfolio-guru.invalid"
+
+# Test-mode-only fault injection exit code (see fault_checkpoint).
+FAULT_EXIT=70
 
 CARD_EXCLUSIONS="supervisor submission,credential or secret change,schema or data migration,\
 pricing or spend change,any new recipient or public announcement,history rewrite or force push,\
@@ -188,6 +233,37 @@ if (( 10#$PROOF_TIMEOUT == 0 || 10#$PROOF_INTERVAL == 0 )); then
   [[ "${RELEASE_LOOP_TEST_MODE:-0}" == 1 ]] || { err "Proof timeout and interval must be positive outside explicit test mode."; exit 64; }
 fi
 
+# --- toolchain ---------------------------------------------------------------
+#
+# Under the bootstrap these arrive as absolute, already-resolved paths and are
+# the paths the card froze. Under a direct invocation (prepare) they are
+# resolved from the current PATH once, made absolute, and frozen on the card so
+# the printed commands name them exactly. Nothing after this line calls a bare
+# `git`, `python3` or `bash` from PATH.
+BOOTSTRAPPED="${RELEASE_LOOP_BOOTSTRAP:-0}"
+PINNED_SHA="${RELEASE_LOOP_PINNED_SHA:-}"
+GIT_BIN="${RELEASE_LOOP_GIT:-}"
+PYTHON_BIN="${RELEASE_LOOP_PYTHON:-}"
+BASH_BIN="${RELEASE_LOOP_BASH:-}"
+
+resolve_tool() {
+  local found
+  found="$(command -v "$1" 2>/dev/null || true)"
+  [[ -n "$found" ]] || { err "Cannot find '$1' on PATH."; exit 64; }
+  printf '%s\n' "$found"
+}
+if [[ -z "$PYTHON_BIN" ]]; then PYTHON_BIN="$(resolve_tool python3)"; fi
+realpath_of() { "$PYTHON_BIN" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$1"; }
+PYTHON_BIN="$(realpath_of "$PYTHON_BIN")"
+if [[ -z "$GIT_BIN" ]]; then GIT_BIN="$(resolve_tool git)"; fi
+GIT_BIN="$(realpath_of "$GIT_BIN")"
+if [[ -z "$BASH_BIN" ]]; then BASH_BIN="${BASH:-$(resolve_tool bash)}"; fi
+BASH_BIN="$(realpath_of "$BASH_BIN")"
+for tool in "$GIT_BIN" "$PYTHON_BIN" "$BASH_BIN"; do
+  [[ "$tool" == /* && -x "$tool" ]] || { err "Release toolchain path is not an absolute executable: $tool"; exit 64; }
+done
+git() { "$GIT_BIN" "$@"; }
+
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 [[ -n "$ROOT" ]] || { err "Not inside a git repository."; exit 64; }
 cd "$ROOT"
@@ -197,10 +273,57 @@ RELEASE_DIR="$ROOT/.release"
 card_path()        { printf '%s/%s.card.json' "$RELEASE_DIR" "$1"; }
 attestation_path() { printf '%s/%s.attestation.json' "$RELEASE_DIR" "$1"; }
 rollback_path()    { printf '%s/%s.rollback.json' "$RELEASE_DIR" "$1"; }
-card_tool()        { python3 "$ROOT/scripts/release_card.py" "$@"; }
 utc_now()          { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
+# The card helper: the checkout copy for a direct prepare, the copy the
+# bootstrap staged from Git objects for everything else.
+CARD_TOOL_FILE="${RELEASE_LOOP_CARD_TOOL:-$ROOT/scripts/release_card.py}"
+card_tool() { "$PYTHON_BIN" "$CARD_TOOL_FILE" "$@"; }
+
+# The one way ship/attest/rollback and their resumes are run. Every path in it
+# is absolute and frozen on the card; the script and helper it executes come
+# from Git objects at the named SHA, never from the checkout.
+bootstrap_command() {
+  local sha="$1" loop_args="$2"
+  printf '%q -C %q show %s:scripts/release_bootstrap.py | %q - --root %q --git %q --bash %q --python %q --sha %s -- %s' \
+    "$GIT_BIN" "$ROOT" "$sha" "$PYTHON_BIN" "$ROOT" "$GIT_BIN" "$BASH_BIN" "$PYTHON_BIN" "$sha" "$loop_args"
+}
+
+# Two halves. The flag is demanded before anything else so the checkout copy of
+# this script can never drive a mutating mode; the pinned SHA is compared once
+# the approval and card have been verified, so a scope mismatch is still
+# reported as the approval problem it is.
+require_bootstrap() {
+  local sha="$1"
+  if [[ "$BOOTSTRAPPED" == 1 && "$PINNED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+    info "Bootstrap: pinned to $PINNED_SHA (script and card helper read from Git objects)."
+    return 0
+  fi
+  err "$MODE runs only through the pinned bootstrap for $sha, never from the checkout copy of this script."
+  err "Run exactly: $(bootstrap_command "$sha" "${ORIGINAL_ARGS[*]}")"
+  final_state blocked "run the printed bootstrap command" "no mutation"
+  exit 3
+}
+
+require_pinned() {
+  local sha="$1"
+  [[ "$PINNED_SHA" == "$sha" ]] && return 0
+  err "This bootstrap is pinned to $PINNED_SHA, but the approval names $sha."
+  err "Run exactly: $(bootstrap_command "$sha" "${ORIGINAL_ARGS[*]}")"
+  final_state blocked "run the bootstrap command printed for the approved SHA" "no mutation"
+  exit 3
+}
+
+# Deterministic interruption point for tests. Only honoured in explicit test
+# mode; outside it this is a no-op, so no production run can be cut short here.
+fault_checkpoint() {
+  [[ "${RELEASE_LOOP_TEST_MODE:-0}" == 1 && "${RELEASE_LOOP_FAULT_AT:-}" == "$1" ]] || return 0
+  err "TEST FAULT injected at checkpoint '$1'; exiting as an interruption would, with no cleanup."
+  exit "$FAULT_EXIT"
+}
+
 tracked_tree_is_clean() { [[ -z "$(git status --porcelain --untracked-files=no)" ]]; }
+
 origin_main_ancestor() { git merge-base --is-ancestor origin/main HEAD 2>/dev/null; }
 ahead_behind() {
   if git rev-parse --verify --quiet origin/main >/dev/null; then
@@ -270,6 +393,7 @@ mode_prepare() {
   info "Repo: $ROOT"
   info "Branch: ${branch:-<detached>}"
   info "Commit: $(git rev-parse --short HEAD)"
+  info "Toolchain: git=$GIT_BIN python=$PYTHON_BIN bash=$BASH_BIN (frozen on the card)"
   if tracked_tree_is_clean; then
     info "Tracked tree: clean"
   else
@@ -278,8 +402,8 @@ mode_prepare() {
   info "Untracked files: $(git ls-files --others --exclude-standard | wc -l | tr -d ' ') (not shipped)"
   local reasons=() ahead
   fetch_main_required || reasons+=("current origin/main could not be fetched")
-  run_offline_check "Offline preflight" bash "$ROOT/scripts/preflight.sh" || reasons+=("offline preflight failed")
-  run_offline_check "Telegram offline QA" bash "$ROOT/scripts/telegram_qa_offline.sh" || reasons+=("Telegram offline QA failed")
+  run_offline_check "Offline preflight" "$BASH_BIN" "$ROOT/scripts/preflight.sh" || reasons+=("offline preflight failed")
+  run_offline_check "Telegram offline QA" "$BASH_BIN" "$ROOT/scripts/telegram_qa_offline.sh" || reasons+=("Telegram offline QA failed")
   [[ "$branch" != main && -n "$branch" ]] || reasons+=("not on a feature branch")
   tracked_tree_is_clean || reasons+=("uncommitted tracked changes")
   read -r _ ahead < <(ahead_behind)
@@ -297,33 +421,70 @@ mode_prepare() {
     warn "BLOCKED — resolve before preparing a card:"
     local reason; for reason in "${reasons[@]}"; do printf '      - %s\n' "$reason"; done
     info "No card was written; nothing to approve yet."
+    final_state blocked "resolve the reasons above and rerun --mode prepare" "no card written"
     return 1
   fi
 
-  local sha proof_mode card
+  local sha proof_mode card compare_rc
   sha="$(git rev-parse HEAD)"
   proof_mode="$(resolved_proof_mode)"
   card="$(card_path "$sha")"
-  if ! card_tool write \
-        --path "$card" \
-        --sha "$sha" \
-        --surface "$SURFACE" \
-        --risk "$RISK" \
-        --effect "$EFFECT" \
-        --proof-mode "$proof_mode" \
-        --live-target "$LIVE_TARGET" \
-        --known-good-sha "$KNOWN_GOOD_SHA" \
-        --rollback-mode "$ROLLBACK_MODE_VALUE" \
-        --exclusions "$CARD_EXCLUSIONS" \
-        --created-at "$(utc_now)"; then
+  local card_fields=(
+    --sha "$sha"
+    --surface "$SURFACE"
+    --risk "$RISK"
+    --effect "$EFFECT"
+    --proof-mode "$proof_mode"
+    --live-target "$LIVE_TARGET"
+    --known-good-sha "$KNOWN_GOOD_SHA"
+    --rollback-mode "$ROLLBACK_MODE_VALUE"
+    --exclusions "$CARD_EXCLUSIONS"
+    --bootstrap-git "$GIT_BIN"
+    --bootstrap-python "$PYTHON_BIN"
+    --bootstrap-bash "$BASH_BIN"
+  )
+
+  # Prepare is immutable for a SHA. Re-preparing the same commit with the same
+  # content is an ordinary repeat and reuses the card, so an approval already
+  # given still stands. Re-preparing it with different content is refused: the
+  # approval names the SHA and the card's digest, and rewriting the card
+  # underneath it would let one approval quietly cover a different target,
+  # effect, proof mode, recipient, exclusion set, rollback target or toolchain.
+  if [[ -f "$card" ]]; then
+    step "Existing card for this SHA"
+    set +e
+    card_tool compare --path "$card" "${card_fields[@]}"
+    compare_rc=$?
+    set -e
+    if [[ $compare_rc == 0 ]]; then
+      info "A card for $sha already exists and this prepare would write exactly the same one."
+      info "Reusing it unchanged; any approval already given for $sha still stands."
+    else
+      case $compare_rc in
+        3) err "A different release card already exists for $sha; prepare is immutable for a SHA."
+           err "The existing card is what an approval of $sha covers, so it was not rewritten." ;;
+        4) err "The existing release card for $sha did not validate; refusing to overwrite it." ;;
+        *) err "These prepare values do not form a valid card; the existing card for $sha was left alone." ;;
+      esac
+      err "Commit the change and prepare that new SHA instead."
+      final_state blocked "prepare the new SHA, or approve the existing card as it stands" "existing card left unchanged"
+      return 2
+    fi
+  elif ! card_tool write "${card_fields[@]}" --path "$card" --created-at "$(utc_now)"; then
     err "Refused to write a release card."
+    final_state blocked "supply a single-line, non-sensitive effect" "no card written"
     return 1
   fi
 
+  local card_env approval
+  card_env="$(card_tool export --path "$card")" || { err "The card just written did not validate."; final_state blocked "inspect $card" "card not approved"; return 1; }
+  eval "$card_env"
+  approval="$CARD_APPROVAL"
+
   banner "RELEASE CARD"
   card_tool render --path "$card" \
-    --ship-command "scripts/release_loop.sh --surface $SURFACE --mode ship --risk $RISK --approved $sha" \
-    --rollback-command "$(rollback_command "$sha")"
+    --ship-command "$(bootstrap_command "$sha" "--surface $SURFACE --mode ship --risk $RISK --approved $approval")" \
+    --rollback-command "$(bootstrap_command "$sha" "--surface $SURFACE --mode rollback --risk $RISK --approved $approval")"
   if [[ "$RISK" == telegram && "$proof_mode" == manual ]]; then
     info ""
     info "Telegram live proof is manual on this card: Telethon session/API id/hash,"
@@ -331,40 +492,55 @@ mode_prepare() {
     info "After shipping, close it with --mode attest. This card can never send automatically."
   fi
   info ""
-  info "Approving the SHA above covers that whole release once. Nothing else."
+  info "Approving the token above covers that whole release once — this SHA, this card, nothing else."
+  info "APPROVAL_TOKEN=$approval"
+  final_state release-ready "approve the exact token on the card above" \
+    "card=.release/$sha.card.json digest=$CARD_DIGEST proof_mode=$proof_mode known_good_sha=$KNOWN_GOOD_SHA verified=prepare"
   return 0
 }
 
 APPROVAL_SHA=""
+APPROVAL_DIGEST=""
+APPROVAL_TOKEN=""
 require_approval() {
   local supplied="${APPROVED_VALUE:-${RELEASE_APPROVED:-}}"
+  # release-ready is reserved for a prepare that actually verified this tree and
+  # this runtime. A missing or malformed approval proves nothing about either.
   if [[ -z "$supplied" ]]; then
-    err "$MODE refused — explicit approval required: --approved <40-hex release SHA>."
-    final_state "release-ready" "prepare a card, then approve its exact SHA" "no mutating action taken"
+    err "$MODE refused — explicit approval required: --approved <sha>:<digest> as printed on the prepared card."
+    final_state blocked "prepare a card, then approve its exact token" "no mutating action taken"
     exit 2
   fi
   supplied="$(printf '%s' "$supplied" | tr 'A-F' 'a-f')"
-  if [[ ! "$supplied" =~ ^[0-9a-f]{40}$ ]]; then
-    err "Approval must be the exact full 40-character SHA printed on the prepared card."
-    err "Dated or bare approvals are stale under the one-card standard; each approval names one SHA."
-    final_state "release-ready" "approve the exact SHA printed by --mode prepare" "no mutating action taken"
+  if [[ "$supplied" =~ ^[0-9a-f]{40}$ ]]; then
+    err "Approval '$supplied' names only a SHA. SHA-only approvals are a legacy form and fail closed:"
+    err "an approval now names one SHA and the canonical digest of the whole card, as <sha>:<digest>."
+    err "Rerun --mode prepare for this SHA and approve the exact token it prints."
+    final_state blocked "approve the exact <sha>:<digest> token printed by --mode prepare" "no mutating action taken"
     exit 2
   fi
-  APPROVAL_SHA="$supplied"
-  info "Approval: covers the card for exact SHA $APPROVAL_SHA."
+  if [[ ! "$supplied" =~ ^([0-9a-f]{40}):([0-9a-f]{64})$ ]]; then
+    err "Approval must be the exact approval token printed on the prepared card: <40-hex sha>:<64-hex digest>."
+    err "Dated or bare approvals are stale under the one-card standard; each approval names one SHA and one card."
+    final_state blocked "approve the exact token printed by --mode prepare" "no mutating action taken"
+    exit 2
+  fi
+  APPROVAL_SHA="${BASH_REMATCH[1]}"
+  APPROVAL_DIGEST="${BASH_REMATCH[2]}"
+  APPROVAL_TOKEN="$supplied"
+  info "Approval: covers the card for exact SHA $APPROVAL_SHA with digest $APPROVAL_DIGEST."
 }
 
 refuse_approval_scope() {
   err "$1"
-  err "A changed SHA, surface, risk, effect, proof mode, live target or rollback target needs a new card and a new approval."
-  final_state blocked "run --mode prepare and approve the printed SHA" "no mutation"
+  err "A changed SHA, surface, risk, effect, proof mode, live target, recipient, rollback target or bootstrap path needs a new card and a new approval."
+  final_state blocked "run --mode prepare and approve the printed token" "no mutation"
   exit 2
 }
 
 CARD_FILE=""
-# head_check is "require-head" everywhere except rollback, whose whole job is to
-# move HEAD off the released SHA; rollback checks HEAD itself against both the
-# released SHA and its own recorded rollback commit.
+# head_check is "require-head" everywhere except rollback, which checks HEAD
+# itself so that its refusal can say what rollback expects of HEAD.
 load_and_verify_card() {
   local sha="$1" head_check="${2:-require-head}" head card_env
   CARD_FILE="$(card_path "$sha")"
@@ -372,15 +548,24 @@ load_and_verify_card() {
   card_env="$(card_tool export --path "$CARD_FILE")" || refuse_approval_scope "Release card for $sha did not validate."
   eval "$card_env"
   [[ "${CARD_SHA:-}" == "$sha" ]] || refuse_approval_scope "Card records SHA ${CARD_SHA:-<none>} but the approval names $sha."
+  # The digest is the approval's second half. It is recomputed from the card as
+  # it is now, so a card edited after approval — even into another valid card —
+  # is refused here, before anything reads the fields it carries.
+  [[ "${CARD_DIGEST:-}" == "$APPROVAL_DIGEST" ]] || refuse_approval_scope "Card digest ${CARD_DIGEST:-<none>} is not the approved digest $APPROVAL_DIGEST; the card on disk is not the card that was approved."
   [[ "${CARD_SURFACE:-}" == "$SURFACE" ]] || refuse_approval_scope "Card surface ${CARD_SURFACE:-<none>} does not equal --surface $SURFACE."
   [[ "${CARD_RISK:-}" == "$RISK" ]] || refuse_approval_scope "Card risk ${CARD_RISK:-<none>} does not equal --risk $RISK."
+  [[ "${CARD_ROLLBACK_PARENT_SHA:-}" == "$sha" ]] || refuse_approval_scope "Card rollback parent ${CARD_ROLLBACK_PARENT_SHA:-<none>} is not the approved SHA $sha."
+  if [[ "${CARD_BOOTSTRAP_GIT:-}" != "$GIT_BIN" || "${CARD_BOOTSTRAP_PYTHON:-}" != "$PYTHON_BIN" || "${CARD_BOOTSTRAP_BASH:-}" != "$BASH_BIN" ]]; then
+    refuse_approval_scope "Card froze bootstrap git=${CARD_BOOTSTRAP_GIT:-<none>} python=${CARD_BOOTSTRAP_PYTHON:-<none>} bash=${CARD_BOOTSTRAP_BASH:-<none>}, but this run uses git=$GIT_BIN python=$PYTHON_BIN bash=$BASH_BIN."
+  fi
   if [[ "$head_check" == require-head ]]; then
     head="$(git rev-parse HEAD)"
     [[ "$head" == "$sha" ]] || refuse_approval_scope "Approval names $sha but HEAD is $head."
   fi
   info "Card: $CARD_FILE"
+  info "Card digest: $CARD_DIGEST"
   info "Card effect: $CARD_EFFECT"
-  info "Card proof mode: $CARD_PROOF_MODE${CARD_LIVE_TARGET:+ (live target @$CARD_LIVE_TARGET)}"
+  info "Card proof mode: $CARD_PROOF_MODE${CARD_LIVE_TARGET:+ (live target @$CARD_LIVE_TARGET, recipients: $CARD_LIVE_ALLOWLIST)}"
 }
 
 PUSHED_SHA=""
@@ -477,7 +662,7 @@ workflow_runs_json() {
 
 select_provenance_run() {
   local sha="$1" expected_event="$2" not_before="${3:-}"
-  python3 -c '
+  "$PYTHON_BIN" -c '
 import datetime as dt, json, sys
 sha, expected_event, not_before = sys.argv[1:4]
 def value(run, camel, snake): return run.get(camel) or run.get(snake) or ""
@@ -553,10 +738,17 @@ wait_for_exact_workflow() {
   done
 }
 
+# ref_mode is "head-and-origin" for a release (HEAD == origin/main == SHA) and
+# "origin-only" for a rollback, whose commit lives on main while HEAD stays at
+# the released SHA the approval named.
 prove_exact_live_runtime() {
-  local sha="$1" output
+  local sha="$1" ref_mode="${2:-head-and-origin}" output
   step "Mac Mini runtime proof for exact SHA"
-  [[ "$(git rev-parse HEAD)" == "$sha" && "$(git rev-parse origin/main)" == "$sha" ]] || { warn "Local HEAD/origin/main no longer equal release SHA."; return 4; }
+  if [[ "$ref_mode" == origin-only ]]; then
+    [[ "$(git rev-parse origin/main)" == "$sha" ]] || { warn "origin/main no longer equals $sha."; return 4; }
+  else
+    [[ "$(git rev-parse HEAD)" == "$sha" && "$(git rev-parse origin/main)" == "$sha" ]] || { warn "Local HEAD/origin/main no longer equal release SHA."; return 4; }
+  fi
   command -v launchctl >/dev/null 2>&1 || { warn "Local launchd access unavailable."; return 4; }
   launchctl print "gui/$(id -u)/com.portfolioguru.bot" >/dev/null 2>&1 || { warn "Portfolio Guru service is not locally accessible."; return 4; }
   [[ -x "$ROOT/scripts/verify_live_runtime.py" ]] || { warn "Runtime verifier unavailable."; return 4; }
@@ -578,8 +770,8 @@ runtime_matches() {
 }
 
 attest_command() {
-  printf "scripts/release_loop.sh --surface %s --mode attest --risk %s --approved %s --result pass|fail --note '<one line>'" \
-    "$SURFACE" "$RISK" "$PUSHED_SHA"
+  bootstrap_command "$APPROVAL_SHA" \
+    "--surface $SURFACE --mode attest --risk $RISK --approved $APPROVAL_TOKEN --result pass|fail --note '<one line>'"
 }
 
 prove_risk_journey() {
@@ -597,11 +789,31 @@ prove_risk_journey() {
         warn "Refusing to run the live child. Restore readiness and resume, or prepare a new manual card."
         return 4
       fi
-      env TELEGRAM_LIVE_APPROVED="$LIVE_APPROVAL_VALUE" \
-          TELEGRAM_BOT_USERNAME="$CARD_LIVE_TARGET" \
-          RUN_LIVE_TELEGRAM=1 \
-          REQUIRE_TELEGRAM_LIVE=1 \
-          bash "$ROOT/scripts/telegram_bot_qa.sh" --focused-release || return 1
+      # RELEASE_LIVE_TARGET and RELEASE_LIVE_ALLOWLIST are the approved target
+      # and the card's frozen singleton allowlist stated explicitly, so the
+      # child can hold them read-only across its own environment load.
+      # TELEGRAM_BOT_USERNAME alone was not enough: backend/.env is read after
+      # the child starts and could export a different username or allowlist,
+      # which would have pointed an approved live proof at a bot this card
+      # never named.
+      local live_rc
+      if env TELEGRAM_LIVE_APPROVED="$LIVE_APPROVAL_VALUE" \
+             RELEASE_LIVE_TARGET="$CARD_LIVE_TARGET" \
+             RELEASE_LIVE_ALLOWLIST="$CARD_LIVE_ALLOWLIST" \
+             TELEGRAM_BOT_USERNAME="$CARD_LIVE_TARGET" \
+             RUN_LIVE_TELEGRAM=1 \
+             REQUIRE_TELEGRAM_LIVE=1 \
+             "$BASH_BIN" "$ROOT/scripts/telegram_bot_qa.sh" --focused-release; then
+        live_rc=0
+      else
+        live_rc=$?
+      fi
+      if [[ $live_rc == "$LIVE_TARGET_REFUSED_EXIT" ]]; then
+        warn "The live child refused: the approved target @$CARD_LIVE_TARGET did not survive its own environment load."
+        warn "No live message was sent. Fix backend/.env so it names the approved target and allowlist, then resume."
+        return 4
+      fi
+      [[ $live_rc == 0 ]] || return 1
       ;;
     broad)
       [[ "$NO_DOGFOOD" != 1 ]] || { warn "Broad proof skipped; proof remains pending."; return 4; }
@@ -610,14 +822,13 @@ prove_risk_journey() {
         warn "Run it at a terminal, or record the operator verdict with: $(attest_command)"
         return 4
       fi
-      bash "$ROOT/scripts/dogfood_smoke.sh" --strict-release || return 1
+      "$BASH_BIN" "$ROOT/scripts/dogfood_smoke.sh" --strict-release || return 1
       ;;
   esac
 }
 
 rollback_command() {
-  printf 'scripts/release_loop.sh --surface %s --mode rollback --risk %s --approved %s' \
-    "$SURFACE" "$RISK" "$1"
+  bootstrap_command "$1" "--surface $SURFACE --mode rollback --risk $RISK --approved $APPROVAL_TOKEN"
 }
 
 rollback_notice() {
@@ -634,14 +845,16 @@ rollback_notice() {
 }
 
 resume_command() {
-  printf 'scripts/release_loop.sh --surface %s --mode ship --risk %s --release-sha %s --approved %s' \
-    "$SURFACE" "$RISK" "$PUSHED_SHA" "$APPROVAL_SHA"
+  bootstrap_command "$APPROVAL_SHA" \
+    "--surface $SURFACE --mode ship --risk $RISK --release-sha $PUSHED_SHA --approved $APPROVAL_TOKEN"
 }
 
 mode_ship() {
   banner "SHIP — gated release closure ($SURFACE, risk=$RISK)"
   require_approval
+  require_bootstrap "$APPROVAL_SHA"
   load_and_verify_card "$APPROVAL_SHA"
+  require_pinned "$APPROVAL_SHA"
   [[ "$branch" != main && -n "$branch" ]] || { err "SHIP refused — use the preserved feature branch."; final_state blocked "checkout feature branch" "no mutation"; exit 3; }
   tracked_tree_is_clean || { err "SHIP refused — uncommitted tracked changes present."; final_state blocked "commit or revert changes" "no mutation"; exit 3; }
 
@@ -653,8 +866,8 @@ mode_ship() {
     read -r _ ahead < <(ahead_behind)
     [[ "$ahead" != "?" && "$ahead" != 0 ]] || { err "SHIP refused — no release commit ahead of origin/main."; final_state blocked "create release commit" "no mutation"; exit 3; }
     origin_main_ancestor || { err "SHIP refused — origin/main is not an ancestor of HEAD."; final_state blocked "rebase onto origin/main" "no mutation"; exit 3; }
-    run_offline_check "Offline preflight" bash "$ROOT/scripts/preflight.sh" || { final_state blocked "fix offline preflight" "no push"; exit 1; }
-    run_offline_check "Telegram offline QA" bash "$ROOT/scripts/telegram_qa_offline.sh" || { final_state blocked "fix Telegram offline QA" "no push"; exit 1; }
+    run_offline_check "Offline preflight" "$BASH_BIN" "$ROOT/scripts/preflight.sh" || { final_state blocked "fix offline preflight" "no push"; exit 1; }
+    run_offline_check "Telegram offline QA" "$BASH_BIN" "$ROOT/scripts/telegram_qa_offline.sh" || { final_state blocked "fix Telegram offline QA" "no push"; exit 1; }
     verify_known_good "$CARD_KNOWN_GOOD_SHA" || { final_state blocked "prepare a new card from the current verified runtime" "no mutation"; exit 1; }
     ship_reconcile_and_push || { final_state blocked "repair reconcile/push and confirm original branch" "push stage failed closed"; exit 1; }
   fi
@@ -713,7 +926,9 @@ mode_ship() {
 mode_attest() {
   banner "ATTEST — manual proof closure ($SURFACE, risk=$RISK)"
   require_approval
+  require_bootstrap "$APPROVAL_SHA"
   load_and_verify_card "$APPROVAL_SHA"
+  require_pinned "$APPROVAL_SHA"
 
   if [[ "$RISK" == internal ]]; then
     err "Internal risk has no manual journey to attest; its proof is CI, deploy and runtime identity."
@@ -739,10 +954,40 @@ mode_attest() {
   PUSHED_SHA="$APPROVAL_SHA"
   KNOWN_GOOD_SHA="${CARD_KNOWN_GOOD_SHA:-}"
 
-  local runtime_rc
+  # Attest closes the manual half of the proof only. The automated half is proved
+  # here in full, from GitHub and from the Mac Mini, rather than assumed from a
+  # ship run that may never have happened in this shell: the exact-SHA Tests run,
+  # then the deploy that followed it, then runtime identity.
+  local tests_rc deploy_rc runtime_rc tests_completed
+  set +e; wait_for_exact_workflow Tests test.yml "$APPROVAL_SHA" push; tests_rc=$?; set -e
+  if [[ $tests_rc == 1 ]]; then
+    err "Tests completed unsuccessfully for $APPROVAL_SHA; there is no automated proof to attest against."
+    final_state blocked "fix the failed Tests run for this exact SHA" "release_sha=$APPROVAL_SHA tests=failed"
+    exit 1
+  fi
+  tests_completed="$WORKFLOW_UPDATED_AT"
+  if [[ $tests_rc == 4 || -z "$tests_completed" ]]; then
+    final_state proof-pending "attest once Tests has completed for this exact SHA" "release_sha=$APPROVAL_SHA tests=pending"
+    exit 4
+  fi
+
+  set +e
+  wait_for_exact_workflow "Deploy Mac Mini" deploy-mac.yml "$APPROVAL_SHA" workflow_run "$tests_completed"
+  deploy_rc=$?
+  set -e
+  if [[ $deploy_rc == 1 ]]; then
+    err "The Mac Mini deploy for $APPROVAL_SHA completed unsuccessfully; nothing manual can close that."
+    final_state blocked "fix the failed deploy run for this exact SHA" "release_sha=$APPROVAL_SHA tests=1 deploy=failed"
+    exit 1
+  fi
+  if [[ $deploy_rc == 4 ]]; then
+    final_state proof-pending "attest once the deploy bound to this SHA has completed" "release_sha=$APPROVAL_SHA tests=1 deploy=pending"
+    exit 4
+  fi
+
   set +e; prove_exact_live_runtime "$APPROVAL_SHA"; runtime_rc=$?; set -e
   if [[ $runtime_rc != 0 ]]; then
-    final_state proof-pending "attest where the Mac Mini runtime is accessible" "release_sha=$APPROVAL_SHA runtime=pending"
+    final_state proof-pending "attest where the Mac Mini runtime is accessible" "release_sha=$APPROVAL_SHA tests=1 deploy=1 runtime=pending"
     exit 4
   fi
 
@@ -763,13 +1008,15 @@ mode_attest() {
   if [[ "$RESULT" == pass ]]; then
     banner "ATTEST complete"
     info "manual proof attested by operator"
-    final_state live none "release_sha=$APPROVAL_SHA proof=manual-operator-attestation result=pass"
+    final_state live none \
+      "release_sha=$APPROVAL_SHA tests=1 deploy=1 runtime=1 proof=manual-operator-attestation result=pass"
     return 0
   fi
   banner "ATTEST recorded a failure"
   info "manual proof attested by operator"
   rollback_notice
-  final_state blocked "roll back to the known-good SHA or ship a fix" "release_sha=$APPROVAL_SHA proof=manual-operator-attestation result=fail"
+  final_state blocked "roll back to the known-good SHA or ship a fix" \
+    "release_sha=$APPROVAL_SHA tests=1 deploy=1 runtime=1 proof=manual-operator-attestation result=fail"
   exit 1
 }
 
@@ -784,8 +1031,13 @@ mode_attest() {
 # and is not touched by any of this.)
 #
 # The recovery is one normal forward commit B: parent exactly R, tree exactly
-# K's. Nothing is reset, force-pushed or rewritten, the released history stays
-# intact, and the deploy pipeline treats B as an ordinary release.
+# K's, built with `commit-tree` from Git objects alone. The working tree, the
+# index and every local ref are left exactly as they were: HEAD stays at R, and
+# B is pushed straight to main by its exact SHA. Nothing is reset, force-pushed,
+# rewritten or checked out, and the deploy pipeline treats B as an ordinary
+# release. Because B is deterministic (fixed identity, R's own date, fixed
+# message), an interrupted run can be rerun at any point and always arrives at
+# the same B; recovery asks Git, not a journal, whether B already exists on main.
 
 resolve_ref() {
   local out
@@ -794,14 +1046,38 @@ resolve_ref() {
   printf '%s\n' "$out"
 }
 
-verify_rollback_shape() {
+# The complete parent list, not just the first parent. A merge whose first parent
+# happened to be the released SHA would drag a second line of history onto main
+# under an approval that named one commit and one tree.
+commit_parents() {
+  local line rest
+  line="$(git rev-list --parents -n 1 "$1" 2>/dev/null || true)"
+  [[ -n "$line" ]] || return 1
+  read -r _ rest <<< "$line"
+  printf '%s\n' "$rest"
+}
+
+# Silent shape check: is this commit exactly parent=released, tree=known-good's?
+# Sets SHAPE_ERROR with the reason when it is not.
+SHAPE_ERROR=""
+rollback_shape_ok() {
   local rollback="$1" released="$2" known_good="$3"
-  local parent tree good_tree
-  parent="$(resolve_ref "$rollback^")" || { err "Rollback commit $rollback has no readable parent."; return 1; }
-  tree="$(resolve_ref "$rollback^{tree}")" || { err "Rollback commit $rollback has no readable tree."; return 1; }
-  good_tree="$(resolve_ref "$known_good^{tree}")" || { err "Known-good commit $known_good has no readable tree."; return 1; }
-  [[ "$parent" == "$released" ]] || { err "Rollback commit parent is $parent, not the released SHA $released."; return 1; }
-  [[ "$tree" == "$good_tree" ]] || { err "Rollback commit tree is $tree, not the known-good tree $good_tree."; return 1; }
+  local parents tree good_tree
+  SHAPE_ERROR=""
+  parents="$(commit_parents "$rollback")" || { SHAPE_ERROR="Rollback commit $rollback has no readable parent list."; return 1; }
+  if [[ "$parents" != "$released" ]]; then
+    SHAPE_ERROR="Rollback commit parent list is '${parents:-<none>}'; it must be exactly one parent, the released SHA $released."
+    return 1
+  fi
+  tree="$(resolve_ref "$rollback^{tree}")" || { SHAPE_ERROR="Rollback commit $rollback has no readable tree."; return 1; }
+  good_tree="$(resolve_ref "$known_good^{tree}")" || { SHAPE_ERROR="Known-good commit $known_good has no readable tree."; return 1; }
+  [[ "$tree" == "$good_tree" ]] || { SHAPE_ERROR="Rollback commit tree is $tree, not the known-good tree $good_tree."; return 1; }
+}
+
+verify_rollback_shape() {
+  rollback_shape_ok "$@" && return 0
+  err "$SHAPE_ERROR"
+  return 1
 }
 
 rollback_commit_message() {
@@ -810,22 +1086,36 @@ rollback_commit_message() {
   printf 'Forward commit only: parent %s, tree exactly that of %s. No history was rewritten.\n' "$1" "$2"
 }
 
+# Deterministic: the same (released, known-good) pair always yields the same
+# commit id, so this is safe to call again after any interruption.
+create_rollback_commit() {
+  local tree="$1" released="$2" known_good="$3" when sha
+  when="$(git show -s --format=%cI "$released" 2>/dev/null || true)"
+  [[ "$when" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T ]] || return 1
+  sha="$(env GIT_AUTHOR_NAME="$ROLLBACK_IDENTITY_NAME" GIT_AUTHOR_EMAIL="$ROLLBACK_IDENTITY_EMAIL" GIT_AUTHOR_DATE="$when" \
+             GIT_COMMITTER_NAME="$ROLLBACK_IDENTITY_NAME" GIT_COMMITTER_EMAIL="$ROLLBACK_IDENTITY_EMAIL" GIT_COMMITTER_DATE="$when" \
+             "$GIT_BIN" commit-tree "$tree" -p "$released" -m "$(rollback_commit_message "$released" "$known_good")" 2>/dev/null || true)"
+  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+  printf '%s\n' "$sha"
+}
+
 ROLLBACK_STATE_FILE=""
 ROLLBACK_COMMIT_SHA=""
 ROLLBACK_STATE_STATUS=""
 ROLLBACK_STATE_CREATED=""
 
-# Load whatever a previous, interrupted run of this exact rollback recorded. A
-# state that does not validate, or that names a different release or target, is
-# refused rather than guessed at: reconciling towards an unapproved SHA is the
-# one thing a resumable rollback must never do.
+# Load whatever a previous run of this exact rollback recorded. A state that
+# does not validate, or that names a different release or target, is refused
+# rather than guessed at: reconciling towards an unapproved SHA is the one thing
+# a resumable rollback must never do. A missing journal is not a problem — Git
+# itself is asked whether the rollback commit already exists on main.
 load_rollback_state() {
   local released="$1" known_good="$2" state_env
   ROLLBACK_STATE_FILE="$(rollback_path "$released")"
   ROLLBACK_COMMIT_SHA=""
   ROLLBACK_STATE_STATUS=""
   ROLLBACK_STATE_CREATED=""
-  [[ -f "$ROLLBACK_STATE_FILE" ]] || { info "No prior rollback state; this is the first execution."; return 0; }
+  [[ -f "$ROLLBACK_STATE_FILE" ]] || { info "No prior rollback journal; Git will say whether a rollback commit already exists."; return 0; }
   state_env="$(card_tool rollback-export --path "$ROLLBACK_STATE_FILE")" || {
     err "Rollback state for $released did not validate; refusing to guess what was already done."
     return 1
@@ -838,7 +1128,7 @@ load_rollback_state() {
   ROLLBACK_COMMIT_SHA="${ROLLBACK_ROLLBACK_SHA:-}"
   ROLLBACK_STATE_STATUS="${ROLLBACK_STATUS:-}"
   ROLLBACK_STATE_CREATED="${ROLLBACK_CREATED_AT:-}"
-  info "Prior rollback state: status=$ROLLBACK_STATE_STATUS rollback_sha=$ROLLBACK_COMMIT_SHA"
+  info "Prior rollback journal: status=$ROLLBACK_STATE_STATUS rollback_sha=$ROLLBACK_COMMIT_SHA"
 }
 
 write_rollback_state() {
@@ -855,7 +1145,7 @@ write_rollback_state() {
         --status "$status" \
         --created-at "$ROLLBACK_STATE_CREATED" \
         --updated-at "$now"; then
-    err "Could not record rollback state; refusing to continue without a resumable record."
+    err "Could not record rollback state; refusing to continue without a progress record."
     return 1
   fi
   ROLLBACK_STATE_STATUS="$status"
@@ -865,7 +1155,9 @@ write_rollback_state() {
 mode_rollback() {
   banner "ROLLBACK — bounded operator-triggered recovery ($SURFACE, risk=$RISK)"
   require_approval
+  require_bootstrap "$APPROVAL_SHA"
   load_and_verify_card "$APPROVAL_SHA" defer-head
+  require_pinned "$APPROVAL_SHA"
 
   local released="$APPROVAL_SHA" known_good="${CARD_KNOWN_GOOD_SHA:-}"
   if [[ "${CARD_ROLLBACK_MODE:-}" != "$ROLLBACK_MODE_VALUE" ]]; then
@@ -886,26 +1178,18 @@ mode_rollback() {
   info "ROLLBACK_FROM=$released"
   info "ROLLBACK_TO=$known_good"
   info "Rollback is $ROLLBACK_MODE_VALUE: it runs because you ran this command, never on its own."
+  info "The checkout, index and local refs are not touched: HEAD stays at $released."
 
   [[ "$branch" != main && -n "$branch" ]] || { err "ROLLBACK refused — run it from the release feature branch, never from main."; final_state blocked "checkout the release feature branch" "no mutation"; exit 3; }
-  tracked_tree_is_clean || { err "ROLLBACK refused — uncommitted tracked changes present."; final_state blocked "commit or revert changes" "no mutation"; exit 3; }
   load_rollback_state "$released" "$known_good" || { final_state blocked "repair or remove the invalid rollback state" "no mutation"; exit 3; }
+  tracked_tree_is_clean || { err "ROLLBACK refused — uncommitted tracked changes present."; final_state blocked "commit or revert changes" "no mutation"; exit 3; }
   fetch_main_required || { final_state blocked "repair origin fetch" "no mutation"; exit 3; }
 
   local head origin_main
   head="$(git rev-parse HEAD)"
   origin_main="$(git rev-parse origin/main)"
-
-  # main may only be the released SHA (nothing pushed yet) or the exact rollback
-  # commit already recorded here. Anything else is a release this card never
-  # named, and rolling one of those back would land somewhere nobody approved.
-  if [[ "$origin_main" != "$released" ]] && [[ -z "$ROLLBACK_COMMIT_SHA" || "$origin_main" != "$ROLLBACK_COMMIT_SHA" ]]; then
-    err "origin/main is $origin_main: neither the released SHA $released nor a recorded rollback commit."
-    final_state blocked "reconcile main before rolling anything back" "no mutation"
-    exit 3
-  fi
-  if [[ "$head" != "$released" ]] && [[ -z "$ROLLBACK_COMMIT_SHA" || "$head" != "$ROLLBACK_COMMIT_SHA" ]]; then
-    err "HEAD is $head; rollback expects the released SHA $released or its recorded rollback commit."
+  if [[ "$head" != "$released" ]]; then
+    err "HEAD is $head; rollback expects the released SHA $released and leaves HEAD there."
     final_state blocked "check out the approved release SHA" "no mutation"
     exit 3
   fi
@@ -922,6 +1206,38 @@ mode_rollback() {
     exit 3
   }
   info "PASS: $known_good is an ancestor of $released."
+
+  # main may only be the released SHA (nothing pushed yet) or a commit that is
+  # already exactly this rollback — parent R, tree K's — however it got there:
+  # a run interrupted after its push and before its journal, for instance.
+  # Anything else is a release this card never named, and rolling one of those
+  # back would land somewhere nobody approved.
+  step "Reconcile main"
+  local rollback_sha=""
+  if [[ "$origin_main" != "$released" ]]; then
+    if rollback_shape_ok "$origin_main" "$released" "$known_good"; then
+      rollback_sha="$origin_main"
+      info "origin/main $origin_main is already a rollback commit of $released onto the tree of $known_good; reusing it."
+    else
+      err "origin/main is $origin_main: neither the released SHA $released nor a rollback commit with parent $released and the tree of $known_good ($SHAPE_ERROR)"
+      final_state blocked "reconcile main before rolling anything back" "no mutation"
+      exit 3
+    fi
+  fi
+  if [[ -n "$ROLLBACK_COMMIT_SHA" ]]; then
+    verify_rollback_shape "$ROLLBACK_COMMIT_SHA" "$released" "$known_good" || {
+      err "The recorded rollback commit $ROLLBACK_COMMIT_SHA no longer has the approved parent/tree shape."
+      final_state blocked "repair or remove the invalid rollback state" "no mutation"
+      exit 3
+    }
+    if [[ -n "$rollback_sha" && "$rollback_sha" != "$ROLLBACK_COMMIT_SHA" ]]; then
+      err "The recorded rollback commit $ROLLBACK_COMMIT_SHA differs from the rollback commit already on main, $rollback_sha."
+      final_state blocked "repair or remove the invalid rollback state" "no mutation"
+      exit 3
+    fi
+    rollback_sha="$ROLLBACK_COMMIT_SHA"
+    info "Reusing recorded rollback commit $rollback_sha; a second rollback commit is never created."
+  fi
 
   # Reconcile and report what is actually live, before anything mutates. Until
   # the rollback commit is pushed, the released SHA is what should be running;
@@ -944,63 +1260,43 @@ mode_rollback() {
     fi
   fi
 
-  local rollback_sha="$ROLLBACK_COMMIT_SHA" tree
+  local tree
   if [[ -z "$rollback_sha" ]]; then
-    step "Create the forward rollback commit"
+    step "Create the forward rollback commit (Git objects only; checkout untouched)"
     tree="$(resolve_ref "$known_good^{tree}")" || {
       err "Could not read the known-good tree of $known_good."
       final_state blocked "fetch the known-good commit" "no mutation"
       exit 3
     }
-    rollback_sha="$(git commit-tree "$tree" -p "$released" -m "$(rollback_commit_message "$released" "$known_good")" 2>/dev/null || true)"
-    if [[ ! "$rollback_sha" =~ ^[0-9a-f]{40}$ ]]; then
+    rollback_sha="$(create_rollback_commit "$tree" "$released" "$known_good")" || {
       err "Could not create the rollback commit object; nothing was changed."
       final_state blocked "retry rollback in a healthy checkout" "no mutation"
       exit 3
-    fi
+    }
     verify_rollback_shape "$rollback_sha" "$released" "$known_good" || {
       err "Refusing the rollback commit: it is not exactly parent=$released with the tree of $known_good."
       final_state blocked "retry rollback in a healthy checkout" "no mutation"
       exit 3
     }
-    # Recorded before the branch moves and long before the push, so an
-    # interruption anywhere after this reconciles onto this one commit instead
-    # of making a second one.
+    info "ROLLBACK_COMMIT=$rollback_sha (parent $released, tree of $known_good)"
+    # An interruption here leaves a dangling, deterministic object and nothing
+    # else; the rerun recomputes the same id.
+    fault_checkpoint rollback-commit-created
+  else
+    info "ROLLBACK_COMMIT=$rollback_sha (parent $released, tree of $known_good)"
+  fi
+  if [[ -z "$ROLLBACK_STATE_STATUS" ]]; then
     write_rollback_state "$released" "$known_good" "$rollback_sha" committed || {
       final_state blocked "make .release writable and rerun the same rollback command" "no mutation"
       exit 3
     }
-  else
-    verify_rollback_shape "$rollback_sha" "$released" "$known_good" || {
-      err "The recorded rollback commit no longer has the approved parent/tree shape."
-      final_state blocked "repair or remove the invalid rollback state" "no mutation"
-      exit 3
-    }
-    info "Reusing recorded rollback commit $rollback_sha; a second rollback commit is never created."
-  fi
-
-  if [[ "$head" != "$rollback_sha" ]]; then
-    step "Move $branch onto the rollback commit"
-    if ! git read-tree -u -m "$released" "$rollback_sha"; then
-      err "Could not write the known-good tree into the working tree; restoring the tracked preimage."
-      git read-tree -u --reset HEAD || err "Preimage restore failed; do not continue by hand until git status is clean."
-      final_state blocked "restore a clean checkout and rerun the same rollback command" "no push"
-      exit 3
-    fi
-    if ! git update-ref -m "rollback $released to known-good $known_good" "refs/heads/$branch" "$rollback_sha" "$released"; then
-      err "Could not move $branch from $released to $rollback_sha; restoring the tracked preimage."
-      git read-tree -u --reset HEAD || err "Preimage restore failed; do not continue by hand until git status is clean."
-      final_state blocked "resolve the branch conflict and rerun the same rollback command" "no push"
-      exit 3
-    fi
   fi
 
   step "Rollback commit invariants"
   head="$(git rev-parse HEAD)"
-  [[ "$head" == "$rollback_sha" ]] || { err "HEAD is $head, not the rollback commit $rollback_sha."; final_state blocked "restore the branch and rerun the same rollback command" "no push"; exit 3; }
-  verify_rollback_shape "$rollback_sha" "$released" "$known_good" || { final_state blocked "restore the branch and rerun the same rollback command" "no push"; exit 3; }
-  tracked_tree_is_clean || { err "Working tree does not exactly match the known-good tree after the rollback commit."; final_state blocked "restore a clean checkout and rerun the same rollback command" "no push"; exit 3; }
-  info "ROLLBACK_COMMIT=$rollback_sha (parent $released, tree of $known_good)"
+  [[ "$head" == "$released" ]] || { err "HEAD moved to $head during rollback; it must stay at the released SHA $released."; final_state blocked "restore the branch to the released SHA and rerun the same rollback command" "no push"; exit 3; }
+  tracked_tree_is_clean || { err "Working tree changed during rollback; nothing here should have touched it."; final_state blocked "restore a clean checkout and rerun the same rollback command" "no push"; exit 3; }
+  verify_rollback_shape "$rollback_sha" "$released" "$known_good" || { final_state blocked "rerun the same rollback command" "no push"; exit 3; }
 
   if [[ "$origin_main" == "$rollback_sha" ]]; then
     info "origin/main is already $rollback_sha; skipping a duplicate push."
@@ -1012,6 +1308,9 @@ mode_rollback() {
       final_state blocked "repair the push and rerun the same rollback command" "rollback commit exists locally, main unchanged"
       exit 1
     fi
+    # An interruption here leaves the commit on main and no journal; the rerun
+    # recognises it on main by shape and never pushes a second one.
+    fault_checkpoint rollback-pushed
     fetch_main_required || { final_state blocked "repair origin fetch and rerun the same rollback command" "push attempted"; exit 1; }
     origin_main="$(git rev-parse origin/main)"
     if [[ "$origin_main" != "$rollback_sha" ]]; then
@@ -1056,7 +1355,7 @@ mode_rollback() {
     exit 4
   fi
 
-  set +e; prove_exact_live_runtime "$rollback_sha"; runtime_rc=$?; set -e
+  set +e; prove_exact_live_runtime "$rollback_sha" origin-only; runtime_rc=$?; set -e
   if [[ $runtime_rc != 0 ]]; then
     if runtime_matches "$released"; then
       err "Rollback blocked: main is $rollback_sha, but the live runtime is still the released SHA $released."
@@ -1076,7 +1375,7 @@ mode_rollback() {
   info "RELEASED_SHA=$released"
   info "ROLLBACK_COMMIT_SHA=$rollback_sha"
   info "KNOWN_GOOD_TREE_SHA=$known_good"
-  info "main and the live runtime are $rollback_sha, whose tree is exactly that of $known_good."
+  info "main and the live runtime are $rollback_sha, whose tree is exactly that of $known_good. HEAD stays at $released."
   final_state rolled-back none "released_sha=$released rollback_sha=$rollback_sha known_good_sha=$known_good tests=1 deploy=1 runtime=1"
 }
 
