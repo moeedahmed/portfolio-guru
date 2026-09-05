@@ -4016,15 +4016,36 @@ async def _alert_filing_failure(
     reason: str | None = None,
     user_id: int | None = None,
 ) -> None:
-    """Page the operator for live Kaizen filing failures without PHI."""
+    """Page the operator ONLY when a Kaizen draft save is uncertain.
+
+    Classification is status-first, reason-second:
+
+    - ``partial`` / ``timeout`` / ``exception`` -> page regardless of reason
+      (completion unknown; a mid-filing failure cannot prove nothing was
+      written, even when the reason is FORM_UNAVAILABLE).
+    - ``failed`` + ``SAVE_FAILURE`` -> page (fields filled, save not confirmed).
+    - ``failed`` + FORM_UNAVAILABLE / LOGIN_FAILED / FIELD_FAILURE / UNKNOWN,
+      and any status/reason outside the known set -> quiet. These are routine
+      and already covered by filing-attempt + funnel telemetry and the
+      affected-user recovery report.
+
+    ``form_type``, ``reason`` and ``user_id`` never reach the operator: the
+    message is a fixed template keyed ``filing_uncertain`` with one
+    category-wide 900 s cooldown (not per person/form).
+    """
+    if status in ("partial", "timeout", "exception"):
+        uncertain = True
+    elif status == "failed" and reason == "SAVE_FAILURE":
+        uncertain = True
+    else:
+        uncertain = False
+    if not uncertain:
+        return
     try:
         import ops_alert
-        reason_text = f" ({reason})" if reason else ""
-        user_text = f" user={user_id}" if user_id is not None else ""
         await ops_alert.notify_operator(
             getattr(context, "bot", None),
-            f"Kaizen filing {status}{reason_text} for {form_type}.{user_text}",
-            key=f"kaizen_filing_failure:{form_type}:{status}:{reason or 'unknown'}",
+            key="filing_uncertain",
             cooldown=900,
         )
     except Exception:
@@ -16101,7 +16122,6 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         import ops_alert
         await ops_alert.notify_operator(
             getattr(context, "bot", None),
-            f"handler error: {str(context.error)[:300]}",
             key="handler_error",
         )
     except Exception:

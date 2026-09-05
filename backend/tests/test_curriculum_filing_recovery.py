@@ -189,6 +189,71 @@ async def test_form_unavailable_requires_explicit_alternative_curriculum_retry()
 
 
 @pytest.mark.asyncio
+async def test_routine_form_unavailable_keeps_telemetry_and_user_report_without_paging(
+    monkeypatch, tmp_path
+):
+    """The real _do_filing failure path, with the real alert helper in place:
+    a routine FORM_UNAVAILABLE failure must still write the filing-attempt and
+    funnel records and give the affected user their recovery report, but must
+    not DM the operator."""
+    import json
+
+    import filing_attempt_log
+    import ops_alert
+    from bot import AWAIT_APPROVAL, handle_approval_approve
+
+    funnel_path = tmp_path / "funnel-events.ndjson"
+    filing_path = tmp_path / "filing-log.ndjson"
+    monkeypatch.setenv("PORTFOLIO_GURU_FUNNEL_LOG_PATH", str(funnel_path))
+    monkeypatch.setenv("PORTFOLIO_GURU_FILING_LOG_PATH", str(filing_path))
+    ops_alert._last_alert.clear()
+    monkeypatch.setattr(ops_alert, "OPERATOR_CHAT_ID", 123)
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["draft_data"] = _active_cbd_draft()
+    route_filing = AsyncMock(return_value=_failed_result(
+        "CBD is not available on your Kaizen profile or curriculum right now; "
+        "Kaizen redirected to https://kaizenep.com/events/list instead of opening the form. "
+        "No draft was written."
+    ))
+
+    with patch("bot.get_credentials", return_value=("user", "pass")), \
+         patch("bot.get_training_level", return_value="HIGHER"), \
+         patch("bot.get_curriculum", return_value="2025"), \
+         patch("bot.route_filing", new=route_filing):
+        result = await handle_approval_approve(
+            sim._make_callback_update("APPROVE|draft"), context
+        )
+
+    assert result == AWAIT_APPROVAL
+    route_filing.assert_awaited_once()
+
+    # Affected user still gets the recovery report and alternative-curriculum path.
+    assert "Nothing was written" in sim.get_last_text()
+    assert ('🔄 Try 2021', "FILING_CURRICULUM|retry|2021") in sim.get_last_buttons()
+
+    # Operator DM: nothing sent to the operator chat.
+    operator_sends = [
+        call for call in context.bot.send_message.await_args_list
+        if call.kwargs.get("chat_id") == 123
+    ]
+    assert operator_sends == []
+
+    # Telemetry is asserted, not assumed: this is the remaining push signal
+    # for a broken form site now that routine failures no longer page.
+    filing_records = list(filing_attempt_log.iter_records(filing_path))
+    assert [r["status"] for r in filing_records] == ["failed"]
+    assert filing_records[0]["form_type"] == "CBD"
+
+    funnel_records = [json.loads(line) for line in funnel_path.read_text().splitlines()]
+    failed = [r for r in funnel_records if r["event"] == "filing_failed"]
+    assert len(failed) == 1
+    assert failed[0]["metadata"]["form_type"] == "CBD"
+    assert failed[0]["metadata"]["reason"] == "FORM_UNAVAILABLE"
+
+
+@pytest.mark.asyncio
 async def test_stale_curriculum_retry_button_cannot_switch_or_file_a_draft():
     from bot import AWAIT_APPROVAL, handle_callback
 

@@ -297,11 +297,12 @@ async def test_alert_filing_failure_pages_operator(monkeypatch):
 
     calls = []
 
-    async def fake_notify_operator(bot_obj, text, *, key="generic", cooldown=300):
+    async def fake_notify_operator(bot_obj, text="", *, key="generic", cooldown=300):
         calls.append({"bot": bot_obj, "text": text, "key": key, "cooldown": cooldown})
 
     monkeypatch.setattr(ops_alert, "notify_operator", fake_notify_operator)
-    context = SimpleNamespace(bot=object())
+    sentinel_bot = object()
+    context = SimpleNamespace(bot=sentinel_bot)
 
     await bot_module._alert_filing_failure(
         context,
@@ -311,8 +312,35 @@ async def test_alert_filing_failure_pages_operator(monkeypatch):
         user_id=12345,
     )
 
+    # Uncertain save pages via the fixed event key with the category-wide
+    # 900 s cooldown; no form/reason/user identifiers are passed through.
     assert len(calls) == 1
-    assert "Kaizen filing failed" in calls[0]["text"]
-    assert "SAVE_FAILURE" in calls[0]["text"]
-    assert calls[0]["key"] == "kaizen_filing_failure:CBD:failed:SAVE_FAILURE"
+    assert calls[0]["bot"] is sentinel_bot
+    assert calls[0]["key"] == "filing_uncertain"
     assert calls[0]["cooldown"] == 900
+    assert calls[0]["text"] == ""
+    for leaked in ("CBD", "SAVE_FAILURE", "12345", "failed"):
+        assert leaked not in calls[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_alert_filing_failure_routine_failure_does_not_call_notify(monkeypatch):
+    import bot as bot_module
+    import ops_alert
+
+    calls = []
+
+    async def fake_notify_operator(*args, **kwargs):
+        calls.append((args, kwargs))
+
+    monkeypatch.setattr(ops_alert, "notify_operator", fake_notify_operator)
+
+    await bot_module._alert_filing_failure(
+        SimpleNamespace(bot=object()),
+        form_type="US_CASE",
+        status="failed",
+        reason="FORM_UNAVAILABLE",
+        user_id=12345,
+    )
+
+    assert calls == []

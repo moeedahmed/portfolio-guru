@@ -68,7 +68,7 @@ async def stripe_webhook(request: Request):
         logger.error("Webhook processing failed: %s", e)
         try:
             import ops_alert
-            ops_alert.notify_operator_sync(f"Stripe webhook FAILED: {e}", key="webhook_fail")
+            ops_alert.notify_operator_sync(key="webhook_fail")
         except Exception:
             logger.debug("operator alert failed", exc_info=True)
         raise HTTPException(status_code=400, detail=str(e))
@@ -79,11 +79,7 @@ async def stripe_webhook(request: Request):
     if result.get("action") in {"error", "ignored", "user_not_found"}:
         try:
             import ops_alert
-            ops_alert.notify_operator_sync(
-                f"Stripe webhook unhandled outcome: {result.get('action')} "
-                f"({result.get('error') or result.get('type') or ''})",
-                key="webhook_unhandled",
-            )
+            ops_alert.notify_operator_sync(key="webhook_unhandled")
         except Exception:
             logger.debug("operator alert failed", exc_info=True)
 
