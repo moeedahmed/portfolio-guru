@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -248,7 +249,12 @@ def _journal(repo):
 # --- prepare and the printed bootstrap ---------------------------------------
 
 
-def test_prepare_freezes_the_real_absolute_toolchain_and_prints_bootstrap_commands(repo):
+@pytest.mark.parametrize("launcher", [False, True])
+def test_prepare_freezes_the_real_absolute_toolchain_and_prints_bootstrap_commands(repo, launcher):
+    if launcher:
+        entry = Path(repo["env"]["PATH"].split(os.pathsep)[0]) / "python3"
+        entry.unlink()
+        _write_executable(entry, f'#!/bin/sh\nexec {shlex.quote(PYTHON)} "$@"\n')
     result = _prepare(repo)
     card = _card(repo)
     assert card["known_good_sha"] == repo["known_good"]
@@ -261,6 +267,37 @@ def test_prepare_freezes_the_real_absolute_toolchain_and_prints_bootstrap_comman
     assert f"show {repo['released']}:scripts/release_bootstrap.py | {PYTHON} - " in ship
     assert f"--sha {repo['released']} -- --surface telegram --mode ship --risk internal --approved {_token(repo)}" in ship
     assert _remote_main(repo) == repo["known_good"], "prepare must not push"
+    assert _pushes(repo) == []
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Apple launcher regression")
+def test_apple_launcher_prepare_and_pinned_bootstrap_without_push(repo):
+    repo["env"]["RELEASE_LOOP_PYTHON"] = "/usr/bin/python3"
+    actual = subprocess.check_output(
+        ["/usr/bin/python3", "-c", "import os,sys; print(os.path.realpath(sys.executable))"],
+        text=True,
+    ).strip()
+    prepare = _prepare(repo)
+    assert _card(repo)["bootstrap_python"] == actual
+    # Execute the printed Git-object bootstrap but stop before release actions.
+    # Product gates/runtime are synthetic in this local repository.
+    command = _printed(prepare.stdout, "ship").split(" -- --surface", 1)[0] + " -- --help"
+    result = _run_printed(repo, command)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"python={actual}" in result.stdout
+    assert "RELEASE_BOOTSTRAP sha=" in result.stdout
+    assert _remote_main(repo) == repo["known_good"]
+    assert _pushes(repo) == []
+
+
+def test_bootstrap_still_rejects_wrong_frozen_interpreter(repo):
+    prepare = _prepare(repo)
+    command = _printed(prepare.stdout, "ship")
+    command = command.replace(f"--python {PYTHON}", "--python /bin/bash")
+    result = _run_printed(repo, command)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "not the frozen interpreter" in result.stderr
+    assert _remote_main(repo) == repo["known_good"]
     assert _pushes(repo) == []
 
 

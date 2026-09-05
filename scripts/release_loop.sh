@@ -254,7 +254,13 @@ resolve_tool() {
 }
 if [[ -z "$PYTHON_BIN" ]]; then PYTHON_BIN="$(resolve_tool python3)"; fi
 realpath_of() { "$PYTHON_BIN" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$1"; }
-PYTHON_BIN="$(realpath_of "$PYTHON_BIN")"
+if [[ "$BOOTSTRAPPED" == 1 ]]; then
+  PYTHON_BIN="$(realpath_of "$PYTHON_BIN")"
+else
+  # A launcher (notably Apple's /usr/bin/python3) need not be a symlink.
+  # Freeze the interpreter it actually starts, matching the bootstrap guard.
+  PYTHON_BIN="$("$PYTHON_BIN" -c 'import os, sys; print(os.path.realpath(sys.executable))')"
+fi
 if [[ -z "$GIT_BIN" ]]; then GIT_BIN="$(resolve_tool git)"; fi
 GIT_BIN="$(realpath_of "$GIT_BIN")"
 if [[ -z "$BASH_BIN" ]]; then BASH_BIN="${BASH:-$(resolve_tool bash)}"; fi
