@@ -72,6 +72,12 @@ from workflow_turn_policy import (
     decide_workflow_turn,
 )
 from message_policy import render_message, safety_redirect_text, style_grounded_answer
+from evidence_artifact import (
+    classify_evidence_artifact,
+    evidence_artifact_text_message,
+    evidence_artifact_upload_message,
+    looks_like_evidence_artifact,
+)
 from rcem_ai_policy import (
     AI_USE_DECLARATION,
     has_personal_reflective_input,
@@ -4393,6 +4399,28 @@ def _build_doc_intent_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|doc_intent"),
         ],
     ])
+
+
+def _build_evidence_artifact_keyboard() -> InlineKeyboardMarkup:
+    """Choices for a certificate/award upload.
+
+    "Use as case" is deliberately absent: there is no clinical case in a
+    certificate, and offering to read one is what pushed a doctor into a
+    Self-directed Learning Reflection they never described.
+    """
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📎 Attach as evidence", callback_data="DOCUSE|attach"),
+            InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|doc_intent"),
+        ],
+    ])
+
+
+def _document_intent_prompt(file_name: str) -> tuple[str, InlineKeyboardMarkup]:
+    """Prompt for a received document, honest about non-case artifacts."""
+    if looks_like_evidence_artifact(file_name=file_name):
+        return evidence_artifact_upload_message(), _build_evidence_artifact_keyboard()
+    return "📄 How would you like to use this document?", _build_doc_intent_keyboard()
 
 
 def _build_image_intent_keyboard() -> InlineKeyboardMarkup:
@@ -10110,6 +10138,21 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
         )
         return AWAIT_FORM_CHOICE
 
+    # A message that only describes a certificate or award has no case in it.
+    # Say what can and can't be done with it instead of recommending a form.
+    if classify_evidence_artifact(text=case_text).is_artifact:
+        _audit_event(
+            context,
+            "decision_path",
+            decision="evidence_artifact_not_a_case",
+            input_source=input_source,
+        )
+        # No case substance was captured, so nothing downstream should later
+        # claim "your case is still in progress".
+        context.user_data.pop("case_text", None)
+        await message.reply_text(evidence_artifact_text_message())
+        return AWAIT_CASE_INPUT
+
     if not _looks_like_clinical_case(case_text):
         _audit_event(
             context,
@@ -10833,6 +10876,31 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
             "The file may be scanned or password-protected.\n\n"
             "Send the case details in text, or upload again and choose Attach only."
         )
+        return AWAIT_CASE_INPUT
+
+    # The filename check happens on arrival, but a certificate can be called
+    # anything. Re-check what was actually read before any of this becomes a
+    # "case" the recommender will pick a form for.
+    artifact_probe = "\n\n".join(part for part in [pending_doc_context.strip(), case_text] if part)
+    if classify_evidence_artifact(file_name=file_name, text=artifact_probe).is_artifact:
+        if mode == "info" and file_path and os.path.exists(file_path):
+            try:
+                os.unlink(file_path)
+            except OSError:
+                pass
+        _audit_event(
+            context,
+            "decision_path",
+            decision="evidence_artifact_not_a_case",
+            mode=mode,
+            attachment_kind=attachment_kind,
+        )
+        kept_note = (
+            "\n\nI've kept the file ready to attach after you choose a form. Nothing has been saved to Kaizen."
+            if mode == "both"
+            else ""
+        )
+        await query.edit_message_text(f"{evidence_artifact_upload_message()}{kept_note}")
         return AWAIT_CASE_INPUT
 
     max_chars = 15000
@@ -12255,10 +12323,8 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             action="document_cached_for_intent",
             file_name=dogfood_audit.message_metadata(update.message, include_text=False).get("file_name"),
         )
-        await ack.edit_text(
-            "📄 How would you like to use this document?",
-            reply_markup=_build_doc_intent_keyboard(),
-        )
+        intent_text, intent_markup = _document_intent_prompt(file_name)
+        await ack.edit_text(intent_text, reply_markup=intent_markup)
         _track_latest_message(context, ack)
         return AWAIT_DOC_INTENT
 
@@ -14578,6 +14644,12 @@ def _current_text_flow_state(context, *, has_draft: bool, has_pending: bool) -> 
     return AWAIT_CASE_INPUT
 
 
+def _pending_document_name(context) -> str:
+    """Filename of the document this turn is about, pending or already read."""
+    pending = context.user_data.get("_pending_doc") or {}
+    return str(pending.get("name") or context.user_data.get("document_name") or "")
+
+
 def _current_text_flow_keyboard(context, *, has_draft: bool, has_pending: bool = False):
     if has_draft:
         return _active_draft_keyboard(context)
@@ -14604,8 +14676,23 @@ async def _answer_mid_flow_question(
         has_draft=has_draft,
         has_pending=has_pending,
     )
+    document_name = _pending_document_name(context)
+    # A stored certificate/award is not case substance. Answering a question
+    # about one must not send the doctor back to a form-choice step that only
+    # exists because the text was filed under "case_text".
+    if (
+        next_state == AWAIT_FORM_CHOICE
+        and classify_evidence_artifact(file_name=document_name, text=case_text).is_artifact
+    ):
+        next_state = AWAIT_CASE_INPUT
     try:
-        answer = style_grounded_answer(await answer_question(raw_text, case_context=case_text))
+        answer = style_grounded_answer(
+            await answer_question(
+                raw_text,
+                case_context=case_text,
+                document_name=document_name,
+            )
+        )
     except Exception:
         answer = (
             "I can help with portfolio forms, drafting, Kaizen setup, and how this "
@@ -15437,10 +15524,8 @@ async def _resume_pending_consent_input(
             )
             return AWAIT_CASE_INPUT
         context.user_data["_pending_doc"] = {"path": cached_path, "name": file_name}
-        await query.edit_message_text(
-            "📄 How would you like to use this document?",
-            reply_markup=_build_doc_intent_keyboard(),
-        )
+        intent_text, intent_markup = _document_intent_prompt(file_name)
+        await query.edit_message_text(intent_text, reply_markup=intent_markup)
         _track_latest_message(context, query.message)
         return AWAIT_DOC_INTENT
 

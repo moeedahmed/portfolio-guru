@@ -20,6 +20,10 @@ from privacy_guard import (
     model_person_names,
 )
 from message_policy import FLEXIBLE_REPLY_STYLE_ENVELOPE, render_message
+from evidence_artifact import (
+    evidence_artifact_answer,
+    looks_like_artifact_filing_question,
+)
 from model_config import gemini_three_five_flash_model
 from privacy_guard import deidentify_clinical_text
 import ai_telemetry
@@ -1103,12 +1107,22 @@ def _looks_like_form_support_question(text_lower: str) -> bool:
     return questionish and any(_contains_standalone_term(text_lower, signal) for signal in support_signals)
 
 
-async def answer_question(text: str, case_context: str = "") -> str:
+async def answer_question(text: str, case_context: str = "", document_name: str = "") -> str:
     """Generate a helpful answer about the bot's capabilities.
 
     When case_context is provided and the question relates to form types,
     the answer is grounded in that specific case rather than being generic.
     """
+    # A question about a certificate or award ("record it as a reflection or
+    # just upload the file?") is answered deterministically. Sending it to the
+    # model produced invented Kaizen/ARCP rules and an unverified SLO mapping.
+    if looks_like_artifact_filing_question(
+        text,
+        case_context=case_context,
+        document_name=document_name,
+    ):
+        return evidence_artifact_answer()
+
     # If the user has an active case and is asking about forms/suggestions,
     # give a case-specific answer instead of a generic list
     if case_context:
@@ -1132,6 +1146,12 @@ Analyse the case and suggest the 2-3 best RCEM WPBA form types for THIS specific
 Available forms: CBD, DOPS, Mini-CEX, ACAT, LAT, ACAF, STAT, MSF, QIAT, JCF, Teaching, Procedural Log, SDL, Ultrasound Case, ESLE, Complaint, Serious Incident, Educational Activity, Formal Course.
 
 Be concise. For each suggestion give the form name and a one-line reason why it fits this case.
+
+Hard limits:
+- Suggest only from the list above. Never invent a form, and never claim a form does or does not exist on Kaizen.
+- Never map anything to an SLO, key capability, or curriculum number.
+- Never state RCEM, ARCP, deanery, or Kaizen platform rules, and never predict how a panel will treat evidence.
+- Never tell the user to upload a loose file to Kaizen; this product saves drafts of the forms listed above.
 
 {FLEXIBLE_REPLY_STYLE_ENVELOPE}"""
             text = await _generate(prompt, purpose="grounded_answer")
