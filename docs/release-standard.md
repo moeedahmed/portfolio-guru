@@ -14,8 +14,9 @@ credential, spend or supervisor-facing guard.
 
 ## The card
 
-`scripts/release_loop.sh --mode prepare` runs the offline gates and, only if the
-tree is release-ready, writes one card under the gitignored `.release/`, keyed
+`scripts/release_loop.sh --mode prepare` runs the offline gates, fetches current
+`origin/main`, and verifies the currently live runtime against it. Only if all
+three agree does it write one local card under the gitignored `.release/`, keyed
 by the full `HEAD` SHA. The card records:
 
 | Field                   | Why it is on the card                                            |
@@ -25,7 +26,8 @@ by the full `HEAD` SHA. The card records:
 | `effect`                | one plain line: what changes for a doctor                        |
 | `proof_mode`            | `automated` or `manual` — frozen here, not decided at ship time  |
 | `live_target`           | the exact bot a live proof may touch, or null                    |
-| `known_good_sha`        | the rollback target, filled in at ship after it is verified live |
+| `known_good_sha`        | the rollback target, verified live and frozen before approval    |
+| `rollback_mode`         | `operator-triggered` — the card says rollback is never silent    |
 | `exclusions`            | what this approval never covers                                  |
 | `created_at`            | when the card was prepared                                       |
 
@@ -47,7 +49,9 @@ Approving the card's SHA — `--approved <40hex>` — covers, once:
 It covers nothing else. The card's exclusions are explicit: supervisor
 submission, credential or secret change, schema or data migration, pricing or
 spend change, any new recipient or public announcement, history rewrite or force
-push, and any SHA other than the one named.
+push, and any **release** SHA other than the one named. The sole bounded exception
+is the operator-triggered rollback commit: its parent must be the named release
+and its complete tree must equal the frozen known-good tree.
 
 **A changed SHA, target, risk, surface, effect, proof mode, rollback target or
 exclusion needs a newly prepared card and a new approval.** An unchanged resume
@@ -65,7 +69,8 @@ card records. Credentials merely being present is not sanction.
 - A **manual** card never sends automatically, even if credentials appear
   between prepare and ship. It closes with `--mode attest`.
 - An **automated** card whose readiness later disappears reports proof pending
-  and refuses to run the live child. It does not quietly become something else.
+  and refuses to run the live child. It cannot be closed by manual attestation;
+  restoring readiness or preparing and approving a new manual card is required.
 - Escalating manual → automated needs a new card and a new approval.
 
 The live guard `TELEGRAM_LIVE_APPROVED` is passed per-command to the live child
@@ -90,6 +95,53 @@ successful deploy, the loop:
    actually run.
 
 It does not rewrite history and it does not claim a rollback it did not perform.
+The receipt prints the exact rollback command rather than describing one; it is
+read at the worst possible moment.
+
+## Rollback
+
+```
+scripts/release_loop.sh --surface telegram --mode rollback --risk <class> \
+  --approved <released 40hex>
+```
+
+The card that authorised the release already names both ends of this: the
+released SHA it approved, and the known-good SHA it verified live before `main`
+moved. Rolling one back to the other is inside that envelope, so **it needs no
+second approval** — and it is never automatic either. `rollback_mode` on the card
+is `operator-triggered`: it happens because the operator ran that command.
+Deploy-time health rollback inside `scripts/deploy_mac.sh` is a separate,
+unchanged mechanism.
+
+Before anything moves, rollback requires a clean tracked tree, an approval and
+card naming the released SHA, `HEAD == origin/main ==` that SHA, a known-good SHA
+that is a real ancestor of it, and a live runtime that is reconciled and reported
+as the released SHA. Any mismatch blocks before mutation.
+
+The recovery is **one normal forward commit**: parent exactly the released SHA,
+tree exactly the known-good SHA's. Nothing is reset, force-pushed, merged or
+checked out on `main`, and untracked files are never touched. If the tree cannot
+be produced exactly, the tracked preimage is restored and the run refuses.
+
+State keyed by the released SHA is written under `.release/` **before** the push,
+so an interruption anywhere afterwards reconciles onto that one commit instead of
+minting a second one. Rerunning the exact same command resumes: it moves a
+committed-but-unpushed rollback forward, skips the push when `origin/main` is
+already the rollback commit, and re-runs proof only. It refuses if `main` is
+neither the released SHA nor the recorded rollback commit, if the state or card
+is tampered, if `HEAD` is unexpected, or if the parent/tree invariant fails.
+
+Proof is the same exact-SHA pipeline as a release — CI `Tests`, the Mac Mini
+deploy, runtime identity — keyed to the rollback commit. **No live journey runs
+during a rollback**; it restores a tree that already passed its own proof and
+must never be the reason a message reaches a real doctor.
+
+Success is `FINAL_RELEASE_STATE=rolled-back`, and only after the runtime proves
+the rollback commit. Everything short of that reports the truth: if CI or deploy
+fails, `main` is the rollback commit and the rollback is not live; if the deploy
+puts the released code back, the receipt says `main` is the rollback commit while
+the runtime is still the released SHA, and that nothing on the Mac Mini has been
+reverted. A created or pushed commit is never itself called a rollback.
 
 ## Manual closure
 
@@ -98,11 +150,14 @@ scripts/release_loop.sh --surface telegram --mode attest --risk telegram \
   --approved <40hex> --result pass|fail --note "<one line, no secrets>"
 ```
 
-Attest re-verifies the card, the SHA, surface, risk, `HEAD == origin/main == SHA`
+Attest is available only when the card itself freezes `proof_mode = manual`; an
+automated card can never downgrade after approval. It re-verifies the card, the
+SHA, surface, risk, `HEAD == origin/main == SHA`
 and runtime identity, then writes a local attestation. It changes nothing
 external. Its output says `manual proof attested by operator`; it never claims
 the automated journey ran. It refuses internal risk, which has no manual journey,
-and refuses to stand in for an automated card whose readiness is still complete.
+and refuses to stand in for every automated card, whether readiness is currently
+complete or not.
 
 ## What this standard is not
 

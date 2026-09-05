@@ -24,6 +24,13 @@ CARD_TOOL = REPO_ROOT / "scripts" / "release_card.py"
 BOT_QA = REPO_ROOT / "scripts" / "telegram_bot_qa.sh"
 PUSHED_SHA = "a" * 40
 OTHER_SHA = "b" * 40
+# Rollback needs three genuinely distinct commits: the released SHA (R), the
+# known-good SHA the card froze (K), and the forward rollback commit (B). Reusing
+# one SHA for two of them would hide exactly the confusions this guards against.
+KNOWN_GOOD_SHA = "c" * 40
+ROLLBACK_SHA = "d" * 40
+KNOWN_GOOD_TREE = "e" * 40
+UNRELATED_TREE = "1" * 40
 LIVE_TARGET = "portfolio_guru_bot"
 LIVE_APPROVAL = "portfolio-guru-live-qa-approved"
 CI_FERNET_KEY = "5Wv33F9sq99WGD2lEzwwd3J_JH5p6vxKdDiAwCWqoYQ="
@@ -117,6 +124,108 @@ def _api_payload(cli_payload: str) -> str:
     return json.dumps({"workflow_runs": runs})
 
 
+# The fake git is stateful on purpose. A rollback that claims to be resumable is
+# only worth testing against a repo whose HEAD and origin/main actually move when
+# it moves them, so `update-ref` and an exact-SHA `push` record where they landed
+# and later invocations read that back.
+_FAKE_GIT = """#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "@@GIT_LOG@@"
+if [[ -n "${FAKE_GIT_FAIL_COMMAND:-}" && "$1 $2" == "$FAKE_GIT_FAIL_COMMAND" ]]; then exit 9; fi
+
+HEAD_STATE="@@HEAD_STATE@@"
+ORIGIN_STATE="@@ORIGIN_STATE@@"
+R="@@R@@"
+K="@@K@@"
+B="@@B@@"
+K_TREE="@@K_TREE@@"
+OTHER_TREE="@@OTHER_TREE@@"
+
+current_head() {
+  if [[ -n "${FAKE_HEAD_SHA:-}" ]]; then printf '%s\\n' "$FAKE_HEAD_SHA"
+  elif [[ -s "$HEAD_STATE" ]]; then printf '%s\\n' "$(/bin/cat "$HEAD_STATE")"
+  else printf '%s\\n' "$R"; fi
+}
+current_origin() {
+  if [[ -n "${FAKE_ORIGIN_MAIN_SHA:-}" ]]; then printf '%s\\n' "$FAKE_ORIGIN_MAIN_SHA"
+  elif [[ -s "$ORIGIN_STATE" ]]; then printf '%s\\n' "$(/bin/cat "$ORIGIN_STATE")"
+  else printf '%s\\n' "$R"; fi
+}
+
+case "$1" in
+  rev-parse)
+    case "$2" in
+      --show-toplevel) printf '%s\\n' "@@ROOT@@" ;;
+      --short) printf '%s\\n' "@@SHORT@@" ;;
+      --verify) exit 0 ;;
+      HEAD) current_head ;;
+      origin/main) current_origin ;;
+      *'^{tree}')
+        ref="${2%'^{tree}'}"
+        case "$ref" in
+          "$B") printf '%s\\n' "${FAKE_ROLLBACK_TREE:-$K_TREE}" ;;
+          "$K") printf '%s\\n' "${FAKE_KNOWN_GOOD_TREE:-$K_TREE}" ;;
+          *) printf '%s\\n' "$OTHER_TREE" ;;
+        esac ;;
+      *'^')
+        ref="${2%'^'}"
+        case "$ref" in
+          "$B") printf '%s\\n' "${FAKE_ROLLBACK_PARENT:-$R}" ;;
+          *) printf '%s\\n' "$OTHER_TREE" ;;
+        esac ;;
+      *) printf '%s\\n' "$2" ;;
+    esac
+    exit 0 ;;
+  branch) printf 'fix/release-proof\\n'; exit 0 ;;
+  status)
+    if [[ -s "$HEAD_STATE" && -n "${FAKE_TREE_STATUS_AFTER_MOVE:-}" ]]; then
+      printf '%s\\n' "$FAKE_TREE_STATUS_AFTER_MOVE"
+    fi
+    if [[ -n "${FAKE_TREE_STATUS:-}" ]]; then printf '%s\\n' "$FAKE_TREE_STATUS"; fi
+    exit 0 ;;
+  ls-files) exit 0 ;;
+  fetch) exit 0 ;;
+  merge-base) exit 0 ;;
+  rev-list) printf '0 1\\n'; exit 0 ;;
+  commit-tree)
+    if [[ -n "${FAKE_COMMIT_TREE_BROKEN:-}" ]]; then exit 1; fi
+    printf '%s\\n' "${FAKE_COMMIT_TREE_SHA:-$B}"; exit 0 ;;
+  read-tree)
+    if [[ -n "${FAKE_READ_TREE_FAIL:-}" && "$3" == "-m" ]]; then exit 1; fi
+    exit 0 ;;
+  update-ref)
+    if [[ -n "${FAKE_UPDATE_REF_FAIL:-}" ]]; then exit 1; fi
+    printf '%s' "${@: -2:1}" > "$HEAD_STATE"
+    exit 0 ;;
+  push)
+    case "$3" in
+      *:refs/heads/main)
+        src="${3%%:*}"
+        if [[ "$src" =~ ^[0-9a-f]{40}$ ]]; then printf '%s' "$src" > "$ORIGIN_STATE"; fi ;;
+    esac
+    exit 0 ;;
+  *) exit 0 ;;
+esac
+"""
+
+
+def _fake_git(root, git_log, head_state, origin_state) -> str:
+    script = _FAKE_GIT
+    for token, value in (
+        ("@@GIT_LOG@@", str(git_log)),
+        ("@@HEAD_STATE@@", str(head_state)),
+        ("@@ORIGIN_STATE@@", str(origin_state)),
+        ("@@ROOT@@", str(root)),
+        ("@@SHORT@@", PUSHED_SHA[:7]),
+        ("@@R@@", PUSHED_SHA),
+        ("@@K@@", KNOWN_GOOD_SHA),
+        ("@@B@@", ROLLBACK_SHA),
+        ("@@K_TREE@@", KNOWN_GOOD_TREE),
+        ("@@OTHER_TREE@@", UNRELATED_TREE),
+    ):
+        script = script.replace(token, value)
+    return script
+
+
 @pytest.fixture
 def ship_harness(tmp_path):
     fake_root = tmp_path / "repo"
@@ -153,32 +262,9 @@ def ship_harness(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     git_log = tmp_path / "git.log"
-    _write_executable(
-        fake_bin / "git",
-        f"""#!/usr/bin/env bash
-printf '%s\\n' "$*" >> "{git_log}"
-if [[ -n "${{FAKE_GIT_FAIL_COMMAND:-}}" && "$1 $2" == "$FAKE_GIT_FAIL_COMMAND" ]]; then exit 9; fi
-case "$1 $2" in
-  "rev-parse --show-toplevel") printf '%s\\n' "{fake_root}" ;;
-  "rev-parse --short") printf '{PUSHED_SHA[:7]}\\n' ;;
-  "rev-parse --verify") exit 0 ;;
-  "rev-parse HEAD") printf '%s\\n' "${{FAKE_HEAD_SHA:-{PUSHED_SHA}}}" ;;
-  "rev-parse origin/main") printf '%s\\n' "${{FAKE_ORIGIN_MAIN_SHA:-{PUSHED_SHA}}}" ;;
-  "branch --show-current") printf 'fix/release-proof\\n' ;;
-  "status --porcelain") exit 0 ;;
-  "ls-files --others") exit 0 ;;
-  "fetch --quiet"|"fetch origin") exit 0 ;;
-  "merge-base --is-ancestor") exit 0 ;;
-  "rev-list --left-right") printf '0 1\\n' ;;
-  "checkout main") exit 0 ;;
-  "pull --ff-only") exit 0 ;;
-  "merge --ff-only") exit 0 ;;
-  "push origin") exit 0 ;;
-  "checkout fix/release-proof") exit 0 ;;
-  *) exit 0 ;;
-esac
-""",
-    )
+    head_state = tmp_path / "fake-head"
+    origin_state = tmp_path / "fake-origin-main"
+    _write_executable(fake_bin / "git", _fake_git(fake_root, git_log, head_state, origin_state))
     _write_executable(
         fake_bin / "launchctl",
         "#!/usr/bin/env bash\n[[ \"$1\" == print ]] && exit 0\nexit 1\n",
@@ -263,6 +349,8 @@ esac
         "live_log": live_log,
         "env_log": env_log,
         "card_dir": fake_root / ".release",
+        "head_state": head_state,
+        "origin_state": origin_state,
     }
 
 
@@ -334,6 +422,50 @@ def _card(harness, sha=PUSHED_SHA):
     return json.loads((harness["card_dir"] / f"{sha}.card.json").read_text())
 
 
+# Prepare while origin/main is the known-good SHA, so the card freezes a rollback
+# target that is genuinely a different commit from the release.
+ROLLBACK_PREPARE_ENV = {"FAKE_ORIGIN_MAIN_SHA": KNOWN_GOOD_SHA}
+
+
+def _rollback_workflows(harness, sha=ROLLBACK_SHA):
+    """Point the fake GitHub fixtures at the rollback commit."""
+    tests = _workflow_runs(sha)
+    deploy = _workflow_runs(
+        sha, event="workflow_run", created_at="2026-08-13T10:06:00Z", updated_at="2026-08-13T10:10:00Z"
+    )
+    (harness["gh_runs"] / "Tests.json").write_text(tests)
+    (harness["gh_runs"] / "Deploy Mac Mini.json").write_text(deploy)
+    (harness["gh_runs"] / "Tests.api.json").write_text(_api_payload(tests))
+    (harness["gh_runs"] / "Deploy Mac Mini.api.json").write_text(_api_payload(deploy))
+
+
+def _rollback_ready(harness, risk="internal", *, live_target=None):
+    """An approved card whose frozen known-good SHA really precedes the release."""
+    _prepared(harness, risk, live_target=live_target, prepare_env=ROLLBACK_PREPARE_ENV)
+    assert _card(harness)["known_good_sha"] == KNOWN_GOOD_SHA
+    _rollback_workflows(harness)
+
+
+def _rollback(harness, risk="internal", *, approved=PUSHED_SHA, extra_env=None, extra_args=()):
+    env = dict(harness["env"])
+    if extra_env:
+        env.update(extra_env)
+    args = ["--surface", "telegram", "--mode", "rollback", "--risk", risk]
+    if approved is not None:
+        args += ["--approved", approved]
+    return run(*args, *extra_args, env=env)
+
+
+def _rollback_state(harness, sha=PUSHED_SHA):
+    return json.loads((harness["card_dir"] / f"{sha}.rollback.json").read_text())
+
+
+def _git_lines(harness, prefix):
+    if not harness["git_log"].exists():
+        return []
+    return [line for line in harness["git_log"].read_text().splitlines() if line.startswith(prefix)]
+
+
 def _env_lines(harness, label):
     if not harness["env_log"].exists():
         return []
@@ -357,8 +489,12 @@ def test_help_lists_required_surfaces_modes_and_risks():
     result = run("--help")
     assert result.returncode == 0, result.stderr
     out = result.stdout
-    for expected in ("--surface", "telegram", "prepare", "ship", "attest", "--risk", "internal", "broad", "--approved"):
+    for expected in (
+        "--surface", "telegram", "prepare", "ship", "attest", "rollback",
+        "--risk", "internal", "broad", "--approved",
+    ):
         assert expected in out
+    assert "--mode rollback --risk <class> --approved <40hex>" in out
 
 
 def test_missing_mode_is_usage_error():
@@ -386,7 +522,7 @@ def test_value_taking_options_refuse_a_missing_or_option_value(option):
     assert f"{option} requires a value" in result.stderr
 
 
-@pytest.mark.parametrize("mode", ["prepare", "ship", "attest"])
+@pytest.mark.parametrize("mode", ["prepare", "ship", "attest", "rollback"])
 def test_every_mode_requires_explicit_risk_before_approval_or_mutation(mode):
     result = run("--surface", "telegram", "--mode", mode, "--approved", PUSHED_SHA, env={"PATH": _path_only()})
     assert result.returncode == 64
@@ -478,20 +614,25 @@ def test_prepare_persists_every_card_field_and_prints_one_ship_command(ship_harn
     assert result.returncode == 0, result.stdout + result.stderr
 
     card = _card(ship_harness)
-    assert card["schema_version"] == 1
+    assert card["schema_version"] == 2
     assert card["sha"] == PUSHED_SHA
     assert card["surface"] == "telegram"
     assert card["risk"] == "telegram"
     assert card["effect"] == "Draft preview now names the chosen form."
     assert card["proof_mode"] in ("automated", "manual")
     assert card["live_target"] == LIVE_TARGET
-    assert card["known_good_sha"] is None, "known-good is only trustworthy once verified at ship"
+    assert card["known_good_sha"] == PUSHED_SHA, "approval must see the already-verified rollback target"
+    assert card["rollback_mode"] == "operator-triggered", "the card must say rollback is never silent"
     assert card["exclusions"], "a card without exclusions would let one approval mean anything"
     assert card["created_at"].endswith("Z")
 
     assert "RELEASE CARD" in result.stdout
     assert f"--mode ship --risk telegram --approved {PUSHED_SHA}" in result.stdout
     assert "not covered" in result.stdout
+    # The one approval also covers rollback, so the card must print the exact
+    # command rather than leaving the operator to invent one under pressure.
+    assert f"--mode rollback --risk telegram --approved {PUSHED_SHA}" in result.stdout
+    assert "operator-triggered" in result.stdout
     # A prepared card is not a deployment: nothing external may have been touched.
     git_log = ship_harness["git_log"].read_text()
     assert "push origin" not in git_log
@@ -517,6 +658,14 @@ def test_prepare_writes_no_card_when_the_tree_is_not_release_ready(ship_harness)
     assert result.returncode == 1
     assert "No card was written" in result.stdout
     assert not (ship_harness["card_dir"] / f"{PUSHED_SHA}.card.json").exists()
+
+
+def test_prepare_writes_no_card_when_live_known_good_cannot_be_verified(ship_harness):
+    result = _prepare(ship_harness, "internal", extra_env={"FAKE_RUNTIME_SHA": OTHER_SHA})
+    assert result.returncode == 1
+    assert "live runtime did not verify" in result.stdout
+    assert not (ship_harness["card_dir"] / f"{PUSHED_SHA}.card.json").exists()
+    assert "push origin" not in ship_harness["git_log"].read_text()
 
 
 @pytest.mark.parametrize(
@@ -608,6 +757,29 @@ def test_ship_refuses_a_card_whose_surface_is_not_the_cli_surface(ship_harness):
     assert "push origin" not in ship_harness["git_log"].read_text()
 
 
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    [
+        (lambda card: card.update(known_good_sha=None), "known-good sha"),
+        (lambda card: card.update(proof_mode="manual"), "internal-risk cards must use automated proof"),
+        (lambda card: card.update(unapproved_extra="anything"), "fields do not exactly match"),
+    ],
+    ids=["missing-rollback-target", "proof-mode-drift", "extra-field"],
+)
+def test_ship_refuses_tampering_with_immutable_card_fields(ship_harness, mutation, expected):
+    _prepared(ship_harness, "internal")
+    card_file = ship_harness["card_dir"] / f"{PUSHED_SHA}.card.json"
+    card = json.loads(card_file.read_text())
+    mutation(card)
+    card_file.write_text(json.dumps(card))
+
+    result = _ship(ship_harness, "internal", skip_prepare=True)
+
+    assert result.returncode == 2
+    assert expected in result.stderr
+    assert "push origin" not in ship_harness["git_log"].read_text()
+
+
 def test_ship_refuses_when_head_moved_away_from_the_approved_sha(ship_harness):
     _prepared(ship_harness, "internal")
     result = _ship(ship_harness, "internal", skip_prepare=True, extra_env={"FAKE_HEAD_SHA": OTHER_SHA})
@@ -631,8 +803,9 @@ def test_ship_keys_both_workflow_proofs_to_pushed_sha_and_internal_needs_no_dogf
     assert "--workflow Tests" in gh_log
     assert "--workflow Deploy Mac Mini" in gh_log
     assert "startedAt,updatedAt" in gh_log
-    # Known-good capture before the push, then runtime identity after deploy.
-    assert ship_harness["runtime_log"].read_text() == f"--expected-sha {PUSHED_SHA}\n" * 2
+    # Prepare freezes known-good before approval, ship re-verifies it before the
+    # push, then runtime identity is proved after deploy.
+    assert ship_harness["runtime_log"].read_text() == f"--expected-sha {PUSHED_SHA}\n" * 3
 
 
 def test_ship_records_a_verified_known_good_sha_on_the_card_before_pushing(ship_harness):
@@ -649,7 +822,7 @@ def test_ship_blocks_before_mutation_when_the_live_runtime_does_not_match_origin
     assert result.returncode == 1
     assert "FINAL_RELEASE_STATE=blocked" in result.stdout
     assert "push origin" not in ship_harness["git_log"].read_text()
-    assert _card(ship_harness)["known_good_sha"] is None
+    assert _card(ship_harness)["known_good_sha"] == PUSHED_SHA
 
 
 def test_ship_falls_back_to_public_actions_api_when_gh_is_not_authenticated(ship_harness):
@@ -1016,8 +1189,9 @@ def test_resume_exact_sha_runs_proof_without_duplicate_push(ship_harness):
     assert "push origin" not in git_log
     assert "checkout main" not in git_log
     assert f"RESUMING_RELEASE_SHA={PUSHED_SHA}" in result.stdout
-    # Runtime identity is re-proved on resume, and only once (no pre-push capture).
-    assert ship_harness["runtime_log"].read_text() == f"--expected-sha {PUSHED_SHA}\n"
+    # Prepare froze the rollback target; resume adds one current-runtime proof
+    # and never performs a pre-push capture or push.
+    assert ship_harness["runtime_log"].read_text() == f"--expected-sha {PUSHED_SHA}\n" * 2
 
 
 def test_resume_requires_the_prepared_card(ship_harness):
@@ -1124,6 +1298,13 @@ def test_live_proof_failure_names_the_known_good_sha_without_claiming_a_rollback
     assert "stays live until a targeted rollback" in result.stdout
     assert f"known-good SHA {PUSHED_SHA}" in result.stdout
     assert "never rewrite history" in result.stdout
+    # The receipt has to hand over the exact recovery command, not a description
+    # of one: this is read at the worst possible moment.
+    assert (
+        f"ROLLBACK_COMMAND=scripts/release_loop.sh --surface telegram --mode rollback "
+        f"--risk telegram --approved {PUSHED_SHA}"
+    ) in result.stdout
+    assert "operator-triggered, never silent" in result.stdout
 
 
 # --- attest ----------------------------------------------------------------
@@ -1228,7 +1409,19 @@ def test_attest_refuses_to_stand_in_for_a_ready_automated_card(ship_harness):
     _prepared(ship_harness, "telegram", prepare_env=TELETHON_ENV)
     result = _attest(ship_harness, "telegram", extra_env=TELETHON_ENV)
     assert result.returncode == 3
-    assert "manual attestation must not stand in for it" in result.stderr
+    assert "proof mode cannot be changed after approval" in result.stderr
+    assert not (ship_harness["card_dir"] / f"{PUSHED_SHA}.attestation.json").exists()
+
+
+def test_attest_refuses_to_downgrade_an_automated_card_when_readiness_disappears(ship_harness):
+    _prepared(ship_harness, "telegram", prepare_env=TELETHON_ENV)
+    result = _attest(
+        ship_harness,
+        "telegram",
+        extra_env={**TELETHON_ENV, "TELEGRAM_LIVE_ALLOWED_BOTS": "some_other_bot"},
+    )
+    assert result.returncode == 3
+    assert "proof mode cannot be changed after approval" in result.stderr
     assert not (ship_harness["card_dir"] / f"{PUSHED_SHA}.attestation.json").exists()
 
 
@@ -1237,6 +1430,397 @@ def test_attest_refuses_internal_risk_which_has_no_manual_journey(ship_harness):
     result = _attest(ship_harness, "internal")
     assert result.returncode == 3
     assert "no manual journey to attest" in result.stderr
+
+
+# --- rollback: refusals before any mutation --------------------------------
+
+
+def test_rollback_refuses_without_approval():
+    result = run("--surface", "telegram", "--mode", "rollback", "--risk", "internal", env={"PATH": _path_only()})
+    assert result.returncode == 2
+    assert "approval required" in result.stderr.lower()
+
+
+def test_rollback_refuses_when_no_card_was_prepared(ship_harness):
+    result = _rollback(ship_harness, "internal")
+    assert result.returncode == 2
+    assert "never prepared" in result.stderr
+    assert _git_lines(ship_harness, "commit-tree ") == []
+    assert _git_lines(ship_harness, "push ") == []
+
+
+def test_rollback_refuses_an_approval_naming_a_different_sha(ship_harness):
+    _rollback_ready(ship_harness)
+    result = _rollback(ship_harness, "internal", approved=OTHER_SHA)
+    assert result.returncode == 2
+    assert "needs a new card and a new approval" in result.stderr
+    assert _git_lines(ship_harness, "commit-tree ") == []
+    assert _git_lines(ship_harness, "push ") == []
+
+
+def test_rollback_refuses_when_cli_risk_differs_from_the_approved_card(ship_harness):
+    _rollback_ready(ship_harness, "internal")
+    result = _rollback(ship_harness, "telegram")
+    assert result.returncode == 2
+    assert "Card risk internal does not equal --risk telegram" in result.stderr
+    assert _git_lines(ship_harness, "commit-tree ") == []
+
+
+def test_rollback_refuses_a_card_that_does_not_authorise_operator_triggered_rollback(ship_harness):
+    _rollback_ready(ship_harness)
+    card_file = ship_harness["card_dir"] / f"{PUSHED_SHA}.card.json"
+    card = json.loads(card_file.read_text())
+    card["rollback_mode"] = "silent"
+    card_file.write_text(json.dumps(card))
+
+    result = _rollback(ship_harness, "internal")
+
+    assert result.returncode == 2
+    assert "rollback mode" in result.stderr
+    assert _git_lines(ship_harness, "commit-tree ") == []
+    assert _git_lines(ship_harness, "push ") == []
+
+
+def test_rollback_refuses_when_the_card_known_good_sha_is_the_released_sha(ship_harness):
+    """Nothing to roll back to is a refusal, not a no-op that reports success."""
+    _prepared(ship_harness, "internal")
+    result = _rollback(ship_harness, "internal")
+    assert result.returncode == 2
+    assert "nothing to roll back to" in result.stderr
+    assert _git_lines(ship_harness, "commit-tree ") == []
+
+
+def test_rollback_refuses_when_the_known_good_sha_is_not_an_ancestor(ship_harness):
+    _rollback_ready(ship_harness)
+    result = _rollback(ship_harness, "internal", extra_env={"FAKE_GIT_FAIL_COMMAND": "merge-base --is-ancestor"})
+    assert result.returncode == 3
+    assert "not an ancestor" in result.stderr
+    assert _git_lines(ship_harness, "commit-tree ") == []
+    assert _git_lines(ship_harness, "push ") == []
+
+
+def test_rollback_refuses_an_uncommitted_tracked_tree(ship_harness):
+    _rollback_ready(ship_harness)
+    result = _rollback(ship_harness, "internal", extra_env={"FAKE_TREE_STATUS": " M backend/bot.py"})
+    assert result.returncode == 3
+    assert "uncommitted tracked changes" in result.stderr
+    assert _git_lines(ship_harness, "commit-tree ") == []
+
+
+def test_rollback_refuses_when_origin_main_drifted_to_an_unknown_sha(ship_harness):
+    """Rolling back a release nobody here approved would land main somewhere new."""
+    _rollback_ready(ship_harness)
+    result = _rollback(ship_harness, "internal", extra_env={"FAKE_ORIGIN_MAIN_SHA": OTHER_SHA})
+    assert result.returncode == 3
+    assert "neither the released SHA" in result.stderr
+    assert _git_lines(ship_harness, "commit-tree ") == []
+    assert _git_lines(ship_harness, "push ") == []
+
+
+def test_rollback_refuses_when_head_is_not_the_released_sha(ship_harness):
+    _rollback_ready(ship_harness)
+    result = _rollback(ship_harness, "internal", extra_env={"FAKE_HEAD_SHA": OTHER_SHA})
+    assert result.returncode == 3
+    assert "rollback expects the released SHA" in result.stderr
+    assert _git_lines(ship_harness, "commit-tree ") == []
+
+
+def test_rollback_refuses_when_the_released_sha_cannot_be_shown_to_be_live(ship_harness):
+    _rollback_ready(ship_harness)
+    result = _rollback(ship_harness, "internal", extra_env={"FAKE_RUNTIME_SHA": OTHER_SHA})
+    assert result.returncode == 4
+    assert "cannot be shown to be running" in result.stderr
+    assert "FINAL_RELEASE_STATE=proof-pending" in result.stdout
+    assert _git_lines(ship_harness, "commit-tree ") == []
+    assert _git_lines(ship_harness, "push ") == []
+
+
+def test_rollback_refuses_when_the_runtime_already_reports_the_known_good_sha(ship_harness):
+    """main says one thing and the Mac Mini says another. That is a deployment
+    to reconcile, not the state this card's rollback describes."""
+    _rollback_ready(ship_harness)
+    result = _rollback(
+        ship_harness,
+        "internal",
+        extra_env={"FAKE_RUNTIME_SHA": KNOWN_GOOD_SHA, "FAKE_CHECKOUT_SHA": KNOWN_GOOD_SHA},
+    )
+
+    assert result.returncode == 3
+    assert "deployment inconsistency" in result.stderr
+    assert _git_lines(ship_harness, "commit-tree ") == []
+    assert _git_lines(ship_harness, "push ") == []
+
+
+def test_rollback_refuses_a_tampered_rollback_state(ship_harness):
+    _rollback_ready(ship_harness)
+    assert _rollback(ship_harness, "internal").returncode == 0
+    state_file = ship_harness["card_dir"] / f"{PUSHED_SHA}.rollback.json"
+    state = json.loads(state_file.read_text())
+    state["rollback_sha"] = OTHER_SHA
+    state_file.write_text(json.dumps(state))
+
+    before = len(_git_lines(ship_harness, "commit-tree "))
+    result = _rollback(ship_harness, "internal")
+
+    assert result.returncode == 3
+    assert "recorded rollback commit" in result.stderr
+    assert len(_git_lines(ship_harness, "commit-tree ")) == before, "a tampered state must not mint a new commit"
+
+
+def test_rollback_refuses_a_rollback_state_whose_target_is_not_the_card_target(ship_harness):
+    _rollback_ready(ship_harness)
+    assert _rollback(ship_harness, "internal").returncode == 0
+    state_file = ship_harness["card_dir"] / f"{PUSHED_SHA}.rollback.json"
+    state = json.loads(state_file.read_text())
+    state["known_good_sha"] = OTHER_SHA
+    state_file.write_text(json.dumps(state))
+
+    result = _rollback(ship_harness, "internal")
+
+    assert result.returncode == 3
+    assert "the approved card names" in result.stderr
+
+
+def test_rollback_ignores_release_sha_which_belongs_to_ship_resume():
+    result = run(
+        "--surface", "telegram", "--mode", "rollback", "--risk", "internal",
+        "--approved", PUSHED_SHA, "--release-sha", PUSHED_SHA,
+        env={"PATH": _path_only()},
+    )
+    assert result.returncode == 64
+    assert "--release-sha is not used by rollback" in result.stderr
+
+
+# --- rollback: the forward commit ------------------------------------------
+
+
+def test_rollback_makes_one_forward_commit_with_the_released_parent_and_known_good_tree(ship_harness):
+    _rollback_ready(ship_harness)
+    result = _rollback(ship_harness, "internal")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    commits = _git_lines(ship_harness, "commit-tree ")
+    assert len(commits) == 1, commits
+    # The commit is built from the known-good tree onto the released SHA: a
+    # normal forward commit, never a reset of shared history.
+    assert commits[0].startswith(f"commit-tree {KNOWN_GOOD_TREE} -p {PUSHED_SHA} -m ")
+    assert f"ROLLBACK_COMMIT={ROLLBACK_SHA}" in result.stdout
+    assert "update-ref" in ship_harness["git_log"].read_text()
+    assert "checkout main" not in ship_harness["git_log"].read_text()
+
+
+def test_rollback_refuses_a_commit_whose_parent_is_not_the_released_sha(ship_harness):
+    _rollback_ready(ship_harness)
+    result = _rollback(ship_harness, "internal", extra_env={"FAKE_ROLLBACK_PARENT": OTHER_SHA})
+
+    assert result.returncode == 3
+    assert "parent is" in result.stderr
+    assert _git_lines(ship_harness, "push ") == []
+    assert not (ship_harness["card_dir"] / f"{PUSHED_SHA}.rollback.json").exists()
+
+
+def test_rollback_refuses_a_commit_whose_tree_is_not_the_known_good_tree(ship_harness):
+    _rollback_ready(ship_harness)
+    result = _rollback(ship_harness, "internal", extra_env={"FAKE_ROLLBACK_TREE": UNRELATED_TREE})
+
+    assert result.returncode == 3
+    assert "not the known-good tree" in result.stderr
+    assert _git_lines(ship_harness, "push ") == []
+    assert not (ship_harness["card_dir"] / f"{PUSHED_SHA}.rollback.json").exists()
+
+
+def test_rollback_restores_the_tracked_preimage_when_the_tree_cannot_be_written(ship_harness):
+    _rollback_ready(ship_harness)
+    result = _rollback(ship_harness, "internal", extra_env={"FAKE_READ_TREE_FAIL": "1"})
+
+    assert result.returncode == 3
+    assert "restoring the tracked preimage" in result.stderr
+    assert "read-tree -u --reset HEAD" in ship_harness["git_log"].read_text()
+    assert _git_lines(ship_harness, "push ") == []
+    assert not ship_harness["head_state"].exists(), "the branch must not have moved"
+
+
+def test_rollback_restores_the_tracked_preimage_when_the_branch_cannot_be_moved(ship_harness):
+    _rollback_ready(ship_harness)
+    result = _rollback(ship_harness, "internal", extra_env={"FAKE_UPDATE_REF_FAIL": "1"})
+
+    assert result.returncode == 3
+    assert "restoring the tracked preimage" in result.stderr
+    assert "read-tree -u --reset HEAD" in ship_harness["git_log"].read_text()
+    assert _git_lines(ship_harness, "push ") == []
+
+
+def test_rollback_refuses_when_the_tree_does_not_match_after_the_commit(ship_harness):
+    _rollback_ready(ship_harness)
+    result = _rollback(
+        ship_harness, "internal", extra_env={"FAKE_TREE_STATUS_AFTER_MOVE": " M backend/bot.py"}
+    )
+
+    assert result.returncode == 3
+    assert "does not exactly match the known-good tree" in result.stderr
+    assert _git_lines(ship_harness, "push ") == []
+
+
+# --- rollback: push, state and proof ---------------------------------------
+
+
+def test_rollback_pushes_the_exact_rollback_sha_once_and_reconciles_after(ship_harness):
+    _rollback_ready(ship_harness)
+    result = _rollback(ship_harness, "internal")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _git_lines(ship_harness, "push ") == [f"push origin {ROLLBACK_SHA}:refs/heads/main"]
+    assert f"ROLLBACK_PUSHED_SHA={ROLLBACK_SHA}" in result.stdout
+    assert ship_harness["origin_state"].read_text() == ROLLBACK_SHA
+    assert ship_harness["head_state"].read_text() == ROLLBACK_SHA
+
+
+def test_rollback_state_is_written_before_the_push(ship_harness):
+    """A crash between commit and push must leave a record to resume from, not a
+    dangling commit nobody remembers making."""
+    _rollback_ready(ship_harness)
+    result = _rollback(ship_harness, "internal", extra_env={"FAKE_GIT_FAIL_COMMAND": "push origin"})
+
+    assert result.returncode == 1
+    state = _rollback_state(ship_harness)
+    assert state["status"] == "committed"
+    assert state["released_sha"] == PUSHED_SHA
+    assert state["known_good_sha"] == KNOWN_GOOD_SHA
+    assert state["rollback_sha"] == ROLLBACK_SHA
+    assert state["schema_version"] == 2
+    assert "main is unchanged" in result.stderr
+    assert set(state) == {
+        "schema_version", "released_sha", "known_good_sha", "rollback_sha",
+        "surface", "risk", "status", "created_at", "updated_at",
+    }
+
+
+def test_rollback_proof_is_keyed_to_the_rollback_commit_and_runs_no_live_journey(ship_harness):
+    _rollback_ready(ship_harness, "telegram", live_target=LIVE_TARGET)
+    result = _rollback(ship_harness, "telegram", extra_env=TELETHON_ENV)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"head_sha={ROLLBACK_SHA}" in result.stdout
+    gh_log = ship_harness["gh_log"].read_text()
+    assert "--workflow Tests" in gh_log
+    assert "--workflow Deploy Mac Mini" in gh_log
+    # Runtime identity is proved for the rollback commit, never for the release.
+    runtime_calls = ship_harness["runtime_log"].read_text().splitlines()
+    assert runtime_calls[-1] == f"--expected-sha {ROLLBACK_SHA}"
+    # A rollback restores a tree that already passed its own proof. It must never
+    # be the reason a message reaches a real doctor.
+    assert not ship_harness["live_log"].exists()
+
+
+def test_rollback_reports_rolled_back_only_after_the_runtime_proves_it(ship_harness):
+    _rollback_ready(ship_harness)
+    result = _rollback(ship_harness, "internal")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "FINAL_RELEASE_STATE=rolled-back" in result.stdout
+    assert f"RELEASED_SHA={PUSHED_SHA}" in result.stdout
+    assert f"ROLLBACK_COMMIT_SHA={ROLLBACK_SHA}" in result.stdout
+    assert f"KNOWN_GOOD_TREE_SHA={KNOWN_GOOD_SHA}" in result.stdout
+    assert _rollback_state(ship_harness)["status"] == "proved"
+
+
+@pytest.mark.parametrize("failed_workflow", ["Tests", "Deploy Mac Mini"])
+def test_rollback_never_reports_rolled_back_when_ci_or_deploy_failed(ship_harness, failed_workflow):
+    _rollback_ready(ship_harness)
+    (ship_harness["gh_runs"] / f"{failed_workflow}.json").write_text(
+        _workflow_runs(
+            ROLLBACK_SHA,
+            conclusion="failure",
+            event="push" if failed_workflow == "Tests" else "workflow_run",
+            created_at="2026-08-13T10:00:00Z" if failed_workflow == "Tests" else "2026-08-13T10:06:00Z",
+        )
+    )
+    result = _rollback(ship_harness, "internal")
+
+    assert result.returncode == 1
+    assert "FINAL_RELEASE_STATE=blocked" in result.stdout
+    assert "FINAL_RELEASE_STATE=rolled-back" not in result.stdout
+    assert f"main is {ROLLBACK_SHA}" in result.stderr
+    assert "The rollback is not live" in result.stderr
+
+
+def test_rollback_says_main_is_b_but_runtime_is_still_the_released_sha(ship_harness):
+    """The worst outcome: the rollback commit is on main, the deploy put the
+    released code back, and the loop must not call that a rollback."""
+    _rollback_ready(ship_harness)
+    assert _rollback(ship_harness, "internal").returncode == 0
+
+    result = _rollback(ship_harness, "internal", extra_env={"FAKE_RUNTIME_SHA": PUSHED_SHA})
+
+    assert result.returncode == 1
+    assert "FINAL_RELEASE_STATE=blocked" in result.stdout
+    assert "FINAL_RELEASE_STATE=rolled-back" not in result.stdout
+    assert f"main is {ROLLBACK_SHA}, but the live runtime is still the released SHA {PUSHED_SHA}" in result.stderr
+    assert "Nothing on the Mac Mini has been reverted" in result.stderr
+
+
+# --- rollback: resume and idempotence --------------------------------------
+
+
+def test_rollback_resumes_a_local_commit_that_was_never_pushed(ship_harness):
+    _rollback_ready(ship_harness)
+    blocked = _rollback(ship_harness, "internal", extra_env={"FAKE_UPDATE_REF_FAIL": "1"})
+    assert blocked.returncode == 3
+    assert _rollback_state(ship_harness)["status"] == "committed"
+    assert not ship_harness["head_state"].exists()
+
+    result = _rollback(ship_harness, "internal")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "FINAL_RELEASE_STATE=rolled-back" in result.stdout
+    assert "Reusing recorded rollback commit" in result.stdout
+    assert len(_git_lines(ship_harness, "commit-tree ")) == 1, "a resume must never make a second commit"
+    assert _git_lines(ship_harness, "push ") == [f"push origin {ROLLBACK_SHA}:refs/heads/main"]
+
+
+def test_rollback_resumes_proof_after_a_push_without_a_duplicate_push(ship_harness):
+    _rollback_ready(ship_harness)
+    (ship_harness["gh_runs"] / "Tests.json").write_text("[]")
+    (ship_harness["gh_runs"] / "Tests.api.json").write_text(json.dumps({"workflow_runs": []}))
+    pending = _rollback(ship_harness, "internal")
+    assert pending.returncode == 4
+    assert "FINAL_RELEASE_STATE=proof-pending" in pending.stdout
+    assert _rollback_state(ship_harness)["status"] == "pushed"
+    assert (
+        f"ROLLBACK_RESUME_COMMAND=scripts/release_loop.sh --surface telegram --mode rollback "
+        f"--risk internal --approved {PUSHED_SHA}"
+    ) in pending.stdout
+
+    _rollback_workflows(ship_harness)
+    result = _rollback(ship_harness, "internal")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "FINAL_RELEASE_STATE=rolled-back" in result.stdout
+    assert "skipping a duplicate push" in result.stdout
+    assert len(_git_lines(ship_harness, "commit-tree ")) == 1
+    assert _git_lines(ship_harness, "push ") == [f"push origin {ROLLBACK_SHA}:refs/heads/main"]
+
+
+def test_rerunning_a_completed_rollback_is_idempotent(ship_harness):
+    _rollback_ready(ship_harness)
+    first = _rollback(ship_harness, "internal")
+    assert first.returncode == 0, first.stdout + first.stderr
+
+    second = _rollback(ship_harness, "internal")
+
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert "FINAL_RELEASE_STATE=rolled-back" in second.stdout
+    assert len(_git_lines(ship_harness, "commit-tree ")) == 1
+    assert _git_lines(ship_harness, "push ") == [f"push origin {ROLLBACK_SHA}:refs/heads/main"]
+    assert _rollback_state(ship_harness)["status"] == "proved"
+
+
+def test_rollback_never_force_pushes_or_rewrites_history():
+    src = SCRIPT.read_text()
+    assert "commit-tree" in src, "rollback must build a normal forward commit"
+    for forbidden in ("push --force", "--force-with-lease", "filter-branch", "update-ref -d"):
+        assert forbidden not in src, f"rollback must never contain {forbidden!r}"
+    assert "git push origin \"$rollback_sha:refs/heads/main\"" in src
 
 
 # --- write surface ---------------------------------------------------------

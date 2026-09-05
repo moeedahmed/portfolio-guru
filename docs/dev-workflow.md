@@ -46,48 +46,46 @@ This checks:
 - backend offline tests pass
 - untracked files are shown clearly
 
-### 5. Commit and push
+### 5. Commit locally
 
 ```bash
 git status
 git add <real source/doc files only>
 git commit -m "clear message"
-git push -u origin HEAD
 ```
 
-Then merge via GitHub or after review.
+Do not separately push the feature branch or create a routine PR. The release
+loop pushes the exact approved commit to `main`; use a PR only when the change
+needs independent repository review beyond the normal release gate.
 
 ## Release closure (deterministic)
 
-Once a fix is committed, close the release with the single deterministic
-entrypoint instead of remembering separate test/push/deploy/restart commands:
+Once a fix is committed, close it through the one-card/one-approval entrypoint:
 
 ```bash
-# Safe readiness report. Never pushes, deploys, or restarts.
-scripts/release_loop.sh --surface telegram --mode prepare --risk telegram
+# Non-deploying checks, local ref refresh, and one gitignored approval card.
+scripts/release_loop.sh --surface telegram --mode prepare --risk telegram \
+  --effect "<one line about what changes for a doctor>" \
+  --live-target portfolio_guru_bot
 
-# Gated closure. Risk is mandatory; approval and a clean, fast-forwardable
-# feature branch are required before reconciliation/push.
-RELEASE_APPROVED=telegram-$(date -u +%Y%m%d) \
-  scripts/release_loop.sh --surface telegram --mode ship --risk telegram
-# or, interactively:
-scripts/release_loop.sh --surface telegram --mode ship --risk telegram --approved
-
-# If proof times out after push, run the exact RESUME_COMMAND printed by ship:
+# Run only after Moeed approves the printed card and exact full SHA.
 scripts/release_loop.sh --surface telegram --mode ship --risk telegram \
-  --release-sha <full-40-character-SHA> --approved
+  --approved <full-40-character-SHA>
+
+# If proof is pending, run the exact RESUME_COMMAND printed by ship.
+# If a released change must be recovered, run the exact ROLLBACK_COMMAND;
+# it reuses the same approved release SHA and never force-pushes.
 ```
 
 What it wires (reusing existing pieces, not reimplementing them):
 
-1. Offline gate — `scripts/preflight.sh` + `scripts/telegram_qa_offline.sh`.
-2. Commit must already be present (ship never creates commits; refuses if dirty).
-3. Reconcile the feature branch to `main`, push one full SHA, and restore the original feature branch (fast-forward only; never reset/force).
-4. Prove a successful `push` Tests run for the SHA, then a successful later `workflow_run` deploy for the same SHA. Manual dispatch does not prove an ordinary ship.
-5. Prove the Mac Mini checkout and runtime identity both equal the full SHA exactly.
-6. Apply explicit risk proof: `internal` needs automated proof only; `telegram` runs one guarded focused live case journey; `broad` requires the strict interactive 15-check dogfood checklist with no skips.
+1. Prepare runs the offline gates, fetches current `origin/main`, proves the live runtime equals it, freezes the exact effect, proof mode, target, exclusions and known-good rollback SHA, and prints one compact card.
+2. Approval names the card's exact full release SHA; dated or bare approvals are refused.
+3. Ship re-verifies the immutable card and live baseline, pushes that exact SHA to `main`, and proves the `push` Tests run, later `workflow_run` deploy and Mac Mini runtime identity.
+4. Risk proof is frozen on the card: `internal` needs no journey; `telegram` uses the exact guarded target only when the sanctioned Telethon route is ready, otherwise manual attestation; `broad` uses the strict 15-check route.
+5. An unchanged resume reuses the same approval and never pushes again. A rollback also reuses it, creates one normal forward commit whose tree exactly matches the frozen known-good tree, and proves that rollback commit through CI, deploy and runtime without a live user journey.
 
-A proof-only resume requires the same approval gate and `HEAD == origin/main == --release-sha`; it never pushes again. Retryable missing/running/timeout/runtime/live proof exits 4 as `proof-pending`. A completed Tests/deploy failure or failed journey is `blocked` and non-zero.
+Missing/running/timeout/inaccessible proof exits 4 as `proof-pending`. Completed CI, deploy or journey failure is `blocked` and non-zero. Only an exact runtime-proved release is `live`; only an exact runtime-proved rollback is `rolled-back`.
 
 Telegram workflow fixes also carry the **setup consent path** gate. Treat the reported
 bug as a symptom of the whole phone journey, not just the line that failed:
@@ -97,15 +95,10 @@ the real launchd bot is running the committed code. `scripts/preflight.sh`
 runs `scripts/setup_consent_path_check.py` for deterministic regressions; the manual
 phone journey is captured in `scripts/dogfood_smoke.sh`.
 
-`ship` checks approval **before** any live or mutating action, so an unapproved
-run is side-effect free. Approval is surface- and date-scoped, so a stale token
-does not silently re-ship. Run `prepare` first; it tells you READY or BLOCKED
-(and why).
+`ship`, `attest`, and `rollback` check the exact full-SHA approval before any live or mutating action. The approval is bound to the persisted card, not to a date or a bare flag, so it cannot silently cover another release. Run `prepare` first; it either writes and prints the one reviewable card or explains why no card was created.
 
-`ship` always prints one machine-readable final state:
-`FINAL_RELEASE_STATE=live|release-ready|proof-pending|blocked`. Printed proof
-commands are a next gate, not completion proof; only collected deploy/restart
-and dogfood proof can make the state `live`.
+Every mode prints one machine-readable final state:
+`FINAL_RELEASE_STATE=live|rolled-back|release-ready|proof-pending|blocked`. Printed proof or rollback commands are next gates, not completion proof; only collected CI, deploy, runtime and required journey evidence can make the state `live` or `rolled-back`.
 
 ## Files that should stay local/private
 

@@ -21,6 +21,15 @@
 
 set -euo pipefail
 
+# Fixed throwaway values for mocked/offline tests only. Scope them to the
+# pytest child so callers never need live credentials and later release,
+# runtime or live-proof steps cannot inherit them.
+OFFLINE_TEST_ENV=(
+  FERNET_SECRET_KEY=5Wv33F9sq99WGD2lEzwwd3J_JH5p6vxKdDiAwCWqoYQ=
+  TELEGRAM_BOT_TOKEN=fake
+  GOOGLE_API_KEY=fake
+)
+
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
 cd "$ROOT"
 
@@ -92,7 +101,7 @@ JOURNEY_TESTS=(
 
 echo
 echo "--- Journey smoke: ${#JOURNEY_TESTS[@]} test files, offline/mocked only ---"
-"$PY" -m pytest "${JOURNEY_TESTS[@]}" -q
+env "${OFFLINE_TEST_ENV[@]}" "$PY" -m pytest "${JOURNEY_TESTS[@]}" -q
 
 echo
 echo "verify:changed PASSED."
