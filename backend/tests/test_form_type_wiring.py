@@ -187,6 +187,132 @@ def test_2021_manual_category_picker_shows_esle_2021_callback():
     assert "FORM|ESLE_ASSESS" not in callbacks
 
 
+def test_category_labels_are_one_word_with_preserved_slugs():
+    from bot import _CAT_SLUGS, FORM_CATEGORIES
+
+    expected_slugs = {
+        "🩺 Clinical": "CLINICAL",
+        "📝 Reflection": "REFLECTIVE",
+        "👨‍🏫 Learning": "TEACHING",
+        "🔬 Procedures": "PROCEDURAL",
+        "🔍 Quality": "QUALITY",
+        "🏛️ Management": "MANAGEMENT",
+    }
+    assert _CAT_SLUGS == expected_slugs
+    assert set(FORM_CATEGORIES) == set(expected_slugs)
+    for label in FORM_CATEGORIES:
+        word = label.split(" ", 1)[1]
+        assert " " not in word, f"Category label {label!r} is not one word"
+
+
+def test_category_membership_matches_approved_mapping_with_no_duplicate_buttons():
+    from bot import FORM_CATEGORIES
+
+    expected = {
+        "🩺 Clinical": ["CBD", "DOPS", "DOPS_ACCS", "MINI_CEX", "ACAT", "LAT", "ACAF", "STAT", "MSF", "ESLE_ASSESS"],
+        "📝 Reflection": ["REFLECT_LOG", "COMPLAINT", "SERIOUS_INC", "CRIT_INCIDENT", "TEACH_CONFID", "PDP", "APPRAISAL", "EDU_MEETING", "EDU_MEETING_SUPP"],
+        "👨‍🏫 Learning": ["TEACH", "TEACH_OBS", "SDL", "EDU_ACT", "FORMAL_COURSE", "JCF"],
+        "🔬 Procedures": ["DOPS", "DOPS_ACCS", "PROC_LOG", "PROCEDURAL_LOG_ACCS", "US_CASE"],
+        "🔍 Quality": ["QIAT", "AUDIT", "RESEARCH", "CLIN_GOV", "MGMT_GUIDELINE", "MGMT_PROJECT", "MGMT_RISK", "MGMT_RISK_PROC"],
+        "🏛️ Management": ["LAT", "MGMT_ROTA", "MGMT_RISK", "MGMT_RISK_PROC", "MGMT_RECRUIT", "MGMT_PROJECT", "MGMT_TRAINING_EVT", "MGMT_GUIDELINE", "MGMT_INFO", "MGMT_INDUCTION", "MGMT_EXPERIENCE", "MGMT_REPORT", "MGMT_COMPLAINT", "BUSINESS_CASE", "COST_IMPROVE", "EQUIP_SERVICE"],
+    }
+    assert FORM_CATEGORIES == expected
+    for cat_forms in FORM_CATEGORIES.values():
+        assert len(cat_forms) == len(set(cat_forms)), "duplicate base form in one category"
+        assert not any(ft.endswith("_2021") for ft in cat_forms), "curriculum variant listed directly"
+
+
+def test_category_reshuffle_preserves_all_previously_reachable_forms():
+    from bot import FORM_CATEGORIES
+
+    old_categories = {
+        "🩺 Clinical": ["CBD", "DOPS", "DOPS_ACCS", "MINI_CEX", "ACAT", "LAT", "LAT_2021", "ACAF", "STAT", "MSF", "QIAT", "QIAT_2021", "JCF", "JCF_2021", "ESLE_ASSESS", "AUDIT", "AUDIT_2021"],
+        "📝 Reflective": ["REFLECT_LOG", "REFLECT_LOG_2021", "COMPLAINT", "SERIOUS_INC", "CRIT_INCIDENT", "PDP", "APPRAISAL"],
+        "👨‍🏫 Teaching": ["TEACH", "TEACH_OBS", "TEACH_CONFID", "SDL", "EDU_ACT", "EDU_MEETING", "EDU_MEETING_SUPP", "FORMAL_COURSE"],
+        "🔬 Procedural": ["PROC_LOG", "PROCEDURAL_LOG_ACCS", "US_CASE"],
+        "🔍 Quality": ["RESEARCH", "CLIN_GOV", "COST_IMPROVE", "EQUIP_SERVICE", "BUSINESS_CASE"],
+        "🏛️ Management": ["MGMT_ROTA", "MGMT_RISK", "MGMT_RECRUIT", "MGMT_PROJECT", "MGMT_RISK_PROC", "MGMT_TRAINING_EVT", "MGMT_GUIDELINE", "MGMT_INFO", "MGMT_INDUCTION", "MGMT_EXPERIENCE", "MGMT_REPORT", "MGMT_COMPLAINT"],
+    }
+    old_base_forms = {
+        ft.replace("_2021", "") for forms in old_categories.values() for ft in forms
+    }
+    new_base_forms = {ft for forms in FORM_CATEGORIES.values() for ft in forms}
+    assert new_base_forms == old_base_forms
+
+
+def test_category_navigation_reaches_every_allowed_categorised_form_without_duplicates():
+    """Walk the real level-1/level-2 keyboard builders for every saved training
+    level and curriculum, the way a trainee's own device actually would.
+
+    Regression: FORM_CATEGORIES previously listed both a base form (e.g. LAT)
+    and its explicit _2021 variant, which made _build_category_forms_keyboard
+    render the same evidence type as two separate buttons once a user's
+    allowed set resolved to the variant. This walks the actual builders (not
+    the raw FORM_CATEGORIES dict) across every profile x curriculum pair so
+    that kind of duplicate-button regression fails here.
+    """
+    from bot import (
+        FORM_CATEGORIES,
+        TRAINING_LEVEL_FORMS,
+        _CAT_SLUGS,
+        _build_category_forms_keyboard,
+        _build_category_picker_keyboard,
+        _get_allowed_forms,
+    )
+
+    categorised_base_forms = {ft for forms in FORM_CATEGORIES.values() for ft in forms}
+    user_id = 424242
+
+    for training_level in [*TRAINING_LEVEL_FORMS, None]:
+        for curriculum in ("2025", "2021"):
+            with patch("bot.get_training_level", return_value=training_level), \
+                 patch("bot.get_curriculum", return_value=curriculum):
+                allowed = set(_get_allowed_forms(user_id))
+                picker = _build_category_picker_keyboard(user_id)
+                visible_slugs = {
+                    button.callback_data.split("FORM|cat_", 1)[1]
+                    for row in picker.inline_keyboard
+                    for button in row
+                    if button.callback_data.startswith("FORM|cat_")
+                }
+
+                reachable = set()
+                for slug in visible_slugs:
+                    forms_kb = _build_category_forms_keyboard(user_id, slug)
+                    callbacks = [
+                        button.callback_data.split("FORM|", 1)[1]
+                        for row in forms_kb.inline_keyboard
+                        for button in row
+                        if button.callback_data.startswith("FORM|")
+                        and button.callback_data != "FORM|show_all"
+                    ]
+                    assert len(callbacks) == len(set(callbacks)), (
+                        f"duplicate callback in {training_level}/{curriculum} category {slug}: {callbacks}"
+                    )
+                    reachable.update(callbacks)
+
+                    # Every button shown must actually be in the user's allowed set.
+                    assert set(callbacks) <= allowed, (
+                        f"{training_level}/{curriculum} category {slug} offered a "
+                        f"form outside the allowed set: {set(callbacks) - allowed}"
+                    )
+
+                # Every allowed form whose base (or its curriculum variant) is
+                # categorised must be reachable through some category.
+                for form_type in allowed:
+                    base = form_type[:-len("_2021")] if form_type.endswith("_2021") else form_type
+                    if base in categorised_base_forms or form_type in categorised_base_forms:
+                        assert form_type in reachable, (
+                            f"{training_level}/{curriculum}: {form_type} is allowed and "
+                            f"categorised but not reachable via any category button"
+                        )
+
+    # Sanity: preserved slugs still resolve to their (renamed) category.
+    assert set(_CAT_SLUGS.values()) == {
+        "CLINICAL", "REFLECTIVE", "TEACHING", "PROCEDURAL", "QUALITY", "MANAGEMENT",
+    }
+
+
 def test_sas_filing_resolves_stale_base_draft_to_2021_variant():
     from bot import _filing_form_type_for_user, _template_requirements
 
