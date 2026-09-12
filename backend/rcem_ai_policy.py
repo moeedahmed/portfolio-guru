@@ -14,7 +14,10 @@ import re
 AI_USE_DECLARATION = "AI was used to help structure and edit this reflection."
 
 
-_PERSONAL_REFLECTION_PATTERNS = tuple(
+# Strong: first-person reflective phrasing. These alone are sufficient
+# evidence of a doctor's own reflective input, regardless of what else the
+# source contains.
+_STRONG_REFLECTION_PATTERNS = tuple(
     re.compile(pattern, re.IGNORECASE)
     for pattern in (
         r"\bI\s+(?:learned|learnt|realised|recognized|recognised|understood|noticed|reflected)\b",
@@ -28,6 +31,40 @@ _PERSONAL_REFLECTION_PATTERNS = tuple(
     )
 )
 
+# Weak: explicit learning stated without first-person phrasing, e.g. a
+# doctor's "Learning points: ..." note or "Learning that X is important when
+# Y", or "This/the case reinforced/highlighted ...". These read as headings
+# or narrative connectors rather than a first-person admission, so they are
+# only accepted when they are not themselves a request for fabricated
+# content and not an explicit statement that no learning was supplied.
+# "showed" is deliberately excluded: it is the most common verb for plain
+# diagnostic narrative ("it showed a fracture"), not for a stated lesson.
+_WEAK_REFLECTION_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\b(?:key |main )?learning points?\b",
+        r"\blearning that\b",
+        r"\b(?:this|it|the case|the encounter)\s+"
+        r"(?:reinforced|highlighted|emphasi[sz]ed|taught|reminded)\b",
+    )
+)
+
+# A weak match next to language asking someone (the AI) to originate the
+# learning, rather than report it, is a request for fabricated content.
+_FABRICATION_REQUEST_PATTERN = re.compile(
+    r"\b(?:invent|make up|fabricat\w*|come up with|generate|write)\b"
+    r"(?:(?!\.).){0,40}\blearning\b",
+    re.IGNORECASE,
+)
+
+# A weak "learning point(s)" heading immediately followed by an explicit
+# statement that none was supplied is not itself a reported learning.
+_NO_LEARNING_SUPPLIED_PATTERN = re.compile(
+    r"\blearning points?\b\s*[:\-]*\s*"
+    r"(?:none|n\W?a|nil|nothing|not\s+(?:supplied|provided|applicable))\b",
+    re.IGNORECASE,
+)
+
 
 def has_personal_reflective_input(text: str | None) -> bool:
     """Return whether the doctor's source contains explicit reflective input.
@@ -38,7 +75,13 @@ def has_personal_reflective_input(text: str | None) -> bool:
     source = " ".join(str(text or "").split())
     if len(source.split()) < 5:
         return False
-    return any(pattern.search(source) for pattern in _PERSONAL_REFLECTION_PATTERNS)
+    if any(pattern.search(source) for pattern in _STRONG_REFLECTION_PATTERNS):
+        return True
+    if _NO_LEARNING_SUPPLIED_PATTERN.search(source):
+        return False
+    if _FABRICATION_REQUEST_PATTERN.search(source):
+        return False
+    return any(pattern.search(source) for pattern in _WEAK_REFLECTION_PATTERNS)
 
 
 def with_ai_use_declaration(text: str | None) -> str:

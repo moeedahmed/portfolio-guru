@@ -185,6 +185,11 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         message_class=MessageClass.FIXED,
         text="\n\n💬 Reply to refine this draft, or use the buttons below to save.",
     ),
+    "draft_reply_hint_reflection_needed": MessageTemplate(
+        key="draft_reply_hint_reflection_needed",
+        message_class=MessageClass.FIXED,
+        text="\n\n💬 Reply to refine this draft with your own learning point, interpretation or intended practice change to unlock saving.",
+    ),
     "capability_overview": MessageTemplate(
         key="capability_overview",
         message_class=MessageClass.FIXED,

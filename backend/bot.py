@@ -2300,7 +2300,7 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
         await _send_latest_message(
             message,
             context,
-            _format_draft_preview_for_context(draft, context) + _REPLY_HINT_SUFFIX,
+            _format_draft_preview_for_context(draft, context) + _draft_reply_hint(context),
             reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
             parse_mode="Markdown",
         )
@@ -5136,6 +5136,15 @@ _MISSING_MARKER = "_— needs your detail_"
 # Appended to draft previews shown with the approval keyboard so the user
 # knows they can reply to refine, instead of relying on a removed Edit button.
 _REPLY_HINT_SUFFIX = render_message("draft_reply_hint")
+# Used instead when Save is hidden pending the doctor's own reflection, since
+# the buttons below only offer "add reflection" or cancel, not save.
+_REPLY_HINT_SUFFIX_REFLECTION_NEEDED = render_message("draft_reply_hint_reflection_needed")
+
+
+def _draft_reply_hint(context) -> str:
+    if context.user_data.get("needs_reflection_detail"):
+        return _REPLY_HINT_SUFFIX_REFLECTION_NEEDED
+    return _REPLY_HINT_SUFFIX
 
 # Visual divider separating portfolio content from bot guidance/rationale in
 # draft previews (after draft body). Post-filing confirmations should stay
@@ -5424,7 +5433,7 @@ async def _show_draft_review(
         update_last=False,
     )
     preview = _format_draft_preview_for_context(draft, context, form_type)
-    text = preview + _REPLY_HINT_SUFFIX
+    text = preview + _draft_reply_hint(context)
     keyboard = _build_approval_keyboard(
         improved_once=context.user_data.get("quick_improve_used", False),
         needs_reflection_detail=needs_reflection_detail,
@@ -10380,7 +10389,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         preview = _format_draft_preview_for_context(draft, context, chosen_form)
         await _safe_edit_text(
             query.message,
-            preview + _REPLY_HINT_SUFFIX,
+            preview + _draft_reply_hint(context),
             reply_markup=_build_approval_keyboard(
                 improved_once=context.user_data.get("quick_improve_used", False),
                 can_back_to_missing=True,
@@ -11107,7 +11116,7 @@ async def _regenerate_active_draft_with_feedback(
     preview = _format_draft_preview_for_context(updated, context)
     await _safe_edit_text(
         ack,
-        preview + _REPLY_HINT_SUFFIX,
+        preview + _draft_reply_hint(context),
         reply_markup=_active_draft_keyboard(context),
         parse_mode="Markdown",
     )
@@ -13327,7 +13336,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     if _set_reflection_detail_gate(context, draft):
         context.user_data.pop("filing_in_progress", None)
         context.user_data.pop("retry_filing_requested", None)
-        review_text = _format_draft_preview_for_context(draft, context) + _REPLY_HINT_SUFFIX
+        review_text = _format_draft_preview_for_context(draft, context) + _draft_reply_hint(context)
         if query:
             await _safe_edit_text(
                 source_message,
@@ -13403,7 +13412,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     draft_backup.save(user_id, form_type, fields)
 
     # Save draft preview and data for later restore + amend feature
-    draft_preview_text = _format_draft_preview_for_context(draft, context, form_type) + _REPLY_HINT_SUFFIX
+    draft_preview_text = _format_draft_preview_for_context(draft, context, form_type) + _draft_reply_hint(context)
     amend_draft_data = _serialise_draft(draft)
     amend_case_text = context.user_data.get("case_text", "")
     amend_chosen_form_type = form_type
@@ -14415,7 +14424,7 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
     header = "💡 *Revised draft* — improved from the first version.\n\n"
     await _safe_edit_text(
         query.message,
-        header + preview + _REPLY_HINT_SUFFIX,
+        header + preview + _draft_reply_hint(context),
         reply_markup=_active_draft_keyboard(context),
         parse_mode="Markdown",
     )
@@ -14642,7 +14651,7 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return AWAIT_APPROVAL
 
     preview = _format_draft_preview_for_context(updated, context)
-    await _safe_edit_text(ack, preview + _REPLY_HINT_SUFFIX, reply_markup=_active_draft_keyboard(context), parse_mode="Markdown")
+    await _safe_edit_text(ack, preview + _draft_reply_hint(context), reply_markup=_active_draft_keyboard(context), parse_mode="Markdown")
     return AWAIT_APPROVAL
 
 
@@ -15065,7 +15074,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
                 preview = _format_draft_preview_for_context(draft, context, chosen_form)
                 ack_line = f"✏️ Updated: {summary}\n\n" if summary else "✏️ Draft updated.\n\n"
                 await update.message.reply_text(
-                    ack_line + preview + _REPLY_HINT_SUFFIX,
+                    ack_line + preview + _draft_reply_hint(context),
                     reply_markup=_active_draft_keyboard(context),
                     parse_mode="Markdown",
                 )

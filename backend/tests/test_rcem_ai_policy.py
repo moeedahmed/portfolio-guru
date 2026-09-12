@@ -48,6 +48,72 @@ def test_personal_reflection_gate_uses_doctor_words_not_generated_length():
     )
 
 
+def test_personal_reflection_gate_recognises_genuine_learning_without_first_person_phrasing():
+    # Synthetic doctor-authored source text (not customer data).
+    assert has_personal_reflective_input(
+        "Learning points: importance of checking neurovascular status and "
+        "applying the Ottawa ankle rules before requesting imaging."
+    )
+    assert has_personal_reflective_input(
+        "This reinforced the importance of documenting neurovascular findings "
+        "before discharge and giving clear safety-netting advice."
+    )
+    assert has_personal_reflective_input(
+        "The case highlighted the importance of early senior escalation in "
+        "unclear presentations."
+    )
+
+
+def test_personal_reflection_gate_preserves_anonymised_child_case_regression():
+    # Synthetic anonymised child-case reproduction (not customer text).
+    source = (
+        "A young child in the department could not communicate their pain "
+        "clearly. Learning that a thorough examination is important when a "
+        "patient cannot communicate pain was the key takeaway from this case."
+    )
+    assert has_personal_reflective_input(source)
+
+
+def test_personal_reflection_gate_still_rejects_narrative_with_no_learning():
+    assert not has_personal_reflective_input(
+        "Chest pain assessed, bloods and ECG requested, discussed with "
+        "medicine and admitted under the on-call team."
+    )
+    assert not has_personal_reflective_input(
+        "Please just write the reflection for me and file the case, I don't "
+        "have anything to add."
+    )
+
+
+def test_personal_reflection_gate_rejects_diagnostic_narrative_mentioning_showed():
+    # Diagnostic narrative, not a stated learning.
+    assert not has_personal_reflective_input(
+        "It showed a fracture on the radiograph."
+    )
+
+
+def test_personal_reflection_gate_rejects_request_to_invent_learning_points():
+    assert not has_personal_reflective_input(
+        "Please invent some learning points for this case."
+    )
+
+
+def test_personal_reflection_gate_rejects_learning_points_heading_with_none_supplied():
+    assert not has_personal_reflective_input(
+        "Learning points: none supplied for this case."
+    )
+
+
+def test_personal_reflection_gate_accepts_actual_learning_point_sentence():
+    # Deidentified doctor-authored source text.
+    source = (
+        "Learning point was how kids with autism or non-verbal would not "
+        "tell about pain and injury, important for clinician to do "
+        "thorough examination and assessment."
+    )
+    assert has_personal_reflective_input(source)
+
+
 def test_ai_use_declaration_is_added_once():
     first = with_ai_use_declaration("I learned to escalate earlier in future.")
     second = with_ai_use_declaration(first)
@@ -106,11 +172,111 @@ def test_ai_declaration_is_visible_and_accountability_is_explicit():
     assert "You remain responsible for its accuracy, authenticity and insight." in preview
 
 
+def test_genuine_non_first_person_learning_unlocks_save_with_keyboard_and_footer_agreement():
+    from bot import (
+        _build_approval_keyboard,
+        _format_draft_preview,
+        _set_reflection_detail_gate,
+    )
+
+    # Synthetic anonymised child-case reproduction (not customer text).
+    source = (
+        "A young child in the department could not communicate their pain "
+        "clearly. Learning that a thorough examination is important when a "
+        "patient cannot communicate pain was the key takeaway from this case."
+    )
+    draft = CBDData(
+        clinical_reasoning="Assessed a distressed non-verbal child for a limb injury.",
+        reflection=(
+            "Learning that a thorough examination is important when a patient "
+            "cannot communicate pain."
+        ),
+    )
+    context = _context(source)
+
+    needs_reflection_detail = _set_reflection_detail_gate(context, draft)
+    assert needs_reflection_detail is False
+
+    preview = _format_draft_preview(draft, needs_reflection_detail=needs_reflection_detail)
+    callbacks = _callbacks(
+        _build_approval_keyboard(needs_reflection_detail=needs_reflection_detail)
+    )
+    assert "ACTION|add_reflection_detail" not in callbacks
+    assert "APPROVE|draft" in callbacks
+    assert "add your own learning point" not in preview.lower()
+
+
 def test_improve_and_save_are_hidden_until_doctor_adds_reflection():
     from bot import _build_approval_keyboard
 
     callbacks = _callbacks(_build_approval_keyboard(needs_reflection_detail=True))
     assert callbacks == {"ACTION|add_reflection_detail", "CANCEL|draft"}
+
+
+def test_actual_learning_point_source_unlocks_save_without_warning():
+    from bot import (
+        _build_approval_keyboard,
+        _format_draft_preview,
+        _set_reflection_detail_gate,
+    )
+
+    # Deidentified doctor-authored source text.
+    source = (
+        "Learning point was how kids with autism or non-verbal would not "
+        "tell about pain and injury, important for clinician to do "
+        "thorough examination and assessment."
+    )
+    draft = CBDData(
+        clinical_reasoning="Assessed a distressed non-verbal child for a limb injury.",
+        reflection=source,
+    )
+    context = _context(source)
+
+    needs_reflection_detail = _set_reflection_detail_gate(context, draft)
+    assert needs_reflection_detail is False
+
+    preview = _format_draft_preview(draft, needs_reflection_detail=needs_reflection_detail)
+    callbacks = _callbacks(
+        _build_approval_keyboard(needs_reflection_detail=needs_reflection_detail)
+    )
+    assert "ACTION|add_reflection_detail" not in callbacks
+    assert "APPROVE|draft" in callbacks
+    assert "reflection is needed before saving" not in preview.lower()
+
+
+def test_missing_reflection_footer_does_not_claim_a_save_button_exists():
+    from bot import _draft_reply_hint
+
+    context = _context(
+        "I assessed the patient, arranged blood tests and discussed admission with medicine."
+    )
+    context.user_data["needs_reflection_detail"] = True
+    footer = _draft_reply_hint(context)
+    assert "use the buttons below to save" not in footer.lower()
+
+    context.user_data["needs_reflection_detail"] = False
+    footer = _draft_reply_hint(context)
+    assert "use the buttons below to save" in footer.lower()
+
+
+def test_refinement_clears_stale_reflection_gate_after_initial_block():
+    from bot import _set_reflection_detail_gate
+
+    draft = CBDData(
+        clinical_reasoning="I assessed the patient and discussed the plan with my consultant.",
+        reflection="I learned to escalate earlier and will do so in future.",
+    )
+    context = _context(
+        "I assessed the patient, arranged treatment and discussed the plan with my consultant."
+    )
+    assert _set_reflection_detail_gate(context, draft) is True
+    assert context.user_data["needs_reflection_detail"] is True
+
+    context.user_data["case_text"] = (
+        "I realised I had anchored early. In future I will reopen the differential sooner."
+    )
+    assert _set_reflection_detail_gate(context, draft) is False
+    assert "needs_reflection_detail" not in context.user_data
 
 
 @pytest.mark.asyncio
