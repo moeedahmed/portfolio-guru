@@ -17,8 +17,11 @@ def _active_cbd_draft():
             "date_of_encounter": "2026-07-16",
             "clinical_setting": "ED",
             "patient_presentation": "Chest pain",
+            "stage_of_training": "Higher/ST4-ST6",
+            "trainee_role": "Assessed and managed the patient",
             "clinical_reasoning": "Assessed and managed as possible ACS.",
             "reflection": "I would escalate earlier if symptoms recurred.",
+            "level_of_supervision": "Indirect",
             "curriculum_links": ["SLO1"],
         },
     }

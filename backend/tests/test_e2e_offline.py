@@ -448,6 +448,8 @@ class TestOfflineE2E:
             date_of_encounter="17/3/2026",
             clinical_setting="ED",
             patient_presentation="Chest pain, troponin positive",
+            trainee_role="Assessed and managed the patient independently",
+            level_of_supervision="Indirect",
             clinical_reasoning="Managed as ACS with dual antiplatelet",
             reflection="Need faster ECG review and escalation",
             curriculum_links=["SLO1"],
@@ -490,7 +492,10 @@ class TestOfflineE2E:
         monkeypatch.setattr("bot.route_filing", fake_route_filing)
 
         # Step 1: send case text → enters AWAIT_FORM_CHOICE
-        update1 = make_text_update("45M chest pain, troponin positive, managed ACS")
+        update1 = make_text_update(
+            "45M chest pain, troponin positive, managed ACS. "
+            "I realised I should have escalated to cardiology earlier and will do so next time."
+        )
         _prepare_update(update1, app.bot)
         await app.process_update(update1)
 
@@ -530,6 +535,8 @@ class TestOfflineE2E:
             date_of_encounter="17/3/2026",
             clinical_setting="ED",
             patient_presentation="Chest pain, troponin positive",
+            trainee_role="Assessed and managed the patient independently",
+            level_of_supervision="Indirect",
             clinical_reasoning="Managed as ACS with dual antiplatelet",
             reflection="Need faster ECG review and escalation",
             curriculum_links=["SLO1"],
@@ -581,7 +588,10 @@ class TestOfflineE2E:
         monkeypatch.setattr("bot.save_kc_coverage", AsyncMock(return_value=None))
         monkeypatch.setattr("bot.get_case_history", AsyncMock(return_value=[]))
 
-        update1 = make_text_update("45M chest pain, troponin positive, managed ACS")
+        update1 = make_text_update(
+            "45M chest pain, troponin positive, managed ACS. "
+            "I realised I should have escalated to cardiology earlier and will do so next time."
+        )
         _prepare_update(update1, app.bot)
         await app.process_update(update1)
 

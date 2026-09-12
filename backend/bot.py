@@ -2314,6 +2314,9 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         if not _draft_has_useful_content(pending_draft, chosen_form):
             return await _ask_for_more_detail_before_draft(message, context, edit=False)
+        gaps = _pre_draft_completeness_gaps(context, pending_draft, chosen_form)
+        if gaps:
+            return await _ask_pre_draft_completeness(message, context, gaps, edit=False)
         return await _show_draft_review(message, context, pending_draft, chosen_form, edit=False)
 
     if case_text and chosen_form and context.user_data.get("paused_flow_rebuild"):
@@ -2345,6 +2348,9 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         if not _draft_has_useful_content(refreshed_draft, chosen_form):
             return await _ask_for_more_detail_before_draft(message, context, edit=False)
+        gaps = _pre_draft_completeness_gaps(context, refreshed_draft, chosen_form)
+        if gaps:
+            return await _ask_pre_draft_completeness(message, context, gaps, edit=False)
         return await _show_draft_review(message, context, refreshed_draft, chosen_form, edit=False)
 
     if case_text:
@@ -5471,6 +5477,67 @@ async def _ask_for_more_detail_before_draft(
     edit: bool = True,
 ) -> int:
     text = render_message(_detail_request_message_key(form_type))
+    if edit:
+        await _safe_edit_text(message, text, reply_markup=_KB_CANCEL)
+    else:
+        await _send_latest_message(message, context, text, reply_markup=_KB_CANCEL)
+    return AWAIT_CASE_INPUT
+
+
+def _pre_draft_completeness_gaps(context, draft, form_type: str) -> list[dict]:
+    """Doctor-owned essentials still missing from a draft with useful content.
+
+    This is the single completeness decision: called here before a draft is
+    first shown, and reused as-is by ``handle_approval_approve`` as the
+    post-preview save safeguard, so an essential removed by an edit after
+    preview is caught with the same rule instead of a second, parallel one.
+    Optional schema fields are never included here — the preview footer's own
+    missing-field line (``_missing_fields_review_line``) still surfaces those
+    separately, but neither path ever blocks on an optional field.
+    """
+    gaps: list[dict] = []
+    if _draft_needs_reflection_detail_before_save(context, draft):
+        gaps.append({
+            "key": "reflection",
+            "label": "your reflection (what you learned or would do differently)",
+        })
+
+    fields = _draft_fields_for_review(draft)
+    reflection_keys = set(_find_reflection_keys(fields, _draft_form_type(draft)))
+    missing_required, _, _ = _missing_template_fields(draft, form_type)
+    for field in missing_required:
+        if field["key"] in reflection_keys:
+            continue
+        # Required date fields already default to today at draft/filing time
+        # (`_apply_default_dates`, and the filer's own header default with an
+        # on-screen "defaulted to today" confirmation) — asking here would
+        # duplicate a question the doctor was never going to be left with.
+        if field.get("type") == "date":
+            continue
+        gaps.append({"key": field["key"], "label": field.get("label") or field["key"]})
+    return gaps
+
+
+def _format_completeness_gap_items(gaps: list[dict]) -> str:
+    labels = [gap["label"] for gap in gaps]
+    if len(labels) == 1:
+        return labels[0]
+    return ", ".join(labels[:-1]) + f" and {labels[-1]}"
+
+
+async def _ask_pre_draft_completeness(
+    message,
+    context: ContextTypes.DEFAULT_TYPE,
+    gaps: list[dict],
+    *,
+    edit: bool = True,
+) -> int:
+    """Ask once for exactly the missing essentials, before showing a draft."""
+    context.user_data["awaiting_detail"] = True
+    text = render_message(
+        "pre_draft_completeness_request",
+        items=_format_completeness_gap_items(gaps),
+    )
     if edit:
         await _safe_edit_text(message, text, reply_markup=_KB_CANCEL)
     else:
@@ -10495,6 +10562,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return ConversationHandler.END
         if not _draft_has_useful_content(draft, chosen_form):
             return await _ask_for_more_detail_before_draft(query.message, context)
+        gaps = _pre_draft_completeness_gaps(context, draft, chosen_form)
+        if gaps:
+            return await _ask_pre_draft_completeness(query.message, context, gaps)
         return await _show_draft_review(query.message, context, draft, chosen_form)
 
     elif data == "CASE|new":
@@ -10529,6 +10599,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return AWAIT_TEMPLATE_REVIEW
             if not _draft_has_useful_content(draft, chosen_form):
                 return await _ask_for_more_detail_before_draft(query.message, context)
+            gaps = _pre_draft_completeness_gaps(context, draft, chosen_form)
+            if gaps:
+                return await _ask_pre_draft_completeness(query.message, context, gaps)
             return await _show_draft_review(query.message, context, draft, chosen_form)
         else:
             context.user_data.clear()
@@ -10615,6 +10688,41 @@ async def handle_pending_media_context(update: Update, context: ContextTypes.DEF
         return AWAIT_DOC_INTENT
     _detach_pending_video_prompt(context)
     return await handle_case_input(update, context)
+
+
+async def _document_followup_refresh_draft(
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    case_text: str,
+    input_source: str,
+    chosen_form: str,
+) -> int:
+    """Merge a document/photo followup into the case already awaiting detail
+    and re-run the chosen form's draft, instead of restarting recommendation."""
+    previous_case = context.user_data.get("case_text", "").strip()
+    if previous_case:
+        case_text = f"{previous_case}\n\n{case_text}".strip()
+    previous_source = context.user_data.get("case_input_source", input_source)
+    input_source = previous_source if previous_source == input_source else "mixed"
+    context.user_data["case_text"] = case_text
+    context.user_data["case_input_source"] = input_source
+    await query.edit_message_text(f"🧩 Updating {_form_display_name(chosen_form)} draft…")
+    try:
+        draft = await _analyse_selected_form(context, user_id, case_text, chosen_form)
+    except asyncio.TimeoutError:
+        await query.edit_message_text("⏳ Template review timed out. Please try again.")
+        return AWAIT_TEMPLATE_REVIEW
+    except Exception as exc:
+        logger.error("Document followup refresh failed for %s: %s", chosen_form, exc, exc_info=True)
+        await query.edit_message_text("⚠️ Could not refresh that template.", reply_markup=_KB_CANCEL)
+        return AWAIT_TEMPLATE_REVIEW
+    if not _draft_has_useful_content(draft, chosen_form):
+        return await _ask_for_more_detail_before_draft(query.message, context)
+    gaps = _pre_draft_completeness_gaps(context, draft, chosen_form)
+    if gaps:
+        return await _ask_pre_draft_completeness(query.message, context, gaps)
+    return await _show_draft_review(query.message, context, draft, chosen_form)
 
 
 async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -10880,9 +10988,14 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
                 except OSError:
                     pass
             context.user_data["document_name"] = file_name
+            input_source = "photo" if is_image_attachment else "document"
+            chosen_form = context.user_data.get("chosen_form")
+            if chosen_form and context.user_data.get("awaiting_detail"):
+                return await _document_followup_refresh_draft(
+                    query, context, update.effective_user.id, case_text, input_source, chosen_form
+                )
             await query.edit_message_text(CAPTURED_ACK, parse_mode="Markdown")
             _track_latest_message(context, query.message)
-            input_source = "photo" if is_image_attachment else "document"
             return await _process_case_text(query.message, context, update.effective_user.id, case_text, input_source)
         if mode == "both":
             if is_image_attachment:
@@ -10955,7 +11068,13 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data["document_name"] = file_name
     input_source = "photo" if is_image_attachment else "document"
 
-    if _gathering_enabled(context) and not (context.user_data.get("chosen_form") and context.user_data.get("awaiting_detail")):
+    chosen_form = context.user_data.get("chosen_form")
+    if chosen_form and context.user_data.get("awaiting_detail"):
+        return await _document_followup_refresh_draft(
+            query, context, update.effective_user.id, case_text, input_source, chosen_form
+        )
+
+    if _gathering_enabled(context) and not (chosen_form and context.user_data.get("awaiting_detail")):
         if not _gathering_case_active(context):
             existing_attachments = _case_attachments(context)
             existing_attachment_path = context.user_data.get("attachment_path")
@@ -11035,6 +11154,9 @@ async def _accumulate_and_refresh(update: Update, context: ContextTypes.DEFAULT_
 
     context.user_data.pop("accumulating_case", None)
     context.user_data.pop("accumulation_additions", None)
+    gaps = _pre_draft_completeness_gaps(context, draft, chosen_form)
+    if gaps:
+        return await _ask_pre_draft_completeness(ack, context, gaps)
     return await _show_draft_review(ack, context, draft, chosen_form)
 
 
@@ -12393,6 +12515,10 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if input_source in {"text", "voice"} and _pending_media_label(context) == "video":
         case_text = _merge_pending_video_context(context, case_text)
 
+    if context.user_data.get("awaiting_detail") and context.user_data.get("chosen_form"):
+        previous_source = context.user_data.get("case_input_source", input_source)
+        input_source = previous_source if previous_source == input_source else "mixed"
+
     if (
         source_detail_retry
         and not (context.user_data.get("awaiting_detail") and context.user_data.get("chosen_form"))
@@ -12472,6 +12598,9 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
         if not _draft_has_useful_content(draft, chosen_form):
             return await _ask_for_more_detail_before_draft(ack, context)
+        gaps = _pre_draft_completeness_gaps(context, draft, chosen_form)
+        if gaps:
+            return await _ask_pre_draft_completeness(ack, context, gaps)
         return await _show_draft_review(ack, context, draft, chosen_form)
 
     active_msg_id = context.user_data.get("last_bot_msg_id")
@@ -12940,6 +13069,10 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if not _draft_has_useful_content(draft, form_type):
             return await _ask_for_more_detail_before_draft(query.message, context, form_type=form_type)
 
+        gaps = _pre_draft_completeness_gaps(context, draft, form_type)
+        if gaps:
+            return await _ask_pre_draft_completeness(query.message, context, gaps)
+
         return await _show_draft_review(query.message, context, draft, form_type)
     finally:
         if context.user_data.get("form_choice_in_progress") == choice_key:
@@ -13351,6 +13484,21 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 parse_mode="Markdown",
             )
         return AWAIT_APPROVAL
+    # Reflection is covered above by the dedicated add-reflection button. A
+    # doctor can still edit a shown draft down to below the schema's other
+    # required fields (e.g. clearing the clinical setting) before tapping
+    # Save. Reuse the same completeness decision used before the preview, so
+    # a removed essential is caught here too instead of filing an incomplete
+    # draft, and the doctor is only asked for what is now actually missing.
+    pre_file_form_type = context.user_data.get("chosen_form") or _draft_form_type(draft)
+    pre_file_gaps = [
+        gap for gap in _pre_draft_completeness_gaps(context, draft, pre_file_form_type)
+        if gap["key"] != "reflection"
+    ]
+    if pre_file_gaps:
+        context.user_data.pop("filing_in_progress", None)
+        context.user_data.pop("retry_filing_requested", None)
+        return await _ask_pre_draft_completeness(source_message, context, pre_file_gaps, edit=bool(query))
     filing_draft = _with_rcem_ai_declaration(draft)
     if _needs_filing_curriculum_choice(user_id):
         context.user_data.pop("filing_in_progress", None)

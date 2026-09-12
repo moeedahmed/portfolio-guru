@@ -324,6 +324,7 @@ async def test_approval_sends_ai_declaration_in_fields_to_filer():
             "_type": "FORM",
             "form_type": "REFLECT_LOG",
             "fields": {
+                "date_of_encounter": "2026-03-17",
                 "reflection": "I realised I had anchored early and will reopen the differential.",
             },
             "uuid": None,

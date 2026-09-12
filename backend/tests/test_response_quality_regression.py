@@ -124,11 +124,22 @@ async def test_success_receipt_quality_and_regression():
     sim = BotSimulator()
     update = sim._make_callback_update("APPROVE|draft")
     context = sim._make_context()
-    context.user_data["case_text"] = "Sample case text"
+    context.user_data["case_text"] = (
+        "Sample case text. I learned to escalate ECG review earlier and will do so in future."
+    )
     context.user_data["draft_data"] = {
         "_type": "FORM",
         "form_type": "CBD",
-        "fields": {"clinical_setting": "ED"},
+        "fields": {
+            "date_of_encounter": "2026-03-17",
+            "clinical_setting": "ED",
+            "patient_presentation": "Chest pain",
+            "stage_of_training": "Higher/ST4-ST6",
+            "trainee_role": "Assessed and managed the patient",
+            "clinical_reasoning": "Managed as ACS.",
+            "reflection": "I learned to escalate ECG review earlier and will do so in future.",
+            "level_of_supervision": "Indirect",
+        },
         "uuid": "test-uuid",
     }
     
@@ -168,11 +179,22 @@ async def test_partial_receipt_quality():
     sim = BotSimulator()
     update = sim._make_callback_update("APPROVE|draft")
     context = sim._make_context()
-    context.user_data["case_text"] = "Sample case text"
+    context.user_data["case_text"] = (
+        "Sample case text. I learned to escalate ECG review earlier and will do so in future."
+    )
     context.user_data["draft_data"] = {
         "_type": "FORM",
         "form_type": "CBD",
-        "fields": {"clinical_setting": "ED"},
+        "fields": {
+            "date_of_encounter": "2026-03-17",
+            "clinical_setting": "ED",
+            "patient_presentation": "Chest pain",
+            "stage_of_training": "Higher/ST4-ST6",
+            "trainee_role": "Assessed and managed the patient",
+            "clinical_reasoning": "Managed as ACS.",
+            "reflection": "I learned to escalate ECG review earlier and will do so in future.",
+            "level_of_supervision": "Indirect",
+        },
         "uuid": "test-uuid",
     }
     
@@ -199,11 +221,22 @@ async def test_partial_receipt_quality():
     sim_no_url = BotSimulator()
     update_no_url = sim_no_url._make_callback_update("APPROVE|draft")
     context_no_url = sim_no_url._make_context()
-    context_no_url.user_data["case_text"] = "Sample case text"
+    context_no_url.user_data["case_text"] = (
+        "Sample case text. I learned to escalate ECG review earlier and will do so in future."
+    )
     context_no_url.user_data["draft_data"] = {
         "_type": "FORM",
         "form_type": "CBD",
-        "fields": {"clinical_setting": "ED"},
+        "fields": {
+            "date_of_encounter": "2026-03-17",
+            "clinical_setting": "ED",
+            "patient_presentation": "Chest pain",
+            "stage_of_training": "Higher/ST4-ST6",
+            "trainee_role": "Assessed and managed the patient",
+            "clinical_reasoning": "Managed as ACS.",
+            "reflection": "I learned to escalate ECG review earlier and will do so in future.",
+            "level_of_supervision": "Indirect",
+        },
         "uuid": "test-uuid",
     }
     
@@ -231,11 +264,22 @@ async def test_uncertain_receipt_quality():
     sim = BotSimulator()
     update = sim._make_callback_update("APPROVE|draft")
     context = sim._make_context()
-    context.user_data["case_text"] = "Sample case text"
+    context.user_data["case_text"] = (
+        "Sample case text. I learned to escalate ECG review earlier and will do so in future."
+    )
     context.user_data["draft_data"] = {
         "_type": "FORM",
         "form_type": "CBD",
-        "fields": {"clinical_setting": "ED"},
+        "fields": {
+            "date_of_encounter": "2026-03-17",
+            "clinical_setting": "ED",
+            "patient_presentation": "Chest pain",
+            "stage_of_training": "Higher/ST4-ST6",
+            "trainee_role": "Assessed and managed the patient",
+            "clinical_reasoning": "Managed as ACS.",
+            "reflection": "I learned to escalate ECG review earlier and will do so in future.",
+            "level_of_supervision": "Indirect",
+        },
         "uuid": "test-uuid",
     }
     

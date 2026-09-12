@@ -111,7 +111,12 @@ async def test_draft_preview_snapshot(snapshot, fixed_cbd_form_draft):
     sim = BotSimulator()
     update = sim._make_callback_update("FORM|CBD")
     context = sim._make_context()
-    context.user_data["case_text"] = "Clinical case text"
+    # Genuine reflective source text so the pre-draft completeness check finds
+    # nothing missing and this snapshot captures the clean, Save-ready preview.
+    context.user_data["case_text"] = (
+        "Central chest pain with diaphoresis. I would involve the cath lab "
+        "team earlier if the ECG remains dynamic."
+    )
 
     with patch(
         "bot._analyse_selected_form",

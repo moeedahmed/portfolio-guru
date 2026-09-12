@@ -50,8 +50,11 @@ def thin_draft():
             "date_of_encounter": "2026-03-17",
             "clinical_setting": "ED",
             "patient_presentation": "Chest pain",
+            "stage_of_training": "Higher/ST4-ST6",
+            "trainee_role": "Assessed and managed the patient",
             "clinical_reasoning": "Managed as ACS.",
             "reflection": "Need faster ECG review.",
+            "level_of_supervision": "Indirect",
             "curriculum_links": ["SLO1"],
             "key_capabilities": ["SLO1 KC1: Assess and stabilise the patient"],
         },
@@ -352,7 +355,9 @@ class TestFlowWalker:
         recommend.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_form_choice_shows_partial_draft_first(self, thin_draft):
+    async def test_form_choice_shows_complete_draft_immediately(self, thin_draft):
+        """A draft with genuine reflection and every schema-required field goes
+        straight to preview: no pre-draft completeness question, Save present."""
         from bot import AWAIT_APPROVAL, handle_form_choice
 
         sim = BotSimulator()
@@ -374,13 +379,35 @@ class TestFlowWalker:
         text = sim.get_last_text()
         assert 'Here is your Case-Based Discussion draft:' in text
         assert 'Review needed before saving' not in text
-        # Required-but-missing fields surface inline with the missing marker
-        # next to each field label; the universal gate at file-time catches
-        # them too. The verbose "🧩 Missing details" block has been removed.
-        assert 'Stage of Training' in text
         assert 'Missing details' not in text
         assert 'Missing required fields' not in text
         assert 'Blank fields are left blank rather than invented' not in text
+
+    @pytest.mark.asyncio
+    async def test_form_choice_asks_for_missing_required_field_before_draft(self, thin_draft):
+        """A genuinely missing schema-required field (not reflection) is asked
+        about before any draft is shown — not surfaced as an inline marker on
+        an already-visible draft with Save available."""
+        from bot import AWAIT_CASE_INPUT, handle_form_choice
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+
+        incomplete_draft = thin_draft.model_copy(
+            update={'fields': {**thin_draft.fields, 'stage_of_training': ''}}
+        )
+
+        update = sim._make_callback_update('FORM|CBD')
+        with patch('bot._analyse_selected_form', new_callable=AsyncMock, return_value=incomplete_draft):
+            result = await handle_form_choice(update, context)
+
+        assert result == AWAIT_CASE_INPUT
+        text = sim.get_last_text()
+        assert 'Stage of Training' in text
+        assert 'Here is your Case-Based Discussion draft' not in text
+        button_data = {data for _, data in sim.get_last_buttons()}
+        assert 'APPROVE|draft' not in button_data
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('second_choice', ['FORM|best', 'FORM|ACAT'])
@@ -533,6 +560,9 @@ class TestFlowWalker:
             fields={
                 'date_of_encounter': '2026-03-17',
                 'clinical_setting': 'ED',
+                'leadership_context': 'Busy majors shift with two juniors needing prioritisation help.',
+                'stage_of_training': 'Higher/ST4-ST6',
+                'clinical_reasoning': 'Directed the team through a surge in majors patients.',
                 'reflection': 'Led a busy shift; juniors needed prioritisation help.',
                 'curriculum_links': ['SLO11'],
                 'key_capabilities': ['SLO11 KC1: Lead a team safely'],
@@ -1957,6 +1987,7 @@ class TestFlowWalker:
                 'stage_of_training': 'Higher/ST4-ST6',
                 'clinical_setting': 'Emergency Department',
                 'procedure_name': 'DC cardioversion',
+                'procedural_skill': 'DC cardioversion',
                 'indication': (
                     'Unstable atrial fibrillation with rapid ventricular '
                     'response and hypotension despite initial fluid '
@@ -3828,8 +3859,11 @@ class TestRecentPortfolioFixes:
                 'date_of_encounter': '2026-03-17',
                 'clinical_setting': 'ED',
                 'patient_presentation': 'Chest pain',
+                'stage_of_training': 'Higher/ST4-ST6',
+                'trainee_role': 'Assessed and managed the patient',
                 'clinical_reasoning': 'Managed as ACS, escalated appropriately.',
                 'reflection': 'Need faster ECG review.',
+                'level_of_supervision': 'Indirect',
                 'curriculum_links': ['SLO1'],
                 'key_capabilities': ['SLO1 KC1: Assess and stabilise the patient'],
             },
@@ -3878,8 +3912,11 @@ class TestRecentPortfolioFixes:
                 'date_of_encounter': '2026-03-17',
                 'clinical_setting': 'ED',
                 'patient_presentation': 'Chest pain',
+                'stage_of_training': 'Higher/ST4-ST6',
+                'trainee_role': 'Assessed and managed the patient',
                 'clinical_reasoning': 'Managed as ACS, escalated appropriately.',
                 'reflection': 'Need faster ECG review.',
+                'level_of_supervision': 'Indirect',
                 'curriculum_links': ['SLO1'],
                 'key_capabilities': ['SLO1 KC1: Assess and stabilise the patient'],
             },
@@ -3935,8 +3972,11 @@ class TestRecentPortfolioFixes:
                 'date_of_encounter': '',
                 'clinical_setting': 'ED',
                 'patient_presentation': 'Chest pain',
+                'stage_of_training': 'Higher/ST4-ST6',
+                'trainee_role': 'Assessed and managed the patient',
                 'clinical_reasoning': 'Managed as ACS.',
                 'reflection': 'Need faster ECG review.',
+                'level_of_supervision': 'Indirect',
                 'curriculum_links': ['SLO1'],
                 'key_capabilities': ['SLO1 KC1: Assess and stabilise the patient'],
             },

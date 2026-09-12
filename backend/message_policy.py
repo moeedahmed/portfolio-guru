@@ -131,6 +131,15 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         ),
         safety_critical=True,
     ),
+    "pre_draft_completeness_request": MessageTemplate(
+        key="pre_draft_completeness_request",
+        message_class=MessageClass.TEMPLATED,
+        text=(
+            "📋 Before I show the draft, I still need: {items}.\n\n"
+            "Reply with that and I'll finish the draft."
+        ),
+        safety_critical=True,
+    ),
     "source_grounding_detail_request": MessageTemplate(
         key="source_grounding_detail_request",
         message_class=MessageClass.TEMPLATED,

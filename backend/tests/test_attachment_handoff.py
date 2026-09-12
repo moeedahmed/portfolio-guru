@@ -31,6 +31,26 @@ def _all_visible_text(sim: BotSimulator) -> str:
     return "\n".join(text for _, text, _ in sim.messages_sent if isinstance(text, str))
 
 
+def _fields_with_schema_essentials(form_type: str, overrides: dict) -> dict:
+    """Fill in a form's other schema-required fields around test-specific ones.
+
+    These tests only care about attachment-path plumbing, but the save
+    handler now checks the same completeness the preview already enforced —
+    a draft this thin would never legitimately have reached Save in the
+    product, so the fixture needs to look like one that would.
+    """
+    from form_schemas import FORM_SCHEMAS
+
+    schema = FORM_SCHEMAS.get(form_type, {})
+    fields = {
+        field["key"]: f"Test {field['label']}"
+        for field in schema.get("fields", [])
+        if field.get("required")
+    }
+    fields.update(overrides)
+    return fields
+
+
 @pytest.mark.asyncio
 async def test_document_case_stores_attachment_path():
     """Document uploads first ask how the file should be used."""
@@ -998,17 +1018,17 @@ async def test_filing_call_receives_attachment_path():
     context.user_data["chosen_form"] = "CBD"
     
     # Mock draft loading
-    draft = FormDraft(form_type="CBD", fields={
+    draft = FormDraft(form_type="CBD", fields=_fields_with_schema_essentials("CBD", {
         "date_of_encounter": "2026-05-27",
         "reflection": "test reflection"
-    })
-    
+    }))
+
     with patch('bot.get_credentials', return_value=("testuser", "testpass")), \
          patch('bot._load_draft', return_value=draft), \
          patch('bot.route_filing', new=AsyncMock(return_value={"status": "success", "filled": ["reflection", "attachment"], "skipped": []})) as route_mock, \
          patch('bot.record_case_filed', new=AsyncMock()), \
          patch('bot.check_can_file', new=AsyncMock(return_value=(True, 1, 10, 'free'))):
-         
+
         await handle_approval_approve(update, context)
 
     # Verify route_filing was called with a path renamed to the original
@@ -1050,10 +1070,10 @@ async def test_filing_call_accepts_video_attachment_path():
     context.user_data["attachment_kind"] = "video"
     context.user_data["chosen_form"] = "CBD"
 
-    draft = FormDraft(form_type="CBD", fields={
+    draft = FormDraft(form_type="CBD", fields=_fields_with_schema_essentials("CBD", {
         "date_of_encounter": "2026-05-27",
         "reflection": "I learned to document my own interpretation before attaching clinical videos.",
-    })
+    }))
 
     with patch('bot.get_credentials', return_value=("testuser", "testpass")), \
          patch('bot._load_draft', return_value=draft), \
@@ -1113,7 +1133,10 @@ async def test_video_reaches_filer_without_a_second_consent_prompt():
     )
     draft = FormDraft(
         form_type="US_CASE",
-        fields={"reflection": "I will document my ultrasound findings contemporaneously."},
+        fields=_fields_with_schema_essentials(
+            "US_CASE",
+            {"reflection": "I will document my ultrasound findings contemporaneously."},
+        ),
     )
 
     with patch("bot.get_credentials", return_value=("testuser", "testpass")), \
@@ -1240,11 +1263,11 @@ async def test_filing_handles_missing_attachment_gracefully():
     context.user_data["chosen_form"] = "CBD"
     
     # Mock draft loading
-    draft = FormDraft(form_type="CBD", fields={
+    draft = FormDraft(form_type="CBD", fields=_fields_with_schema_essentials("CBD", {
         "date_of_encounter": "2026-05-27",
         "reflection": "test reflection"
-    })
-    
+    }))
+
     with patch('bot.get_credentials', return_value=("testuser", "testpass")), \
          patch('bot._load_draft', return_value=draft), \
          patch('bot.route_filing', new=AsyncMock(return_value={"status": "success", "filled": ["reflection"], "skipped": []})) as route_mock, \
@@ -1297,7 +1320,10 @@ async def test_every_attached_file_reaches_the_filer():
         "attachment_upload_confirmed": True,
     })
 
-    draft = FormDraft(form_type="US_CASE", fields={"reflection": "I will document sooner."})
+    draft = FormDraft(
+        form_type="US_CASE",
+        fields=_fields_with_schema_essentials("US_CASE", {"reflection": "I will document sooner."}),
+    )
 
     with patch("bot.get_credentials", return_value=("u", "p")), \
          patch("bot._load_draft", return_value=draft), \
@@ -1343,7 +1369,10 @@ async def test_a_single_attachment_still_files_as_a_plain_string():
 
     draft = FormDraft(
         form_type="CBD",
-        fields={"reflection": "I learned to document the escalation decision more clearly."},
+        fields=_fields_with_schema_essentials(
+            "CBD",
+            {"reflection": "I learned to document the escalation decision more clearly."},
+        ),
     )
 
     with patch("bot.get_credentials", return_value=("u", "p")), \

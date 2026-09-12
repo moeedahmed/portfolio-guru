@@ -3,8 +3,12 @@
   dict({
     'buttons': list([
       tuple(
-        '✍️ Add reflection',
-        'ACTION|add_reflection_detail',
+        '💾 Save to Kaizen',
+        'APPROVE|draft',
+      ),
+      tuple(
+        '✏️ Improve reflection',
+        'IMPROVE|reflection',
       ),
       tuple(
         '❌ Cancel',
@@ -39,10 +43,7 @@
       • An AI-use declaration has been added to the reflection field.
       • You remain responsible for its accuracy, authenticity and insight.
       
-      ⚠️ *Your reflection is needed before saving*
-      • Add what you learned or what you would do differently before saving.
-      
-      💬 Reply to refine this draft with your own learning point, interpretation or intended practice change to unlock saving.
+      💬 Reply to refine this draft, or use the buttons below to save.
     ''',
   })
 # ---
