@@ -7,12 +7,13 @@ This is the single switch for the "UK/EU-hosted only" data-routing decision.
 - `PG_USE_VERTEX=1` + `GCP_PROJECT_ID` set: a Vertex-mode client pinned to an EU
   region, so ALL clinical extraction (text, voice, vision, documents) is
   processed in the EU under Google Cloud's Data Processing Addendum, with no
-  other code change. Auth is Application Default Credentials — `run_local.sh`
-  materialises `GCP_VERTEX_SA_JSON` to a temp file and sets
-  `GOOGLE_APPLICATION_CREDENTIALS` at boot.
-
-The same `client.models.generate_content(...)` call works for both backends, so
-callers only swap their client construction for `make_client()`.
+  other code change. Auth is an explicit service-account credential fetched
+  from BWS into process memory by `vertex_credentials.get_credentials()` —
+  never written to disk, never placed in the process environment — and passed
+  straight to `google.genai.Client(credentials=...)`. There is deliberately no
+  Application Default Credentials fallback: if the in-memory fetch fails,
+  `make_client()` raises rather than silently routing clinical data off-region
+  or to an ambient identity.
 """
 from __future__ import annotations
 
@@ -51,12 +52,21 @@ def vertex_model(default: str = "gemini-3.5-flash") -> str:
 
 
 def make_client():
-    """Construct a google-genai client honouring the EU-routing flag."""
+    """Construct a google-genai client honouring the EU-routing flag.
+
+    In Vertex mode this fetches the service-account credential from BWS into
+    process memory (see vertex_credentials.py) and passes it explicitly —
+    there is no ADC fallback, so a fetch failure raises rather than routing
+    clinical data off-region.
+    """
     from google import genai
 
     if use_vertex():
+        from vertex_credentials import get_credentials
+
         project = os.environ.get("GCP_PROJECT_ID")
         location = vertex_location()
+        credentials = get_credentials(project)
         logger.info("Gemini client: Vertex AI (EU) project=%s location=%s", project, location)
-        return genai.Client(vertexai=True, project=project, location=location)
+        return genai.Client(vertexai=True, project=project, location=location, credentials=credentials)
     return genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
