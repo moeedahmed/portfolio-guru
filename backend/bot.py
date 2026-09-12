@@ -2878,22 +2878,27 @@ def _profile_blocked_fallback_recommendations(original_recs, allowed, excluded):
         ))
     return fallbacks
 
-# Category groupings for Forms navigation
+# Category groupings for Forms navigation. Base form codes only — curriculum
+# variants (e.g. _2021) are resolved at display/filing time via
+# _form_type_for_curriculum, so listing both here would render duplicate
+# buttons for the same form.
 FORM_CATEGORIES = {
-    "🩺 Clinical": ["CBD", "DOPS", "DOPS_ACCS", "MINI_CEX", "ACAT", "LAT", "LAT_2021", "ACAF", "STAT", "MSF", "QIAT", "QIAT_2021", "JCF", "JCF_2021", "ESLE_ASSESS", "AUDIT", "AUDIT_2021"],
-    "📝 Reflective": ["REFLECT_LOG", "REFLECT_LOG_2021", "COMPLAINT", "SERIOUS_INC", "CRIT_INCIDENT", "PDP", "APPRAISAL"],
-    "👨‍🏫 Teaching": ["TEACH", "TEACH_OBS", "TEACH_CONFID", "SDL", "EDU_ACT", "EDU_MEETING", "EDU_MEETING_SUPP", "FORMAL_COURSE"],
-    "🔬 Procedural": ["PROC_LOG", "PROCEDURAL_LOG_ACCS", "US_CASE"],
-    "🔍 Quality": ["RESEARCH", "CLIN_GOV", "COST_IMPROVE", "EQUIP_SERVICE", "BUSINESS_CASE"],
-    "🏛️ Management": ["MGMT_ROTA", "MGMT_RISK", "MGMT_RECRUIT", "MGMT_PROJECT", "MGMT_RISK_PROC", "MGMT_TRAINING_EVT", "MGMT_GUIDELINE", "MGMT_INFO", "MGMT_INDUCTION", "MGMT_EXPERIENCE", "MGMT_REPORT", "MGMT_COMPLAINT"],
+    "🩺 Clinical": ["CBD", "DOPS", "DOPS_ACCS", "MINI_CEX", "ACAT", "LAT", "ACAF", "STAT", "MSF", "ESLE_ASSESS"],
+    "📝 Reflection": ["REFLECT_LOG", "COMPLAINT", "SERIOUS_INC", "CRIT_INCIDENT", "TEACH_CONFID", "PDP", "APPRAISAL", "EDU_MEETING", "EDU_MEETING_SUPP"],
+    "👨‍🏫 Learning": ["TEACH", "TEACH_OBS", "SDL", "EDU_ACT", "FORMAL_COURSE", "JCF"],
+    "🔬 Procedures": ["DOPS", "DOPS_ACCS", "PROC_LOG", "PROCEDURAL_LOG_ACCS", "US_CASE"],
+    "🔍 Quality": ["QIAT", "AUDIT", "RESEARCH", "CLIN_GOV", "MGMT_GUIDELINE", "MGMT_PROJECT", "MGMT_RISK", "MGMT_RISK_PROC"],
+    "🏛️ Management": ["LAT", "MGMT_ROTA", "MGMT_RISK", "MGMT_RISK_PROC", "MGMT_RECRUIT", "MGMT_PROJECT", "MGMT_TRAINING_EVT", "MGMT_GUIDELINE", "MGMT_INFO", "MGMT_INDUCTION", "MGMT_EXPERIENCE", "MGMT_REPORT", "MGMT_COMPLAINT", "BUSINESS_CASE", "COST_IMPROVE", "EQUIP_SERVICE"],
 }
 
-# Slug mapping for callback data (Telegram limits callback_data to 64 bytes)
+# Slug mapping for callback data (Telegram limits callback_data to 64 bytes).
+# Slugs are frozen independently of the display label above so existing
+# callback buttons already sent to users keep routing correctly.
 _CAT_SLUGS = {
     "🩺 Clinical": "CLINICAL",
-    "📝 Reflective": "REFLECTIVE",
-    "👨‍🏫 Teaching": "TEACHING",
-    "🔬 Procedural": "PROCEDURAL",
+    "📝 Reflection": "REFLECTIVE",
+    "👨‍🏫 Learning": "TEACHING",
+    "🔬 Procedures": "PROCEDURAL",
     "🔍 Quality": "QUALITY",
     "🏛️ Management": "MANAGEMENT",
 }
@@ -12776,7 +12781,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         curriculum = _effective_curriculum(user_id)
         cur_label = "2025 curriculum" if curriculum == "2025" else "2021 curriculum"
         await query.edit_message_text(
-            f"Pick a category ({cur_label}):",
+            f"Browse supported forms ({cur_label}):",
             reply_markup=_build_category_picker_keyboard(user_id),
         )
         return AWAIT_FORM_CHOICE
@@ -12811,7 +12816,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         effective = _effective_curriculum(user_id)
         cur_label = "2025 curriculum" if effective == "2025" else "2021 curriculum"
         await query.edit_message_text(
-            f"Pick a category ({cur_label}):",
+            f"Browse supported forms ({cur_label}):",
             reply_markup=_build_category_picker_keyboard(user_id),
         )
         return AWAIT_FORM_CHOICE

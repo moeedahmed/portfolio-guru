@@ -1357,6 +1357,85 @@ class TestFlowWalker:
         assert all(label != '📖 SDL' for label, _ in buttons)
 
     @pytest.mark.asyncio
+    async def test_legacy_reflective_and_procedural_category_slugs_still_route(self):
+        """Old buttons already sent to a trainee's chat before the label
+        rename (Reflective->Reflection, Procedural->Procedures) must keep
+        working — the callback_data slug is frozen independently of the
+        on-screen label."""
+        from bot import AWAIT_FORM_CHOICE, handle_form_choice
+
+        sim = BotSimulator()
+        context = sim._make_context()
+
+        with patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_curriculum', return_value='2025'):
+            result = await handle_form_choice(sim._make_callback_update('FORM|cat_REFLECTIVE'), context)
+            assert result == AWAIT_FORM_CHOICE
+            assert 'Reflection' in sim.get_last_text()
+            reflective_buttons = [d for _, d in sim.get_last_buttons()]
+            assert 'FORM|REFLECT_LOG' in reflective_buttons
+
+            result = await handle_form_choice(sim._make_callback_update('FORM|cat_PROCEDURAL'), context)
+            assert result == AWAIT_FORM_CHOICE
+            assert 'Procedures' in sim.get_last_text()
+            procedural_buttons = [d for _, d in sim.get_last_buttons()]
+            assert 'FORM|DOPS' in procedural_buttons
+
+    @pytest.mark.asyncio
+    async def test_invalid_category_slug_is_a_safe_no_op(self):
+        from bot import AWAIT_FORM_CHOICE, handle_form_choice
+
+        sim = BotSimulator()
+        context = sim._make_context()
+
+        result = await handle_form_choice(sim._make_callback_update('FORM|cat_BOGUS'), context)
+
+        assert result == AWAIT_FORM_CHOICE
+        assert sim.messages_sent == []
+
+    @pytest.mark.asyncio
+    async def test_repeated_category_tap_is_idempotent(self):
+        """Tapping the same category button twice in a row must not grow
+        state or change the rendered screen — pure re-render, no drafting."""
+        from bot import AWAIT_FORM_CHOICE, handle_form_choice
+
+        sim = BotSimulator()
+        context = sim._make_context()
+
+        with patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_curriculum', return_value='2025'):
+            first = await handle_form_choice(sim._make_callback_update('FORM|cat_CLINICAL'), context)
+            first_text = sim.get_last_text()
+            first_buttons = sim.get_last_buttons()
+
+            second = await handle_form_choice(sim._make_callback_update('FORM|cat_CLINICAL'), context)
+
+        assert first == AWAIT_FORM_CHOICE == second
+        assert sim.get_last_text() == first_text
+        assert sim.get_last_buttons() == first_buttons
+        assert len(sim.messages_sent) == 2  # one edit per tap, nothing extra queued
+
+    @pytest.mark.asyncio
+    async def test_category_navigation_edits_same_message_in_place(self):
+        """Recommendations <-> categories <-> forms must all edit the one
+        outstanding message, never send a fresh message (no chat clutter)."""
+        from bot import AWAIT_FORM_CHOICE, handle_form_choice
+
+        sim = BotSimulator()
+        context = sim._make_context()
+
+        with patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_curriculum', return_value='2025'):
+            await handle_form_choice(sim._make_callback_update('FORM|show_all'), context)
+            await handle_form_choice(sim._make_callback_update('FORM|cat_CLINICAL'), context)
+            await handle_form_choice(sim._make_callback_update('FORM|show_all'), context)
+
+        assert sim.messages_sent, "no messages captured"
+        assert all(kind == 'edit' for kind, _, _ in sim.messages_sent), (
+            f"category navigation sent a new message instead of editing: {sim.messages_sent}"
+        )
+
+    @pytest.mark.asyncio
     async def test_search_returns_to_form_choice(self):
         from bot import AWAIT_FORM_SEARCH, handle_form_choice
 
@@ -4096,7 +4175,7 @@ class TestRecentPortfolioFixes:
         assert result == AWAIT_FORM_CHOICE
         assert context.user_data['case_text'] == SAMPLE_CASES['valid']
         assert context.user_data['excluded_form_type'] == 'REFLECT_LOG'
-        assert 'Pick a category' in sim.get_last_text()
+        assert 'Browse supported forms' in sim.get_last_text()
 
     @pytest.mark.asyncio
     async def test_stale_form_selection_without_case_gives_restart_path(self):
