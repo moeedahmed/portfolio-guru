@@ -1346,6 +1346,51 @@ def _case_review_state_snapshot(context) -> dict:
     }
 
 
+_MISSING_ESSENTIALS_REPLAY_KEY = "_missing_essentials_replay"
+
+
+def _missing_essentials_replay_check(context, update) -> tuple[bool, int | None]:
+    """Scoped replay guard for the chosen_form+awaiting_detail essentials followup.
+
+    Telegram can redeliver the same update (webhook retry, or PTB firing a
+    matching handler twice for one update) while the essentials followup is
+    mid-flight. Without this, a replayed identical inbound would re-append
+    the same case text and re-run extraction/draft. The guard is set
+    synchronously before any await so a concurrent duplicate of the same
+    update is caught before it can start its own extraction pass. A genuine
+    failure (timeout/exception) resets the guard so the doctor's retry of
+    that same update still works; a genuinely new message always carries a
+    different update_id and is never affected.
+    """
+    guard = context.user_data.get(_MISSING_ESSENTIALS_REPLAY_KEY)
+    if guard and guard.get("update_id") == update.update_id:
+        if guard.get("status") == "failed":
+            context.user_data[_MISSING_ESSENTIALS_REPLAY_KEY] = {
+                "update_id": update.update_id,
+                "status": "in_flight",
+            }
+            return False, None
+        return True, guard.get("result", AWAIT_CASE_INPUT)
+    context.user_data[_MISSING_ESSENTIALS_REPLAY_KEY] = {
+        "update_id": update.update_id,
+        "status": "in_flight",
+    }
+    return False, None
+
+
+def _mark_missing_essentials_replay_done(context, update, result: int) -> None:
+    guard = context.user_data.get(_MISSING_ESSENTIALS_REPLAY_KEY)
+    if guard and guard.get("update_id") == update.update_id:
+        guard["status"] = "done"
+        guard["result"] = result
+
+
+def _mark_missing_essentials_replay_failed(context, update) -> None:
+    guard = context.user_data.get(_MISSING_ESSENTIALS_REPLAY_KEY)
+    if guard and guard.get("update_id") == update.update_id:
+        guard["status"] = "failed"
+
+
 def _clear_case_review_state(context, keep_case: bool = True) -> None:
     """Clear transient case-review flags while optionally preserving the stored case text."""
     for key in (
@@ -1368,6 +1413,7 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
         "pending_case_bundle",
         "pending_bundle_msg_id",
         "pending_bundle_chat_id",
+        _MISSING_ESSENTIALS_REPLAY_KEY,
     ):
         context.user_data.pop(key, None)
     if not keep_case:
@@ -5325,7 +5371,12 @@ def _draft_transparency_layer(
     if not _draft_has_reflection_fields(draft):
         return ""
 
-    lines = ["", "🤖 *RCEM AI use*"]
+    # Labelled "AI assistance", not "RCEM AI use" — this discloses tool
+    # behaviour (an AI-use declaration was added, the doctor stays
+    # accountable) without implying RCEM endorsement of the tool or citing
+    # a specific regulatory requirement. The divider keeps it visually
+    # distinct from the Curriculum block above, not just another section.
+    lines = ["", _DRAFT_DIVIDER, "🤖 *AI assistance*"]
     lines.append("• An AI-use declaration has been added to the reflection field.")
     lines.append("• You remain responsible for its accuracy, authenticity and insight.")
 
@@ -11734,10 +11785,15 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     context.user_data.pop("post_reset", None)
 
     # Clear stale status state from previous sessions, but keep active prompts
-    # editable while the user is adding bundle/source-detail context.
+    # editable while the user is adding bundle/source-detail context, or
+    # answering the missing-essentials gap prompt (`awaiting_detail`) — losing
+    # the tracked id here means the followup ack/draft is sent as a brand new
+    # message instead of retiring the essentials prompt, leaving its Cancel
+    # button live in the chat alongside the new draft.
     if not (
         context.user_data.get("pending_case_bundle")
         or context.user_data.get("awaiting_source_detail")
+        or (context.user_data.get("awaiting_detail") and context.user_data.get("chosen_form"))
     ):
         context.user_data.pop("status_msg_id", None)
         context.user_data.pop("status_msg_chat", None)
@@ -12490,12 +12546,19 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text("💬 Send a text message, voice note, photo, video, or document.")
         return ConversationHandler.END
 
+    if context.user_data.get("awaiting_detail") and context.user_data.get("chosen_form"):
+        is_replay, replay_result = _missing_essentials_replay_check(context, update)
+        if is_replay:
+            return replay_result
+
     if (
         context.user_data.get("awaiting_detail")
         and context.user_data.get("chosen_form")
         and _looks_like_explicit_new_case_request(case_text)
     ):
-        return await _show_open_case_new_case_gate(update.message, context, case_text)
+        gate_result = await _show_open_case_new_case_gate(update.message, context, case_text)
+        _mark_missing_essentials_replay_done(context, update, gate_result)
+        return gate_result
 
     # If the user is refining a chosen template, keep the original wording and append the new detail.
     if context.user_data.get("awaiting_detail") and context.user_data.get("chosen_form"):
@@ -12581,27 +12644,41 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 _video_context_detail_request(),
                 reply_markup=_KB_CANCEL,
             )
+            _mark_missing_essentials_replay_done(context, update, AWAIT_CASE_INPUT)
             return AWAIT_CASE_INPUT
         await update.effective_chat.send_action(constants.ChatAction.TYPING)
-        ack = await update.message.reply_text(f"🧩 Updating {_form_display_name(chosen_form)} draft…")
-        context.user_data["last_bot_msg_id"] = ack.message_id
-        context.user_data["last_bot_chat_id"] = ack.chat_id
+        # Edit the still-tracked essentials-gap prompt in place when one is
+        # active, instead of sending a fresh message and abandoning it with
+        # its Cancel button still live.
+        ack = await _send_latest_message(
+            update.message, context, f"🧩 Updating {_form_display_name(chosen_form)} draft…"
+        )
         try:
             draft = await _analyse_selected_form(context, user_id, case_text, chosen_form)
         except asyncio.TimeoutError:
             await ack.edit_text("⏳ Template review timed out. Please try again.")
+            # A real failure — clear the replay guard so the doctor's retry
+            # of this same update is processed instead of short-circuited.
+            _mark_missing_essentials_replay_failed(context, update)
             return AWAIT_TEMPLATE_REVIEW
         except Exception as exc:
             logger.error("Template review refresh failed for %s: %s", chosen_form, exc, exc_info=True)
             await ack.edit_text("⚠️ Could not refresh that template.", reply_markup=_KB_CANCEL)
+            _mark_missing_essentials_replay_failed(context, update)
             return AWAIT_TEMPLATE_REVIEW
 
         if not _draft_has_useful_content(draft, chosen_form):
-            return await _ask_for_more_detail_before_draft(ack, context)
+            result = await _ask_for_more_detail_before_draft(ack, context)
+            _mark_missing_essentials_replay_done(context, update, result)
+            return result
         gaps = _pre_draft_completeness_gaps(context, draft, chosen_form)
         if gaps:
-            return await _ask_pre_draft_completeness(ack, context, gaps)
-        return await _show_draft_review(ack, context, draft, chosen_form)
+            result = await _ask_pre_draft_completeness(ack, context, gaps)
+            _mark_missing_essentials_replay_done(context, update, result)
+            return result
+        result = await _show_draft_review(ack, context, draft, chosen_form)
+        _mark_missing_essentials_replay_done(context, update, result)
+        return result
 
     active_msg_id = context.user_data.get("last_bot_msg_id")
     active_chat_id = context.user_data.get("last_bot_chat_id")

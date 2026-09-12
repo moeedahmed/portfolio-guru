@@ -501,12 +501,17 @@ class TestFlowWalker:
 
         first_field_pos = text.index('📅')
         assert '📋 *Draft preview*' not in text
-        assert text.count(_DRAFT_DIVIDER) == 0
+        # The one divider present separates Curriculum from AI assistance
+        # (below); it must not appear a second time as a leftover instruction
+        # block, and the retired 'Missing details' block must not reappear.
+        assert text.count(_DRAFT_DIVIDER) == 1
         assert '🧩 *Missing details*' not in text
 
         curriculum_pos = text.index('📚 *Curriculum:*')
+        divider_pos = text.index(_DRAFT_DIVIDER)
+        ai_pos = text.index('🤖 *AI assistance*')
         reply_hint_pos = text.index('💬 Reply to refine this draft')
-        assert first_field_pos < curriculum_pos < reply_hint_pos
+        assert first_field_pos < curriculum_pos < divider_pos < ai_pos < reply_hint_pos
 
     @pytest.mark.asyncio
     async def test_draft_preview_keeps_why_this_form_compact(self, thin_draft):
@@ -539,10 +544,13 @@ class TestFlowWalker:
 
         text = sim.get_last_text()
 
-        assert _DRAFT_DIVIDER not in text
+        # The only divider present separates Curriculum from AI assistance —
+        # not a second, heavier divider sandwiching the draft body.
+        assert text.count(_DRAFT_DIVIDER) == 1
         first_field_pos = text.index('📅')
         curriculum_pos = text.index('📚 *Curriculum:*')
-        assert first_field_pos < curriculum_pos
+        divider_pos = text.index(_DRAFT_DIVIDER)
+        assert first_field_pos < curriculum_pos < divider_pos
         assert '*Why this form:*' not in text
 
     @pytest.mark.asyncio
@@ -595,7 +603,9 @@ class TestFlowWalker:
 
         text = sim.get_last_text()
 
-        assert _DRAFT_DIVIDER not in text
+        # The only divider present separates Curriculum from AI assistance —
+        # not a leftover heavy divider around the sanitised rationale.
+        assert text.count(_DRAFT_DIVIDER) == 1
         assert "I've treated this as a Leadership Assessment Tool:" not in text
         # None of the internal/model-flavoured phrasing should reach the user.
         assert 'the trainee' not in text.lower()
@@ -964,10 +974,26 @@ class TestFlowWalker:
         )
 
         assert AI_USE_DECLARATION in preview
-        assert 'RCEM AI use' in preview
+        assert 'AI assistance' in preview
+        assert 'RCEM' not in preview
         assert 'You remain responsible for its accuracy, authenticity and insight.' in preview
         assert 'Review needed before saving' not in preview
         assert 'Save as draft only runs after you review' not in preview
+
+    def test_draft_preview_dividers_curriculum_from_ai_assistance(self, thin_draft):
+        """A rename to 'AI assistance' alone reads as just another section
+        header at the same visual weight as Curriculum. A divider must sit
+        between the draft body (ending in the Curriculum block) and the AI
+        assistance note so the two are visibly distinct blocks."""
+        from bot import _DRAFT_DIVIDER, _format_draft_preview
+
+        preview = _format_draft_preview(thin_draft, input_source='voice')
+
+        assert _DRAFT_DIVIDER in preview
+        curriculum_pos = preview.index('📚 *Curriculum:*')
+        divider_pos = preview.index(_DRAFT_DIVIDER)
+        ai_pos = preview.index('🤖 *AI assistance*')
+        assert curriculum_pos < divider_pos < ai_pos
 
     def test_draft_preview_never_quotes_raw_source_text(self, thin_draft):
         """The preview must describe the source type but never quote raw case text."""

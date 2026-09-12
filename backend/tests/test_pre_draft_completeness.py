@@ -472,6 +472,108 @@ async def test_new_case_resets_pending_detail_state_no_cross_case_contamination(
 
 
 @pytest.mark.asyncio
+async def test_completeness_prompt_advertises_supported_reply_formats():
+    """The essentials-gap prompt must name every reply format the AWAIT_CASE_INPUT
+    handlers actually accept (text, voice/audio, photo, document, video), and for
+    video it must say 'with a description' rather than implying transcription —
+    the conversation handler map routes VOICE/AUDIO/PHOTO/VIDEO/Document.ALL to
+    handle_case_input here, but a video attachment is only ever cached, never
+    interpreted (see `_video_context_detail_request`)."""
+    from bot import AWAIT_CASE_INPUT, handle_form_choice
+
+    sim = BotSimulator()
+    update = sim._make_callback_update("FORM|CBD")
+    context = sim._make_context()
+    context.user_data["case_text"] = (
+        "45M with chest pain, troponin positive, managed as ACS. "
+        "I learned to escalate ECG review earlier and will do so in future."
+    )
+
+    thin_draft = _cbd_draft(reflection="")
+    with patch("bot._analyse_selected_form", new=AsyncMock(return_value=thin_draft)):
+        result = await handle_form_choice(update, context)
+
+    assert result == AWAIT_CASE_INPUT
+    text = sim.get_last_text().lower()
+    assert "text" in text
+    assert "voice" in text
+    assert "audio" in text
+    assert "photo" in text
+    assert "document" in text
+    assert "video" in text
+    assert "description" in text
+    assert "interpret" not in text and "transcri" not in text
+
+
+@pytest.mark.asyncio
+async def test_repeated_resume_with_unchanged_gap_edits_the_same_prompt():
+    """A duplicate resume (retry/replay) with an unresolved gap must edit the
+    already-tracked prompt message in place rather than sending a second one,
+    so no accumulating stale prompt with a live Cancel button is left behind."""
+    from bot import _resume_paused_flow
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["chosen_form"] = "CBD"
+    context.user_data["pending_draft_data"] = {
+        "_type": "FORM",
+        "form_type": "CBD",
+        "fields": {**COMPLETE_CBD_FIELDS, "reflection": ""},
+        "uuid": "uuid-cbd",
+    }
+
+    update1 = sim._make_text_update("anything")
+    await _resume_paused_flow(update1, context, "Resuming.")
+    first_actions = [action for action, _, _ in sim.messages_sent]
+    assert "reply" in first_actions
+    tracked_id = context.user_data.get("last_bot_msg_id")
+    assert tracked_id
+
+    sim.clear_messages()
+    update2 = sim._make_text_update("anything")
+    await _resume_paused_flow(update2, context, "Resuming.")
+
+    # The replay must edit the tracked message id, never send a fresh one.
+    assert context.user_data.get("last_bot_msg_id") == tracked_id
+    actions = [action for action, _, _ in sim.messages_sent]
+    assert "bot_edit" in actions
+    assert "reply" not in actions and "send" not in actions
+
+
+@pytest.mark.asyncio
+async def test_resolved_gap_retires_prompt_by_editing_into_draft_preview():
+    """Once the gap is answered and the draft is complete, the same tracked
+    message must turn into the draft preview rather than a new message being
+    sent alongside the old prompt (which would leave a stale Cancel button)."""
+    from bot import AWAIT_APPROVAL, handle_case_input
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["case_text"] = REFLECTIVE_CASE_TEXT
+    context.user_data["chosen_form"] = "CBD"
+    context.user_data["awaiting_detail"] = True
+
+    # Simulate the essentials prompt already being the tracked bot message.
+    context.user_data["last_bot_msg_id"] = 42
+    context.user_data["last_bot_chat_id"] = sim.user_id
+
+    followup_update = sim._make_text_update("Setting was ED. I learned to escalate ECG review earlier next time.")
+    complete_draft = _cbd_draft()
+    analyse = AsyncMock(return_value=complete_draft)
+    patches = _common_patches()
+    with patches[0], patches[1], patches[2], patch("bot._analyse_selected_form", new=analyse):
+        result = await handle_case_input(followup_update, context)
+
+    assert result == AWAIT_APPROVAL
+    actions = [action for action, _, _ in sim.messages_sent]
+    assert "bot_edit" in actions
+    assert "reply" not in actions and "send" not in actions
+    buttons = {data for _, data in sim.get_last_buttons()}
+    assert "APPROVE|draft" in buttons
+    assert "ACTION|cancel" not in buttons
+
+
+@pytest.mark.asyncio
 async def test_exact_deidentified_screenshot_learning_sentence_accepted_in_preview():
     from bot import AWAIT_APPROVAL, handle_form_choice
 
@@ -498,3 +600,54 @@ async def test_exact_deidentified_screenshot_learning_sentence_accepted_in_previ
     buttons = {data for _, data in sim.get_last_buttons()}
     assert "APPROVE|draft" in buttons
     assert "ACTION|add_reflection_detail" not in buttons
+
+
+@pytest.mark.asyncio
+async def test_edit_failure_on_remaining_gap_preserves_merged_answer_and_raises():
+    """If Telegram genuinely fails to edit the tracked essentials prompt with
+    the still-outstanding gap (not the harmless 'message not modified' case),
+    the failure must not be swallowed as a false success. The user's partial
+    answer is merged into ``case_text`` before the edit is even attempted, so
+    it — and the still-active gate — must survive the failed edit rather than
+    being lost or silently reported as done."""
+    from telegram.error import BadRequest
+
+    from bot import handle_case_input
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    original_case = "45M with chest pain, troponin positive, managed as ACS."
+    context.user_data["case_text"] = original_case
+    context.user_data["chosen_form"] = "CBD"
+    context.user_data["awaiting_detail"] = True
+    context.user_data["last_bot_msg_id"] = 42
+    context.user_data["last_bot_chat_id"] = sim.user_id
+
+    followup_update = sim._make_text_update(
+        "I learned to escalate ECG review earlier next time."
+    )
+    setting_still_missing = _cbd_draft(clinical_setting="")
+    analyse = AsyncMock(return_value=setting_still_missing)
+
+    original_edit = context.bot.edit_message_text
+    call_count = {"n": 0}
+
+    async def flaky_edit(*args, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 2:
+            raise BadRequest("Message to edit not found")
+        return await original_edit(*args, **kwargs)
+
+    context.bot.edit_message_text = AsyncMock(side_effect=flaky_edit)
+
+    patches = _common_patches()
+    with patches[0], patches[1], patches[2], patch("bot._analyse_selected_form", new=analyse):
+        with pytest.raises(BadRequest):
+            await handle_case_input(followup_update, context)
+
+    assert call_count["n"] == 2
+    # The merged answer and the still-open gate survive the failed edit —
+    # nothing is lost, and the state is not falsely marked resolved.
+    assert "escalate ECG review earlier" in context.user_data["case_text"]
+    assert context.user_data["awaiting_detail"] is True
+    assert context.user_data["chosen_form"] == "CBD"

@@ -3312,6 +3312,15 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
         "curriculum_links": _normalise_list_field(data.get("curriculum_links")),
         "key_capabilities": _normalise_list_field(data.get("key_capabilities")),
     }
+    # The model returns curriculum_links and key_capabilities as two separate
+    # JSON fields, which can drift apart (e.g. curriculum_links naming only
+    # one SLO while key_capabilities lists KCs across several). The preview
+    # hierarchy only renders a KC under an SLO already present in
+    # curriculum_links, so any drift silently drops KCs from what the doctor
+    # sees. Re-derive curriculum_links from the selected KCs so every KC is
+    # represented.
+    if normalised["key_capabilities"]:
+        normalised["curriculum_links"] = _derive_curriculum_links_from_kcs(normalised["key_capabilities"])
     normalised = _fill_blank_clinical_setting_from_source(
         normalised,
         case_description,

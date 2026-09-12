@@ -114,6 +114,126 @@ async def test_reflect_log_difficult_case_supplemented_end_to_end():
     assert set(draft.fields["curriculum_links"]) >= {"SLO2", "SLO7"}
 
 
+# --- CBD curriculum_links/key_capabilities drift (SLO4 KC1-alone regression) ---
+
+ANKLE_CASE = (
+    "Setting: Emergency Department. I assessed an adult with an ankle injury after "
+    "a fall. I examined the ankle, checked and documented neurovascular status, and "
+    "discussed the assessment and imaging decision with my supervisor. I provided "
+    "discharge advice and safety-netting.\n\n"
+    "Learning point: the importance of documenting neurovascular findings clearly "
+    "and checking that the patient understands when to return for reassessment."
+)
+
+
+@pytest.mark.asyncio
+async def test_cbd_curriculum_links_reflect_every_selected_kc():
+    """Reproduces the reported *shape* of the defect for this exact fictional
+    ankle case: a curriculum_links/key_capabilities drift where the model
+    names only one SLO in curriculum_links despite selecting KCs across three.
+    The three KCs below (SLO4 KC1, SLO2 KC1, SLO9 KC1) are genuine entries
+    from `KC_FULL_TEXT`, but this payload is a constructed reproduction of the
+    drift pattern, not a captured/verified historical model response for this
+    case — no live model call was made or logged for it, so this proves the
+    re-derivation fix, not what Gemini actually returned for the doctor's
+    report. Because the preview hierarchy only shows a KC under an SLO
+    already in curriculum_links, the other two KCs would otherwise silently
+    vanish from the doctor's draft, appearing as if only "SLO4 KC1" had been
+    selected. curriculum_links must be re-derived from the actual selected
+    KCs so none are dropped."""
+    from extractor import extract_cbd_data
+    from bot import _format_curriculum_hierarchy
+
+    payload = {
+        "form_type": "CBD",
+        "date_of_encounter": "2026-06-29",
+        "patient_age": "adult",
+        "patient_presentation": "Ankle injury after a fall",
+        "clinical_setting": "Emergency Department",
+        "stage_of_training": None,
+        "trainee_role": "",
+        "clinical_reasoning": "Examined the ankle and documented neurovascular status.",
+        "reflection": (
+            "The importance of documenting neurovascular findings clearly and "
+            "checking that the patient understands when to return for reassessment."
+        ),
+        "level_of_supervision": "Indirect",
+        "supervisor_name": None,
+        # The model names only SLO4, even though key_capabilities below spans
+        # SLO4, SLO2 and SLO9 — this is the drift that caused the defect.
+        "curriculum_links": ["SLO4"],
+        "key_capabilities": [
+            "SLO4 KC1: be expert in assessment, investigation and clinical "
+            "management of patients attending with all injuries, regardless of "
+            "complexity (2025 Update)",
+            "SLO2 KC1: able to support the pre-hospital, medical, nursing and "
+            "administrative team in answering clinical questions and in making "
+            "safe decisions for patients with appropriate levels of risk in the ED (2025 Update)",
+            "SLO9 KC1: be able to undertake training and supervision of members "
+            "of the ED team in the clinical environment (2025 Update)",
+        ],
+    }
+    with patch("extractor._generate", new=AsyncMock(return_value=json.dumps(payload))):
+        draft = await extract_cbd_data(ANKLE_CASE)
+
+    assert len(draft.key_capabilities) == 3
+    assert set(draft.curriculum_links) == {"SLO4", "SLO2", "SLO9"}, (
+        f"curriculum_links must cover every selected KC's SLO, got {draft.curriculum_links}"
+    )
+
+    rendered = _format_curriculum_hierarchy(draft.curriculum_links, draft.key_capabilities)
+    assert "SLO4" in rendered and "SLO2" in rendered and "SLO9" in rendered
+    assert rendered.count("↳ KC1:") == 3, f"all three KCs must render, got:\n{rendered}"
+
+
+@pytest.mark.asyncio
+async def test_cbd_curriculum_links_untouched_when_no_kcs_selected():
+    from extractor import extract_cbd_data
+
+    payload = {
+        "form_type": "CBD",
+        "date_of_encounter": "",
+        "patient_age": "",
+        "patient_presentation": "",
+        "clinical_setting": "",
+        "stage_of_training": None,
+        "trainee_role": "",
+        "clinical_reasoning": "",
+        "reflection": "",
+        "level_of_supervision": "",
+        "supervisor_name": None,
+        "curriculum_links": [],
+        "key_capabilities": [],
+    }
+    with patch("extractor._generate", new=AsyncMock(return_value=json.dumps(payload))):
+        draft = await extract_cbd_data("Reviewed a set of blood results and documented a plan.")
+
+    assert draft.curriculum_links == []
+    assert draft.key_capabilities == []
+
+
+def test_derive_curriculum_links_skips_malformed_kc_strings():
+    """A malformed or empty KC entry (no SLO prefix) must not raise and must
+    not block sound links from valid entries elsewhere in the same list."""
+    from extractor import _derive_curriculum_links_from_kcs
+
+    assert _derive_curriculum_links_from_kcs(None) == []
+    assert _derive_curriculum_links_from_kcs([]) == []
+    assert _derive_curriculum_links_from_kcs(["", "   ", "not a kc string"]) == []
+    links = _derive_curriculum_links_from_kcs([
+        "not a kc string",
+        "SLO4 KC1: be expert in assessment, investigation and clinical management "
+        "of patients attending with all injuries, regardless of complexity (2025 Update)",
+        "",
+        "SLO4 KC1: be expert in assessment, investigation and clinical management "
+        "of patients attending with all injuries, regardless of complexity (2025 Update)",
+        "SLO2 KC1: able to support the pre-hospital, medical, nursing and "
+        "administrative team in answering clinical questions and in making safe "
+        "decisions for patients with appropriate levels of risk in the ED (2025 Update)",
+    ])
+    assert links == ["SLO4", "SLO2"]
+
+
 # --- Curriculum preview formatting ---
 
 def test_preview_labels_slo2_with_a_title():

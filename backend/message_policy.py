@@ -136,7 +136,8 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         message_class=MessageClass.TEMPLATED,
         text=(
             "📋 Before I show the draft, I still need: {items}.\n\n"
-            "Reply with that and I'll finish the draft."
+            "Reply by text, voice/audio, photo, document, or video with a description "
+            "and I'll finish the draft."
         ),
         safety_critical=True,
     ),
