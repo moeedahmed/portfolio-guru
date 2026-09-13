@@ -541,10 +541,12 @@ async def test_repeated_resume_with_unchanged_gap_edits_the_same_prompt():
 
 
 @pytest.mark.asyncio
-async def test_resolved_gap_retires_prompt_by_editing_into_draft_preview():
-    """Once the gap is answered and the draft is complete, the same tracked
-    message must turn into the draft preview rather than a new message being
-    sent alongside the old prompt (which would leave a stale Cancel button)."""
+async def test_resolved_gap_retires_prompt_and_sends_fresh_draft_after_reply():
+    """Once the gap is answered and the draft is complete, the old essentials
+    prompt (which sits *before* the doctor's reply) must be retired — its
+    Cancel button stripped — and the draft preview sent as a fresh message
+    after the reply, instead of the final draft being edited into a message
+    that chronologically precedes the doctor's own answer."""
     from bot import AWAIT_APPROVAL, handle_case_input
 
     sim = BotSimulator()
@@ -566,8 +568,15 @@ async def test_resolved_gap_retires_prompt_by_editing_into_draft_preview():
 
     assert result == AWAIT_APPROVAL
     actions = [action for action, _, _ in sim.messages_sent]
-    assert "bot_edit" in actions
-    assert "reply" not in actions and "send" not in actions
+    # The old prompt (message 42) is retired by editing it directly through
+    # the bot (stripped of its Cancel button), then a genuinely new message
+    # is sent for the acknowledgement, which is itself edited into the draft.
+    assert actions[0] == "bot_edit"
+    retired_text, retired_markup = sim.messages_sent[0][1], sim.messages_sent[0][2]
+    assert retired_markup is None
+    assert "added" in retired_text.lower()
+    assert "reply" in actions
+    assert context.user_data.get("last_bot_msg_id") != 42
     buttons = {data for _, data in sim.get_last_buttons()}
     assert "APPROVE|draft" in buttons
     assert "ACTION|cancel" not in buttons
@@ -604,12 +613,12 @@ async def test_exact_deidentified_screenshot_learning_sentence_accepted_in_previ
 
 @pytest.mark.asyncio
 async def test_edit_failure_on_remaining_gap_preserves_merged_answer_and_raises():
-    """If Telegram genuinely fails to edit the tracked essentials prompt with
-    the still-outstanding gap (not the harmless 'message not modified' case),
-    the failure must not be swallowed as a false success. The user's partial
-    answer is merged into ``case_text`` before the edit is even attempted, so
-    it — and the still-active gate — must survive the failed edit rather than
-    being lost or silently reported as done."""
+    """If Telegram genuinely fails to edit the fresh acknowledgement message
+    with the still-outstanding gap (not the harmless 'message not modified'
+    case), the failure must not be swallowed as a false success. The user's
+    partial answer is merged into ``case_text`` before the edit is even
+    attempted, so it — and the still-active gate — must survive the failed
+    edit rather than being lost or silently reported as done."""
     from telegram.error import BadRequest
 
     from bot import handle_case_input
@@ -629,23 +638,29 @@ async def test_edit_failure_on_remaining_gap_preserves_merged_answer_and_raises(
     setting_still_missing = _cbd_draft(clinical_setting="")
     analyse = AsyncMock(return_value=setting_still_missing)
 
-    original_edit = context.bot.edit_message_text
+    # The old prompt (message 42) is retired directly through the bot; the
+    # failure under test happens on the fresh acknowledgement message's own
+    # edit-in-place (its "still missing" gap update), not the bot-level call.
+    original_capture_edit = sim._capture_edit
     call_count = {"n": 0}
 
-    async def flaky_edit(*args, **kwargs):
+    async def flaky_edit(text=None, *args, **kwargs):
         call_count["n"] += 1
-        if call_count["n"] == 2:
+        if call_count["n"] == 1:
             raise BadRequest("Message to edit not found")
-        return await original_edit(*args, **kwargs)
+        return await original_capture_edit(text, *args, **kwargs)
 
-    context.bot.edit_message_text = AsyncMock(side_effect=flaky_edit)
+    sim._capture_edit = flaky_edit
 
     patches = _common_patches()
     with patches[0], patches[1], patches[2], patch("bot._analyse_selected_form", new=analyse):
         with pytest.raises(BadRequest):
             await handle_case_input(followup_update, context)
 
-    assert call_count["n"] == 2
+    assert call_count["n"] == 1
+    # The old prompt was still retired before the failure.
+    actions = [action for action, _, _ in sim.messages_sent]
+    assert "bot_edit" in actions
     # The merged answer and the still-open gate survive the failed edit —
     # nothing is lost, and the state is not falsely marked resolved.
     assert "escalate ECG review earlier" in context.user_data["case_text"]

@@ -2893,8 +2893,7 @@ def _clinical_kc_supplement_codes(case_description: str) -> list[str]:
     ):
         add("SLO7 KC3")
 
-    if _case_contains_any(text, ("teach", "supervis", "feedback", "debrief")):
-        add("SLO9 KC1")
+    # Teaching requires actor-aware evidence from extraction, not keyword supplementation.
 
     # Core adult/paediatric assessment (SLO1/SLO5 KC1) is broad — it could be
     # argued for almost any clinical case. Only offer it as a rounding-out KC

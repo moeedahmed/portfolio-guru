@@ -40,6 +40,22 @@ _LEADING_EMOJI = re.compile(
 
 _DECORATIVE_EMOJI_RE = re.compile("[✨🤖🎉⭐]")
 
+# The one canonical list of genuinely supported input types for "send me
+# more" moments: initial capture (file_case_prompt), extending a case
+# (gathering_captured), missing essentials (pre_draft_completeness_request),
+# and attachment context (attachment_captured). Telegram's Reply-to-message
+# feature is never implied as required — this is about what media types are
+# accepted, not how to send them. Every template that names supported inputs
+# should reuse this phrase rather than drift into its own wording.
+#
+# Not every "send more" prompt qualifies: state-specific follow-ups that
+# narrow the accepted input for a real reason keep their own truthful,
+# narrower wording instead of this clause — e.g. `_video_context_detail_request`
+# (bot.py) only wants text/voice grounding for an attached video, since the
+# bot never interprets video content itself, and `photo_grounding_detail_request`
+# similarly asks for the doctor's own words rather than another image.
+MODALITY_CLAUSE = "text, voice/audio, photos, documents, or video with a description"
+
 
 class MessageClass(str, Enum):
     FIXED = "fixed"
@@ -108,7 +124,7 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         key="file_case_prompt",
         message_class=MessageClass.FIXED,
         text=(
-            "📥 Send what happened (text, voice, photo, or document).\n\n"
+            f"📥 Send what happened ({MODALITY_CLAUSE}).\n\n"
             "If you can, include the patient's presentation, your actions, the outcome, and any learning points."
         ),
     ),
@@ -136,8 +152,7 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         message_class=MessageClass.TEMPLATED,
         text=(
             "📋 Before I show the draft, I still need: {items}.\n\n"
-            "Reply by text, voice/audio, photo, document, or video with a description "
-            "and I'll finish the draft."
+            f"Send it as {MODALITY_CLAUSE} and I'll finish the draft."
         ),
         safety_critical=True,
     ),
@@ -240,7 +255,7 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         message_class=MessageClass.FIXED,
         text=(
             "📥 Case captured.\n\n"
-            "Send another anonymised message to add details.\n\n"
+            f"Send another anonymised message ({MODALITY_CLAUSE}) to add details.\n\n"
             "When you're ready, tap Choose form."
         ),
     ),
@@ -249,7 +264,7 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         message_class=MessageClass.TEMPLATED,
         text=(
             "📎 {attachment_label} attached.\n\n"
-            "Add anonymised case details before choosing a form.{context_note}"
+            f"Add anonymised case details ({MODALITY_CLAUSE}) before choosing a form.{{context_note}}"
         ),
     ),
     "gathering_continuation": MessageTemplate(

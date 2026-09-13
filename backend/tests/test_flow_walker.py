@@ -501,17 +501,16 @@ class TestFlowWalker:
 
         first_field_pos = text.index('📅')
         assert '📋 *Draft preview*' not in text
-        # The one divider present separates Curriculum from AI assistance
-        # (below); it must not appear a second time as a leftover instruction
-        # block, and the retired 'Missing details' block must not reappear.
-        assert text.count(_DRAFT_DIVIDER) == 1
+        # No divider or 'AI assistance' footer: the AI-use declaration lives
+        # once, inline in the reflection field, and the retired 'Missing
+        # details' block must not reappear either.
+        assert _DRAFT_DIVIDER not in text
+        assert '🤖 *AI assistance*' not in text
         assert '🧩 *Missing details*' not in text
 
         curriculum_pos = text.index('📚 *Curriculum:*')
-        divider_pos = text.index(_DRAFT_DIVIDER)
-        ai_pos = text.index('🤖 *AI assistance*')
         reply_hint_pos = text.index('💬 Reply to refine this draft')
-        assert first_field_pos < curriculum_pos < divider_pos < ai_pos < reply_hint_pos
+        assert first_field_pos < curriculum_pos < reply_hint_pos
 
     @pytest.mark.asyncio
     async def test_draft_preview_keeps_why_this_form_compact(self, thin_draft):
@@ -544,13 +543,12 @@ class TestFlowWalker:
 
         text = sim.get_last_text()
 
-        # The only divider present separates Curriculum from AI assistance —
-        # not a second, heavier divider sandwiching the draft body.
-        assert text.count(_DRAFT_DIVIDER) == 1
+        # No divider anywhere — there is no second block sandwiching the
+        # draft body, and no decorative separator before the reply hint.
+        assert _DRAFT_DIVIDER not in text
         first_field_pos = text.index('📅')
         curriculum_pos = text.index('📚 *Curriculum:*')
-        divider_pos = text.index(_DRAFT_DIVIDER)
-        assert first_field_pos < curriculum_pos < divider_pos
+        assert first_field_pos < curriculum_pos
         assert '*Why this form:*' not in text
 
     @pytest.mark.asyncio
@@ -603,9 +601,9 @@ class TestFlowWalker:
 
         text = sim.get_last_text()
 
-        # The only divider present separates Curriculum from AI assistance —
-        # not a leftover heavy divider around the sanitised rationale.
-        assert text.count(_DRAFT_DIVIDER) == 1
+        # No divider anywhere, including a leftover heavy divider around the
+        # sanitised rationale.
+        assert _DRAFT_DIVIDER not in text
         assert "I've treated this as a Leadership Assessment Tool:" not in text
         # None of the internal/model-flavoured phrasing should reach the user.
         assert 'the trainee' not in text.lower()
@@ -965,6 +963,8 @@ class TestFlowWalker:
         assert draft.fields['procedural_skill'] == ''
 
     def test_draft_preview_declares_ai_use_by_default(self, thin_draft):
+        """The AI-use declaration lives once, inline in the reflection field.
+        There must be no second 'AI assistance' footer repeating it."""
         from bot import _format_draft_preview
         from rcem_ai_policy import AI_USE_DECLARATION
 
@@ -974,26 +974,20 @@ class TestFlowWalker:
         )
 
         assert AI_USE_DECLARATION in preview
-        assert 'AI assistance' in preview
+        assert 'AI assistance' not in preview
         assert 'RCEM' not in preview
-        assert 'You remain responsible for its accuracy, authenticity and insight.' in preview
         assert 'Review needed before saving' not in preview
         assert 'Save as draft only runs after you review' not in preview
 
-    def test_draft_preview_dividers_curriculum_from_ai_assistance(self, thin_draft):
-        """A rename to 'AI assistance' alone reads as just another section
-        header at the same visual weight as Curriculum. A divider must sit
-        between the draft body (ending in the Curriculum block) and the AI
-        assistance note so the two are visibly distinct blocks."""
+    def test_draft_preview_has_no_divider_when_reflection_detail_not_needed(self, thin_draft):
+        """No decorative divider or duplicate AI-assistance footer should
+        appear when the doctor's own reflective input is already present."""
         from bot import _DRAFT_DIVIDER, _format_draft_preview
 
         preview = _format_draft_preview(thin_draft, input_source='voice')
 
-        assert _DRAFT_DIVIDER in preview
-        curriculum_pos = preview.index('📚 *Curriculum:*')
-        divider_pos = preview.index(_DRAFT_DIVIDER)
-        ai_pos = preview.index('🤖 *AI assistance*')
-        assert curriculum_pos < divider_pos < ai_pos
+        assert _DRAFT_DIVIDER not in preview
+        assert '🤖 *AI assistance*' not in preview
 
     def test_draft_preview_never_quotes_raw_source_text(self, thin_draft):
         """The preview must describe the source type but never quote raw case text."""

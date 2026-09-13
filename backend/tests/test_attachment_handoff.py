@@ -18,6 +18,7 @@ from bot import (
     handle_mid_conversation_text,
 )
 from tests.bot_simulator import BotSimulator
+from message_policy import render_message
 from extractor import FormDraft
 from channel_actions import ChannelReply
 from conversation_supervisor import (
@@ -351,7 +352,8 @@ async def test_document_attach_only_does_not_extract_and_waits_for_case_details(
     assert context.user_data["attachment_name"] == "evidence.pdf"
     assert "case_text" not in context.user_data
     assert sim.get_last_text().startswith("📎 Document attached.")
-    assert "Add anonymised case details before choosing a form." in sim.get_last_text()
+    assert "Add anonymised case details" in sim.get_last_text()
+    assert "before choosing a form." in sim.get_last_text()
     assert sim.get_last_buttons() == [
         ("📋 Choose form", "GATHER|done"),
         ("❌ Discard case", "ACTION|cancel"),
@@ -425,7 +427,7 @@ async def test_image_attach_only_prompt_rejoins_gathering_loop_on_next_text(monk
         kind=GatheringTurnKind.CONTINUE_GATHERING,
         intent=ConversationalIntent.NEW_CASE,
         add_to_case=True,
-        reply=ChannelReply(body="📥 Case captured.\n\nSend another anonymised message to add details.\n\nWhen you're ready, tap Choose form."),
+        reply=ChannelReply(body=render_message("gathering_captured")),
     )
     with patch("bot.decide_gathering_turn", new=AsyncMock(return_value=decision)):
         result = await handle_gathering_input(text_update, context)
@@ -436,7 +438,7 @@ async def test_image_attach_only_prompt_rejoins_gathering_loop_on_next_text(monk
     assert context.bot.edit_message_text.await_args.kwargs["reply_markup"] is None
     assert context.user_data["gathering_msg_id"] != attached_prompt_id
     assert context.user_data["attachment_path"] == temp_path
-    assert sim.get_last_text() == "📥 Case captured.\n\nSend another anonymised message to add details.\n\nWhen you're ready, tap Choose form."
+    assert sim.get_last_text() == render_message("gathering_captured")
     assert sim.get_last_buttons() == [
         ("📋 Choose form", "GATHER|done"),
         ("❌ Discard case", "ACTION|cancel"),

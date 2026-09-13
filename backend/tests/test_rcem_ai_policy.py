@@ -168,8 +168,11 @@ def test_ai_declaration_is_visible_and_accountability_is_explicit():
     declared = _with_rcem_ai_declaration(draft)
     preview = _format_draft_preview(draft, needs_reflection_detail=False)
     assert declared.fields["reflection"].endswith(AI_USE_DECLARATION)
+    # The declaration lives once, inline in the reflection field; there is no
+    # second "AI assistance" footer repeating it.
     assert AI_USE_DECLARATION in preview
-    assert "You remain responsible for its accuracy, authenticity and insight." in preview
+    assert preview.count(AI_USE_DECLARATION) == 1
+    assert "AI assistance" not in preview
 
 
 def test_genuine_non_first_person_learning_unlocks_save_with_keyboard_and_footer_agreement():

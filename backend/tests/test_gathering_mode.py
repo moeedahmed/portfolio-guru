@@ -4,6 +4,7 @@ import pytest
 from telegram.error import BadRequest
 
 import bot
+from message_policy import render_message
 from bot import (
     AWAIT_CASE_INPUT,
     AWAIT_FORM_CHOICE,
@@ -187,7 +188,7 @@ async def test_gathering_reply_offers_done_button(monkeypatch):
          patch("bot._process_case_text", new=AsyncMock(return_value=AWAIT_FORM_CHOICE)):
         await handle_case_input(update, context)
 
-    assert sim.messages_sent[-1][1] == "📥 Case captured.\n\nSend another anonymised message to add details.\n\nWhen you're ready, tap Choose form."
+    assert sim.messages_sent[-1][1] == render_message("gathering_captured")
     assert sim.get_last_buttons() == [
         ("📋 Choose form", "GATHER|done"),
         ("❌ Discard case", "ACTION|cancel"),
@@ -271,7 +272,7 @@ async def test_gathering_ready_prompt_is_resent_below_new_case_detail(monkeypatc
     assert context.user_data["last_bot_msg_id"] != first_ready_id
     assert any(kind == "bot_delete" for kind, _, _ in sim.messages_sent)
     assert sim.messages_sent[-1][0] == "reply"
-    assert sim.get_last_text() == "📥 Case captured.\n\nSend another anonymised message to add details.\n\nWhen you're ready, tap Choose form."
+    assert sim.get_last_text() == render_message("gathering_captured")
     assert sim.get_last_buttons() == [
         ("📋 Choose form", "GATHER|done"),
         ("❌ Discard case", "ACTION|cancel"),

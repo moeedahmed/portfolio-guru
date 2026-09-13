@@ -1211,6 +1211,101 @@ async def _retire_active_source_detail_message(context) -> None:
         context.user_data.pop(key, None)
 
 
+_RETIRED_ESSENTIALS_PROMPT_REFS_KEY = "_retired_essentials_prompt_refs"
+_RETIRED_ESSENTIALS_PROMPT_REFS_MAX = 8
+
+
+def _mark_essentials_prompt_retired(context, chat_id, msg_id) -> None:
+    """Remember a retired essentials-gap prompt so a stale Cancel tap on it
+    can be recognised even when the Telegram-side edit/markup removal failed
+    and the button is still visually live in the chat."""
+    if not chat_id or not msg_id:
+        return
+    refs = context.user_data.setdefault(_RETIRED_ESSENTIALS_PROMPT_REFS_KEY, [])
+    ref = [chat_id, msg_id]
+    if ref in refs:
+        return
+    refs.append(ref)
+    del refs[:-_RETIRED_ESSENTIALS_PROMPT_REFS_MAX]
+
+
+def _is_retired_essentials_prompt_ref(context, chat_id, msg_id) -> bool:
+    if not chat_id or not msg_id:
+        return False
+    refs = context.user_data.get(_RETIRED_ESSENTIALS_PROMPT_REFS_KEY) or []
+    return [chat_id, msg_id] in refs
+
+
+async def _retire_active_missing_essentials_prompt(context) -> None:
+    """Resolve the tracked essentials-gap prompt before the followup reply.
+
+    That prompt sits in the chat *before* the doctor's new message, so editing
+    it in place (as picker navigation does) would leave the acknowledgement or
+    final draft looking like it was sent before the doctor's own reply. Retire
+    it here and clear the tracked message so the caller sends a fresh one that
+    lands after the doctor's contribution instead.
+
+    The retirement is recorded in `_retired_essentials_prompt_refs` regardless
+    of whether the Telegram-side edit actually succeeded, so a Cancel tap that
+    still lands on this message (edit failed, or the tap raced the edit) is
+    recognised as stale by the callback router instead of cancelling whatever
+    draft is active by the time it arrives.
+    """
+    chat_id = context.user_data.get("last_bot_chat_id")
+    msg_id = context.user_data.get("last_bot_msg_id")
+    for key in ("last_bot_msg_id", "last_bot_chat_id", "status_msg_id", "status_msg_chat"):
+        context.user_data.pop(key, None)
+    if not chat_id or not msg_id:
+        return
+    try:
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=msg_id,
+            text="📥 Added — see the update below.",
+        )
+        _audit_event(
+            context,
+            "prompt_retired",
+            action="missing_essentials_prompt_edited",
+            message_id=msg_id,
+            chat_id=chat_id,
+        )
+    except Exception as exc:
+        if _telegram_message_not_modified_error(exc):
+            _audit_event(
+                context,
+                "prompt_retired",
+                action="missing_essentials_prompt_already_retired",
+                message_id=msg_id,
+                chat_id=chat_id,
+            )
+            _mark_essentials_prompt_retired(context, chat_id, msg_id)
+            return
+        try:
+            await context.bot.edit_message_reply_markup(
+                chat_id=chat_id,
+                message_id=msg_id,
+                reply_markup=None,
+            )
+            _audit_event(
+                context,
+                "prompt_retired",
+                action="missing_essentials_reply_markup_removed",
+                message_id=msg_id,
+                chat_id=chat_id,
+            )
+        except Exception as markup_exc:
+            if not _telegram_message_not_modified_error(markup_exc):
+                _audit_event(
+                    context,
+                    "prompt_retired",
+                    action="missing_essentials_retire_failed",
+                    message_id=msg_id,
+                    chat_id=chat_id,
+                )
+    _mark_essentials_prompt_retired(context, chat_id, msg_id)
+
+
 async def _send_pending_bundle_status(message, context, text, reply_markup=None, parse_mode=None):
     """Edit the current bundle status only, otherwise send a fresh bundle status."""
     chat_id = getattr(message, "chat_id", None) or getattr(getattr(message, "chat", None), "id", None)
@@ -5363,27 +5458,20 @@ def _draft_transparency_layer(
     needs_reflection_detail: bool = False,
     has_user_context: bool = True,
 ) -> str:
-    """Compact review note shown before the approval keyboard.
+    """Safety-critical review note shown before the approval keyboard.
+
+    The AI-use declaration already lives once, in the reflection field text
+    itself (see `_with_rcem_ai_declaration`); this layer must not repeat it
+    as a second footer. It only renders when the doctor's own reflective
+    input is still missing and saving needs to be gated on that.
 
     Names the source *type* only — it never quotes raw case text, so
     patient-identifying detail in the source is not surfaced in the preview.
     """
-    if not _draft_has_reflection_fields(draft):
+    if not _draft_has_reflection_fields(draft) or not needs_reflection_detail:
         return ""
 
-    # Labelled "AI assistance", not "RCEM AI use" — this discloses tool
-    # behaviour (an AI-use declaration was added, the doctor stays
-    # accountable) without implying RCEM endorsement of the tool or citing
-    # a specific regulatory requirement. The divider keeps it visually
-    # distinct from the Curriculum block above, not just another section.
-    lines = ["", _DRAFT_DIVIDER, "🤖 *AI assistance*"]
-    lines.append("• An AI-use declaration has been added to the reflection field.")
-    lines.append("• You remain responsible for its accuracy, authenticity and insight.")
-
-    if not needs_reflection_detail:
-        return "\n".join(lines)
-
-    lines.extend(["", "⚠️ *Your reflection is needed before saving*"])
+    lines = ["", "⚠️ *Your reflection is needed before saving*"]
 
     if (
         str(input_source or "").strip().lower() in _USER_CONTEXT_REQUIRED_SOURCES
@@ -10681,6 +10769,25 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("CANCEL|") or data in {"ACTION|reset", "ACTION|cancel"}:
         await query.answer()
+        stale_message = query.message
+        stale_chat_id = getattr(stale_message, "chat_id", None) or getattr(
+            getattr(stale_message, "chat", None), "id", None
+        )
+        stale_msg_id = getattr(stale_message, "message_id", None)
+        if _is_retired_essentials_prompt_ref(context, stale_chat_id, stale_msg_id):
+            # This Cancel button belonged to an essentials-gap prompt that was
+            # already retired (the doctor answered it) — a live active draft
+            # may already exist by the time this stale tap arrives, so treat
+            # it as a no-op on the old message rather than cancelling it.
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+            return await _resume_paused_flow(
+                update,
+                context,
+                "⏳ That earlier Cancel button is no longer active.",
+            )
         # Disarm buttons immediately — prevents double-tap
         await query.edit_message_reply_markup(reply_markup=None)
         user_id = update.effective_user.id
@@ -12647,9 +12754,10 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             _mark_missing_essentials_replay_done(context, update, AWAIT_CASE_INPUT)
             return AWAIT_CASE_INPUT
         await update.effective_chat.send_action(constants.ChatAction.TYPING)
-        # Edit the still-tracked essentials-gap prompt in place when one is
-        # active, instead of sending a fresh message and abandoning it with
-        # its Cancel button still live.
+        # Retire the essentials-gap prompt (it sits before the doctor's new
+        # message) and send a fresh acknowledgement instead of editing it in
+        # place, so the transcript stays chronological.
+        await _retire_active_missing_essentials_prompt(context)
         ack = await _send_latest_message(
             update.message, context, f"🧩 Updating {_form_display_name(chosen_form)} draft…"
         )

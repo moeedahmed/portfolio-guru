@@ -42,6 +42,64 @@ def test_clinical_supplement_keeps_external_team_kc_for_referral():
     assert "SLO7 KC1" not in codes
 
 
+# Exact fictional software fixture from the reported ankle case (no live
+# model call; deterministic supplement heuristic only).
+ANKLE_CASE_DETERMINISTIC = (
+    "Please create a Case-Based Discussion for today. Setting: Emergency Department. "
+    "I assessed an adult with an ankle injury after a fall. I examined the ankle, "
+    "checked and documented neurovascular status, and discussed the assessment and "
+    "imaging decision with my supervisor. I provided discharge advice and safety-netting. "
+    "Learning point: the importance of documenting neurovascular findings clearly and "
+    "checking that the patient understands when to return for reassessment."
+)
+
+
+def test_clinical_supplement_does_not_credit_teaching_kc_for_being_supervised():
+    """'my supervisor' names who supervised the trainee — the trainee did not
+    teach or supervise anyone, so SLO9 KC1 (training/supervision *given* by
+    the trainee) must not be fabricated from the bare 'supervis' stem. Only
+    the two genuinely supported KCs (SLO2 KC1 for the decision discussed with
+    a senior, SLO1 KC1 for the assessment) should be offered; a third KC must
+    not be padded in without support."""
+    codes = _clinical_kc_supplement_codes(ANKLE_CASE_DETERMINISTIC)
+    assert "SLO9 KC1" not in codes, f"'my supervisor' must not imply the trainee taught/supervised, got {codes}"
+    assert codes == ["SLO2 KC1", "SLO1 KC1"], (
+        f"expected exactly the two genuinely supported KCs, got {codes}"
+    )
+
+
+def test_supplement_preserves_extracted_trainee_teaching():
+    from extractor import KC_FULL_TEXT
+    kc = KC_FULL_TEXT["SLO9 KC1"]
+    out = _supplement_supported_key_capabilities(
+        {"curriculum_links": ["SLO9"], "key_capabilities": [kc]},
+        case_description="I taught a junior doctor and provided feedback.",
+        schema_key="REFLECT_LOG", has_kc_tick=True,
+    )
+    assert kc in out["key_capabilities"]
+
+
+@pytest.mark.parametrize(
+    "case_description",
+    [
+        "I was supervised by my consultant throughout the case.",
+        "I was supervised by a senior colleague.",
+        "My consultant provided feedback on my assessment.",
+        "I received feedback from my supervisor afterwards.",
+        "I attended teaching on ankle injuries this week.",
+        "Feedback was given to me by the registrar after the shift.",
+    ],
+)
+def test_clinical_supplement_does_not_credit_teaching_kc_for_passive_receipt(case_description):
+    """Being on the receiving end of supervision, feedback or teaching shows
+    no training capability delivered by the trainee — 'was supervised',
+    'received feedback' and 'attended teaching' must not be credited as
+    SLO9 KC1 just because they share the teach/feedback/supervis stems with
+    the genuinely trainee-delivered phrasing."""
+    codes = _clinical_kc_supplement_codes(case_description)
+    assert "SLO9 KC1" not in codes, f"passive receipt must not imply trainee-delivered teaching, got {codes}"
+
+
 def test_clinical_supplement_does_not_pad_broad_kc1_without_support():
     # No assessment/management language and only one genuine signal (escalation)
     codes = _clinical_kc_supplement_codes(
