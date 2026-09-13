@@ -7,7 +7,7 @@ preview (no bare SLO2, no ultra-truncated KC line, no duplicate KC entries).
 """
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -477,3 +477,103 @@ def test_unticked_kc_targets_matches_by_code_not_verbose_text():
     assert missed[0].startswith("SLO7 KC1:")
     # Nothing ticked → every target is missed (no double-counting of errors).
     assert len(_unticked_kc_targets(targets, [])) == 3
+
+
+# --- CBD prompt no longer stops at the first plausible KC: regression via
+# actual bot dispatch (bot._analyse_selected_form -> extract_cbd_data ->
+# _format_curriculum_hierarchy), not a hand-called extractor function. These
+# payloads are fabricated stand-ins for what a full-curriculum-aware model
+# response should look like; they are not captured live Gemini output. See
+# KC_EVIDENCE.md for why a live call is still required before this can be
+# called verified.
+
+async def _dispatch_cbd_draft(monkeypatch, payload: dict):
+    import bot
+
+    monkeypatch.setattr(bot, "get_voice_profile", lambda user_id: "")
+    monkeypatch.setattr(bot, "get_training_level", lambda user_id: None)
+    monkeypatch.setattr(bot, "_audit_event", lambda *a, **k: None)
+
+    context = MagicMock()
+    context.user_data = {}
+
+    with patch("extractor._generate", new=AsyncMock(return_value=json.dumps(payload))):
+        draft = await bot._analyse_selected_form(context, 999999, ANKLE_CASE, "CBD")
+    return draft
+
+
+@pytest.mark.asyncio
+async def test_cbd_dispatch_keeps_single_kc_when_only_one_is_supported(monkeypatch):
+    """A sparse but genuinely one-KC-supported case must render exactly one
+    KC — the prompt change must not introduce padding to hit ~3."""
+    from bot import _format_curriculum_hierarchy
+
+    payload = {
+        "form_type": "CBD",
+        "date_of_encounter": "2026-06-29",
+        "patient_age": "adult",
+        "patient_presentation": "Ankle injury after a fall",
+        "clinical_setting": "Emergency Department",
+        "stage_of_training": None,
+        "trainee_role": "",
+        "clinical_reasoning": "Examined the ankle and documented neurovascular status.",
+        "reflection": (
+            "The importance of documenting neurovascular findings clearly and "
+            "checking that the patient understands when to return for reassessment."
+        ),
+        "level_of_supervision": "Indirect",
+        "supervisor_name": None,
+        "curriculum_links": ["SLO4"],
+        "key_capabilities": [
+            "SLO4 KC1: be expert in assessment, investigation and clinical "
+            "management of patients attending with all injuries, regardless of "
+            "complexity (2025 Update)",
+        ],
+    }
+    draft = await _dispatch_cbd_draft(monkeypatch, payload)
+
+    assert len(draft.key_capabilities) == 1
+    rendered = _format_curriculum_hierarchy(draft.curriculum_links, draft.key_capabilities)
+    assert rendered.count("↳ KC") == 1
+
+
+@pytest.mark.asyncio
+async def test_cbd_dispatch_renders_full_multi_kc_response_with_correct_slo_links(monkeypatch):
+    """A case genuinely supporting multiple independent capabilities must
+    render all of them, each under the correct SLO, using the full KC text."""
+    from bot import _format_curriculum_hierarchy
+
+    payload = {
+        "form_type": "CBD",
+        "date_of_encounter": "2026-06-29",
+        "patient_age": "adult",
+        "patient_presentation": "Ankle injury after a fall",
+        "clinical_setting": "Emergency Department",
+        "stage_of_training": None,
+        "trainee_role": "",
+        "clinical_reasoning": "Examined the ankle and documented neurovascular status.",
+        "reflection": (
+            "The importance of documenting neurovascular findings clearly and "
+            "checking that the patient understands when to return for reassessment."
+        ),
+        "level_of_supervision": "Indirect",
+        "supervisor_name": None,
+        "curriculum_links": ["SLO4"],
+        "key_capabilities": [
+            "SLO4 KC1: be expert in assessment, investigation and clinical "
+            "management of patients attending with all injuries, regardless of "
+            "complexity (2025 Update)",
+            "SLO2 KC1: able to support the pre-hospital, medical, nursing and "
+            "administrative team in answering clinical questions and in making "
+            "safe decisions for patients with appropriate levels of risk in the ED (2025 Update)",
+            "SLO9 KC1: be able to undertake training and supervision of members "
+            "of the multi-professional team (2025 Update)",
+        ],
+    }
+    draft = await _dispatch_cbd_draft(monkeypatch, payload)
+
+    assert len(draft.key_capabilities) == 3
+    assert set(draft.curriculum_links) >= {"SLO4", "SLO2", "SLO9"}
+    rendered = _format_curriculum_hierarchy(draft.curriculum_links, draft.key_capabilities)
+    assert rendered.count("↳ KC") == 3
+    assert "SLO4" in rendered and "SLO2" in rendered and "SLO9" in rendered

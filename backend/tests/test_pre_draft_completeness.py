@@ -543,10 +543,11 @@ async def test_repeated_resume_with_unchanged_gap_edits_the_same_prompt():
 @pytest.mark.asyncio
 async def test_resolved_gap_retires_prompt_and_sends_fresh_draft_after_reply():
     """Once the gap is answered and the draft is complete, the old essentials
-    prompt (which sits *before* the doctor's reply) must be retired — its
-    Cancel button stripped — and the draft preview sent as a fresh message
-    after the reply, instead of the final draft being edited into a message
-    that chronologically precedes the doctor's own answer."""
+    prompt (which sits *before* the doctor's reply) must be retired — deleted
+    outright, since it is bot-owned and fully resolved — and the draft
+    preview sent as a fresh message after the reply, instead of the final
+    draft being edited into a message that chronologically precedes the
+    doctor's own answer."""
     from bot import AWAIT_APPROVAL, handle_case_input
 
     sim = BotSimulator()
@@ -568,13 +569,10 @@ async def test_resolved_gap_retires_prompt_and_sends_fresh_draft_after_reply():
 
     assert result == AWAIT_APPROVAL
     actions = [action for action, _, _ in sim.messages_sent]
-    # The old prompt (message 42) is retired by editing it directly through
-    # the bot (stripped of its Cancel button), then a genuinely new message
-    # is sent for the acknowledgement, which is itself edited into the draft.
-    assert actions[0] == "bot_edit"
-    retired_text, retired_markup = sim.messages_sent[0][1], sim.messages_sent[0][2]
-    assert retired_markup is None
-    assert "added" in retired_text.lower()
+    # The old prompt (message 42) is retired by deleting it outright, then a
+    # genuinely new message is sent for the acknowledgement, which is itself
+    # edited into the draft.
+    assert actions[0] == "bot_delete"
     assert "reply" in actions
     assert context.user_data.get("last_bot_msg_id") != 42
     buttons = {data for _, data in sim.get_last_buttons()}
@@ -638,9 +636,9 @@ async def test_edit_failure_on_remaining_gap_preserves_merged_answer_and_raises(
     setting_still_missing = _cbd_draft(clinical_setting="")
     analyse = AsyncMock(return_value=setting_still_missing)
 
-    # The old prompt (message 42) is retired directly through the bot; the
+    # The old prompt (message 42) is deleted directly through the bot; the
     # failure under test happens on the fresh acknowledgement message's own
-    # edit-in-place (its "still missing" gap update), not the bot-level call.
+    # edit-in-place (its "still missing" gap update), not the deletion call.
     original_capture_edit = sim._capture_edit
     call_count = {"n": 0}
 
@@ -658,9 +656,9 @@ async def test_edit_failure_on_remaining_gap_preserves_merged_answer_and_raises(
             await handle_case_input(followup_update, context)
 
     assert call_count["n"] == 1
-    # The old prompt was still retired before the failure.
+    # The old prompt was still retired (deleted) before the failure.
     actions = [action for action, _, _ in sim.messages_sent]
-    assert "bot_edit" in actions
+    assert "bot_delete" in actions
     # The merged answer and the still-open gate survive the failed edit —
     # nothing is lost, and the state is not falsely marked resolved.
     assert "escalate ECG review earlier" in context.user_data["case_text"]

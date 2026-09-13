@@ -1055,6 +1055,10 @@ def _telegram_message_not_modified_error(exc: Exception) -> bool:
     return isinstance(exc, BadRequest) and "message is not modified" in str(exc).lower()
 
 
+def _telegram_message_not_found_error(exc: Exception) -> bool:
+    return isinstance(exc, BadRequest) and "not found" in str(exc).lower()
+
+
 def _oversized_video_text(*, gathering: bool = False) -> str:
     if gathering:
         return (
@@ -1239,17 +1243,25 @@ def _is_retired_essentials_prompt_ref(context, chat_id, msg_id) -> bool:
 async def _retire_active_missing_essentials_prompt(context) -> None:
     """Resolve the tracked essentials-gap prompt before the followup reply.
 
-    That prompt sits in the chat *before* the doctor's new message, so editing
-    it in place (as picker navigation does) would leave the acknowledgement or
-    final draft looking like it was sent before the doctor's own reply. Retire
-    it here and clear the tracked message so the caller sends a fresh one that
+    That prompt sits in the chat *before* the doctor's new message, so
+    editing it in place (as picker navigation does) would leave the
+    acknowledgement or final draft looking like it was sent before the
+    doctor's own reply. It is bot-owned and fully resolved by the doctor's
+    reply, so it is deleted outright rather than left behind with an "Added
+    — see below" placeholder; the caller then sends a fresh message that
     lands after the doctor's contribution instead.
 
-    The retirement is recorded in `_retired_essentials_prompt_refs` regardless
-    of whether the Telegram-side edit actually succeeded, so a Cancel tap that
-    still lands on this message (edit failed, or the tap raced the edit) is
-    recognised as stale by the callback router instead of cancelling whatever
-    draft is active by the time it arrives.
+    A "message to delete not found" error means a prior retirement attempt
+    already removed it server-side (or Telegram's own retention already
+    dropped it) — that is treated as an already-clean retirement, not a
+    failure. Only when deletion itself is refused (permission, or Telegram's
+    delete time limit) does the prompt fall back to stripping its keyboard
+    and leaving a minimal "Details received." acknowledgement in its place.
+
+    The retirement is recorded in `_retired_essentials_prompt_refs`
+    regardless of outcome, so a Cancel tap that still lands on this message
+    is recognised as stale by the callback router instead of cancelling
+    whatever draft is active by the time it arrives.
     """
     chat_id = context.user_data.get("last_bot_chat_id")
     msg_id = context.user_data.get("last_bot_msg_id")
@@ -1258,20 +1270,18 @@ async def _retire_active_missing_essentials_prompt(context) -> None:
     if not chat_id or not msg_id:
         return
     try:
-        await context.bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=msg_id,
-            text="📥 Added — see the update below.",
-        )
+        await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
         _audit_event(
             context,
             "prompt_retired",
-            action="missing_essentials_prompt_edited",
+            action="missing_essentials_prompt_deleted",
             message_id=msg_id,
             chat_id=chat_id,
         )
+        _mark_essentials_prompt_retired(context, chat_id, msg_id)
+        return
     except Exception as exc:
-        if _telegram_message_not_modified_error(exc):
+        if _telegram_message_not_found_error(exc):
             _audit_event(
                 context,
                 "prompt_retired",
@@ -1281,28 +1291,36 @@ async def _retire_active_missing_essentials_prompt(context) -> None:
             )
             _mark_essentials_prompt_retired(context, chat_id, msg_id)
             return
+    try:
+        await context.bot.edit_message_reply_markup(
+            chat_id=chat_id,
+            message_id=msg_id,
+            reply_markup=None,
+        )
+        _audit_event(
+            context,
+            "prompt_retired",
+            action="missing_essentials_reply_markup_removed",
+            message_id=msg_id,
+            chat_id=chat_id,
+        )
         try:
-            await context.bot.edit_message_reply_markup(
+            await context.bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=msg_id,
-                reply_markup=None,
+                text="Details received.",
             )
+        except Exception:
+            pass
+    except Exception as markup_exc:
+        if not _telegram_message_not_modified_error(markup_exc):
             _audit_event(
                 context,
                 "prompt_retired",
-                action="missing_essentials_reply_markup_removed",
+                action="missing_essentials_retire_failed",
                 message_id=msg_id,
                 chat_id=chat_id,
             )
-        except Exception as markup_exc:
-            if not _telegram_message_not_modified_error(markup_exc):
-                _audit_event(
-                    context,
-                    "prompt_retired",
-                    action="missing_essentials_retire_failed",
-                    message_id=msg_id,
-                    chat_id=chat_id,
-                )
     _mark_essentials_prompt_retired(context, chat_id, msg_id)
 
 

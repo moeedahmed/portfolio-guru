@@ -3186,10 +3186,10 @@ KCs are what matter — SLOs are just grouping labels derived automatically from
 {RCEM_KC_MAP}
 
 INSTRUCTIONS:
-1. Read the full case description.
-2. For each SLO that is relevant to the case, read KC2, KC3, KC4... FIRST. Ask: does this case directly demonstrate THIS specific numbered capability?
+1. Before selecting anything, silently work through the FULL curriculum above against this specific case: for every SLO, ask what in the case (if anything) independently supports each of its KCs. Do this full pass in your own reasoning — do not skip SLOs just because an early one already matched, and do not stop at the first plausible KC. This reasoning is internal working only; it is not part of the JSON output.
+2. For each SLO that your pass above found relevant, read KC2, KC3, KC4... FIRST. Ask: does this case directly demonstrate THIS specific numbered capability?
 3. Only consider KC1 for an SLO after checking the higher KCs. KC1 is a broad fallback — only include it if the case demonstrates something KC2+ does not already cover for that SLO.
-4. Aim for 3 appropriate Key Capabilities by default — most substantive clinical cases genuinely demonstrate around 3. CAVEAT: select FEWER than 3 if fewer are genuinely supported, and NEVER pad with weak, broad or only-loosely-related KCs just to reach 3. Three strong KCs beat three including a filler.
+4. Aim for 3 appropriate Key Capabilities by default. From your full pass, select independently and specifically supported KCs across the relevant curriculum; select more only when each additional capability is distinctly demonstrated. CAVEAT: select FEWER than 3 if fewer are genuinely supported, and NEVER pad, stretch, or include a weak/broad/only-loosely-related KC just to reach a count. Never invent a capability the case does not actually show. Three strong KCs beat three including a filler; one strong KC beats three where only one is real.
 5. Use the FULL KC text exactly as written above (including the "(2025 Update)" suffix).
 6. Format each as: "SLO_CODE KC_NUM: full description text (2025 Update)"
 

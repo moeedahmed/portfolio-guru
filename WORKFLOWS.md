@@ -751,9 +751,16 @@ which handler is involved:
   be retired and replaced with a fresh bubble after their reply — never
   edited in place — so the transcript still reads in the order the doctor
   sent things. Picker navigation (choosing a form, editing a field) has no
-  competing user message and is edited in place instead. See
-  `_retire_active_missing_essentials_prompt` /
+  competing user message and is edited in place instead. The essentials-gap
+  prompt is bot-owned and fully resolved by the reply, so it is deleted
+  outright rather than left behind with an "Added ... see below" placeholder;
+  a delete refusal (not merely Telegram reporting it already gone) falls back
+  to stripping its keyboard and a minimal "Details received." acknowledgement.
+  See `_retire_active_missing_essentials_prompt` /
   `_retire_active_source_detail_message` in `backend/bot.py`; proved by
+  `test_chronological_deletion_removes_prompt_without_boilerplate` and
+  `test_partial_answer_deletes_prompt_every_round`
+  (`backend/tests/test_missing_essentials_prompt_retirement.py`),
   `test_resolved_gap_retires_prompt_and_sends_fresh_draft_after_reply`
   (`backend/tests/test_pre_draft_completeness.py`) and
   `test_source_detail_voice_retry_retires_previous_prompt`
