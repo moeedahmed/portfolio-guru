@@ -21,7 +21,7 @@ from kaizen_form_filer import (
     _QA_READ_FIELD_JS,
     _QA_READ_KC_JS,
     _session_cache_path,
-    _default_non_applicable_procedural_selects,
+    _resolve_procedural_skill_selects,
     _is_kaizen_app_url,
     _strip_emojis,
     _to_uk_date,
@@ -754,16 +754,17 @@ async def test_cbd_defaults_visible_procedural_skill_dropdown_to_na():
         {
             "id": "8def931e-3a00-43ac-8529-44cdaf34be2d",
             "label": "ST4-ST6 Higher EM Procedural Skills",
+            "options": ["Please select", "- n/a -", "Chest drain insertion"],
             "selectedText": "",
             "selectedValue": "?",
-            "hasNa": True,
         }
     ])
 
     with patch("kaizen_form_filer._fill_select", AsyncMock(return_value=True)) as fill_select:
-        defaulted = await _default_non_applicable_procedural_selects(page, "CBD")
+        answered, unresolved = await _resolve_procedural_skill_selects(page, "CBD", {})
 
-    assert defaulted == ["8def931e-3a00-43ac-8529-44cdaf34be2d"]
+    assert answered == ["8def931e-3a00-43ac-8529-44cdaf34be2d"]
+    assert unresolved == []
     fill_select.assert_awaited_once_with(
         page,
         "8def931e-3a00-43ac-8529-44cdaf34be2d",
@@ -777,9 +778,9 @@ async def test_dops_does_not_default_required_procedural_skill_to_na():
     page.evaluate = AsyncMock()
 
     with patch("kaizen_form_filer._fill_select", AsyncMock(return_value=True)) as fill_select:
-        defaulted = await _default_non_applicable_procedural_selects(page, "DOPS")
+        answered, unresolved = await _resolve_procedural_skill_selects(page, "DOPS", {})
 
-    assert defaulted == []
+    assert (answered, unresolved) == ([], [])
     page.evaluate.assert_not_called()
     fill_select.assert_not_awaited()
 
@@ -790,8 +791,8 @@ async def test_file_to_kaizen_records_cbd_procedural_na_default(mock_playwright_
         with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
             with patch("kaizen_form_filer._verify_entry_saved", AsyncMock(return_value=True)):
                 with patch(
-                    "kaizen_form_filer._default_non_applicable_procedural_selects",
-                    AsyncMock(return_value=["8def931e-3a00-43ac-8529-44cdaf34be2d"]),
+                    "kaizen_form_filer._resolve_procedural_skill_selects",
+                    AsyncMock(return_value=(["8def931e-3a00-43ac-8529-44cdaf34be2d"], [])),
                 ) as default_na:
                     fields = {
                         "date_of_encounter": "2026-03-21",
@@ -802,7 +803,7 @@ async def test_file_to_kaizen_records_cbd_procedural_na_default(mock_playwright_
                     result = await file_to_kaizen("CBD", fields, "user", "pass")
 
     default_na.assert_awaited_once()
-    assert "procedural_skills_n/a (1)" in result["filled"]
+    assert "procedural_skills (1)" in result["filled"]
 
 
 @pytest.mark.asyncio

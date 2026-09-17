@@ -516,3 +516,225 @@ def test_no_required_esle_field_can_be_filed_blank():
             assert field["key"] in gap_keys, (
                 f"{form_type}: required field {field['key']} is neither defaulted nor asked for"
             )
+
+
+# ─── Procedural skills list: the other required ESLE dropdown ────────────────
+#
+# Live evidence, 17 Sep 2026: a real ESLE draft saved with "Please select the
+# Procedural skills list you would like to link this event to (please select
+# N/A if not applicable)" left blank. The form offers "Not applicable", so a
+# blank is never a correct answer.
+
+from procedural_skills import (  # noqa: E402
+    find_not_applicable_option,
+    is_not_applicable_option,
+    resolve_procedural_skill,
+)
+
+# The ESLE control's own options, as reported from the live form.
+ESLE_PROCEDURAL_OPTIONS = [
+    "Please select",
+    "Not applicable",
+    "Arterial line insertion",
+    "Central venous line insertion",
+    "Chest drain insertion",
+    "Lumbar puncture",
+    "Other",
+]
+
+PROCEDURAL_DOM_ID = "131840e2-282d-4979-bfed-45deb28d4851"
+
+
+def _procedural_page(options, form_label="Procedural skills list"):
+    """A page showing one blank procedural-skills dropdown."""
+    page = MagicMock()
+    page.filled = []
+
+    async def evaluate(script, arg=None):
+        return [{
+            "id": PROCEDURAL_DOM_ID,
+            "label": form_label,
+            "options": list(options),
+            "selectedText": "",
+            "selectedValue": "?",
+        }]
+
+    page.evaluate = evaluate
+    return page
+
+
+def test_the_live_esle_spelling_of_not_applicable_is_recognised():
+    """The exact bug: "Not applicable" contains no "n/a", so it matched nothing."""
+    assert is_not_applicable_option("Not applicable")
+    assert find_not_applicable_option(ESLE_PROCEDURAL_OPTIONS) == "Not applicable"
+
+
+def test_every_seen_spelling_of_the_no_procedure_option_is_recognised():
+    for spelling in ("- n/a -", "N/A", "n/a", "NA", "Not applicable", "Not Applicable"):
+        assert is_not_applicable_option(spelling), spelling
+    for skill in ("Chest drain insertion", "Please select", "Lumbar puncture", ""):
+        assert not is_not_applicable_option(skill), skill
+
+
+def test_a_session_with_no_procedure_answers_not_applicable():
+    fields = {"reflection": TEAM_DECISION_SESSION}
+    assert resolve_procedural_skill(ESLE_PROCEDURAL_OPTIONS, fields) == "Not applicable"
+
+
+def test_a_session_that_names_a_procedure_selects_that_skill():
+    fields = {"reflection": (
+        "I was observed performing a chest drain insertion on a patient with a "
+        "tension pneumothorax, then debriefed with the consultant."
+    )}
+    assert resolve_procedural_skill(ESLE_PROCEDURAL_OPTIONS, fields) == "Chest drain insertion"
+
+
+def test_a_stated_skill_field_outranks_the_prose():
+    fields = {
+        "procedural_skill": "lumbar puncture",
+        "reflection": "I also watched a chest drain insertion earlier in the shift.",
+    }
+    assert resolve_procedural_skill(ESLE_PROCEDURAL_OPTIONS, fields) == "Lumbar puncture"
+
+
+def test_an_unknown_stated_skill_falls_back_to_not_applicable_not_blank():
+    fields = {"procedural_skill": "reduction of a shoulder dislocation"}
+    assert resolve_procedural_skill(ESLE_PROCEDURAL_OPTIONS, fields) == "Not applicable"
+
+
+def test_generic_options_are_never_inferred_from_prose():
+    fields = {"reflection": "We discussed other options with the patient."}
+    assert resolve_procedural_skill(ESLE_PROCEDURAL_OPTIONS, fields) == "Not applicable"
+
+
+def test_a_dropdown_offering_no_answer_at_all_is_reported_not_guessed():
+    assert resolve_procedural_skill(["Please select"], {"reflection": "Quiet shift."}) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("form_type", ["ESLE", "ESLE_ASSESS", "ESLE_2021", "ESLE_PART1_2"])
+async def test_esle_variants_all_answer_the_procedural_dropdown(form_type, monkeypatch):
+    """Both ESLE variants must answer it — the class behind the 2021 misses."""
+    page = _procedural_page(ESLE_PROCEDURAL_OPTIONS)
+    chosen = []
+
+    async def fake_fill_select(_page, dom_id, value):
+        chosen.append((dom_id, value))
+        return True
+
+    monkeypatch.setattr(kff, "_fill_select", fake_fill_select)
+    answered, unresolved = await kff._resolve_procedural_skill_selects(
+        page, form_type, {"reflection": NO_DOMAIN_EVIDENCE_SESSION},
+    )
+
+    assert answered == [PROCEDURAL_DOM_ID], f"{form_type} left the dropdown blank"
+    assert unresolved == []
+    assert chosen == [(PROCEDURAL_DOM_ID, "Not applicable")]
+
+
+@pytest.mark.asyncio
+async def test_a_procedural_esle_session_selects_the_real_skill(monkeypatch):
+    page = _procedural_page(ESLE_PROCEDURAL_OPTIONS)
+    chosen = []
+
+    async def fake_fill_select(_page, dom_id, value):
+        chosen.append((dom_id, value))
+        return True
+
+    monkeypatch.setattr(kff, "_fill_select", fake_fill_select)
+    answered, unresolved = await kff._resolve_procedural_skill_selects(
+        page, "ESLE_ASSESS",
+        {"reflection": "I performed a lumbar puncture under supervision."},
+    )
+
+    assert answered == [PROCEDURAL_DOM_ID]
+    assert unresolved == []
+    assert chosen == [(PROCEDURAL_DOM_ID, "Lumbar puncture")]
+
+
+@pytest.mark.asyncio
+async def test_a_dropdown_that_refuses_the_choice_is_reported_not_swallowed(monkeypatch):
+    page = _procedural_page(ESLE_PROCEDURAL_OPTIONS)
+
+    async def refuse(_page, _dom_id, _value):
+        return False
+
+    monkeypatch.setattr(kff, "_fill_select", refuse)
+    answered, unresolved = await kff._resolve_procedural_skill_selects(
+        page, "ESLE_ASSESS", {"reflection": NO_DOMAIN_EVIDENCE_SESSION},
+    )
+
+    assert answered == []
+    assert unresolved == ["Procedural skills list"]
+
+
+@pytest.mark.asyncio
+async def test_procedural_forms_still_require_a_real_skill(monkeypatch):
+    """DOPS and procedural logs must not be defaulted to "not applicable"."""
+    page = _procedural_page(ESLE_PROCEDURAL_OPTIONS)
+
+    async def fail(_page, _dom_id, _value):  # pragma: no cover - must not run
+        raise AssertionError("a procedural form was defaulted to not-applicable")
+
+    monkeypatch.setattr(kff, "_fill_select", fail)
+    for form_type in ("DOPS", "DOPS_ACCS_2021", "PROC_LOG"):
+        assert await kff._resolve_procedural_skill_selects(page, form_type, {}) == ([], [])
+
+
+@pytest.mark.asyncio
+async def test_guard_names_both_required_esle_dropdowns_when_left_blank():
+    """Either blank required dropdown must be named back, on every variant."""
+    flagged = [
+        "Which specific Domains of performance in this session would you like focused on in this ESLE?",
+        "Please select the Procedural skills list you would like to link this event to",
+    ]
+
+    for form_type in ("ESLE", "ESLE_ASSESS", "ESLE_2021", "ESLE_PART1_2"):
+        gaps = await kff._required_field_gaps(_guard_page(flagged), form_type)
+        assert len(gaps) == 2, f"{form_type}: {gaps}"
+        assert any(gap.startswith("Which specific Domains of performance") for gap in gaps)
+        assert any(gap.startswith("Please select the Procedural skills list") for gap in gaps)
+
+
+# ─── Sweep: every control the real ESLE form renders is accounted for ────────
+
+def test_every_control_on_the_captured_esle_form_is_handled():
+    """Nothing on the real ESLE DOM can be left untouched without failing here.
+
+    `backend/discovered_fields.json` is a capture of the live ESLE form, so
+    this is the form's own control inventory rather than a list someone
+    remembered. The procedural-skills dropdown was in that capture all along
+    and still filed blank, which is the miss this pins. A control added by
+    Kaizen later fails here until it is mapped, defaulted, or deliberately
+    listed below.
+    """
+    import json
+    import os
+
+    capture_path = os.path.join(os.path.dirname(__file__), "..", "discovered_fields.json")
+    with open(capture_path) as handle:
+        captured = json.load(handle)["ESLE_ASSESS"]["all_uuid_elements"]
+
+    field_map = {
+        **kff.COMMON_HEADER_FIELD_MAP,
+        **kff.FORM_FIELD_MAP["ESLE_PART1_2"],
+    }
+    mapped_ids = {kff._field_dom_id(dom_id) for dom_id in field_map.values()}
+
+    # Controls filled by a dedicated subsystem rather than the field map.
+    handled_elsewhere = {
+        "8bc374b7-4b07-4e16-984a-4af6eae806ef",  # curriculum tree — _fill_curriculum_for_form
+        "11dd6816-955c-4cfc-aeff-b0fb84ce6301",  # attachments — _attach_file, optional
+        PROCEDURAL_DOM_ID,                        # _resolve_procedural_skill_selects
+    }
+
+    unhandled = [
+        element["label"]
+        for element in captured
+        if element["id"] not in mapped_ids and element["id"] not in handled_elsewhere
+    ]
+    assert unhandled == [], f"ESLE controls nothing fills: {unhandled}"
+
+    # The procedural dropdown is handled by the page sweep, so it must stay in
+    # the sweep's known-id list — dropping it would silently un-handle it.
+    assert PROCEDURAL_DOM_ID in kff._PROCEDURAL_SKILL_NA_SELECT_IDS
