@@ -2670,6 +2670,32 @@ def _polish_qiat_fields(fields: dict, case_description: str) -> dict:
     return out
 
 
+def _polish_esle_fields(fields: dict, case_description: str) -> dict:
+    """Ground the required ESLE "Domains of performance" answer in the session.
+
+    Kaizen refuses to treat the draft as complete without this answer, but a
+    model list is only as good as the evidence behind it, so the claim is
+    re-checked against the session's own words (see esle_domains.py). When
+    nothing is evidenced the field stays empty and the normal missing-required
+    path asks the doctor rather than guessing on their behalf.
+    """
+    from esle_domains import resolve_esle_domains
+
+    out = dict(fields or {})
+    narrative = "\n".join(
+        str(value)
+        for key, value in out.items()
+        if key not in {"domains_of_performance", "curriculum_links", "key_capabilities"}
+        and isinstance(value, str)
+    )
+    out["domains_of_performance"] = resolve_esle_domains(
+        out.get("domains_of_performance"),
+        f"{case_description or ''}\n{narrative}",
+        doctor_text=case_description,
+    )
+    return out
+
+
 def _polish_acaf_fields(fields: dict, case_description: str) -> dict:
     """Move source-grounded learning into ACAF reflection when left blank."""
     out = dict(fields or {})
@@ -3635,6 +3661,8 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
         normalised = _polish_qiat_fields(normalised, case_description)
     if schema_key == "ACAF":
         normalised = _polish_acaf_fields(normalised, case_description)
+    if schema_key == "ESLE_ASSESS":
+        normalised = _polish_esle_fields(normalised, case_description)
 
     # Apply humanizer to ALL narrative fields before user sees the draft
     normalised = _humanize_all_fields(normalised)

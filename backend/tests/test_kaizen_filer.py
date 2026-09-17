@@ -1503,3 +1503,44 @@ def test_both_expand_loops_wait_first():
 
     source = inspect.getsource(kaizen_form_filer)
     assert source.count("await _await_curriculum_tree(page)") == 2
+
+
+# ─── Required-field guard through the real filing path ───────────────────────
+
+@pytest.mark.asyncio
+async def test_esle_save_is_not_reported_clean_while_kaizen_flags_a_required_field(
+    mock_playwright_ctx,
+):
+    """Observed live (2026-09-17): an ESLE saved with the required "Domains of
+    performance" question blank was still reported as a clean save with seven
+    fields completed. A draft Kaizen itself marks incomplete is partial.
+    """
+    from kaizen_form_filer import _REQUIRED_FIELD_MARKER_JS, _WIDGET_STATE_JS
+
+    mock_page = mock_playwright_ctx
+    original_evaluate = mock_page.evaluate.side_effect
+
+    async def evaluate(expr, *args):
+        if expr == _REQUIRED_FIELD_MARKER_JS:
+            return [
+                "Which specific Domains of performance in this session would "
+                "you like focused on in this ESLE?"
+            ]
+        if expr == _WIDGET_STATE_JS:
+            return {"missing": False, "options": [], "chips": [], "text": ""}
+        return await original_evaluate(expr, *args)
+
+    mock_page.evaluate = AsyncMock(side_effect=evaluate)
+
+    with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
+            with patch("kaizen_form_filer._verify_entry_saved", AsyncMock(return_value=True)):
+                result = await file_to_kaizen(
+                    "ESLE_ASSESS",
+                    {"reflection": "Synthetic ESLE reflection for an offline test."},
+                    "user",
+                    "pass",
+                )
+
+    assert result["status"] == "partial"
+    assert any("Domains of performance" in str(item) for item in result["skipped"])

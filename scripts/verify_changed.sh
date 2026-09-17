@@ -64,6 +64,7 @@ JOURNEY_TESTS=(
   tests/test_filing_reliability.py
   tests/test_filing_attempt_log.py
   tests/test_curriculum_filing_recovery.py
+  tests/test_esle_domains.py
   # 3. Telegram channel contract / callback state safety
   tests/test_channel_contract.py
   tests/test_channel_reply_policy.py

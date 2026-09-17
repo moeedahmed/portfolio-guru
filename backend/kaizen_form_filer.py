@@ -841,6 +841,9 @@ FORM_FIELD_MAP = {
         "stage_of_training": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
         "date_of_esle": "2c86886b-0a18-4771-9b25-6c2272fdad6b",
         "reflection": "488e8e63-300d-4ed9-a4f4-eaee53608f05",
+        # Required custom multi-select widget (a DIV, not a SELECT) — see
+        # _fill_domain_multiselect.
+        "domains_of_performance": "7683f17f-cc85-47fe-b0fa-e6ad817f0045",
     },
     # ESLE Reflection — supplementary reflective entry. Does not go to assessor.
     "ESLE_REFLECTION": {
@@ -1245,6 +1248,15 @@ def normalise_fields_for_deterministic_filing(form_type: str, fields: dict) -> d
         out["resource_details"] = _append_section(out.get("resource_details"), "Learning activity type", value)
         out.pop("learning_activity_type", None)
 
+    # Resolved through filing_form_base so every ESLE variant — including
+    # ESLE_2021, which shares the ESLE_PART1_2 field map — gets the same pass.
+    elif filing_form_base(form_type) == "ESLE_PART1_2" and out.get("domains_of_performance"):
+        # "All Domains" is exclusive on the Kaizen form; resolve the selection
+        # here too so an edited or restored draft cannot reach the widget with
+        # a combination the form forbids.
+        from esle_domains import normalise_domains
+        out["domains_of_performance"] = normalise_domains(out["domains_of_performance"])
+
     elif handling_key == "QIAT":
         for key in ("pdp_summary", "qi_engagement", "qi_understanding", "reflection", "next_pdp"):
             if isinstance(out.get(key), (list, tuple, set, dict)):
@@ -1570,6 +1582,21 @@ _FORM_FIELD_MAP_VARIANT_BASES = {
 for _variant, _base in _FORM_FIELD_MAP_VARIANT_BASES.items():
     if _base in FORM_FIELD_MAP:
         FORM_FIELD_MAP.setdefault(_variant, FORM_FIELD_MAP[_base])
+
+
+def filing_form_base(form_type: str) -> str:
+    """The form whose DOM this code is actually driving.
+
+    A ``_2021`` curriculum variant is a different Kaizen form code but the same
+    rendered form, and it is resolved by ``_FORM_FIELD_MAP_VARIANT_BASES``
+    rather than by ``FORM_TYPE_ALIASES``. Anything keyed on "which form is this
+    really" has to apply both, or it silently treats the variant as an unknown
+    form: ``ESLE_2021`` filed through the ``ESLE_PART1_2`` field map while the
+    post-save required-field guard skipped it entirely.
+    """
+    canonical = canonical_form_type(form_type)
+    base = _FORM_FIELD_MAP_VARIANT_BASES.get(canonical, canonical)
+    return canonical_form_type(base)
 
 
 # ─── JS snippets (passed as separate strings, NEVER f-string interpolated) ───
@@ -2347,6 +2374,155 @@ async def _fill_select(page: Page, dom_id: Any, value: str) -> bool:
             return False
 
 
+# ─── Custom (DIV-based) multi-select widgets ─────────────────────────────────
+#
+# Kaizen renders a few required questions as an Angular widget wrapped in a
+# DIV rather than a <select>, so the generic select/text fillers cannot touch
+# them and the field silently stays blank on the saved draft. ESLE's "Domains
+# of performance" question is one of these.
+
+_MULTISELECT_WIDGET_FIELDS = frozenset({"domains_of_performance"})
+
+_WIDGET_STATE_JS = """(domId) => {
+    const root = document.getElementById(domId);
+    if (!root) return {missing: true};
+    const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+    const rows = Array.from(root.querySelectorAll(
+        '[role="option"], li, label, option, .ui-select-choices-row, .dropdown-item'
+    ));
+    const options = [];
+    const seen = new Set();
+    for (const row of rows) {
+        const text = norm(row.innerText || row.textContent);
+        if (!text || text.length > 80 || seen.has(text)) continue;
+        seen.add(text);
+        const box = row.querySelector('input[type="checkbox"]') ||
+                    (row.tagName === 'INPUT' ? row : null);
+        let selected;
+        if (box) {
+            selected = !!box.checked;
+        } else if (row.tagName === 'OPTION') {
+            selected = !!row.selected;
+        } else {
+            selected = row.getAttribute('aria-selected') === 'true' ||
+                       /(^|\\s)(selected|active|ui-select-choices-row-active)(\\s|$)/.test(row.className || '');
+        }
+        options.push({text: text, selected: selected});
+    }
+    const chips = Array.from(root.querySelectorAll(
+        '.ui-select-match-item, .select2-search-choice, .chip, .tag, .badge, .selected-item'
+    )).map((el) => norm(el.innerText || el.textContent)).filter(Boolean);
+    return {missing: false, options: options, chips: chips, text: norm(root.innerText || root.textContent)};
+}"""
+
+_WIDGET_PICK_JS = """({domId, wanted}) => {
+    const root = document.getElementById(domId);
+    if (!root) return false;
+    const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const target = norm(wanted);
+    const rows = Array.from(root.querySelectorAll(
+        '[role="option"], li, label, option, .ui-select-choices-row, .dropdown-item'
+    ));
+    for (const row of rows) {
+        if (norm(row.innerText || row.textContent) !== target) continue;
+        const box = row.querySelector('input[type="checkbox"]') ||
+                    (row.tagName === 'INPUT' ? row : null);
+        if (box) {
+            if (!box.checked) box.click();
+            box.dispatchEvent(new Event('change', {bubbles: true}));
+            return true;
+        }
+        if (row.tagName === 'OPTION') {
+            row.selected = true;
+            const select = row.closest('select');
+            if (select) select.dispatchEvent(new Event('change', {bubbles: true}));
+            return true;
+        }
+        row.click();
+        row.dispatchEvent(new Event('change', {bubbles: true}));
+        return true;
+    }
+    return false;
+}"""
+
+
+def _widget_selected_values(state: Any) -> List[str]:
+    """Selected option labels reported by a custom multi-select widget."""
+    if not isinstance(state, dict) or state.get("missing"):
+        return []
+    selected = [
+        str(option.get("text") or "").strip()
+        for option in (state.get("options") or [])
+        if isinstance(option, dict) and option.get("selected")
+    ]
+    chips = [str(chip).strip() for chip in (state.get("chips") or []) if str(chip).strip()]
+    merged: List[str] = []
+    for value in selected + chips:
+        if value and value not in merged:
+            merged.append(value)
+    return merged
+
+
+async def _read_widget_state(page: Page, dom_id: str) -> Dict[str, Any]:
+    try:
+        state = await page.evaluate(_WIDGET_STATE_JS, dom_id)
+    except Exception as exc:
+        logger.warning(f"Could not read multi-select widget {dom_id}: {exc}")
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+async def _fill_domain_multiselect(page: Page, field_target: Any, values: Any) -> bool:
+    """Select options on a DIV-wrapped Angular multi-select.
+
+    The widget has to be opened before its option rows exist, so the toggle is
+    clicked first and each wanted option is then matched by its visible label.
+    Returns True only when the widget itself reports every wanted option as
+    selected — a click that Angular ignored must not be reported as filled.
+    """
+    from esle_domains import normalise_domains
+
+    wanted = normalise_domains(values)
+    if not wanted:
+        return False
+
+    dom_id = _field_dom_id(field_target)
+    if not dom_id:
+        return False
+
+    scope = f'[id="{dom_id}"]'
+    await _click_first_visible(page, [
+        f"{scope} .ui-select-toggle",
+        f"{scope} .dropdown-toggle",
+        f"{scope} button",
+        f"{scope} input",
+        scope,
+    ])
+    await asyncio.sleep(1)
+
+    for value in wanted:
+        try:
+            picked = await page.evaluate(_WIDGET_PICK_JS, {"domId": dom_id, "wanted": value})
+        except Exception as exc:
+            logger.warning(f"Multi-select pick failed for {dom_id} = {value}: {exc}")
+            picked = False
+        if not picked:
+            logger.warning(f"Multi-select option not found for {dom_id}: {value}")
+        await asyncio.sleep(0.5)
+
+    state = await _read_widget_state(page, dom_id)
+    selected = {value.lower() for value in _widget_selected_values(state)}
+    missing = [value for value in wanted if value.lower() not in selected]
+    if missing:
+        logger.warning(
+            "Multi-select %s did not confirm %s (selected: %s)",
+            dom_id, missing, sorted(selected),
+        )
+        return False
+    logger.info(f"Multi-select set: {dom_id} = {wanted}")
+    return True
+
+
 _PROCEDURAL_SKILL_NA_SELECT_IDS = (
     "eed0e8dc-075d-4661-aea5-2c3238af4c5b",  # ACCS Procedural skills
     "31bd55b7-0e32-4918-8cc0-4ba33af83772",  # Intermediate Procedural skills
@@ -3042,6 +3218,12 @@ async def _verify_fields(page: Page, form_type: str, fields: dict, field_map: di
         dom_id = _field_dom_id(field_map.get(key))
         if not dom_id or dom_id in ("startDate", "endDate"):
             continue
+        if key in _MULTISELECT_WIDGET_FIELDS:
+            # The widget's own text includes every option label, so "has text"
+            # proves nothing here — ask it what is selected.
+            if not _widget_selected_values(await _read_widget_state(page, dom_id)):
+                issues.append(f"{key} has no selected option (dom_id={dom_id})")
+            continue
         val = await page.evaluate(
             "(domId) => { var el = document.getElementById(domId); return el ? (el.value || el.textContent || '').trim() : null; }",
             dom_id
@@ -3213,6 +3395,34 @@ async def _verify_filing_qa(
 
     for key, field_target in field_map.items():
         dom_id = _field_dom_id(field_target)
+        if key in _MULTISELECT_WIDGET_FIELDS:
+            # A DIV widget's textContent includes its own option labels, so the
+            # generic "has text" read would call an untouched widget filled.
+            # Ask the widget which options are actually selected instead.
+            widget_state = await _read_widget_state(page, dom_id)
+            selected = _widget_selected_values(widget_state)
+            field_states[key] = {"tag": "DIV", "value": ", ".join(selected)}
+            expected_value = expected_fields.get(key)
+            if selected:
+                filled.append(key)
+            elif _is_meaningful(expected_value):
+                empty_expected.append(key)
+                gaps.append({
+                    "field": key,
+                    "dom_id": dom_id,
+                    "form_type": form_type,
+                    "kind": "multi_select_widget",
+                    "missing_dom": bool(widget_state.get("missing")),
+                    "expected_preview": _expected_preview(expected_value),
+                    "reason": (
+                        "dom_element_missing" if widget_state.get("missing")
+                        else "value_not_persisted"
+                    ),
+                })
+            else:
+                empty_acceptable.append(key)
+            continue
+
         try:
             state = await page.evaluate(_QA_READ_FIELD_JS, dom_id)
         except Exception as exc:
@@ -3374,6 +3584,77 @@ async def _verify_filing_qa(
     }
 
 
+# ─── Required-field guard (post-save) ────────────────────────────────────────
+#
+# Field-map-driven QA can only see fields the map knows about, so a required
+# control that was never mapped — ESLE's "Domains of performance" widget was
+# exactly this — stays invisible and the save is reported as complete while
+# Kaizen shows "This field is required" on the draft. This guard asks the
+# saved form itself which required questions it is still complaining about.
+#
+# Scoped to ESLE for now because that is the form with observed evidence of
+# the miss. Widening it to every form is a one-line change to
+# _REQUIRED_FIELD_GUARD_FORMS, but it should only be done with a real saved
+# draft per form to check Kaizen does not mark optional-but-untouched
+# controls the same way.
+#
+# Membership is checked through filing_form_base, so a _2021 curriculum variant
+# of a guarded form is guarded too. Name base forms here, not variants.
+
+_REQUIRED_FIELD_GUARD_FORMS = frozenset({"ESLE_PART1_2", "ESLE_REFLECTION"})
+
+_REQUIRED_FIELD_MARKER_JS = """() => {
+    const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+    const labels = [];
+    const nodes = Array.from(document.querySelectorAll('body *'));
+    for (const node of nodes) {
+        if (node.children && node.children.length) continue;
+        const text = norm(node.innerText || node.textContent);
+        if (!/this field is required/i.test(text)) continue;
+        if (node.offsetParent === null && (!node.getClientRects || node.getClientRects().length === 0)) continue;
+        let container = node.parentElement;
+        let label = '';
+        for (let depth = 0; container && depth < 6; depth++) {
+            const labelEl = container.querySelector('label, .control-label, legend, h4, h5');
+            if (labelEl) {
+                const candidate = norm(labelEl.innerText || labelEl.textContent);
+                if (candidate && !/this field is required/i.test(candidate)) {
+                    label = candidate;
+                    break;
+                }
+            }
+            container = container.parentElement;
+        }
+        label = label.replace(/[*★\\s]+$/, '').trim();
+        if (label && labels.indexOf(label) === -1) labels.push(label);
+    }
+    return labels;
+}"""
+
+
+async def _required_field_gaps(page: Page, form_type: str) -> List[str]:
+    """Required questions the saved Kaizen draft still flags as unanswered."""
+    # filing_form_base, not canonical_form_type: the _2021 variants share this
+    # form's DOM and so need the same guard.
+    if filing_form_base(form_type) not in _REQUIRED_FIELD_GUARD_FORMS:
+        return []
+    try:
+        labels = await page.evaluate(_REQUIRED_FIELD_MARKER_JS)
+    except Exception as exc:
+        logger.warning(f"Required-field guard could not read {form_type} draft: {exc}")
+        return []
+    if not isinstance(labels, list):
+        return []
+    gaps = []
+    for label in labels:
+        text = _trim_to_word_boundary(str(label).strip(), 60)
+        if text and text not in gaps:
+            gaps.append(text)
+    if gaps:
+        logger.warning(f"Required fields still blank on saved {form_type} draft: {gaps}")
+    return gaps
+
+
 # ─── Main entry point ────────────────────────────────────────────────────────
 
 async def fill_kaizen_form(
@@ -3526,6 +3807,13 @@ async def fill_kaizen_form(
                 skipped.append(key)
                 continue
 
+            if key in _MULTISELECT_WIDGET_FIELDS:
+                if await _fill_domain_multiselect(page, dom_id, value):
+                    filled.append(key)
+                else:
+                    errors.append(f"{key}: multi-select fill failed")
+                continue
+
             # Detect field type
             tag = await _field_tag(page, dom_id, field_key=key)
 
@@ -3611,6 +3899,9 @@ async def fill_kaizen_form(
 
         # ─── STEP 7: Save ────────────────────────────────────────────────────
         saved = await _save_form(page, save_as_draft)
+        if saved:
+            for required_gap in await _required_field_gaps(page, form_type):
+                errors.append(f"required field still blank on the saved draft: {required_gap}")
         if not saved:
             errors.append("Save may have failed")
         elif not save_as_draft:
@@ -3809,6 +4100,9 @@ async def _fill_field_legacy(page: Page, dom_id: Any, value: Any, field_key: str
     try:
         if field_key == "stage_of_training":
             return await _fill_stage(page, dom_id, str(value))
+
+        if field_key in _MULTISELECT_WIDGET_FIELDS:
+            return await _fill_domain_multiselect(page, dom_id, value)
 
         field_target = dom_id
         el = await _first_field_locator(page, field_target, field_key=field_key)
@@ -4718,6 +5012,15 @@ async def file_to_kaizen(
 
             if status == "success":
                 status = "partial"
+
+        # A draft Kaizen itself still marks as incomplete is never a clean
+        # save, whatever the field map managed to fill.
+        if saved and not submit:
+            for required_gap in await _required_field_gaps(page, form_type):
+                if required_gap not in skipped:
+                    skipped.append(required_gap)
+                if status == "success":
+                    status = "partial"
 
         # Log filing result for the autonomous gap-fix loop
         from filing_result_logger import log_filing_result
