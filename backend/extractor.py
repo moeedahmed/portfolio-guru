@@ -770,6 +770,9 @@ def extract_explicit_form_type(text: str, *, require_intent: bool = True) -> str
     1. PRIMARY phrases (e.g. "procedure log", "case-based discussion") are
        full-form names. If any appears anywhere in the text, that's a strong
        enough signal — return that form, no intent phrase required.
+    1b. PRIMARY word codes (e.g. "esle") are acronyms that name exactly one
+       form and mean nothing else in English. They match on a word boundary
+       only, and like the primary phrases they need no intent phrase.
     2. SECONDARY keys (e.g. "stat", "cbd") are short codes that only count
        when (a) an intent phrase is present and (b) the code appears as a
        whole word (word boundary), not as part of "statin"/"status"/etc.
@@ -800,11 +803,27 @@ def extract_explicit_form_type(text: str, *, require_intent: bool = True) -> str
         "US_CASE":      [
             "ultrasound case", "ultrasound log", "ultrasound logs", "us case", "pocus case"
         ],
-        "ESLE_ASSESS":  ["significant learning event"],
+        "ESLE_ASSESS":  [
+            "significant learning event",
+            # An ESLE *is* an (extended) supervised learning event, so the
+            # spelled-out name must name the form as reliably as the acronym.
+            "extended supervised learning event",
+            "emergency medicine supervised learning event",
+            "supervised learning event",
+        ],
         "COMPLAINT":    ["complaint reflection", "complaint form"],
         "SERIOUS_INC":  ["serious incident", "si reflection", "never event"],
         "EDU_ACT":      ["educational activity", "teaching attended"],
         "FORMAL_COURSE":["formal course", "atls course", "apls course", "als course", "epals"],
+    }
+
+    # Acronyms that name exactly one form and have no ordinary-English meaning,
+    # so they are as strong a signal as a full form name. Matched on a word
+    # boundary (never as a substring) and, like the primary phrases, without
+    # needing an intent phrase — "I did a 45-minute ESLE" names the form even
+    # though it contains no "do a"/"file a" wording.
+    primary_word_codes = {
+        "ESLE_ASSESS": ["esle", "esles"],
     }
 
     primary_hits = []
@@ -813,6 +832,11 @@ def extract_explicit_form_type(text: str, *, require_intent: bool = True) -> str
             idx = text_lower.find(kw)
             if idx != -1:
                 primary_hits.append((idx, len(kw), form_type))
+    for form_type, codes in primary_word_codes.items():
+        for code in codes:
+            match = re.search(rf'\b{re.escape(code)}\b', text_lower)
+            if match:
+                primary_hits.append((match.start(), len(code), form_type))
     if primary_hits:
         primary_hits.sort(key=lambda h: (h[0], -h[1]))
         return primary_hits[0][2]
@@ -1661,6 +1685,90 @@ def _prefer_dops_for_observed_procedure(
     return _dedupe_recommendations([dops, proc_log, *remaining])[:3]
 
 
+# The doctor names the event outright. An ESLE *is* an extended supervised
+# learning event, so either wording is a direct statement of form type.
+_ESLE_NAMED_RE = re.compile(
+    r"\besles?\b|\b(?:extended |emergency medicine )?supervised learning event"
+)
+
+# Shift/area-level responsibility: the doctor was leading, covering, in charge
+# of, or running a clinical area or a shift — the setting an ESLE assesses.
+# Deliberately requires a responsibility verb next to a named area/shift so an
+# ordinary single-patient case (which never says who was covering what) cannot
+# match.
+_ESLE_AREA_RE = re.compile(
+    r"\b(?:cover(?:ing|ed)?|lead(?:ing)?|led|running|ran|in charge of|"
+    r"co-?ordinat(?:ing|ed))\b[^.;]{0,40}?\b"
+    r"(?:majors|minors|resus(?:citation)?|the department|the floor|shop floor|"
+    r"the shift|the whole shift|the take|triage|the ed|the emergency department)\b"
+)
+
+# Being observed working across a shift rather than on one encounter.
+_ESLE_OBSERVED_RE = re.compile(
+    r"\b(?:observed|observing|watched|shadowed)\b[^.;]{0,40}?\b"
+    r"(?:my shift|the shift|me work|me working|the majors|the resus|"
+    r"the resuscitation area|the department|the shop floor)\b"
+    r"|\bsupernumerary\b"
+)
+
+
+def _has_supervised_shift_signal(case_description: str) -> bool:
+    """True when the text describes ESLE-shaped shift/area-level practice.
+
+    Three independent routes, any of which is enough: the doctor names an ESLE,
+    describes leading/covering/running a clinical area or shift, or describes
+    being observed across a shift rather than for one encounter.
+    """
+    text = f" {case_description or ''} ".lower()
+    return bool(
+        _ESLE_NAMED_RE.search(text)
+        or _ESLE_AREA_RE.search(text)
+        or _ESLE_OBSERVED_RE.search(text)
+    )
+
+
+def _ensure_esle_for_supervised_shift(
+    recommendations: list[FormTypeRecommendation],
+    case_description: str,
+) -> list[FormTypeRecommendation]:
+    """Keep ESLE on the table for shift/area-level supervision cases.
+
+    The recommender prompt is heavily biased against ESLE (a deliberate guard
+    against the word "learning" triggering it), and in practice that bias also
+    suppresses genuine ESLEs: a case describing covering majors and running a
+    queue came back as CBD + Reflective Log with ESLE absent. This adds
+    ESLE back without removing the model's picks — CBD can still be offered,
+    ESLE just must not be missing.
+    """
+    if not _has_supervised_shift_signal(case_description):
+        return recommendations
+    if any(
+        canonical_form_type(rec.form_type) == "ESLE_ASSESS"
+        for rec in recommendations
+    ):
+        return recommendations
+
+    named = bool(_ESLE_NAMED_RE.search(f" {case_description or ''} ".lower()))
+    esle = FormTypeRecommendation(
+        form_type="ESLE_ASSESS",
+        rationale=(
+            "You name an ESLE for this event."
+            if named else
+            "You describe leading, covering or being observed across a clinical "
+            "area or shift — the non-technical skills an ESLE assesses."
+        ),
+        uuid=FORM_UUIDS.get("ESLE_ASSESS"),
+    )
+    # A named ESLE leads. An inferred one slots in behind the model's best fit
+    # so an existing correct top pick (e.g. QIAT for a QI project) still leads
+    # and ESLE is simply never absent.
+    ordered = (
+        [esle, *recommendations] if named or not recommendations
+        else [recommendations[0], esle, *recommendations[1:]]
+    )
+    return _dedupe_recommendations(ordered)[:3]
+
+
 def _deterministic_recommend_form_types(
     case_description: str,
     input_source: str = "text",
@@ -2018,7 +2126,11 @@ ESLE (Extended Supervised Learning Event)
 - NOT for: Individual case write-ups. Not for single clinical encounters. Not for "learning from" a case.
   The word "learning" in a description does NOT trigger ESLE.
 - Suggest when: Description explicitly mentions shift-level observation, NTS feedback, a consultant
-  watching them work across a session, or the specific NTS domains listed above.
+  watching them work across a session, or the specific NTS domains listed above. ALSO suggest when
+  the trainee says they were covering, leading, running or in charge of a clinical area (majors,
+  resus, the shop floor) or the shift — prioritising patients, escalating, supervising juniors and
+  handing over are exactly the four NTS domains. If the trainee calls the event an ESLE or a
+  supervised learning event, ESLE must be in your list.
 
 MSF (Multi-Source Feedback)
 - Purpose: Collect 360-degree feedback on generic professional skills (communication, leadership,
@@ -2177,9 +2289,11 @@ MGMT_* (Management Portfolio forms — Rota, Complaint, Critical Incident, Risk,
    cognitive bias, professional development) — REFLECT_LOG is the PRIMARY suggestion, not CBD.
    CBD and REFLECT_LOG can both appear, but reflection-framed descriptions → REFLECT_LOG first.
 
-4. ESLE is one of the hardest to trigger correctly. Only suggest it if the description explicitly mentions
-   shift-level observation, a consultant watching across multiple cases/interactions, or NTS feedback.
-   A single case — however complex — does not warrant ESLE.
+4. ESLE needs a shift- or area-level event, not a keyword. Suggest it when the description mentions
+   shift-level observation, a consultant watching across multiple cases/interactions, NTS feedback,
+   or the trainee covering/leading/running/being in charge of a clinical area or the shift. A single
+   case — however complex — does not warrant ESLE on its own. But the word "learning" alone never
+   triggers ESLE, and a trainee who names an ESLE always gets one.
 
 5. Prefer specificity. If DOPS clearly applies, suggest DOPS over CBD. If US_CASE applies,
    suggest it over CBD. CBD is a fallback for case management when no more specific form fits.
@@ -2236,6 +2350,7 @@ MGMT_* (Management Portfolio forms — Rota, Complaint, Critical Incident, Risk,
         )
     recommendations = _prefer_dops_for_observed_procedure(recommendations, case_description)
     recommendations = _prefer_qiat_for_qi_project(recommendations, case_description)
+    recommendations = _ensure_esle_for_supervised_shift(recommendations, case_description)
 
     return recommendations
 
