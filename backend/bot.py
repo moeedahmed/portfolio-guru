@@ -11382,6 +11382,7 @@ async def _regenerate_active_draft_with_feedback(
                     current_draft=current_draft_text,
                     voice_profile_json=vp,
                     input_source=context.user_data.get("case_input_source", "text"),
+                    previous_key_capabilities=list(getattr(draft, "key_capabilities", None) or []),
                 ),
                 timeout=45,
             )
@@ -14726,6 +14727,7 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
                     current_draft=current_draft_text,
                     voice_profile_json=vp,
                     input_source=context.user_data.get("case_input_source", "text"),
+                    previous_key_capabilities=list(getattr(draft, "key_capabilities", None) or []),
                 ),
                 timeout=45,
             )
@@ -14983,6 +14985,7 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 current_draft=current_draft_text,
                 voice_profile_json=vp,
                 input_source=context.user_data.get("case_input_source", "text"),
+                previous_key_capabilities=list(getattr(draft, "key_capabilities", None) or []),
             ), timeout=45)
         else:
             updated = await asyncio.wait_for(extract_form_data(

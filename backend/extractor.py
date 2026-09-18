@@ -3245,6 +3245,62 @@ Pre-preview quality check:
 """
 
 
+_KC_EDIT_DROP_FIELD = "dropped_key_capabilities"
+
+
+def _kc_identity(capability) -> str:
+    """Whitespace/case-insensitive comparison key for a Key Capability string."""
+    return " ".join(str(capability or "").split()).casefold()
+
+
+def _build_kc_edit_retention_instruction(previous_key_capabilities) -> str:
+    listed = "\n".join(f"- {kc}" for kc in previous_key_capabilities)
+    return f"""
+
+===== KEY CAPABILITIES ALREADY ON THIS DRAFT =====
+{listed}
+
+These were selected from the same clinical facts you are reading again now — the case description has not changed.
+- Add a Key Capability when the feedback newly evidences one.
+- Drop one of the capabilities listed above ONLY if the user's feedback asks to remove or change the curriculum links, or corrects or contradicts the clinical fact that capability rested on.
+- If you drop one, you MUST also return a top-level JSON field "{_KC_EDIT_DROP_FIELD}": a list of objects {{"capability": "<exact capability text from the list above>", "reason": "<the user's own words, or the corrected fact, that removes its support>"}}.
+- A capability you simply leave out, with no entry in that field, is restored automatically. Omitting one silently changes nothing.
+"""
+
+
+def _apply_kc_edit_retention(selected, previous_key_capabilities, drop_claims):
+    """Restore previously-selected Key Capabilities dropped without a stated reason.
+
+    On the edit path `case_description` is byte-identical to the one the original
+    draft was built from (bot.py keeps the case unchanged and puts the doctor's
+    reply in `edit_feedback`), so the facts that supported a capability are still
+    there unless the feedback removed that support. The model may still drop one,
+    but only by naming it with a reason in `dropped_key_capabilities`; a silent
+    re-roll over the same unchanged facts cannot lose a capability. Additions and
+    ordering of the model's own selection are left alone.
+    """
+    if not previous_key_capabilities:
+        return selected
+    justified = set()
+    if isinstance(drop_claims, list):
+        for claim in drop_claims:
+            if isinstance(claim, dict):
+                capability = claim.get("capability")
+                reason = str(claim.get("reason") or "").strip()
+            else:
+                capability, reason = claim, ""
+            if capability and reason:
+                justified.add(_kc_identity(capability))
+    kept = {_kc_identity(kc) for kc in selected}
+    restored = list(selected)
+    for previous in previous_key_capabilities:
+        identity = _kc_identity(previous)
+        if identity and identity not in kept and identity not in justified:
+            restored.append(previous)
+            kept.add(identity)
+    return restored
+
+
 async def extract_cbd_data(
     case_description: str,
     edit_feedback: str = "",
@@ -3253,6 +3309,7 @@ async def extract_cbd_data(
     leave_missing_blank: bool = True,
     preserve_original_content: bool = True,
     input_source: str = "text",
+    previous_key_capabilities=None,
 ) -> CBDData:
     """Extract structured CBD data from free-text case description.
 
@@ -3398,6 +3455,10 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
 - Sound like a confident registrar writing after a shift, not an AI summarising a textbook
 """
 
+    previous_key_capabilities = [kc for kc in (previous_key_capabilities or []) if str(kc or "").strip()]
+    if edit_feedback and previous_key_capabilities:
+        system_prompt += _build_kc_edit_retention_instruction(previous_key_capabilities)
+
     prompt = f"{system_prompt}\n\nCase description:\n{case_description}"
     if edit_feedback and current_draft:
         prompt += f"\n\nCurrent draft (improve this based on the feedback below):\n{current_draft}\n\nUser feedback:\n{edit_feedback}"
@@ -3452,6 +3513,12 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
         "curriculum_links": _normalise_list_field(data.get("curriculum_links")),
         "key_capabilities": _normalise_list_field(data.get("key_capabilities")),
     }
+    if edit_feedback and previous_key_capabilities:
+        normalised["key_capabilities"] = _apply_kc_edit_retention(
+            normalised["key_capabilities"],
+            previous_key_capabilities,
+            data.get(_KC_EDIT_DROP_FIELD),
+        )
     # The model returns curriculum_links and key_capabilities as two separate
     # JSON fields, which can drift apart (e.g. curriculum_links naming only
     # one SLO while key_capabilities lists KCs across several). The preview
