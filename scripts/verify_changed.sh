@@ -57,6 +57,7 @@ JOURNEY_TESTS=(
   # 1. Case capture -> extraction -> form recommendation
   tests/test_conversational_case_engine.py
   tests/test_deterministic_form_recommender.py
+  tests/test_esle_routing.py
   tests/test_form_recommender_per_shape.py
   tests/test_vnext_form_recommender.py
   # 2. Draft preview -> approval -> Kaizen draft save
