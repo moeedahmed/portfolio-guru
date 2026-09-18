@@ -145,70 +145,60 @@ def test_deterministic_recommender_prefers_accs_dops_over_generic_dops():
     assert recs[0].form_type == "DOPS_ACCS"
 
 
-def test_deterministic_recommender_no_formal_dops_stays_procedure_log():
-    recs = extractor._deterministic_recommend_form_types(
+def _declined_for_the_model(description: str) -> bool:
+    """True when the pre-pass steps aside so the AI recommender reads the case.
+
+    Moeed's decision, 18 September 2026: clinical, teaching, audit, course and
+    research wording no longer picks a form from keywords. A single passing word
+    ("pocus", "chest drain", "life support") used to select the form while the
+    model never read the case, so these descriptions now reach the recommender,
+    which holds the authoritative RCEM definitions.
+    """
+    return extractor._deterministic_recommend_form_types(description) is None
+
+
+def test_procedure_without_formal_dops_is_left_to_the_model():
+    assert _declined_for_the_model(
         "I performed a shoulder reduction in ED with senior advice available but no formal DOPS."
     )
 
-    assert recs is not None
-    assert recs[0].form_type == "PROC_LOG"
 
-
-def test_deterministic_recommender_distinguishes_attended_teaching_from_delivered():
-    recs = extractor._deterministic_recommend_form_types(
+def test_attended_teaching_is_left_to_the_model():
+    assert _declined_for_the_model(
         "I attended a regional paediatric emergency medicine teaching day yesterday."
     )
 
-    assert recs is not None
-    assert recs[0].form_type == "EDU_ACT"
 
-
-def test_exact_form_request_does_not_match_teach_inside_teaching():
-    recs = extractor._deterministic_recommend_form_types(
+def test_teaching_word_inside_another_phrase_is_left_to_the_model():
+    assert _declined_for_the_model(
         "I need a portfolio entry after attending a safeguarding teaching day."
     )
 
-    assert recs is not None
-    assert recs[0].form_type != "TEACH"
 
-
-def test_deterministic_recommender_distinguishes_observed_teaching():
-    recs = extractor._deterministic_recommend_form_types(
+def test_observed_teaching_is_left_to_the_model():
+    assert _declined_for_the_model(
         "A consultant observed me teaching an F2 doctor how to assess ankle injuries."
     )
 
-    assert recs is not None
-    assert recs[0].form_type == "TEACH_OBS"
 
-
-def test_deterministic_recommender_handles_research_and_pdp():
-    research = extractor._deterministic_recommend_form_types(
+def test_research_and_pdp_are_left_to_the_model():
+    assert _declined_for_the_model(
         "I recruited patients to an ED research study after GCP training."
     )
-    image_research = extractor._deterministic_recommend_form_types(
+    assert extractor._deterministic_recommend_form_types(
         "Context supplied with image: the image is supporting evidence only; "
         "I recruited patients to an ED research study after GCP training.",
         input_source="image",
-    )
-    pdp = extractor._deterministic_recommend_form_types(
+    ) is None
+    assert _declined_for_the_model(
         "My PDP goal is to improve paediatric safeguarding confidence."
     )
 
-    assert research is not None
-    assert research[0].form_type == "RESEARCH"
-    assert image_research is not None
-    assert image_research[0].form_type == "RESEARCH"
-    assert pdp is not None
-    assert pdp[0].form_type == "PDP"
 
-
-def test_deterministic_recommender_keeps_plain_audit_out_of_qiat():
-    recs = extractor._deterministic_recommend_form_types(
+def test_plain_audit_is_left_to_the_model():
+    assert _declined_for_the_model(
         "I completed an audit of capacity documentation and presented the results."
     )
-
-    assert recs is not None
-    assert recs[0].form_type == "AUDIT"
 
 
 def test_deterministic_date_fill_uses_explicit_relative_date_only():

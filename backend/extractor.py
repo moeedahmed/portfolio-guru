@@ -1773,184 +1773,46 @@ def _deterministic_recommend_form_types(
     case_description: str,
     input_source: str = "text",
 ) -> list[FormTypeRecommendation] | None:
-    """Return high-confidence form recommendations without an LLM.
+    """Return a form recommendation only when the user explicitly names one.
 
-    This pre-pass is deliberately conservative. It only handles cases where the
-    user has effectively named the portfolio event type or described an
-    unambiguous procedural/QI/course signal. General clinical cases continue to
-    the AI recommender.
+    Narrowed on 2026-09-18 (Moeed's decision). The clinical keyword pre-pass that
+    used to short-circuit here fired on a single word anywhere in the text
+    ("pocus", "chest drain", "life support") and picked a form while the model
+    never read the case. Those rules were removed rather than repaired: the AI
+    recommender already reads the same authoritative RCEM form definitions, so
+    form choice has one source of truth and no second keyword list to maintain.
+
+    Two non-clinical branches stay. A user who names the target form gets it
+    back directly, and a user who names their programme (ACCS) before describing
+    a procedure keeps the ACCS-specific form family, which the general
+    definitions do not cover.
     """
-    text = f" {case_description or ''} ".lower()
     recommendations: list[FormTypeRecommendation] = []
-
-    def add(form_type: str, rationale: str) -> None:
-        form_type = canonical_form_type(form_type)
-        if form_type not in {rec.form_type for rec in recommendations}:
-            recommendations.append(FormTypeRecommendation(
-                form_type=form_type,
-                rationale=rationale,
-                uuid=FORM_UUIDS.get(form_type),
-            ))
 
     explicit_form = _deterministic_explicit_form_request(case_description)
     if explicit_form:
-        add(
-            explicit_form,
-            f"The user explicitly asked for {public_form_name(explicit_form)}.",
-        )
+        form_type = canonical_form_type(explicit_form)
+        recommendations.append(FormTypeRecommendation(
+            form_type=form_type,
+            rationale=f"The user explicitly asked for {public_form_name(form_type)}.",
+            uuid=FORM_UUIDS.get(form_type),
+        ))
         return recommendations
 
-    image_source_has_text_context = (
-        _is_image_source(input_source)
-        and "context supplied with image" in text
-    )
-    if _is_image_source(input_source) and not image_source_has_text_context:
+    text = f" {case_description or ''} ".lower()
+    if _is_image_source(input_source) and "context supplied with image" not in text:
         return None
 
     accs_recommendation = _deterministic_accs_procedure_recommendation(case_description)
     if accs_recommendation:
         for form_type, rationale in accs_recommendation:
-            add(form_type, rationale)
-        return recommendations
-
-    if re.search(r"\b(completed|performed|undertook|conducted)\s+(an?\s+)?audit\b", text) and not _source_describes_qi_cycle(case_description):
-        add("AUDIT", "Audit activity is stated without a full QI change/re-audit cycle.")
-        return recommendations
-
-    if _has_qi_project_signal(case_description):
-        add(
-            "QIAT",
-            "QI/audit project with measurement and change; QIAT is the specific assessment form.",
-        )
-        if "teaching intervention" in text or "education intervention" in text:
-            add(
-                "TEACH",
-                "Teaching was described as an intervention within the QI/audit project.",
-            )
-        return recommendations
-
-    if re.search(r"\bjournal\s+club\b", text) and re.search(
-        r"\b(presented|led|presenting|discussed|appraised)\b", text
-    ):
-        add("JCF", "Journal club presentation or discussion described explicitly.")
-        return recommendations
-
-    course_patterns = (
-        r"\bals\b",
-        r"\batls\b",
-        r"\bapls\b",
-        r"\balso\s+course\b",
-        r"\badvanced life support in obstetrics\b",
-        r"\blife support\b",
-        r"\bformal course\b",
-        r"\bsimulation course\b",
-        r"\bleadership course\b",
-        r"\bcourse certificate\b",
-    )
-    if any(re.search(pattern, text) for pattern in course_patterns) and re.search(
-        r"\b(attended|completed|passed|certificate|certified|course)\b", text
-    ):
-        add("FORMAL_COURSE", "Formal course attendance/completion is stated explicitly.")
-        return recommendations
-
-    if any(term in text for term in ("pocus", "fast scan", "lung ultrasound", "cardiac echo", "ivc ultrasound")):
-        add("US_CASE", "Point-of-care ultrasound case is stated explicitly.")
-        return recommendations
-
-    if any(term in text for term in ("pdp goal", "personal development plan", "development plan")):
-        add("PDP", "Personal development plan goal and actions are stated explicitly.")
-        return recommendations
-
-    if any(
-        term in text
-        for term in (
-            "research study",
-            "research project",
-            "recruited patients",
-            "checked eligibility",
-            "obtained consent",
-            "gcp training",
-        )
-    ):
-        add("RESEARCH", "Research activity with recruitment/consent/study participation is stated explicitly.")
-        return recommendations
-
-    if re.search(r"\b(attended|attending|participated in|went to)\b", text) and any(
-        term in text
-        for term in (
-            "teaching day",
-            "teaching session",
-            "education day",
-            "educational activity",
-            "regional teaching",
-            "grand round",
-            "simulation day",
-        )
-    ):
-        add("EDU_ACT", "The trainee attended an educational activity as a learner.")
-        return recommendations
-
-    if any(
-        term in text
-        for term in (
-            "observed me teaching",
-            "observed my teaching",
-            "feedback on my teaching",
-            "teaching observation",
-            "consultant observed me teaching",
-        )
-    ):
-        add("TEACH_OBS", "Teaching was observed for feedback on the trainee's teaching skill.")
-        add("TEACH", "The same activity can also be recorded as teaching delivered.")
-        return recommendations
-
-    if _has_directly_observed_procedure_signal(case_description):
-        add(
-            "DOPS",
-            "Directly observed hands-on procedure with senior supervision; DOPS is the specific assessed-procedure form.",
-        )
-        add(
-            "PROC_LOG",
-            "The performed procedure can also be recorded in the procedural log.",
-        )
-        if any(term in text for term in ("feedback", "learning point", "reflected", "reflection")):
-            add(
-                "REFLECT_LOG",
-                "Feedback/reflection was included alongside the procedural assessment.",
-            )
-        return recommendations
-
-    performed_procedure = any(term in text for term in _OBSERVED_PROCEDURE_TERMS)
-    trainee_performed = re.search(
-        r"\b(i|trainee)\s+.*\b(performed|administered|inserted|reduced|completed|did)\b",
-        text,
-    )
-    if performed_procedure and trainee_performed:
-        add("PROC_LOG", "Trainee-performed procedure without a clear direct-assessment signal.")
-        return recommendations
-
-    formal_teaching = any(
-        term in text
-        for term in (
-            "formal teaching session",
-            "simulation teaching",
-            "lecture",
-            "tutorial",
-            "teaching session",
-        )
-    )
-    observed_teaching = any(
-        term in text
-        for term in (
-            "assessor observed",
-            "consultant observed",
-            "observed my teaching",
-            "feedback on my teaching",
-            "stat assessment",
-        )
-    )
-    if formal_teaching and observed_teaching:
-        add("STAT", "Formal teaching session with observation/assessment stated explicitly.")
+            canonical = canonical_form_type(form_type)
+            if canonical not in {rec.form_type for rec in recommendations}:
+                recommendations.append(FormTypeRecommendation(
+                    form_type=canonical,
+                    rationale=rationale,
+                    uuid=FORM_UUIDS.get(canonical),
+                ))
         return recommendations
 
     return None
