@@ -47,13 +47,6 @@ _DECORATIVE_EMOJI_RE = re.compile("[✨🤖🎉⭐]")
 # feature is never implied as required — this is about what media types are
 # accepted, not how to send them. Every template that names supported inputs
 # should reuse this phrase rather than drift into its own wording.
-#
-# Not every "send more" prompt qualifies: state-specific follow-ups that
-# narrow the accepted input for a real reason keep their own truthful,
-# narrower wording instead of this clause — e.g. `_video_context_detail_request`
-# (bot.py) only wants text/voice grounding for an attached video, since the
-# bot never interprets video content itself, and `photo_grounding_detail_request`
-# similarly asks for the doctor's own words rather than another image.
 MODALITY_CLAUSE = "text, voice/audio, photos, documents, or video with a description"
 
 
@@ -151,27 +144,9 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         key="pre_draft_completeness_request",
         message_class=MessageClass.TEMPLATED,
         text=(
-            "📋 Before I show the draft, I still need: {items}.\n\n"
-            f"Send it as {MODALITY_CLAUSE} and I'll finish the draft."
-        ),
-        safety_critical=True,
-    ),
-    "source_grounding_detail_request": MessageTemplate(
-        key="source_grounding_detail_request",
-        message_class=MessageClass.TEMPLATED,
-        text=(
-            "📋 More clinical context needed\n\n"
-            "Could you share the presentation, what you did, the outcome, or what you learned?"
-        ),
-        safety_critical=True,
-    ),
-    "photo_grounding_detail_request": MessageTemplate(
-        key="photo_grounding_detail_request",
-        message_class=MessageClass.TEMPLATED,
-        text=(
-            "📋 I can read the text in that image, but it isn't your clinical context.\n\n"
-            "Tell me in your own words: what the case was, what you did or decided, "
-            "the outcome, and what you learned. I won't interpret the image for you."
+            "📋 Heads up — I still don't have: {items}.\n\n"
+            f"Send it as {MODALITY_CLAUSE} and I'll add it, "
+            "or use the draft below as-is."
         ),
         safety_critical=True,
     ),
