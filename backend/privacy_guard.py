@@ -43,9 +43,16 @@ PRIVACY_RULES: tuple[PrivacyRule, ...] = (
         re.compile(r"\b(?:NHS\s*(?:No|Number)?\s*:?\s*)?\d{3}\s*\d{3}\s*\d{4}\b", re.IGNORECASE),
         "[NHS number]",
     ),
+    # Doctors write the record number every way the keyboard allows: "MRN-A44571",
+    # "MRN A44571", "MRN: A44571". The previous pattern required a second literal
+    # "MRN" after the optional "MRN:" prefix, so the colon form — the one that
+    # comes off a scanned report header — went through untouched.
+    #
+    # The lookahead requires a digit somewhere in the identifier so prose like
+    # "MRN was checked" keeps its verb instead of losing it to the replacement.
     PrivacyRule(
         "MRN",
-        re.compile(r"\b(?:MRN\s*:\s*)?MRN[-\s]*[A-Z0-9-]+\b", re.IGNORECASE),
+        re.compile(r"\bMRN\s*[:\-]?\s*(?=[A-Z0-9-]*\d)[A-Z0-9][A-Z0-9-]*\b", re.IGNORECASE),
         "[MRN]",
     ),
     PrivacyRule(
@@ -121,6 +128,39 @@ PRIVACY_RULES: tuple[PrivacyRule, ...] = (
         ),
         "[patient name]",
         group=1,
+    ),
+    # A note header names the patient with no title at all: "Jane Doe, 54F,
+    # chest pain". Deliberately narrow, because a false positive here deletes
+    # clinical content: the name must sit at the start of the note or of a new
+    # sentence/line, be two or three Title-Case words, and be followed
+    # immediately by an age/sex token. Only the name is replaced, so the
+    # demographics the form actually needs survive.
+    #
+    # "discussed with Dr Sarah Patel" cannot reach this rule — it is neither at
+    # a boundary nor followed by an age — and CLINICIAN_NAME starts earlier on
+    # the "Dr" anyway, so it wins the overlap resolution below.
+    PrivacyRule(
+        "PATIENT_NAME",
+        re.compile(
+            r"(?:^|(?<=\n)|(?<=\. )|(?<=\.\n))"
+            r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})"
+            r"\s*,\s*(?=\d{1,3}\s*(?:[MF]\b|male\b|female\b|yo\b|y/o\b))"
+        ),
+        "[patient name]",
+        group=1,
+    ),
+    # House number + street name + street type. The street type must be
+    # Title-Case and a street name word is required between the number and the
+    # type, so "3 Hill" or a lowercase "2 way" in prose cannot match. The city
+    # that usually follows is left alone: it is rarely identifying on its own
+    # and removing it would strip useful clinical geography.
+    PrivacyRule(
+        "ADDRESS",
+        re.compile(
+            r"\b\d{1,4}[A-Za-z]?\s+(?:[A-Z][A-Za-z'-]+\s+){1,3}"
+            r"(?:Road|Street|Lane|Avenue|Close|Drive|Way|Court|Crescent|Terrace|Grove|Place|Hill|Gardens)\b"
+        ),
+        "[address]",
     ),
     PrivacyRule(
         "TERTIARY_CENTRE",

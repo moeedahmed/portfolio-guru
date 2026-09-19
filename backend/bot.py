@@ -2167,25 +2167,6 @@ def _gathering_reply(context) -> tuple[str, InlineKeyboardMarkup]:
     return render_message("gathering_captured"), _gathering_done_keyboard()
 
 
-def _gathering_case_has_draftable_context(context) -> bool:
-    case_text, _ = _combined_gathering_case(context)
-    return _case_context_has_user_grounding(case_text)
-
-
-async def _show_gathering_context_request(message, context, input_source: str) -> int:
-    """Keep gathering active, but do not expose Draft until context is credible."""
-    await _delete_previous_gathering_message(context)
-    await _retire_active_source_detail_message(context)
-    prompt_msg = await _send_latest_message(
-        message,
-        context,
-        _source_context_detail_request(input_source),
-        reply_markup=_KB_CANCEL,
-    )
-    _track_source_detail_prompt(context, prompt_msg.message_id, prompt_msg.chat_id)
-    return AWAIT_GATHERING
-
-
 async def _show_gathering_ready_prompt(message, context) -> int:
     """Send a fresh ready-to-draft prompt under the latest case detail."""
     await _delete_previous_gathering_message(context)
@@ -2475,7 +2456,7 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
             return await _ask_for_more_detail_before_draft(message, context, edit=False)
         gaps = _pre_draft_completeness_gaps(context, pending_draft, chosen_form)
         if gaps:
-            return await _ask_pre_draft_completeness(message, context, gaps, edit=False)
+            await _notify_pre_draft_gaps(message, context, gaps)
         return await _show_draft_review(message, context, pending_draft, chosen_form, edit=False)
 
     if case_text and chosen_form and context.user_data.get("paused_flow_rebuild"):
@@ -2509,7 +2490,7 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
             return await _ask_for_more_detail_before_draft(message, context, edit=False)
         gaps = _pre_draft_completeness_gaps(context, refreshed_draft, chosen_form)
         if gaps:
-            return await _ask_pre_draft_completeness(message, context, gaps, edit=False)
+            await _notify_pre_draft_gaps(message, context, gaps)
         return await _show_draft_review(message, context, refreshed_draft, chosen_form, edit=False)
 
     if case_text:
@@ -4938,10 +4919,38 @@ def _recommendation_line(rec, *, index: int, total: int, curriculum: str) -> str
     return sanitize_internal_form_codes(f"- {name}: {rationale}")
 
 
-def _privacy_nudge_for_source(input_source: str | None) -> str:
+def _format_removed_labels(removed_labels: list[str] | None) -> str:
+    """"an NHS number, a date of birth and a clinician name" — or "" for none."""
+    labels = [label for label in (removed_labels or []) if label]
+    if not labels:
+        return ""
+    if len(labels) == 1:
+        return labels[0]
+    return ", ".join(labels[:-1]) + f" and {labels[-1]}"
+
+
+def _photo_redaction_note(removed_labels: list[str] | None) -> str:
+    """Short note for photos read mid-case, where there is no privacy nudge.
+
+    The nudge only rides along with the first form recommendation. A photo
+    sent into an open case gets this one line appended to the acknowledgement
+    it was already going to receive, so the doctor still learns what we took
+    out without a second message or any new blocking step.
+    """
+    shown = _format_removed_labels(removed_labels)
+    if not shown:
+        return ""
+    return f"\n\n🔒 I removed {shown} from that photo's text — please still check the rest."
+
+
+def _privacy_nudge_for_source(input_source: str | None, removed_labels: list[str] | None = None) -> str:
     if input_source not in {"photo", "image"}:
         return ""
-    return render_message("photo_privacy_nudge")
+    nudge = render_message("photo_privacy_nudge")
+    shown = _format_removed_labels(removed_labels)
+    if shown:
+        nudge += f"\nI already removed {shown} I could detect automatically — please still check the rest."
+    return nudge
 
 
 def _build_form_recommendation_text(
@@ -4951,6 +4960,7 @@ def _build_form_recommendation_text(
     curriculum: str = "2025",
     opening: str | None = None,
     closing: str = "Select a form to draft it.",
+    removed_labels: list[str] | None = None,
 ) -> str:
     visible_recommendations = [r for r in recommendations if getattr(r, "uuid", None)]
     if opening is None:
@@ -4975,7 +4985,7 @@ def _build_form_recommendation_text(
         opening=opening,
         recommendations=rationale_text,
         closing=closing,
-        privacy_nudge=_privacy_nudge_for_source(input_source),
+        privacy_nudge=_privacy_nudge_for_source(input_source, removed_labels),
     )
 
 
@@ -5113,7 +5123,44 @@ _ATTACHMENT_PHI_LABEL_WORDS = {
     "PHONE": "a phone number",
     "NAMED_HOSPITAL": "a named hospital",
     "NAMED_WARD": "a named ward",
+    "ADDRESS": "an address",
 }
+
+
+def _deidentify_photo_case_text(case_text: str) -> tuple[str, list[str]]:
+    """Run our own de-identifier over text extracted from a photo.
+
+    The photo is a first-class case source, but a photo of a report or notes
+    can carry the same identifiers a typed case would. This runs before that
+    text becomes the case anywhere else (draft, storage, audit) so the doctor
+    is never relying on us alone to catch it — and is told plainly what we
+    already removed.
+    """
+    if not case_text or not case_text.strip():
+        return case_text, []
+    redacted, findings = deidentify_clinical_text(case_text)
+    labels: list[str] = []
+    for finding in findings:
+        word = _ATTACHMENT_PHI_LABEL_WORDS.get(finding.label)
+        if word and word not in labels:
+            labels.append(word)
+    return redacted, labels
+
+
+async def _read_image_text(path: str) -> tuple[str, list[str]]:
+    """Read an image and de-identify it in one step.
+
+    Every photo read in this module goes through here, so no raw OCR string
+    reaches storage, an audit record, a model prompt or a draft — not just the
+    photo that started the case. Redaction is idempotent, so a later pass over
+    an already-redacted string is a no-op.
+
+    The ``NOT_CLINICAL`` sentinel is returned untouched: callers branch on it.
+    """
+    text = await extract_from_image(path)
+    if not text or not text.strip() or text.strip() == "NOT_CLINICAL":
+        return text, []
+    return _deidentify_photo_case_text(text)
 
 
 def _attachment_confirmation_reason(context) -> str | None:
@@ -5495,9 +5542,9 @@ def _draft_transparency_layer(
         str(input_source or "").strip().lower() in _USER_CONTEXT_REQUIRED_SOURCES
         and not has_user_context
     ):
-        # Backstop only: `_source_context_needs_more_detail` should have asked
-        # for context before this draft existed. Kept so a draft restored from
-        # persistence without that flag still warns rather than saving quietly.
+        # A photo-origin draft with no words of the doctor's own still warns
+        # here rather than saving quietly — this is purely a reflection-detail
+        # note, not a refusal to draft.
         source_label = _source_label(input_source)
         lines.append(
             f"• Source: {source_label}. Add your own interpretation/reflection before saving."
@@ -5682,24 +5729,23 @@ def _format_completeness_gap_items(gaps: list[dict]) -> str:
     return ", ".join(labels[:-1]) + f" and {labels[-1]}"
 
 
-async def _ask_pre_draft_completeness(
+async def _notify_pre_draft_gaps(
     message,
     context: ContextTypes.DEFAULT_TYPE,
     gaps: list[dict],
-    *,
-    edit: bool = True,
-) -> int:
-    """Ask once for exactly the missing essentials, before showing a draft."""
-    context.user_data["awaiting_detail"] = True
+) -> None:
+    """Name the missing essentials as an offer, never a wall.
+
+    Sent as its own message ahead of the draft that follows immediately
+    after — the doctor can reply with the missing detail (it gets folded in
+    as edit feedback) or just approve the draft that's about to show, as-is.
+    This never blocks the draft from being shown.
+    """
     text = render_message(
         "pre_draft_completeness_request",
         items=_format_completeness_gap_items(gaps),
     )
-    if edit:
-        await _safe_edit_text(message, text, reply_markup=_KB_CANCEL)
-    else:
-        await _send_latest_message(message, context, text, reply_markup=_KB_CANCEL)
-    return AWAIT_CASE_INPUT
+    await _send_latest_message(message, context, text, reply_markup=None)
 
 
 def _universal_pre_file_gate(form_type: str, fields: dict) -> list[str]:
@@ -6975,7 +7021,6 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
     # Photo example — extract text from image. "Reading image…" is a fresh
     # ack message; the next-step prompt then edits it into the result.
     elif msg and msg.photo:
-        from vision import extract_from_image
         await _flow_msg(update, context, "📷 Reading image…", flow_key="voice")
         try:
             photo = msg.photo[-1]
@@ -6984,7 +7029,9 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
             with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
                 tmp_path = tmp.name
                 await photo_file.download_to_drive(tmp_path)
-                text = await extract_from_image(tmp_path)
+                # A writing-style sample is stored on the profile and injected
+                # into every later extraction prompt, so it is redacted too.
+                text, _removed_labels = await _read_image_text(tmp_path)
             import os
             os.unlink(tmp_path)
             if text and text.strip() != "NOT_CLINICAL":
@@ -9702,6 +9749,23 @@ def _looks_like_clinical_case(case_text: str) -> bool:
     return len(case_text.split()) >= _MIN_CASE_WORDS
 
 
+_MIN_INPUT_WORDS = 3
+
+
+def _case_has_minimum_input(case_text: str, context=None) -> bool:
+    """The one automatic refusal left: genuinely empty input.
+
+    Fewer than 3 words and no attachment queued means there is nothing at all
+    to work with. Anything else — however sparse, whatever the source — goes
+    to the model, which decides whether there is a case to draft from."""
+    text = str(case_text or "").strip()
+    if len(text.split()) >= _MIN_INPUT_WORDS:
+        return True
+    if context is not None and _case_attachments(context):
+        return True
+    return False
+
+
 _VIDEO_CONTEXT_ACTION_MARKERS = (
     "assessed",
     "assessment",
@@ -10136,82 +10200,6 @@ def _case_context_has_user_grounding(case_text: str) -> bool:
     return clinical_hits >= 3 and action_hits >= 1 and len(words) >= 25
 
 
-def _source_context_needs_more_detail(
-    input_source: str | None,
-    case_text: str,
-    context=None,
-) -> bool:
-    source = str(input_source or "").strip().lower()
-    if source in _USER_CONTEXT_REQUIRED_SOURCES:
-        # Ask before drafting, not after. Without this the bot builds a draft
-        # from OCR alone and then apologises for it in the preview.
-        #
-        # Two independent signals, either of which clears the gate: the caption
-        # flag set by the attachment flow, and grounding detected in the text
-        # itself. The flag alone would block any path that forgot to set it;
-        # the text alone would be fooled by a caption-free clinical report.
-        if context is not None and context.user_data.get("case_has_user_context"):
-            return False
-        # "File this as a procedure log" is the doctor typing, not the scanner.
-        # An explicit form instruction can only have come from them, so it
-        # counts as context even though it is too short to look like a case.
-        if extract_explicit_form_type(case_text):
-            return False
-        return not _case_context_has_user_grounding(case_text)
-    return _source_grounding_required(source) and not _case_context_has_user_grounding(case_text)
-
-
-def _photo_media_needs_user_context(
-    context,
-    input_source: str | None,
-    caption: str,
-    extracted_text: str,
-) -> bool:
-    """True when a photo would drive a case the doctor has never described.
-
-    Photos sent *into an open case* are usually legitimate — a CXR backing up
-    a case the doctor already typed. The failure mode is narrower: a case that
-    originated from an image and still has no words of theirs, where each new
-    photo just rewrites an ungrounded draft from OCR.
-
-    So this fires only when the case is known to lack user context
-    (``case_has_user_context`` explicitly False, set for image-origin cases)
-    and this message adds none either — no caption, no grounding in the text.
-    """
-    if str(input_source or "").strip().lower() not in _USER_CONTEXT_REQUIRED_SOURCES:
-        return False
-    if context is None or context.user_data.get("case_has_user_context") is not False:
-        return False
-    if str(caption or "").strip():
-        return False
-    return not _case_context_has_user_grounding(extracted_text or "")
-
-
-def _source_context_detail_request(input_source: str | None) -> str:
-    source = str(input_source or "").strip().lower()
-    if source in _USER_CONTEXT_REQUIRED_SOURCES:
-        return render_message("photo_grounding_detail_request")
-    if source == "voice":
-        source_label = "the voice transcript"
-    elif source == "audio":
-        source_label = "the audio transcript"
-    else:
-        source_label = "what you sent"
-    return render_message("source_grounding_detail_request", source_label=source_label)
-
-
-def _video_context_detail_request() -> str:
-    return (
-        "📋 I need your own clinical context before drafting from a video attachment.\n\n"
-        "Send rough notes with: what the video shows, what you did or decided, the outcome, "
-        "and what you learned. I won't interpret the video myself."
-    )
-
-
-def _attached_video_context_needs_more_detail(context, case_text: str) -> bool:
-    return _has_video_attachment_for_drafting(context) and not _video_context_has_user_grounding(case_text)
-
-
 async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: int, case_text: str, form_type: str):
     """Create an explicit-only draft snapshot for the selected form.
 
@@ -10325,6 +10313,11 @@ async def _handle_reuse_request(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_id: int, case_text: str, input_source: str) -> int:
     """Store case text, suggest form types, or move directly to the chosen template review."""
+    photo_removed_labels: list[str] = []
+    if str(input_source or "").strip().lower() in {"photo", "image"}:
+        case_text, photo_removed_labels = _deidentify_photo_case_text(case_text)
+    context.user_data["_photo_redaction_labels"] = photo_removed_labels
+
     _track_funnel_event(context, "case_started", source=input_source, update_last=False)
     _track_funnel_event(context, "input_received", source=input_source)
     _audit_event(
@@ -10338,43 +10331,15 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
         case_text_sha256_16=dogfood_audit.text_fingerprint(case_text),
         case_chars=len(case_text or ""),
     )
-    # Anti-fabrication gate: never feed a too-thin input to the recommender or
-    # the field extractor. The LLM is instructed not to fabricate, but with no
-    # content to ground against it can still hallucinate plausible-sounding
-    # clinical details. Better to ask the user for more.
+    # Only automatic refusal left: genuinely empty input. Everything else goes
+    # to the model, which decides whether there is a case to draft from.
     context.user_data["case_text"] = case_text
     context.user_data["case_input_source"] = input_source
     _remember_case_context_source(context, input_source)
-
-    if _source_context_needs_more_detail(input_source, case_text, context):
-        context.user_data["awaiting_source_detail"] = True
-        _audit_event(
-            context,
-            "decision_path",
-            decision="source_context_needed",
-            input_source=input_source,
-            case_chars=len(case_text or ""),
-        )
-        prompt_msg = await _send_latest_message(
-            message,
-            context,
-            _source_context_detail_request(input_source),
-            reply_markup=_KB_CANCEL,
-        )
-        _track_source_detail_prompt(context, prompt_msg.message_id, prompt_msg.chat_id)
-        return AWAIT_CASE_INPUT
     context.user_data.pop("awaiting_source_detail", None)
 
     explicit_form = extract_explicit_form_type(case_text)
     if explicit_form:
-        if _attached_video_context_needs_more_detail(context, case_text):
-            await _send_latest_message(
-                message,
-                context,
-                _video_context_detail_request(),
-                reply_markup=_KB_CANCEL,
-            )
-            return AWAIT_CASE_INPUT
         context.user_data["chosen_form"] = explicit_form
         _audit_event(
             context,
@@ -10386,7 +10351,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
         prompt_text = (
             f"I’ll use *{_form_display_name(explicit_form)}* for this entry.\n\n"
             "Select the form below to draft from what you sent."
-        )
+        ) + _privacy_nudge_for_source(input_source, photo_removed_labels)
         _store_explicit_form_choice_state(context, explicit_form, prompt_text)
         await _send_latest_message(
             message,
@@ -10412,7 +10377,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
         await message.reply_text(evidence_artifact_text_message())
         return AWAIT_CASE_INPUT
 
-    if not _looks_like_clinical_case(case_text):
+    if not _case_has_minimum_input(case_text, context):
         _audit_event(
             context,
             "decision_path",
@@ -10420,21 +10385,8 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
             input_source=input_source,
             case_chars=len(case_text or ""),
         )
-        await message.reply_text(
-            _video_context_detail_request()
-            if _has_video_attachment_for_drafting(context)
-            else render_message("thin_case_detail_request")
-        )
-        return AWAIT_CASE_INPUT if _has_video_attachment_for_drafting(context) else ConversationHandler.END
-
-    if _attached_video_context_needs_more_detail(context, case_text):
-        await _send_latest_message(
-            message,
-            context,
-            _video_context_detail_request(),
-            reply_markup=_KB_CANCEL,
-        )
-        return AWAIT_CASE_INPUT
+        await message.reply_text(render_message("thin_case_detail_request"))
+        return ConversationHandler.END
 
     training_level = get_training_level(user_id)
     allowed_forms = _allowed_forms_for_training_level(training_level)
@@ -10496,6 +10448,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
         recommendations,
         input_source=input_source,
         curriculum=_effective_curriculum(user_id),
+        removed_labels=photo_removed_labels,
     )
     context.user_data["form_recommendations_text"] = prompt_text
     _track_funnel_event(
@@ -10721,7 +10674,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await _ask_for_more_detail_before_draft(query.message, context)
         gaps = _pre_draft_completeness_gaps(context, draft, chosen_form)
         if gaps:
-            return await _ask_pre_draft_completeness(query.message, context, gaps)
+            await _notify_pre_draft_gaps(query.message, context, gaps)
         return await _show_draft_review(query.message, context, draft, chosen_form)
 
     elif data == "CASE|new":
@@ -10758,7 +10711,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return await _ask_for_more_detail_before_draft(query.message, context)
             gaps = _pre_draft_completeness_gaps(context, draft, chosen_form)
             if gaps:
-                return await _ask_pre_draft_completeness(query.message, context, gaps)
+                await _notify_pre_draft_gaps(query.message, context, gaps)
             return await _show_draft_review(query.message, context, draft, chosen_form)
         else:
             context.user_data.clear()
@@ -10897,7 +10850,7 @@ async def _document_followup_refresh_draft(
         return await _ask_for_more_detail_before_draft(query.message, context)
     gaps = _pre_draft_completeness_gaps(context, draft, chosen_form)
     if gaps:
-        return await _ask_pre_draft_completeness(query.message, context, gaps)
+        await _notify_pre_draft_gaps(query.message, context, gaps)
     return await _show_draft_review(query.message, context, draft, chosen_form)
 
 
@@ -10947,7 +10900,7 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
                     if cached:
                         text = cached
                     elif sibling_kind == "image":
-                        text = await extract_from_image(sibling_path)
+                        text, _removed_labels = await _read_image_text(sibling_path)
                     else:
                         text = await extract_from_document(sibling_path)
                     if text and text.strip() and text.strip() != "NOT_CLINICAL":
@@ -11129,7 +11082,7 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
     await query.edit_message_text(f"{read_icon} Reading {attachment_label}…")
     try:
         if is_image_attachment:
-            case_text = await extract_from_image(file_path)
+            case_text, _removed_labels = await _read_image_text(file_path)
             if case_text.strip() == "NOT_CLINICAL":
                 case_text = ""
         else:
@@ -11298,15 +11251,6 @@ async def _accumulate_and_refresh(update: Update, context: ContextTypes.DEFAULT_
     combined = combine_case_inputs(initial_case, additions)
     context.user_data["case_text"] = combined
 
-    if _attached_video_context_needs_more_detail(context, combined):
-        await _send_latest_message(
-            update.message,
-            context,
-            _video_context_detail_request(),
-            reply_markup=_KB_CANCEL,
-        )
-        return AWAIT_CASE_INPUT
-
     form_name = _form_display_name(chosen_form)
     await update.effective_chat.send_action(constants.ChatAction.TYPING)
     ack = await _send_latest_message(
@@ -11332,7 +11276,7 @@ async def _accumulate_and_refresh(update: Update, context: ContextTypes.DEFAULT_
     context.user_data.pop("accumulation_additions", None)
     gaps = _pre_draft_completeness_gaps(context, draft, chosen_form)
     if gaps:
-        return await _ask_pre_draft_completeness(ack, context, gaps)
+        await _notify_pre_draft_gaps(ack, context, gaps)
     return await _show_draft_review(ack, context, draft, chosen_form)
 
 
@@ -11455,7 +11399,7 @@ async def handle_template_review_media(update: Update, context: ContextTypes.DEF
             with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
                 tmp_path = tmp.name
                 await photo_file.download_to_drive(tmp_path)
-                extracted_text = await extract_from_image(tmp_path)
+                extracted_text, removed_labels = await _read_image_text(tmp_path)
                 _cache_and_queue_attachment(
                     context, tmp_path, _numbered_media_name(context, "portfolio-image", ".jpg"), "image"
                 )
@@ -11467,7 +11411,10 @@ async def handle_template_review_media(update: Update, context: ContextTypes.DEF
             # kept the scanner's words and discarded theirs.
             if caption:
                 extracted_text = combine_case_inputs(caption, [extracted_text or ""])
-            await ack.edit_text("📷 Got it — attached, and updating your draft…")
+            await ack.edit_text(
+                "📷 Got it — attached, and updating your draft…"
+                + _photo_redaction_note(removed_labels)
+            )
         except Exception:
             await ack.edit_text("⚠️ Couldn't read image. Try again or send text.")
             return AWAIT_TEMPLATE_REVIEW
@@ -11532,16 +11479,6 @@ async def handle_template_review_media(update: Update, context: ContextTypes.DEF
     if not extracted_text or not extracted_text.strip():
         return AWAIT_TEMPLATE_REVIEW
 
-    if _photo_media_needs_user_context(context, "photo" if msg.photo else "", caption, extracted_text):
-        _audit_event(
-            context,
-            "decision_path",
-            decision="photo_template_context_needed",
-            input_source="photo",
-        )
-        await ack.edit_text(_source_context_detail_request("photo"))
-        return AWAIT_TEMPLATE_REVIEW
-
     return await _accumulate_and_refresh(update, context, extracted_text)
 
 
@@ -11581,7 +11518,7 @@ async def handle_approval_media_feedback(update: Update, context: ContextTypes.D
             with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
                 tmp_path = tmp.name
                 await photo_file.download_to_drive(tmp_path)
-                extracted_text = await extract_from_image(tmp_path)
+                extracted_text, removed_labels = await _read_image_text(tmp_path)
                 _cache_and_queue_attachment(
                     context, tmp_path, _numbered_media_name(context, "portfolio-image", ".jpg"), "image"
                 )
@@ -11590,7 +11527,10 @@ async def handle_approval_media_feedback(update: Update, context: ContextTypes.D
                 return AWAIT_APPROVAL
             if caption:
                 extracted_text = combine_case_inputs(caption, [extracted_text or ""])
-            await ack.edit_text("📷 Got it — attached, and updating your draft…")
+            await ack.edit_text(
+                "📷 Got it — attached, and updating your draft…"
+                + _photo_redaction_note(removed_labels)
+            )
         except Exception:
             await ack.edit_text("⚠️ Couldn't read image. Type your feedback instead.")
             return AWAIT_APPROVAL
@@ -11652,16 +11592,6 @@ async def handle_approval_media_feedback(update: Update, context: ContextTypes.D
 
     else:
         await msg.reply_text("Send text, voice, image, or a document with the extra detail.")
-        return AWAIT_APPROVAL
-
-    if _photo_media_needs_user_context(context, input_source, caption, extracted_text or ""):
-        _audit_event(
-            context,
-            "decision_path",
-            decision="photo_feedback_context_needed",
-            input_source=input_source,
-        )
-        await ack.edit_text(_source_context_detail_request(input_source))
         return AWAIT_APPROVAL
 
     if _has_retryable_failed_filing_draft(context):
@@ -12325,7 +12255,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
                     tmp_path = tmp.name
                     await photo_file.download_to_drive(tmp_path)
-                    case_text = await extract_from_image(tmp_path)
+                    case_text, _removed_labels = await _read_image_text(tmp_path)
                 ocr_done.set()
                 progress_task.cancel()
                 if case_text.strip() == "NOT_CLINICAL":
@@ -12402,7 +12332,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             # the clinical interpretation this product refuses to do.
             image_text = ""
             try:
-                extracted = await extract_from_image(cached_path)
+                extracted, _removed_labels = await _read_image_text(cached_path)
                 if extracted and extracted.strip() != "NOT_CLINICAL":
                     image_text = extracted.strip()
             except Exception:
@@ -12758,20 +12688,11 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         combined_case_text, combined_source = _combined_gathering_case(context)
         context.user_data["case_text"] = combined_case_text
         context.user_data["case_input_source"] = combined_source
-        if not _gathering_case_has_draftable_context(context):
-            return await _show_gathering_context_request(update.message, context, combined_source)
         return await _show_gathering_ready_prompt(update.message, context)
 
     if chosen_form and context.user_data.get("awaiting_detail"):
         context.user_data["case_text"] = case_text
         context.user_data["case_input_source"] = input_source
-        if _attached_video_context_needs_more_detail(context, case_text):
-            await update.message.reply_text(
-                _video_context_detail_request(),
-                reply_markup=_KB_CANCEL,
-            )
-            _mark_missing_essentials_replay_done(context, update, AWAIT_CASE_INPUT)
-            return AWAIT_CASE_INPUT
         await update.effective_chat.send_action(constants.ChatAction.TYPING)
         # Retire the essentials-gap prompt (it sits before the doctor's new
         # message) and send a fresh acknowledgement instead of editing it in
@@ -12800,9 +12721,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return result
         gaps = _pre_draft_completeness_gaps(context, draft, chosen_form)
         if gaps:
-            result = await _ask_pre_draft_completeness(ack, context, gaps)
-            _mark_missing_essentials_replay_done(context, update, result)
-            return result
+            await _notify_pre_draft_gaps(ack, context, gaps)
         result = await _show_draft_review(ack, context, draft, chosen_form)
         _mark_missing_essentials_replay_done(context, update, result)
         return result
@@ -13055,8 +12974,6 @@ async def handle_gathering_input(update: Update, context: ContextTypes.DEFAULT_T
     combined_case_text, combined_source = _combined_gathering_case(context)
     context.user_data["case_text"] = combined_case_text
     context.user_data["case_input_source"] = combined_source
-    if not _gathering_case_has_draftable_context(context):
-        return await _show_gathering_context_request(update.message, context, combined_source)
     return await _show_gathering_ready_prompt(update.message, context)
 
 
@@ -13275,7 +13192,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         gaps = _pre_draft_completeness_gaps(context, draft, form_type)
         if gaps:
-            return await _ask_pre_draft_completeness(query.message, context, gaps)
+            await _notify_pre_draft_gaps(query.message, context, gaps)
 
         return await _show_draft_review(query.message, context, draft, form_type)
     finally:
@@ -13702,7 +13619,16 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     if pre_file_gaps:
         context.user_data.pop("filing_in_progress", None)
         context.user_data.pop("retry_filing_requested", None)
-        return await _ask_pre_draft_completeness(source_message, context, pre_file_gaps, edit=bool(query))
+        context.user_data["awaiting_detail"] = True
+        gap_text = render_message(
+            "pre_draft_completeness_request",
+            items=_format_completeness_gap_items(pre_file_gaps),
+        )
+        if query:
+            await _safe_edit_text(source_message, gap_text, reply_markup=_KB_CANCEL)
+        else:
+            await _send_latest_message(source_message, context, gap_text, reply_markup=_KB_CANCEL)
+        return AWAIT_CASE_INPUT
     filing_draft = _with_rcem_ai_declaration(draft)
     if _needs_filing_curriculum_choice(user_id):
         context.user_data.pop("filing_in_progress", None)
@@ -14953,8 +14879,11 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
                 tmp_path = tmp.name
                 await photo_file.download_to_drive(tmp_path)
-                feedback = await extract_from_image(tmp_path)
-            await ack.edit_text("✏️ Regenerating draft with your feedback…")
+                feedback, removed_labels = await _read_image_text(tmp_path)
+            await ack.edit_text(
+                "✏️ Regenerating draft with your feedback…"
+                + _photo_redaction_note(removed_labels)
+            )
         except Exception as e:
             logger.error(f"Photo extraction in edit failed: {e}", exc_info=True)
             await ack.edit_text("⚠️ Couldn't read image. Type your feedback instead.")

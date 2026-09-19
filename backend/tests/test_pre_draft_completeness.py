@@ -76,8 +76,10 @@ async def test_complete_draft_previews_immediately_no_gap_question():
 
 
 @pytest.mark.asyncio
-async def test_missing_reflection_asks_targeted_question_then_previews_once():
-    from bot import AWAIT_APPROVAL, AWAIT_CASE_INPUT, handle_case_input, handle_form_choice
+async def test_missing_reflection_shows_draft_with_add_reflection_offer():
+    """Reflection is still nudged strongly — Save isn't offered until it's
+    added — but the draft itself is shown immediately, never blocked on it."""
+    from bot import AWAIT_APPROVAL, handle_form_choice
 
     sim = BotSimulator()
     original_case = "45M with chest pain, troponin positive, managed as ACS."
@@ -89,31 +91,19 @@ async def test_missing_reflection_asks_targeted_question_then_previews_once():
     with patch("bot._analyse_selected_form", new=AsyncMock(return_value=thin_draft)):
         result = await handle_form_choice(update, context)
 
-    assert result == AWAIT_CASE_INPUT
-    first_ask = sim.get_last_text()
-    assert "reflection" in first_ask.lower()
-    assert context.user_data["awaiting_detail"] is True
-
-    followup_update = sim._make_text_update("I learned to escalate ECG review earlier next time.")
-    complete_draft = _cbd_draft()
-    analyse = AsyncMock(return_value=complete_draft)
-    patches = _common_patches()
-    with patches[0], patches[1], patches[2], patch("bot._analyse_selected_form", new=analyse):
-        result = await handle_case_input(followup_update, context)
-
     assert result == AWAIT_APPROVAL
-    analyse.assert_awaited_once()
-    merged_case_text = analyse.await_args.args[2]
-    assert original_case in merged_case_text
-    assert "escalate ECG review earlier" in merged_case_text
-    final_text = sim.get_last_text()
-    assert "still need" not in final_text.lower()
-    assert "reflection is needed before saving" not in final_text.lower()
+    gap_note = sim.messages_sent[-2][1].lower()
+    assert "reflection" in gap_note
+    buttons = {data for _, data in sim.get_last_buttons()}
+    assert "ACTION|add_reflection_detail" in buttons
+    assert "APPROVE|draft" not in buttons
 
 
 @pytest.mark.asyncio
-async def test_missing_clinical_setting_asks_setting_only():
-    from bot import AWAIT_CASE_INPUT, handle_form_choice
+async def test_missing_clinical_setting_names_it_but_still_offers_save():
+    """A missing non-reflection essential is an offer, not a wall: the draft
+    shows immediately with Save still available."""
+    from bot import AWAIT_APPROVAL, handle_form_choice
 
     sim = BotSimulator()
     update = sim._make_callback_update("FORM|CBD")
@@ -127,15 +117,19 @@ async def test_missing_clinical_setting_asks_setting_only():
     with patch("bot._analyse_selected_form", new=AsyncMock(return_value=draft)):
         result = await handle_form_choice(update, context)
 
-    assert result == AWAIT_CASE_INPUT
-    text = sim.get_last_text().lower()
-    assert "clinical setting" in text
-    assert "reflection" not in text
+    assert result == AWAIT_APPROVAL
+    gap_note = sim.messages_sent[-2][1].lower()
+    assert "clinical setting" in gap_note
+    assert "reflection" not in gap_note
+    buttons = {data for _, data in sim.get_last_buttons()}
+    assert "APPROVE|draft" in buttons
 
 
 @pytest.mark.asyncio
-async def test_two_missing_items_combined_then_partial_answer_asks_remaining_gap():
-    from bot import AWAIT_CASE_INPUT, handle_case_input, handle_form_choice
+async def test_two_missing_items_named_together_reflection_still_gates_save():
+    """Both gaps are named in one offer; Save stays gated only on reflection,
+    the more clinically essential of the two."""
+    from bot import AWAIT_APPROVAL, handle_form_choice
 
     sim = BotSimulator()
     original_case = "45M with chest pain, troponin positive, managed as ACS."
@@ -147,24 +141,13 @@ async def test_two_missing_items_combined_then_partial_answer_asks_remaining_gap
     with patch("bot._analyse_selected_form", new=AsyncMock(return_value=both_missing)):
         result = await handle_form_choice(update, context)
 
-    assert result == AWAIT_CASE_INPUT
-    combined_text = sim.get_last_text().lower()
+    assert result == AWAIT_APPROVAL
+    combined_text = sim.messages_sent[-2][1].lower()
     assert "reflection" in combined_text
     assert "clinical setting" in combined_text
-
-    partial_answer_update = sim._make_text_update(
-        "I learned to escalate ECG review earlier next time."
-    )
-    setting_still_missing = _cbd_draft(clinical_setting="")
-    analyse = AsyncMock(return_value=setting_still_missing)
-    patches = _common_patches()
-    with patches[0], patches[1], patches[2], patch("bot._analyse_selected_form", new=analyse):
-        result = await handle_case_input(partial_answer_update, context)
-
-    assert result == AWAIT_CASE_INPUT
-    remaining_ask = sim.get_last_text().lower()
-    assert "clinical setting" in remaining_ask
-    assert "reflection" not in remaining_ask
+    buttons = {data for _, data in sim.get_last_buttons()}
+    assert "ACTION|add_reflection_detail" in buttons
+    assert "APPROVE|draft" not in buttons
 
 
 @pytest.mark.asyncio
@@ -286,10 +269,11 @@ async def test_document_followup_preserves_case_and_attachment_then_previews():
 
 
 @pytest.mark.asyncio
-async def test_document_followup_partial_answer_asks_remaining_gap():
+async def test_document_followup_still_names_remaining_gap_but_shows_draft():
     """A document reply that only fills one of two gaps must keep the case
-    merged and ask only for what's still missing, not repeat the answered gap."""
-    from bot import AWAIT_CASE_INPUT, handle_document_intent
+    merged, name only what's still missing (not the answered gap), and show
+    the draft immediately rather than asking again."""
+    from bot import AWAIT_APPROVAL, handle_document_intent
 
     sim = BotSimulator()
     context = sim._make_context()
@@ -315,15 +299,16 @@ async def test_document_followup_partial_answer_asks_remaining_gap():
          patch("bot._analyse_selected_form", new=analyse):
         result = await handle_document_intent(update, context)
 
-    assert result == AWAIT_CASE_INPUT
+    assert result == AWAIT_APPROVAL
     analyse.assert_awaited_once()
     merged_case_text = analyse.await_args.args[2]
     assert original_case in merged_case_text
     assert "escalate ECG review earlier" in merged_case_text
-    remaining_ask = sim.get_last_text().lower()
+    remaining_ask = sim.messages_sent[-2][1].lower()
     assert "clinical setting" in remaining_ask
     assert "reflection" not in remaining_ask
-    assert context.user_data["awaiting_detail"] is True
+    buttons = {data for _, data in sim.get_last_buttons()}
+    assert "APPROVE|draft" in buttons
 
     if os.path.exists(temp_path):
         os.unlink(temp_path)
@@ -478,8 +463,8 @@ async def test_completeness_prompt_advertises_supported_reply_formats():
     video it must say 'with a description' rather than implying transcription —
     the conversation handler map routes VOICE/AUDIO/PHOTO/VIDEO/Document.ALL to
     handle_case_input here, but a video attachment is only ever cached, never
-    interpreted (see `_video_context_detail_request`)."""
-    from bot import AWAIT_CASE_INPUT, handle_form_choice
+    interpreted."""
+    from bot import AWAIT_APPROVAL, handle_form_choice
 
     sim = BotSimulator()
     update = sim._make_callback_update("FORM|CBD")
@@ -493,8 +478,8 @@ async def test_completeness_prompt_advertises_supported_reply_formats():
     with patch("bot._analyse_selected_form", new=AsyncMock(return_value=thin_draft)):
         result = await handle_form_choice(update, context)
 
-    assert result == AWAIT_CASE_INPUT
-    text = sim.get_last_text().lower()
+    assert result == AWAIT_APPROVAL
+    text = sim.messages_sent[-2][1].lower()
     assert "text" in text
     assert "voice" in text
     assert "audio" in text

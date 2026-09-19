@@ -521,7 +521,11 @@ async def test_video_attach_only_waits_for_user_context_without_extracting():
 
 
 @pytest.mark.asyncio
-async def test_video_attach_blocks_symptom_fragments_before_drafting():
+async def test_video_attach_no_longer_blocks_symptom_fragments_from_drafting():
+    """A video attachment must not gate drafting on the doctor re-describing
+    it in text — the old video-context refusal is gone. Real symptom text
+    sent afterwards keeps the attachment and reaches form recommendation
+    instead of being refused."""
     sim = BotSimulator()
     context = sim._make_context()
     attach_update = sim._make_callback_update("DOCUSE|attach")
@@ -543,22 +547,32 @@ async def test_video_attach_blocks_symptom_fragments_before_drafting():
         "shortness of breath, fever, fall. Turn that into a case"
     )
 
+    from extractor import FORM_UUIDS
+    from models import FormTypeRecommendation
+
+    recommendations = [
+        FormTypeRecommendation(
+            form_type="CBD",
+            rationale="Polytrauma case with multiple symptoms.",
+            uuid=FORM_UUIDS.get("CBD"),
+        )
+    ]
     with patch('bot.has_credentials', return_value=True), \
          patch('bot.consent.has_current_consent', new=AsyncMock(return_value=True)), \
          patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
          patch('bot.classify_intent', new=AsyncMock(return_value="case")), \
-         patch('bot.recommend_form_types', new=AsyncMock()) as recommend_mock:
+         patch('bot.recommend_form_types', new=AsyncMock(return_value=recommendations)) as recommend_mock, \
+         patch('bot.get_training_level', return_value='ST5'), \
+         patch('bot.get_curriculum', return_value='2025'):
         result = await handle_case_input(text_update, context)
 
-    assert result == AWAIT_CASE_INPUT
-    recommend_mock.assert_not_awaited()
+    assert result == AWAIT_FORM_CHOICE
+    recommend_mock.assert_awaited_once()
     assert context.user_data["attachment_path"] == temp_path
     assert context.user_data["attachment_name"] == "portfolio-video.mp4"
     assert context.user_data["attachment_kind"] == "video"
     text = _all_visible_text(sim)
-    assert "what the video shows" in text
-    assert "what you did or decided" in text
-    assert "Drafted" not in text
+    assert "what the video shows" not in text
 
     if os.path.exists(temp_path):
         os.unlink(temp_path)

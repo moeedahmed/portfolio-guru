@@ -384,11 +384,11 @@ class TestFlowWalker:
         assert 'Blank fields are left blank rather than invented' not in text
 
     @pytest.mark.asyncio
-    async def test_form_choice_asks_for_missing_required_field_before_draft(self, thin_draft):
-        """A genuinely missing schema-required field (not reflection) is asked
-        about before any draft is shown — not surfaced as an inline marker on
-        an already-visible draft with Save available."""
-        from bot import AWAIT_CASE_INPUT, handle_form_choice
+    async def test_form_choice_names_missing_required_field_but_still_shows_draft(self, thin_draft):
+        """A genuinely missing schema-required field (not reflection) is named
+        as a heads-up, but the draft is shown immediately with Save available
+        — the gap is an offer, never a wall."""
+        from bot import AWAIT_APPROVAL, handle_form_choice
 
         sim = BotSimulator()
         context = sim._make_context()
@@ -402,12 +402,13 @@ class TestFlowWalker:
         with patch('bot._analyse_selected_form', new_callable=AsyncMock, return_value=incomplete_draft):
             result = await handle_form_choice(update, context)
 
-        assert result == AWAIT_CASE_INPUT
+        assert result == AWAIT_APPROVAL
+        gap_note = sim.messages_sent[-2][1]
+        assert 'Stage of Training' in gap_note
         text = sim.get_last_text()
-        assert 'Stage of Training' in text
-        assert 'Here is your Case-Based Discussion draft' not in text
+        assert 'Here is your Case-Based Discussion draft' in text
         button_data = {data for _, data in sim.get_last_buttons()}
-        assert 'APPROVE|draft' not in button_data
+        assert 'APPROVE|draft' in button_data
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('second_choice', ['FORM|best', 'FORM|ACAT'])
@@ -3474,30 +3475,58 @@ class TestFlowWalker:
         assert 'Here is your Mini-Clinical Evaluation Exercise draft:' in sim.get_last_text()
 
     @pytest.mark.asyncio
-    async def test_thin_input_blocked_before_extraction(self):
-        """A too-short non-clinical message routed into _process_case_text
-        must be blocked by the anti-fabrication gate — no recommender, no
-        extractor calls, and the user is asked for real clinical detail."""
+    async def test_genuinely_empty_input_blocked_before_extraction(self):
+        """The only automatic refusal left: fewer than 3 words and no
+        attachment. Neither the recommender nor the extractor fire."""
         from bot import _process_case_text
 
         sim = BotSimulator()
-        update = sim._make_text_update('please file a case')
+        update = sim._make_text_update('hi')
         context = sim._make_context()
         user_id = sim.user_id
 
         with patch('bot.recommend_form_types', new=AsyncMock()) as recommend, \
              patch('bot._analyse_selected_form', new=AsyncMock()) as analyse:
             result = await _process_case_text(
-                update.message, context, user_id, 'please file a case', 'text'
+                update.message, context, user_id, 'hi', 'text'
             )
 
         assert result == ConversationHandler.END
-        # Neither the recommender nor the extractor should fire — the input is
-        # below the minimum-content threshold.
         recommend.assert_not_awaited()
         analyse.assert_not_awaited()
         text = (sim.get_last_text() or '').lower()
         assert 'clinical detail' in text or 'what happened' in text
+
+    @pytest.mark.asyncio
+    async def test_short_but_nonempty_input_reaches_the_model_not_a_keyword_gate(self):
+        """A short phrase with no obvious clinical vocabulary is no longer
+        refused by a keyword/word-count heuristic — it goes to the model,
+        which decides whether there is anything to draft from."""
+        from bot import AWAIT_FORM_CHOICE, _process_case_text
+        from extractor import FORM_UUIDS
+        from models import FormTypeRecommendation
+
+        sim = BotSimulator()
+        update = sim._make_text_update('please file a case')
+        context = sim._make_context()
+        user_id = sim.user_id
+
+        recommendations = [
+            FormTypeRecommendation(
+                form_type="CBD",
+                rationale="Insufficient detail to recommend confidently.",
+                uuid=FORM_UUIDS.get("CBD"),
+            )
+        ]
+        with patch('bot.recommend_form_types', new=AsyncMock(return_value=recommendations)) as recommend, \
+             patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_curriculum', return_value='2025'):
+            result = await _process_case_text(
+                update.message, context, user_id, 'please file a case', 'text'
+            )
+
+        assert result == AWAIT_FORM_CHOICE
+        recommend.assert_awaited_once()
 
 
 class TestRecentPortfolioFixes:
@@ -4607,15 +4636,18 @@ class TestVideoGroundingGate:
 
 
 class TestPhotoGroundingGate:
-    """A photo's OCR text is the document talking, not the doctor.
+    """A photo of the doctor's own notes is a first-class case source.
 
-    Drafting from it alone produced a reflection the trainee never wrote, then
-    apologised for it in the preview. The ask must come *before* the draft.
+    The old per-source refusal (asking the doctor to re-describe a photo in
+    their own words before drafting) is gone: the vision extraction's output
+    is accepted as the case directly, no caption required.
     """
 
     @pytest.mark.asyncio
-    async def test_bare_photo_asks_for_context_instead_of_drafting(self):
-        from bot import AWAIT_CASE_INPUT, _process_case_text
+    async def test_bare_photo_is_accepted_as_the_case(self):
+        from bot import AWAIT_FORM_CHOICE, _process_case_text
+        from extractor import FORM_UUIDS
+        from models import FormTypeRecommendation
         from tests.bot_simulator import BotSimulator
 
         sim = BotSimulator()
@@ -4630,16 +4662,20 @@ class TestPhotoGroundingGate:
             'with SWMA. Patient attended ED. Technically difficult study, poor acoustic windows.'
         )
 
-        with patch('bot.recommend_form_types', new=AsyncMock()) as recommend_mock:
+        recommendations = [
+            FormTypeRecommendation(
+                form_type="CBD",
+                rationale="Echo report reviewed for a patient in ED.",
+                uuid=FORM_UUIDS.get("CBD"),
+            )
+        ]
+        with patch('bot.recommend_form_types', new=AsyncMock(return_value=recommendations)) as recommend_mock, \
+             patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_curriculum', return_value='2025'):
             result = await _process_case_text(message, context, 12345, ocr_text, 'photo')
 
-        prompts = [text for _, text, _ in sim.messages_sent if text]
-        assert result == AWAIT_CASE_INPUT
-        recommend_mock.assert_not_called(), 'A bare photo must never reach the recommender'
-        assert context.user_data.get('awaiting_source_detail') is True
-        assert any("isn't your clinical context" in t for t in prompts), (
-            f'Expected a request for the doctor\'s own context, got: {prompts}'
-        )
+        assert result == AWAIT_FORM_CHOICE
+        recommend_mock.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_photo_with_user_caption_proceeds_to_drafting(self):
@@ -4665,10 +4701,10 @@ class TestPhotoGroundingGate:
         recommend_mock.assert_called(), 'A photo with the doctor\'s own words must still draft'
 
     @pytest.mark.asyncio
-    async def test_photo_reply_to_image_origin_draft_asks_instead_of_redrafting(self):
-        """The reported failure: a case that began as a bare photo, with a draft
-        already on screen. Sending the same photo again re-ran extraction and
-        produced a fresh ungrounded draft instead of asking for context."""
+    async def test_photo_reply_to_image_origin_draft_redrafts_from_it(self):
+        """A second bare photo sent while a draft is on screen now re-runs
+        extraction like any other case-input source — no per-source refusal
+        stands between the doctor's photo and the redraft."""
         from bot import AWAIT_APPROVAL, _store_draft, handle_approval_media_feedback
         from models import CBDData
         from tests.bot_simulator import BotSimulator
@@ -4689,13 +4725,14 @@ class TestPhotoGroundingGate:
         update.message.text = None
         update.message.caption = None
 
+        redrafted = CBDData(patient_presentation='Poor acoustic windows on echo.')
         with patch('bot.extract_from_image', new=AsyncMock(return_value='Impression: mild concentric LVH. Poor acoustic windows.')), \
-             patch('bot.extract_cbd_data', new=AsyncMock()) as extract_mock, \
+             patch('bot.extract_cbd_data', new=AsyncMock(return_value=redrafted)) as extract_mock, \
              patch('bot.get_voice_profile', return_value=None):
             result = await handle_approval_media_feedback(update, context)
 
         assert result == AWAIT_APPROVAL
-        extract_mock.assert_not_awaited(), 'A second bare photo must not re-run extraction'
+        extract_mock.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_photo_reply_with_caption_still_updates_draft(self):
