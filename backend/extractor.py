@@ -1312,45 +1312,119 @@ Answer concisely. If the question is about a specific form type, confirm it's su
     return sanitize_internal_form_codes(text.strip())
 
 
-async def assess_case_sufficiency(case_description: str) -> dict:
-    """Check if a case has enough detail for a quality portfolio entry.
-    Returns {"sufficient": True/False, "questions": ["...", "..."]}."""
-    prompt = f"""You are a medical portfolio assistant. A doctor has described a clinical case for their e-portfolio entry.
-Assess whether the description contains enough detail to write a high-quality entry.
+ESSENTIAL_PRESENT = "present"
+ESSENTIAL_MISSING = "missing"
+ESSENTIAL_UNAVAILABLE = "unavailable"
+_ESSENTIAL_STATUSES = frozenset({ESSENTIAL_PRESENT, ESSENTIAL_MISSING, ESSENTIAL_UNAVAILABLE})
 
-A sufficient case should mention most of:
-- What the patient presented with
-- What the doctor did (assessment, investigations, management)
-- Clinical reasoning (why they made those decisions)
-- What they learned or would do differently
 
-Case description:
+async def assess_form_essentials(
+    case_description: str,
+    form_type: str,
+    essentials: list[dict],
+    *,
+    input_source: str = "text",
+) -> dict[str, str]:
+    """Judge which of a form's genuinely essential details the case already has.
+
+    This is the one sufficiency judgement in the product: it reads the
+    doctor's own words against the requirements the caller derived from the
+    Kaizen schema, and returns a status per requirement key. It never invents
+    a requirement of its own, and it never writes portfolio content — the
+    drafting call stays separate and happens only once the essentials are
+    settled.
+
+    Returns ``{key: "present"|"missing"|"unavailable"}`` covering **every**
+    requested key exactly once. Anything less — unparseable, partial,
+    duplicated, padded with keys that were not asked about, or carrying an
+    unknown status — returns ``{}``, meaning "no judgement". Callers must
+    never read ``{}`` as "nothing missing": there is no safe way to draft
+    from a requirement that was never judged.
+    """
+    requirements = [
+        item for item in (essentials or [])
+        if str((item or {}).get("key") or "").strip()
+    ]
+    if not requirements or not str(case_description or "").strip():
+        return {}
+
+    lines = []
+    for item in requirements:
+        label = str(item.get("label") or item["key"]).strip()
+        description = str(item.get("description") or "").strip()
+        lines.append(f'- "{item["key"]}": {label}' + (f" — {description}" if description else ""))
+    schema = FORM_SCHEMAS.get(schema_form_type(form_type), {})
+    form_name = schema.get("name") or form_type
+
+    prompt = f"""You are checking whether a doctor's own case notes already contain the detail a UK RCEM portfolio form genuinely requires. You are NOT writing the portfolio entry.
+
+Form: {form_name} ({form_type})
+
+Required detail:
+{chr(10).join(lines)}
+
+Doctor's case notes (source of truth, {input_source}):
+<<<
 {case_description}
+>>>
 
-If the case has enough detail, return: {{"sufficient": true, "questions": []}}
-If the case is too thin, return: {{"sufficient": false, "questions": ["specific question 1", "specific question 2"]}}
+For each required item return exactly one status:
+- "present": the notes state it, or state it clearly enough in the doctor's own words that no invention is needed.
+- "unavailable": the notes explicitly say it is unknown, not recorded, not remembered, or does not apply.
+- "missing": anything else.
 
-Rules:
-- Ask 2-3 specific questions about what's missing - not generic "tell me more"
-- Questions should target the specific gaps: missing reasoning, missing outcome, missing reflection, etc.
-- Return ONLY the JSON. No explanation."""
+Judgement rules:
+- Judge only what the notes actually say. Typical practice is not evidence.
+- Attribution matters. "FAST was done" or "a CT was arranged" does not say who did it. An item about what THIS doctor did is present only if the notes say what this doctor did.
+- Specificity matters. An unspecified "CT" does not establish a body region, technique, or result.
+- A reflection item is present only if the doctor states their own learning, interpretation, reaction, or intended change of practice. Text that you could write for them does not count.
+- Do not add requirements. Judge only the items listed above.
 
-    text = await _generate(prompt, purpose="case_sufficiency")
-    raw = text.strip()
+Return ONLY JSON: {{"items": [{{"key": "...", "status": "..."}}]}}"""
+
+    text = await _generate(prompt, purpose="form_essentials_sufficiency")
+    raw = (text or "").strip()
     if raw.startswith("```"):
-        raw = raw.split("```")[1]
+        parts = raw.split("```")
+        raw = parts[1] if len(parts) > 1 else raw
         if raw.startswith("json"):
             raw = raw[4:]
     raw = raw.strip()
     try:
         data = json.loads(raw)
     except (json.JSONDecodeError, ValueError):
-        return {"sufficient": True, "questions": []}
-    if "sufficient" not in data:
-        data["sufficient"] = True
-    if "questions" not in data or not isinstance(data["questions"], list):
-        data["questions"] = []
-    return data
+        logger.warning("Essentials assessment returned unparseable JSON for %s", form_type)
+        return {}
+    items = data.get("items") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return {}
+
+    # A partial, duplicated, or padded answer is not a judgement — it is an
+    # unusable one. Returning the half of it that parsed would let a genuinely
+    # required detail through as "not mentioned as missing", so the whole
+    # response is rejected and the caller asks the doctor to retry instead.
+    wanted = {str(item["key"]) for item in requirements}
+    statuses: dict[str, str] = {}
+    for entry in items:
+        if not isinstance(entry, dict):
+            logger.warning("Essentials assessment for %s returned a malformed item", form_type)
+            return {}
+        key = str(entry.get("key") or "").strip()
+        status = str(entry.get("status") or "").strip().lower()
+        if key not in wanted or status not in _ESSENTIAL_STATUSES or key in statuses:
+            logger.warning(
+                "Essentials assessment for %s returned an unusable item (unknown key, "
+                "unknown status, or duplicate)", form_type,
+            )
+            return {}
+        statuses[key] = status
+    if set(statuses) != wanted:
+        logger.warning(
+            "Essentials assessment for %s covered %d of %d requirements",
+            form_type, len(statuses), len(wanted),
+        )
+        return {}
+    return statuses
 
 
 def _humanize_text(text: str) -> str:
@@ -3005,6 +3079,15 @@ def _guard_unsourced_exact_training_stage(fields: dict, schema: dict, source_tex
     return guarded
 
 
+# Source-fidelity bullets shared by every extraction prompt's grounding block.
+# They name the three ways a draft most often drifts away from what the doctor
+# actually wrote: taking over attribution, sharpening vague detail, and
+# supplying a reflection the doctor never had.
+_SOURCE_FIDELITY_RULES = """- Keep the doctor's own attribution. "FAST was done", "a CT was arranged", "bloods were sent" do not say who did it — never rewrite them as "I performed" or "I arranged" unless the source says so.
+- Keep the source's level of specificity. An unspecified "CT" stays an unspecified CT: never name a body region, technique, dose, or result the doctor did not state.
+- Never write a personal reflection the doctor did not supply. If the source contains no learning, interpretation, reaction, or intended change of practice, leave the reflection field blank."""
+
+
 _IMAGE_EXTRACTOR_GUARD = """
 ===== IMAGE-DERIVED INPUT GUARD (NON-NEGOTIABLE) =====
 The case description below was extracted from a photo/screenshot — it
@@ -3291,6 +3374,7 @@ Write the reflection in direct, first-person clinical language:
 - Extract ONLY what the doctor explicitly stated or clearly implied. Never invent clinical details.
 - {missing_text_instruction}
 - Never add diagnoses, investigations, procedures, or clinical reasoning the doctor did not describe.
+{_SOURCE_FIDELITY_RULES}
 - It is better to leave a field sparse than to fabricate content. Doctors will reject inaccurate drafts.
 - Return ONLY the JSON. No explanation."""
     system_prompt += preserve_instruction
@@ -3594,6 +3678,7 @@ Rules:
 - Extract ONLY what the doctor explicitly stated or clearly implied. Never invent clinical details.
 - {missing_text_instruction}
 - Never add diagnoses, investigations, procedures, or clinical reasoning the doctor did not describe.
+{_SOURCE_FIDELITY_RULES}
 - It is better to leave a field sparse than to fabricate content. Doctors will reject inaccurate drafts.
 - Return ONLY the JSON object. No explanation.
 

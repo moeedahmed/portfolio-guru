@@ -61,6 +61,7 @@ JOURNEY_TESTS=(
   tests/test_form_recommender_per_shape.py
   tests/test_vnext_form_recommender.py
   # 2. Draft preview -> approval -> Kaizen draft save
+  tests/test_essential_first_gate.py
   tests/test_vnext_draft_preview.py
   tests/test_filing_reliability.py
   tests/test_filing_attempt_log.py

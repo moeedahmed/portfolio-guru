@@ -19,7 +19,7 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler, PicklePersistence,
 )
 from store import store_credentials, get_credentials, has_credentials, init
-from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, is_reuse_request, review_draft, analyse_portfolio_health, summarise_recent_activity, generate_nudge_copy, extract_field_updates, compose_filing_recovery_copy, combine_case_inputs, _has_qi_project_signal, schema_form_type
+from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, is_reuse_request, review_draft, analyse_portfolio_health, summarise_recent_activity, generate_nudge_copy, extract_field_updates, compose_filing_recovery_copy, combine_case_inputs, _has_qi_project_signal, schema_form_type, assess_form_essentials, ESSENTIAL_PRESENT, ESSENTIAL_MISSING, ESSENTIAL_UNAVAILABLE
 from usage import record_case_filed, get_cases_this_month, check_can_file, get_user_tier, set_user_tier, get_case_history, TIER_LIMITS, get_all_active_users, get_cases_this_week, is_beta_tester, set_beta_tester, save_kc_coverage, delete_portfolio_evidence
 # Module-attribute access (consent.fn) rather than from-imports: test_smoke
 # pops `bot` from sys.modules, so multiple bot module objects can be alive in
@@ -1527,6 +1527,7 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
         "pending_bundle_msg_id",
         "pending_bundle_chat_id",
         _MISSING_ESSENTIALS_REPLAY_KEY,
+        _ESSENTIALS_ASSESSMENT_KEY,
     ):
         context.user_data.pop(key, None)
     if not keep_case:
@@ -2447,16 +2448,21 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
         return AWAIT_APPROVAL
 
     if pending_draft and chosen_form:
+        if not _draft_has_useful_content(pending_draft, chosen_form):
+            return await _ask_for_more_detail_before_draft(message, context, edit=False)
+        # Re-offering an older pending draft is still putting a draft in front
+        # of the doctor, so it is settled the same way. Nothing about the case
+        # is lost if the gate stops here.
+        gate = await _essentials_gate_before_draft(
+            message, context, case_text, chosen_form, edit=False
+        )
+        if gate is not None:
+            return gate
         await _send_latest_message(
             message,
             context,
             f"{reason}\n\nYour draft is still ready below.",
         )
-        if not _draft_has_useful_content(pending_draft, chosen_form):
-            return await _ask_for_more_detail_before_draft(message, context, edit=False)
-        gaps = _pre_draft_completeness_gaps(context, pending_draft, chosen_form)
-        if gaps:
-            await _notify_pre_draft_gaps(message, context, gaps)
         return await _show_draft_review(message, context, pending_draft, chosen_form, edit=False)
 
     if case_text and chosen_form and context.user_data.get("paused_flow_rebuild"):
@@ -2466,6 +2472,11 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
             context,
             f"{reason}\n\nI rebuilt the latest {_form_display_name(chosen_form)} step below so you can keep going.",
         )
+        gate = await _essentials_gate_before_draft(
+            message, context, case_text, chosen_form, edit=False
+        )
+        if gate is not None:
+            return gate
         try:
             refreshed_draft = await _analyse_selected_form(context, user_id, case_text, chosen_form)
         except asyncio.TimeoutError:
@@ -2488,9 +2499,6 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         if not _draft_has_useful_content(refreshed_draft, chosen_form):
             return await _ask_for_more_detail_before_draft(message, context, edit=False)
-        gaps = _pre_draft_completeness_gaps(context, refreshed_draft, chosen_form)
-        if gaps:
-            await _notify_pre_draft_gaps(message, context, gaps)
         return await _show_draft_review(message, context, refreshed_draft, chosen_form, edit=False)
 
     if case_text:
@@ -5216,7 +5224,12 @@ def _build_attachment_confirm_keyboard() -> InlineKeyboardMarkup:
 
 
 def _draft_needs_reflection_detail_before_save(context, draft) -> bool:
+    form_type = context.user_data.get("chosen_form") or _draft_form_type(draft)
     if not _draft_has_reflection_fields(draft):
+        return False
+    # Schema-led: a DOPS reflection is optional, so an empty or AI-structured
+    # one must not hold up a save the way a CBD's required reflection does.
+    if not _form_requires_reflection(form_type, draft):
         return False
 
     source = str(context.user_data.get("case_input_source") or "").strip().lower()
@@ -5225,9 +5238,15 @@ def _draft_needs_reflection_detail_before_save(context, draft) -> bool:
 
     case_text = str(context.user_data.get("case_text") or "").strip()
     if case_text:
-        context.user_data["rcem_personal_reflection_confirmed"] = (
-            has_personal_reflective_input(case_text)
-        )
+        # The model's semantic reading of the doctor's own words is the
+        # judgement (cached by `_essentials_gate_before_draft` for this exact
+        # case and form). `has_personal_reflective_input` remains only as the
+        # deterministic fallback for a case that was never assessed — a model
+        # outage must not silently drop RCEM's authentic-reflection gate.
+        judged = _model_reflection_judgement(context, case_text, form_type)
+        if judged is None:
+            judged = has_personal_reflective_input(case_text)
+        context.user_data["rcem_personal_reflection_confirmed"] = judged
 
     # Existing persisted drafts created before this control may not retain the
     # original case text. Preserve their explicit review/save path; every new
@@ -5689,15 +5708,22 @@ async def _ask_for_more_detail_before_draft(
 
 
 def _pre_draft_completeness_gaps(context, draft, form_type: str) -> list[dict]:
-    """Doctor-owned essentials still missing from a draft with useful content.
+    """Required evidence genuinely lost from a draft that already exists.
 
-    This is the single completeness decision: called here before a draft is
-    first shown, and reused as-is by ``handle_approval_approve`` as the
-    post-preview save safeguard, so an essential removed by an edit after
-    preview is caught with the same rule instead of a second, parallel one.
-    Optional schema fields are never included here — the preview footer's own
-    missing-field line (``_missing_fields_review_line``) still surfaces those
-    separately, but neither path ever blocks on an optional field.
+    Sufficiency is settled before drafting by ``_essentials_gate_before_draft``,
+    so this is not a pre-draft question and never re-litigates a judgement
+    already made: it is the quiet save-time safeguard for required evidence
+    that is genuinely absent from the draft about to be filed — typically
+    because an edit after the preview removed it.
+
+    It covers every schema-required field, including ones the gate never asks
+    the doctor about (the training stage comes from the saved profile, not
+    from the case), because a blank required field cannot be filed whatever
+    its origin. Required dates are excluded: they are defaulted to today at
+    both draft and filing time, so they are never actually lost. Optional
+    fields are never included, and reflection has its own gate above. Labels
+    are shared with the pre-draft gate so the two never describe the same
+    requirement differently.
     """
     gaps: list[dict] = []
     if _draft_needs_reflection_detail_before_save(context, draft):
@@ -5708,17 +5734,16 @@ def _pre_draft_completeness_gaps(context, draft, form_type: str) -> list[dict]:
 
     fields = _draft_fields_for_review(draft)
     reflection_keys = set(_find_reflection_keys(fields, _draft_form_type(draft)))
+    duplicates = _DUPLICATE_ESSENTIAL_KEYS.get(schema_form_type(form_type or ""), set())
+    essential_labels = {
+        item["key"]: item["label"] for item in _form_essential_requirements(form_type)
+    }
     missing_required, _, _ = _missing_template_fields(draft, form_type)
     for field in missing_required:
-        if field["key"] in reflection_keys:
+        key = field["key"]
+        if key in reflection_keys or key in duplicates or field.get("type") == "date":
             continue
-        # Required date fields already default to today at draft/filing time
-        # (`_apply_default_dates`, and the filer's own header default with an
-        # on-screen "defaulted to today" confirmation) — asking here would
-        # duplicate a question the doctor was never going to be left with.
-        if field.get("type") == "date":
-            continue
-        gaps.append({"key": field["key"], "label": field.get("label") or field["key"]})
+        gaps.append({"key": key, "label": essential_labels.get(key) or field.get("label") or key})
     return gaps
 
 
@@ -5729,23 +5754,352 @@ def _format_completeness_gap_items(gaps: list[dict]) -> str:
     return ", ".join(labels[:-1]) + f" and {labels[-1]}"
 
 
-async def _notify_pre_draft_gaps(
+# === ESSENTIAL-FIRST SUFFICIENCY GATE ===
+#
+# One decision, taken *before* any draft is generated: does the case the
+# doctor already sent carry what this form genuinely requires? The judgement
+# is the product model's (`assess_form_essentials`) reading the doctor's own
+# words against requirements derived from the Kaizen schema — not a keyword
+# rule, and not a second opinion on the model's own draft. Everything that
+# can draft a form routes through `_essentials_gate_before_draft`, and only a
+# complete judgement that every essential is present permits a drafting call:
+# a missing essential is asked for, an unavailable one offers a different
+# form, and an assessment that did not complete is retried. There is no path
+# that drafts anyway.
+
+# How each essential reads to the doctor when it has to be asked for, and
+# what it means to the model when it is being judged. Anything not named
+# here falls back to the schema's own label.
+_ESSENTIAL_FIELD_GUIDANCE: dict[str, dict[str, str]] = {
+    "reflection": {
+        "label": "your reflection (what you learned or would do differently)",
+        "description": "the doctor's own learning, interpretation, reaction, or intended change of practice",
+    },
+    "clinical_reasoning": {"description": "what the case was and why the doctor made the decisions they made"},
+    "trainee_role": {"description": "what this doctor personally did in this case"},
+    "trainee_performance": {"description": "how this doctor performed during the procedure"},
+    "indication": {"description": "why this patient needed the procedure"},
+    "patient_presentation": {"description": "what the patient presented with"},
+    "clinical_setting": {"description": "where the case happened, e.g. Emergency Department"},
+    "level_of_supervision": {"description": "how closely the doctor was supervised: direct, indirect, or distant"},
+    "case_observed": {"description": "the case that was observed"},
+    "procedure_name": {"description": "which procedure was performed"},
+    "placement": {"description": "which ACCS placement the doctor was in"},
+}
+
+# Schema-required fields Portfolio Guru fills itself, so they are never a
+# question for the doctor: required dates default to today at draft and
+# filing time, and the training stage comes from the saved profile.
+_SELF_FILLED_ESSENTIAL_KEYS = {"stage_of_training"}
+
+# Schema keys that restate another required key on the same form. Asking for
+# both would be one question the doctor has already answered.
+_DUPLICATE_ESSENTIAL_KEYS = {"DOPS": {"procedural_skill"}}
+
+_ESSENTIALS_ASSESSMENT_KEY = "essentials_assessment"
+
+
+def _form_essential_requirements(form_type: str) -> list[dict]:
+    """The form's genuinely essential, doctor-owned requirements.
+
+    Schema-required fields only: optional fields are never asked for, and
+    fields the product fills itself are excluded rather than turned into a
+    question the doctor was never going to be left with.
+    """
+    schema_key = schema_form_type(form_type or "")
+    duplicates = _DUPLICATE_ESSENTIAL_KEYS.get(schema_key, set())
+    required, _ = _template_requirements(form_type)
+    essentials: list[dict] = []
+    for field in required:
+        key = field["key"]
+        if field.get("type") == "date" or key in _SELF_FILLED_ESSENTIAL_KEYS or key in duplicates:
+            continue
+        guidance = _ESSENTIAL_FIELD_GUIDANCE.get(key, {})
+        essentials.append({
+            "key": key,
+            "label": guidance.get("label") or field.get("label") or key,
+            "description": guidance.get("description", ""),
+        })
+    return essentials
+
+
+def _essentials_cache_signature(case_text: str, form_type: str) -> tuple[str, str]:
+    """What a cached sufficiency judgement is actually about: form + case."""
+    return (
+        schema_form_type(form_type or ""),
+        dogfood_audit.text_fingerprint(case_text or ""),
+    )
+
+
+async def _assess_case_essentials(
+    context: ContextTypes.DEFAULT_TYPE,
+    case_text: str,
+    form_type: str,
+) -> dict[str, str]:
+    """Model judgement per essential, cached against this case and form.
+
+    A non-empty result always covers every essential of the form. An empty
+    result means the judgement did not complete — outage, timeout, or an
+    unusable answer — and callers must not read it as "nothing is missing".
+    An incomplete judgement is never cached, so a retry genuinely retries.
+    """
+    essentials = _form_essential_requirements(form_type)
+    if not essentials or not str(case_text or "").strip():
+        return {}
+
+    signature = _essentials_cache_signature(case_text, form_type)
+    cached = context.user_data.get(_ESSENTIALS_ASSESSMENT_KEY)
+    if isinstance(cached, dict) and tuple(cached.get("signature") or ()) == signature:
+        return dict(cached.get("statuses") or {})
+
+    try:
+        statuses = await asyncio.wait_for(
+            assess_form_essentials(
+                case_text,
+                form_type,
+                essentials,
+                input_source=context.user_data.get("case_input_source", "text"),
+            ),
+            timeout=25,
+        )
+    except Exception as exc:
+        logger.warning("Essentials assessment unavailable for %s: %s", form_type, exc)
+        context.user_data.pop(_ESSENTIALS_ASSESSMENT_KEY, None)
+        return {}
+
+    if not statuses:
+        context.user_data.pop(_ESSENTIALS_ASSESSMENT_KEY, None)
+        return {}
+
+    context.user_data[_ESSENTIALS_ASSESSMENT_KEY] = {
+        "signature": list(signature),
+        "statuses": dict(statuses),
+    }
+    return dict(statuses)
+
+
+def _cached_essential_statuses(
+    context: ContextTypes.DEFAULT_TYPE,
+    case_text: str,
+    form_type: str,
+) -> dict[str, str] | None:
+    cached = context.user_data.get(_ESSENTIALS_ASSESSMENT_KEY)
+    if not isinstance(cached, dict):
+        return None
+    if tuple(cached.get("signature") or ()) != _essentials_cache_signature(case_text, form_type):
+        return None
+    statuses = cached.get("statuses")
+    return dict(statuses) if isinstance(statuses, dict) else None
+
+
+def _model_reflection_judgement(
+    context: ContextTypes.DEFAULT_TYPE,
+    case_text: str,
+    form_type: str,
+) -> bool | None:
+    """Whether the model judged the doctor's own reflective input present.
+
+    ``None`` means this case and form were never assessed (model outage, or
+    a draft restored from an older session), not that reflection is absent.
+    """
+    statuses = _cached_essential_statuses(context, case_text, form_type)
+    if not statuses:
+        return None
+    reflection_keys = _find_reflection_keys(statuses, form_type)
+    if not reflection_keys:
+        return None
+    return any(statuses.get(key) == ESSENTIAL_PRESENT for key in reflection_keys)
+
+
+def _form_requires_reflection(form_type: str, draft=None) -> bool:
+    """Does this form's schema actually require a reflection field?
+
+    CBD does; DOPS marks it optional. An optional reflection must never
+    become a universal save blocker, so the gate is schema-led rather than
+    firing on any reflection-shaped key in the draft.
+    """
+    schema_fields = FORM_SCHEMAS.get(schema_form_type(form_type or ""), {}).get("fields", [])
+    if not schema_fields:
+        # Unregistered form: no schema to read, so fall back to the draft's
+        # own shape rather than assuming a requirement either way.
+        return _draft_has_reflection_fields(draft) if draft is not None else False
+    fields_by_key = {field["key"]: field for field in schema_fields}
+    return any(
+        fields_by_key[key].get("required")
+        for key in _find_reflection_keys(fields_by_key, form_type)
+    )
+
+
+async def _ask_for_missing_essentials(
     message,
     context: ContextTypes.DEFAULT_TYPE,
-    gaps: list[dict],
-) -> None:
-    """Name the missing essentials as an offer, never a wall.
+    form_type: str,
+    missing: list[dict],
+    *,
+    edit: bool,
+) -> int:
+    """One grouped question naming exactly the essentials still missing.
 
-    Sent as its own message ahead of the draft that follows immediately
-    after — the doctor can reply with the missing detail (it gets folded in
-    as edit feedback) or just approve the draft that's about to show, as-is.
-    This never blocks the draft from being shown.
+    Asked items are not remembered, because they are not the question: the
+    question is what the *current* case still lacks. Anything the doctor has
+    since supplied is judged present and drops out of the next ask, so an
+    answered item is never repeated, and a still-missing required detail is
+    never waved through because it was mentioned once before.
     """
+    context.user_data["chosen_form"] = form_type
+    context.user_data["awaiting_detail"] = True
+    _audit_event(
+        context,
+        "decision_path",
+        decision="essentials_question_asked",
+        form_type=form_type,
+        missing_keys=[item["key"] for item in missing],
+    )
+    _track_funnel_event(
+        context,
+        "essentials_requested",
+        form_type=form_type,
+        missing_count=len(missing),
+    )
     text = render_message(
         "pre_draft_completeness_request",
-        items=_format_completeness_gap_items(gaps),
+        items=_format_completeness_gap_items(missing),
     )
-    await _send_latest_message(message, context, text, reply_markup=None)
+    if edit:
+        await _safe_edit_text(message, text, reply_markup=_KB_CANCEL)
+        _track_latest_message(context, message)
+    else:
+        await _send_latest_message(message, context, text, reply_markup=_KB_CANCEL)
+    return AWAIT_CASE_INPUT
+
+
+async def _ask_to_retry_essentials_check(
+    message,
+    context: ContextTypes.DEFAULT_TYPE,
+    form_type: str,
+    *,
+    edit: bool,
+) -> int:
+    """The sufficiency check did not complete, so nothing may be drafted yet.
+
+    A requirement that was never judged cannot be assumed satisfied, and a
+    draft built on that assumption is exactly the silent bypass this gate
+    exists to prevent. The case is kept as sent and the check is offered
+    again; more detail from the doctor also re-runs it.
+    """
+    context.user_data["chosen_form"] = form_type
+    context.user_data["awaiting_detail"] = True
+    _audit_event(
+        context,
+        "decision_path",
+        decision="essentials_check_incomplete",
+        form_type=form_type,
+    )
+    text = render_message("essentials_check_retry", form_name=_form_display_name(form_type))
+    if edit:
+        await _safe_edit_text(message, text, reply_markup=_KB_RETRY_TEMPLATE)
+        _track_latest_message(context, message)
+    else:
+        await _send_latest_message(message, context, text, reply_markup=_KB_RETRY_TEMPLATE)
+    return AWAIT_CASE_INPUT
+
+
+def _build_change_form_keyboard(context: ContextTypes.DEFAULT_TYPE) -> InlineKeyboardMarkup:
+    back_to = "FORM|back" if context.user_data.get("form_recommendations") else "FORM|show_all"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔀 Choose a different form", callback_data=back_to)],
+        [_BTN_CANCEL],
+    ])
+
+
+async def _offer_change_form_for_unavailable_essentials(
+    message,
+    context: ContextTypes.DEFAULT_TYPE,
+    form_type: str,
+    unavailable: list[dict],
+    *,
+    edit: bool,
+) -> int:
+    """The doctor cannot supply something this form genuinely requires.
+
+    The case is kept exactly as sent and a different form is offered. The
+    requirement is neither invented for them nor quietly skipped.
+    """
+    context.user_data["chosen_form"] = form_type
+    context.user_data["awaiting_detail"] = True
+    _audit_event(
+        context,
+        "decision_path",
+        decision="essential_unavailable_change_form_offered",
+        form_type=form_type,
+        unavailable_keys=[item["key"] for item in unavailable],
+    )
+    text = render_message(
+        "essential_unavailable_change_form",
+        form_name=_form_display_name(form_type),
+        items=_format_completeness_gap_items(unavailable),
+    )
+    keyboard = _build_change_form_keyboard(context)
+    if edit:
+        await _safe_edit_text(message, text, reply_markup=keyboard)
+        _track_latest_message(context, message)
+    else:
+        await _send_latest_message(message, context, text, reply_markup=keyboard)
+    return AWAIT_CASE_INPUT
+
+
+async def _essentials_gate_before_draft(
+    message,
+    context: ContextTypes.DEFAULT_TYPE,
+    case_text: str,
+    form_type: str,
+    *,
+    edit: bool = True,
+) -> int | None:
+    """Settle the form's essentials before anything is drafted.
+
+    Returns ``None`` **only** when every essential of this form has been
+    judged present — that is the single condition under which a caller may
+    make a drafting call. Every other outcome returns the conversation state
+    to hand back, with the doctor's case retained exactly as sent:
+
+    * an essential is still missing → one grouped question naming only what
+      is genuinely still absent;
+    * an essential is unavailable to the doctor → a different form is
+      offered rather than the requirement being invented or skipped;
+    * the judgement did not complete (outage, timeout, or a partial,
+      duplicated or malformed answer) → a short retry, because a requirement
+      that was never judged cannot be assumed satisfied.
+
+    There is deliberately no "asked once already" exception: a cap on
+    questions would let required content through, which is the one thing
+    this gate exists to prevent.
+    """
+    essentials = _form_essential_requirements(form_type)
+    if not essentials or not str(case_text or "").strip():
+        return None
+
+    statuses = await _assess_case_essentials(context, case_text, form_type)
+    if not statuses:
+        return await _ask_to_retry_essentials_check(message, context, form_type, edit=edit)
+
+    unavailable = [item for item in essentials if statuses.get(item["key"]) == ESSENTIAL_UNAVAILABLE]
+    if unavailable:
+        return await _offer_change_form_for_unavailable_essentials(
+            message, context, form_type, unavailable, edit=edit
+        )
+
+    missing = [item for item in essentials if statuses.get(item["key"]) == ESSENTIAL_MISSING]
+    if missing:
+        return await _ask_for_missing_essentials(message, context, form_type, missing, edit=edit)
+
+    _audit_event(
+        context,
+        "decision_path",
+        decision="essentials_sufficient",
+        form_type=form_type,
+    )
+    return None
 
 
 def _universal_pre_file_gate(form_type: str, fields: dict) -> list[str]:
@@ -10651,6 +11005,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return ConversationHandler.END
         await query.edit_message_text(f"🧩 Reviewing {_form_display_name(chosen_form)} template…")
+        gate = await _essentials_gate_before_draft(query.message, context, case_text, chosen_form)
+        if gate is not None:
+            return gate
         try:
             draft = await _analyse_selected_form(context, user_id, case_text, chosen_form)
         except asyncio.TimeoutError:
@@ -10672,9 +11029,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return ConversationHandler.END
         if not _draft_has_useful_content(draft, chosen_form):
             return await _ask_for_more_detail_before_draft(query.message, context)
-        gaps = _pre_draft_completeness_gaps(context, draft, chosen_form)
-        if gaps:
-            await _notify_pre_draft_gaps(query.message, context, gaps)
         return await _show_draft_review(query.message, context, draft, chosen_form)
 
     elif data == "CASE|new":
@@ -10701,6 +11055,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if chosen_form:
             context.user_data["case_text"] = merged
             await query.edit_message_text(f"🧩 Updating {_form_display_name(chosen_form)} draft…")
+            gate = await _essentials_gate_before_draft(query.message, context, merged, chosen_form)
+            if gate is not None:
+                return gate
             try:
                 draft = await _analyse_selected_form(context, user_id, merged, chosen_form)
             except Exception as exc:
@@ -10709,9 +11066,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return AWAIT_TEMPLATE_REVIEW
             if not _draft_has_useful_content(draft, chosen_form):
                 return await _ask_for_more_detail_before_draft(query.message, context)
-            gaps = _pre_draft_completeness_gaps(context, draft, chosen_form)
-            if gaps:
-                await _notify_pre_draft_gaps(query.message, context, gaps)
             return await _show_draft_review(query.message, context, draft, chosen_form)
         else:
             context.user_data.clear()
@@ -10837,6 +11191,9 @@ async def _document_followup_refresh_draft(
     context.user_data["case_text"] = case_text
     context.user_data["case_input_source"] = input_source
     await query.edit_message_text(f"🧩 Updating {_form_display_name(chosen_form)} draft…")
+    gate = await _essentials_gate_before_draft(query.message, context, case_text, chosen_form)
+    if gate is not None:
+        return gate
     try:
         draft = await _analyse_selected_form(context, user_id, case_text, chosen_form)
     except asyncio.TimeoutError:
@@ -10848,9 +11205,6 @@ async def _document_followup_refresh_draft(
         return AWAIT_TEMPLATE_REVIEW
     if not _draft_has_useful_content(draft, chosen_form):
         return await _ask_for_more_detail_before_draft(query.message, context)
-    gaps = _pre_draft_completeness_gaps(context, draft, chosen_form)
-    if gaps:
-        await _notify_pre_draft_gaps(query.message, context, gaps)
     return await _show_draft_review(query.message, context, draft, chosen_form)
 
 
@@ -11259,6 +11613,15 @@ async def _accumulate_and_refresh(update: Update, context: ContextTypes.DEFAULT_
         f"🧩 Updating {form_name} draft…",
     )
 
+    gate = await _essentials_gate_before_draft(ack, context, combined, chosen_form)
+    if gate is not None:
+        # `case_text` already holds the combined case, so the additions list
+        # has done its job; leaving it set would append this same text again
+        # on the next pass through here.
+        context.user_data.pop("accumulating_case", None)
+        context.user_data.pop("accumulation_additions", None)
+        return gate
+
     try:
         draft = await _analyse_selected_form(context, user_id, combined, chosen_form)
     except asyncio.TimeoutError:
@@ -11274,9 +11637,6 @@ async def _accumulate_and_refresh(update: Update, context: ContextTypes.DEFAULT_
 
     context.user_data.pop("accumulating_case", None)
     context.user_data.pop("accumulation_additions", None)
-    gaps = _pre_draft_completeness_gaps(context, draft, chosen_form)
-    if gaps:
-        await _notify_pre_draft_gaps(ack, context, gaps)
     return await _show_draft_review(ack, context, draft, chosen_form)
 
 
@@ -11310,8 +11670,20 @@ async def _regenerate_active_draft_with_feedback(
         context.user_data["case_has_user_context"] = True
 
     ack = await msg.reply_text("✏️ Regenerating draft with your extra information…")
+
+    # Regenerating is drafting. An edit must not rebuild the draft from a case
+    # whose essentials are known to be missing, so the same gate runs here on
+    # the doctor's combined source — which stays saved either way.
+    form_type = (
+        draft.form_type
+        if isinstance(draft, FormDraft)
+        else (context.user_data.get("chosen_form") or "CBD")
+    )
+    gate = await _essentials_gate_before_draft(ack, context, case_text, form_type)
+    if gate is not None:
+        return gate
+
     try:
-        form_type = draft.form_type if isinstance(draft, FormDraft) else "CBD"
         current_draft_text = _format_draft_preview(
             draft,
             include_safety_layer=False,
@@ -11343,6 +11715,9 @@ async def _regenerate_active_draft_with_feedback(
                 timeout=45,
         )
         _store_draft(context, updated)
+        # The gate above already judged this exact case and form, so the
+        # reflection decision here reads that fresh judgement rather than a
+        # stale one from before the doctor's reply.
         _set_reflection_detail_gate(context, updated)
     except asyncio.TimeoutError:
         await ack.edit_text(
@@ -12701,6 +13076,10 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         ack = await _send_latest_message(
             update.message, context, f"🧩 Updating {_form_display_name(chosen_form)} draft…"
         )
+        gate = await _essentials_gate_before_draft(ack, context, case_text, chosen_form)
+        if gate is not None:
+            _mark_missing_essentials_replay_done(context, update, gate)
+            return gate
         try:
             draft = await _analyse_selected_form(context, user_id, case_text, chosen_form)
         except asyncio.TimeoutError:
@@ -12719,9 +13098,6 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             result = await _ask_for_more_detail_before_draft(ack, context)
             _mark_missing_essentials_replay_done(context, update, result)
             return result
-        gaps = _pre_draft_completeness_gaps(context, draft, chosen_form)
-        if gaps:
-            await _notify_pre_draft_gaps(ack, context, gaps)
         result = await _show_draft_review(ack, context, draft, chosen_form)
         _mark_missing_essentials_replay_done(context, update, result)
         return result
@@ -13161,6 +13537,10 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
             reply_markup=None,
         )
 
+        gate = await _essentials_gate_before_draft(query.message, context, case_text, form_type)
+        if gate is not None:
+            return gate
+
         try:
             draft = await _analyse_selected_form(context, update.effective_user.id, case_text, form_type)
         except asyncio.TimeoutError:
@@ -13189,10 +13569,6 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         if not _draft_has_useful_content(draft, form_type):
             return await _ask_for_more_detail_before_draft(query.message, context, form_type=form_type)
-
-        gaps = _pre_draft_completeness_gaps(context, draft, form_type)
-        if gaps:
-            await _notify_pre_draft_gaps(query.message, context, gaps)
 
         return await _show_draft_review(query.message, context, draft, form_type)
     finally:
@@ -16069,6 +16445,11 @@ def build_application() -> Application:
                 MessageHandler(filters.VIDEO, handle_case_input),
                 MessageHandler(filters.Document.ALL, handle_case_input),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|continue_thin$"),
+                # The essentials gate can offer a different form from this
+                # state when the current one needs something the doctor
+                # cannot supply; without this the offer's own button would
+                # match no handler and be dropped.
+                CallbackQueryHandler(handle_form_choice, pattern=r"^FORM\|"),
             ],
             AWAIT_USERNAME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, setup_username),

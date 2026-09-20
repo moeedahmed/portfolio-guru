@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from telegram.ext import ConversationHandler
 
+import bot
 from tests.bot_simulator import BotSimulator
 
 
@@ -384,10 +385,10 @@ class TestFlowWalker:
         assert 'Blank fields are left blank rather than invented' not in text
 
     @pytest.mark.asyncio
-    async def test_form_choice_names_missing_required_field_but_still_shows_draft(self, thin_draft):
-        """A genuinely missing schema-required field (not reflection) is named
-        as a heads-up, but the draft is shown immediately with Save available
-        — the gap is an offer, never a wall."""
+    async def test_form_choice_never_asks_for_a_field_the_product_fills_itself(self, thin_draft):
+        """Stage of training comes from the saved portfolio profile, so a blank
+        one is never a question for the doctor: the draft is shown immediately
+        with Save available and no gap message."""
         from bot import AWAIT_APPROVAL, handle_form_choice
 
         sim = BotSimulator()
@@ -398,13 +399,17 @@ class TestFlowWalker:
             update={'fields': {**thin_draft.fields, 'stage_of_training': ''}}
         )
 
+        essentials = {item['key'] for item in bot._form_essential_requirements('CBD')}
+        assert 'stage_of_training' not in essentials
+        statuses = {key: 'present' for key in essentials}
+
         update = sim._make_callback_update('FORM|CBD')
-        with patch('bot._analyse_selected_form', new_callable=AsyncMock, return_value=incomplete_draft):
+        with patch('bot.assess_form_essentials', new_callable=AsyncMock, return_value=statuses), \
+             patch('bot._analyse_selected_form', new_callable=AsyncMock, return_value=incomplete_draft):
             result = await handle_form_choice(update, context)
 
         assert result == AWAIT_APPROVAL
-        gap_note = sim.messages_sent[-2][1]
-        assert 'Stage of Training' in gap_note
+        assert not any('I still need' in (text or '') for _, text, _ in sim.messages_sent)
         text = sim.get_last_text()
         assert 'Here is your Case-Based Discussion draft' in text
         button_data = {data for _, data in sim.get_last_buttons()}

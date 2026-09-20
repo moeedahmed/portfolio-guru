@@ -77,9 +77,15 @@ async def test_concurrent_duplicate_same_update_only_extracts_once():
 
     analyse = AsyncMock(side_effect=slow_analyse)
     patches = _common_patches()
-    with patches[0], patches[1], patches[2], patch("bot._analyse_selected_form", new=analyse):
+    with patches[0], patches[1], patches[2], \
+         patch("bot._analyse_selected_form", new=analyse):
         task = asyncio.create_task(handle_case_input(followup_update, context))
-        await asyncio.sleep(0)  # let the in-flight call reach the extraction await
+        # Hand control back until the in-flight call is genuinely parked on
+        # the extraction await, however many awaits precede it.
+        for _ in range(100):
+            if analyse.await_count:
+                break
+            await asyncio.sleep(0)
 
         # The concurrent duplicate must bail out immediately, without a second
         # extraction call and without re-appending the case text again.

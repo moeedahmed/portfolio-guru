@@ -395,6 +395,13 @@ def _patch_extraction(monkeypatch_obj, case: CaseDefinition) -> None:
     async def fake_extract(*args, **kwargs):
         return draft
 
+    async def fake_assess_essentials(case_description, form_type, essentials, **kwargs):
+        # The golden cases are complete cases, so the essential-first gate
+        # judges them sufficient and the journey runs straight to the draft.
+        # Stubbed here for the same reason every other model call is: this
+        # harness must never reach a provider.
+        return {item["key"]: "present" for item in essentials}
+
     media_texts: dict[str, list[str]] = {
         "photo": [
             step.extracted_text
@@ -429,6 +436,7 @@ def _patch_extraction(monkeypatch_obj, case: CaseDefinition) -> None:
         return _pop_media_text("document")
 
     monkeypatch_obj.setattr("bot.recommend_form_types", fake_recommend)
+    monkeypatch_obj.setattr("bot.assess_form_essentials", fake_assess_essentials)
     monkeypatch_obj.setattr("bot.classify_intent", AsyncMock(return_value="case"))
     monkeypatch_obj.setattr(
         "bot.extract_explicit_form_type", lambda text, *, require_intent=True: None

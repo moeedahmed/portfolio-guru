@@ -24,6 +24,7 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "live: live Telegram tests (requires personal account session)")
     config.addinivalue_line("markers", "kaizen: live Kaizen integration tests (requires credentials, manual only)")
     config.addinivalue_line("markers", "consent_gate: exercise the real Art 9 consent gate (opts out of the autouse consent bypass)")
+    config.addinivalue_line("markers", "essentials_gate: exercise the real essential-first sufficiency call (opts out of the autouse sufficient-case stub)")
 
 
 @pytest.fixture(autouse=True)
@@ -60,6 +61,32 @@ def _default_gathering_mode_off(monkeypatch):
     """
     monkeypatch.setenv("PG_GATHERING_MODE", "off")
     yield
+
+@pytest.fixture(autouse=True)
+def _default_essentials_judged_sufficient(request, monkeypatch):
+    """Default the essential-first sufficiency judgement to "case is complete".
+
+    Nothing in the offline suite may reach a provider, and the gate refuses to
+    draft from a case it could not judge — so without this every draft-path
+    test would stop at the retry prompt instead of exercising the behaviour it
+    was written for. This mirrors the other autouse defaults here: it stubs a
+    model call, it does not relax the rule. Tests that exercise the gate patch
+    `bot.assess_form_essentials` themselves, and their patch wins.
+    """
+    if request.node.get_closest_marker("essentials_gate"):
+        yield
+        return
+
+    async def _all_present(case_description, form_type, essentials, **kwargs):
+        return {item["key"]: "present" for item in essentials}
+
+    import bot
+    import extractor
+
+    monkeypatch.setattr(extractor, "assess_form_essentials", _all_present)
+    monkeypatch.setattr(bot, "assess_form_essentials", _all_present, raising=False)
+    yield
+
 
 @pytest.fixture(autouse=True)
 def _default_consent_granted(request, monkeypatch):

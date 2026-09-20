@@ -144,9 +144,30 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         key="pre_draft_completeness_request",
         message_class=MessageClass.TEMPLATED,
         text=(
-            "📋 Heads up — I still don't have: {items}.\n\n"
-            f"Send it as {MODALITY_CLAUSE} and I'll add it, "
-            "or use the draft below as-is."
+            "📋 Before I draft this, I still need: {items}.\n\n"
+            f"Send it as {MODALITY_CLAUSE} and I'll add it to your case — "
+            "everything you've already sent is kept."
+        ),
+        safety_critical=True,
+    ),
+    "essentials_check_retry": MessageTemplate(
+        key="essentials_check_retry",
+        message_class=MessageClass.TEMPLATED,
+        text=(
+            "📋 I couldn't finish checking your case against the {form_name} "
+            "requirements just now, so I haven't drafted anything yet.\n\n"
+            "Your case is saved exactly as you sent it. Tap Retry, or send more "
+            f"detail ({MODALITY_CLAUSE}) and I'll check again."
+        ),
+        safety_critical=True,
+    ),
+    "essential_unavailable_change_form": MessageTemplate(
+        key="essential_unavailable_change_form",
+        message_class=MessageClass.TEMPLATED,
+        text=(
+            "📋 A {form_name} needs {items}, and that isn't available for this case.\n\n"
+            "I won't invent it or leave it out. Your case is saved — choose a different "
+            f"form below, or send the detail ({MODALITY_CLAUSE}) if you can get it."
         ),
         safety_critical=True,
     ),
