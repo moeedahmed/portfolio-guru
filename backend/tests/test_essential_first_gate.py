@@ -995,25 +995,53 @@ async def test_refine_regenerates_once_the_reply_completes_the_essentials():
     assert context.user_data.get("needs_reflection_detail") is not True
 
 
+# Functions allowed to reach the drafting model without the gate, and why.
+# Each refines a draft the gate already cleared, from the *same* saved case
+# text, so no unjudged requirement can enter through them. A path that folds
+# the doctor's new words into the case is not refinement and is not listed
+# here — `_regenerate_active_draft_with_feedback` re-gates instead.
+_UNGATED_DRAFTING_CALLERS = {
+    # The single drafting call the gate deliberately guards from outside.
+    "_analyse_selected_form",
+    # Post-preview refinements of an existing, already-gated draft.
+    "handle_quick_improve",
+    "handle_edit_value",
+}
+
+
 def test_no_drafting_entrypoint_can_skip_the_gate():
-    """Structural guard: every function that calls the drafting model also
-    calls the essentials gate, so a new entrypoint cannot quietly bypass it."""
+    """Structural guard: every function that reaches the drafting model also
+    calls the essentials gate, so a new entrypoint cannot quietly bypass it.
+
+    All three call shapes count — `_analyse_selected_form` and the two
+    extractors it wraps — because a new entrypoint calling an extractor
+    directly would be exactly as much of a bypass as one that did not.
+    """
     import ast
 
     source = open(bot.__file__).read()
     tree = ast.parse(source)
+    drafting_calls = ("_analyse_selected_form(", "extract_form_data(", "extract_cbd_data(")
     offenders = []
+    seen_exempt = set()
     for node in ast.walk(tree):
         if not isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
             continue
         body = ast.get_source_segment(source, node) or ""
-        if "_analyse_selected_form(" not in body:
+        if not any(call in body for call in drafting_calls):
             continue
-        if node.name == "_analyse_selected_form":
+        if node.name in _UNGATED_DRAFTING_CALLERS:
+            seen_exempt.add(node.name)
             continue
         if "_essentials_gate_before_draft(" not in body:
             offenders.append(node.name)
     assert not offenders, f"drafting entrypoints without the essentials gate: {offenders}"
+    # A stale exemption is its own risk: it would silently excuse a future
+    # function that happened to reuse the name.
+    assert seen_exempt == _UNGATED_DRAFTING_CALLERS, (
+        "exemptions no longer match the code: "
+        f"{_UNGATED_DRAFTING_CALLERS - seen_exempt}"
+    )
 
 
 @pytest.mark.asyncio
