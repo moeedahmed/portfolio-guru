@@ -108,3 +108,16 @@ Every one was concurrent writers on shared mutable state.
 ## Supported Forms
 
 Full form catalogue and DOM coverage status: `docs/form-coverage.md`. The coverage doc is the source for which forms are deterministic, which are UUID-known but hidden, and which are admin/utility surfaces rather than fileable portfolio evidence.
+
+## Scope Guard
+
+Complete the current task with the minimum sufficient change.
+
+- Before editing, define the outcome, non-goals, expected files, and proof.
+- Read the relevant code, tests, and configuration directly; resolve ambiguous or unverified premises first.
+- Reuse existing helpers, patterns, and test setup. Fix the root cause rather than stacking workarounds.
+- Add an abstraction only for an explicit requirement or a second real caller in the current task.
+- Preserve behaviour outside the requested change and remove replaced code unless compatibility is explicit.
+- Run the narrowest relevant existing tests and extend the nearest relevant test before creating new test infrastructure.
+- Stop and re-scope before adding an unexpected dependency, service, public API, schema, storage or wire-format change, duplicate implementation, unrelated file, or speculative cleanup.
+- Finish with only necessary files changed and no debug code, backup copies, scratch files, or dead paths.
