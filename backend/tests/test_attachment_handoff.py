@@ -28,6 +28,12 @@ from conversation_supervisor import (
 from conversational_router import ConversationalIntent
 
 
+@pytest.fixture(autouse=True)
+def _isolate_portfolio_history(monkeypatch):
+    """Attachment plumbing must not depend on a developer's local case history."""
+    monkeypatch.setattr("bot.get_case_history", AsyncMock(return_value=[]))
+
+
 def _all_visible_text(sim: BotSimulator) -> str:
     return "\n".join(text for _, text, _ in sim.messages_sent if isinstance(text, str))
 
