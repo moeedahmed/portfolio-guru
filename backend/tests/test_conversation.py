@@ -257,7 +257,6 @@ class TestMessagePolicy:
             ('💾 Save to Kaizen', "APPROVE|draft"),
         ]
         assert [(button.text, button.callback_data) for button in rows[1]] == [
-            ('✏️ Improve reflection', "IMPROVE|reflection"),
             ('❌ Cancel', "CANCEL|draft"),
         ]
 

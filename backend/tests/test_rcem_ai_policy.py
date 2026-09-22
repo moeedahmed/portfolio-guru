@@ -213,7 +213,7 @@ def test_improve_and_save_are_hidden_until_doctor_adds_reflection():
     from bot import _build_approval_keyboard
 
     callbacks = _callbacks(_build_approval_keyboard(needs_reflection_detail=True))
-    assert callbacks == {"ACTION|add_reflection_detail", "CANCEL|draft"}
+    assert callbacks == {"CANCEL|draft"}
 
 
 def test_actual_learning_point_source_unlocks_save_without_warning():
@@ -256,6 +256,7 @@ def test_missing_reflection_footer_does_not_claim_a_save_button_exists():
     context.user_data["needs_reflection_detail"] = True
     footer = _draft_reply_hint(context)
     assert "use the buttons below to save" not in footer.lower()
+    assert "reply" in footer.lower()
 
     context.user_data["needs_reflection_detail"] = False
     footer = _draft_reply_hint(context)
@@ -352,3 +353,43 @@ async def test_approval_sends_ai_declaration_in_fields_to_filer():
     filed_fields = route.await_args.kwargs["fields"]
     assert filed_fields["reflection"].endswith(AI_USE_DECLARATION)
     assert filed_fields["reflection"].count(AI_USE_DECLARATION) == 1
+
+
+@pytest.mark.parametrize("improved_once", [False, True])
+def test_ready_draft_and_amend_offer_only_save_and_cancel(improved_once):
+    from bot import _build_approval_keyboard, _build_amend_keyboard
+
+    assert _callbacks(_build_approval_keyboard(improved_once=improved_once)) == {
+        "APPROVE|draft", "CANCEL|draft",
+    }
+    assert _callbacks(_build_amend_keyboard(improved_once=improved_once)) == {
+        "APPROVE|draft", "AMEND|cancel",
+    }
+
+
+@pytest.mark.parametrize("reflection", ["", "I learned to escalate sooner."])
+def test_draft_coach_invites_reply_without_redundant_button(reflection):
+    from bot import _draft_coach_note
+
+    note = _draft_coach_note(CBDData(reflection=reflection))
+    assert "reply" in note.lower()
+    assert "tap" not in note.lower()
+    assert "Improve reflection" not in note
+
+
+@pytest.mark.asyncio
+async def test_stale_improve_callback_without_draft_cannot_extract():
+    from bot import AWAIT_CASE_INPUT, handle_quick_improve
+    from tests.bot_simulator import BotSimulator
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    with patch("bot._resume_paused_flow", new_callable=AsyncMock,
+               return_value=AWAIT_CASE_INPUT) as resume, \
+         patch("bot.extract_cbd_data", new_callable=AsyncMock) as extract:
+        state = await handle_quick_improve(
+            sim._make_callback_update("IMPROVE|reflection"), context,
+        )
+    assert state == AWAIT_CASE_INPUT
+    assert "no longer active" in resume.call_args.args[2]
+    extract.assert_not_awaited()

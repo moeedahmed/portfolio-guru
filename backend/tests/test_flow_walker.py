@@ -371,7 +371,7 @@ class TestFlowWalker:
 
         assert result == AWAIT_APPROVAL
         button_data = {data for _, data in sim.get_last_buttons()}
-        assert {'APPROVE|draft', 'IMPROVE|reflection', 'CANCEL|draft'} <= button_data
+        assert set(button_data) == {'APPROVE|draft', 'CANCEL|draft'}
         assert 'ACTION|add_reflection_detail' not in button_data
         assert 'ACTION|continue_thin' not in button_data
         assert 'ACTION|back_to_missing' not in button_data
@@ -1040,7 +1040,7 @@ class TestFlowWalker:
 
         assert 'Your reflection is needed before saving' in preview
         assert 'Add your own interpretation/reflection' in preview
-        assert 'ACTION|add_reflection_detail' in buttons
+        assert buttons == {'CANCEL|draft'}
         assert 'APPROVE|draft' not in buttons
 
     def test_image_with_user_context_can_show_save_when_reflection_is_useful(self, thin_draft):
@@ -1347,14 +1347,13 @@ class TestFlowWalker:
         assert revised_edits == []
 
         # The keyboard must be restored on the ORIGINAL draft message via a
-        # markup-only edit (text untouched). The improve button must still be
-        # present so the user can retry.
+        # markup-only edit (text untouched), keeping Save and Cancel available.
         markup_events = [m for m in sim.messages_sent if m[0] == 'markup' and m[2] is not None]
         assert markup_events, 'Original draft buttons were not restored after failure'
         last_markup = markup_events[-1][2]
         button_data = [b.callback_data for row in last_markup.inline_keyboard for b in row]
         assert 'APPROVE|draft' in button_data
-        assert 'IMPROVE|reflection' in button_data
+        assert set(button_data) == {'APPROVE|draft', 'CANCEL|draft'}
 
     @pytest.mark.asyncio
     async def test_all_forms_screen_has_navigation(self):

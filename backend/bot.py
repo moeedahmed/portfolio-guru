@@ -4537,35 +4537,20 @@ def _build_approval_keyboard(
     needs_reflection_detail: bool = False,
 ):
     rows = []
-    if needs_reflection_detail:
-        rows.append([InlineKeyboardButton("✍️ Add reflection", callback_data="ACTION|add_reflection_detail")])
-    elif improved_once:
-        # After Quick Improve is used, remove the improve button entirely
+    if not needs_reflection_detail:
         rows.append([InlineKeyboardButton("💾 Save to Kaizen", callback_data="APPROVE|draft")])
-    else:
-        rows.append([InlineKeyboardButton("💾 Save to Kaizen", callback_data="APPROVE|draft")])
-        rows.append([InlineKeyboardButton("✏️ Improve reflection", callback_data="IMPROVE|reflection")])
     if can_back_to_missing:
         rows.append(_nav_row("Back", "ACTION|back_to_missing", "Cancel", "CANCEL|draft"))
-    elif rows[-1][0].callback_data == "IMPROVE|reflection":
-        rows[-1].append(InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|draft"))
-    elif needs_reflection_detail:
-        rows[-1].append(InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|draft"))
     else:
         rows.append([InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|draft")])
     return InlineKeyboardMarkup(rows)
 
 
 def _build_amend_keyboard(improved_once: bool = False) -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton("💾 Save to Kaizen", callback_data="APPROVE|draft")]]
-    if not improved_once:
-        rows.append([
-            InlineKeyboardButton("✏️ Improve reflection", callback_data="IMPROVE|reflection"),
-            InlineKeyboardButton("❌ Cancel", callback_data="AMEND|cancel"),
-        ])
-    else:
-        rows.append([InlineKeyboardButton("❌ Cancel", callback_data="AMEND|cancel")])
-    return InlineKeyboardMarkup(rows)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💾 Save to Kaizen", callback_data="APPROVE|draft")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="AMEND|cancel")],
+    ])
 
 
 def _build_doc_intent_keyboard() -> InlineKeyboardMarkup:
@@ -5079,9 +5064,9 @@ def _draft_coach_note(draft) -> str:
     Returns "" for solid reflections so the preview isn't padded with noise."""
     reflection = _draft_reflection_text(draft).strip()
     if not reflection:
-        return "Coach note: Tap 'Improve reflection' to help flesh out your thoughts."
+        return "Coach note: Reply with what you learned or would do differently."
     if len(reflection.split()) < 18:
-        return "Coach note: This reflection is brief. Tap 'Improve reflection' if you'd like to expand it."
+        return "Coach note: This reflection is brief. Reply if you'd like to expand or change it."
     return ""
 
 
@@ -5368,7 +5353,7 @@ _MISSING_MARKER = "_— needs your detail_"
 # knows they can reply to refine, instead of relying on a removed Edit button.
 _REPLY_HINT_SUFFIX = render_message("draft_reply_hint")
 # Used instead when Save is hidden pending the doctor's own reflection, since
-# the buttons below only offer "add reflection" or cancel, not save.
+# the keyboard only offers Cancel while the doctor replies with reflection.
 _REPLY_HINT_SUFFIX_REFLECTION_NEEDED = render_message("draft_reply_hint_reflection_needed")
 
 

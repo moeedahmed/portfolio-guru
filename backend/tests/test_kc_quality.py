@@ -577,3 +577,212 @@ async def test_cbd_dispatch_renders_full_multi_kc_response_with_correct_slo_link
     rendered = _format_curriculum_hierarchy(draft.curriculum_links, draft.key_capabilities)
     assert rendered.count("↳ KC") == 3
     assert "SLO4" in rendered and "SLO2" in rendered and "SLO9" in rendered
+
+
+STEMI_CASE = (
+    "I assessed an adult in the ED with chest pain and inferior ST elevation. "
+    "I recognised an inferior STEMI, discussed safe immediate treatment with "
+    "the nursing team, started emergency management and coordinated urgent "
+    "transfer with the primary PCI team. I learned to activate the pathway early."
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("initial_count,reviewed_count", [(3, 3), (2, 3), (2, 2)])
+async def test_cbd_reviews_short_kc_selection_without_padding(initial_count, reviewed_count):
+    from extractor import KC_FULL_TEXT, RCEM_KC_MAP, extract_cbd_data
+
+    kcs = [KC_FULL_TEXT[code] for code in ("SLO1 KC1", "SLO2 KC1", "SLO3 KC3")]
+    source = STEMI_CASE if reviewed_count == 3 else (
+        "I assessed an adult with a headache, explained my assessment to the "
+        "nursing team and agreed a safe discharge plan."
+    )
+    payload = {"clinical_reasoning": source, "key_capabilities": kcs[:initial_count]}
+    reviewed = {**payload, "key_capabilities": kcs[:reviewed_count],
+                "clinical_reasoning": "Invented narrative must not replace the draft."}
+    generate = AsyncMock(side_effect=[json.dumps(payload), json.dumps(reviewed)])
+    with patch("extractor._generate", generate):
+        draft = await extract_cbd_data(source)
+
+    assert draft.key_capabilities == kcs[:reviewed_count]
+    assert "Invented narrative" not in draft.clinical_reasoning
+    assert draft.curriculum_links == ["SLO1", "SLO2", "SLO3"][:reviewed_count]
+    assert generate.await_count == (1 if initial_count == 3 else 2)
+    if initial_count < 3:
+        review_prompt = generate.call_args.args[0]
+        assert RCEM_KC_MAP in review_prompt
+        assert source in review_prompt
+        assert "fewer" in review_prompt.lower()
+
+
+@pytest.mark.asyncio
+async def test_cbd_short_selection_review_keeps_feedback_and_source_fidelity_rules():
+    from extractor import KC_FULL_TEXT, _SOURCE_FIDELITY_RULES, extract_cbd_data
+
+    kcs = [KC_FULL_TEXT[code] for code in ("SLO1 KC1", "SLO2 KC1")]
+    source = "FAST was done, a CT was arranged."
+    feedback = "I did not perform the FAST. No CT body region was specified."
+    payload = {"clinical_reasoning": source, "key_capabilities": kcs}
+    generate = AsyncMock(return_value=json.dumps(payload))
+    with patch("extractor._generate", generate):
+        draft = await extract_cbd_data(
+            source, edit_feedback=feedback, current_draft=source,
+            previous_key_capabilities=kcs,
+        )
+    assert generate.await_count == 2
+    review_prompt = generate.call_args.args[0]
+    assert feedback in review_prompt
+    assert _SOURCE_FIDELITY_RULES in review_prompt
+    assert draft.key_capabilities == kcs
+    assert "I performed" not in draft.clinical_reasoning
+    assert "CT head" not in draft.clinical_reasoning
+    assert "CT abdomen" not in draft.clinical_reasoning
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("review_response", [
+    "invalid JSON", "```json\ninvalid JSON\n```", "null", "[]", "{}",
+    '{"key_capabilities": null}', '{"key_capabilities": "SLO3 KC3"}',
+    '{"key_capabilities": [null]}', '{"key_capabilities": [{}]}',
+    '{"key_capabilities": ["   "]}',
+])
+async def test_unusable_cbd_kc_review_preserves_original_without_padding_or_retry(review_response):
+    from extractor import KC_FULL_TEXT, extract_cbd_data
+
+    kcs = [KC_FULL_TEXT["SLO1 KC1"], KC_FULL_TEXT["SLO2 KC1"]]
+    payload = {"clinical_reasoning": STEMI_CASE, "key_capabilities": kcs}
+    generate = AsyncMock(side_effect=[json.dumps(payload), review_response])
+    with patch("extractor._generate", generate):
+        draft = await extract_cbd_data(STEMI_CASE)
+    assert draft.key_capabilities == kcs
+    assert draft.curriculum_links == ["SLO1", "SLO2"]
+    assert "inferior STEMI" in draft.clinical_reasoning
+    assert generate.await_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("response", [
+    None, RuntimeError("provider failed"), TimeoutError("provider timeout"),
+    '{"key_capabilities": ["invented capability"]}',
+    '{"key_capabilities": ["SLO99 KC1: unknown"]}',
+    '{"key_capabilities": ["SLO1 KC99: unknown"]}',
+    '{"key_capabilities": ["SLO1 KC1garbage"]}',
+])
+async def test_optional_review_failure_preserves_whole_draft(response):
+    from extractor import KC_FULL_TEXT, extract_cbd_data
+
+    payload = {"key_capabilities": [KC_FULL_TEXT["SLO1 KC1"]],
+               "clinical_reasoning": STEMI_CASE, "reflection": "I learned to activate the pathway early."}
+    with patch("extractor._generate", AsyncMock(return_value=json.dumps(payload))):
+        baseline = await extract_cbd_data(STEMI_CASE)
+    generate = AsyncMock(side_effect=[json.dumps(payload), response])
+    with patch("extractor._generate", generate):
+        draft = await extract_cbd_data(STEMI_CASE)
+    assert draft == baseline
+    assert generate.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_review_counts_and_adopts_canonical_distinct_identities():
+    from extractor import KC_FULL_TEXT, extract_cbd_data
+
+    initial = ["SLO1 KC1: adult assessment", "slo1 kc1: different wording", "SLO2 KC1: team decisions"]
+    reviewed = [*initial, "SLO3 KC3: emergency management"]
+    generate = AsyncMock(side_effect=[json.dumps({"key_capabilities": initial}),
+                                      json.dumps({"key_capabilities": reviewed})])
+    with patch("extractor._generate", generate):
+        draft = await extract_cbd_data(STEMI_CASE)
+    assert generate.await_count == 2
+    assert draft.key_capabilities == [KC_FULL_TEXT[k] for k in ("SLO1 KC1", "SLO2 KC1", "SLO3 KC3")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("claims", [None, [], "invalid", [{}],
+    [{"capability": "SLO2 KC1", "reason": {"invalid": True}}]])
+async def test_review_cannot_erase_or_reintroduce_justified_removal(claims):
+    from extractor import KC_FULL_TEXT, extract_cbd_data
+
+    kcs = [KC_FULL_TEXT[k] for k in ("SLO1 KC1", "SLO2 KC1")]
+    original = {"key_capabilities": kcs[:1], "dropped_key_capabilities": [
+        {"capability": kcs[1], "reason": "I did not support team decisions."}]}
+    reviewed = {"key_capabilities": kcs, "dropped_key_capabilities": claims}
+    with patch("extractor._generate", AsyncMock(side_effect=[json.dumps(original), json.dumps(reviewed)])):
+        draft = await extract_cbd_data(STEMI_CASE, edit_feedback="Remove team decisions.",
+                                       previous_key_capabilities=kcs)
+    assert draft.key_capabilities == kcs[:1]
+
+
+@pytest.mark.asyncio
+async def test_optional_review_has_real_timeout_and_cancels(monkeypatch):
+    import asyncio
+    import extractor
+
+    monkeypatch.setattr(extractor, "_KC_REVIEW_TIMEOUT_SECONDS", 0.01, raising=False)
+    cancelled = asyncio.Event()
+    kcs = [extractor.KC_FULL_TEXT["SLO1 KC1"]]
+    async def generate(prompt, **kwargs):
+        if "KC selection review:" not in prompt:
+            return json.dumps({"key_capabilities": kcs})
+        assert kwargs["retries"] == 0
+        assert kwargs["max_attempts"] == 1
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+    with patch("extractor._generate", generate):
+        draft = await asyncio.wait_for(extractor.extract_cbd_data(STEMI_CASE), timeout=0.5)
+    assert cancelled.is_set()
+    assert draft.key_capabilities == kcs
+
+
+@pytest.mark.asyncio
+async def test_optional_review_skipped_when_extraction_used_budget(monkeypatch):
+    import asyncio
+    import extractor
+
+    monkeypatch.setattr(extractor, "_KC_REVIEW_DEADLINE_SECONDS", 0.01)
+    kcs = [extractor.KC_FULL_TEXT["SLO1 KC1"]]
+    async def slow_initial(*args, **kwargs):
+        await asyncio.sleep(0.02)
+        return json.dumps({"key_capabilities": kcs})
+    generate = AsyncMock(side_effect=slow_initial)
+    with patch("extractor._generate", generate):
+        draft = await extractor.extract_cbd_data(STEMI_CASE)
+    assert generate.await_count == 1
+    assert draft.key_capabilities == kcs
+
+
+@pytest.mark.asyncio
+async def test_review_valid_removal_merges_with_original_exclusions():
+    from extractor import KC_FULL_TEXT, extract_cbd_data
+
+    kcs = [KC_FULL_TEXT[k] for k in ("SLO1 KC1", "SLO2 KC1", "SLO3 KC3")]
+    original = {"key_capabilities": kcs[:1], "dropped_key_capabilities": [
+        {"capability": kcs[1], "reason": "No team decisions."}]}
+    reviewed = {"key_capabilities": kcs, "dropped_key_capabilities": [
+        {"capability": "SLO3 KC3: other wording", "reason": "No emergency management."}]}
+    with patch("extractor._generate", AsyncMock(side_effect=[json.dumps(original), json.dumps(reviewed)])):
+        draft = await extract_cbd_data(STEMI_CASE, edit_feedback="Correct the curriculum links.",
+                                       previous_key_capabilities=kcs)
+    assert draft.key_capabilities == kcs[:1]
+
+
+@pytest.mark.asyncio
+async def test_generate_attempt_cap_prevents_retry_and_provider_fallback(monkeypatch):
+    import extractor
+    from unittest.mock import MagicMock
+
+    providers = [{"name": "fixture", "type": "openai_compat", "model": "fixture",
+                  "base_url": "https://example.invalid", "env_key": "FIXTURE_KEY"}] * 2
+    monkeypatch.setenv("FIXTURE_KEY", "offline-fixture")
+    post = AsyncMock(side_effect=RuntimeError("503 unavailable"))
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    client.post = post
+    with patch("extractor._select_providers", return_value=providers), \
+         patch("extractor.httpx.AsyncClient", return_value=client), \
+         patch("extractor.ai_telemetry.record"):
+        with pytest.raises(RuntimeError, match="503"):
+            await extractor._generate("fixture", retries=0, max_attempts=1)
+    assert post.await_count == 1

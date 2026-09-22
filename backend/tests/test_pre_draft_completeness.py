@@ -123,7 +123,7 @@ async def test_missing_reflection_on_a_restored_draft_still_gates_save():
     route_filing.assert_not_awaited()
     assert "reflection is needed before saving" in sim.get_last_text().lower()
     buttons = {data for _, data in sim.get_last_buttons()}
-    assert "ACTION|add_reflection_detail" in buttons
+    assert buttons == {"CANCEL|draft"}
     assert "APPROVE|draft" not in buttons
 
 
@@ -184,7 +184,7 @@ async def test_restored_draft_missing_reflection_and_setting_names_both_and_file
     assert "reflection is needed before saving" in preview
     assert "clinical setting" in preview
     buttons = {data for _, data in sim.get_last_buttons()}
-    assert "ACTION|add_reflection_detail" in buttons
+    assert buttons == {"CANCEL|draft"}
     assert "APPROVE|draft" not in buttons
 
 

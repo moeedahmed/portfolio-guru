@@ -202,7 +202,8 @@ def _allow_non_eu_extraction() -> bool:
     }
 
 
-async def _generate(prompt, retries: int = 1, tier: str = "", purpose: str = "unspecified"):
+async def _generate(prompt, retries: int = 1, tier: str = "", purpose: str = "unspecified",
+                    max_attempts: int | None = None):
     """Call the configured extractor LLM.
     Defaults to DeepSeek V4 Flash.
     Returns the response as a plain string.
@@ -214,6 +215,7 @@ async def _generate(prompt, retries: int = 1, tier: str = "", purpose: str = "un
     import time as _time
     loop = asyncio.get_event_loop()
     last_error = None
+    attempts = 0
     t0 = _time.monotonic()
 
     providers = _select_providers(tier)
@@ -234,6 +236,9 @@ async def _generate(prompt, retries: int = 1, tier: str = "", purpose: str = "un
         outcome = "success" if provider_index == 0 else "fallback"
 
         for attempt in range(retries + 1):
+            if max_attempts is not None and attempts >= max_attempts:
+                raise last_error or RuntimeError("Generation attempt budget exhausted")
+            attempts += 1
             try:
                 if provider["type"] == "gemini":
                     client = _get_client()
@@ -3191,11 +3196,52 @@ Pre-preview quality check:
 
 
 _KC_EDIT_DROP_FIELD = "dropped_key_capabilities"
+_KC_REVIEW_TIMEOUT_SECONDS = 8.0
+# CBD callers allow 45 seconds; reserve five for final normalisation/return.
+_KC_REVIEW_DEADLINE_SECONDS = 40.0
+
+
+def _canonical_kc(capability):
+    if not isinstance(capability, str):
+        return None
+    match = re.fullmatch(r"\s*(SLO[1-9]\d*)\s+(KC[1-9]\d*)(?:\s*:\s*\S.*)?\s*",
+                         capability, re.IGNORECASE | re.DOTALL)
+    if not match:
+        return None
+    return KC_FULL_TEXT.get(f"{match[1].upper()} {match[2].upper()}")
+
+
+def _canonical_kcs(capabilities, *, strict=False):
+    if not isinstance(capabilities, list):
+        raise ValueError("Invalid KC list")
+    result = []
+    for capability in capabilities:
+        canonical = _canonical_kc(capability)
+        if canonical is None and strict:
+            raise ValueError("Unknown or malformed KC")
+        value = canonical or capability
+        if value not in result:
+            result.append(value)
+    return result
+
+
+def _validated_kc_drop_claims(claims):
+    if not isinstance(claims, list):
+        return []
+    valid = []
+    for claim in claims:
+        if not isinstance(claim, dict):
+            continue
+        capability = _canonical_kc(claim.get("capability"))
+        reason = claim.get("reason")
+        if capability and isinstance(reason, str) and reason.strip():
+            valid.append({"capability": capability, "reason": reason.strip()})
+    return valid
 
 
 def _kc_identity(capability) -> str:
     """Whitespace/case-insensitive comparison key for a Key Capability string."""
-    return " ".join(str(capability or "").split()).casefold()
+    return " ".join(str(_canonical_kc(capability) or capability or "").split()).casefold()
 
 
 def _build_kc_edit_retention_instruction(previous_key_capabilities) -> str:
@@ -3264,6 +3310,7 @@ async def extract_cbd_data(
     advanced-imaging narrative the LLM tries to inject is stripped before the
     user sees the draft.
     """
+    review_deadline = asyncio.get_running_loop().time() + _KC_REVIEW_DEADLINE_SECONDS
     case_description = await _prepare_case_description_for_model_async(case_description)
     missing_text_instruction = (
         'If a field cannot be filled from the case description, return an empty string "" for text/date/dropdown fields, null for nullable fields, and [] for list fields.'
@@ -3332,7 +3379,7 @@ INSTRUCTIONS:
 1. Before selecting anything, silently work through the FULL curriculum above against this specific case: for every SLO, ask what in the case (if anything) independently supports each of its KCs. Do this full pass in your own reasoning — do not skip SLOs just because an early one already matched, and do not stop at the first plausible KC. This reasoning is internal working only; it is not part of the JSON output.
 2. For each SLO that your pass above found relevant, read KC2, KC3, KC4... FIRST. Ask: does this case directly demonstrate THIS specific numbered capability?
 3. Only consider KC1 for an SLO after checking the higher KCs. KC1 is a broad fallback — only include it if the case demonstrates something KC2+ does not already cover for that SLO.
-4. Aim for 3 appropriate Key Capabilities by default. From your full pass, select independently and specifically supported KCs across the relevant curriculum; select more only when each additional capability is distinctly demonstrated. CAVEAT: select FEWER than 3 if fewer are genuinely supported, and NEVER pad, stretch, or include a weak/broad/only-loosely-related KC just to reach a count. Never invent a capability the case does not actually show. Three strong KCs beat three including a filler; one strong KC beats three where only one is real.
+4. Select 3 appropriate Key Capabilities whenever the case supports three. This is the default, not an optional target. From your full pass, select independently and specifically supported KCs across the relevant curriculum; select more only when each additional capability is distinctly demonstrated. CAVEAT: select FEWER than 3 if fewer are genuinely supported, and NEVER pad, stretch, or include a weak/broad/only-loosely-related KC just to reach a count. Never invent a capability the case does not actually show. Three strong KCs beat three including a filler; one strong KC beats three where only one is real.
 5. Use the FULL KC text exactly as written above (including the "(2025 Update)" suffix).
 6. Format each as: "SLO_CODE KC_NUM: full description text (2025 Update)"
 
@@ -3341,11 +3388,11 @@ Do NOT select KC1 just because it "could apply". Only select KC1 if:
 - The case specifically demonstrates something unique to KC1 that KC2+ does not cover, OR
 - KC1 is the only KC for that SLO
 
-Examples of KC1 being WRONG: selecting SLO1 KC1 just because a patient was assessed. Selecting SLO2 KC1 just because a decision was made. These are true of every case — they add no specificity.
+Do not exclude a supported KC merely because it is KC1 or broad. SLO1 has only KC1: substantive adult ED assessment and management can support it. SLO2 KC1 requires evidence of supporting the team with safe clinical decisions, not merely a mention that a decision was made. Count these separately only when the case demonstrates their distinct work.
 Examples of KC1 being RIGHT: selecting SLO3 KC1 when the trainee performed airway management (KC1 is specific here). Selecting SLO10 KC1 when the trainee critically appraised evidence (only KC for research).
 
 HARD RULES — only select if DIRECTLY demonstrated:
-- Resuscitation KCs (SLO3): only if patient was actually resuscitated, intubated, arrested
+- Resuscitation KCs (SLO3): require actual management of the capability described. SLO3 KC3 covers management of life-threatening conditions, including emergency stabilisation and urgent treatment pathways; arrest or intubation is not required. A diagnosis alone is insufficient. Never infer airway procedures, circulatory support or team leadership that was not described.
 - Procedure KCs (SLO6): only if trainee personally performed a named procedure
 - Paediatric KCs (SLO5): only if patient was under 16
 - Shift leadership KCs (SLO8): only if trainee explicitly led/coordinated the shift
@@ -3435,6 +3482,50 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
         retry_raw = retry_raw.strip()
         data = json.loads(retry_raw)
 
+    # A short selection gets one full-curriculum AI review, never deterministic
+    # supplementation. The model may confirm fewer; a count cannot prove support.
+    selected_kcs = _canonical_kcs(_normalise_list_field(data.get("key_capabilities")))
+    data["key_capabilities"] = selected_kcs
+    review_budget = min(_KC_REVIEW_TIMEOUT_SECONDS,
+                        review_deadline - asyncio.get_running_loop().time())
+    if len({kc for kc in selected_kcs if _canonical_kc(kc)}) < 3 and review_budget > 0:
+        review_prompt = (
+            f"{prompt}\n\nPrevious extraction:\n{json.dumps(data)}\n\n"
+            "KC selection review: the previous extraction returned fewer than three "
+            "distinct Key Capabilities. Recheck the FULL curriculum against the "
+            "original case and any user feedback. Return the same JSON fields, "
+            "selecting three KCs when independently supported. If fewer are genuinely "
+            "supported, keep fewer; never invent evidence or pad the selection. "
+            "Preserve all non-curriculum fields and any justified KC removal claims."
+        )
+        try:
+            review_text = await asyncio.wait_for(
+                _generate(review_prompt, retries=0, max_attempts=1),
+                timeout=review_budget,
+            )
+            review_raw = review_text.strip()
+            if review_raw.startswith("```"):
+                review_raw = review_raw.split("```")[1]
+                if review_raw.startswith("json"):
+                    review_raw = review_raw[4:]
+            reviewed = json.loads(review_raw.strip())
+            reviewed_kcs = _canonical_kcs(reviewed.get("key_capabilities"), strict=True)
+            # Review claims may add exclusions, never erase the initial ones.
+            original_claims = data.get(_KC_EDIT_DROP_FIELD)
+            merged_claims = (list(original_claims) if isinstance(original_claims, list) else [])
+            merged_claims += _validated_kc_drop_claims(reviewed.get(_KC_EDIT_DROP_FIELD))
+            excluded = {_kc_identity(claim["capability"])
+                        for claim in _validated_kc_drop_claims(merged_claims)}
+            reviewed_kcs = [kc for kc in reviewed_kcs if _kc_identity(kc) not in excluded]
+        except Exception:
+            # Includes provider/timeout/shape errors; cancellation by the caller
+            # still propagates. Do not log provider output or clinical content.
+            logger.warning("Unusable CBD KC review; preserving original selection")
+        else:
+            # Adopt atomically, and only curriculum fields, after validation.
+            data["key_capabilities"] = reviewed_kcs
+            data[_KC_EDIT_DROP_FIELD] = merged_claims
+
     normalised = {
         "form_type": "CBD",
         "date_of_encounter": _normalise_text_field(data.get("date_of_encounter"), leave_missing_blank, ""),
@@ -3465,6 +3556,7 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
             previous_key_capabilities,
             data.get(_KC_EDIT_DROP_FIELD),
         )
+    normalised["key_capabilities"] = _canonical_kcs(normalised["key_capabilities"])
     # The model returns curriculum_links and key_capabilities as two separate
     # JSON fields, which can drift apart (e.g. curriculum_links naming only
     # one SLO while key_capabilities lists KCs across several). The preview

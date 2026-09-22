@@ -17,12 +17,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from extractor import _apply_kc_edit_retention, extract_cbd_data
+from extractor import KC_FULL_TEXT, _apply_kc_edit_retention, extract_cbd_data
 
 
-KC_INJURY = "SLO4 KC1: injury assessment and management (2025 Update)"
-KC_ADULT = "SLO1 KC1: assessing and managing adult patients (2025 Update)"
-KC_NEW = "SLO7 KC1: communication with patients and relatives (2025 Update)"
+KC_INJURY = KC_FULL_TEXT["SLO4 KC1"]
+KC_ADULT = KC_FULL_TEXT["SLO1 KC1"]
+KC_NEW = KC_FULL_TEXT["SLO7 KC1"]
 
 CASE = (
     "Setting: Emergency Department. I assessed an adult with an ankle injury "
