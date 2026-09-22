@@ -17,7 +17,7 @@ This is the Portfolio Guru implementation of the wider OpenClaw Telegram bot tes
 Before launching or widening testing of a Telegram bot:
 
 1. Run the offline bot gate.
-2. Ask Moeed before any Telethon live run, name the target bot, and wait for explicit approval for that exact run.
+2. Task-bound autonomy, named: an already-approved product task, or an exact release approval (`--approved <sha>:<card-digest>`, see `docs/release-standard.md`), for the same allowlisted bot and an unchanged recipient/effect covers that task's or card's required live verification — run it without asking again, gated by the `TELEGRAM_LIVE_APPROVED` guard variable being set to `portfolio-guru-live-qa-approved` for that run. A standalone, ad-hoc live run outside an approved task or card (exploring the bot live for its own sake, a new target, a new recipient, or a broader effect) still needs Moeed's exact approval before `TELEGRAM_LIVE_APPROVED` is set — name the target bot and wait for that explicit approval first.
 3. Run the Telethon live lane against the intended bot account only.
 4. Save transcript artefacts.
 5. Review the transcript for sense, tone, missing buttons, loops, empty replies, and leaked internals.
@@ -27,7 +27,7 @@ Before launching or widening testing of a Telegram bot:
 
 Live Telethon QA uses a real user session, so the harness treats it as a controlled external action:
 
-- Require explicit approval for the exact run with `TELEGRAM_LIVE_APPROVED=portfolio-guru-live-qa-approved`.
+- Require the guard variable `TELEGRAM_LIVE_APPROVED=portfolio-guru-live-qa-approved` before any send. It is set for a run that an already-approved product task or exact release approval already covers (same allowlisted bot, unchanged recipient/effect — see the Launch Gate above); a standalone ad-hoc run still needs Moeed's exact approval before this variable is set.
 - Require a single named target bot via `TELEGRAM_BOT_USERNAME`; default is `portfolio_guru_bot`.
 - Refuse runtime target mismatches. The script cannot be pointed at one bot and then send to another.
 - Keep an allowlist in `TELEGRAM_LIVE_ALLOWED_BOTS`; default is only `portfolio_guru_bot`.
@@ -74,7 +74,8 @@ Default behaviour:
 - Runs Telethon live tests only when Telethon session/API credentials are present.
 - Uses the live guardrail gate before any Telethon send/click.
 - Writes logs and transcript artefacts under `.artifacts/telegram-bot-qa/`.
-- Skips cleanly when live credentials are absent unless live testing is explicitly required.
+- For an ordinary run, skips cleanly (exit 0) when live credentials are absent, unless live testing is explicitly required with `REQUIRE_TELEGRAM_LIVE=1`.
+- `--focused-release` is **fail-closed, not skip-cleanly**: it is the release gate's required live proof, so it forces the same behaviour as `REQUIRE_TELEGRAM_LIVE=1` regardless of the caller's environment. Missing approval or credentials, an incomplete allowlist, or an explicit `RUN_LIVE_TELEGRAM=0` all make it exit non-zero rather than silently reporting a clean skip.
 
 For a launch-blocking run:
 
@@ -82,7 +83,7 @@ For a launch-blocking run:
 TELEGRAM_LIVE_APPROVED=portfolio-guru-live-qa-approved REQUIRE_TELEGRAM_LIVE=1 scripts/telegram_bot_qa.sh
 ```
 
-Only set `TELEGRAM_LIVE_APPROVED` after Moeed has approved that specific live run. Never run Telethon live QA silently while Moeed is manually testing the bot.
+Only set `TELEGRAM_LIVE_APPROVED` after an already-approved task/card covers this exact run, or after Moeed has approved a standalone ad-hoc run. Never run Telethon live QA silently while Moeed is manually testing the bot.
 
 ## Credential Discipline
 
@@ -105,7 +106,7 @@ Required live variables:
 - `TELETHON_SESSION`
 - `TELETHON_API_ID` or `TELEGRAM_API_ID`
 - `TELETHON_API_HASH` or `TELEGRAM_API_HASH`
-- `TELEGRAM_LIVE_APPROVED=portfolio-guru-live-qa-approved` after explicit approval for that exact run
+- `TELEGRAM_LIVE_APPROVED=portfolio-guru-live-qa-approved` — set once an already-approved task/card covers this exact run, or after Moeed's explicit approval for a standalone ad-hoc run
 - `TELEGRAM_BOT_USERNAME` when testing a non-default bot
 - `TELEGRAM_LIVE_ALLOWED_BOTS` if widening beyond the default `portfolio_guru_bot`
 

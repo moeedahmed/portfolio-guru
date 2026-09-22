@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable
@@ -109,6 +110,96 @@ def button_texts(message) -> list[str]:
     return [button.text for row in (getattr(message, "buttons", None) or []) for button in row]
 
 
+def message_fingerprint(message) -> tuple[int, str, tuple[str, ...]]:
+    """Identity of a message's visible content: id plus text plus button labels.
+
+    Telegram bots often edit a message in place rather than sending a new one,
+    so message-id ordering alone cannot tell a genuinely changed reply from the
+    same pre-click message still sitting at the top of history. Comparing the
+    full fingerprint catches both a same-id edit (fingerprint changes) and a
+    stale unedited repeat (fingerprint matches the known "before" state).
+    """
+    return (
+        getattr(message, "id", 0) or 0,
+        (getattr(message, "raw_text", "") or "").strip(),
+        tuple(button_texts(message)),
+    )
+
+
+_SLO_HEADER_RE = re.compile(r"SLO\s*(\d+)", re.IGNORECASE)
+_KC_CHILD_RE = re.compile(r"^↳\s*KC\s*(\d+)\s*:", re.IGNORECASE)
+
+
+def parse_visible_kc_selections(text: str) -> list[tuple[int, int]]:
+    """Parse the rendered SLO->KC hierarchy into ordered (SLO number, KC number)
+    pairs, matching `bot.py`'s `_format_curriculum_hierarchy` output exactly: a
+    parent "• *SLOn — ...*" line followed by one or more child "  ↳ KCm: ..."
+    lines that belong to the most recently seen parent. A child line with no
+    parent yet seen (should not happen in real output) is dropped rather than
+    silently attributed to the wrong SLO.
+
+    Returns raw (possibly duplicate) pairs in document order; callers decide
+    whether duplicates are acceptable for their assertion.
+    """
+    pairs: list[tuple[int, int]] = []
+    current_slo: int | None = None
+    for line in (text or "").splitlines():
+        stripped = line.strip()
+        child_match = _KC_CHILD_RE.match(stripped)
+        if child_match:
+            if current_slo is not None:
+                pairs.append((current_slo, int(child_match.group(1))))
+            continue
+        if stripped.startswith("•"):
+            header_match = _SLO_HEADER_RE.search(stripped)
+            current_slo = int(header_match.group(1)) if header_match else None
+    return pairs
+
+
+READY_DRAFT_BUTTON_TOKEN = "save to kaizen"
+MISSING_ESSENTIALS_TEXT_MARKER = "before i draft this, i still need"
+
+
+def classify_post_click_draft_state(message) -> str:
+    """Classify the message the bot shows right after a form-choice click.
+
+    The only two bounded states this journey is allowed to see are the ready
+    draft (`_build_approval_keyboard` in bot.py: "Save to Kaizen" + "Cancel")
+    and the bounded missing-essentials prompt (`_ask_for_missing_essentials`,
+    rendered from the `pre_draft_completeness_request` template with a
+    Cancel-only keyboard). Anything else — including a ready-looking message
+    that also carries the missing-essentials marker, or a missing-essentials
+    message with extra buttons — fails closed rather than being guessed at.
+    This is deliberately not a general flow engine: it recognises exactly
+    these two states and nothing further.
+
+    Returns "ready" or "missing_essentials"; raises AssertionError otherwise.
+    """
+    received_lower = (getattr(message, "raw_text", "") or "").lower()
+    buttons = button_texts(message)
+    buttons_lower = [b.lower() for b in buttons]
+
+    is_ready = any(READY_DRAFT_BUTTON_TOKEN in b for b in buttons_lower)
+    is_missing_essentials = MISSING_ESSENTIALS_TEXT_MARKER in received_lower
+
+    if is_ready and not is_missing_essentials:
+        return "ready"
+
+    if is_missing_essentials and not is_ready:
+        cancel_only = bool(buttons_lower) and all("cancel" in b for b in buttons_lower)
+        if not cancel_only:
+            raise AssertionError(
+                "the missing-essentials prompt must offer Cancel only; got "
+                f"buttons {buttons!r}"
+            )
+        return "missing_essentials"
+
+    raise AssertionError(
+        "unexpected post-click state: neither the ready draft nor the bounded "
+        f"missing-essentials prompt; text={getattr(message, 'raw_text', '')!r} buttons={buttons!r}"
+    )
+
+
 def _contains_any(value: str, tokens: tuple[str, ...]) -> bool:
     return any(token.lower() in value.lower() for token in tokens)
 
@@ -174,6 +265,14 @@ def _click_expectation_step(step: TelegramStep) -> TelegramStep:
     )
 
 
+# Deliberately narrow: real network hiccups a poll loop should just retry,
+# not every possible exception. A bug in the matching logic below (a bad
+# assertion, an AttributeError from a malformed fake in a unit test, a
+# harness programming error) must propagate immediately rather than being
+# silently reinterpreted as "the message never arrived".
+_TRANSIENT_POLL_ERRORS = (ConnectionError, TimeoutError, OSError)
+
+
 async def wait_for_matching_message(
     client,
     chat_id: str | int,
@@ -183,8 +282,22 @@ async def wait_for_matching_message(
     expect_button_any: tuple[str, ...] = (),
     forbid_text_any: tuple[str, ...] = FORBIDDEN_RESPONSE_MARKERS,
     min_id: int | None = None,
+    reject_fingerprint: tuple[int, str, tuple[str, ...]] | None = None,
 ) -> any:
-    """Poll recent chat history until a message matches text/buttons expectations."""
+    """Poll recent chat history until a message matches text/buttons expectations.
+
+    `reject_fingerprint`, when given, excludes a message whose full
+    (id, text, buttons) fingerprint equals a known "before" state — the
+    pre-click message a caller already read — even if it happens to satisfy
+    the text/button expectations. This is a stronger guard than `min_id`
+    alone, which cannot tell an edited-in-place reply (same id) from the same
+    stale message still being returned by the API.
+
+    Only `_TRANSIENT_POLL_ERRORS` from the `get_messages` call itself are
+    swallowed and retried; any other exception — including one raised while
+    evaluating a match — propagates immediately instead of being masked as a
+    plain timeout.
+    """
     import asyncio
     import time
     start_time = time.time()
@@ -192,25 +305,29 @@ async def wait_for_matching_message(
     while time.time() - start_time < timeout_seconds:
         try:
             messages = await client.get_messages(chat_id, limit=5)
-            for msg in messages:
-                if msg.out:
-                    continue
-                if min_id is not None and getattr(msg, "id", 0) < min_id:
-                    continue
-                received = getattr(msg, "raw_text", "") or ""
-                buttons = button_texts(msg)
+        except _TRANSIENT_POLL_ERRORS:
+            await asyncio.sleep(0.5)
+            continue
 
-                text_ok = not expect_text_any or _contains_any(received, expect_text_any)
-                buttons_ok = not expect_buttons or bool(buttons or msg.reply_markup)
-                button_text_ok = not expect_button_any or any(
-                    _button_matches(button, expect_button_any) for button in buttons
-                )
-                forbidden_text_ok = not forbid_text_any or not _contains_any(received, forbid_text_any)
+        for msg in messages:
+            if msg.out:
+                continue
+            if min_id is not None and getattr(msg, "id", 0) < min_id:
+                continue
+            if reject_fingerprint is not None and message_fingerprint(msg) == reject_fingerprint:
+                continue
+            received = getattr(msg, "raw_text", "") or ""
+            buttons = button_texts(msg)
 
-                if received.strip() and text_ok and buttons_ok and button_text_ok and forbidden_text_ok:
-                    return msg
-        except Exception:
-            pass
+            text_ok = not expect_text_any or _contains_any(received, expect_text_any)
+            buttons_ok = not expect_buttons or bool(buttons or msg.reply_markup)
+            button_text_ok = not expect_button_any or any(
+                _button_matches(button, expect_button_any) for button in buttons
+            )
+            forbidden_text_ok = not forbid_text_any or not _contains_any(received, forbid_text_any)
+
+            if received.strip() and text_ok and buttons_ok and button_text_ok and forbidden_text_ok:
+                return msg
         await asyncio.sleep(0.5)
 
     raise TimeoutError(
@@ -268,6 +385,7 @@ async def run_telegram_workflow(client, bot_username: str, steps: Iterable[Teleg
                     f"got buttons {exchange.buttons!r}"
                 )
                 clicked_text = button.text
+                before_click_fingerprint = message_fingerprint(reply)
                 await button.click()
                 click_step = _click_expectation_step(step)
                 followup = await wait_for_matching_message(
@@ -279,6 +397,7 @@ async def run_telegram_workflow(client, bot_username: str, steps: Iterable[Teleg
                     expect_button_any=click_step.expect_button_any,
                     forbid_text_any=click_step.forbid_text_any,
                     min_id=getattr(reply, "id", None),
+                    reject_fingerprint=before_click_fingerprint,
                 )
                 _assert_message_matches(followup, click_step, f"after clicking {clicked_text!r}")
                 transcript.append(

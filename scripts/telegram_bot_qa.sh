@@ -40,6 +40,16 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
+# The focused release journey is required release proof, not optional
+# coverage: missing approval/credentials, an incomplete allowlist, or an
+# explicit RUN_LIVE_TELEGRAM=0 must all fail this run closed (non-zero) rather
+# than exiting 0 having silently skipped the one live check the release gate
+# depends on. This overrides any caller-supplied REQUIRE_TELEGRAM_LIVE/
+# RUN_LIVE_TELEGRAM — a focused release cannot opt back into a skip.
+if [[ "$FOCUSED_RELEASE" == "1" ]]; then
+  REQUIRE_LIVE=1
+fi
+
 mkdir -p "$ARTIFACT_DIR"
 
 cd "$BACKEND"
@@ -201,11 +211,16 @@ PY
 
 if [[ "$RUN_LIVE" == "0" || "$RUN_LIVE" == "false" ]]; then
   printf -- '- live-telegram: SKIP (disabled by RUN_LIVE_TELEGRAM)\n' >> "$SUMMARY"
+  if [[ "$REQUIRE_LIVE" == "1" ]]; then
+    cat "$SUMMARY"
+    echo "ERROR: live Telegram QA is required (focused release or REQUIRE_TELEGRAM_LIVE=1), but RUN_LIVE_TELEGRAM explicitly disabled it. Nothing was sent." >&2
+    exit 20
+  fi
 elif [[ "$HAS_TELETHON_ENV" == "1" ]]; then
   printf 'Live Telegram QA approved for target: %s\n' "${TELEGRAM_BOT_USERNAME:-portfolio_guru_bot}" >> "$SUMMARY"
   if [[ "$FOCUSED_RELEASE" == "1" ]]; then
     TELEGRAM_E2E_ARTIFACT_DIR="$ARTIFACT_DIR" run_step live-telegram-focused "$PY" -m pytest \
-      tests/test_e2e.py::test_e2e_case_text_enters_draft_flow \
+      tests/test_e2e.py::test_e2e_cbd_ready_draft_to_cancel_journey \
       -q \
       -m e2e
   else
