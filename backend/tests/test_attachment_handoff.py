@@ -680,6 +680,7 @@ async def test_attach_only_attachment_survives_next_text_case():
          patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
          patch('bot.get_training_level', return_value='ST5'), \
          patch('bot.get_curriculum', return_value='2025'), \
+         patch('bot.classify_intent', new=AsyncMock(return_value='case')), \
          patch('bot.recommend_form_types', new=AsyncMock(return_value=[])):
         result = await handle_case_input(update, context)
 
@@ -1255,6 +1256,7 @@ async def test_attachment_path_not_added_for_other_types(input_type):
          patch('bot.transcribe_voice', new=AsyncMock(return_value="clinical text")), \
          patch('bot.get_training_level', return_value='ST5'), \
          patch('bot.get_curriculum', return_value='2025'), \
+         patch('bot.classify_intent', new=AsyncMock(return_value='case')), \
          patch('bot.recommend_form_types', new=AsyncMock(return_value=[])):
         
         await handle_case_input(update, context)

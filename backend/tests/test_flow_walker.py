@@ -12,6 +12,12 @@ import bot
 from tests.bot_simulator import BotSimulator
 
 
+@pytest.fixture(autouse=True)
+def _isolated_flow_storage(monkeypatch, tmp_path):
+    from tests.helpers import isolate_bot_storage
+    isolate_bot_storage(monkeypatch, tmp_path)
+
+
 SAMPLE_CASES = {
     "valid": "45M with chest pain, troponin positive, managed as ACS and reflected on escalation.",
     "gibberish": "asdfghjkl random weather bananas",

@@ -1561,8 +1561,9 @@ def test_telegram_bot_qa_direct_call_guard_is_unchanged():
     to run live without it must stay exactly as strict."""
     src = BOT_QA.read_text()
     assert 'LIVE_APPROVAL_VALUE="portfolio-guru-live-qa-approved"' in src
-    assert 'REQUIRE_LIVE="${REQUIRE_TELEGRAM_LIVE:-0}"' in src
-    assert "live-telegram: SKIP (explicit approval missing)" in src
+    assert 'REQUIRE_LIVE="${REQUIRE_TELEGRAM_LIVE:-1}"' in src
+    assert "live-telegram: PENDING (approved task/card guard missing)" in src
+    assert "live-telegram: SKIP" not in src
     assert "ERROR: live Telegram QA required, but approval/credentials/target allowlist are incomplete." in src
     assert "exit 20" in src
     # The approved target and allowlist are captured read-only before the dotenv load.
@@ -2532,8 +2533,10 @@ def test_release_loop_has_no_passive_deploy_script_literal_and_real_guard_allows
     hermes_root = Path.home() / ".hermes" / "hermes-agent"
     python = hermes_root / "venv" / "bin" / "python"
     guard = hermes_root / "cron" / "lifecycle_guard.py"
-    if not (python.exists() and guard.exists()):
+    if not guard.is_file():
         pytest.skip("installed Hermes lifecycle guard is not available")
+    if not python.is_file():
+        python = Path(sys.executable)
     probe = subprocess.run(
         [
             str(python),
@@ -2549,6 +2552,28 @@ def test_release_loop_has_no_passive_deploy_script_literal_and_real_guard_allows
         text=True,
     )
     assert probe.returncode == 0, probe.stderr
+
+
+@pytest.mark.parametrize("installed_python", [False, True])
+def test_guard_probe_interpreter_selection(tmp_path, monkeypatch, installed_python):
+    from types import SimpleNamespace
+    root = tmp_path / ".hermes" / "hermes-agent"
+    (root / "cron").mkdir(parents=True)
+    (root / "cron" / "lifecycle_guard.py").touch()
+    interpreter = root / "venv" / "bin" / "python"
+    if installed_python:
+        interpreter.parent.mkdir(parents=True)
+        interpreter.touch()
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    calls = []
+    def probe(command, **kwargs):
+        calls.append(command)
+        assert command[0] == str(interpreter if installed_python else Path(sys.executable))
+        assert "from cron.lifecycle_guard import" in command[2]
+        return SimpleNamespace(returncode=0, stderr="")
+    monkeypatch.setattr(subprocess, "run", probe)
+    test_release_loop_has_no_passive_deploy_script_literal_and_real_guard_allows_wrapper()
+    assert len(calls) == 1
 
 
 if __name__ == "__main__":

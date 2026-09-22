@@ -31,7 +31,7 @@ Examples: Telegram message layout, button hierarchy, preview formatting, or Kaiz
 
 - Meet the meaningful user-facing requirements.
 - Capture screenshots from the affected real surface. Snapshot tests and transcripts remain useful regression proof but do not replace a screenshot when visual presentation changed.
-- Private Telegram or Kaizen evidence must avoid patient data and credentials. Any live send or authenticated third-party action requires explicit approval.
+- Private Telegram or Kaizen evidence must avoid patient data and credentials. Live proof within the already-approved target/account/effect needs no fresh ask; a new target, access or protected effect requires explicit approval.
 
 ### 4. Multi-step interaction
 
@@ -59,6 +59,39 @@ Telegram proof is `automated` only when the Telethon session, API id/hash, `TELE
 Manual workflow dispatch is not evidence for an ordinary ship. A completed Tests/deploy or live-journey failure is `blocked` with exit 1, and the loop then prints the verified prior known-good SHA and the exact `--mode rollback` command while stating that the released SHA stays live until a targeted rollback is actually run.
 
 Bounded rollback is `--mode rollback --risk <card risk> --approved <released 40hex>`. It reuses the original approval — the card already names both the released SHA and the frozen known-good SHA — and is operator-triggered, never silent; the deploy script's own health rollback is separate and unchanged. Before mutation it requires a clean tracked tree, the card, `HEAD == origin/main ==` the released SHA, a known-good SHA that is a real ancestor, and a live runtime reconciled and reported as the released SHA. It then makes one normal forward commit whose parent is exactly the released SHA and whose tree is exactly the known-good SHA's — never a force push, reset, merge, `main` checkout or untracked-file change — restoring the tracked preimage if that tree cannot be produced exactly. Validated state keyed by the released SHA is written under `.release/` before the push, so rerunning the same command resumes a committed-but-unpushed rollback, skips a duplicate push when `origin/main` is already the rollback commit, runs proof only, and never makes a second commit; drifted `main`, tampered state or card, unexpected `HEAD`, or a broken parent/tree invariant all fail closed. Proof is the same exact-SHA CI `Tests`, `Deploy Mac Mini` and runtime-identity pipeline keyed to the rollback commit, with **no live journey**. Success is `FINAL_RELEASE_STATE=rolled-back` only once the runtime proves that commit; a created or pushed commit is never itself called a rollback, and if the deploy restores the released runtime the receipt says main is the rollback commit while the runtime is still the released SHA. Missing, running, timeout, inaccessible runtime, or unavailable protected live proof is `proof-pending` with exit 4; on a manual card that message names the missing manual proof, not a missing approval. After a pushed run becomes pending, the loop prints an exact secret-free `--release-sha <40hex>` resume command. Resume reuses the same approval and card, requires `HEAD == origin/main == supplied SHA`, re-verifies runtime, performs proof stages only, and never attempts a duplicate push. Pull requests are optional and are not part of the default flow. The ship approval does not weaken live-send guards: Telegram, Vertex AI, Kaizen, Stripe, and supervisor-facing actions remain protected.
+
+## Whole-bot aggregate proof
+
+The product-owned comprehensive bot gate is
+`bash scripts/telegram_bot_qa.sh --whole-bot`. It runs the full offline gate before
+any live readiness check, then the reviewed safe live graph and verified
+cancellation. Phase 5A protects clinical generation, portfolio reads/sync and
+persistent mutations; clinical journeys stay offline-only and their live layer
+stays pending until an explicit synthetic-isolation envelope exists. It is on-demand and
+release-risk driven, never part of ordinary offline CI.
+
+Live whole-bot proof requires the clean exact `PORTFOLIO_GURU_EXPECTED_SHA` and
+successful existing `verify_live_runtime.py` verification for `portfolio_guru_bot`
+before client access. Run, target and candidate/runtime SHA provenance must match
+in receipts and transcript envelopes. Every attempted process/JUnit error fails
+even before graph completion. Offline/live process trees and cancel cleanup have
+explicit finite deadlines and atomic terminal receipts.
+
+Routine proof inside an approved bot/account/effect envelope is autonomous. Do not
+fall back to a second Founder manual checklist. One aggregate receipt decides
+completion; an absent layer, skip, unknown interface, stale/empty artifact or failed
+cleanup is non-pass. Existing release approval, deployment/runtime identity and
+protected-write authorisations are separate requirements; this safe bot gate does
+not silently discharge them.
+
+Exhaustive means the reviewed current registered commands, callback branches and
+conversation state/input kinds have assertion-backed offline scenarios, combined
+with the safe reachable live graph for the synthetic account. Open-ended text,
+model/provider behaviour and dynamic argument values are sampled. Registration and
+producer drift require review and do not themselves earn coverage. Report exposed
+product failures as failures; never relabel a broken route as covered or delete its
+assertion to close the catalogue. See `telegram-bot-autonomous-testing.md` for the
+aggregate artifact and protected-boundary contract.
 
 ## Completion record
 

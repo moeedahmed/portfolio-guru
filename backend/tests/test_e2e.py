@@ -173,6 +173,8 @@ async def test_e2e_cbd_ready_draft_to_cancel_journey(telethon_client):
         )
         assert cbd_button is not None, f"no CBD button offered: {button_texts(form_choice)!r}"
         clicked_form_button_text = cbd_button.text
+        form_payload = cbd_button.data.decode() if isinstance(cbd_button.data, bytes) else cbd_button.data
+        assert form_payload in {"FORM|CBD", "FORM|CBD_2021", "FORM|best"}, "Unreviewed clinical form control"
         await cbd_button.click()
 
         # Wait for the first genuinely changed incoming message with no assumption
@@ -235,6 +237,8 @@ async def test_e2e_cbd_ready_draft_to_cancel_journey(telethon_client):
         else:
             ready_draft = post_click
 
+        assert any((b.data.decode() if isinstance(b.data, bytes) else b.data) == "APPROVE|draft"
+                   for row in ready_draft.buttons for b in row), "Save boundary payload not observed"
         draft_buttons = button_texts(ready_draft)
         assert any("save to kaizen" in text.lower() for text in draft_buttons), draft_buttons
         assert any("cancel" in text.lower() for text in draft_buttons), draft_buttons
@@ -261,6 +265,8 @@ async def test_e2e_cbd_ready_draft_to_cancel_journey(telethon_client):
         )
         assert cancel_button is not None, f"no Cancel button on ready draft: {draft_buttons!r}"
         clicked_cancel_button_text = cancel_button.text
+        cancel_payload = cancel_button.data.decode() if isinstance(cancel_button.data, bytes) else cancel_button.data
+        assert cancel_payload in {"ACTION|cancel", "CANCEL|draft"}, "Protected or unknown control labelled Cancel"
         await cancel_button.click()
 
         cancelled = await wait_for_matching_message(

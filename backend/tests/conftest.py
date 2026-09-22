@@ -141,3 +141,32 @@ def mock_callback_update():
     update.callback_query.message = MagicMock()
     update.callback_query.message.text = "test"
     return update
+
+
+@pytest.fixture(autouse=True)
+def _offline_network_is_fail_closed(request, monkeypatch):
+    """An omitted provider stub must fail locally, never reach an external API."""
+    if request.node.get_closest_marker("live") or request.node.get_closest_marker("kaizen") or request.path.name in {"test_e2e.py", "test_e2e_live.py"}:
+        return
+    import socket
+    def refused(*args, **kwargs):
+        pytest.fail("Offline test attempted a socket connection; stub the external boundary")
+    monkeypatch.setattr(socket.socket, "connect", refused)
+    monkeypatch.setattr(socket.socket, "connect_ex", refused)
+    monkeypatch.setattr(socket, "getaddrinfo", refused)
+    # Navigation classification is a provider boundary, not the subject of legacy
+    # bot scenarios. Explicit navigation tests override this neutral response.
+    import bot
+    monkeypatch.setattr(bot, "classify_menu_intent", AsyncMock(return_value="ambiguous"))
+    monkeypatch.setattr(bot, "classify_intent", AsyncMock(return_value="case"))
+
+    # Chart rendering is real, but host font discovery is not a product contract.
+    # fc-list can hang in the clean macOS sandbox; Matplotlib handles OSError
+    # by using its bundled fonts and ordinary filesystem discovery instead.
+    import subprocess
+    check_output = subprocess.check_output
+    def local_output(args, *positional, **kwargs):
+        if isinstance(args, (list, tuple)) and args and args[0] in {"fc-list", "system_profiler"}:
+            raise FileNotFoundError("Host font discovery disabled in offline tests")
+        return check_output(args, *positional, **kwargs)
+    monkeypatch.setattr(subprocess, "check_output", local_output)

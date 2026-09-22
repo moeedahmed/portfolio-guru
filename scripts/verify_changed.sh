@@ -28,6 +28,7 @@ OFFLINE_TEST_ENV=(
   FERNET_SECRET_KEY=5Wv33F9sq99WGD2lEzwwd3J_JH5p6vxKdDiAwCWqoYQ=
   TELEGRAM_BOT_TOKEN=fake
   GOOGLE_API_KEY=fake
+  PYTHON_DOTENV_DISABLED=1
 )
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
@@ -54,6 +55,11 @@ else
 fi
 
 JOURNEY_TESTS=(
+  # Whole-bot harness and aggregate contracts (fake clients only).
+  tests/test_telegram_live_harness.py
+  tests/test_whole_bot_explorer.py
+  tests/test_whole_bot_proof_safety.py
+  tests/test_release_proof_helpers.py
   # 1. Case capture -> extraction -> form recommendation
   tests/test_conversational_case_engine.py
   tests/test_deterministic_form_recommender.py
@@ -107,4 +113,13 @@ echo "--- Journey smoke: ${#JOURNEY_TESTS[@]} test files, offline/mocked only --
 env "${OFFLINE_TEST_ENV[@]}" "$PY" -m pytest "${JOURNEY_TESTS[@]}" -q
 
 echo
+WHOLE_ARTIFACTS="${WHOLE_BOT_ARTIFACT_DIR:-$ROOT/.artifacts/whole-bot-offline-proof}"
+mkdir -p "$WHOLE_ARTIFACTS"
+read -r -a WHOLE_TESTS <<< "$("$PY" -m tests.whole_bot_catalogue)"
+echo "--- Whole-bot catalogue: real callbacks, assertion-backed evidence ---"
+env "${OFFLINE_TEST_ENV[@]}" WHOLE_BOT_OBSERVATIONS="$WHOLE_ARTIFACTS/observations.json" \
+  WHOLE_BOT_CATALOGUE="$WHOLE_ARTIFACTS/catalogue.json" \
+  "$PY" -m pytest -p tests.whole_bot_audit "${WHOLE_TESTS[@]}" -q -m "not live and not kaizen" \
+  --junitxml="$WHOLE_ARTIFACTS/catalogue-tests.xml"
+
 echo "verify:changed PASSED."

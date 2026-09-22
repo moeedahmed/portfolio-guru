@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import pytest
 from pathlib import Path
 
 
@@ -122,3 +123,20 @@ def test_telegram_focused_release_fails_closed_when_run_live_explicitly_disabled
     assert result.returncode != 0, result.stdout + result.stderr
     assert "required" in (result.stdout + result.stderr).lower()
     assert "live-telegram-focused" not in log.read_text()
+
+
+@pytest.mark.parametrize("approved", [False, True])
+def test_whole_bot_never_accepts_missing_proof(tmp_path, approved):
+    root, log = _fake_python_reporting_telethon_env(tmp_path, has_telethon_env=True)
+    import sys
+    python = root / "backend/venv/bin/python3"
+    original = python.read_text()
+    python.write_text(original.replace("exit 0", 'if [[ "$*" == *"tests.whole_bot_aggregate"* ]]; then echo "PENDING: aggregate proof missing"; exit 20; fi\nexit 0'))
+    env = {**os.environ, "PORTFOLIO_GURU_APP_DIR": str(root), "RUN_LIVE_TELEGRAM": "1"}
+    env["TELEGRAM_LIVE_APPROVED"] = "portfolio-guru-live-qa-approved" if approved else ""
+    result = subprocess.run(["bash", str(TELEGRAM_QA), "--whole-bot"], env=env, capture_output=True, text=True)
+    assert result.returncode == 20
+    assert "PENDING" in result.stdout + result.stderr
+    if approved:
+        assert "tests.whole_bot_aggregate" in log.read_text()
+        assert "test_e2e_cbd" not in log.read_text()

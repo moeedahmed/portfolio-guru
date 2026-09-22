@@ -119,3 +119,54 @@ def make_command_update(command: str, user: User | None = None, args: list[str] 
         entities=[MessageEntity(type=MessageEntity.BOT_COMMAND, offset=0, length=len(f"/{command}"))],
     )
     return Update(update_id=_next_update_id(), message=msg)
+
+
+def build_offline_application():
+    """Use production registration, replacing only transport and persistence.
+
+    Never initialize the polling updater or inspect/purge a real persistence file.
+    The caller owns response capture and per-scenario external-effect stubs.
+    """
+    from unittest.mock import patch
+    from telegram.ext import Application, ApplicationBuilder, DictPersistence
+    import bot
+
+    persistence = DictPersistence()
+    app = (Application.builder().token("0:FAKE").updater(None).job_queue(None)
+           .persistence(persistence).request(OfflineRequest())
+           .get_updates_request(OfflineRequest()).build())
+    with patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "0:FAKE",
+                                   "PG_ALLOW_NON_EU_EXTRACTION": "1"}), \
+         patch("bot.os.makedirs"), \
+         patch("clinical_persistence.purge_existing_file", return_value={"status": "offline"}), \
+         patch("clinical_persistence.ClinicalScrubbingPersistence", return_value=persistence), \
+         patch.object(ApplicationBuilder, "build", return_value=app):
+        return bot.build_application()
+
+
+def isolate_bot_storage(monkeypatch, tmp_path, *, audit_path=None):
+    """Keep production storage boundaries real but scoped to synthetic test data."""
+    from sqlmodel import SQLModel, create_engine
+    from sqlalchemy.pool import StaticPool
+    import credentials
+    import profile_store
+    import usage
+    import kaizen_index
+    import supervisor_bot
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(credentials, "engine", engine)
+    monkeypatch.setattr(profile_store, "engine", engine)
+    monkeypatch.setattr(usage, "DB_PATH", str(tmp_path / "usage.db"))
+    monkeypatch.setattr(kaizen_index, "DB_PATH", str(tmp_path / "usage.db"))
+    monkeypatch.setattr(supervisor_bot, "NOTIFICATION_CACHE_DIR", tmp_path / "supervisor")
+    for key, filename in {
+        "PORTFOLIO_GURU_FUNNEL_LOG_PATH": "funnel.ndjson",
+        "PORTFOLIO_GURU_FILING_LOG_PATH": "filing.ndjson",
+        "PORTFOLIO_GURU_DOGFOOD_AUDIT_PATH": "audit.ndjson",
+        "PORTFOLIO_GURU_DRAFT_BACKUP_DIR": "drafts",
+        "PORTFOLIO_GURU_HEALTH_PROFILE_PATH": "health.json",
+    }.items():
+        monkeypatch.setenv(key, str(audit_path if key == "PORTFOLIO_GURU_DOGFOOD_AUDIT_PATH"
+                                   and audit_path else tmp_path / filename))

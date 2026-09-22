@@ -3,10 +3,10 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-
 import pytest
 
 from tests import telegram_live_harness as harness
+from tests.telegram_live_policy import command_expectation
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BOT_QA = REPO_ROOT / "scripts" / "telegram_bot_qa.sh"
@@ -228,6 +228,43 @@ def test_matches_expectation_requires_expected_text_and_button():
     message = _FakeMessage("This looks suitable for CBD", (("Use best fit", "See all forms"),))
 
     assert harness._matches_expectation(message, step) is True
+
+
+def test_chase_live_expectation_matches_real_handler_response():
+    code = '''import asyncio, json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+import bot
+async def main():
+    reply_text = AsyncMock()
+    await bot.chase_command(SimpleNamespace(message=SimpleNamespace(reply_text=reply_text)), SimpleNamespace())
+    reply_text.assert_awaited_once()
+    print(json.dumps(reply_text.await_args_list[0].args[0]))
+asyncio.run(main())'''
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=REPO_ROOT / "backend",
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "PYTHON_DOTENV_DISABLED": "1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "DATABASE_URL": "sqlite://",
+            "TELEGRAM_BOT_TOKEN": "0:FAKE",
+            "GOOGLE_API_KEY": "fake",
+            "FERNET_SECRET_KEY": "5Wv33F9sq99WGD2lEzwwd3J_JH5p6vxKdDiAwCWqoYQ=",
+        },
+    )
+    actual_text = json.loads(result.stdout.splitlines()[-1])
+    step = harness.TelegramStep(
+        name="command:chase",
+        message="/chase",
+        expect_text_any=command_expectation("chase"),
+    )
+    assert harness._matches_expectation(_FakeMessage(actual_text), step) is True
 
 
 def test_matches_expectation_blocks_forbidden_text_and_buttons():

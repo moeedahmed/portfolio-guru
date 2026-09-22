@@ -7,10 +7,11 @@ STAMP="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
 ARTIFACT_ROOT="${TELEGRAM_BOT_QA_ARTIFACT_ROOT:-${ROOT}/.artifacts/telegram-bot-qa}"
 ARTIFACT_DIR="${ARTIFACT_ROOT}/${STAMP}"
 RUN_LIVE="${RUN_LIVE_TELEGRAM:-auto}"
-REQUIRE_LIVE="${REQUIRE_TELEGRAM_LIVE:-0}"
+REQUIRE_LIVE="${REQUIRE_TELEGRAM_LIVE:-1}"
 LIVE_APPROVAL_VALUE="portfolio-guru-live-qa-approved"
 DEFAULT_LIVE_ALLOWLIST="portfolio_guru_bot"
 FOCUSED_RELEASE=0
+WHOLE_BOT=0
 
 # Captured read-only before backend/.env is read. A release live proof is
 # approved for one exact bot and one frozen singleton allowlist; the environment
@@ -35,6 +36,7 @@ readonly DOTENV_PROTECTED_NAMES
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --focused-release) FOCUSED_RELEASE=1 ;;
+    --whole-bot) WHOLE_BOT=1 ;;
     *) echo "ERROR: unknown argument: $1" >&2; exit 64 ;;
   esac
   shift
@@ -46,7 +48,7 @@ done
 # than exiting 0 having silently skipped the one live check the release gate
 # depends on. This overrides any caller-supplied REQUIRE_TELEGRAM_LIVE/
 # RUN_LIVE_TELEGRAM — a focused release cannot opt back into a skip.
-if [[ "$FOCUSED_RELEASE" == "1" ]]; then
+if [[ "$FOCUSED_RELEASE" == "1" || ( "$RUN_LIVE" != "0" && "$RUN_LIVE" != "false" ) ]]; then
   REQUIRE_LIVE=1
 fi
 
@@ -62,6 +64,16 @@ elif [[ -x "../.venv/bin/python3" ]]; then
   PY="../.venv/bin/python3"
 else
   PY="python3"
+fi
+
+# One aggregate gate: offline proof first; live remains explicit and guarded.
+if [[ "$WHOLE_BOT" == "1" ]]; then
+  if [[ "$FOCUSED_RELEASE" == "1" ]]; then
+    echo "ERROR: --whole-bot and --focused-release are separate proof modes." >&2
+    exit 64
+  fi
+  # Replace the shell so SIGINT/SIGTERM reaches the process-tree owner.
+  exec env PYTHON_DOTENV_DISABLED=1 "$PY" -m tests.whole_bot_aggregate "$ARTIFACT_DIR"
 fi
 
 if [[ -f ".env" ]]; then
@@ -210,7 +222,7 @@ PY
 )"
 
 if [[ "$RUN_LIVE" == "0" || "$RUN_LIVE" == "false" ]]; then
-  printf -- '- live-telegram: SKIP (disabled by RUN_LIVE_TELEGRAM)\n' >> "$SUMMARY"
+  printf -- '- live-telegram: NOT RUN (explicit offline-only mode)\n' >> "$SUMMARY"
   if [[ "$REQUIRE_LIVE" == "1" ]]; then
     cat "$SUMMARY"
     echo "ERROR: live Telegram QA is required (focused release or REQUIRE_TELEGRAM_LIVE=1), but RUN_LIVE_TELEGRAM explicitly disabled it. Nothing was sent." >&2
@@ -232,10 +244,10 @@ elif [[ "$HAS_TELETHON_ENV" == "1" ]]; then
   fi
 else
   if [[ -n "${TELETHON_SESSION:-}" && -n "${TELEGRAM_API_ID:-${TELETHON_API_ID:-}}" && -n "${TELEGRAM_API_HASH:-${TELETHON_API_HASH:-}}" && "${TELEGRAM_LIVE_APPROVED:-}" != "$LIVE_APPROVAL_VALUE" ]]; then
-    printf -- '- live-telegram: SKIP (explicit approval missing)\n' >> "$SUMMARY"
-    printf '  Set TELEGRAM_LIVE_APPROVED=%s only after Moeed approves this exact live run.\n' "$LIVE_APPROVAL_VALUE" >> "$SUMMARY"
+    printf -- '- live-telegram: PENDING (approved task/card guard missing)\n' >> "$SUMMARY"
+    printf '  Set TELEGRAM_LIVE_APPROVED=%s only for an approved task/card naming this bot and effect.\n' "$LIVE_APPROVAL_VALUE" >> "$SUMMARY"
   else
-    printf -- '- live-telegram: SKIP (Telethon session/API env incomplete)\n' >> "$SUMMARY"
+    printf -- '- live-telegram: PENDING (Telethon session/API env incomplete)\n' >> "$SUMMARY"
   fi
   if [[ "$REQUIRE_LIVE" == "1" || "$RUN_LIVE" == "1" || "$RUN_LIVE" == "true" ]]; then
     echo "ERROR: live Telegram QA required, but approval/credentials/target allowlist are incomplete."

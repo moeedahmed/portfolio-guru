@@ -13,13 +13,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from telegram import Message, User
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ConversationHandler, MessageHandler, filters
 
 from tests.helpers import (
     BOT_USER,
     TEST_CHAT,
     TEST_USER,
-    OfflineRequest,
     make_callback_update,
     make_command_update,
     make_text_update,
@@ -40,6 +38,9 @@ class ResponseCollector:
         msg.message_id = len(self.sent) + 5000
         msg.chat_id = chat_id
         msg.text = text
+        async def edit(text=None, **kwargs):
+            return await self.fake_edit_message_text(text=text, chat_id=chat_id, message_id=msg.message_id, **kwargs)
+        msg.edit_text = AsyncMock(side_effect=edit)
         return msg
 
     async def fake_send_message(self, chat_id=None, text="", **kwargs):
@@ -50,7 +51,9 @@ class ResponseCollector:
     async def fake_edit_message_text(self, text="", chat_id=None, message_id=None, **kwargs):
         record = {"method": "edit_message_text", "chat_id": chat_id, "text": text, "message_id": message_id, **kwargs}
         self.sent.append(record)
-        return True
+        message = self._make_fake_message(chat_id, text)
+        message.message_id = message_id
+        return message
 
     async def fake_answer_callback_query(self, callback_query_id=None, **kwargs):
         return True
@@ -72,17 +75,13 @@ async def offline_app(monkeypatch, tmp_path):
     """Build a real PTB Application with OfflineRequest and all handlers registered."""
     import bot
 
+    from tests.helpers import isolate_bot_storage
+    isolate_bot_storage(monkeypatch, tmp_path)
     collector = ResponseCollector()
 
     # Build application with offline request — no network, no persistence
-    app = (
-        Application.builder()
-        .token("0:FAKE")
-        .updater(None)
-        .request(OfflineRequest())
-        .get_updates_request(OfflineRequest())
-        .build()
-    )
+    from tests.helpers import build_offline_application
+    app = build_offline_application()
 
     # Patch bot internals so initialize() doesn't hit the network
     real_bot = app.bot
@@ -121,128 +120,6 @@ async def offline_app(monkeypatch, tmp_path):
     patches.enter_context(patch.object(bot_cls, "delete_webhook", AsyncMock(return_value=True)))
     patches.enter_context(patch.object(bot_cls, "send_chat_action", _fake_send_action))
     patches.enter_context(patch.object(bot_cls, "edit_message_reply_markup", AsyncMock(return_value=True)))
-
-    # ---- Register all handlers (mirrors build_application in bot.py) ----
-    case_conv = ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(bot.handle_callback, pattern=r"^ACTION\|(?:file|reset|cancel|add_detail|continue_thin)$"),
-            MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_case_input),
-            MessageHandler(filters.VOICE, bot.handle_case_input),
-            MessageHandler(filters.PHOTO, bot.handle_case_input),
-            MessageHandler(filters.Document.ALL, bot.handle_case_input),
-        ],
-        states={
-            bot.AWAIT_CASE_INPUT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_case_input),
-                MessageHandler(filters.VOICE, bot.handle_case_input),
-                MessageHandler(filters.PHOTO, bot.handle_case_input),
-                MessageHandler(filters.Document.ALL, bot.handle_case_input),
-                CallbackQueryHandler(bot.handle_callback, pattern=r"^ACTION\|add_detail$"),
-                CallbackQueryHandler(bot.handle_callback, pattern=r"^ACTION\|continue_thin$"),
-            ],
-            bot.AWAIT_FORM_CHOICE: [
-                CallbackQueryHandler(bot.handle_form_choice, pattern=r"^FORM\|"),
-                CallbackQueryHandler(bot.handle_callback, pattern=r"^CANCEL\|"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_mid_conversation_text),
-            ],
-            bot.AWAIT_TEMPLATE_REVIEW: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_template_review_text),
-                MessageHandler(filters.VOICE, bot.handle_case_input),
-                MessageHandler(filters.PHOTO, bot.handle_case_input),
-                MessageHandler(filters.Document.ALL, bot.handle_case_input),
-                CallbackQueryHandler(bot.handle_callback, pattern=r"^CASE\|"),
-                CallbackQueryHandler(bot.handle_form_choice, pattern=r"^FORM\|"),
-                CallbackQueryHandler(bot.handle_callback, pattern=r"^ACTION\|add_detail$"),
-                CallbackQueryHandler(bot.handle_callback, pattern=r"^ACTION\|continue_thin$"),
-                CallbackQueryHandler(bot.handle_callback, pattern=r"^CANCEL\|"),
-            ],
-            bot.AWAIT_APPROVAL: [
-                CallbackQueryHandler(bot.handle_approval_approve, pattern=r"^APPROVE\|"),
-                CallbackQueryHandler(bot.handle_approval_edit, pattern=r"^EDIT\|"),
-                CallbackQueryHandler(bot.handle_callback, pattern=r"^CANCEL\|"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_mid_conversation_text),
-            ],
-            bot.AWAIT_EDIT_FIELD: [
-                CallbackQueryHandler(bot.handle_edit_field, pattern=r"^FIELD\|"),
-                CallbackQueryHandler(bot.handle_callback, pattern=r"^CANCEL\|"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_mid_conversation_text),
-            ],
-            bot.AWAIT_EDIT_VALUE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_edit_value_with_intent),
-                MessageHandler(~filters.COMMAND & ~filters.TEXT, bot.handle_edit_value),
-                CallbackQueryHandler(bot.handle_callback, pattern=r"^CANCEL\|"),
-            ],
-        },
-        fallbacks=[
-            CommandHandler("start", bot.start),
-            CommandHandler("help", bot.help_command),
-            CommandHandler("settings", bot.settings_command),
-            CommandHandler("cancel", bot.setup_cancel),
-            CallbackQueryHandler(
-                bot.handle_callback,
-                pattern=r"^(?:INFO\|.*|CANCEL\|.*|ACTION\|(?:file|setup|reset|cancel|add_detail|continue_thin|retry_filing))$",
-            ),
-        ],
-        per_message=False,
-        allow_reentry=False,
-    )
-
-    setup_conv = ConversationHandler(
-        entry_points=[CommandHandler("setup", bot.setup_start)],
-        states={
-            bot.AWAIT_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, bot.setup_username)],
-            bot.AWAIT_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, bot.setup_password)],
-            bot.AWAIT_TRAINING_LEVEL: [CallbackQueryHandler(bot.setup_training_level, pattern=r"^SETLEVEL\|")],
-            bot.AWAIT_CURRICULUM: [CallbackQueryHandler(bot.setup_curriculum, pattern=r"^SETUP_CURRICULUM\|")],
-        },
-        fallbacks=[CommandHandler("cancel", bot.setup_cancel)],
-        allow_reentry=True,
-    )
-
-    voice_conv = ConversationHandler(
-        entry_points=[CommandHandler("voice", bot.voice_start)],
-        states={
-            bot.AWAIT_VOICE_EXAMPLES: [
-                CallbackQueryHandler(bot.voice_collect_example, pattern=r"^VOICE\|"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.voice_collect_example),
-                MessageHandler(filters.PHOTO, bot.voice_collect_example),
-                MessageHandler(filters.VOICE, bot.voice_collect_example),
-            ],
-        },
-        fallbacks=[CommandHandler("cancel", bot.setup_cancel)],
-        allow_reentry=True,
-    )
-
-    # Top-level command handlers
-    app.add_handler(CommandHandler("start", bot.start))
-    app.add_handler(CommandHandler("settings", bot.settings_command))
-    app.add_handler(CommandHandler("cancel", bot.cancel_command))
-    app.add_handler(CommandHandler("reset", bot.reset_data))
-    app.add_handler(CommandHandler("delete", bot.reset_data))
-    app.add_handler(CommandHandler("help", bot.help_command))
-    app.add_handler(CommandHandler("bulk", bot.bulk_command))
-    app.add_handler(CommandHandler("unsigned", bot.unsigned_command))
-    app.add_handler(CommandHandler("chase", bot.chase_command))
-    app.add_handler(CommandHandler("curriculum", bot.curriculum_command))
-    app.add_handler(CallbackQueryHandler(bot.handle_set_curriculum, pattern=r"^SET_CURRICULUM\|"))
-    app.add_handler(CallbackQueryHandler(bot.handle_chase_log, pattern=r"^CHASE_LOG\|"))
-    app.add_handler(CallbackQueryHandler(bot.handle_info_button, pattern=r"^INFO\|"))
-    app.add_handler(CallbackQueryHandler(bot.handle_reset_confirm, pattern=r"^CONFIRM\|(?:reset|delete)$"))
-    app.add_handler(
-        CallbackQueryHandler(
-            bot.handle_action_button,
-            pattern=r"^ACTION\|(?!file$|reset$|cancel$|add_detail$|continue_thin$|retry_filing$).+",
-        )
-    )
-    app.add_handler(CallbackQueryHandler(bot.handle_feedback, pattern=r"^FEEDBACK\|"))
-    app.add_handler(CallbackQueryHandler(bot.handle_filing_feedback, pattern=r"^FILING\|feedback\|"))
-    app.add_handler(CallbackQueryHandler(bot.handle_pushback, pattern=r"^PUSHBACK\|"))
-
-    # Conversation handlers (order matters)
-    app.add_handler(setup_conv)
-    app.add_handler(CallbackQueryHandler(bot.handle_set_level, pattern=r"^SETLEVEL\|"))
-    app.add_handler(voice_conv)
-    app.add_handler(case_conv)
 
     await app.initialize()
 
@@ -293,10 +170,8 @@ class TestOfflineE2E:
         _prepare_update(update, app.bot)
         await app.process_update(update)
 
-        assert len(collector.texts) >= 2
-        assert "Portfolio Guru" in collector.texts[0]
-        assert "Step 1 of 3" not in collector.texts[0]
-        text = collector.texts[1]
+        assert len(collector.texts) == 1
+        text = collector.texts[0]
         assert "Step 1 of 3" in text
         assert "username" in text.lower()
         sent = collector.sent[0]
@@ -317,9 +192,8 @@ class TestOfflineE2E:
 
         assert len(collector.texts) >= 1
         text = collector.texts[0]
-        assert "Portfolio Guru is ready" in text
-        assert "Send an anonymised case" in text
-        assert "before saving to Kaizen" in text
+        assert "Ready when you are" in text
+        assert "anonymised case" in text
         assert "show buttons for what to do next" not in text
         assert "draft it" not in text
         sent = collector.sent[0]

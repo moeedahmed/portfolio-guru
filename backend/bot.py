@@ -15147,6 +15147,13 @@ async def handle_amend_draft(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return AWAIT_APPROVAL
 
     if action == "update_current":
+        if not _load_draft(context) or not context.user_data.get("case_text"):
+            await query.answer()
+            await query.message.reply_text(
+                "That draft is no longer available to update. No changes were saved. "
+                "Send a case to continue, or /cancel to return to the menu."
+            )
+            return AWAIT_CASE_INPUT
         await query.answer("Updating draft")
         pending = context.user_data.pop("amend_pending_feedback", "")
         return await _regenerate_active_draft_with_feedback(
@@ -16525,7 +16532,7 @@ def build_application() -> Application:
                     handle_callback,
                     pattern=r"^FILING_CURRICULUM\|(?:select|retry)\|(?:2021|2025)$",
                 ),
-                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:add_reflection_detail|retry_filing)$"),
+                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:add_reflection_detail|retry_filing|back_to_missing)$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
                 MessageHandler(filters.VOICE, handle_approval_media_feedback),
@@ -16647,7 +16654,7 @@ def build_application() -> Application:
     application.add_handler(
         CallbackQueryHandler(
             handle_action_button,
-            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|setup$|voice$|same_case_another$).+",
+            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|setup$|voice$|same_case_another$|retry_recommend$|retry_template$|back_to_missing$|retry_setup_login$).+",
         )
     )
     application.add_handler(CallbackQueryHandler(handle_feedback, pattern=r"^FEEDBACK\|"))
