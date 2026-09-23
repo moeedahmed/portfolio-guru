@@ -20,10 +20,14 @@
 # Not for the live deployment. /Users/moeedahmed/projects/portfolio-guru-live
 # keeps its own private venv on purpose: a shared environment means one worktree
 # upgrading a dependency can break production without a deploy.
+#
+# Worktrees go under ~/projects/.worktrees, not ~/projects itself. Created
+# straight into ~/projects, finished worktrees piled up beside the real
+# projects: 23 of them by 2026-09-23, most already merged into main.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WORKTREE_PARENT="${PG_WORKTREE_PARENT:-$HOME/projects}"
+WORKTREE_PARENT="${PG_WORKTREE_PARENT:-$HOME/projects/.worktrees}"
 SHARED_STATE="${PG_SHARED_STATE:-$HOME/.local/share/portfolio-guru}"
 SHARED_VENV="$SHARED_STATE/venv"
 SHARED_ENV="$SHARED_STATE/backend.env"
@@ -74,6 +78,7 @@ fi
 
 # ── The worktree itself ──────────────────────────────────────────────────────
 git -C "$REPO_ROOT" fetch --quiet origin main || true
+mkdir -p "$WORKTREE_PARENT"
 if [[ -n "$branch" ]]; then
   git -C "$REPO_ROOT" worktree add "$target" "$branch"
 else
