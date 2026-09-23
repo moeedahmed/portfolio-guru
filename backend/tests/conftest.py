@@ -6,6 +6,25 @@ import os
 # Add backend to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+# The test process must see the same environment as the CI Tests job, whatever
+# backend/.env holds. Worktrees from scripts/new_worktree.sh link the shared real
+# .env, and bot.py / credentials.py load it at import time — so SUPABASE_URL and
+# the service-role key reached supabase_sync, which then tried the real mirror
+# and tripped the socket guard below (2026-09-23, 55 failures in a clean prepare).
+# This runs before any backend module is imported, so load_dotenv() is a no-op
+# for the whole session. Live/e2e tests read their Telethon credentials from the
+# shell, never from backend/.env, so they are unaffected.
+os.environ["PYTHON_DOTENV_DISABLED"] = "1"
+# CI has no Supabase configured; a shell that exports it must not turn the
+# best-effort mirror on. Tests that exercise the mirror set these themselves.
+for _name in ("SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"):
+    os.environ.pop(_name, None)
+# CI's throwaway values (.github/workflows/test.yml), for callers such as a
+# direct `scripts/preflight.sh` that no longer get a key from backend/.env.
+os.environ.setdefault("FERNET_SECRET_KEY", "5Wv33F9sq99WGD2lEzwwd3J_JH5p6vxKdDiAwCWqoYQ=")
+os.environ.setdefault("TELEGRAM_BOT_TOKEN", "fake")
+os.environ.setdefault("GOOGLE_API_KEY", "fake")
+
 
 @pytest.fixture(autouse=True)
 def _allow_non_eu_extraction_in_tests(monkeypatch):
