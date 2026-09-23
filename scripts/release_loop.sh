@@ -119,8 +119,12 @@ EFFECT=""
 LIVE_TARGET=""
 RESULT=""
 NOTE=""
-PROOF_TIMEOUT="${RELEASE_LOOP_PROOF_TIMEOUT:-900}"
-PROOF_INTERVAL="${RELEASE_LOOP_PROOF_INTERVAL:-5}"
+# Per-workflow proof window and the shortest gap between GitHub polls. CI Tests
+# alone has taken longer than 15 minutes, and without a working `gh` login the
+# poll falls back to the public API, which allows 60 requests an hour per IP.
+# A 5s poll spent that budget in minutes and then read the refusals as "no run".
+PROOF_TIMEOUT="${RELEASE_LOOP_PROOF_TIMEOUT:-1800}"
+PROOF_INTERVAL="${RELEASE_LOOP_PROOF_INTERVAL:-60}"
 GITHUB_REPOSITORY="${RELEASE_LOOP_GITHUB_REPOSITORY:-moeedahmed/portfolio-guru}"
 
 # Fixed throwaway values for the offline children only, applied per command with
@@ -654,16 +658,79 @@ prepare_resume() {
   info "Proof-only resume: no checkout, merge, or push will run."
 }
 
+# What the last workflow query learned beyond the runs themselves. STATE is ok,
+# rate-limited or failed. The rate-limit numbers come only from GitHub's own
+# X-RateLimit-Remaining/X-RateLimit-Reset (epoch) and Retry-After (seconds)
+# headers; nothing else from a response is ever printed.
+WORKFLOW_QUERY_STATE=""
+WORKFLOW_QUERY_DETAIL=""
+WORKFLOW_RATE_REMAINING=""
+WORKFLOW_RATE_RESET=""
+WORKFLOW_RETRY_AFTER=""
+
+# A header's value only when it is a plain whole number; anything else (an
+# HTTP-date Retry-After, a missing header) reads as unknown.
+header_number() {
+  local value
+  value="$(grep -i "^$2:" "$1" 2>/dev/null | tail -n 1 | tr -d ' \t\r')" || true
+  value="${value#*:}"
+  if [[ "$value" =~ ^[0-9]{1,12}$ ]]; then printf '%s' "$value"; fi
+  return 0
+}
+
+# Writes the runs payload to out_file. Called directly, not inside $(...), so
+# the WORKFLOW_QUERY_* results reach the caller rather than a discarded subshell.
 workflow_runs_json() {
-  local workflow_name="$1" workflow_file="$2"
+  local workflow_name="$1" workflow_file="$2" sha="$3" out_file="$4"
+  WORKFLOW_QUERY_STATE=failed
+  WORKFLOW_QUERY_DETAIL=""
+  WORKFLOW_RATE_REMAINING=""
+  WORKFLOW_RATE_RESET=""
+  WORKFLOW_RETRY_AFTER=""
   if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-    gh run list --workflow "$workflow_name" --branch main --limit 100 \
-      --json databaseId,headSha,status,conclusion,event,createdAt,startedAt,updatedAt
-    return
+    local gh_error
+    if gh_error="$(gh run list --workflow "$workflow_name" --branch main --limit 100 \
+      --json databaseId,headSha,status,conclusion,event,createdAt,startedAt,updatedAt 2>&1 >"$out_file")"; then
+      WORKFLOW_QUERY_STATE=ok
+      return 0
+    fi
+    if printf '%s' "$gh_error" | grep -qi 'rate limit'; then
+      WORKFLOW_QUERY_STATE=rate-limited
+      WORKFLOW_QUERY_DETAIL="gh run list reported a GitHub API rate limit"
+    else
+      WORKFLOW_QUERY_DETAIL="gh run list failed"
+    fi
+    return 1
   fi
-  command -v curl >/dev/null 2>&1 || return 1
-  curl --fail --silent --show-error --max-time 20 \
-    "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_file/runs?branch=main&head_sha=$PUSHED_SHA&per_page=100"
+  if ! command -v curl >/dev/null 2>&1; then
+    WORKFLOW_QUERY_DETAIL="gh is not authenticated and curl is unavailable"
+    return 1
+  fi
+  local headers http_code
+  headers="$(mktemp "${TMPDIR:-/tmp}/release-loop-headers.XXXXXX")" || { WORKFLOW_QUERY_DETAIL="cannot create a temporary file"; return 1; }
+  http_code="$(curl --silent --max-time 20 --dump-header "$headers" --output "$out_file" --write-out '%{http_code}' \
+    "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_file/runs?branch=main&head_sha=$sha&per_page=100" \
+    2>/dev/null)" || true
+  WORKFLOW_RATE_REMAINING="$(header_number "$headers" x-ratelimit-remaining)"
+  WORKFLOW_RATE_RESET="$(header_number "$headers" x-ratelimit-reset)"
+  WORKFLOW_RETRY_AFTER="$(header_number "$headers" retry-after)"
+  rm -f "$headers"
+  [[ "$http_code" =~ ^[0-9]{3}$ ]] || http_code=000
+  if [[ "$http_code" == 200 ]]; then
+    WORKFLOW_QUERY_STATE=ok
+    return 0
+  fi
+  # GitHub signals a rate limit as 429, or as 403 with no quota left or a
+  # Retry-After. Any other 403 is a permission problem, not a reason to wait.
+  if [[ "$http_code" == 429 || ( "$http_code" == 403 && ( "$WORKFLOW_RATE_REMAINING" == 0 || -n "$WORKFLOW_RETRY_AFTER" ) ) ]]; then
+    WORKFLOW_QUERY_STATE=rate-limited
+    WORKFLOW_QUERY_DETAIL="GitHub API rate limit reached (HTTP $http_code, unauthenticated public API)"
+  elif [[ "$http_code" == 000 ]]; then
+    WORKFLOW_QUERY_DETAIL="GitHub API unreachable"
+  else
+    WORKFLOW_QUERY_DETAIL="GitHub API returned HTTP $http_code"
+  fi
+  return 1
 }
 
 select_provenance_run() {
@@ -712,19 +779,48 @@ if candidates:
 ' "$sha" "$expected_event" "$not_before"
 }
 
+utc_from_epoch() {
+  "$PYTHON_BIN" -c 'import datetime, sys; print(datetime.datetime.fromtimestamp(int(sys.argv[1]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))' "$1"
+}
+
+# Why the last wait returned 4: "pending" (no successful run seen in the window)
+# or "rate-limited" (GitHub refused to answer, which says nothing about the run).
+WORKFLOW_PENDING_REASON=""
+WORKFLOW_RETRY_NOT_BEFORE=""
+
+# The next-gate wording for a wait that returned 4.
+proof_wait_gate() {
+  if [[ "$WORKFLOW_PENDING_REASON" == rate-limited ]]; then
+    printf 'wait for the GitHub API rate limit to reset (not before %s), then %s' "${WORKFLOW_RETRY_NOT_BEFORE:-the reset time}" "$1"
+  else
+    printf '%s' "$1"
+  fi
+}
+proof_wait_word() {
+  if [[ "$WORKFLOW_PENDING_REASON" == rate-limited ]]; then printf 'rate-limited'; else printf 'pending'; fi
+}
+
 WORKFLOW_UPDATED_AT=""
 wait_for_exact_workflow() {
   local workflow_name="$1" workflow_file="$2" sha="$3" expected_event="$4" not_before="${5:-}"
-  local deadline json match run_id status conclusion updated _created _started event now
+  local deadline json_file match run_id status conclusion updated _created _started event now pause resume_at spread
+  WORKFLOW_PENDING_REASON=""
+  WORKFLOW_RETRY_NOT_BEFORE=""
   deadline=$(( $(date +%s) + 10#$PROOF_TIMEOUT ))
   step "$workflow_name provenance proof for exact SHA"
+  json_file="$(mktemp "${TMPDIR:-/tmp}/release-loop-runs.XXXXXX")" || { warn "Cannot create a temporary file for $workflow_name proof."; WORKFLOW_PENDING_REASON=pending; return 4; }
   while true; do
-    if json="$(workflow_runs_json "$workflow_name" "$workflow_file" 2>/dev/null)"; then
-      match="$(printf '%s' "$json" | select_provenance_run "$sha" "$expected_event" "$not_before" 2>/dev/null || true)"
+    if workflow_runs_json "$workflow_name" "$workflow_file" "$sha" "$json_file"; then
+      if ! match="$(select_provenance_run "$sha" "$expected_event" "$not_before" <"$json_file" 2>/dev/null)"; then
+        WORKFLOW_QUERY_STATE=failed
+        WORKFLOW_QUERY_DETAIL="GitHub returned an unreadable runs payload"
+        match=""
+      fi
       if [[ -n "$match" ]]; then
         IFS='|' read -r run_id status conclusion updated _created _started event <<< "$match"
         info "MATCH: workflow=$workflow_name run_id=$run_id head_sha=$sha event=$event status=$status conclusion=${conclusion:-pending}"
         if [[ "$status" == completed ]]; then
+          rm -f "$json_file"
           if [[ "$conclusion" == success ]]; then
             WORKFLOW_UPDATED_AT="$updated"
             info "PASS: $workflow_name succeeded with required provenance."
@@ -736,11 +832,56 @@ wait_for_exact_workflow() {
       fi
     fi
     now="$(date +%s)"
+
+    # A refusal is not an answer. Wait out the limit when it resets inside this
+    # window; otherwise stop now and say when a resume can usefully run, rather
+    # than spending the window on requests GitHub will refuse.
+    if [[ "$WORKFLOW_QUERY_STATE" == rate-limited ]]; then
+      if [[ -n "$WORKFLOW_RETRY_AFTER" ]]; then resume_at=$(( now + 10#$WORKFLOW_RETRY_AFTER ))
+      elif [[ -n "$WORKFLOW_RATE_RESET" ]]; then resume_at=$(( 10#$WORKFLOW_RATE_RESET + 1 ))
+      else resume_at=$(( now + (10#$PROOF_INTERVAL > 60 ? 10#$PROOF_INTERVAL : 60) ))
+      fi
+      (( resume_at > now )) || resume_at=$(( now + 1 ))
+      WORKFLOW_RETRY_NOT_BEFORE="$(utc_from_epoch "$resume_at")"
+      warn "$WORKFLOW_QUERY_DETAIL while checking $workflow_name for exact SHA $sha."
+      warn "This is not evidence that the run is missing, running or failed."
+      info "RATE_LIMIT_RETRY_NOT_BEFORE=$WORKFLOW_RETRY_NOT_BEFORE"
+      if (( resume_at > deadline )); then
+        rm -f "$json_file"
+        warn "The limit outlasts this ${PROOF_TIMEOUT}s proof window; stopping now instead of polling into it."
+        WORKFLOW_PENDING_REASON=rate-limited
+        return 4
+      fi
+      info "Waiting $(( resume_at - now ))s for the GitHub API rate limit to reset."
+      sleep "$(( resume_at - now ))"
+      continue
+    fi
+
     if (( now >= deadline )); then
-      warn "No $workflow_name run for exact SHA $sha with event=$expected_event completed successfully within ${PROOF_TIMEOUT}s."
+      rm -f "$json_file"
+      WORKFLOW_PENDING_REASON=pending
+      if [[ "$WORKFLOW_QUERY_STATE" == failed ]]; then
+        warn "Could not read $workflow_name runs for exact SHA $sha within ${PROOF_TIMEOUT}s: $WORKFLOW_QUERY_DETAIL. That is not evidence the run is missing."
+      else
+        warn "No $workflow_name run for exact SHA $sha with event=$expected_event completed successfully within ${PROOF_TIMEOUT}s."
+      fi
       return 4
     fi
-    sleep "$PROOF_INTERVAL"
+
+    # Spread whatever quota is left over the time until it resets, so a long CI
+    # run cannot spend the hour's requests before it finishes. Never sleep past
+    # the deadline: the last poll lands on it.
+    pause=$(( 10#$PROOF_INTERVAL ))
+    if [[ -n "$WORKFLOW_RATE_REMAINING" && -n "$WORKFLOW_RATE_RESET" ]] && (( 10#$WORKFLOW_RATE_RESET > now )); then
+      if (( 10#$WORKFLOW_RATE_REMAINING == 0 )); then
+        pause=$(( 10#$WORKFLOW_RATE_RESET - now + 1 ))
+      else
+        spread=$(( (10#$WORKFLOW_RATE_RESET - now + 10#$WORKFLOW_RATE_REMAINING - 1) / 10#$WORKFLOW_RATE_REMAINING ))
+        (( spread <= pause )) || pause=$spread
+      fi
+    fi
+    (( now + pause <= deadline )) || pause=$(( deadline - now ))
+    sleep "$pause"
   done
 }
 
@@ -885,7 +1026,7 @@ mode_ship() {
   if [[ $tests_rc == 1 ]]; then final_state blocked "fix failed Tests run" "pushed_sha=$PUSHED_SHA"; exit 1; fi
   if [[ $tests_rc == 4 ]]; then
     banner "SHIP proof pending"; info "RESUME_COMMAND=$(resume_command)"
-    final_state proof-pending "run RESUME_COMMAND after Tests progresses" "pushed_sha=$PUSHED_SHA tests=pending"
+    final_state proof-pending "$(proof_wait_gate "run RESUME_COMMAND after Tests progresses")" "pushed_sha=$PUSHED_SHA tests=$(proof_wait_word)"
     exit 4
   fi
   local tests_completed="$WORKFLOW_UPDATED_AT"
@@ -901,7 +1042,7 @@ mode_ship() {
   if [[ $deploy_rc == 1 ]]; then final_state blocked "fix failed deploy run" "pushed_sha=$PUSHED_SHA tests=1 deploy=failed"; exit 1; fi
   if [[ $deploy_rc == 4 ]]; then
     banner "SHIP proof pending"; info "RESUME_COMMAND=$(resume_command)"
-    final_state proof-pending "run RESUME_COMMAND after deploy progresses" "pushed_sha=$PUSHED_SHA tests=1 deploy=pending"
+    final_state proof-pending "$(proof_wait_gate "run RESUME_COMMAND after deploy progresses")" "pushed_sha=$PUSHED_SHA tests=1 deploy=$(proof_wait_word)"
     exit 4
   fi
 
@@ -973,7 +1114,7 @@ mode_attest() {
   fi
   tests_completed="$WORKFLOW_UPDATED_AT"
   if [[ $tests_rc == 4 || -z "$tests_completed" ]]; then
-    final_state proof-pending "attest once Tests has completed for this exact SHA" "release_sha=$APPROVAL_SHA tests=pending"
+    final_state proof-pending "$(proof_wait_gate "attest once Tests has completed for this exact SHA")" "release_sha=$APPROVAL_SHA tests=$(proof_wait_word)"
     exit 4
   fi
 
@@ -987,7 +1128,7 @@ mode_attest() {
     exit 1
   fi
   if [[ $deploy_rc == 4 ]]; then
-    final_state proof-pending "attest once the deploy bound to this SHA has completed" "release_sha=$APPROVAL_SHA tests=1 deploy=pending"
+    final_state proof-pending "$(proof_wait_gate "attest once the deploy bound to this SHA has completed")" "release_sha=$APPROVAL_SHA tests=1 deploy=$(proof_wait_word)"
     exit 4
   fi
 
@@ -1343,7 +1484,7 @@ mode_rollback() {
   if [[ $tests_rc == 4 || -z "$tests_completed" ]]; then
     warn "main is $rollback_sha; Tests has not proven it yet, and nothing else has changed."
     info "ROLLBACK_RESUME_COMMAND=$(rollback_command "$released")"
-    final_state proof-pending "rerun the same rollback command after Tests progresses" "rollback_sha=$rollback_sha tests=pending"
+    final_state proof-pending "$(proof_wait_gate "rerun the same rollback command after Tests progresses")" "rollback_sha=$rollback_sha tests=$(proof_wait_word)"
     exit 4
   fi
 
@@ -1357,7 +1498,7 @@ mode_rollback() {
   if [[ $deploy_rc == 4 ]]; then
     warn "main is $rollback_sha; its deploy has not completed successfully yet."
     info "ROLLBACK_RESUME_COMMAND=$(rollback_command "$released")"
-    final_state proof-pending "rerun the same rollback command after deploy progresses" "rollback_sha=$rollback_sha tests=1 deploy=pending"
+    final_state proof-pending "$(proof_wait_gate "rerun the same rollback command after deploy progresses")" "rollback_sha=$rollback_sha tests=1 deploy=$(proof_wait_word)"
     exit 4
   fi
 

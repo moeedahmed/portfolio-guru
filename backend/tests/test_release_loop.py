@@ -23,6 +23,8 @@ import os
 import shutil
 import subprocess
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -286,6 +288,7 @@ def ship_harness(tmp_path):
 printf '%s\\n' "$*" >> "{gh_log}"
 if [[ "$1 $2" == "auth status" ]]; then [[ "${{FAKE_GH_AUTH:-1}}" == "1" ]]; exit; fi
 if [[ "$1 $2" == "run list" ]]; then
+  if [[ -n "${{FAKE_GH_RUN_ERROR:-}}" ]]; then printf '%s\\n' "$FAKE_GH_RUN_ERROR" >&2; exit 1; fi
   workflow=""
   while [[ $# -gt 0 ]]; do
     if [[ "$1" == "--workflow" ]]; then workflow="$2"; break; fi
@@ -298,15 +301,43 @@ fi
 exit 2
 """,
     )
+    # The public-API fallback. Each call is logged, so tests can count requests.
+    # FAKE_CURL_<n> scripts call n (1-based, across workflows) as
+    # "<http status>|<body file or empty for the fixture>|<header lines, ; separated>";
+    # unscripted calls answer 200 with the workflow's fixture and no rate headers.
+    curl_log = tmp_path / "curl.log"
     _write_executable(
         fake_bin / "curl",
         f"""#!/usr/bin/env bash
 url="${{@: -1}}"
+header_file="" out_file="" write_out=""
+while [[ $# -gt 1 ]]; do
+  case "$1" in
+    --dump-header) header_file="$2"; shift ;;
+    --output) out_file="$2"; shift ;;
+    --write-out) write_out="$2"; shift ;;
+  esac
+  shift
+done
+printf '%s\\n' "$url" >> "{curl_log}"
+call="$(wc -l < "{curl_log}" | tr -d ' ')"
 case "$url" in
-  *test.yml*) /bin/cat "{gh_runs}/Tests.api.json" ;;
-  *deploy-mac.yml*) /bin/cat "{gh_runs}/Deploy Mac Mini.api.json" ;;
+  *test.yml*) body="{gh_runs}/Tests.api.json" ;;
+  *deploy-mac.yml*) body="{gh_runs}/Deploy Mac Mini.api.json" ;;
   *) exit 2 ;;
 esac
+scripted_name="FAKE_CURL_$call"
+IFS='|' read -r status scripted_body headers <<< "${{!scripted_name:-200||}}"
+[[ -z "$scripted_body" ]] || body="$scripted_body"
+if [[ -n "$header_file" ]]; then
+  IFS=';' read -r -a header_lines <<< "$headers"
+  {{
+    printf 'HTTP/2 %s\\r\\n' "$status"
+    for line in "${{header_lines[@]}}"; do printf '%s\\r\\n' "$line"; done
+  }} > "$header_file"
+fi
+if [[ "$status" == 200 ]]; then /bin/cat "$body"; else printf '{{"message":"refused"}}'; fi > "${{out_file:-/dev/stdout}}"
+[[ -z "$write_out" ]] || printf '%s' "$status"
 """,
     )
     (gh_runs / "Tests.api.json").write_text(_api_payload(_workflow_runs()))
@@ -340,6 +371,7 @@ esac
         "git_log": git_log,
         "gh_log": gh_log,
         "gh_runs": gh_runs,
+        "curl_log": curl_log,
         "runtime_log": runtime_log,
         "live_log": live_log,
         "env_log": env_log,
@@ -1202,6 +1234,178 @@ def test_ship_falls_back_to_public_actions_api_when_gh_is_not_authenticated(ship
     assert result.returncode == 0, result.stderr
     assert "FINAL_RELEASE_STATE=live" in result.stdout
     assert f"head_sha={PUSHED_SHA}" in result.stdout
+
+
+# --- GitHub API rate limits -------------------------------------------------
+#
+# On 2026-09-23 a ship without a gh login polled the public Actions API every
+# few seconds, spent the 60 requests/hour unauthenticated budget, then read the
+# refusals as "no run found" and reported proof-pending although Tests and the
+# deploy had both passed. These drive that fallback with scripted responses and
+# a fake `sleep`, so waits are observed rather than taken.
+
+PUBLIC_API = {"FAKE_GH_AUTH": "0"}
+
+
+def _fake_sleep(harness) -> Path:
+    log = harness["fake_bin"].parent / "sleep.log"
+    _write_executable(harness["fake_bin"] / "sleep", f'#!/usr/bin/env bash\nprintf "%s\\n" "$1" >> "{log}"\n')
+    return log
+
+
+def _sleeps(log: Path) -> list[int]:
+    return [int(value) for value in log.read_text().split()] if log.exists() else []
+
+
+def _curl_urls(harness) -> list[str]:
+    log = harness["curl_log"]
+    return log.read_text().splitlines() if log.exists() else []
+
+
+def _utc(epoch: int) -> str:
+    return datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _running_tests_api(harness) -> Path:
+    runs = json.loads(_workflow_runs())
+    runs[1]["status"] = "in_progress"
+    runs[1]["conclusion"] = None
+    path = harness["gh_runs"] / "Tests.running.api.json"
+    path.write_text(_api_payload(json.dumps(runs)))
+    return path
+
+
+@pytest.mark.parametrize("resume", [False, True], ids=["ship", "resume"])
+def test_rate_limit_outlasting_the_window_stops_after_one_request_and_says_when_to_retry(ship_harness, resume):
+    sleep_log = _fake_sleep(ship_harness)
+    reset = int(time.time()) + 3600
+    extra_env = {
+        **PUBLIC_API,
+        "RELEASE_LOOP_PROOF_TIMEOUT": "900",
+        "RELEASE_LOOP_PROOF_INTERVAL": "60",
+        "FAKE_CURL_1": f"403||x-ratelimit-limit: 60;x-ratelimit-remaining: 0;x-ratelimit-reset: {reset}",
+    }
+    extra_args = ("--release-sha", PUSHED_SHA) if resume else ()
+    result = _ship(ship_harness, "internal", extra_env=extra_env, extra_args=extra_args)
+
+    assert result.returncode == 4, result.stdout + result.stderr
+    assert "FINAL_RELEASE_STATE=proof-pending" in result.stdout
+    urls = _curl_urls(ship_harness)
+    assert len(urls) == 1, urls
+    assert "/workflows/test.yml/runs" in urls[0] and f"head_sha={PUSHED_SHA}" in urls[0]
+    assert _sleeps(sleep_log) == []
+    assert "GitHub API rate limit reached (HTTP 403" in result.stdout
+    assert "not evidence that the run is missing" in result.stdout
+    assert f"RATE_LIMIT_RETRY_NOT_BEFORE={_utc(reset + 1)}" in result.stdout
+    assert f"FINAL_RELEASE_GATE=wait for the GitHub API rate limit to reset (not before {_utc(reset + 1)})" in result.stdout
+    assert "tests=rate-limited" in result.stdout
+    assert "No Tests run for exact SHA" not in result.stdout
+    assert "RESUME_COMMAND=" in result.stdout
+
+
+def test_429_retry_after_beyond_the_window_is_rate_limited_not_pending(ship_harness):
+    sleep_log = _fake_sleep(ship_harness)
+    result = _ship(ship_harness, "internal", extra_env={**PUBLIC_API, "FAKE_CURL_1": "429||retry-after: 120"})
+
+    assert result.returncode == 4
+    assert len(_curl_urls(ship_harness)) == 1
+    assert _sleeps(sleep_log) == []
+    assert "GitHub API rate limit reached (HTTP 429" in result.stdout
+    assert "RATE_LIMIT_RETRY_NOT_BEFORE=" in result.stdout
+    assert "tests=rate-limited" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "headers, expected_wait",
+    [
+        ("x-ratelimit-remaining: 0;x-ratelimit-reset: {reset}", 121),
+        ("retry-after: 30;x-ratelimit-remaining: 0;x-ratelimit-reset: {reset}", 30),
+    ],
+    ids=["reset-header", "retry-after-wins"],
+)
+def test_rate_limit_that_resets_inside_the_window_is_waited_out_and_ship_closes(ship_harness, headers, expected_wait):
+    sleep_log = _fake_sleep(ship_harness)
+    reset = int(time.time()) + 120
+    extra_env = {
+        **PUBLIC_API,
+        "RELEASE_LOOP_PROOF_TIMEOUT": "900",
+        "RELEASE_LOOP_PROOF_INTERVAL": "60",
+        "FAKE_CURL_1": "403||" + headers.format(reset=reset),
+    }
+    result = _ship(ship_harness, "internal", extra_env=extra_env)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "FINAL_RELEASE_STATE=live" in result.stdout
+    # One refused Tests request, one Tests request after the wait, one deploy request.
+    assert len(_curl_urls(ship_harness)) == 3
+    [waited] = _sleeps(sleep_log)
+    assert expected_wait - 3 <= waited <= expected_wait
+    assert "Waiting" in result.stdout and "rate limit to reset" in result.stdout
+
+
+def test_poll_spreads_the_remaining_quota_until_it_resets(ship_harness):
+    sleep_log = _fake_sleep(ship_harness)
+    reset = int(time.time()) + 600
+    running = _running_tests_api(ship_harness)
+    extra_env = {
+        **PUBLIC_API,
+        "RELEASE_LOOP_PROOF_TIMEOUT": "1800",
+        "RELEASE_LOOP_PROOF_INTERVAL": "60",
+        "FAKE_CURL_1": f"200|{running}|x-ratelimit-remaining: 2;x-ratelimit-reset: {reset}",
+    }
+    result = _ship(ship_harness, "internal", extra_env=extra_env)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    # Two requests left for ~600s: the next poll waits ~300s, not the 60s floor.
+    [waited] = _sleeps(sleep_log)
+    assert 297 <= waited <= 300
+
+
+def test_default_poll_interval_is_sixty_seconds(ship_harness):
+    sleep_log = _fake_sleep(ship_harness)
+    running = _running_tests_api(ship_harness)
+    env = dict(ship_harness["env"])
+    del env["RELEASE_LOOP_PROOF_TIMEOUT"], env["RELEASE_LOOP_PROOF_INTERVAL"]
+    ship_harness = {**ship_harness, "env": env}
+    result = _ship(ship_harness, "internal", extra_env={**PUBLIC_API, "FAKE_CURL_1": f"200|{running}|"})
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _sleeps(sleep_log) == [60]
+
+
+def test_permission_403_is_unreadable_not_rate_limited_or_missing(ship_harness):
+    result = _ship(ship_harness, "internal", extra_env={**PUBLIC_API, "FAKE_CURL_1": "403||x-ratelimit-remaining: 57"})
+
+    assert result.returncode == 4
+    assert f"Could not read Tests runs for exact SHA {PUSHED_SHA}" in result.stdout
+    assert "GitHub API returned HTTP 403" in result.stdout
+    assert "RATE_LIMIT_RETRY_NOT_BEFORE" not in result.stdout
+    assert "tests=pending" in result.stdout
+    assert "No Tests run for exact SHA" not in result.stdout
+
+
+def test_unreadable_runs_payload_is_not_reported_as_a_missing_run(ship_harness):
+    garbage = ship_harness["gh_runs"] / "garbage.json"
+    garbage.write_text("<html>not json</html>")
+    result = _ship(ship_harness, "internal", extra_env={**PUBLIC_API, "FAKE_CURL_1": f"200|{garbage}|"})
+
+    assert result.returncode == 4
+    assert "GitHub returned an unreadable runs payload" in result.stdout
+    assert "No Tests run for exact SHA" not in result.stdout
+
+
+def test_authenticated_gh_rate_limit_is_reported_without_falling_back_to_curl(ship_harness):
+    result = _ship(
+        ship_harness,
+        "internal",
+        extra_env={"FAKE_GH_RUN_ERROR": "HTTP 403: API rate limit exceeded for user ID 1."},
+    )
+
+    assert result.returncode == 4
+    assert "gh run list reported a GitHub API rate limit" in result.stdout
+    assert "RATE_LIMIT_RETRY_NOT_BEFORE=" in result.stdout
+    assert "tests=rate-limited" in result.stdout
+    assert _curl_urls(ship_harness) == []
 
 
 @pytest.mark.parametrize("failed_workflow", ["Tests", "Deploy Mac Mini"])
