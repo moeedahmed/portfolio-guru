@@ -62,6 +62,9 @@ elif [[ -x ".venv/bin/python3" ]]; then
   PY=".venv/bin/python3"
 elif [[ -x "../.venv/bin/python3" ]]; then
   PY="../.venv/bin/python3"
+elif [[ -x "$HOME/.local/share/portfolio-guru/venv/bin/python3" ]]; then
+  # Claude Code worktrees carry no venv; use the shared dev environment.
+  PY="$HOME/.local/share/portfolio-guru/venv/bin/python3"
 else
   PY="python3"
 fi

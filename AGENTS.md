@@ -87,10 +87,14 @@ blocked deploys twice. Nothing was caused by the agents being different tools.
 Every one was concurrent writers on shared mutable state.
 
 - **One writer per file set, one directory per writer.** Never work in
-  `~/projects/portfolio-guru` itself and never in the live checkout. Get your
-  own with `scripts/new_worktree.sh <short-name>` — it takes seconds and shares
-  a prepared venv and `.env`. It lands in `~/projects/.worktrees/`; once your
-  branch is merged, remove it with the command the script prints.
+  `~/projects/portfolio-guru` itself and never in the live checkout. Claude
+  Code sessions use Claude Code's own worktrees (`.claude/worktrees/`, created
+  and cleaned up by Claude Code); the gate scripts find the shared dev venv
+  (`~/.local/share/portfolio-guru/venv`) there automatically. Other agents
+  (Codex, Hermes) use `scripts/new_worktree.sh <short-name>`, which lands in
+  `~/projects/.worktrees/` with the same shared venv and `.env`. Either way the
+  release loop pushes the exact approved commit to `main`; the branch name is
+  only the workspace.
 - **`~/projects/portfolio-guru-live` is the deployment, not a workspace.** It is
   pinned to `main`, only `deploy_mac.sh` writes to it, and a pre-commit hook
   refuses commits there. A commit made there diverges `main` from origin and the

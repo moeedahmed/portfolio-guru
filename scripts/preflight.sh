@@ -71,6 +71,9 @@ if [[ -d backend ]]; then
     PY=".venv/bin/python"
   elif [[ -x ../.venv/bin/python ]]; then
     PY="../.venv/bin/python"
+  elif [[ -x "$HOME/.local/share/portfolio-guru/venv/bin/python3" ]]; then
+    # Claude Code worktrees carry no venv; use the shared dev environment.
+    PY="$HOME/.local/share/portfolio-guru/venv/bin/python3"
   else
     PY="python3"
   fi
