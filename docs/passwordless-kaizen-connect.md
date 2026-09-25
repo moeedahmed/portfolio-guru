@@ -18,6 +18,13 @@ is the main way a password leaks, so this option never holds one.
   **I've signed in**. The bot believes "I've signed in" only after it has opened
   Kaizen with the kept session, and reads the portfolio type as the password
   route does, then continues with the usual profile questions.
+- The page has ordinary **Kaizen username** and **Password** boxes (so the
+  phone keyboard and password managers work), with a small live view of the
+  real RCEM page underneath. The details are typed into the real login page
+  and never stored or logged; the password box empties once sent. A wrong
+  password shows "Kaizen didn't accept those details"; five attempts per link.
+  (The first version made people tap a picture of the login page; Android
+  dropped the keyboard, so it was replaced on 2026-09-25.)
 - Choosing it deletes any stored password, locally and in the Supabase mirror.
 - When Kaizen has ended the session, saving shows **"Kaizen has signed you
   out"** with **🔒 Sign in again**. The draft is kept and saves once they have

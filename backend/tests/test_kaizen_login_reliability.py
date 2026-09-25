@@ -741,3 +741,26 @@ async def test_login_failure_never_logs_credentials_or_page_text(_no_login_sleep
     logged = caplog.text
     assert secret not in logged
     assert "Patient-identifiable page body text" not in logged
+
+
+@pytest.mark.asyncio
+async def test_rejection_is_read_from_the_real_rcem_error_box():
+    """RCEM's sign-in page (auth.kaizenep.com, checked live 2026-09-25) shows a
+    failed sign-in in <p id="error-message">, not in any alert class. The probe
+    must look there, or a wrong password is misreported as Kaizen being down."""
+    from kaizen_form_filer import _has_credential_rejection
+
+    rcem_text = "Authentication failed. There is no such account or you have given invalid credentials."
+
+    class Locator:
+        def __init__(self, selector):
+            self.selector = selector
+
+        async def all_inner_texts(self):
+            return [rcem_text] if "#error-message" in self.selector else []
+
+    class Page:
+        def locator(self, selector):
+            return Locator(selector)
+
+    assert await _has_credential_rejection(Page()) is True

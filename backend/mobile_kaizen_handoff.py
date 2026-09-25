@@ -271,6 +271,49 @@ _ALLOWED_KEYS = {
 }
 
 
+MAX_SIGN_IN_ATTEMPTS = 5
+REJECTION_CHECK_DELAY_SECONDS = 6.0
+
+
+def normalise_credentials(message: Any) -> tuple[str, str] | None:
+    """Accept a sign-in from the page's own username/password boxes.
+
+    The values are typed straight into the real RCEM login page and never
+    stored, logged or echoed. Anything malformed is ignored.
+    """
+    if not isinstance(message, dict) or message.get("type") != "credentials":
+        return None
+    username, password = message.get("username"), message.get("password")
+    for value in (username, password):
+        if not isinstance(value, str) or not value or len(value) > 256:
+            return None
+        if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+            return None
+    return username.strip(), password
+
+
+async def submit_kaizen_login(page: Any, username: str, password: str) -> None:
+    """Type the doctor's details into the real RCEM login page and submit.
+
+    Mirrors ``kaizen_form_filer._login`` (proven in production): username box
+    ``input[name="login"]``, then ``input[name="password"]``, each followed by
+    the submit button. When both boxes are on one page, one submit is enough.
+    """
+    submit = page.locator('button[type="submit"]').first
+    login_box = page.locator('input[name="login"]')
+    password_box = page.locator('input[name="password"]')
+    if await login_box.count():
+        await login_box.fill(username)
+    if await password_box.count() and await password_box.is_visible():
+        await password_box.fill(password)
+        await submit.click()
+        return
+    await submit.click()
+    await password_box.wait_for(state="visible", timeout=15000)
+    await password_box.fill(password)
+    await submit.click()
+
+
 def normalise_browser_input(
     message: Any,
     *,
@@ -495,12 +538,16 @@ class MobileBrowserManager:
         screenshot_interval: float = 0.65,
         connect_page: Callable[[], Any] | None = None,
         keep_session: Callable[[HandoffRecord, Any, Any], Any] | None = None,
+        submit_login: Callable[[Any, str, str], Any] | None = None,
+        login_rejected: Callable[[Any], Any] | None = None,
         max_concurrent_browsers: int = 2,
     ) -> None:
         self.login_url = login_url
         self.screenshot_interval = screenshot_interval
         self._connect_page = connect_page or self._default_connect_page
         self._keep_session = keep_session or self._default_keep_session
+        self._submit_login = submit_login or submit_kaizen_login
+        self._login_rejected = login_rejected or _kaizen_login_rejected
         self._browser_slots = asyncio.Semaphore(max(1, max_concurrent_browsers))
 
     async def serve(
@@ -544,6 +591,9 @@ class MobileBrowserManager:
             await websocket.send_json({"type": "status", "status": "login"})
 
             receive_task = asyncio.create_task(websocket.receive_json())
+            sign_in_attempts = 0
+            check_rejection_at: float | None = None
+            loop = asyncio.get_running_loop()
             while store.clock() < record.expires_at:
                 if _authenticated_kaizen_url(str(page.url)):
                     receive_task.cancel()
@@ -593,8 +643,38 @@ class MobileBrowserManager:
                 )
                 if receive_task in done:
                     message = receive_task.result()
-                    await self._apply_input(page, message)
+                    credentials = normalise_credentials(message)
+                    if credentials is not None:
+                        sign_in_attempts += 1
+                        if sign_in_attempts > MAX_SIGN_IN_ATTEMPTS:
+                            store.fail(record.session_id, "Too many sign-in attempts. Return to Telegram for a new link.")
+                            await websocket.send_json({"type": "status", **_status_payload(record)})
+                            return
+                        await websocket.send_json({"type": "status", "status": "signing_in"})
+                        try:
+                            await self._submit_login(page, *credentials)
+                        except Exception as exc:
+                            # Class name only: never risk logging typed details.
+                            logger.warning("Kaizen sign-in could not be entered: %s", type(exc).__name__)
+                            await websocket.send_json({
+                                "type": "status",
+                                "status": "login",
+                                "message": "Kaizen's sign-in page didn't respond. Wait a moment and try again.",
+                            })
+                        credentials = None
+                        check_rejection_at = loop.time() + REJECTION_CHECK_DELAY_SECONDS
+                    else:
+                        await self._apply_input(page, message)
                     receive_task = asyncio.create_task(websocket.receive_json())
+
+                if check_rejection_at is not None and loop.time() >= check_rejection_at:
+                    check_rejection_at = None
+                    if not _authenticated_kaizen_url(str(page.url)) and await self._login_rejected(page):
+                        await websocket.send_json({
+                            "type": "status",
+                            "status": "login",
+                            "message": "Kaizen didn't accept those details. Check them and try again.",
+                        })
 
             store.fail(record.session_id, "The Kaizen login window expired.")
         except WebSocketDisconnect:
@@ -684,6 +764,15 @@ class _OwnedBrowserHandle:
             await self.browser.close()
         finally:
             await self.playwright_handle.stop()
+
+
+async def _kaizen_login_rejected(page: Any) -> bool:
+    from kaizen_form_filer import _has_credential_rejection
+
+    try:
+        return bool(await _has_credential_rejection(page))
+    except Exception:
+        return False
 
 
 def _authenticated_kaizen_url(url: str) -> bool:
@@ -841,6 +930,15 @@ HANDOFF_HTML = """<!doctype html>
       <h1>Connect Kaizen</h1>
       <p>Sign in to Kaizen yourself in this temporary, isolated browser. Portfolio Guru does not store your password &mdash; it keeps only the signed-in session, so it can save drafts until Kaizen logs you out.</p>
     </section>
+    <form id="signin-form" class="signin" autocomplete="on">
+      <label for="kz-username">Kaizen username</label>
+      <input id="kz-username" name="username" type="text" inputmode="email" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" required>
+      <label for="kz-password">Password</label>
+      <input id="kz-password" name="password" type="password" autocomplete="current-password" required>
+      <button id="signin" type="submit" disabled>Sign in to Kaizen</button>
+      <p class="hint">Use your password manager if you like. Your details go straight to Kaizen and are never stored.</p>
+    </form>
+    <p class="live-label">Live view of the real Kaizen page</p>
     <section class="browser-shell" aria-label="Temporary Kaizen browser">
       <div class="browser-bar"><span class="lock">●</span><span id="browser-label">Opening RCEM ePortfolio…</span></div>
       <div class="screen-wrap">
@@ -889,6 +987,16 @@ button:last-child { background: #1c6b50; color: #fff; }
 .status-card { display: flex; flex-direction: column; gap: 3px; margin-top: 14px; padding: 14px 16px; border-radius: 15px; background: #173f31; color: #fff; }
 .status-card span { color: #d8e7df; font-size: 13px; line-height: 1.4; }
 .privacy { margin: 13px 4px 0; color: #607168; font-size: 12px; line-height: 1.45; }
+.signin { display: grid; gap: 6px; margin: 4px 0 14px; padding: 16px; border: 1px solid #c9d7ce; border-radius: 16px; background: #fff; }
+.signin label { color: #183127; font-size: 14px; font-weight: 700; }
+.signin input { min-height: 46px; padding: 0 12px; border: 1px solid #b9c9bf; border-radius: 10px; font: inherit; font-size: 16px; color: #102019; background: #fbfcfb; }
+.signin #signin { margin-top: 8px; background: #1c6b50; color: #fff; }
+.signin #signin:disabled { opacity: .55; }
+.signin .hint { margin: 4px 0 0; color: #607168; font-size: 12px; line-height: 1.4; }
+.live-label { margin: 0 4px 6px; color: #526158; font-size: 12px; }
+.screen-wrap { max-height: 38vh; }
+.done .signin, .done .live-label { display: none; }
+.controls { display: none; }
 .done .browser-shell { display: none; }
 .done .status-card { margin-top: 28px; padding: 24px; }
 @media (max-height: 700px) { .screen-wrap { max-height: 52vh; } .intro p:not(.eyebrow) { font-size: 13px; } }
@@ -905,11 +1013,17 @@ HANDOFF_JS = r"""
   let socket;
   let pointerStart;
 
+  const form = document.getElementById('signin-form');
+  const username = document.getElementById('kz-username');
+  const password = document.getElementById('kz-password');
+  const signin = document.getElementById('signin');
   const setStatus = (next, message) => {
+    signin.disabled = next !== 'login';
     const states = {
       opening: ['Opening Kaizen', 'Preparing an isolated browser…'],
       queued: ['Browser queued', 'Another clinician is using the secure browser. Keep this page open.'],
-      login: ['Sign in yourself', 'Tap a field above, then type. You can paste your password from your password manager.'],
+      login: ['Sign in to Kaizen', 'Enter your Kaizen username and password above.'],
+      signing_in: ['Signing in…', 'Kaizen is checking your details.'],
       saving: ['Login confirmed', 'Keeping your Kaizen session…'],
       complete: ['Kaizen connected', 'You can close this page and return to Telegram.'],
       failed: ['Connection stopped', message || 'Return to Telegram and request a new link.'],
@@ -999,6 +1113,13 @@ HANDOFF_JS = r"""
   document.getElementById('backspace').addEventListener('click', () => send({type: 'key', key: 'Backspace'}));
   document.getElementById('tab').addEventListener('click', () => { send({type: 'key', key: 'Tab'}); keyboard.focus({preventScroll: true}); });
   document.getElementById('enter').addEventListener('click', () => send({type: 'key', key: 'Enter'}));
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    if (signin.disabled || !username.value || !password.value) return;
+    send({type: 'credentials', username: username.value, password: password.value});
+    password.value = '';
+    setStatus('signing_in');
+  });
   exchange().catch(() => setStatus('failed', 'The secure link could not be opened. Return to Telegram and try again.'));
 })();
 """

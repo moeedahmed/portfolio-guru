@@ -555,3 +555,203 @@ def test_taps_outside_the_letterboxed_picture_are_ignored():
 
     assert "Math.min(box.width / 430, box.height / 850)" in HANDOFF_JS
     assert "if (at)" in HANDOFF_JS
+
+
+# --- Sign-in boxes (real username/password fields on our page) ----------------
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ({"type": "credentials", "username": " doc@nhs.net ", "password": "pw 1"}, ("doc@nhs.net", "pw 1")),
+        ({"type": "credentials", "username": "", "password": "pw"}, None),
+        ({"type": "credentials", "username": "doc", "password": ""}, None),
+        ({"type": "credentials", "username": "doc", "password": "x" * 257}, None),
+        ({"type": "credentials", "username": "doc\n", "password": "pw"}, None),
+        ({"type": "credentials", "username": 5, "password": "pw"}, None),
+        ({"type": "text", "text": "pw"}, None),
+    ],
+)
+def test_sign_in_details_are_bounded_and_well_formed(message, expected):
+    from mobile_kaizen_handoff import normalise_credentials
+
+    assert normalise_credentials(message) == expected
+
+
+def _sign_in_fakes(messages):
+    import asyncio
+
+    class FakeContext:
+        async def close(self):
+            return None
+
+    class FakePage:
+        url = "https://auth.kaizenep.com/login"
+        context = FakeContext()
+
+        async def set_viewport_size(self, viewport):
+            return None
+
+        async def goto(self, url, **kwargs):
+            return None
+
+        async def screenshot(self, **kwargs):
+            return b"jpeg"
+
+    class FakeSocket:
+        def __init__(self):
+            self.sent = []
+            self.queue = list(messages)
+
+        async def send_json(self, payload):
+            self.sent.append(payload)
+
+        async def receive_json(self):
+            if self.queue:
+                return self.queue.pop(0)
+            await asyncio.Event().wait()
+
+        async def close(self, code=None):
+            return None
+
+    class FakePlaywright:
+        async def stop(self):
+            return None
+
+    return FakePage(), FakeSocket(), FakePlaywright()
+
+
+@pytest.mark.asyncio
+async def test_sign_in_boxes_type_into_kaizen_and_report_a_rejection(monkeypatch, caplog):
+    import mobile_kaizen_handoff as handoff
+
+    monkeypatch.setattr(handoff, "REJECTION_CHECK_DELAY_SECONDS", 0.0)
+    page, socket, pw = _sign_in_fakes(
+        [{"type": "credentials", "username": "doc@nhs.net", "password": "hunter2"}]
+    )
+    typed = []
+
+    async def connect_page():
+        return page, pw
+
+    async def submit_login(p, username, password):
+        typed.append((username, password))
+
+    async def rejected(p):
+        return True
+
+    store = HandoffStore(ttl=timedelta(seconds=2))
+    record = store.get_by_viewer_token(store.exchange(store.create(_connect_request()).token))
+    manager = MobileBrowserManager(
+        connect_page=connect_page, submit_login=submit_login, login_rejected=rejected,
+        screenshot_interval=0.05,
+    )
+
+    await manager.serve(record, socket, store)
+
+    assert typed == [("doc@nhs.net", "hunter2")]
+    statuses = [m.get("status") for m in socket.sent if m.get("type") == "status"]
+    assert "signing_in" in statuses
+    assert any("didn't accept those details" in (m.get("message") or "") for m in socket.sent)
+    assert "hunter2" not in caplog.text
+    assert "hunter2" not in repr(socket.sent)
+
+
+@pytest.mark.asyncio
+async def test_a_failing_sign_in_never_logs_the_details(caplog):
+    page, socket, pw = _sign_in_fakes(
+        [{"type": "credentials", "username": "doc@nhs.net", "password": "hunter2"}]
+    )
+
+    async def connect_page():
+        return page, pw
+
+    async def submit_login(p, username, password):
+        raise RuntimeError(f"fill failed for {username} / {password}")
+
+    store = HandoffStore(ttl=timedelta(seconds=1))
+    record = store.get_by_viewer_token(store.exchange(store.create(_connect_request()).token))
+    manager = MobileBrowserManager(connect_page=connect_page, submit_login=submit_login, screenshot_interval=0.05)
+
+    await manager.serve(record, socket, store)
+
+    assert "hunter2" not in caplog.text and "doc@nhs.net" not in caplog.text
+    assert any("didn't respond" in (m.get("message") or "") for m in socket.sent)
+
+
+@pytest.mark.asyncio
+async def test_sign_in_attempts_are_capped():
+    import mobile_kaizen_handoff as handoff
+
+    tries = [{"type": "credentials", "username": "doc", "password": f"pw{i}"}
+             for i in range(handoff.MAX_SIGN_IN_ATTEMPTS + 1)]
+    page, socket, pw = _sign_in_fakes(tries)
+
+    async def connect_page():
+        return page, pw
+
+    async def submit_login(p, username, password):
+        return None
+
+    async def not_rejected(p):
+        return False
+
+    store = HandoffStore(ttl=timedelta(seconds=5))
+    record = store.get_by_viewer_token(store.exchange(store.create(_connect_request()).token))
+    manager = MobileBrowserManager(
+        connect_page=connect_page, submit_login=submit_login, login_rejected=not_rejected,
+        screenshot_interval=0.01,
+    )
+
+    await manager.serve(record, socket, store)
+
+    assert record.status == "failed"
+    assert "Too many sign-in attempts" in (record.error or "")
+
+
+def test_sign_in_page_has_password_manager_friendly_boxes():
+    from mobile_kaizen_handoff import HANDOFF_HTML, HANDOFF_JS
+
+    assert 'autocomplete="username"' in HANDOFF_HTML
+    assert 'type="password" autocomplete="current-password"' in HANDOFF_HTML
+    assert "<form" in HANDOFF_HTML
+    # The password box is emptied as soon as it has been sent.
+    assert "password.value = ''" in HANDOFF_JS
+
+
+@pytest.mark.asyncio
+async def test_submit_kaizen_login_uses_both_boxes_when_shown_together():
+    from mobile_kaizen_handoff import submit_kaizen_login
+
+    actions = []
+
+    class Box:
+        def __init__(self, name, visible=True):
+            self.name, self.visible = name, visible
+
+        @property
+        def first(self):
+            return self
+
+        async def count(self):
+            return 1
+
+        async def is_visible(self):
+            return self.visible
+
+        async def fill(self, value):
+            actions.append(("fill", self.name))
+
+        async def click(self):
+            actions.append(("click", self.name))
+
+        async def wait_for(self, **kwargs):
+            actions.append(("wait", self.name))
+
+    class Page:
+        def locator(self, selector):
+            return {'input[name="login"]': Box("login"), 'input[name="password"]': Box("password"),
+                    'button[type="submit"]': Box("submit")}[selector]
+
+    await submit_kaizen_login(Page(), "doc", "pw")
+
+    assert actions == [("fill", "login"), ("fill", "password"), ("click", "submit")]

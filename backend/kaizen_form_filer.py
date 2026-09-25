@@ -1972,7 +1972,10 @@ async def use_cached_session(page: Page, telegram_user_id: int, username: Option
 # the page (headings, help text, "Forgotten password?") is not a rejection.
 _LOGIN_ERROR_SELECTOR = (
     ".alert-danger, .alert-error, [role='alert'], .validation-summary-errors, "
-    ".field-validation-error, .login-error, .error-message"
+    ".field-validation-error, .login-error, .error-message, "
+    # auth.kaizenep.com (risr/advance) sign-in page, seen live 2026-09-25:
+    # <p id="error-message">Authentication failed. ... invalid credentials.</p>
+    "#error-message"
 )
 
 # Conservative: each phrase means the portal explicitly refused the supplied
