@@ -63,17 +63,9 @@ python3 scripts/setup_consent_path_check.py
 echo
 if [[ -d backend ]]; then
   cd backend
-  if [[ -x venv/bin/python3 ]]; then
-    PY="venv/bin/python3"
-  elif [[ -x venv/bin/python ]]; then
-    PY="venv/bin/python"
-  elif [[ -x .venv/bin/python ]]; then
-    PY=".venv/bin/python"
-  elif [[ -x ../.venv/bin/python ]]; then
-    PY="../.venv/bin/python"
-  else
-    PY="python3"
-  fi
+  # shellcheck source=scripts/lib/test_env.sh
+  . "$ROOT/scripts/lib/test_env.sh"
+  pg_setup_test_env
   echo "Running backend offline tests with $PY"
   "$PY" -m pytest tests/ -q \
     --ignore=tests/test_e2e.py \
