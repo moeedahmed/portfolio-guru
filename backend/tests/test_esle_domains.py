@@ -218,6 +218,9 @@ def test_domains_widget_is_mapped_on_the_esle_form():
 
 # ─── Widget handler ──────────────────────────────────────────────────────────
 
+DOMAINS = "domains_of_performance"
+
+
 def _widget_page(selected_after_pick):
     """Fake page for the DIV multi-select: records picks, reports selection."""
     page = MagicMock()
@@ -260,8 +263,8 @@ def instant_sleep(monkeypatch):
 async def test_widget_selects_each_wanted_domain(instant_sleep):
     page = _widget_page({TEAMWORK_AND_COOPERATION, DECISION_MAKING})
 
-    filled = await kff._fill_domain_multiselect(
-        page, "7683f17f", [TEAMWORK_AND_COOPERATION, DECISION_MAKING]
+    filled = await kff._fill_multiselect_widget(
+        page, "7683f17f", [TEAMWORK_AND_COOPERATION, DECISION_MAKING], field_key=DOMAINS
     )
 
     assert filled is True
@@ -273,14 +276,14 @@ async def test_widget_reports_failure_when_the_option_does_not_stick(instant_sle
     """An Angular click that changed nothing must not count as filled."""
     page = _widget_page(set())
 
-    assert await kff._fill_domain_multiselect(page, "7683f17f", [DECISION_MAKING]) is False
+    assert await kff._fill_multiselect_widget(page, "7683f17f", [DECISION_MAKING], field_key=DOMAINS) is False
 
 
 @pytest.mark.asyncio
 async def test_widget_applies_all_domains_exclusivity_before_clicking(instant_sleep):
     page = _widget_page({ALL_DOMAINS, DECISION_MAKING})
 
-    await kff._fill_domain_multiselect(page, "7683f17f", [ALL_DOMAINS, DECISION_MAKING])
+    await kff._fill_multiselect_widget(page, "7683f17f", [ALL_DOMAINS, DECISION_MAKING], field_key=DOMAINS)
 
     assert page.picked == [DECISION_MAKING]
 
@@ -289,7 +292,7 @@ async def test_widget_applies_all_domains_exclusivity_before_clicking(instant_sl
 async def test_widget_with_no_value_is_not_filled(instant_sleep):
     page = _widget_page(set())
 
-    assert await kff._fill_domain_multiselect(page, "7683f17f", []) is False
+    assert await kff._fill_multiselect_widget(page, "7683f17f", [], field_key=DOMAINS) is False
     page.evaluate.assert_not_awaited()
 
 
@@ -432,8 +435,8 @@ async def test_widget_never_clicks_all_domains_alongside_an_individual_domain(in
     """Last line of defence: even a bad value reaching the filler is resolved."""
     page = _widget_page(set(ESLE_DOMAIN_OPTIONS))
 
-    await kff._fill_domain_multiselect(
-        page, "7683f17f", [ALL_DOMAINS, DECISION_MAKING, SITUATIONAL_AWARENESS]
+    await kff._fill_multiselect_widget(
+        page, "7683f17f", [ALL_DOMAINS, DECISION_MAKING, SITUATIONAL_AWARENESS], field_key=DOMAINS
     )
 
     assert ALL_DOMAINS not in page.picked

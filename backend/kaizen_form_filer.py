@@ -783,6 +783,9 @@ FORM_FIELD_MAP = {
         "changed_management": "e9419598-3230-4e50-810f-29893a6a8c42",
         "learning_points": "df24a5de-14a4-4d25-9c93-b93ac76991b9",
         "other_comments": "317ddbf2-a3dc-4ee7-a53c-fa1369d2c929",
+        # "Ultrasound application used" is a kz-tree tick-box list (no ids on
+        # the boxes) inside this DIV — see _fill_multiselect_widget.
+        "us_application": "69878c05-4fbc-4e1b-9307-54a3a3a9ca8a",
     },
     "COMPLAINT": {
         "reflection_title": "fe902ad2-a932-489f-bb01-2ae6dda100f4",
@@ -844,7 +847,7 @@ FORM_FIELD_MAP = {
         "date_of_esle": "2c86886b-0a18-4771-9b25-6c2272fdad6b",
         "reflection": "488e8e63-300d-4ed9-a4f4-eaee53608f05",
         # Required custom multi-select widget (a DIV, not a SELECT) — see
-        # _fill_domain_multiselect.
+        # _fill_multiselect_widget.
         "domains_of_performance": "7683f17f-cc85-47fe-b0fa-e6ad817f0045",
     },
     # ESLE Reflection — supplementary reflective entry. Does not go to assessor.
@@ -2389,9 +2392,14 @@ async def _fill_select(page: Page, dom_id: Any, value: str) -> bool:
 # Kaizen renders a few required questions as an Angular widget wrapped in a
 # DIV rather than a <select>, so the generic select/text fillers cannot touch
 # them and the field silently stays blank on the saved draft. ESLE's "Domains
-# of performance" question is one of these.
+# of performance" question is one of these, and so is the Ultrasound Case's
+# "Ultrasound application used" tick-box tree.
 
-_MULTISELECT_WIDGET_FIELDS = frozenset({"domains_of_performance"})
+_MULTISELECT_WIDGET_FIELDS = frozenset({"domains_of_performance", "us_application"})
+
+# Tree widgets render every option up front; there is nothing to open, and a
+# click on the tree's search box would only steal focus.
+_ALWAYS_OPEN_WIDGET_FIELDS = frozenset({"us_application"})
 
 _WIDGET_STATE_JS = """(domId) => {
     const root = document.getElementById(domId);
@@ -2482,17 +2490,55 @@ async def _read_widget_state(page: Page, dom_id: str) -> Dict[str, Any]:
     return state if isinstance(state, dict) else {}
 
 
-async def _fill_domain_multiselect(page: Page, field_target: Any, values: Any) -> bool:
+def _option_key(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def _widget_wanted_options(field_key: str, values: Any) -> List[str]:
+    """The Kaizen option labels to select for this field, in order.
+
+    ESLE domains keep their own canonicalisation (All Domains exclusivity).
+    Any other widget is matched against the options its schema declares, so
+    a value Kaizen does not offer is never clicked.
+    """
+    if field_key == "domains_of_performance":
+        from esle_domains import normalise_domains
+        return normalise_domains(values)
+
+    options = next(
+        (
+            field.get("options") or []
+            for schema in FORM_SCHEMAS.values()
+            for field in schema.get("fields", [])
+            if field.get("key") == field_key and field.get("options")
+        ),
+        [],
+    )
+    by_key = {_option_key(option): option for option in options}
+    if isinstance(values, (list, tuple, set)):
+        raw = list(values)
+    else:
+        raw = re.split(r"[;,\n]", str(values or ""))
+    wanted: List[str] = []
+    for item in raw:
+        option = by_key.get(_option_key(item))
+        if option and option not in wanted:
+            wanted.append(option)
+    return wanted
+
+
+async def _fill_multiselect_widget(
+    page: Page, field_target: Any, values: Any, *, field_key: str
+) -> bool:
     """Select options on a DIV-wrapped Angular multi-select.
 
-    The widget has to be opened before its option rows exist, so the toggle is
-    clicked first and each wanted option is then matched by its visible label.
-    Returns True only when the widget itself reports every wanted option as
-    selected — a click that Angular ignored must not be reported as filled.
+    A dropdown widget has to be opened before its option rows exist, so its
+    toggle is clicked first; each wanted option is then matched by its visible
+    label. Returns True only when the widget itself reports every wanted
+    option as selected — a click that Angular ignored must not be reported as
+    filled.
     """
-    from esle_domains import normalise_domains
-
-    wanted = normalise_domains(values)
+    wanted = _widget_wanted_options(field_key, values)
     if not wanted:
         return False
 
@@ -2500,15 +2546,16 @@ async def _fill_domain_multiselect(page: Page, field_target: Any, values: Any) -
     if not dom_id:
         return False
 
-    scope = f'[id="{dom_id}"]'
-    await _click_first_visible(page, [
-        f"{scope} .ui-select-toggle",
-        f"{scope} .dropdown-toggle",
-        f"{scope} button",
-        f"{scope} input",
-        scope,
-    ])
-    await asyncio.sleep(1)
+    if field_key not in _ALWAYS_OPEN_WIDGET_FIELDS:
+        scope = f'[id="{dom_id}"]'
+        await _click_first_visible(page, [
+            f"{scope} .ui-select-toggle",
+            f"{scope} .dropdown-toggle",
+            f"{scope} button",
+            f"{scope} input",
+            scope,
+        ])
+        await asyncio.sleep(1)
 
     for value in wanted:
         try:
@@ -2521,8 +2568,8 @@ async def _fill_domain_multiselect(page: Page, field_target: Any, values: Any) -
         await asyncio.sleep(0.5)
 
     state = await _read_widget_state(page, dom_id)
-    selected = {value.lower() for value in _widget_selected_values(state)}
-    missing = [value for value in wanted if value.lower() not in selected]
+    selected = {_option_key(value) for value in _widget_selected_values(state)}
+    missing = [value for value in wanted if _option_key(value) not in selected]
     if missing:
         logger.warning(
             "Multi-select %s did not confirm %s (selected: %s)",
@@ -3849,7 +3896,7 @@ async def fill_kaizen_form(
                 continue
 
             if key in _MULTISELECT_WIDGET_FIELDS:
-                if await _fill_domain_multiselect(page, dom_id, value):
+                if await _fill_multiselect_widget(page, dom_id, value, field_key=key):
                     filled.append(key)
                 else:
                     errors.append(f"{key}: multi-select fill failed")
@@ -4147,7 +4194,7 @@ async def _fill_field_legacy(page: Page, dom_id: Any, value: Any, field_key: str
             return await _fill_stage(page, dom_id, str(value))
 
         if field_key in _MULTISELECT_WIDGET_FIELDS:
-            return await _fill_domain_multiselect(page, dom_id, value)
+            return await _fill_multiselect_widget(page, dom_id, value, field_key=field_key)
 
         field_target = dom_id
         el = await _first_field_locator(page, field_target, field_key=field_key)
