@@ -34,9 +34,9 @@ TICKET JSON SCHEMA
     {
       "form_type": "TEACH",         # must be a key in FORM_UUIDS
       "save_as_draft": true,        # must be true — draft-only is the invariant
-      "reuse_draft": false,         # optional — if true, edit an existing draft of
-                                    # the same form_type instead of creating a new
-                                    # one. Form-type based, not UUID based.
+      "reuse_draft_url": null,      # optional — the exact Kaizen draft URL
+                                    # (/events/fillin/...) to edit instead of
+                                    # creating a new draft.
       "fields": {
         # Universal headers (all forms):
         "date_of_encounter": "15/4/2026",   # maps to startDate
@@ -221,11 +221,10 @@ def _validate(ticket: dict) -> tuple[str, dict, str | None, bool, str | None, st
 
     draft_uuid = ticket.get("draft_uuid")
     if draft_uuid:
-        # filer_router.route_filing exposes reuse_draft (form-type based) but
-        # not UUID-based draft targeting. Refuse rather than silently dropping
-        # the targeting — the caller intended a specific draft.
+        # filer_router.route_filing targets a draft by its exact URL, not a
+        # UUID. Refuse rather than silently dropping the targeting.
         _die(3, "draft_uuid is not supported by filer_router.route_filing. "
-                "Use reuse_draft=true to edit an existing draft of the same form_type, "
+                "Pass reuse_draft_url (the draft's /events/fillin/ URL), "
                 "or remove draft_uuid to create a new draft.")
     save_as_draft = ticket.get("save_as_draft", True)
     # Draft-only is the product invariant for non-bot entrypoints. fill_one is
@@ -245,7 +244,7 @@ async def _run(
     form_type: str,
     fields: dict,
     save_as_draft: bool,
-    reuse_draft: bool = False,
+    reuse_draft_url: str | None = None,
     attachment_drive_url: str | None = None,
     attachment_path: str | None = None,
 ) -> dict:
@@ -262,7 +261,7 @@ async def _run(
         fields=fields,
         credentials={"username": username, "password": password},
         submit=False,
-        reuse_draft=reuse_draft,
+        reuse_draft_url=reuse_draft_url,
         attachment_path=attachment_path,
         attachment_drive_url=attachment_drive_url,
     )
@@ -271,7 +270,7 @@ async def _run(
 def main() -> None:
     ticket = _load_ticket()
     form_type, fields, draft_uuid, save_as_draft, attachment_drive_url, attachment_path = _validate(ticket)
-    reuse_draft = bool(ticket.get("reuse_draft", False))
+    reuse_draft_url = ticket.get("reuse_draft_url") or None
     clinical_text_preflight = _run_clinical_text_preflight(fields)
     if clinical_text_preflight["status"] == "blocked":
         print(json.dumps({
@@ -301,7 +300,7 @@ def main() -> None:
             "field_count": len(fields),
             "kc_count": len(fields.get("curriculum_links") or []),
             "save_as_draft": save_as_draft,
-            "reuse_draft": reuse_draft,
+            "reuse_draft_url": reuse_draft_url,
             "draft_uuid": draft_uuid,
             "clinical_text_preflight": clinical_text_preflight,
         }, indent=2))
@@ -312,7 +311,7 @@ def main() -> None:
             form_type,
             fields,
             save_as_draft,
-            reuse_draft=reuse_draft,
+            reuse_draft_url=reuse_draft_url,
             attachment_drive_url=attachment_drive_url,
             attachment_path=attachment_path,
         ))

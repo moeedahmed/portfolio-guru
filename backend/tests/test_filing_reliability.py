@@ -288,7 +288,7 @@ async def test_route_filing_does_not_reuse_drafts_by_default():
             fields={"reflection": "Sample"},
             credentials={"username": "u", "password": "p"},
         )
-    assert deterministic.await_args.kwargs["reuse_draft"] is False
+    assert deterministic.await_args.kwargs["reuse_draft_url"] is None
 
 
 @pytest.mark.asyncio
@@ -306,9 +306,9 @@ async def test_route_filing_reuses_drafts_when_explicitly_requested():
             form_type="CBD",
             fields={"reflection": "Sample"},
             credentials={"username": "u", "password": "p"},
-            reuse_draft=True,
+            reuse_draft_url="https://kaizenep.com/events/fillin/draft-doc-id",
         )
-    assert deterministic.await_args.kwargs["reuse_draft"] is True
+    assert deterministic.await_args.kwargs["reuse_draft_url"] == "https://kaizenep.com/events/fillin/draft-doc-id"
 
 
 @pytest.mark.asyncio
@@ -328,9 +328,9 @@ async def test_retry_after_dom_drift_reuses_draft_and_surfaces_changed_field():
     ):
         calls.append({
             "fields": dict(fields),
-            "reuse_draft": kwargs["reuse_draft"],
+            "reuse_draft": bool(kwargs["reuse_draft_url"]),
         })
-        if kwargs["reuse_draft"]:
+        if kwargs["reuse_draft_url"]:
             return {
                 "status": "partial",
                 "filled": ["reflection"],
@@ -364,7 +364,7 @@ async def test_retry_after_dom_drift_reuses_draft_and_surfaces_changed_field():
                 "clinical_reasoning_renamed": "DOM drifted field",
             },
             credentials={"username": "u", "password": "p"},
-            reuse_draft=True,
+            reuse_draft_url=draft_url,
         )
 
     assert calls == [

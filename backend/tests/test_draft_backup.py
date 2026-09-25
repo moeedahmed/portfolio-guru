@@ -114,3 +114,22 @@ def test_filenames_cannot_escape_the_backup_directory(backup_dir):
     assert path is not None
     assert path.parent == backup_dir
     assert ".." not in path.name
+
+
+def test_legacy_plaintext_drafts_are_erased_by_reset_and_expiry(backup_dir):
+    """Plaintext backups from before encryption matched neither purge."""
+    import os
+    import time
+
+    mine = backup_dir / "4242_CBD_2026-07-01.json"
+    theirs = backup_dir / "9001_CBD_2026-07-01.json"
+    for path in (mine, theirs):
+        path.write_text('{"fields": {"reflection": "clinical text"}}')
+
+    assert draft_backup.purge_user(4242) == 1
+    assert not mine.exists() and theirs.exists()
+
+    old = time.time() - 30 * 86400
+    os.utime(theirs, (old, old))
+    assert draft_backup.purge_expired()["removed"] == 1
+    assert not theirs.exists()

@@ -250,9 +250,11 @@ def test_semantic_credit_requires_proven_slots_and_boundaries(tmp_path):
 def test_selector_delta_preserves_unrelated_actions():
     coverage = Coverage(inventory(build_offline_application()))
     global_route = next(s.handler for s in coverage.slots if s.callback == "handle_action_button")
-    for payload in ("retry_recommend", "retry_template"):
+    # Buttons that move the case conversation stay inside case_conv; the global
+    # handler threw their returned state away (Retry left the case stuck).
+    for payload in ("retry_recommend", "retry_template", "retry_filing", "pwl_reconnected", "add_reflection_detail"):
         assert not global_route.pattern.match("ACTION|" + payload)
-    for payload in ("settings", "health", "retry_filing", "retry_recommend_extra", "retry_template_extra"):
+    for payload in ("settings", "health", "retry_filing_extra", "retry_recommend_extra", "retry_template_extra"):
         assert global_route.pattern.match("ACTION|" + payload)
 
 

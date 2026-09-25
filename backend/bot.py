@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import re
+import secrets
 import sys
 import shutil
 import tempfile
@@ -22,6 +23,8 @@ from store import store_credentials, get_credentials, has_credentials, init
 import kaizen_connection
 from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, is_reuse_request, review_draft, analyse_portfolio_health, summarise_recent_activity, generate_nudge_copy, extract_field_updates, compose_filing_recovery_copy, combine_case_inputs, _has_qi_project_signal, schema_form_type, assess_form_essentials, ESSENTIAL_PRESENT, ESSENTIAL_MISSING, ESSENTIAL_UNAVAILABLE
 from usage import record_case_filed, get_cases_this_month, check_can_file, get_user_tier, set_user_tier, get_case_history, TIER_LIMITS, get_all_active_users, get_cases_this_week, is_beta_tester, set_beta_tester, save_kc_coverage, delete_portfolio_evidence
+from data_paths import data_path
+from update_processor import PerUserUpdateProcessor
 # Module-attribute access (consent.fn) rather than from-imports: test_smoke
 # pops `bot` from sys.modules, so multiple bot module objects can be alive in
 # one test run — resolving through the single consent module keeps the gate
@@ -701,7 +704,7 @@ async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
     if the bot restarts daily.
     """
     import os
-    sentinel = os.path.expanduser("~/.openclaw/data/portfolio-guru/weekly_push_last_run")
+    sentinel = str(data_path("weekly_push_last_run"))
     os.makedirs(os.path.dirname(sentinel), exist_ok=True)
     now = time.time()
     if os.path.exists(sentinel):
@@ -830,8 +833,8 @@ async def signoff_chase_push(context: ContextTypes.DEFAULT_TYPE) -> None:
     from health_watch import detect_changes, format_change_report
 
     heartbeat_url = os.environ.get("PG_SIGNOFF_CHASE_HEALTHCHECK_URL", "")
-    seen_path = os.path.expanduser("~/.openclaw/data/portfolio-guru/signoff_chase_seen.json")
-    sentinel = os.path.expanduser("~/.openclaw/data/portfolio-guru/signoff_chase_last_run")
+    seen_path = str(data_path("signoff_chase_seen.json"))
+    sentinel = str(data_path("signoff_chase_last_run"))
     os.makedirs(os.path.dirname(sentinel), exist_ok=True)
     now = time.time()
     if os.path.exists(sentinel):
@@ -1835,7 +1838,7 @@ async def _handle_incomplete_draft_complaint(message, context) -> int | None:
             "Every field already has content. Tell me which part looks wrong or "
             "thin and I'll revise it, then you can save the update."
         )
-    await message.reply_text("\n".join(lines), reply_markup=_build_amend_keyboard(improved_once=False))
+    await message.reply_text("\n".join(lines), reply_markup=_build_amend_keyboard(improved_once=False, context=context))
     return AWAIT_APPROVAL
 
 
@@ -2586,7 +2589,7 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
             message,
             context,
             _format_draft_preview_for_context(draft, context) + _draft_reply_hint(context),
-            reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
+            reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False), context=context),
             parse_mode="Markdown",
         )
         return AWAIT_APPROVAL
@@ -4675,24 +4678,55 @@ def _store_explicit_form_choice_state(
     context.user_data["explicit_form_choice"] = form_type
 
 
+def _case_token(context) -> str:
+    """Short token stamped on this case's Save and Cancel buttons.
+
+    Old buttons stay in the chat. Without a stamp, a Cancel from an earlier case
+    wiped the live one, and a second queued tap on Save filed the draft again.
+    The token is renewed when a save starts and disappears with the case.
+    """
+    token = context.user_data.get("case_token")
+    if not token:
+        token = secrets.token_hex(3)
+        context.user_data["case_token"] = token
+    return token
+
+
+def _case_button(action: str, context=None) -> str:
+    return f"{action}|{_case_token(context)}" if context is not None else action
+
+
+def _is_stale_case_button(context, data: str | None) -> bool:
+    """True for a stamped Save/Cancel whose case or save attempt has passed.
+
+    Buttons sent before stamping existed carry no token and are accepted.
+    """
+    parts = (data or "").split("|")
+    if len(parts) != 3 or parts[:2] not in (["APPROVE", "draft"], ["CANCEL", "draft"]):
+        return False
+    return parts[2] != context.user_data.get("case_token")
+
+
 def _build_approval_keyboard(
     improved_once: bool = False,
     can_back_to_missing: bool = False,
     needs_reflection_detail: bool = False,
+    context=None,
 ):
     rows = []
+    save, cancel = _case_button("APPROVE|draft", context), _case_button("CANCEL|draft", context)
     if not needs_reflection_detail:
-        rows.append([InlineKeyboardButton("💾 Save to Kaizen", callback_data="APPROVE|draft")])
+        rows.append([InlineKeyboardButton("💾 Save to Kaizen", callback_data=save)])
     if can_back_to_missing:
-        rows.append(_nav_row("Back", "ACTION|back_to_missing", "Cancel", "CANCEL|draft"))
+        rows.append(_nav_row("Back", "ACTION|back_to_missing", "Cancel", cancel))
     else:
-        rows.append([InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|draft")])
+        rows.append([InlineKeyboardButton("❌ Cancel", callback_data=cancel)])
     return InlineKeyboardMarkup(rows)
 
 
-def _build_amend_keyboard(improved_once: bool = False) -> InlineKeyboardMarkup:
+def _build_amend_keyboard(improved_once: bool = False, context=None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💾 Save to Kaizen", callback_data="APPROVE|draft")],
+        [InlineKeyboardButton("💾 Save to Kaizen", callback_data=_case_button("APPROVE|draft", context))],
         [InlineKeyboardButton("❌ Cancel", callback_data="AMEND|cancel")],
     ])
 
@@ -4760,10 +4794,11 @@ def _build_video_intent_keyboard() -> InlineKeyboardMarkup:
 
 def _active_draft_keyboard(context) -> InlineKeyboardMarkup:
     if context.user_data.get("amend_mode"):
-        return _build_amend_keyboard(improved_once=context.user_data.get("quick_improve_used", False))
+        return _build_amend_keyboard(improved_once=context.user_data.get("quick_improve_used", False), context=context)
     return _build_approval_keyboard(
         improved_once=context.user_data.get("quick_improve_used", False),
         needs_reflection_detail=context.user_data.get("needs_reflection_detail", False),
+        context=context,
     )
 
 
@@ -4863,9 +4898,9 @@ def _looks_like_explicit_new_case_request(text: str) -> bool:
     return any(re.search(pattern, lowered) for pattern in patterns)
 
 
-def _build_post_review_keyboard(improved_once: bool = False):
+def _build_post_review_keyboard(improved_once: bool = False, context=None):
     """Keyboard shown after lightweight draft improvement."""
-    return _build_approval_keyboard(improved_once=improved_once)
+    return _build_approval_keyboard(improved_once=improved_once, context=context)
 
 
 _POST_FILING_SAME_CASE_LABEL = "📋 Another form"
@@ -5817,6 +5852,7 @@ async def _show_draft_review(
     keyboard = _build_approval_keyboard(
         improved_once=context.user_data.get("quick_improve_used", False),
         needs_reflection_detail=needs_reflection_detail,
+        context=context,
     )
     if edit:
         await _safe_edit_text(
@@ -6753,8 +6789,32 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     return AWAIT_USERNAME
 
 
+def _looks_like_case_not_credential(text: str, *, min_words: int, min_chars: int) -> bool:
+    """A pasted case, not a Kaizen email or password.
+
+    Setup used to swallow it: case text sent while setup waited for an email got
+    "That doesn't look like an email" on every message, and while it waited for
+    a password it was tried as the password.
+    """
+    stripped = (text or "").strip()
+    return "@" not in stripped and len(stripped) >= min_chars and len(stripped.split()) >= min_words
+
+
+async def _leave_setup_for_case(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data.pop("setup_username", None)
+    context.user_data.pop("_setup_state_hint", None)
+    _flow_done(context, "setup")
+    await update.message.reply_text(
+        "That looks like a case rather than your Kaizen login, so I've stopped the Kaizen setup. "
+        "Please send the case again."
+    )
+    return ConversationHandler.END
+
+
 async def setup_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     text = update.message.text.strip()
+    if _looks_like_case_not_credential(text, min_words=8, min_chars=60):
+        return await _leave_setup_for_case(update, context)
     if "@" not in text or "." not in text:
         await _flow_msg(update, context, "⚠️ That doesn't look like an email. What's your Kaizen username?", flow_key="setup")
         return AWAIT_USERNAME
@@ -6891,6 +6951,8 @@ def _clear_setup_retry_credentials(context: ContextTypes.DEFAULT_TYPE) -> None:
 async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     username = context.user_data.get("setup_username", "")
     password = update.message.text.strip()
+    if _looks_like_case_not_credential(password, min_words=12, min_chars=80):
+        return await _leave_setup_for_case(update, context)
 
     # Delete password message for security
     try:
@@ -7064,7 +7126,10 @@ async def _finish_setup_after_connect(
         logger.warning("Health pathway auto-detection save failed", exc_info=True)
         auto_pathway = None
 
-    if auto_level:
+    # Only a first connection sets the curriculum. Every reconnect (including a
+    # passwordless re-sign-in) used to reset it, silently moving 2021-curriculum
+    # doctors onto 2025 forms. The manual level pick already worked this way.
+    if auto_level and not get_curriculum(user_id):
         store_curriculum(user_id, _default_curriculum_for_training_level(auto_level))
 
     if auto_level:
@@ -8820,6 +8885,11 @@ async def _clear_local_portfolio_account_data(user_id: int, *, reason: str) -> d
         cleared["draft_backups"] = draft_backup.purge_user(user_id)
     except Exception:
         logger.warning("Could not clear draft backups for %s", reason, exc_info=True)
+    try:
+        from clinical_persistence import purge_working_case
+        cleared["working_case"] = purge_working_case(user_id)
+    except Exception:
+        logger.warning("Could not clear working case for %s", reason, exc_info=True)
     return cleared
 
 
@@ -10863,8 +10933,6 @@ async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: in
     full code must be passed into ``extract_form_data`` so the resulting draft
     carries the correct Kaizen UUID for the chosen curriculum variant.
     """
-    # Set tier for provider chain gating
-    os.environ["CURRENT_USER_TIER"] = context.user_data.get("user_tier", "free")
     vp = get_voice_profile(user_id) or ""
     name_failures_before = service_failure_count()
     base_form_type = form_type[:-5] if form_type.endswith("_2021") else form_type
@@ -11143,6 +11211,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Route callback queries based on prefix."""
     query = update.callback_query
     data = query.data
+    if _is_stale_case_button(context, data):
+        await query.answer("That button is from an earlier step. Use the latest message.", show_alert=True)
+        return None
+    if data.startswith("CANCEL|draft|"):
+        data = "CANCEL|draft"
     _remember_audit_user(context, update)
     _audit_event(
         context,
@@ -11226,6 +11299,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 improved_once=context.user_data.get("quick_improve_used", False),
                 can_back_to_missing=True,
                 needs_reflection_detail=needs_reflection_detail,
+                context=context,
             ),
             parse_mode="Markdown",
         )
@@ -14222,7 +14296,13 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         if query:
             await query.answer("⏳ Already saving your draft — give it a moment.")
         return None
+    if query and _is_stale_case_button(context, query.data):
+        await query.answer("That Save button is from an earlier step. Use the latest message.", show_alert=True)
+        return None
     context.user_data["filing_in_progress"] = True
+    # Every Save button already sent is spent: a second queued tap on it must
+    # not file this draft again. Buttons shown after this attempt get the new token.
+    context.user_data["case_token"] = secrets.token_hex(3)
 
     if query:
         try:
@@ -14503,7 +14583,8 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 credentials={"username": username, "password": password},
                 curriculum_links=curriculum_links,
                 form_name=form_name,
-                reuse_draft=reuse_existing_draft,
+                # Retry reopens only the exact draft the last attempt reached.
+                reuse_draft_url=context.user_data.get("kaizen_draft_url") if reuse_existing_draft else None,
                 attachment_path=attachment_path,
                 telegram_user_id=user_id,
             ),
@@ -14635,6 +14716,9 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         status in ("failed", "partial")
         and len(filled) > 0
         and _classify_filing_failure(error, skipped, status, filled) == "SAVE_FAILURE"
+        # Without the draft's own address a second pass would create a
+        # duplicate; the doctor gets the save-failure message instead.
+        and result.get("draft_url")
     ):
         try:
             await ack.edit_text(
@@ -14656,7 +14740,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                     credentials={"username": username, "password": password},
                     curriculum_links=curriculum_links,
                     form_name=form_name,
-                    reuse_draft=True,
+                    reuse_draft_url=result["draft_url"],
                     attachment_path=attachment_path,
                     telegram_user_id=user_id,
                 ),
@@ -14680,6 +14764,9 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             context.user_data.pop("filing_in_progress", None)
             retry_typing_stop.set()
             retry_typing_task.cancel()
+
+    if result.get("draft_url"):
+        context.user_data["kaizen_draft_url"] = result["draft_url"]
 
     defaulted_fields = set(result.get("defaulted_fields") or [])
     date_default_note = ""
@@ -15168,7 +15255,7 @@ async def handle_approval_submit(update: Update, context: ContextTypes.DEFAULT_T
         )
     await query.message.reply_text(
         "Portfolio Guru only saves Kaizen entries as drafts. Use Save to Kaizen when you're ready.",
-        reply_markup=_build_approval_keyboard(),
+        reply_markup=_build_approval_keyboard(context=context),
     )
     return AWAIT_APPROVAL
 
@@ -15229,7 +15316,7 @@ async def handle_review_draft(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.error("Draft review failed: %s", e)
         await query.message.reply_text(
             "⚠️ Review failed — you can still file your draft.",
-            reply_markup=_build_post_review_keyboard(),
+            reply_markup=_build_post_review_keyboard(context=context),
         )
         return AWAIT_APPROVAL
 
@@ -15269,7 +15356,7 @@ async def handle_review_draft(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     await query.message.reply_text(
         "\n".join(lines),
-        reply_markup=_build_post_review_keyboard(),
+        reply_markup=_build_post_review_keyboard(context=context),
         parse_mode="Markdown",
     )
     return AWAIT_APPROVAL
@@ -15549,7 +15636,7 @@ async def handle_amend_draft(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.message.reply_text(
         "✏️ *Amending this draft.* Send changes, then tap *Save updated draft* or *Cancel amend*.\n\n"
         + preview,
-        reply_markup=_build_amend_keyboard(improved_once=False),
+        reply_markup=_build_amend_keyboard(improved_once=False, context=context),
         parse_mode="Markdown",
     )
     return AWAIT_APPROVAL
@@ -16748,19 +16835,22 @@ def build_application() -> Application:
     from extractor import assert_eu_routing
     assert_eu_routing()
 
-    persistence_path = os.path.expanduser("~/.openclaw/data/portfolio-guru/bot_persistence")
+    persistence_path = str(data_path("bot_persistence"))
     os.makedirs(os.path.dirname(persistence_path), exist_ok=True)
     # Clinical content stays in memory for the conversation and never reaches
     # the pickle; see clinical_persistence.py. The one-shot purge repairs files
     # written before that was true.
     from clinical_persistence import ClinicalScrubbingPersistence, purge_existing_file
     logger.info("Persistence clinical purge: %s", purge_existing_file(persistence_path))
-    persistence = ClinicalScrubbingPersistence(filepath=persistence_path)
+    # Flush every 5 s rather than PTB's 60 s, so a crash or hard kill loses
+    # seconds of conversation state, not a minute.
+    persistence = ClinicalScrubbingPersistence(filepath=persistence_path, update_interval=5)
 
     application = (
         Application.builder()
         .token(token)
         .persistence(persistence)
+        .concurrent_updates(PerUserUpdateProcessor())
         .read_timeout(30)
         .write_timeout(30)
         .connect_timeout(30)
@@ -16776,7 +16866,8 @@ def build_application() -> Application:
             CommandHandler("start", start),
             # Let thin-case buttons re-enter the case conversation even if the
             # user taps them after the active state has been lost.
-            CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:file|reset|cancel|continue_thin|unsigned|status|health|help|voice)$"),
+            CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:file|reset|cancel|continue_thin|unsigned|status|health|help|voice|retry_filing)$"),
+            CallbackQueryHandler(passwordless_reconnected, pattern=r"^ACTION\|pwl_reconnected$"),
             CallbackQueryHandler(handle_same_case_another, pattern=r"^ACTION\|same_case_another$"),
             CallbackQueryHandler(handle_amend_draft, pattern=r"^AMEND\|"),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_case_input),
@@ -16886,7 +16977,7 @@ def build_application() -> Application:
             AWAIT_APPROVAL: [
                 CallbackQueryHandler(handle_document_intent, pattern=r"^DOCUSE\|"),
                 CallbackQueryHandler(handle_approval_submit, pattern=r"^APPROVE\|submit$"),
-                CallbackQueryHandler(handle_approval_approve, pattern=r"^APPROVE\|draft$"),
+                CallbackQueryHandler(handle_approval_approve, pattern=r"^APPROVE\|draft(?:\|[0-9a-f]+)?$"),
                 CallbackQueryHandler(handle_attachment_confirm, pattern=r"^ATTACH\|(?:yes|no)$"),
                 CallbackQueryHandler(handle_quick_improve, pattern=r"^IMPROVE\|reflection$"),
                 CallbackQueryHandler(handle_review_draft, pattern=r"^REVIEW\|draft$"),
@@ -16936,6 +17027,11 @@ def build_application() -> Application:
                     r"retry_recommend|retry_template))$"
                 ),
             ),
+            CallbackQueryHandler(passwordless_reconnected, pattern=r"^ACTION\|pwl_reconnected$"),
+            # Last: input the current step has no handler for (typing at a
+            # button-only step, a voice note while picking a field) used to be
+            # dropped without a reply.
+            MessageHandler(~filters.COMMAND, _reply_use_current_step),
         ],
         per_message=False,
         allow_reentry=False,
@@ -16973,6 +17069,7 @@ def build_application() -> Application:
         },
         fallbacks=[CommandHandler("start", start), CommandHandler("cancel", setup_cancel)],
         allow_reentry=True,
+        conversation_timeout=SIDE_FLOW_TIMEOUT,
     )
 
     # Register handlers
@@ -17027,7 +17124,9 @@ def build_application() -> Application:
     application.add_handler(
         CallbackQueryHandler(
             handle_action_button,
-            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|setup$|voice$|same_case_another$|retry_recommend$|retry_template$|back_to_missing$|retry_setup_login$|connect_passwordless$|passwordless_done$|passwordless_link$).+",
+            # Buttons that move the case conversation must reach case_conv, or
+            # the state they return is thrown away (Retry left the case stuck).
+            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|setup$|voice$|same_case_another$|retry_recommend$|retry_template$|back_to_missing$|retry_setup_login$|connect_passwordless$|passwordless_done$|passwordless_link$|retry_filing$|pwl_reconnected$|add_reflection_detail$).+",
         )
     )
     application.add_handler(CallbackQueryHandler(handle_feedback, pattern=r"^FEEDBACK\|"))
@@ -17077,6 +17176,7 @@ def build_application() -> Application:
         },
         fallbacks=[CommandHandler("start", start), CommandHandler("cancel", setup_cancel)],
         allow_reentry=True,
+        conversation_timeout=SIDE_FLOW_TIMEOUT,
     )
 
     pathway_conv = ConversationHandler(
@@ -17086,6 +17186,7 @@ def build_application() -> Application:
         },
         fallbacks=[CommandHandler("start", start), CommandHandler("cancel", setup_cancel)],
         allow_reentry=True,
+        conversation_timeout=SIDE_FLOW_TIMEOUT,
     )
 
     application.add_handler(setup_conv)
@@ -17115,8 +17216,37 @@ def build_application() -> Application:
     # NOTE: CallbackQueryHandler already registered in case_conv fallbacks.
     # Do NOT add a second one here — causes duplicate message delivery.
 
+    # Must stay the last group-0 handler: a tap nothing above claimed (a button
+    # from an earlier step or an old conversation) is answered instead of
+    # leaving Telegram's spinner running with no reply.
+    application.add_handler(CallbackQueryHandler(_answer_unhandled_button, pattern=r"^.*$"))
+
     _install_dogfood_audit_bot_hooks(application)
     return application
+
+
+# Setup, writing-style and pathway flows sit in front of case capture. Left
+# open, they swallowed the doctor's next case, so they close after 15 minutes.
+SIDE_FLOW_TIMEOUT = timedelta(minutes=15)
+
+
+async def _answer_unhandled_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    logger.info("Unhandled button tap: data=%s user=%s", (query.data or "")[:40], update.effective_user.id)
+    try:
+        await query.answer(
+            "That button is from an earlier step. Use the latest message, or send a new case.",
+            show_alert=True,
+        )
+    except Exception:
+        logger.debug("Could not answer unhandled button", exc_info=True)
+
+
+async def _reply_use_current_step(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        "I can't use that at this step. Please use the buttons on my last message, or /cancel to start again."
+    )
+    return None
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -17170,33 +17300,29 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     except Exception:
         logger.debug("operator alert failed", exc_info=True)
 
-    # Generic fallback — preserve draft if we're in approval state
+    # Generic fallback. It used to edit an old message far up the chat, blame
+    # "filing" whatever had failed, and offer a Retry that saved to Kaizen. Now
+    # it says what is known, at the bottom of the chat, and saves nothing.
     if update and hasattr(update, 'effective_message') and update.effective_message:
-        # Check if we have a draft in user_data (means we're in approval flow)
-        draft = None
-        if hasattr(context, 'user_data'):
-            draft = _load_draft(context)
-        
-        if draft:
-            # We have a draft — offer retry + start fresh
-            retry_keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_filing")],
-                [InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|reset")],
-            ])
-            await _edit_last_bot_msg(
-                context,
-                update.effective_message.chat_id,
-                "Something went wrong while filing. Try again or file another case.",
-                reply_markup=retry_keyboard,
+        user_data = getattr(context, "user_data", None) or {}
+        # The handler that set this has died; with one update per user at a
+        # time nothing else is saving, and a stuck flag blocked every later Save.
+        was_saving = bool(user_data.pop("filing_in_progress", False))
+        draft = _load_draft(context) if user_data else None
+        if was_saving:
+            text = (
+                "Something went wrong while saving to Kaizen. Please check your Kaizen drafts "
+                "before trying again, in case it saved. Your draft is still here."
             )
+        elif draft:
+            text = "Something went wrong on my side. Nothing was saved to Kaizen and your draft is still here."
         else:
-            # No draft — just start fresh
-            await _edit_last_bot_msg(
-                context,
-                update.effective_message.chat_id,
-                "Something went wrong. Use the latest message to start again.",
-                reply_markup=_build_next_step_keyboard(update.effective_user.id),
-            )
+            text = "Something went wrong on my side. Nothing was saved. Please send your case again."
+        keyboard = _active_draft_keyboard(context) if draft else _build_next_step_keyboard(update.effective_user.id)
+        try:
+            await update.effective_chat.send_message(text, reply_markup=keyboard)
+        except Exception:
+            logger.warning("Could not send the error reply", exc_info=True)
 
 
 def main():
@@ -17220,7 +17346,9 @@ def main():
 
     # Clear any existing webhook so polling works
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-    _req.post(f"https://api.telegram.org/bot{token}/deleteWebhook", json={"drop_pending_updates": True})
+    # Keep messages sent while the bot was restarting: a deploy used to discard
+    # them, so a doctor's case or button tap during the restart simply vanished.
+    _req.post(f"https://api.telegram.org/bot{token}/deleteWebhook", json={"drop_pending_updates": False})
     logger.info("Webhook cleared - polling mode active")
 
     application = build_application()
@@ -17379,7 +17507,7 @@ def main():
         logger.info("Portfolio Guru live commit: unavailable")
 
     logger.info("Portfolio Guru v2 starting in POLLING mode...")
-    application.run_polling(drop_pending_updates=True)
+    application.run_polling(drop_pending_updates=False)
 
 
 if __name__ == "__main__":

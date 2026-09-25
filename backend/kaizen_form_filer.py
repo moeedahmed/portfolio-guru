@@ -34,6 +34,7 @@ import urllib.request
 from datetime import datetime, date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from data_paths import data_path
 
 from playwright.async_api import async_playwright, Page, Browser, BrowserContext
 from selector_strategy import fallback_dom_id
@@ -1845,7 +1846,7 @@ async def _connect_cdp() -> tuple:
 # detect that by navigating to /activities and falling back to a fresh login
 # if the page bounces to a login URL.
 
-_SESSION_DIR = Path.home() / ".openclaw/data/portfolio-guru/sessions"
+_SESSION_DIR = data_path("sessions")
 
 
 def _normalise_session_username(username: Optional[str]) -> Optional[str]:
@@ -4547,69 +4548,6 @@ async def _attach_file(page: Page, file_path: str | list[str]) -> bool:
         return False
 
 
-# ─── Draft deduplication ─────────────────────────────────────────────────────
-
-async def _find_existing_draft(page: Page, form_type: str) -> bool:
-    """
-    Navigate to the activities page and look for a saved draft matching this form type.
-    If found, click into it so the page is now on the existing draft form.
-    Returns True if an existing draft was found and opened, False otherwise.
-    """
-    display_name = FORM_DISPLAY_NAMES.get(form_type, form_type)
-    logger.info(f"Looking for existing draft of type '{display_name}' ({form_type})")
-
-    try:
-        await page.goto("https://kaizenep.com/activities", wait_until="domcontentloaded", timeout=40000)
-        await asyncio.sleep(4)
-
-        drafts_header = page.locator("text=Saved drafts").first
-        try:
-            if await drafts_header.is_visible(timeout=3000):
-                await drafts_header.click()
-                await asyncio.sleep(1)
-        except Exception:
-            pass
-
-        for search_text in [display_name, form_type]:
-            draft_link = page.locator(f"a:has-text('{search_text}')").first
-            try:
-                if await draft_link.is_visible(timeout=3000):
-                    logger.info(f"Found existing draft matching '{search_text}' — clicking into it")
-                    await draft_link.click()
-                    await page.wait_for_load_state("domcontentloaded", timeout=30000)
-                    await asyncio.sleep(5)
-                    logger.info(f"Opened existing draft at: {page.url}")
-                    return True
-            except Exception:
-                continue
-
-        for selector in ["tr:has-text('draft')", "[class*='draft']", "[class*='saved']"]:
-            try:
-                rows = page.locator(selector)
-                count = await rows.count()
-                for i in range(count):
-                    row = rows.nth(i)
-                    row_text = await row.inner_text()
-                    if display_name.lower() in row_text.lower() or form_type.lower() in row_text.lower():
-                        link = row.locator("a").first
-                        if await link.is_visible(timeout=2000):
-                            logger.info(f"Found draft in '{selector}' row: {row_text[:80]}")
-                            await link.click()
-                            await page.wait_for_load_state("domcontentloaded", timeout=30000)
-                            await asyncio.sleep(5)
-                            logger.info(f"Opened existing draft at: {page.url}")
-                            return True
-            except Exception:
-                continue
-
-        logger.info(f"No existing draft found for '{display_name}' — will create new")
-        return False
-
-    except Exception as e:
-        logger.warning(f"Draft search failed ({e}) — will create new form")
-        return False
-
-
 # ─── Bulk draft deletion ─────────────────────────────────────────────────────
 
 async def delete_all_drafts_of_type(
@@ -4770,11 +4708,15 @@ async def file_to_kaizen(
     submit: bool = False,
     attachment_path: Optional[str | list[str]] = None,
     attachment_drive_url: Optional[str] = None,
-    reuse_draft: bool = False,
+    reuse_draft_url: Optional[str] = None,
     telegram_user_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     File a form to Kaizen as a draft (legacy API).
+
+    ``reuse_draft_url`` reopens the exact draft an earlier attempt reached
+    (``draft_url`` in its result). There is no search by form type: picking
+    "the first draft of this type" overwrote older, unrelated drafts.
 
     Used by filer_router.py and bot.py. Wraps the old filer logic
     for backward compatibility.
@@ -4847,11 +4789,18 @@ async def file_to_kaizen(
                 ),
             )
 
-        # Navigate to a new form by default. Reusing same-form drafts can
-        # overwrite repeated ARCP tickets that legitimately share form type/date.
+        # A new form by default; a retry reopens only its own earlier draft.
         reused_draft = False
-        if reuse_draft:
-            reused_draft = await _find_existing_draft(page, form_type)
+        if reuse_draft_url:
+            await page.goto(reuse_draft_url, wait_until="domcontentloaded", timeout=40000)
+            await asyncio.sleep(4)
+            if not _saved_draft_url(page.url):
+                return _early_filing_failure(
+                    form_type,
+                    "Couldn't reopen the draft from the last attempt. "
+                    "Please check your Kaizen drafts before trying again.",
+                )
+            reused_draft = True
 
         if not reused_draft:
             form_url = f"https://kaizenep.com/events/new-section/{uuid}"
@@ -4994,6 +4943,9 @@ async def file_to_kaizen(
             saved = await _save_form(page, True)
 
         saved_url = page.url if saved and not submit else None
+        # Kaizen autosaves, so even an unconfirmed save can leave a draft; its
+        # exact address is what a retry must reopen instead of creating another.
+        draft_url = page.url if _saved_draft_url(page.url) else reuse_draft_url
 
         # Post-save verification
         verified = None
@@ -5095,6 +5047,7 @@ async def file_to_kaizen(
             "skipped": skipped,
             "error": save_error,
             "saved_url": saved_url,
+            "draft_url": draft_url,
             "filing_qa": filing_qa,
             **header_meta,
         }

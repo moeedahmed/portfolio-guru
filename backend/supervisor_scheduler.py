@@ -29,6 +29,7 @@ import logging
 import os
 from pathlib import Path
 from typing import Awaitable, Callable
+from data_paths import data_path
 
 import supervisor_workflow
 from credentials import has_credentials
@@ -40,7 +41,7 @@ logger = logging.getLogger(__name__)
 SUPERVISOR_STATE_DIR = Path(
     os.environ.get(
         "PORTFOLIO_GURU_SUPERVISOR_STATE_DIR",
-        os.path.expanduser("~/.openclaw/data/portfolio-guru/supervisor"),
+        str(data_path("supervisor")),
     )
 )
 

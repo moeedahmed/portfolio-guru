@@ -70,28 +70,19 @@ async def scrape_unsigned_tickets(
     results = []
     pw = None
     browser_to_close = None  # only set when we launched our own browser
+    context_to_close = None  # our private context inside the shared CDP browser
 
     try:
         pw = await async_playwright().start()
         target_page = None
 
-        # Try CDP first
+        # Try CDP first, always in a fresh private context. Reusing an open
+        # Kaizen page or the shared profile's context meant a doctor's scan
+        # could read whichever account was signed in there, not their own.
         try:
             browser = await pw.chromium.connect_over_cdp(CDP_URL, no_defaults=True)
-            for ctx in browser.contexts:
-                for page in ctx.pages:
-                    if "kaizenep.com" in page.url:
-                        target_page = page
-                        logger.info(f"CDP: reusing existing Kaizen page: {page.url}")
-                        break
-                if target_page:
-                    break
-            if not target_page:
-                if browser.contexts:
-                    target_page = await browser.contexts[0].new_page()
-                else:
-                    ctx = await browser.new_context()
-                    target_page = await ctx.new_page()
+            context_to_close = await browser.new_context()
+            target_page = await context_to_close.new_page()
         except Exception as e:
             logger.info(f"CDP unavailable ({e}) — launching headless Chromium")
             browser_to_close = await pw.chromium.launch(headless=True)
@@ -102,7 +93,7 @@ async def scrape_unsigned_tickets(
         await target_page.goto("https://kaizenep.com/activities", wait_until="domcontentloaded")
         await asyncio.sleep(4)
 
-        # Check if login needed (true for fresh headless browser, false for CDP with existing session)
+        # A fresh private context is always signed out, so this signs in as the caller.
         if "auth." in target_page.url or "login" in target_page.url.lower() or "eportfolio.rcem.ac.uk" in target_page.url:
             if not username or not password:
                 logger.error("Login required but no credentials provided")
@@ -191,6 +182,11 @@ async def scrape_unsigned_tickets(
     except Exception as e:
         logger.error(f"Unsigned scraper error: {e}")
     finally:
+        if context_to_close:
+            try:
+                await context_to_close.close()
+            except Exception:
+                pass
         if browser_to_close:
             try:
                 await browser_to_close.close()

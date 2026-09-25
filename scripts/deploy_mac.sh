@@ -90,6 +90,9 @@ if [[ ! -f "$PLIST_PATH" ]]; then
   exit 1
 fi
 
+# Give launchd room to let an in-flight Kaizen save finish on SIGTERM (older
+# installs predate ExitTimeOut in install_launchd.sh).
+plutil -replace ExitTimeOut -integer 330 "$PLIST_PATH" 2>/dev/null || true
 launchctl bootout "gui/$(id -u)" "$PLIST_PATH" 2>/dev/null || true
 
 collect_app_pids() {
@@ -117,7 +120,14 @@ if [[ -n "$webhook_port_pids" ]]; then
   # shellcheck disable=SC2086
   kill $webhook_port_pids 2>/dev/null || true
 fi
-sleep 5
+# SIGTERM makes the bot drain running updates before exiting; killing it after
+# a fixed 5 s cut Kaizen saves off mid-way. Wait for it, then force stragglers.
+stop_grace="${PORTFOLIO_GURU_STOP_GRACE_SECONDS:-330}"
+waited=0
+while [[ -n "$(collect_app_pids)" && "$waited" -lt "$stop_grace" ]]; do
+  sleep 1
+  waited=$((waited + 1))
+done
 app_pids="$(collect_app_pids | sort -u | tr '\n' ' ')"
 if [[ -n "$app_pids" ]]; then
   # shellcheck disable=SC2086

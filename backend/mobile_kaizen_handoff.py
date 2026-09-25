@@ -31,6 +31,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
+from data_paths import data_path
 
 from fastapi import Cookie, FastAPI, Header, HTTPException, WebSocket
 from fastapi.exceptions import RequestValidationError
@@ -42,14 +43,7 @@ from starlette.websockets import WebSocketDisconnect
 VIEWPORT_WIDTH = 430
 VIEWPORT_HEIGHT = 850
 DEFAULT_TTL = timedelta(minutes=10)
-DEFAULT_INTERNAL_KEY_FILE = (
-    Path.home()
-    / ".openclaw"
-    / "data"
-    / "portfolio-guru"
-    / "mobile-handoff"
-    / "internal.key"
-)
+DEFAULT_INTERNAL_KEY_FILE = data_path("mobile-handoff", "internal.key")
 DEFAULT_PUBLIC_URL_FILE = DEFAULT_INTERNAL_KEY_FILE.with_name("public-url")
 VIEWER_COOKIE = "pg_handoff"
 logger = logging.getLogger(__name__)

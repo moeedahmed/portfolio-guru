@@ -29,6 +29,7 @@ import pathlib
 import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
+from data_paths import data_path
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,9 @@ _TTL_ENV = "PG_DRAFT_BACKUP_TTL_DAYS"
 DEFAULT_TTL_DAYS = 7
 
 SUFFIX = ".json.enc"
+# Plaintext backups written by the inline bot.py writer before 2026-08-25.
+# They matched neither the retention purge nor /reset, so they lingered.
+LEGACY_PLAINTEXT_SUFFIX = ".json"
 
 # Anything that could escape the backup directory or collide across users.
 _UNSAFE = re.compile(r"[^A-Za-z0-9_.-]")
@@ -49,7 +53,7 @@ def backup_dir() -> pathlib.Path:
     override = os.environ.get(_PATH_ENV)
     if override:
         return pathlib.Path(override)
-    return pathlib.Path.home() / ".openclaw" / "data" / "portfolio-guru" / "drafts"
+    return data_path("drafts")
 
 
 def ttl_days() -> int:
@@ -146,11 +150,15 @@ def discard(user_id: int, form_type: str, *, on: date | None = None) -> int:
 
 
 def purge_user(user_id: int) -> int:
-    """Delete every backup for a user. Wired into /reset (GDPR Art. 17)."""
+    """Delete every backup for a user, legacy plaintext included. Wired into
+    /reset (GDPR Art. 17)."""
     directory = backup_dir()
     if not directory.is_dir():
         return 0
-    return _unlink_all(sorted(directory.glob(f"{_slug(user_id)}_*{SUFFIX}")))
+    prefix = f"{_slug(user_id)}_*"
+    return _unlink_all(sorted(
+        [*directory.glob(prefix + SUFFIX), *directory.glob(prefix + LEGACY_PLAINTEXT_SUFFIX)]
+    ))
 
 
 def purge_expired(now: datetime | None = None) -> dict[str, Any]:
@@ -162,7 +170,7 @@ def purge_expired(now: datetime | None = None) -> dict[str, Any]:
     cutoff = (now or datetime.now(timezone.utc)) - timedelta(days=ttl_days())
     cutoff_ts = cutoff.timestamp()
     expired = []
-    for path in sorted(directory.glob(f"*{SUFFIX}")):
+    for path in sorted([*directory.glob(f"*{SUFFIX}"), *directory.glob(f"*{LEGACY_PLAINTEXT_SUFFIX}")]):
         try:
             if path.stat().st_mtime < cutoff_ts:
                 expired.append(path)

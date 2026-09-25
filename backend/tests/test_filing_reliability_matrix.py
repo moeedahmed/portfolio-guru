@@ -91,7 +91,7 @@ async def test_priority_forms_route_to_deterministic_draft_save_contract(form_ty
             fields=fields,
             credentials={"username": "doctor@example.com", "password": "not-real"},
             submit=False,
-            reuse_draft=False,
+            reuse_draft_url=None,
             telegram_user_id=99999999,
         )
 
@@ -101,5 +101,5 @@ async def test_priority_forms_route_to_deterministic_draft_save_contract(form_ty
     deterministic.assert_awaited_once()
     kwargs = deterministic.await_args.kwargs
     assert kwargs["submit"] is False
-    assert kwargs["reuse_draft"] is False
+    assert kwargs["reuse_draft_url"] is None
     assert kwargs["telegram_user_id"] == 99999999

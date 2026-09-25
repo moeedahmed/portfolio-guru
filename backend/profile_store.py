@@ -6,10 +6,11 @@ import os
 from typing import Optional
 from datetime import datetime
 from sqlmodel import SQLModel, Field, Session, create_engine, select
+from data_paths import data_path
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
-    f"sqlite:///{os.path.expanduser('~/.openclaw/data/portfolio-guru/portfolio_guru.db')}"
+    f"sqlite:///{data_path('portfolio_guru.db')}"
 )
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})

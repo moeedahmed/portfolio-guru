@@ -183,6 +183,15 @@ def decide_workflow_turn(
     if classifier_failed:
         return WorkflowTurnDecision(WorkflowTurnKind.CLARIFY, canonical_intent=canonical)
 
+    # A whole new case pasted while one is open used to be merged into it,
+    # giving a draft about two patients. Short additions still enrich.
+    if case_detail and phase in {WorkflowPhase.CASE_OPEN, WorkflowPhase.DRAFT_OPEN} and _looks_like_whole_new_case(raw):
+        return WorkflowTurnDecision(
+            WorkflowTurnKind.CONFIRM_STATE_CHANGE,
+            state_action="start_new_case",
+            canonical_intent=canonical,
+        )
+
     if case_detail and phase is WorkflowPhase.CASE_OPEN:
         return WorkflowTurnDecision(WorkflowTurnKind.ENRICH, canonical_intent=canonical)
 
@@ -214,6 +223,17 @@ def decide_workflow_turn(
         return WorkflowTurnDecision(WorkflowTurnKind.CLARIFY, canonical_intent=canonical)
 
     return WorkflowTurnDecision(WorkflowTurnKind.CLARIFY, canonical_intent=canonical)
+
+
+# "45M", "a 72-year-old", "6yo", "F 30" at the start of the message.
+_PATIENT_OPENING_RE = re.compile(
+    r"^\W*(?:(?:a|an)\s+)?(?:\d{1,3}\s*(?:yo|y/o|y\.o\.|-?\s*years?[- ]old|yr?s?\b|[mf]\b|male|female)|[mf]\s*\d{1,3}\b)",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_whole_new_case(text: str) -> bool:
+    return len(text.split()) >= 20 and bool(_PATIENT_OPENING_RE.search(text))
 
 
 def _looks_like_case_detail(text: str) -> bool:

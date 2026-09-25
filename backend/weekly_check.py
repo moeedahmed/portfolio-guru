@@ -11,11 +11,12 @@ import json
 import os
 import sys
 from datetime import datetime, timedelta
+from data_paths import data_path
 
 import aiohttp
 import aiosqlite
 
-_DEFAULT_DB = os.path.expanduser("~/.openclaw/data/portfolio-guru/usage.db")
+_DEFAULT_DB = str(data_path("usage.db"))
 DB_PATH = os.environ.get("USAGE_DB_PATH", _DEFAULT_DB)
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 

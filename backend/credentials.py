@@ -7,9 +7,10 @@ from typing import Optional
 from datetime import datetime
 from cryptography.fernet import Fernet
 from sqlmodel import Field, Session, SQLModel, create_engine, select
+from data_paths import data_path
 
 
-_DEFAULT_DB = os.path.expanduser("~/.openclaw/data/portfolio-guru/portfolio_guru.db")
+_DEFAULT_DB = str(data_path("portfolio_guru.db"))
 DATABASE_URL = os.environ.get("DATABASE_URL", f"sqlite:///{_DEFAULT_DB}")
 def _get_fernet_key() -> bytes:
     from dotenv import load_dotenv

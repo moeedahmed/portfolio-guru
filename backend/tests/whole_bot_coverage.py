@@ -60,14 +60,14 @@ def registration_digest(slots):
 
 # Reviewed registration shape: adding/reordering a slot requires a new exercised
 # scenario, not an automatically regenerated approval manifest.
-REGISTRATION_DIGEST = "58e786f096b0c8103bbff04531fc423d3a2180a84519997fda522595ba3fe635"
+REGISTRATION_DIGEST = "df5320d2d803c31de76977e8db7f9620436f6ff20c08ea2453a7bf1056fa77b8"
 CATEGORIES = {
     name: category for category, names in {
         "admin": "assignbeta_command beta_command filingreport_command funnelreport_command listusers_command setbeta_command settier_command",
         "disabled": "bulk_command chase_command",
         "protected-boundary": "handle_approval_approve handle_approval_submit handle_reset_confirm handle_upgrade_button setup_password setup_retry_login reset_data passwordless_setup_done",
         "internal": "handle_assessor_intent_capture",
-        "safe": """_setup_wrong_input arcp_command cancel_command curriculum_command gather_command
+        "safe": """_setup_wrong_input _answer_unhandled_button _reply_use_current_step arcp_command cancel_command curriculum_command gather_command
             gather_done_callback handle_action_button handle_amend_draft handle_approval_edit
             handle_approval_media_feedback handle_attachment_confirm handle_callback handle_case_input
             handle_chase_log handle_consent_callback handle_document_intent handle_edit_field
@@ -90,7 +90,7 @@ for _name in """beta_command link_command handle_action_button handle_callback
     handle_attachment_confirm handle_chase_log handle_consent_callback handle_feedback
     handle_filing_feedback handle_pathway_choice handle_pushback handle_set_curriculum
     handle_set_level handle_supervisor_callback setup_curriculum setup_training_level
-    voice_collect_example""".split():
+    voice_collect_example passwordless_reconnected""".split():
     CATEGORIES[_name] = "protected-boundary"
 
 

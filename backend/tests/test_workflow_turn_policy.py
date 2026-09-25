@@ -165,3 +165,21 @@ def test_mixed_case_detail_and_portfolio_question_is_both_not_a_transition():
     assert decision.kind is WorkflowTurnKind.ENRICH_AND_ANSWER
     assert decision.state_action is None
     assert decision.case_detail == "His BP was 80/40 and I escalated early"
+
+
+def test_a_whole_new_case_while_one_is_open_asks_before_merging():
+    """A second patient pasted mid-draft used to be merged into the first."""
+    second_case = (
+        "72F presented with sudden onset left sided weakness, NIHSS 9, CT head showed no bleed, "
+        "I discussed thrombolysis with the stroke team and the patient was treated within the window."
+    )
+    for phase in (WorkflowPhase.CASE_OPEN, WorkflowPhase.DRAFT_OPEN):
+        decision = decide(second_case, phase=phase, legacy_intent="add_detail")
+        assert decision.kind is WorkflowTurnKind.CONFIRM_STATE_CHANGE
+        assert decision.state_action == "start_new_case"
+
+
+def test_a_short_addition_still_enriches_the_open_case():
+    addition = "The patient was also tachycardic at 130 and the consultant reviewed him in resus."
+    decision = decide(addition, phase=WorkflowPhase.DRAFT_OPEN, legacy_intent="add_detail")
+    assert decision.kind is WorkflowTurnKind.ENRICH

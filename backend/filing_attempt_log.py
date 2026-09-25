@@ -33,6 +33,7 @@ import os
 import pathlib
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, Iterator, List, Optional
+from data_paths import data_path
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +110,7 @@ def default_log_path() -> pathlib.Path:
     override = os.environ.get("PORTFOLIO_GURU_FILING_LOG_PATH")
     if override:
         return pathlib.Path(override)
-    return pathlib.Path.home() / ".openclaw" / "data" / "portfolio-guru" / "filing-log.ndjson"
+    return data_path("filing-log.ndjson")
 
 
 def _normalise_portfolio_shape(portfolio_shape: Optional[str]) -> Optional[str]:

@@ -20,6 +20,8 @@ def payload_branch(payload):
         return family + "|*"
     if family in {"SUP", "CONSENT", "FILING_CURRICULUM", "FILING", "FEEDBACK"} and len(parts) >= 3:
         return "|".join(parts[:2]) + "|*"
+    if family in {"APPROVE", "CANCEL"} and len(parts) == 3 and parts[1] == "draft":
+        return family + "|draft"  # case token stamp, not a new branch
     if family == "CHASE_LOG":
         return payload if payload == "CHASE_LOG|cancel" else "CHASE_LOG|*"
     if family == "PUSHBACK" and len(parts) >= 3:
@@ -45,7 +47,7 @@ def producer_digest():
     return hashlib.sha256(json.dumps(modules).encode()).hexdigest()
 
 
-PRODUCER_DIGEST = 'e241b5a8eae08d86e1935a5d7b3f8ff91fea010b1942b52619333d1b8879a52d'
+PRODUCER_DIGEST = 'c42495d233e4d679b18bf6228e2c57e0ab5c533096aa28bf4439ce73076b5655'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
@@ -190,7 +192,7 @@ def reviewed_units(slots):
     return dict(sorted(units.items()))
 
 
-CATALOGUE_DIGEST = '80d80f6caa1276539b85e0829b6ffdce23221c7ca5bfd5f984bfb9432b79b500'
+CATALOGUE_DIGEST = 'd20bbed6498aba762716056ad4aa47766a56da6995a446c4b0795258b961d779'
 
 
 def requirements_digest(units):

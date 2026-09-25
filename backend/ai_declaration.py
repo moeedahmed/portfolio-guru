@@ -41,6 +41,9 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 DEFAULT_DECLARATION_LABEL = "AI use declaration"
+# The sentence rcem_ai_policy appended before it deferred to this module; drafts
+# restored from before that change must not be declared a second time.
+_LEGACY_REFLECTION_SENTENCE = "ai was used to help structure and edit this reflection."
 DEFAULT_DECLARATION_TEXT = (
     "AI was used to help structure and edit this entry. "
     "The content, accuracy and reflective insight are my own."
@@ -109,6 +112,7 @@ def contains_declaration(value: Any) -> bool:
         f"{declaration_label().lower()}:" in lowered
         or declaration_text().lower() in lowered
         or DEFAULT_DECLARATION_LABEL.lower() + ":" in lowered
+        or _LEGACY_REFLECTION_SENTENCE in lowered
     )
 
 

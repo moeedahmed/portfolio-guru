@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 from telegram import Chat, CallbackQuery, Message, Update, User
+from tests.helpers import unstamp
 
 
 class BotSimulator:
@@ -146,7 +147,7 @@ class BotSimulator:
         for _, _, markup in reversed(self.messages_sent):
             if markup and hasattr(markup, "inline_keyboard"):
                 return [
-                    (button.text, button.callback_data)
+                    (button.text, unstamp(button.callback_data))
                     for row in markup.inline_keyboard
                     for button in row
                     if button.callback_data

@@ -115,7 +115,7 @@ async def test_legacy_higher_profile_must_choose_curriculum_before_filing():
     store.assert_called_once_with(sim.user_id, "2021")
     route_filing.assert_awaited_once()
     assert route_filing.await_args.kwargs["form_type"] == "CBD_2021"
-    assert route_filing.await_args.kwargs["reuse_draft"] is False
+    assert route_filing.await_args.kwargs["reuse_draft_url"] is None
 
 
 @pytest.mark.asyncio
@@ -188,7 +188,7 @@ async def test_form_unavailable_requires_explicit_alternative_curriculum_retry()
     assert route_filing.await_args_list[1].kwargs["form_type"] == "CBD_2021"
     # The rejected 2025 navigation wrote nothing, so the alternative is a new
     # form attempt. It must never search for and overwrite an older CBD draft.
-    assert route_filing.await_args_list[1].kwargs["reuse_draft"] is False
+    assert route_filing.await_args_list[1].kwargs["reuse_draft_url"] is None
 
 
 @pytest.mark.asyncio

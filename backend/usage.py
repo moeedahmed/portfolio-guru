@@ -9,8 +9,9 @@ import re
 import sqlite3
 import aiosqlite
 from datetime import datetime, timezone, timedelta
+from data_paths import data_path
 
-_DEFAULT_DB = os.path.expanduser("~/.openclaw/data/portfolio-guru/usage.db")
+_DEFAULT_DB = str(data_path("usage.db"))
 DB_PATH = os.environ.get("USAGE_DB_PATH", _DEFAULT_DB)
 
 # Tier limits

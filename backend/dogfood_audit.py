@@ -22,6 +22,7 @@ import pathlib
 import re
 from datetime import datetime, timezone
 from typing import Any, Iterable, Iterator
+from data_paths import data_path
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ def default_log_path() -> pathlib.Path:
     override = os.environ.get(_PATH_ENV)
     if override:
         return pathlib.Path(override)
-    return pathlib.Path.home() / ".openclaw" / "data" / "portfolio-guru" / "dogfood-audit.ndjson"
+    return data_path("dogfood-audit.ndjson")
 
 
 def _enabled() -> bool:
