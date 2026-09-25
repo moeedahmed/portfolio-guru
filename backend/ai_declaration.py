@@ -201,7 +201,14 @@ def apply_ai_declaration(
 
 
 def will_declare(form_type: str, fields: dict) -> bool:
-    """Whether filing this draft will add a declaration — used by the preview.
+    """Whether filing this draft will APPEND a declaration — used by the preview.
+
+    Mirrors `apply_ai_declaration`'s `meta["declared"]` exactly, including the
+    already-declared case: fields that carry a declaration get no second one,
+    so this returns False for them. That matters for the preview. A draft whose
+    text already ends in the declaration would otherwise be shown the note as
+    well, and the doctor would see the same sentence twice — once inside the
+    entry and once underneath it.
 
     Resolves against the same normalisation filing uses, so the preview does
     not promise a declaration the filer cannot place (and vice versa).
@@ -210,7 +217,7 @@ def will_declare(form_type: str, fields: dict) -> bool:
         return False
     fields = fields or {}
     if fields_carry_declaration(fields):
-        return True
+        return False
     try:
         from kaizen_form_filer import normalise_fields_for_deterministic_filing
         resolved = normalise_fields_for_deterministic_filing(form_type, fields)

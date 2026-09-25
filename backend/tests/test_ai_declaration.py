@@ -256,6 +256,45 @@ def test_regeneration_prompt_does_not_carry_the_declaration_boilerplate():
     assert DEFAULT_DECLARATION_LABEL not in prompt_view
 
 
+def test_preview_does_not_repeat_a_declaration_already_in_the_entry():
+    """Regression: a saved draft reopened for editing already has the
+    declaration inside its narrative field. Adding the preview note on top
+    showed the doctor the same sentence twice — once in the entry, once under
+    it (reported on a US_CASE draft, 2026-09-25)."""
+    from bot import _format_draft_preview
+    from models import FormDraft
+
+    already_declared = (
+        "I learned to scan early in back pain with hypotension.\n\n"
+        + declaration_block()
+    )
+    draft = FormDraft(form_type="US_CASE", fields={
+        "date_of_case": "2026-09-25",
+        "clinical_scenario": "70-year-old with back pain and hypotension.",
+        "learning_points": already_declared,
+    })
+    preview = _format_draft_preview(draft)
+
+    assert preview.count(ai_declaration.declaration_text()) == 1, (
+        "the declaration is shown twice in the preview"
+    )
+    assert preview.count(DEFAULT_DECLARATION_LABEL) == 1
+    # The one that survives is the real entry text, not the appended note.
+    assert "saved with this entry" not in preview
+
+
+def test_filing_an_already_declared_draft_adds_no_second_copy():
+    """The other half of the same guarantee, at the Kaizen end."""
+    fields, meta = _file_as_kaizen_would("US_CASE", {
+        "date_of_case": "2026-09-25",
+        "learning_points": "I learned to scan early.\n\n" + declaration_block(),
+    })
+
+    assert meta["declared"] is False
+    assert meta["reason"] == "already_declared"
+    assert fields["learning_points"].count(DEFAULT_DECLARATION_LABEL) == 1
+
+
 def test_draft_preview_omits_the_declaration_when_nothing_will_be_declared():
     from bot import _format_draft_preview
     from models import FormDraft
