@@ -382,14 +382,23 @@ def test_ready_draft_and_amend_offer_only_save_and_cancel(improved_once):
     }
 
 
-@pytest.mark.parametrize("reflection", ["", "I learned to escalate sooner."])
-def test_draft_coach_invites_reply_without_redundant_button(reflection):
+@pytest.mark.parametrize("draft", [
+    CBDData(reflection="I learned to escalate sooner."),
+    FormDraft(form_type="DOPS", fields={"reflection": ""}),
+], ids=["brief_cbd_reflection", "empty_optional_dops_reflection"])
+def test_draft_coach_invites_reply_without_redundant_button(draft):
     from bot import _draft_coach_note
 
-    note = _draft_coach_note(CBDData(reflection=reflection))
+    note = _draft_coach_note(draft)
     assert "reply" in note.lower()
     assert "tap" not in note.lower()
     assert "Improve reflection" not in note
+
+
+def test_no_coach_note_repeats_the_still_needed_line_for_a_required_reflection():
+    from bot import _draft_coach_note
+
+    assert _draft_coach_note(CBDData(reflection="")) == ""
 
 
 @pytest.mark.asyncio
