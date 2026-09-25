@@ -5004,6 +5004,10 @@ def _find_reflection_keys(fields: dict, form_type: str | None = None) -> list[st
             keys.append(key)
     for key in fields:
         normalised = str(key).lower()
+        # A reflection *title* (US_CASE, SDL, ...) names the entry; it is not
+        # the doctor's reflection and must never be judged or gated as one.
+        if "title" in normalised:
+            continue
         if (
             "reflection" in normalised
             or "reflective" in normalised
@@ -5793,8 +5797,12 @@ _ESSENTIAL_FIELD_GUIDANCE: dict[str, dict[str, str]] = {
 
 # Schema-required fields Portfolio Guru fills itself, so they are never a
 # question for the doctor: required dates default to today at draft and
-# filing time, and the training stage comes from the saved profile.
-_SELF_FILLED_ESSENTIAL_KEYS = {"stage_of_training"}
+# filing time, the training stage comes from the saved profile, and a
+# reflection title is composed by the drafter from the case and reviewed in
+# the preview. Asking for the title looped: doctors read "Case reflection
+# title" as their reflection, sent reflections, and the title stayed missing.
+# Factual titles (a paper's, a teaching session's) are still asked for.
+_SELF_FILLED_ESSENTIAL_KEYS = {"stage_of_training", "reflection_title", "case_reflection_title"}
 
 # Schema keys that restate another required key on the same form. Asking for
 # both would be one question the doctor has already answered.
