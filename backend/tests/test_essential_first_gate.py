@@ -873,3 +873,32 @@ async def test_a_reply_regenerates_the_draft_but_still_missing_essentials_stay_b
     assert bot._load_draft(context).fields["reflection"] == ""
     assert "registrar was present" in context.user_data["case_text"]
 
+
+
+@pytest.mark.asyncio
+async def test_case_content_is_drafted_even_when_judged_missing():
+    """Only doctor-only details are held back. A strict "missing" on the case
+    narrative or setting blanked content the case plainly contained."""
+    from models import CBDData
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["case_text"] = THIN_CASE
+    drafted = CBDData(
+        clinical_setting="Emergency Department",
+        clinical_reasoning="Collapse with vertigo; peripheral features on examination.",
+        trainee_role="Assessed and managed the patient",
+    )
+    statuses = _all(
+        "CBD", ESSENTIAL_PRESENT,
+        clinical_setting=ESSENTIAL_MISSING, clinical_reasoning=ESSENTIAL_MISSING, trainee_role=ESSENTIAL_MISSING,
+    )
+    with patch("bot.assess_form_essentials", new=_assess(statuses)), \
+         patch("bot.extract_cbd_data", new=AsyncMock(return_value=drafted)), \
+         patch("bot.get_voice_profile", return_value=""):
+        await bot._essentials_gate_before_draft(MagicMock(), context, THIN_CASE, "CBD")
+        draft = await bot._analyse_selected_form(context, 4242, THIN_CASE, "CBD")
+
+    assert draft.clinical_setting == "Emergency Department"
+    assert draft.clinical_reasoning.startswith("Collapse with vertigo")
+    assert draft.trainee_role == "", "the doctor's own role is never assumed"

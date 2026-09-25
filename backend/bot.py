@@ -6178,15 +6178,28 @@ async def _offer_change_form_for_unavailable_essentials(
     return AWAIT_CASE_INPUT
 
 
-def _blank_judged_missing_essentials(context, draft, case_text: str, form_type: str):
-    """Leave every essential the doctor has not supplied blank in the draft.
+# What only the doctor can say about themselves. The case notes describe the
+# patient, so the model drafts the narrative, setting and presentation from
+# them; but it must never assume the doctor's role, performance, supervision
+# or reflection.
+_DOCTOR_ONLY_ESSENTIAL_KEYS = frozenset({"trainee_role", "trainee_performance", "level_of_supervision"})
 
-    Drafting now happens before those details are given, so this is what keeps
-    the model from filling a role, a supervision level or a reflection the
-    doctor never described. The blanks show in the preview as gaps to fill.
+
+def _blank_judged_missing_essentials(context, draft, case_text: str, form_type: str):
+    """Leave blank the doctor-only essentials they have not supplied.
+
+    Drafting happens before those details are given, so this keeps the model
+    from filling a role, a supervision level or a reflection the doctor never
+    described. It deliberately does not wipe case content (narrative, setting,
+    presentation): a strict "missing" judgement there blanked a narrative the
+    case plainly contained (demo, 25 Sep 2026). The blanks show as gaps.
     """
     statuses = _cached_essential_statuses(context, case_text, form_type) or {}
-    missing = [key for key, status in statuses.items() if status == ESSENTIAL_MISSING]
+    reflection_keys = set(_find_reflection_keys(statuses, form_type))
+    missing = [
+        key for key, status in statuses.items()
+        if status == ESSENTIAL_MISSING and (key in _DOCTOR_ONLY_ESSENTIAL_KEYS or key in reflection_keys)
+    ]
     if not missing or draft is None:
         return draft
     if isinstance(draft, FormDraft):
