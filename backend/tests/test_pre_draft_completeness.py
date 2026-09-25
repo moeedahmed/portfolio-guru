@@ -94,40 +94,6 @@ async def test_complete_draft_previews_immediately_no_gap_question():
 
 
 @pytest.mark.asyncio
-async def test_missing_reflection_on_a_restored_draft_still_gates_save():
-    """A draft restored from an older session carries no sufficiency
-    judgement for its case. The save must still not go through while a CBD's
-    required reflection is absent from the doctor's own words — nothing is
-    filed, and the Add-reflection route is offered instead."""
-    from bot import AWAIT_APPROVAL, handle_approval_approve
-
-    sim = BotSimulator()
-    update = sim._make_callback_update("APPROVE|draft")
-    context = sim._make_context()
-    context.user_data["case_text"] = "45M with chest pain, troponin positive, managed as ACS."
-    context.user_data["chosen_form"] = "CBD"
-    restored = _cbd_draft(reflection="")
-    context.user_data["draft_data"] = {
-        "_type": "FORM",
-        "form_type": restored.form_type,
-        "fields": restored.fields,
-        "uuid": restored.uuid,
-    }
-
-    route_filing = AsyncMock()
-    with patch("bot.get_credentials", return_value=("user", "pass")), \
-         patch("bot.route_filing", new=route_filing):
-        result = await handle_approval_approve(update, context)
-
-    assert result == AWAIT_APPROVAL
-    route_filing.assert_not_awaited()
-    assert "reflection is needed before saving" in sim.get_last_text().lower()
-    buttons = {data for _, data in sim.get_last_buttons()}
-    assert buttons == {"CANCEL|draft"}
-    assert "APPROVE|draft" not in buttons
-
-
-@pytest.mark.asyncio
 async def test_settled_draft_does_not_nag_about_a_field_the_extractor_left_blank():
     """Essentials were judged present before drafting, so the preview is the
     draft: no second "I still need" message, and Save stays available."""
@@ -151,41 +117,6 @@ async def test_settled_draft_does_not_nag_about_a_field_the_extractor_left_blank
     assert not any("I still need" in (text or "") for _, text, _ in sim.messages_sent)
     buttons = {data for _, data in sim.get_last_buttons()}
     assert "APPROVE|draft" in buttons
-
-
-@pytest.mark.asyncio
-async def test_restored_draft_missing_reflection_and_setting_names_both_and_files_nothing():
-    """Same restored-draft path with two essentials gone: the reflection
-    route is offered, the other missing essential is named, and nothing is
-    filed."""
-    from bot import AWAIT_APPROVAL, handle_approval_approve
-
-    sim = BotSimulator()
-    update = sim._make_callback_update("APPROVE|draft")
-    context = sim._make_context()
-    context.user_data["case_text"] = "45M with chest pain, troponin positive, managed as ACS."
-    context.user_data["chosen_form"] = "CBD"
-    both_missing = _cbd_draft(reflection="", clinical_setting="")
-    context.user_data["draft_data"] = {
-        "_type": "FORM",
-        "form_type": both_missing.form_type,
-        "fields": both_missing.fields,
-        "uuid": both_missing.uuid,
-    }
-
-    route_filing = AsyncMock()
-    with patch("bot.get_credentials", return_value=("user", "pass")), \
-         patch("bot.route_filing", new=route_filing):
-        result = await handle_approval_approve(update, context)
-
-    assert result == AWAIT_APPROVAL
-    route_filing.assert_not_awaited()
-    preview = sim.get_last_text().lower()
-    assert "reflection is needed before saving" in preview
-    assert "clinical setting" in preview
-    buttons = {data for _, data in sim.get_last_buttons()}
-    assert buttons == {"CANCEL|draft"}
-    assert "APPROVE|draft" not in buttons
 
 
 @pytest.mark.asyncio
@@ -395,38 +326,6 @@ async def test_nonreflective_draft_is_exempt_and_previews():
 
 
 @pytest.mark.asyncio
-async def test_removed_essential_field_after_preview_blocks_file_call():
-    from bot import AWAIT_CASE_INPUT, handle_approval_approve
-
-    sim = BotSimulator()
-    update = sim._make_callback_update("APPROVE|draft")
-    context = sim._make_context()
-    context.user_data["case_text"] = REFLECTIVE_CASE_TEXT
-    context.user_data["chosen_form"] = "CBD"
-    # Reflection present but clinical_setting was cleared by an edit after preview.
-    edited_draft = _cbd_draft(clinical_setting="")
-    context.user_data["draft_data"] = {
-        "_type": "FORM",
-        "form_type": edited_draft.form_type,
-        "fields": edited_draft.fields,
-        "uuid": edited_draft.uuid,
-    }
-
-    route_filing = AsyncMock()
-    with patch("bot.get_credentials", return_value=("user", "pass")), \
-         patch("bot.route_filing", new=route_filing):
-        result = await handle_approval_approve(update, context)
-
-    assert result == AWAIT_CASE_INPUT
-    route_filing.assert_not_awaited()
-    text = sim.get_last_text().lower()
-    assert "clinical setting" in text
-    assert context.user_data["awaiting_detail"] is True
-    # The still-valid case text/draft context is preserved for the follow-up merge.
-    assert context.user_data["case_text"] == REFLECTIVE_CASE_TEXT
-
-
-@pytest.mark.asyncio
 async def test_intact_draft_still_saves_normally_after_the_essential_check():
     from bot import handle_approval_approve
 
@@ -489,39 +388,6 @@ async def test_new_case_resets_pending_detail_state_no_cross_case_contamination(
     assert "awaiting_detail" not in context.user_data
     assert "chosen_form" not in context.user_data
     assert "case_text" not in context.user_data
-
-
-@pytest.mark.asyncio
-async def test_completeness_prompt_advertises_supported_reply_formats():
-    """The essentials question must name every reply format the AWAIT_CASE_INPUT
-    handlers actually accept (text, voice/audio, photo, document, video), and for
-    video it must say 'with a description' rather than implying transcription —
-    the conversation handler map routes VOICE/AUDIO/PHOTO/VIDEO/Document.ALL to
-    handle_case_input here, but a video attachment is only ever cached, never
-    interpreted."""
-    from bot import AWAIT_CASE_INPUT, handle_form_choice
-
-    sim = BotSimulator()
-    update = sim._make_callback_update("FORM|CBD")
-    context = sim._make_context()
-    context.user_data["case_text"] = "45M with chest pain, troponin positive, managed as ACS."
-
-    statuses = {item["key"]: "present" for item in bot._form_essential_requirements("CBD")}
-    statuses["reflection"] = "missing"
-    with patch("bot.assess_form_essentials", new=AsyncMock(return_value=statuses)), \
-         patch("bot._analyse_selected_form", new=AsyncMock()):
-        result = await handle_form_choice(update, context)
-
-    assert result == AWAIT_CASE_INPUT
-    text = sim.get_last_text().lower()
-    assert "text" in text
-    assert "voice" in text
-    assert "audio" in text
-    assert "photo" in text
-    assert "document" in text
-    assert "video" in text
-    assert "description" in text
-    assert "interpret" not in text and "transcri" not in text
 
 
 @pytest.mark.asyncio
@@ -683,3 +549,56 @@ async def test_edit_failure_on_remaining_gap_preserves_merged_answer_and_raises(
     assert "escalate ECG review earlier" in context.user_data["case_text"]
     assert context.user_data["awaiting_detail"] is True
     assert context.user_data["chosen_form"] == "CBD"
+
+
+def _saving(context, draft):
+    context.user_data["draft_data"] = {
+        "_type": "FORM",
+        "form_type": draft.form_type,
+        "fields": draft.fields,
+        "uuid": draft.uuid,
+    }
+    return AsyncMock(return_value={
+        "status": "partial", "filled": ["clinical_reasoning"], "skipped": [], "method": "deterministic",
+    })
+
+
+@pytest.mark.asyncio
+async def test_save_with_a_missing_reflection_files_it_blank_never_ai_written():
+    """Draft first (25 Sep 2026): Save is always available. A reflection the
+    doctor never supplied is saved blank for them to write in Kaizen."""
+    from bot import handle_approval_approve
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["case_text"] = "45M with chest pain, troponin positive, managed as ACS."
+    context.user_data["chosen_form"] = "CBD"
+    route_filing = _saving(context, _cbd_draft(reflection="This case reinforced early ECG review."))
+
+    with patch("bot.get_credentials", return_value=("user", "pass")), \
+         patch("bot.route_filing", new=route_filing), \
+         patch("bot.compose_filing_recovery_copy", new=AsyncMock(return_value="")):
+        await handle_approval_approve(sim._make_callback_update("APPROVE|draft"), context)
+
+    route_filing.assert_awaited_once()
+    assert route_filing.await_args.kwargs["fields"]["reflection"] == ""
+
+
+@pytest.mark.asyncio
+async def test_save_with_other_blank_essentials_still_files_the_draft():
+    from bot import handle_approval_approve
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["case_text"] = REFLECTIVE_CASE_TEXT
+    context.user_data["chosen_form"] = "CBD"
+    route_filing = _saving(context, _cbd_draft(clinical_setting=""))
+
+    with patch("bot.get_credentials", return_value=("user", "pass")), \
+         patch("bot.route_filing", new=route_filing), \
+         patch("bot.compose_filing_recovery_copy", new=AsyncMock(return_value="")):
+        await handle_approval_approve(sim._make_callback_update("APPROVE|draft"), context)
+
+    route_filing.assert_awaited_once()
+    assert route_filing.await_args.kwargs["fields"]["clinical_setting"] == ""
+

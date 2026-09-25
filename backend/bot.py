@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import re
+import secrets
 import sys
 import shutil
 import tempfile
@@ -19,8 +20,11 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler, PicklePersistence,
 )
 from store import store_credentials, get_credentials, has_credentials, init
+import kaizen_connection
 from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, is_reuse_request, review_draft, analyse_portfolio_health, summarise_recent_activity, generate_nudge_copy, extract_field_updates, compose_filing_recovery_copy, combine_case_inputs, _has_qi_project_signal, schema_form_type, assess_form_essentials, ESSENTIAL_PRESENT, ESSENTIAL_MISSING, ESSENTIAL_UNAVAILABLE
 from usage import record_case_filed, get_cases_this_month, check_can_file, get_user_tier, set_user_tier, get_case_history, TIER_LIMITS, get_all_active_users, get_cases_this_week, is_beta_tester, set_beta_tester, save_kc_coverage, delete_portfolio_evidence
+from data_paths import data_path
+from update_processor import PerUserUpdateProcessor
 # Module-attribute access (consent.fn) rather than from-imports: test_smoke
 # pops `bot` from sys.modules, so multiple bot module objects can be alive in
 # one test run — resolving through the single consent module keeps the gate
@@ -700,7 +704,7 @@ async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
     if the bot restarts daily.
     """
     import os
-    sentinel = os.path.expanduser("~/.openclaw/data/portfolio-guru/weekly_push_last_run")
+    sentinel = str(data_path("weekly_push_last_run"))
     os.makedirs(os.path.dirname(sentinel), exist_ok=True)
     now = time.time()
     if os.path.exists(sentinel):
@@ -829,8 +833,8 @@ async def signoff_chase_push(context: ContextTypes.DEFAULT_TYPE) -> None:
     from health_watch import detect_changes, format_change_report
 
     heartbeat_url = os.environ.get("PG_SIGNOFF_CHASE_HEALTHCHECK_URL", "")
-    seen_path = os.path.expanduser("~/.openclaw/data/portfolio-guru/signoff_chase_seen.json")
-    sentinel = os.path.expanduser("~/.openclaw/data/portfolio-guru/signoff_chase_last_run")
+    seen_path = str(data_path("signoff_chase_seen.json"))
+    sentinel = str(data_path("signoff_chase_last_run"))
     os.makedirs(os.path.dirname(sentinel), exist_ok=True)
     now = time.time()
     if os.path.exists(sentinel):
@@ -874,7 +878,7 @@ async def signoff_chase_push(context: ContextTypes.DEFAULT_TYPE) -> None:
                 # refreshed next week.
                 if (
                     refreshed < SIGNOFF_CHASE_MAX_REFRESH_PER_RUN
-                    and has_credentials(user_id)
+                    and _kaizen_connected(user_id)
                     and await _health_needs_kaizen_refresh(user_id)
                 ):
                     try:
@@ -1834,7 +1838,7 @@ async def _handle_incomplete_draft_complaint(message, context) -> int | None:
             "Every field already has content. Tell me which part looks wrong or "
             "thin and I'll revise it, then you can save the update."
         )
-    await message.reply_text("\n".join(lines), reply_markup=_build_amend_keyboard(improved_once=False))
+    await message.reply_text("\n".join(lines), reply_markup=_build_amend_keyboard(improved_once=False, context=context))
     return AWAIT_APPROVAL
 
 
@@ -2255,7 +2259,7 @@ def _pop_source_detail_prompt_refs(context) -> list[dict]:
  AWAIT_VOICE_EXAMPLES, AWAIT_TEMPLATE_REVIEW,
  AWAIT_CURRICULUM, AWAIT_FORM_SEARCH,
  AWAIT_GATHERING, AWAIT_PATHWAY,
- AWAIT_DOC_INTENT) = range(15)
+ AWAIT_DOC_INTENT, AWAIT_PASSWORDLESS) = range(16)
 
 # Common button patterns used across the bot
 _BTN_SETUP = InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")
@@ -2312,6 +2316,139 @@ _KB_RETYPE_SETUP = InlineKeyboardMarkup([
     [_BTN_CANCEL],
 ])
 
+# --- Passwordless Kaizen connection ------------------------------------------
+# Opt-in alternative to storing a password: the doctor signs in to Kaizen on
+# the Connect Kaizen page (mobile_kaizen_handoff), and only the signed-in
+# session is kept. Kaizen ends it after about a day; the doctor then signs in
+# again when they next save. Offered only where kaizen_connection says so.
+_PASSWORDLESS_SETUP_OFFER = (
+    "\n\nPrefer not to share your password? Tap below and sign in to Kaizen "
+    "yourself instead. You'll need to sign in again about once a day, "
+    "usually when you save a draft."
+)
+_BTN_CONNECT_PASSWORDLESS = InlineKeyboardButton(
+    "🔒 Connect without sharing my password",
+    callback_data="ACTION|connect_passwordless",
+)
+_PASSWORDLESS_LINK_TEXT = (
+    "🔒 Sign in to Kaizen\n\n"
+    "1. Tap *Sign in to Kaizen* and sign in on the page that opens.\n"
+    "2. When it says *Kaizen connected*, come back here and tap *I've signed in*.\n\n"
+    "_The link works once and expires in 10 minutes. Portfolio Guru never stores "
+    "your password; it keeps only the signed-in session, which Kaizen ends after "
+    "about a day._"
+)
+_PASSWORDLESS_UNAVAILABLE_TEXT = (
+    "⚠️ The Kaizen sign-in page isn't available right now. Try again in a few "
+    "minutes, or connect with your username and password instead."
+)
+_PASSWORDLESS_NOT_SIGNED_IN_TEXT = (
+    "I can't see a Kaizen sign-in yet.\n\n"
+    "Tap *Sign in to Kaizen*, finish signing in until the page says "
+    "*Kaizen connected*, then tap *I've signed in*. If the link has expired, "
+    "tap *New link*."
+)
+_PASSWORDLESS_FEATURE_UNAVAILABLE_TEXT = (
+    "This feature needs a username-and-password connection, because it signs in "
+    "to Kaizen on its own. You're connected without sharing your password, so "
+    "it isn't available yet. Saving drafts and /health work as normal."
+)
+_PASSWORDLESS_CHECK_FAILED_TEXT = (
+    "⚠️ I couldn't reach Kaizen to check just now. Tap *I've signed in* again "
+    "in a moment."
+)
+
+
+def _passwordless_keyboard(url: str, *, done_action: str, link_action: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔒 Sign in to Kaizen", url=url)],
+        [InlineKeyboardButton("✅ I've signed in", callback_data=f"ACTION|{done_action}")],
+        [
+            InlineKeyboardButton("🔁 New link", callback_data=f"ACTION|{link_action}"),
+            _BTN_CANCEL,
+        ],
+    ])
+
+
+def _kaizen_connected(user_id: int) -> bool:
+    """Connected with a stored password, or passwordless.
+
+    Goes through this module's ``has_credentials`` name (which tests patch)
+    and ``profile_store`` by attribute, so both stay patchable.
+    """
+    if has_credentials(user_id):
+        return True
+    import profile_store
+
+    return profile_store.get_kaizen_connection(user_id) == kaizen_connection.PASSWORDLESS
+
+
+def _is_passwordless_user(user_id: int) -> bool:
+    if has_credentials(user_id):
+        return False
+    import profile_store
+
+    return profile_store.get_kaizen_connection(user_id) == kaizen_connection.PASSWORDLESS
+
+
+async def _create_passwordless_link(user_id: int):
+    """One-time Connect Kaizen link, or None when the sign-in page is down."""
+    from mobile_kaizen_handoff import ConnectLinkUnavailable, create_connect_link
+
+    try:
+        return await asyncio.to_thread(create_connect_link, user_id)
+    except ConnectLinkUnavailable as exc:
+        logger.warning("Connect Kaizen link unavailable: %s", exc)
+        return None
+
+
+async def _probe_kept_kaizen_session(user_id: int) -> bool | str | None:
+    """Open Kaizen with the kept session and read the portfolio type.
+
+    Returns the detected role (as the password login test does) when the kept
+    session really opens Kaizen, ``False`` when there is no working session,
+    and ``None`` when Kaizen could not be reached to find out.
+    """
+    from engine.portfoliotypes.base import detect_portfolio_type
+    from engine.providers.kaizen import KAIZEN_DASHBOARD_BODY_PREVIEW_CHARS
+    from kaizen_form_filer import _connect_cdp, use_cached_session
+
+    if not kaizen_connection.has_kept_session(user_id):
+        return False
+    page = None
+    pw = None
+    browser_context = None
+    try:
+        page, pw = await _connect_cdp()
+        if page is None:
+            return None
+        browser_context = getattr(page, "context", None)
+        if not await asyncio.wait_for(use_cached_session(page, user_id), timeout=60):
+            return False
+        try:
+            title = await page.title()
+        except Exception:
+            title = ""
+        try:
+            body = await page.locator("body").inner_text(timeout=5000)
+        except Exception:
+            body = ""
+        return detect_portfolio_type(title, body[:KAIZEN_DASHBOARD_BODY_PREVIEW_CHARS]) or "unknown"
+    except Exception as exc:
+        logger.warning("Kept Kaizen session probe failed: %s", type(exc).__name__)
+        return None
+    finally:
+        if browser_context is not None:
+            try:
+                await browser_context.close()
+            except Exception:
+                pass
+        if pw is not None:
+            try:
+                await pw.stop()
+            except Exception:
+                pass
+
 # Substrings that indicate the LLM call hit a transient upstream issue (rate
 # limiting, quota, service overload) rather than a code bug. Matching is
 # case-insensitive on str(exception). Keep tight — false positives would hide
@@ -2346,7 +2483,7 @@ def _is_transient_llm_error(exc: BaseException) -> bool:
 
 def _setup_needs_finishing(user_id: int) -> bool:
     try:
-        return not has_credentials(user_id)
+        return not _kaizen_connected(user_id)
     except Exception:
         logger.warning("Credential setup check failed; treating setup as unfinished", exc_info=True)
         return True
@@ -2367,8 +2504,16 @@ def _build_data_clear_keyboard() -> None:
     return None
 
 
+def _username_prompt_with_offer(user_id: int, prompt: str) -> tuple[str, InlineKeyboardMarkup | None]:
+    """Add the passwordless option to a username prompt where it's offered."""
+    if kaizen_connection.passwordless_offered_to(user_id):
+        return prompt + _PASSWORDLESS_SETUP_OFFER, InlineKeyboardMarkup([[_BTN_CONNECT_PASSWORDLESS]])
+    return prompt, None
+
+
 async def _send_start_setup_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text(_KAIZEN_USERNAME_PROMPT, parse_mode="Markdown")
+    text, markup = _username_prompt_with_offer(update.effective_user.id, _KAIZEN_USERNAME_PROMPT)
+    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=markup)
     context.user_data["_setup_state_hint"] = "username"
     return AWAIT_USERNAME
 
@@ -2380,12 +2525,13 @@ async def _prompt_implicit_kaizen_username(update: Update, context: ContextTypes
     # the only usable next step. A Cancel would just loop back to the same
     # "connect first" state. Explicit Connect Kaizen routes (/start, /settings)
     # keep their buttons.
-    await update.message.reply_text(
+    text, markup = _username_prompt_with_offer(
+        update.effective_user.id,
         "Before I can save drafts to Kaizen, I need to connect your account.\n\n"
         "Send your Kaizen username or email to start.\n\n"
         f"{_KAIZEN_USERNAME_PRIVACY_NOTE}",
-        parse_mode="Markdown",
     )
+    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=markup)
     return AWAIT_USERNAME
 
 
@@ -2443,7 +2589,7 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
             message,
             context,
             _format_draft_preview_for_context(draft, context) + _draft_reply_hint(context),
-            reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
+            reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False), context=context),
             parse_mode="Markdown",
         )
         return AWAIT_APPROVAL
@@ -4532,24 +4678,59 @@ def _store_explicit_form_choice_state(
     context.user_data["explicit_form_choice"] = form_type
 
 
+def _case_token(context) -> str:
+    """Short token stamped on this case's Save and Cancel buttons.
+
+    Old buttons stay in the chat. Without a stamp, a Cancel from an earlier case
+    wiped the live one, and a second queued tap on Save filed the draft again.
+    The token is renewed when a save starts and disappears with the case.
+    """
+    token = context.user_data.get("case_token")
+    if not token:
+        token = secrets.token_hex(3)
+        context.user_data["case_token"] = token
+    return token
+
+
+def _case_button(action: str, context=None) -> str:
+    return f"{action}|{_case_token(context)}" if context is not None else action
+
+
+def _is_stale_case_button(context, data: str | None) -> bool:
+    """True for a stamped Save/Cancel whose case or save attempt has passed.
+
+    Buttons sent before stamping existed carry no token and are accepted.
+    """
+    parts = (data or "").split("|")
+    if len(parts) != 3 or parts[:2] not in (["APPROVE", "draft"], ["CANCEL", "draft"]):
+        return False
+    return parts[2] != context.user_data.get("case_token")
+
+
 def _build_approval_keyboard(
     improved_once: bool = False,
     can_back_to_missing: bool = False,
-    needs_reflection_detail: bool = False,
+    context=None,
 ):
     rows = []
-    if not needs_reflection_detail:
-        rows.append([InlineKeyboardButton("💾 Save to Kaizen", callback_data="APPROVE|draft")])
-    if can_back_to_missing:
-        rows.append(_nav_row("Back", "ACTION|back_to_missing", "Cancel", "CANCEL|draft"))
+    save, cancel = _case_button("APPROVE|draft", context), _case_button("CANCEL|draft", context)
+    gaps = _draft_gaps(context) if context is not None else []
+    # Save is always offered: it only ever makes a Kaizen draft, which the
+    # doctor can finish there. Gaps are filled by replying, not by buttons.
+    if gaps:
+        rows.append([InlineKeyboardButton("💾 Save draft now, finish in Kaizen", callback_data=save)])
     else:
-        rows.append([InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|draft")])
+        rows.append([InlineKeyboardButton("💾 Save to Kaizen", callback_data=save)])
+    if can_back_to_missing:
+        rows.append(_nav_row("Back", "ACTION|back_to_missing", "Cancel", cancel))
+    else:
+        rows.append([InlineKeyboardButton("❌ Cancel", callback_data=cancel)])
     return InlineKeyboardMarkup(rows)
 
 
-def _build_amend_keyboard(improved_once: bool = False) -> InlineKeyboardMarkup:
+def _build_amend_keyboard(improved_once: bool = False, context=None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💾 Save to Kaizen", callback_data="APPROVE|draft")],
+        [InlineKeyboardButton("💾 Save to Kaizen", callback_data=_case_button("APPROVE|draft", context))],
         [InlineKeyboardButton("❌ Cancel", callback_data="AMEND|cancel")],
     ])
 
@@ -4617,10 +4798,10 @@ def _build_video_intent_keyboard() -> InlineKeyboardMarkup:
 
 def _active_draft_keyboard(context) -> InlineKeyboardMarkup:
     if context.user_data.get("amend_mode"):
-        return _build_amend_keyboard(improved_once=context.user_data.get("quick_improve_used", False))
+        return _build_amend_keyboard(improved_once=context.user_data.get("quick_improve_used", False), context=context)
     return _build_approval_keyboard(
         improved_once=context.user_data.get("quick_improve_used", False),
-        needs_reflection_detail=context.user_data.get("needs_reflection_detail", False),
+        context=context,
     )
 
 
@@ -4720,9 +4901,9 @@ def _looks_like_explicit_new_case_request(text: str) -> bool:
     return any(re.search(pattern, lowered) for pattern in patterns)
 
 
-def _build_post_review_keyboard(improved_once: bool = False):
+def _build_post_review_keyboard(improved_once: bool = False, context=None):
     """Keyboard shown after lightweight draft improvement."""
-    return _build_approval_keyboard(improved_once=improved_once)
+    return _build_approval_keyboard(improved_once=improved_once, context=context)
 
 
 _POST_FILING_SAME_CASE_LABEL = "📋 Another form"
@@ -5069,6 +5250,10 @@ def _draft_coach_note(draft) -> str:
     Returns "" for solid reflections so the preview isn't padded with noise."""
     reflection = _draft_reflection_text(draft).strip()
     if not reflection:
+        # A required reflection is already named in the closing "Still
+        # needed" line; only an optional one needs this nudge.
+        if _form_requires_reflection(_draft_form_type(draft), draft):
+            return ""
         return "Coach note: Reply with what you learned or would do differently."
     if len(reflection.split()) < 18:
         return "Coach note: This reflection is brief. Reply if you'd like to expand or change it."
@@ -5265,6 +5450,22 @@ def _remember_case_context_source(
         context.user_data["case_has_user_context"] = False
 
 
+def _without_reflection_text(draft):
+    """The draft with its reflection fields emptied, for saving without the
+    doctor's own reflection."""
+    fields = _draft_fields_for_review(draft)
+    keys = _find_reflection_keys(fields, _draft_form_type(draft))
+    if not keys:
+        return draft
+    if isinstance(draft, FormDraft):
+        return FormDraft(
+            form_type=draft.form_type,
+            fields={**draft.fields, **{key: "" for key in keys}},
+            uuid=draft.uuid,
+        )
+    return draft.model_copy(update={key: "" for key in keys if key in type(draft).model_fields})
+
+
 def _set_reflection_detail_gate(context, draft) -> bool:
     needs_reflection_detail = _draft_needs_reflection_detail_before_save(context, draft)
     if needs_reflection_detail:
@@ -5375,15 +5576,28 @@ _MISSING_MARKER = "_— needs your detail_"
 # Appended to draft previews shown with the approval keyboard so the user
 # knows they can reply to refine, instead of relying on a removed Edit button.
 _REPLY_HINT_SUFFIX = render_message("draft_reply_hint")
-# Used instead when Save is hidden pending the doctor's own reflection, since
-# the keyboard only offers Cancel while the doctor replies with reflection.
-_REPLY_HINT_SUFFIX_REFLECTION_NEEDED = render_message("draft_reply_hint_reflection_needed")
 
 
 def _draft_reply_hint(context) -> str:
-    if context.user_data.get("needs_reflection_detail"):
-        return _REPLY_HINT_SUFFIX_REFLECTION_NEEDED
-    return _REPLY_HINT_SUFFIX
+    gaps = _draft_gaps(context)
+    if not gaps:
+        return _REPLY_HINT_SUFFIX
+    return render_message(
+        "draft_gap_hint",
+        items=_format_completeness_gap_items(gaps),
+        it_or_them="it" if len(gaps) == 1 else "them",
+    )
+
+
+def _draft_gaps(context) -> list[dict]:
+    """Required fields the open draft still lacks, reflection last."""
+    draft = _load_draft(context)
+    if draft is None:
+        return []
+    form_type = context.user_data.get("chosen_form") or _draft_form_type(draft)
+    gaps = _pre_draft_completeness_gaps(context, draft, form_type)
+    gaps.sort(key=lambda gap: gap["key"] == "reflection")
+    return gaps
 
 # Visual divider separating portfolio content from bot guidance/rationale in
 # draft previews (after draft body). Post-filing confirmations should stay
@@ -5501,48 +5715,6 @@ def _source_label(input_source: str | None) -> str:
     return _SOURCE_LABELS.get(str(input_source or "").strip().lower(), "case note")
 
 
-def _reflection_review_line(draft) -> str:
-    fields = _draft_fields_for_review(draft)
-    form_type = _draft_form_type(draft)
-    keys = _find_reflection_keys(fields, form_type)
-
-    if not keys:
-        return "• AI-filled fields: review the wording; blank fields mean I could not safely infer detail."
-
-    present = [key for key in keys if not _is_missing_field_value(fields.get(key))]
-    missing = [key for key in keys if _is_missing_field_value(fields.get(key))]
-
-    if present and missing:
-        return (
-            f"• Reflection fields: {len(present)} AI-filled for review; "
-            f"{len(missing)} still needs your detail."
-        )
-    if present:
-        noun = "field" if len(present) == 1 else "fields"
-        return f"• Reflection fields: {len(present)} AI-filled {noun} for you to check."
-    return "• Reflection fields: no reflection text was safely found yet."
-
-
-def _missing_fields_review_line(draft) -> str:
-    """Name the required fields still waiting on the user.
-
-    A bare count next to the inline ``needs your detail`` markers told the user
-    something they could already see; the field names tell them where to type.
-    """
-    form_type = _draft_form_type(draft)
-    missing_required, _, _ = _missing_template_fields(draft, form_type)
-    if not missing_required:
-        return ""
-    labels = [str(field.get("label") or field.get("key") or "").strip() for field in missing_required]
-    labels = [label for label in labels if label]
-    if not labels:
-        return ""
-    shown = ", ".join(labels[:3])
-    if len(labels) > 3:
-        shown = f"{shown}, +{len(labels) - 3} more"
-    return f"• Still needed: {shown}."
-
-
 def _draft_transparency_layer(
     draft,
     *,
@@ -5554,36 +5726,26 @@ def _draft_transparency_layer(
 
     The AI-use declaration already lives once, in the reflection field text
     itself (see `_with_rcem_ai_declaration`); this layer must not repeat it
-    as a second footer. It only renders when the doctor's own reflective
-    input is still missing and saving needs to be gated on that.
+    as a second footer. It only renders for a photo-only case, whose
+    reflection must come from the doctor's own words.
 
     Names the source *type* only — it never quotes raw case text, so
     patient-identifying detail in the source is not surfaced in the preview.
     """
     if not _draft_has_reflection_fields(draft) or not needs_reflection_detail:
         return ""
-
-    lines = ["", "⚠️ *Your reflection is needed before saving*"]
-
+    # What is still missing is named once, in the closing reply hint. This
+    # note only adds what the hint cannot: a photo alone carries none of the
+    # doctor's own words, so the reflection must come from them.
     if (
         str(input_source or "").strip().lower() in _USER_CONTEXT_REQUIRED_SOURCES
         and not has_user_context
     ):
-        # A photo-origin draft with no words of the doctor's own still warns
-        # here rather than saving quietly — this is purely a reflection-detail
-        # note, not a refusal to draft.
-        source_label = _source_label(input_source)
-        lines.append(
-            f"• Source: {source_label}. Add your own interpretation/reflection before saving."
+        return (
+            f"\n⚠️ Source: {_source_label(input_source)}. Add your own interpretation "
+            "and reflection. I won't write them for you."
         )
-    else:
-        lines.append("• Add what you learned or what you would do differently before saving.")
-
-    gap_line = _missing_fields_review_line(draft)
-    if gap_line:
-        lines.append(gap_line)
-
-    return "\n".join(lines)
+    return ""
 
 
 def _template_requirements(form_type: str):
@@ -5673,7 +5835,7 @@ async def _show_draft_review(
     text = preview + _draft_reply_hint(context)
     keyboard = _build_approval_keyboard(
         improved_once=context.user_data.get("quick_improve_used", False),
-        needs_reflection_detail=needs_reflection_detail,
+        context=context,
     )
     if edit:
         await _safe_edit_text(
@@ -5769,11 +5931,10 @@ def _format_completeness_gap_items(gaps: list[dict]) -> str:
 # is the product model's (`assess_form_essentials`) reading the doctor's own
 # words against requirements derived from the Kaizen schema — not a keyword
 # rule, and not a second opinion on the model's own draft. Everything that
-# can draft a form routes through `_essentials_gate_before_draft`, and only a
-# complete judgement that every essential is present permits a drafting call:
-# a missing essential is asked for, an unavailable one offers a different
-# form, and an assessment that did not complete is retried. There is no path
-# that drafts anyway.
+# can draft a form routes through `_essentials_gate_before_draft`. A missing
+# essential is drafted as a blank gap for the doctor to fill (never invented),
+# an unavailable one offers a different form, and an assessment that did not
+# complete is retried.
 
 # How each essential reads to the doctor when it has to be asked for, and
 # what it means to the model when it is being judged. Anything not named
@@ -5942,49 +6103,6 @@ def _form_requires_reflection(form_type: str, draft=None) -> bool:
     )
 
 
-async def _ask_for_missing_essentials(
-    message,
-    context: ContextTypes.DEFAULT_TYPE,
-    form_type: str,
-    missing: list[dict],
-    *,
-    edit: bool,
-) -> int:
-    """One grouped question naming exactly the essentials still missing.
-
-    Asked items are not remembered, because they are not the question: the
-    question is what the *current* case still lacks. Anything the doctor has
-    since supplied is judged present and drops out of the next ask, so an
-    answered item is never repeated, and a still-missing required detail is
-    never waved through because it was mentioned once before.
-    """
-    context.user_data["chosen_form"] = form_type
-    context.user_data["awaiting_detail"] = True
-    _audit_event(
-        context,
-        "decision_path",
-        decision="essentials_question_asked",
-        form_type=form_type,
-        missing_keys=[item["key"] for item in missing],
-    )
-    _track_funnel_event(
-        context,
-        "essentials_requested",
-        form_type=form_type,
-        missing_count=len(missing),
-    )
-    text = render_message(
-        "pre_draft_completeness_request",
-        items=_format_completeness_gap_items(missing),
-    )
-    if edit:
-        await _safe_edit_text(message, text, reply_markup=_KB_CANCEL)
-        _track_latest_message(context, message)
-    else:
-        await _send_latest_message(message, context, text, reply_markup=_KB_CANCEL)
-    return AWAIT_CASE_INPUT
-
-
 async def _ask_to_retry_essentials_check(
     message,
     context: ContextTypes.DEFAULT_TYPE,
@@ -6060,6 +6178,46 @@ async def _offer_change_form_for_unavailable_essentials(
     return AWAIT_CASE_INPUT
 
 
+# What only the doctor can say about themselves. The case notes describe the
+# patient, so the model drafts the narrative, setting and presentation from
+# them; but it must never assume the doctor's role, performance, supervision
+# or reflection.
+_DOCTOR_ONLY_ESSENTIAL_KEYS = frozenset({"trainee_role", "trainee_performance", "level_of_supervision"})
+
+
+def _blank_judged_missing_essentials(context, draft, case_text: str, form_type: str):
+    """Leave blank the doctor-only essentials they have not supplied.
+
+    Drafting happens before those details are given, so this keeps the model
+    from filling a role, a supervision level or a reflection the doctor never
+    described. It deliberately does not wipe case content (narrative, setting,
+    presentation): a strict "missing" judgement there blanked a narrative the
+    case plainly contained (demo, 25 Sep 2026). The blanks show as gaps.
+    """
+    statuses = _cached_essential_statuses(context, case_text, form_type) or {}
+    reflection_keys = set(_find_reflection_keys(statuses, form_type))
+    missing = [
+        key for key, status in statuses.items()
+        if status == ESSENTIAL_MISSING and (key in _DOCTOR_ONLY_ESSENTIAL_KEYS or key in reflection_keys)
+    ]
+    if not missing or draft is None:
+        return draft
+    if isinstance(draft, FormDraft):
+        fields = dict(draft.fields)
+        changed = False
+        for key in missing:
+            if key in fields and not _is_missing_field_value(fields[key]):
+                fields[key] = ""
+                changed = True
+        return FormDraft(form_type=draft.form_type, fields=fields, uuid=draft.uuid) if changed else draft
+    blanks = {
+        key: type(draft).model_fields[key].default
+        for key in missing
+        if key in type(draft).model_fields and not _is_missing_field_value(getattr(draft, key, None))
+    }
+    return draft.model_copy(update=blanks) if blanks else draft
+
+
 async def _essentials_gate_before_draft(
     message,
     context: ContextTypes.DEFAULT_TYPE,
@@ -6070,22 +6228,17 @@ async def _essentials_gate_before_draft(
 ) -> int | None:
     """Settle the form's essentials before anything is drafted.
 
-    Returns ``None`` **only** when every essential of this form has been
-    judged present — that is the single condition under which a caller may
-    make a drafting call. Every other outcome returns the conversation state
-    to hand back, with the doctor's case retained exactly as sent:
+    Returns ``None`` when the caller may draft: every essential is judged
+    either present or missing. Missing essentials are not asked for up front;
+    the draft leaves them blank and shows them as gaps to fill (draft first,
+    decided 25 Sep 2026). Two outcomes still return a conversation state, with
+    the doctor's case retained exactly as sent:
 
-    * an essential is still missing → one grouped question naming only what
-      is genuinely still absent;
     * an essential is unavailable to the doctor → a different form is
       offered rather than the requirement being invented or skipped;
     * the judgement did not complete (outage, timeout, or a partial,
       duplicated or malformed answer) → a short retry, because a requirement
-      that was never judged cannot be assumed satisfied.
-
-    There is deliberately no "asked once already" exception: a cap on
-    questions would let required content through, which is the one thing
-    this gate exists to prevent.
+      that was never judged cannot be safely blanked or assumed present.
     """
     essentials = _form_essential_requirements(form_type)
     if not essentials or not str(case_text or "").strip():
@@ -6103,7 +6256,24 @@ async def _essentials_gate_before_draft(
 
     missing = [item for item in essentials if statuses.get(item["key"]) == ESSENTIAL_MISSING]
     if missing:
-        return await _ask_for_missing_essentials(message, context, form_type, missing, edit=edit)
+        # Draft first (Moeed, 25 Sep 2026): asking before drafting was a wall
+        # doctors stopped at. The draft is built now, with these fields left
+        # blank on purpose (_blank_judged_missing_essentials) and shown as
+        # gaps the doctor fills inside the draft, one at a time.
+        _audit_event(
+            context,
+            "decision_path",
+            decision="essentials_missing_drafting_with_gaps",
+            form_type=form_type,
+            missing_keys=[item["key"] for item in missing],
+        )
+        _track_funnel_event(
+            context,
+            "essentials_requested",
+            form_type=form_type,
+            missing_count=len(missing),
+        )
+        return None
 
     _audit_event(
         context,
@@ -6528,12 +6698,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             await setup_start(update, context)
             return ConversationHandler.END
         elif deep_link == "file":
-            if has_credentials(update.effective_user.id):
+            if _kaizen_connected(update.effective_user.id):
                 await update.message.reply_text(FILE_CASE_PROMPT)
                 return AWAIT_CASE_INPUT
 
     user_id = update.effective_user.id
-    connected = has_credentials(user_id)
+    connected = _kaizen_connected(user_id)
     if not connected:
         return await _send_start_setup_messages(update, context)
     if not await consent.has_current_consent(user_id):
@@ -6589,7 +6759,7 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
     # /setup command guard: connected users get settings; explicit button
     # clicks (Update Kaizen login / Connect Kaizen) always start setup.
-    if not query and has_credentials(update.effective_user.id):
+    if not query and _kaizen_connected(update.effective_user.id):
         await settings_command(update, context)
         return ConversationHandler.END
 
@@ -6599,17 +6769,43 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         await _retire_clicked_keyboard(query)
     _flow_done(context, "setup")  # fresh start — drop any stale anchor
     context.user_data["_setup_state_hint"] = "username"
+    text, markup = _username_prompt_with_offer(update.effective_user.id, _KAIZEN_USERNAME_PROMPT)
     await _flow_msg(
         update, context,
-        _KAIZEN_USERNAME_PROMPT,
+        text,
+        reply_markup=markup,
         parse_mode="Markdown",
         flow_key="setup",
     )
     return AWAIT_USERNAME
 
 
+def _looks_like_case_not_credential(text: str, *, min_words: int, min_chars: int) -> bool:
+    """A pasted case, not a Kaizen email or password.
+
+    Setup used to swallow it: case text sent while setup waited for an email got
+    "That doesn't look like an email" on every message, and while it waited for
+    a password it was tried as the password.
+    """
+    stripped = (text or "").strip()
+    return "@" not in stripped and len(stripped) >= min_chars and len(stripped.split()) >= min_words
+
+
+async def _leave_setup_for_case(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data.pop("setup_username", None)
+    context.user_data.pop("_setup_state_hint", None)
+    _flow_done(context, "setup")
+    await update.message.reply_text(
+        "That looks like a case rather than your Kaizen login, so I've stopped the Kaizen setup. "
+        "Please send the case again."
+    )
+    return ConversationHandler.END
+
+
 async def setup_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     text = update.message.text.strip()
+    if _looks_like_case_not_credential(text, min_words=8, min_chars=60):
+        return await _leave_setup_for_case(update, context)
     if "@" not in text or "." not in text:
         await _flow_msg(update, context, "⚠️ That doesn't look like an email. What's your Kaizen username?", flow_key="setup")
         return AWAIT_USERNAME
@@ -6746,6 +6942,8 @@ def _clear_setup_retry_credentials(context: ContextTypes.DEFAULT_TYPE) -> None:
 async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     username = context.user_data.get("setup_username", "")
     password = update.message.text.strip()
+    if _looks_like_case_not_credential(password, min_words=12, min_chars=80):
+        return await _leave_setup_for_case(update, context)
 
     # Delete password message for security
     try:
@@ -6866,6 +7064,17 @@ async def _complete_setup_login(
         await _clear_local_portfolio_account_data(user_id, reason="kaizen_account_switch")
 
     store_credentials(user_id, username, password)
+    kaizen_connection.clear_passwordless(user_id)
+    return await _finish_setup_after_connect(update, context, login_ok)
+
+
+async def _finish_setup_after_connect(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    login_ok: bool | str,
+) -> int:
+    """Everything after Kaizen is connected, for either connection method."""
+    user_id = update.effective_user.id
     _track_funnel_event(context, "credentials_connected")
     _clear_setup_retry_credentials(context)
     context.user_data.pop("setup_username", None)
@@ -6908,7 +7117,10 @@ async def _complete_setup_login(
         logger.warning("Health pathway auto-detection save failed", exc_info=True)
         auto_pathway = None
 
-    if auto_level:
+    # Only a first connection sets the curriculum. Every reconnect (including a
+    # passwordless re-sign-in) used to reset it, silently moving 2021-curriculum
+    # doctors onto 2025 forms. The manual level pick already worked this way.
+    if auto_level and not get_curriculum(user_id):
         store_curriculum(user_id, _default_curriculum_for_training_level(auto_level))
 
     if auto_level:
@@ -6951,6 +7163,124 @@ async def _complete_setup_login(
 
     _flow_done(context, "setup")
     return ConversationHandler.END
+
+
+async def passwordless_setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Setup: send a Connect Kaizen link instead of asking for a password."""
+    query = update.callback_query
+    user_id = update.effective_user.id
+    if query:
+        await query.answer()
+        await _retire_clicked_keyboard(query)
+    if not kaizen_connection.passwordless_offered_to(user_id):
+        await _flow_msg(update, context, _KAIZEN_USERNAME_PROMPT, parse_mode="Markdown", flow_key="setup")
+        return AWAIT_USERNAME
+    context.user_data.pop("setup_username", None)
+    context.user_data["_setup_state_hint"] = "passwordless"
+    link = await _create_passwordless_link(user_id)
+    if link is None:
+        await _flow_msg(
+            update, context,
+            _PASSWORDLESS_UNAVAILABLE_TEXT + "\n\n" + _KAIZEN_USERNAME_PROMPT,
+            parse_mode="Markdown",
+            flow_key="setup",
+        )
+        context.user_data["_setup_state_hint"] = "username"
+        return AWAIT_USERNAME
+    await _flow_msg(
+        update, context,
+        _PASSWORDLESS_LINK_TEXT,
+        reply_markup=_passwordless_keyboard(
+            link.url, done_action="passwordless_done", link_action="passwordless_link"
+        ),
+        parse_mode="Markdown",
+        flow_key="setup",
+    )
+    return AWAIT_PASSWORDLESS
+
+
+async def passwordless_setup_new_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Setup: the doctor's link expired or was used; send a fresh one."""
+    return await passwordless_setup_start(update, context)
+
+
+async def passwordless_setup_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Setup: the doctor says they signed in. Prove it before connecting."""
+    query = update.callback_query
+    user_id = update.effective_user.id
+    await query.answer("Checking Kaizen…")
+    probe = await _probe_kept_kaizen_session(user_id)
+    if not probe:
+        text = _PASSWORDLESS_CHECK_FAILED_TEXT if probe is None else _PASSWORDLESS_NOT_SIGNED_IN_TEXT
+        await query.message.reply_text(
+            text,
+            parse_mode="Markdown",
+            reply_markup=query.message.reply_markup,
+        )
+        return AWAIT_PASSWORDLESS
+    await _retire_clicked_keyboard(query)
+    was_password_user = has_credentials(user_id)
+    if was_password_user:
+        # The password is about to be deleted and we can't tell whether the
+        # doctor signed in to the same Kaizen account, so clear the previous
+        # account's local evidence exactly as an account switch does.
+        await _clear_local_portfolio_account_data(user_id, reason="kaizen_account_switch")
+    kaizen_connection.mark_passwordless(user_id)
+    context.user_data.pop("_setup_state_hint", None)
+    return await _finish_setup_after_connect(update, context, probe)
+
+
+async def passwordless_awaiting_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text(
+        "Finish signing in on the Kaizen page, then tap *I've signed in* above. "
+        "Tap *New link* if it has expired.",
+        parse_mode="Markdown",
+    )
+    return AWAIT_PASSWORDLESS
+
+
+async def passwordless_reconnect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Kaizen signed a passwordless user out: send a fresh sign-in link.
+
+    Works from anywhere (after a failed save, from settings); the draft being
+    saved stays in place and is saved once the doctor has signed in again.
+    """
+    query = update.callback_query
+    user_id = update.effective_user.id
+    link = await _create_passwordless_link(user_id)
+    if link is None:
+        await query.message.reply_text(_PASSWORDLESS_UNAVAILABLE_TEXT)
+        return
+    await query.message.reply_text(
+        _PASSWORDLESS_LINK_TEXT,
+        parse_mode="Markdown",
+        reply_markup=_passwordless_keyboard(
+            link.url, done_action="pwl_reconnected", link_action="pwl_reconnect"
+        ),
+    )
+
+
+async def passwordless_reconnected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """After signing in again: check it worked, then finish the waiting save."""
+    query = update.callback_query
+    user_id = update.effective_user.id
+    await query.answer("Checking Kaizen…")
+    probe = await _probe_kept_kaizen_session(user_id)
+    if not probe:
+        text = _PASSWORDLESS_CHECK_FAILED_TEXT if probe is None else _PASSWORDLESS_NOT_SIGNED_IN_TEXT
+        await query.message.reply_text(
+            text,
+            parse_mode="Markdown",
+            reply_markup=query.message.reply_markup,
+        )
+        return None
+    if _load_draft(context):
+        # Same path as the Retry button: the kept draft is saved now.
+        context.user_data["retry_filing_requested"] = True
+        return await handle_approval_approve(update, context)
+    await _retire_clicked_keyboard(query)
+    await query.message.reply_text("✅ Kaizen connected again. Send your next case whenever you're ready.")
+    return None
 
 
 async def setup_retry_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -7194,7 +7524,7 @@ async def _voice_show_settings_screen(update: Update, context: ContextTypes.DEFA
         user_id,
         tier=await get_user_tier(user_id),
         used=used,
-        connected=has_credentials(user_id),
+        connected=_kaizen_connected(user_id),
         is_beta=await is_beta_tester(user_id),
         kaizen_sync=await _safe_kaizen_sync_status(user_id),
     )
@@ -7529,7 +7859,14 @@ async def _voice_run_kaizen_sample(
         )
 
     rows = []
-    if getattr(result, "reason", None) in {
+    passwordless = _is_passwordless_user(update.effective_user.id)
+    if passwordless and getattr(result, "reason", None) == "credentials_missing":
+        body = (
+            "Learning from your previous Kaizen entries needs a username-and-password "
+            "connection, so it isn't available when you connect without sharing your "
+            "password. You can add 3-5 examples manually instead."
+        )
+    elif getattr(result, "reason", None) in {
         "login_required",
         "credentials_missing",
         "credentials_unavailable",
@@ -7683,7 +8020,7 @@ async def handle_info_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     user_id = update.effective_user.id
-    primary = [_BTN_SETUP] if not has_credentials(user_id) else []
+    primary = [_BTN_SETUP] if not _kaizen_connected(user_id) else []
     rows = []
     if primary:
         rows.append(primary)
@@ -7756,15 +8093,21 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
     if action == "retry_filing":
         context.user_data["retry_filing_requested"] = True
         return await handle_approval_approve(update, context)
+    if action == "pwl_reconnected":
+        return await passwordless_reconnected(update, context)
 
     await query.answer()
+
+    if action == "pwl_reconnect":
+        await passwordless_reconnect(update, context)
+        return None
 
     if action == "setup":
         # force_reconnect is set when the user lands here after a Login failed
         # filing — their saved credentials no longer work, so the
         # "already connected" branch would leave them stuck.
         force_reconnect = context.user_data.pop("force_reconnect", False)
-        if has_credentials(user_id) and not force_reconnect:
+        if _kaizen_connected(user_id) and not force_reconnect:
             await query.message.reply_text(
                 "Your Kaizen account is already connected. Just send your next case to file it."
             )
@@ -7789,7 +8132,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
 
     elif action == "file":
-        if not has_credentials(user_id):
+        if not _kaizen_connected(user_id):
             await query.message.reply_text(
                 "🔗 Connect your Kaizen account first.",
                 reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]])
@@ -7825,7 +8168,9 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         )
 
     elif action == "unsigned":
-        if not has_credentials(user_id):
+        if _is_passwordless_user(user_id):
+            await query.message.reply_text(_PASSWORDLESS_FEATURE_UNAVAILABLE_TEXT)
+        elif not has_credentials(user_id):
             await query.message.reply_text(
                 "🔗 Connect your Kaizen account first.",
                 reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]])
@@ -7851,7 +8196,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         back_btn = InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")
         back_markup = InlineKeyboardMarkup([[back_btn]])
 
-        if not has_credentials(user_id):
+        if not _kaizen_connected(user_id):
             await query.message.edit_text(
                 "🔗 Connect your Kaizen account first.",
                 reply_markup=InlineKeyboardMarkup([[_BTN_SETUP], [back_btn]]),
@@ -8075,13 +8420,13 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             user_id,
             tier=tier,
             used=used,
-            connected=has_credentials(user_id),
+            connected=_kaizen_connected(user_id),
             kaizen_sync=await _safe_kaizen_sync_status(user_id),
         )
         await query.message.edit_text(text, reply_markup=keyboard)
 
     elif action == "refresh_portfolio":
-        if not has_credentials(user_id):
+        if not _kaizen_connected(user_id):
             await query.message.edit_text(
                 "🔗 Connect your Kaizen account first, then you can sync Kaizen evidence.",
                 reply_markup=InlineKeyboardMarkup([
@@ -8097,7 +8442,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         )
 
     elif action == "confirm_refresh_portfolio":
-        if not has_credentials(user_id):
+        if not _kaizen_connected(user_id):
             await query.message.edit_text(
                 "🔗 Connect your Kaizen account first, then you can sync Kaizen evidence.",
                 reply_markup=InlineKeyboardMarkup([
@@ -8137,7 +8482,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         back_btn = InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")
         back_markup = InlineKeyboardMarkup([[back_btn]])
 
-        if not has_credentials(user_id):
+        if not _kaizen_connected(user_id):
             await query.message.edit_text(
                 "🔗 Connect your Kaizen account first.",
                 reply_markup=InlineKeyboardMarkup([[_BTN_SETUP], [back_btn]]),
@@ -8278,7 +8623,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         )
 
     elif action == "back_to_menu":
-        connected = has_credentials(user_id)
+        connected = _kaizen_connected(user_id)
         msg_text = WELCOME_MSG_CONNECTED if connected else WELCOME_MSG
         await query.message.edit_text(
             msg_text,
@@ -8531,6 +8876,11 @@ async def _clear_local_portfolio_account_data(user_id: int, *, reason: str) -> d
         cleared["draft_backups"] = draft_backup.purge_user(user_id)
     except Exception:
         logger.warning("Could not clear draft backups for %s", reason, exc_info=True)
+    try:
+        from clinical_persistence import purge_working_case
+        cleared["working_case"] = purge_working_case(user_id)
+    except Exception:
+        logger.warning("Could not clear working case for %s", reason, exc_info=True)
     return cleared
 
 
@@ -8597,7 +8947,7 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         user_id,
         tier=tier,
         used=used,
-        connected=has_credentials(user_id),
+        connected=_kaizen_connected(user_id),
         is_beta=await is_beta_tester(user_id),
         kaizen_sync=await _safe_kaizen_sync_status(user_id),
     )
@@ -9012,7 +9362,7 @@ def _sync_status_is_fresh(status: KaizenSyncStatus | None) -> bool:
 
 async def _health_needs_kaizen_refresh(user_id: int) -> bool:
     """Gate the primary /health journey through refresh when data is stale."""
-    if not has_credentials(user_id):
+    if not _kaizen_connected(user_id):
         return False
     return not _sync_status_is_fresh(await _safe_kaizen_sync_status(user_id))
 
@@ -9423,7 +9773,7 @@ async def handle_pathway_choice(update: Update, context: ContextTypes.DEFAULT_TY
             update.effective_user.id,
             tier=await get_user_tier(update.effective_user.id),
             used=used,
-            connected=has_credentials(update.effective_user.id),
+            connected=_kaizen_connected(update.effective_user.id),
             is_beta=await is_beta_tester(update.effective_user.id),
             kaizen_sync=await _safe_kaizen_sync_status(update.effective_user.id),
         )
@@ -10574,8 +10924,6 @@ async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: in
     full code must be passed into ``extract_form_data`` so the resulting draft
     carries the correct Kaizen UUID for the chosen curriculum variant.
     """
-    # Set tier for provider chain gating
-    os.environ["CURRENT_USER_TIER"] = context.user_data.get("user_tier", "free")
     vp = get_voice_profile(user_id) or ""
     name_failures_before = service_failure_count()
     base_form_type = form_type[:-5] if form_type.endswith("_2021") else form_type
@@ -10610,6 +10958,7 @@ async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: in
     else:
         context.user_data.pop("name_check_unavailable", None)
 
+    draft = _blank_judged_missing_essentials(context, draft, case_text, form_type)
     _apply_profile_training_stage(draft, user_id, form_type)
     _apply_default_dates(draft, form_type)
     _store_pending_draft(context, draft)
@@ -10854,6 +11203,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Route callback queries based on prefix."""
     query = update.callback_query
     data = query.data
+    if _is_stale_case_button(context, data):
+        await query.answer("That button is from an earlier step. Use the latest message.", show_alert=True)
+        return None
+    if data.startswith("CANCEL|draft|"):
+        data = "CANCEL|draft"
     _remember_audit_user(context, update)
     _audit_event(
         context,
@@ -10883,7 +11237,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "ACTION|file":
         await query.answer()
         user_id = update.effective_user.id
-        if not has_credentials(user_id):
+        if not _kaizen_connected(user_id):
             await query.message.reply_text(
                 "Connect your Kaizen account first.",
                 reply_markup=InlineKeyboardMarkup([
@@ -10936,7 +11290,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=_build_approval_keyboard(
                 improved_once=context.user_data.get("quick_improve_used", False),
                 can_back_to_missing=True,
-                needs_reflection_detail=needs_reflection_detail,
+                context=context,
             ),
             parse_mode="Markdown",
         )
@@ -11726,6 +12080,7 @@ async def _regenerate_active_draft_with_feedback(
                 ),
                 timeout=45,
         )
+        updated = _blank_judged_missing_essentials(context, updated, case_text, form_type)
         _store_draft(context, updated)
         # The gate above already judged this exact case and form, so the
         # reflection decision here reads that fresh judgement rather than a
@@ -12244,7 +12599,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         context.user_data.pop("last_bot_chat_id", None)
 
     # Check credentials
-    if not has_credentials(user_id):
+    if not _kaizen_connected(user_id):
         if update.message and update.message.text:
             email = _extract_setup_email_candidate(update.message.text)
             if email:
@@ -12458,7 +12813,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     user_id,
                     tier=tier,
                     used=used,
-                    connected=has_credentials(user_id),
+                    connected=_kaizen_connected(user_id),
                     is_beta=await is_beta_tester(user_id),
                     kaizen_sync=await _safe_kaizen_sync_status(user_id),
                 )
@@ -12478,7 +12833,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     user_id,
                     tier=tier,
                     used=used,
-                    connected=has_credentials(user_id),
+                    connected=_kaizen_connected(user_id),
                     is_beta=await is_beta_tester(user_id),
                     kaizen_sync=await _safe_kaizen_sync_status(user_id),
                 )
@@ -13933,7 +14288,13 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         if query:
             await query.answer("⏳ Already saving your draft — give it a moment.")
         return None
+    if query and _is_stale_case_button(context, query.data):
+        await query.answer("That Save button is from an earlier step. Use the latest message.", show_alert=True)
+        return None
     context.user_data["filing_in_progress"] = True
+    # Every Save button already sent is spent: a second queued tap on it must
+    # not file this draft again. Buttons shown after this attempt get the new token.
+    context.user_data["case_token"] = secrets.token_hex(3)
 
     if query:
         try:
@@ -13958,6 +14319,10 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
 
     user_id = update.effective_user.id
     creds = get_credentials(user_id)
+    if not creds and _is_passwordless_user(user_id):
+        # No stored login: the filer uses the kept session, and a lapsed
+        # session comes back as a login failure that offers a fresh link.
+        creds = ("", "")
     if not creds:
         context.user_data.clear()
         await source_message.reply_text(
@@ -13975,48 +14340,12 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             context,
             "That earlier draft is no longer active.",
         )
+    # Save is always available (draft first, 25 Sep 2026): a Kaizen draft may
+    # be incomplete and the doctor finishes it there. RCEM's rule still holds:
+    # a reflection the doctor has not supplied is left blank, never saved as
+    # AI wording. The post-save report names the blank fields to complete.
     if _set_reflection_detail_gate(context, draft):
-        context.user_data.pop("filing_in_progress", None)
-        context.user_data.pop("retry_filing_requested", None)
-        review_text = _format_draft_preview_for_context(draft, context) + _draft_reply_hint(context)
-        if query:
-            await _safe_edit_text(
-                source_message,
-                review_text,
-                reply_markup=_active_draft_keyboard(context),
-                parse_mode="Markdown",
-            )
-        else:
-            await source_message.reply_text(
-                review_text,
-                reply_markup=_active_draft_keyboard(context),
-                parse_mode="Markdown",
-            )
-        return AWAIT_APPROVAL
-    # Reflection is covered above by the dedicated add-reflection button. A
-    # doctor can still edit a shown draft down to below the schema's other
-    # required fields (e.g. clearing the clinical setting) before tapping
-    # Save. Reuse the same completeness decision used before the preview, so
-    # a removed essential is caught here too instead of filing an incomplete
-    # draft, and the doctor is only asked for what is now actually missing.
-    pre_file_form_type = context.user_data.get("chosen_form") or _draft_form_type(draft)
-    pre_file_gaps = [
-        gap for gap in _pre_draft_completeness_gaps(context, draft, pre_file_form_type)
-        if gap["key"] != "reflection"
-    ]
-    if pre_file_gaps:
-        context.user_data.pop("filing_in_progress", None)
-        context.user_data.pop("retry_filing_requested", None)
-        context.user_data["awaiting_detail"] = True
-        gap_text = render_message(
-            "pre_draft_completeness_request",
-            items=_format_completeness_gap_items(pre_file_gaps),
-        )
-        if query:
-            await _safe_edit_text(source_message, gap_text, reply_markup=_KB_CANCEL)
-        else:
-            await _send_latest_message(source_message, context, gap_text, reply_markup=_KB_CANCEL)
-        return AWAIT_CASE_INPUT
+        draft = _without_reflection_text(draft)
     filing_draft = _with_rcem_ai_declaration(draft)
     if _needs_filing_curriculum_choice(user_id):
         context.user_data.pop("filing_in_progress", None)
@@ -14210,7 +14539,8 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 credentials={"username": username, "password": password},
                 curriculum_links=curriculum_links,
                 form_name=form_name,
-                reuse_draft=reuse_existing_draft,
+                # Retry reopens only the exact draft the last attempt reached.
+                reuse_draft_url=context.user_data.get("kaizen_draft_url") if reuse_existing_draft else None,
                 attachment_path=attachment_path,
                 telegram_user_id=user_id,
             ),
@@ -14342,6 +14672,9 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         status in ("failed", "partial")
         and len(filled) > 0
         and _classify_filing_failure(error, skipped, status, filled) == "SAVE_FAILURE"
+        # Without the draft's own address a second pass would create a
+        # duplicate; the doctor gets the save-failure message instead.
+        and result.get("draft_url")
     ):
         try:
             await ack.edit_text(
@@ -14363,7 +14696,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                     credentials={"username": username, "password": password},
                     curriculum_links=curriculum_links,
                     form_name=form_name,
-                    reuse_draft=True,
+                    reuse_draft_url=result["draft_url"],
                     attachment_path=attachment_path,
                     telegram_user_id=user_id,
                 ),
@@ -14387,6 +14720,9 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             context.user_data.pop("filing_in_progress", None)
             retry_typing_stop.set()
             retry_typing_task.cancel()
+
+    if result.get("draft_url"):
+        context.user_data["kaizen_draft_url"] = result["draft_url"]
 
     defaulted_fields = set(result.get("defaulted_fields") or [])
     date_default_note = ""
@@ -14657,6 +14993,36 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         # message. force_reconnect lets the ACTION|setup handler bypass the
         # "already connected" short-circuit when the user taps Reconnect.
         is_login_failure = _is_session_failure_error(error)
+        if is_login_failure and platform == "kaizen" and _is_passwordless_user(user_id):
+            # Expected about once a day for passwordless users, so no operator
+            # alert. The draft stays; signing in again saves it.
+            msg = (
+                f"🔒 Kaizen has signed you out\n"
+                f"{form_name}\n\n"
+                "This happens about once a day when you connect without sharing "
+                "your password. Your draft is kept. Tap below to sign in again "
+                "and I'll save it."
+            )
+            end_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔒 Sign in again", callback_data="ACTION|pwl_reconnect")],
+                [InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|reset")],
+            ])
+            context.user_data["last_filing_status"] = status
+            context.user_data["last_filing_form_name"] = form_name
+            context.user_data["last_filing_report"] = msg
+            try:
+                await ack.edit_text(msg, reply_markup=end_keyboard)
+            except Exception:
+                logger.warning("Could not edit sign-in-again report, sending fresh message", exc_info=True)
+                try:
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text=msg,
+                        reply_markup=end_keyboard,
+                    )
+                except Exception:
+                    logger.warning("Could not send sign-in-again report", exc_info=True)
+            return AWAIT_APPROVAL
         if is_login_failure and platform == "kaizen":
             await _alert_filing_failure(
                 context,
@@ -14845,7 +15211,7 @@ async def handle_approval_submit(update: Update, context: ContextTypes.DEFAULT_T
         )
     await query.message.reply_text(
         "Portfolio Guru only saves Kaizen entries as drafts. Use Save to Kaizen when you're ready.",
-        reply_markup=_build_approval_keyboard(),
+        reply_markup=_build_approval_keyboard(context=context),
     )
     return AWAIT_APPROVAL
 
@@ -14906,7 +15272,7 @@ async def handle_review_draft(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.error("Draft review failed: %s", e)
         await query.message.reply_text(
             "⚠️ Review failed — you can still file your draft.",
-            reply_markup=_build_post_review_keyboard(),
+            reply_markup=_build_post_review_keyboard(context=context),
         )
         return AWAIT_APPROVAL
 
@@ -14946,7 +15312,7 @@ async def handle_review_draft(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     await query.message.reply_text(
         "\n".join(lines),
-        reply_markup=_build_post_review_keyboard(),
+        reply_markup=_build_post_review_keyboard(context=context),
         parse_mode="Markdown",
     )
     return AWAIT_APPROVAL
@@ -15226,7 +15592,7 @@ async def handle_amend_draft(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.message.reply_text(
         "✏️ *Amending this draft.* Send changes, then tap *Save updated draft* or *Cancel amend*.\n\n"
         + preview,
-        reply_markup=_build_amend_keyboard(improved_once=False),
+        reply_markup=_build_amend_keyboard(improved_once=False, context=context),
         parse_mode="Markdown",
     )
     return AWAIT_APPROVAL
@@ -15594,6 +15960,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
         phase=phase,
         legacy_intent=intent,
         classifier_failed=classifier_failed,
+        draft_has_gaps=has_draft and bool(_draft_gaps(context)),
     )
 
     if amend_mode:
@@ -15956,6 +16323,9 @@ async def unsigned_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     """Handle /unsigned — Unlimited feature. Shows date-range picker, then scans Kaizen."""
     user_id = update.effective_user.id
 
+    if _is_passwordless_user(user_id):
+        await update.message.reply_text(_PASSWORDLESS_FEATURE_UNAVAILABLE_TEXT)
+        return
     if not has_credentials(user_id):
         await update.message.reply_text(
             "🔗 Connect your Kaizen account first.\n\nOpen /settings to get started.",
@@ -16395,7 +16765,13 @@ async def privacy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         f"{status_line}\n\n"
         "• When drafting, the anonymised case details you provide are processed by Google Gemini via Vertex AI in the UK (London region).\n"
         "• Kaizen credentials are stored encrypted and never shared with the AI model.\n"
-        "• Drafts only — nothing is ever submitted to a supervisor.\n"
+        + (
+            "• Or connect without sharing your password: you sign in to Kaizen yourself and only "
+            "the signed-in session is kept, encrypted, until Kaizen ends it (about a day).\n"
+            if kaizen_connection.passwordless_offered_to(update.effective_user.id)
+            else ""
+        )
+        + "• Drafts only — nothing is ever submitted to a supervisor.\n"
         "• You are responsible for anonymising patients before sending.\n"
         "• /reset withdraws consent and erases Portfolio Guru's stored data (UK GDPR Art. 17)."
     )
@@ -16416,19 +16792,22 @@ def build_application() -> Application:
     from extractor import assert_eu_routing
     assert_eu_routing()
 
-    persistence_path = os.path.expanduser("~/.openclaw/data/portfolio-guru/bot_persistence")
+    persistence_path = str(data_path("bot_persistence"))
     os.makedirs(os.path.dirname(persistence_path), exist_ok=True)
     # Clinical content stays in memory for the conversation and never reaches
     # the pickle; see clinical_persistence.py. The one-shot purge repairs files
     # written before that was true.
     from clinical_persistence import ClinicalScrubbingPersistence, purge_existing_file
     logger.info("Persistence clinical purge: %s", purge_existing_file(persistence_path))
-    persistence = ClinicalScrubbingPersistence(filepath=persistence_path)
+    # Flush every 5 s rather than PTB's 60 s, so a crash or hard kill loses
+    # seconds of conversation state, not a minute.
+    persistence = ClinicalScrubbingPersistence(filepath=persistence_path, update_interval=5)
 
     application = (
         Application.builder()
         .token(token)
         .persistence(persistence)
+        .concurrent_updates(PerUserUpdateProcessor())
         .read_timeout(30)
         .write_timeout(30)
         .connect_timeout(30)
@@ -16444,7 +16823,8 @@ def build_application() -> Application:
             CommandHandler("start", start),
             # Let thin-case buttons re-enter the case conversation even if the
             # user taps them after the active state has been lost.
-            CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:file|reset|cancel|continue_thin|unsigned|status|health|help|voice)$"),
+            CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:file|reset|cancel|continue_thin|unsigned|status|health|help|voice|retry_filing)$"),
+            CallbackQueryHandler(passwordless_reconnected, pattern=r"^ACTION\|pwl_reconnected$"),
             CallbackQueryHandler(handle_same_case_another, pattern=r"^ACTION\|same_case_another$"),
             CallbackQueryHandler(handle_amend_draft, pattern=r"^AMEND\|"),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_case_input),
@@ -16472,8 +16852,15 @@ def build_application() -> Application:
             ],
             AWAIT_USERNAME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, setup_username),
+                CallbackQueryHandler(passwordless_setup_start, pattern=r"^ACTION\|connect_passwordless$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|cancel$"),
                 MessageHandler(~filters.TEXT & ~filters.COMMAND, _setup_wrong_input),
+            ],
+            AWAIT_PASSWORDLESS: [
+                CallbackQueryHandler(passwordless_setup_done, pattern=r"^ACTION\|passwordless_done$"),
+                CallbackQueryHandler(passwordless_setup_new_link, pattern=r"^ACTION\|passwordless_link$"),
+                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|cancel$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, passwordless_awaiting_text),
             ],
             AWAIT_PASSWORD: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, setup_password),
@@ -16547,7 +16934,7 @@ def build_application() -> Application:
             AWAIT_APPROVAL: [
                 CallbackQueryHandler(handle_document_intent, pattern=r"^DOCUSE\|"),
                 CallbackQueryHandler(handle_approval_submit, pattern=r"^APPROVE\|submit$"),
-                CallbackQueryHandler(handle_approval_approve, pattern=r"^APPROVE\|draft$"),
+                CallbackQueryHandler(handle_approval_approve, pattern=r"^APPROVE\|draft(?:\|[0-9a-f]+)?$"),
                 CallbackQueryHandler(handle_attachment_confirm, pattern=r"^ATTACH\|(?:yes|no)$"),
                 CallbackQueryHandler(handle_quick_improve, pattern=r"^IMPROVE\|reflection$"),
                 CallbackQueryHandler(handle_review_draft, pattern=r"^REVIEW\|draft$"),
@@ -16597,6 +16984,11 @@ def build_application() -> Application:
                     r"retry_recommend|retry_template))$"
                 ),
             ),
+            CallbackQueryHandler(passwordless_reconnected, pattern=r"^ACTION\|pwl_reconnected$"),
+            # Last: input the current step has no handler for (typing at a
+            # button-only step, a voice note while picking a field) used to be
+            # dropped without a reply.
+            MessageHandler(~filters.COMMAND, _reply_use_current_step),
         ],
         per_message=False,
         allow_reentry=False,
@@ -16613,8 +17005,15 @@ def build_application() -> Application:
         states={
             AWAIT_USERNAME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, setup_username),
+                CallbackQueryHandler(passwordless_setup_start, pattern=r"^ACTION\|connect_passwordless$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|cancel$"),
                 MessageHandler(~filters.TEXT & ~filters.COMMAND, _setup_wrong_input),
+            ],
+            AWAIT_PASSWORDLESS: [
+                CallbackQueryHandler(passwordless_setup_done, pattern=r"^ACTION\|passwordless_done$"),
+                CallbackQueryHandler(passwordless_setup_new_link, pattern=r"^ACTION\|passwordless_link$"),
+                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|cancel$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, passwordless_awaiting_text),
             ],
             AWAIT_PASSWORD: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, setup_password),
@@ -16627,6 +17026,7 @@ def build_application() -> Application:
         },
         fallbacks=[CommandHandler("start", start), CommandHandler("cancel", setup_cancel)],
         allow_reentry=True,
+        conversation_timeout=SIDE_FLOW_TIMEOUT,
     )
 
     # Register handlers
@@ -16681,7 +17081,9 @@ def build_application() -> Application:
     application.add_handler(
         CallbackQueryHandler(
             handle_action_button,
-            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|setup$|voice$|same_case_another$|retry_recommend$|retry_template$|back_to_missing$|retry_setup_login$).+",
+            # Buttons that move the case conversation must reach case_conv, or
+            # the state they return is thrown away (Retry left the case stuck).
+            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|setup$|voice$|same_case_another$|retry_recommend$|retry_template$|back_to_missing$|retry_setup_login$|connect_passwordless$|passwordless_done$|passwordless_link$|retry_filing$|pwl_reconnected$|add_reflection_detail$).+",
         )
     )
     application.add_handler(CallbackQueryHandler(handle_feedback, pattern=r"^FEEDBACK\|"))
@@ -16731,6 +17133,7 @@ def build_application() -> Application:
         },
         fallbacks=[CommandHandler("start", start), CommandHandler("cancel", setup_cancel)],
         allow_reentry=True,
+        conversation_timeout=SIDE_FLOW_TIMEOUT,
     )
 
     pathway_conv = ConversationHandler(
@@ -16740,6 +17143,7 @@ def build_application() -> Application:
         },
         fallbacks=[CommandHandler("start", start), CommandHandler("cancel", setup_cancel)],
         allow_reentry=True,
+        conversation_timeout=SIDE_FLOW_TIMEOUT,
     )
 
     application.add_handler(setup_conv)
@@ -16769,8 +17173,37 @@ def build_application() -> Application:
     # NOTE: CallbackQueryHandler already registered in case_conv fallbacks.
     # Do NOT add a second one here — causes duplicate message delivery.
 
+    # Must stay the last group-0 handler: a tap nothing above claimed (a button
+    # from an earlier step or an old conversation) is answered instead of
+    # leaving Telegram's spinner running with no reply.
+    application.add_handler(CallbackQueryHandler(_answer_unhandled_button, pattern=r"^.*$"))
+
     _install_dogfood_audit_bot_hooks(application)
     return application
+
+
+# Setup, writing-style and pathway flows sit in front of case capture. Left
+# open, they swallowed the doctor's next case, so they close after 15 minutes.
+SIDE_FLOW_TIMEOUT = timedelta(minutes=15)
+
+
+async def _answer_unhandled_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    logger.info("Unhandled button tap: data=%s user=%s", (query.data or "")[:40], update.effective_user.id)
+    try:
+        await query.answer(
+            "That button is from an earlier step. Use the latest message, or send a new case.",
+            show_alert=True,
+        )
+    except Exception:
+        logger.debug("Could not answer unhandled button", exc_info=True)
+
+
+async def _reply_use_current_step(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        "I can't use that at this step. Please use the buttons on my last message, or /cancel to start again."
+    )
+    return None
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -16824,33 +17257,29 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     except Exception:
         logger.debug("operator alert failed", exc_info=True)
 
-    # Generic fallback — preserve draft if we're in approval state
+    # Generic fallback. It used to edit an old message far up the chat, blame
+    # "filing" whatever had failed, and offer a Retry that saved to Kaizen. Now
+    # it says what is known, at the bottom of the chat, and saves nothing.
     if update and hasattr(update, 'effective_message') and update.effective_message:
-        # Check if we have a draft in user_data (means we're in approval flow)
-        draft = None
-        if hasattr(context, 'user_data'):
-            draft = _load_draft(context)
-        
-        if draft:
-            # We have a draft — offer retry + start fresh
-            retry_keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_filing")],
-                [InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|reset")],
-            ])
-            await _edit_last_bot_msg(
-                context,
-                update.effective_message.chat_id,
-                "Something went wrong while filing. Try again or file another case.",
-                reply_markup=retry_keyboard,
+        user_data = getattr(context, "user_data", None) or {}
+        # The handler that set this has died; with one update per user at a
+        # time nothing else is saving, and a stuck flag blocked every later Save.
+        was_saving = bool(user_data.pop("filing_in_progress", False))
+        draft = _load_draft(context) if user_data else None
+        if was_saving:
+            text = (
+                "Something went wrong while saving to Kaizen. Please check your Kaizen drafts "
+                "before trying again, in case it saved. Your draft is still here."
             )
+        elif draft:
+            text = "Something went wrong on my side. Nothing was saved to Kaizen and your draft is still here."
         else:
-            # No draft — just start fresh
-            await _edit_last_bot_msg(
-                context,
-                update.effective_message.chat_id,
-                "Something went wrong. Use the latest message to start again.",
-                reply_markup=_build_next_step_keyboard(update.effective_user.id),
-            )
+            text = "Something went wrong on my side. Nothing was saved. Please send your case again."
+        keyboard = _active_draft_keyboard(context) if draft else _build_next_step_keyboard(update.effective_user.id)
+        try:
+            await update.effective_chat.send_message(text, reply_markup=keyboard)
+        except Exception:
+            logger.warning("Could not send the error reply", exc_info=True)
 
 
 def main():
@@ -16874,7 +17303,9 @@ def main():
 
     # Clear any existing webhook so polling works
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-    _req.post(f"https://api.telegram.org/bot{token}/deleteWebhook", json={"drop_pending_updates": True})
+    # Keep messages sent while the bot was restarting: a deploy used to discard
+    # them, so a doctor's case or button tap during the restart simply vanished.
+    _req.post(f"https://api.telegram.org/bot{token}/deleteWebhook", json={"drop_pending_updates": False})
     logger.info("Webhook cleared - polling mode active")
 
     application = build_application()
@@ -17033,7 +17464,7 @@ def main():
         logger.info("Portfolio Guru live commit: unavailable")
 
     logger.info("Portfolio Guru v2 starting in POLLING mode...")
-    application.run_polling(drop_pending_updates=True)
+    application.run_polling(drop_pending_updates=False)
 
 
 if __name__ == "__main__":

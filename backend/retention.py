@@ -7,7 +7,8 @@ false on three counts, all now fixed elsewhere:
 - ``drafts/`` held plaintext case narrative that survived /reset entirely
   (now encrypted, erased on save, TTL'd — see ``draft_backup.py``);
 - ``bot_persistence`` retained case text and drafts for 20 users indefinitely
-  (now scrubbed before it reaches disk — see ``clinical_persistence.py``);
+  (now scrubbed before it reaches disk; only the case in progress is kept,
+  encrypted, for at most 24 hours — see ``clinical_persistence.py``);
 - ``dogfood-audit.ndjson`` held 44MB of readable narrative
   (now restricted to operator and synthetic traffic).
 

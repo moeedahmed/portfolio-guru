@@ -8,6 +8,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from data_paths import data_path
 
 # Add backend to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
@@ -55,7 +56,7 @@ def get_first_credentials():
     from cryptography.fernet import Fernet
     from sqlmodel import Session, create_engine, select
 
-    db_path = os.path.expanduser("~/.openclaw/data/portfolio-guru/portfolio_guru.db")
+    db_path = str(data_path("portfolio_guru.db"))
     if not os.path.exists(db_path):
         raise FileNotFoundError(f"Database not found: {db_path}")
 

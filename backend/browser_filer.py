@@ -19,13 +19,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
+from data_paths import data_path
 
 from selector_logger import SelectorLogger
 from model_config import browser_fallback_model, gemini_fast_model
 
 logger = logging.getLogger(__name__)
 
-BROWSER_USE_LOG_DIR = Path.home() / ".openclaw/data/portfolio-guru/browser-use-logs"
+BROWSER_USE_LOG_DIR = data_path("browser-use-logs")
 
 
 # Field key → human-readable label mapping for task prompt

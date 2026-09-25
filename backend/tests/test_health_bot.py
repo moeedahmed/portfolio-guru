@@ -1987,3 +1987,20 @@ def test_format_health_activity_snapshot_uses_indexed_kaizen_coverage_when_prese
     assert "SLO 8" in text
     assert "not your full Kaizen strength" not in text
     assert "Portfolio Guru-linked" not in text
+
+
+@pytest.mark.asyncio
+async def test_weekly_nudge_chart_renders_from_the_real_stats_shape(monkeypatch, tmp_path):
+    """The chart read keys the stats never had; every weekly digest since
+    22 August went out without its chart. Build one from the producer's shape."""
+    import os
+    import bot
+    import portfolio_chart
+
+    async def stats(user_id):
+        return {"cases": 3, "gap": ("CBD", 12), "top_form": ("DOPS", 2), "form_types_this_month": 2}
+
+    monkeypatch.setattr(bot, "_compute_weekly_stats", stats)
+    monkeypatch.chdir(tmp_path)
+    path = await portfolio_chart.generate_weekly_nudge_chart_async(4242)
+    assert os.path.exists(path) and os.path.getsize(path) > 0

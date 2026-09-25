@@ -184,7 +184,7 @@ class _Context:
 def chase_job(tmp_path, monkeypatch):
     """Import the job with the run sentinel redirected away from the real home."""
     monkeypatch.setenv("USAGE_DB_PATH", str(tmp_path / "chase_job.db"))
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("PORTFOLIO_GURU_DATA_DIR", str(tmp_path))
     import bot as bot_module
 
     return bot_module

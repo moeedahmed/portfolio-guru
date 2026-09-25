@@ -35,6 +35,11 @@ cat > "$PLIST_PATH" <<PLIST
   <key>KeepAlive</key>
   <true/>
 
+  <!-- On SIGTERM the bot finishes updates already running, including a Kaizen
+       save of up to 300 s. launchd's default 20 s would kill it mid-save. -->
+  <key>ExitTimeOut</key>
+  <integer>330</integer>
+
   <key>StandardOutPath</key>
   <string>${BOT_LOG}</string>
 

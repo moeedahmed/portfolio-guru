@@ -6,10 +6,11 @@ import os
 from typing import Optional
 from datetime import datetime
 from sqlmodel import SQLModel, Field, Session, create_engine, select
+from data_paths import data_path
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
-    f"sqlite:///{os.path.expanduser('~/.openclaw/data/portfolio-guru/portfolio_guru.db')}"
+    f"sqlite:///{data_path('portfolio_guru.db')}"
 )
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
@@ -31,6 +32,10 @@ class UserProfile(SQLModel, table=True):
     # portfolio and the current bot maps that to HIGHER as a default. Read-only here;
     # mutated only through the demotion-safe `store_kaizen_role` helper.
     kaizen_role: Optional[str] = Field(default=None)
+    # How the user connected Kaizen: "passwordless" when they sign in on the
+    # Connect Kaizen page and only the signed-in session is kept. Password
+    # users are recognised by their stored credentials, so this stays None.
+    kaizen_connection: Optional[str] = Field(default=None)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -42,6 +47,7 @@ def init_profile_db():
     # Migrate: add columns that create_all won't alter on existing tables.
     _migrate_add_column("curriculum", "TEXT")
     _migrate_add_column("kaizen_role", "TEXT")
+    _migrate_add_column("kaizen_connection", "TEXT")
 
 
 def _migrate_add_column(column_name: str, column_type: str) -> None:
@@ -73,6 +79,7 @@ def _autoapply_userprofile_migrations() -> None:
         init_profile_db()
         _migrate_add_column("curriculum", "TEXT")
         _migrate_add_column("kaizen_role", "TEXT")
+        _migrate_add_column("kaizen_connection", "TEXT")
     except Exception:
         pass
 
@@ -232,6 +239,28 @@ def store_kaizen_role(telegram_user_id: int, role: Optional[str]) -> None:
                 kaizen_role=role,
             ))
         session.commit()
+
+
+def store_kaizen_connection(telegram_user_id: int, method: Optional[str]) -> None:
+    """Record how the user connected Kaizen (``"passwordless"`` or None)."""
+    with Session(engine) as session:
+        existing = _select_profile(session, telegram_user_id)
+        if existing:
+            existing.kaizen_connection = method
+            existing.updated_at = datetime.utcnow()
+            session.add(existing)
+        else:
+            session.add(UserProfile(
+                telegram_user_id=telegram_user_id,
+                kaizen_connection=method,
+            ))
+        session.commit()
+
+
+def get_kaizen_connection(telegram_user_id: int) -> Optional[str]:
+    with Session(engine) as session:
+        profile = _select_profile(session, telegram_user_id)
+        return profile.kaizen_connection if profile else None
 
 
 def get_kaizen_role(telegram_user_id: int) -> Optional[str]:

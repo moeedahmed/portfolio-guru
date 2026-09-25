@@ -362,7 +362,7 @@ async def test_filer_router_uses_deterministic_esle_assessed_alias():
 
     assert result["status"] == "success"
     assert deterministic.await_args.args[1] == "ESLE_PART1_2"
-    assert deterministic.await_args.kwargs["reuse_draft"] is False
+    assert deterministic.await_args.kwargs["reuse_draft_url"] is None
 
 
 @pytest.mark.asyncio
@@ -379,10 +379,10 @@ async def test_filer_router_reuses_existing_draft_only_when_requested():
             form_type="DOPS",
             fields={"reflection": "Retry the same DOPS draft"},
             credentials={"username": "u", "password": "p"},
-            reuse_draft=True,
+            reuse_draft_url="https://kaizenep.com/events/fillin/draft-doc-id",
         )
 
-    assert deterministic.await_args.kwargs["reuse_draft"] is True
+    assert deterministic.await_args.kwargs["reuse_draft_url"] == "https://kaizenep.com/events/fillin/draft-doc-id"
 
 
 def test_schema_required_fields_have_map_merge_or_explicit_safe_skip():

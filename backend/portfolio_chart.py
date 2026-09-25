@@ -547,7 +547,7 @@ async def generate_weekly_nudge_chart_async(user_id: int) -> str:
     data = await _collect_nudge(user_id)
     return _render_nudge_card(
         user_id=user_id,
-        cases_this_week=data["cases_this_week"],
+        cases_this_week=data["cases"],
         form_types_this_month=data["form_types_this_month"],
         top_form=data.get("top_form"),
         gap=data.get("gap"),

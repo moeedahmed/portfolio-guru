@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import re
 from unittest.mock import AsyncMock
 
 from telegram import Bot, Chat, Message, Update, User, CallbackQuery
@@ -170,3 +171,8 @@ def isolate_bot_storage(monkeypatch, tmp_path, *, audit_path=None):
     }.items():
         monkeypatch.setenv(key, str(audit_path if key == "PORTFOLIO_GURU_DOGFOOD_AUDIT_PATH"
                                    and audit_path else tmp_path / filename))
+
+
+def unstamp(callback_data):
+    """Drop the per-case token from Save/Cancel buttons (bot._case_token)."""
+    return re.sub(r"^(APPROVE|CANCEL)\|draft\|[0-9a-f]+$", r"\1|draft", callback_data or "")

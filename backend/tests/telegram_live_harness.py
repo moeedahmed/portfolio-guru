@@ -167,10 +167,11 @@ def classify_post_click_draft_state(message) -> str:
     """Classify the message the bot shows right after a form-choice click.
 
     The only two bounded states this journey is allowed to see are the ready
-    draft (`_build_approval_keyboard` in bot.py: "Save to Kaizen" + "Cancel")
-    and the bounded missing-essentials prompt (`_ask_for_missing_essentials`,
-    rendered from the `pre_draft_completeness_request` template with a
-    Cancel-only keyboard). Anything else — including a ready-looking message
+    draft (`_build_approval_keyboard` in bot.py: a Save button + "Cancel") and
+    the retired missing-essentials prompt. Since 25 Sep 2026 missing details
+    are listed inside the ready draft, so a live run should only ever see
+    "ready"; the second state stays recognised so an old prompt fails
+    loudly rather than being guessed at. Anything else — including a ready-looking message
     that also carries the missing-essentials marker, or a missing-essentials
     message with extra buttons — fails closed rather than being guessed at.
     This is deliberately not a general flow engine: it recognises exactly

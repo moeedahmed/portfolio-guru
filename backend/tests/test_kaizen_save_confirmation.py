@@ -76,7 +76,6 @@ async def test_repeated_tickets_create_new_forms_by_default():
     with patch("kaizen_form_filer.async_playwright", return_value=ap), \
          patch("kaizen_form_filer.KAIZEN_USE_CDP", False), \
          patch("kaizen_form_filer._login", new=AsyncMock(return_value=True)), \
-         patch("kaizen_form_filer._find_existing_draft", new=AsyncMock(return_value=True)) as find_existing, \
          patch("kaizen_form_filer._fill_field_legacy", new=AsyncMock(return_value=True)), \
          patch("kaizen_form_filer._save_form", new=AsyncMock(return_value=True)), \
          patch("kaizen_form_filer._verify_entry_saved", new=AsyncMock(return_value=True)), \
@@ -86,5 +85,58 @@ async def test_repeated_tickets_create_new_forms_by_default():
 
     assert first["status"] == "success"
     assert second["status"] == "success"
-    find_existing.assert_not_awaited()
     assert page.goto.await_count == 2
+
+
+def _playwright_with(page):
+    browser = AsyncMock()
+    browser.new_page = AsyncMock(return_value=page)
+    pw = AsyncMock()
+    pw.chromium.launch = AsyncMock(return_value=browser)
+    starter = MagicMock()
+    starter.start = AsyncMock(return_value=pw)
+    return starter
+
+
+_PROC_LOG_FIELDS = {"date_of_activity": "2026-03-17", "reflective_comments": "Procedure completed."}
+
+
+@pytest.mark.asyncio
+async def test_retry_reopens_exactly_the_draft_it_reached():
+    """Retry used to open the first draft of the same type on /activities,
+    which could be an older, unrelated draft that then got overwritten."""
+    draft = "https://kaizenep.com/events/fillin/doc-1?autosave=a1"
+    page = FakePage(url=draft)
+
+    with patch("kaizen_form_filer.async_playwright", return_value=_playwright_with(page)), \
+         patch("kaizen_form_filer.KAIZEN_USE_CDP", False), \
+         patch("kaizen_form_filer._login", new=AsyncMock(return_value=True)), \
+         patch("kaizen_form_filer._fill_field_legacy", new=AsyncMock(return_value=True)), \
+         patch("kaizen_form_filer._save_form", new=AsyncMock(return_value=True)), \
+         patch("kaizen_form_filer._verify_entry_saved", new=AsyncMock(return_value=True)), \
+         patch("kaizen_form_filer.asyncio.sleep", new=AsyncMock()):
+        result = await file_to_kaizen("PROC_LOG", _PROC_LOG_FIELDS, "user", "pass", reuse_draft_url=draft)
+
+    visited = [call.args[0] for call in page.goto.await_args_list]
+    assert draft in visited
+    assert not any("/activities" in url or "new-section" in url for url in visited)
+    assert result["draft_url"] == draft
+
+
+@pytest.mark.asyncio
+async def test_retry_that_cannot_reopen_its_draft_creates_nothing():
+    page = FakePage(url="https://kaizenep.com/dashboard")
+
+    with patch("kaizen_form_filer.async_playwright", return_value=_playwright_with(page)), \
+         patch("kaizen_form_filer.KAIZEN_USE_CDP", False), \
+         patch("kaizen_form_filer._login", new=AsyncMock(return_value=True)), \
+         patch("kaizen_form_filer._save_form", new=AsyncMock(return_value=True)) as save, \
+         patch("kaizen_form_filer.asyncio.sleep", new=AsyncMock()):
+        result = await file_to_kaizen(
+            "PROC_LOG", _PROC_LOG_FIELDS, "user", "pass",
+            reuse_draft_url="https://kaizenep.com/events/fillin/gone",
+        )
+
+    assert result["status"] == "failed"
+    assert "check your Kaizen drafts" in result["error"]
+    save.assert_not_awaited()

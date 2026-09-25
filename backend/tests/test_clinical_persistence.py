@@ -54,6 +54,11 @@ def test_scrub_does_not_mutate_the_live_user_data():
     assert live["last_amend_draft"]["fields"]["reflection"] == CASE
 
 
+@pytest.fixture(autouse=True)
+def _own_data_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("PORTFOLIO_GURU_DATA_DIR", str(tmp_path / "data"))
+
+
 @pytest.mark.asyncio
 async def test_persistence_writes_no_clinical_content_to_disk(tmp_path):
     path = tmp_path / "bot_persistence"
@@ -71,8 +76,64 @@ async def test_persistence_writes_no_clinical_content_to_disk(tmp_path):
     reloaded = await cp.ClinicalScrubbingPersistence(filepath=path).get_user_data()
     stored = reloaded[4242]
     assert stored["user_tier"] == "pro_plus", "operational state must survive"
-    assert "case_text" not in stored
     assert "last_amend_draft" not in stored
+    assert "last_filed_case_text" not in stored
+
+
+@pytest.mark.asyncio
+async def test_case_in_progress_survives_a_restart_encrypted(tmp_path):
+    """A deploy mid-case used to keep the step but drop the case, so the
+    doctor's next tap said the draft had expired."""
+    path = tmp_path / "bot_persistence"
+    persistence = cp.ClinicalScrubbingPersistence(filepath=path)
+    await persistence.update_user_data(4242, _user_data())
+    await persistence.flush()
+
+    for f in cp.working_case_dir().iterdir():
+        assert CASE.encode() not in f.read_bytes(), "working case must be encrypted"
+
+    restored = (await cp.ClinicalScrubbingPersistence(filepath=path).get_user_data())[4242]
+    assert restored["case_text"] == CASE
+    assert restored["draft_data"]["clinical_reasoning"] == CASE
+    assert "last_filed_case_text" not in restored, "filed-case history stays memory-only"
+
+
+@pytest.mark.asyncio
+async def test_filing_or_cancelling_removes_the_working_case(tmp_path):
+    persistence = cp.ClinicalScrubbingPersistence(filepath=tmp_path / "bot_persistence")
+    await persistence.update_user_data(4242, _user_data())
+    await persistence.update_user_data(4242, {"user_tier": "pro_plus"})
+
+    assert list(cp.working_case_dir().iterdir()) == []
+
+
+def test_expired_or_unreadable_working_cases_are_deleted_on_load():
+    from datetime import datetime, timedelta, timezone
+
+    cp.save_working_case(1, {"case_text": CASE})
+    cp.save_working_case(2, {"case_text": CASE})
+    (cp.working_case_dir() / "3.enc").write_bytes(b"not a fernet token")
+
+    later = datetime.now(timezone.utc) + timedelta(hours=25)
+    assert cp.load_working_cases(now=later) == {}
+    assert list(cp.working_case_dir().iterdir()) == []
+
+
+def test_reset_erases_the_working_case():
+    cp.save_working_case(4242, {"case_text": CASE})
+    assert cp.purge_working_case(4242) == 1
+    assert cp.load_working_cases() == {}
+
+
+def test_no_key_means_no_file(monkeypatch):
+    import credentials
+
+    def _no_key():
+        raise RuntimeError("no key")
+
+    monkeypatch.setattr(credentials, "_fernet", _no_key)
+    cp.save_working_case(4242, {"case_text": CASE})
+    assert not cp.working_case_dir().exists() or list(cp.working_case_dir().iterdir()) == []
 
 
 def test_purge_strips_clinical_keys_from_an_existing_file(tmp_path):
@@ -119,3 +180,16 @@ def test_every_case_bearing_key_in_bot_is_declared_clinical():
         f"user_data keys carrying case content are not scrubbed before "
         f"persistence: {sorted(missing)}"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_saving_flag_never_survives_a_restart(tmp_path):
+    """A crash mid-save left "Already saving your draft" on every later Save."""
+    path = tmp_path / "bot_persistence"
+    persistence = cp.ClinicalScrubbingPersistence(filepath=path)
+    await persistence.update_user_data(4242, {"user_tier": "free", "filing_in_progress": True})
+    await persistence.flush()
+
+    restored = (await cp.ClinicalScrubbingPersistence(filepath=path).get_user_data())[4242]
+    assert "filing_in_progress" not in restored
+    assert restored["user_tier"] == "free"

@@ -178,6 +178,11 @@ export PG_SIGNOFF_CHASE_HEALTHCHECK_URL
 # re-listing and began reporting only what moved. Set to empty to disable.
 export PG_ENABLE_SIGNOFF_CHASE="${PG_ENABLE_SIGNOFF_CHASE:-1}"
 export PG_SIGNOFF_CHASE_USER_IDS="${PG_SIGNOFF_CHASE_USER_IDS:-}"
+# "Connect without sharing your password". Starts with the operator only;
+# set the allowlist to * to offer it to everyone, or the flag to empty to
+# switch the option (and its sign-in page) off.
+export PG_ENABLE_PASSWORDLESS_CONNECT="${PG_ENABLE_PASSWORDLESS_CONNECT:-1}"
+export PG_PASSWORDLESS_ALLOWLIST="${PG_PASSWORDLESS_ALLOWLIST:-6912896590}"
 if [ -n "$PG_ENABLE_SIGNOFF_CHASE" ]; then
   echo "Sign-off chase: ENABLED${PG_SIGNOFF_CHASE_USER_IDS:+ (users: $PG_SIGNOFF_CHASE_USER_IDS)}"
 else
@@ -281,6 +286,28 @@ echo "Webhook server started (PID $WEBHOOK_PID, port 8099)"
 
 # Clean up webhook server when bot exits
 trap "kill $WEBHOOK_PID 2>/dev/null" EXIT
+
+# Connect Kaizen sign-in page for the passwordless option (port 8101, published
+# as connect.emgurus.com by the Cloudflare tunnel). Started with an empty
+# environment plus the one secret it needs, the session-encryption key, so it
+# never holds the bot, payment or AI credentials. Off unless enabled.
+CONNECT_PORT=8101
+CONNECT_PORT_PIDS="$(lsof -tiTCP:$CONNECT_PORT -sTCP:LISTEN 2>/dev/null || true)"
+if [ -n "$CONNECT_PORT_PIDS" ]; then
+  kill $CONNECT_PORT_PIDS 2>/dev/null || true
+  sleep 1
+  kill -9 $CONNECT_PORT_PIDS 2>/dev/null || true
+fi
+if pg_is_truthy "${PG_ENABLE_PASSWORDLESS_CONNECT:-}"; then
+  env -i \
+    HOME="$HOME" \
+    PATH="$PATH" \
+    FERNET_SECRET_KEY="$FERNET_SECRET_KEY" \
+    PG_MOBILE_HANDOFF_PUBLIC_URL="${PG_MOBILE_HANDOFF_PUBLIC_URL:-https://connect.emgurus.com}" \
+    $PYTHON -m uvicorn mobile_kaizen_handoff:create_default_app --factory \
+      --host 127.0.0.1 --port "$CONNECT_PORT" --log-level warning --no-access-log &
+  echo "Connect Kaizen page started (PID $!, port $CONNECT_PORT)"
+fi
 
 # Start bot (foreground)
 exec $PYTHON bot.py

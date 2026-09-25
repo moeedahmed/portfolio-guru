@@ -71,6 +71,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+from data_paths import data_path
 
 ENGINE_VERSION = "1.0.0-hermes-test"
 SUPPORTED_COMMANDS = (
@@ -255,13 +256,7 @@ def _state_path() -> Path:
     explicit = os.environ.get("PORTFOLIO_GURU_WHATSAPP_STATE_PATH")
     if explicit:
         return Path(explicit).expanduser()
-    return (
-        Path.home()
-        / ".openclaw"
-        / "data"
-        / "portfolio-guru"
-        / "hermes-whatsapp-workflows.json"
-    )
+    return data_path("hermes-whatsapp-workflows.json")
 
 
 def _state_ttl_seconds() -> int:

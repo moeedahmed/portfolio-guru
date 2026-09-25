@@ -22,6 +22,7 @@ import pathlib
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, Iterator, Optional
+from data_paths import data_path
 
 from filing_attempt_log import is_operator_user, is_synthetic_user
 
@@ -61,7 +62,7 @@ def default_log_path() -> pathlib.Path:
     override = os.environ.get("PORTFOLIO_GURU_FUNNEL_LOG_PATH")
     if override:
         return pathlib.Path(override)
-    return pathlib.Path.home() / ".openclaw" / "data" / "portfolio-guru" / "funnel-events.ndjson"
+    return data_path("funnel-events.ndjson")
 
 
 def safe_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:

@@ -22,12 +22,13 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Iterable, Literal, Optional
+from data_paths import data_path
 
 import aiosqlite
 
 from health_models import EvidenceItem, HealthDomain
 
-_DEFAULT_DB = os.path.expanduser("~/.openclaw/data/portfolio-guru/usage.db")
+_DEFAULT_DB = str(data_path("usage.db"))
 DB_PATH = os.environ.get("USAGE_DB_PATH", _DEFAULT_DB)
 
 

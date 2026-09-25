@@ -10,6 +10,7 @@ from telegram.ext import ConversationHandler
 
 import bot
 from tests.bot_simulator import BotSimulator
+from tests.helpers import unstamp
 
 
 @pytest.fixture(autouse=True)
@@ -1020,15 +1021,14 @@ class TestFlowWalker:
 
         preview = _format_draft_preview_for_context(thin_draft, context, 'CBD')
 
-        assert 'Your reflection is needed before saving' in preview
         assert 'AI reflection check' not in preview
         assert 'Source cue' not in preview
         assert 'John Smith' not in preview
         assert '943 476 5919' not in preview
         assert 'reflected on escalation' not in preview
 
-    def test_image_only_draft_requires_user_reflection_before_save(self, thin_draft):
-        from bot import _build_approval_keyboard, _format_draft_preview_for_context, _set_reflection_detail_gate
+    def test_image_only_draft_asks_for_the_doctors_own_reflection(self, thin_draft):
+        from bot import _format_draft_preview_for_context, _set_reflection_detail_gate
         from tests.bot_simulator import BotSimulator
 
         sim = BotSimulator()
@@ -1038,16 +1038,9 @@ class TestFlowWalker:
 
         assert _set_reflection_detail_gate(context, thin_draft) is True
         preview = _format_draft_preview_for_context(thin_draft, context, 'CBD')
-        buttons = {
-            button.callback_data
-            for row in _build_approval_keyboard(needs_reflection_detail=True).inline_keyboard
-            for button in row
-        }
 
-        assert 'Your reflection is needed before saving' in preview
-        assert 'Add your own interpretation/reflection' in preview
-        assert buttons == {'CANCEL|draft'}
-        assert 'APPROVE|draft' not in buttons
+        assert 'Add your own interpretation and reflection' in preview
+        assert "I won't write them for you" in preview
 
     def test_image_with_user_context_can_show_save_when_reflection_is_useful(self, thin_draft):
         from bot import _build_approval_keyboard, _set_reflection_detail_gate
@@ -1073,7 +1066,7 @@ class TestFlowWalker:
         assert _set_reflection_detail_gate(context, strong_draft) is False
         buttons = {
             button.callback_data
-            for row in _build_approval_keyboard(needs_reflection_detail=False).inline_keyboard
+            for row in _build_approval_keyboard().inline_keyboard
             for button in row
         }
 
@@ -1297,7 +1290,7 @@ class TestFlowWalker:
         assert improved.fields['reflection'] in revised_text
         revised_markup = revised_edits[0][2]
         assert revised_markup is not None and hasattr(revised_markup, 'inline_keyboard')
-        button_data = [b.callback_data for row in revised_markup.inline_keyboard for b in row]
+        button_data = [unstamp(b.callback_data) for row in revised_markup.inline_keyboard for b in row]
         assert 'APPROVE|draft' in button_data
         # One-revision default: improve button must NOT come back on the
         # revised draft.
@@ -1357,7 +1350,7 @@ class TestFlowWalker:
         markup_events = [m for m in sim.messages_sent if m[0] == 'markup' and m[2] is not None]
         assert markup_events, 'Original draft buttons were not restored after failure'
         last_markup = markup_events[-1][2]
-        button_data = [b.callback_data for row in last_markup.inline_keyboard for b in row]
+        button_data = [unstamp(b.callback_data) for row in last_markup.inline_keyboard for b in row]
         assert 'APPROVE|draft' in button_data
         assert set(button_data) == {'APPROVE|draft', 'CANCEL|draft'}
 
@@ -2493,6 +2486,7 @@ class TestFlowWalker:
                 'skipped': [],
                 'method': 'deterministic',
                 'error': 'Save button not found or click failed',
+                'draft_url': 'https://kaizenep.com/events/fillin/draft-doc-id',
             },
             {
                 'status': 'success',
@@ -2510,8 +2504,9 @@ class TestFlowWalker:
 
         assert first == AWAIT_APPROVAL
         assert route_filing.await_count == 2
-        assert route_filing.await_args_list[0].kwargs['reuse_draft'] is False
-        assert route_filing.await_args_list[1].kwargs['reuse_draft'] is True
+        assert route_filing.await_args_list[0].kwargs['reuse_draft_url'] is None
+        # Retry reopens exactly the draft Kaizen reached, never "any draft of this type".
+        assert route_filing.await_args_list[1].kwargs['reuse_draft_url'] == 'https://kaizenep.com/events/fillin/draft-doc-id'
         assert second == ConversationHandler.END
 
     @pytest.mark.asyncio
@@ -2552,7 +2547,7 @@ class TestFlowWalker:
         retry_messages = sim.messages_sent[before_retry_count:]
         assert first == AWAIT_APPROVAL
         assert second == ConversationHandler.END
-        assert route_filing.await_args_list[1].kwargs['reuse_draft'] is True
+        assert route_filing.await_args_list[1].kwargs['reuse_draft_url'] is None  # no draft was reached, so none to reopen
         assert any(kind == 'edit' and 'Retrying Kaizen filing' in text for kind, text, _ in retry_messages)
         assert any(kind == 'edit' and 'Saved! Your draft is ready' in text for kind, text, _ in retry_messages)
         assert not any(kind in {'reply', 'send'} for kind, _, _ in retry_messages)
@@ -2596,7 +2591,7 @@ class TestFlowWalker:
         retry_messages = sim.messages_sent[before_retry_count:]
         assert first == AWAIT_APPROVAL
         assert second == AWAIT_APPROVAL
-        assert route_filing.await_args_list[1].kwargs['reuse_draft'] is True
+        assert route_filing.await_args_list[1].kwargs['reuse_draft_url'] is None  # no draft was reached, so none to reopen
         assert any(kind == 'edit' and 'Retrying Kaizen filing' in text for kind, text, _ in retry_messages)
         assert any(kind == 'edit' and "Filing didn't complete" in text for kind, text, _ in retry_messages)
         assert not any(kind in {'reply', 'send'} for kind, _, _ in retry_messages)
@@ -2805,7 +2800,7 @@ class TestFlowWalker:
             result = await handle_action_button(sim._make_callback_update('ACTION|retry_filing'), context)
 
         route_filing.assert_awaited_once()
-        assert route_filing.await_args.kwargs['reuse_draft'] is True
+        assert route_filing.await_args.kwargs['reuse_draft_url'] is None  # no draft was reached, so none to reopen
         assert result == ConversationHandler.END
 
     @pytest.mark.asyncio
@@ -4094,7 +4089,7 @@ class TestRecentPortfolioFixes:
         from bot import _build_post_filing_keyboard
 
         keyboard = _build_post_filing_keyboard('CBD', 'failed')
-        callbacks = {b.callback_data for row in keyboard.inline_keyboard for b in row}
+        callbacks = {unstamp(b.callback_data) for row in keyboard.inline_keyboard for b in row}
         assert 'FILING|feedback|CBD' not in callbacks
 
     def test_post_filing_keyboard_has_no_duplicate_file_another_case(self):
@@ -4775,7 +4770,7 @@ class TestPhotoGroundingGate:
         extract_mock.assert_awaited(), 'A captioned photo carries the doctor\'s words and must draft'
 
     def test_review_block_names_missing_fields_and_drops_duplicate_coach_note(self):
-        from bot import _format_draft_preview_for_context
+        from bot import _draft_reply_hint, _format_draft_preview_for_context, _store_draft
         from models import FormDraft
         from tests.bot_simulator import BotSimulator
 
@@ -4789,9 +4784,12 @@ class TestPhotoGroundingGate:
         context.user_data['case_has_user_context'] = True
         context.user_data['needs_reflection_detail'] = True
 
-        preview = _format_draft_preview_for_context(draft, context, 'REFLECT_LOG')
+        context.user_data['chosen_form'] = 'REFLECT_LOG'
+        _store_draft(context, draft)
+        preview = _format_draft_preview_for_context(draft, context, 'REFLECT_LOG') + _draft_reply_hint(context)
 
-        assert 'Still needed: Description / What happened.' in preview
+        # Missing fields are named once, in the closing line that invites a reply.
+        assert 'Still needed:' in preview and 'your reflection' in preview.split('Still needed:', 1)[1]
         assert 'photo/OCR text' not in preview, (
             'Source jargon must not appear once the doctor has supplied context'
         )

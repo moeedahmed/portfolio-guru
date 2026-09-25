@@ -7,9 +7,10 @@ from typing import Optional
 from datetime import datetime
 from cryptography.fernet import Fernet
 from sqlmodel import Field, Session, SQLModel, create_engine, select
+from data_paths import data_path
 
 
-_DEFAULT_DB = os.path.expanduser("~/.openclaw/data/portfolio-guru/portfolio_guru.db")
+_DEFAULT_DB = str(data_path("portfolio_guru.db"))
 DATABASE_URL = os.environ.get("DATABASE_URL", f"sqlite:///{_DEFAULT_DB}")
 def _get_fernet_key() -> bytes:
     from dotenv import load_dotenv
@@ -127,6 +128,28 @@ def get_credentials(telegram_user_id: int) -> Optional[tuple[str, str]]:
         username = f.decrypt(cred.kaizen_username_enc).decode()
         password = f.decrypt(cred.kaizen_password_enc).decode()
         return username, password
+
+
+def delete_credentials(telegram_user_id: int) -> bool:
+    """Delete the stored Kaizen login, here and in the Supabase mirror.
+
+    Used when a user switches to the passwordless connection, so no copy of
+    their password is kept anywhere. Returns True if a local row existed.
+    """
+    with Session(engine) as session:
+        cred = session.exec(
+            select(UserCredential).where(UserCredential.telegram_user_id == telegram_user_id)
+        ).first()
+        existed = cred is not None
+        if cred:
+            session.delete(cred)
+            session.commit()
+    try:
+        from supabase_sync import delete_mirrored_credentials
+        delete_mirrored_credentials(telegram_user_id)
+    except Exception:
+        pass
+    return existed
 
 
 def has_credentials(telegram_user_id: int) -> bool:

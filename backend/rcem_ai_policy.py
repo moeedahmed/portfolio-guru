@@ -10,8 +10,12 @@ from __future__ import annotations
 
 import re
 
+import ai_declaration
 
-AI_USE_DECLARATION = "AI was used to help structure and edit this reflection."
+# One declaration, owned by ai_declaration. This module used to append its own
+# sentence and the filer then appended ai_declaration's, so saved entries
+# carried two declarations.
+AI_USE_DECLARATION = ai_declaration.declaration_block()
 
 
 # Strong: first-person reflective phrasing. These alone are sufficient
@@ -89,6 +93,6 @@ def with_ai_use_declaration(text: str | None) -> str:
     reflection = str(text or "").strip()
     if not reflection:
         return ""
-    if AI_USE_DECLARATION.casefold() in reflection.casefold():
+    if not ai_declaration.is_enabled() or ai_declaration.contains_declaration(reflection):
         return reflection
-    return f"{reflection}\n\n{AI_USE_DECLARATION}"
+    return f"{reflection}\n\n{ai_declaration.declaration_block()}"

@@ -11,6 +11,7 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from data_paths import data_path
 
 from health_models import HealthProfile
 
@@ -19,7 +20,7 @@ def _store_path() -> Path:
     return Path(
         os.environ.get(
             "PORTFOLIO_GURU_HEALTH_PROFILE_PATH",
-            os.path.expanduser("~/.openclaw/data/portfolio-guru/health_profiles.json"),
+            str(data_path("health_profiles.json")),
         )
     )
 

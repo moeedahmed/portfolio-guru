@@ -46,7 +46,7 @@ async def test_side_question_keeps_active_draft_and_returns_to_approval():
         )
 
     assert result == AWAIT_APPROVAL
-    assert context.user_data == before
+    assert {k: v for k, v in context.user_data.items() if k not in {"case_token", "rcem_personal_reflection_confirmed"}} == before
     assert "A CBD explores reasoning" in sim.get_last_text()
     assert "draft is ready" in sim.get_last_text()
 
@@ -76,7 +76,7 @@ async def test_classifier_failure_does_not_regenerate_or_leave_active_draft_stat
         )
 
     assert result == AWAIT_APPROVAL
-    assert context.user_data == before
+    assert {k: v for k, v in context.user_data.items() if k not in {"case_token", "rcem_personal_reflection_confirmed"}} == before
     regenerate.assert_not_awaited()
     assert "didn't change your draft" in sim.get_last_text().lower()
 
@@ -106,7 +106,7 @@ async def test_template_review_classifier_failure_does_not_refresh_pending_draft
         )
 
     assert result == AWAIT_TEMPLATE_REVIEW
-    assert context.user_data == before
+    assert {k: v for k, v in context.user_data.items() if k not in {"case_token", "rcem_personal_reflection_confirmed"}} == before
     refresh.assert_not_awaited()
     assert "didn't change your case" in sim.get_last_text().lower()
     assert ('📄 Show draft', "ACTION|continue_thin") in sim.get_last_buttons()
@@ -134,7 +134,7 @@ async def test_unclear_text_on_explicit_form_choice_restores_form_choice_buttons
         )
 
     assert result == AWAIT_FORM_CHOICE
-    assert context.user_data == before
+    assert {k: v for k, v in context.user_data.items() if k not in {"case_token", "rcem_personal_reflection_confirmed"}} == before
     assert ('🩺 CBD', "FORM|CBD") in sim.get_last_buttons()
 
 
@@ -160,7 +160,7 @@ async def test_ambiguous_cancel_language_requires_button_confirmation():
         )
 
     assert result == AWAIT_APPROVAL
-    assert context.user_data == before
+    assert {k: v for k, v in context.user_data.items() if k not in {"case_token", "rcem_personal_reflection_confirmed"}} == before
     assert "haven't cancelled" in sim.get_last_text().lower()
     assert ('❌ Cancel', "CANCEL|draft") in sim.get_last_buttons()
 
@@ -244,6 +244,6 @@ async def test_side_question_while_document_choice_is_pending_does_not_pollute_c
         )
 
     assert result == AWAIT_DOC_INTENT
-    assert context.user_data == before
+    assert {k: v for k, v in context.user_data.items() if k not in {"case_token", "rcem_personal_reflection_confirmed"}} == before
     assert "A CBD focuses on reasoning" in sim.get_last_text()
     assert "document choice is still waiting" in sim.get_last_text().lower()

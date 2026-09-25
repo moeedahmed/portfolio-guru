@@ -65,6 +65,7 @@ Portfolio Guru ingests clinicians' free-text/voice/image clinical case descripti
 - **Necessity:** sending case content to an AI model is necessary to deliver the extraction feature the user requests; credential storage is necessary to save drafts on the user's behalf.
 - **Proportionality / data minimisation:**
   - Credentials are never sent to the AI model and are encrypted at rest.
+  - Users may instead connect without a stored password: they sign in on a Portfolio Guru-hosted page (connect.emgurus.com) that streams an isolated browser, and only the resulting Kaizen session is kept (encrypted; Kaizen ends it after about 24 hours). This removes the stored-password risk (R2) for those users. Residual risks: keystrokes transit the Portfolio Guru browser (never stored or logged), and the kept session is itself a short-lived bearer credential. Links are single-use, expire in 10 minutes, and the page never accepts or echoes credentials in requests. «REVIEW: solicitor/DPO to confirm.»
   - The user is asked not to send patient-identifiable data.
   - «REVIEW: consider minimising retention of raw case content (delete after draft saved) and whether image/voice can be processed without long-term storage.»
 - **Data quality / accuracy:** AI output is non-deterministic; mitigated by mandatory human review (draft-only) — see automation risk below.

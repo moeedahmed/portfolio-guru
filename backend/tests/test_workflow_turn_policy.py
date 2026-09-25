@@ -165,3 +165,38 @@ def test_mixed_case_detail_and_portfolio_question_is_both_not_a_transition():
     assert decision.kind is WorkflowTurnKind.ENRICH_AND_ANSWER
     assert decision.state_action is None
     assert decision.case_detail == "His BP was 80/40 and I escalated early"
+
+
+def test_a_whole_new_case_while_one_is_open_asks_before_merging():
+    """A second patient pasted mid-draft used to be merged into the first."""
+    second_case = (
+        "72F presented with sudden onset left sided weakness, NIHSS 9, CT head showed no bleed, "
+        "I discussed thrombolysis with the stroke team and the patient was treated within the window."
+    )
+    for phase in (WorkflowPhase.CASE_OPEN, WorkflowPhase.DRAFT_OPEN):
+        decision = decide(second_case, phase=phase, legacy_intent="add_detail")
+        assert decision.kind is WorkflowTurnKind.CONFIRM_STATE_CHANGE
+        assert decision.state_action == "start_new_case"
+
+
+def test_a_short_addition_still_enriches_the_open_case():
+    addition = "The patient was also tachycardic at 130 and the consultant reviewed him in resus."
+    decision = decide(addition, phase=WorkflowPhase.DRAFT_OPEN, legacy_intent="add_detail")
+    assert decision.kind is WorkflowTurnKind.ENRICH
+
+
+def test_a_short_answer_fills_a_draft_that_has_gaps():
+    """The draft asks the doctor to reply with what is missing; "indirect"
+    must fill it, not be turned away as unclear."""
+    for text in ("indirect", "Supervision was indirect"):
+        with_gaps = decide_workflow_turn(text, phase=WorkflowPhase.DRAFT_OPEN, legacy_intent="add_detail", draft_has_gaps=True)
+        assert with_gaps.kind is WorkflowTurnKind.ENRICH
+        without = decide(text, phase=WorkflowPhase.DRAFT_OPEN, legacy_intent="add_detail")
+        assert without.kind is WorkflowTurnKind.CLARIFY
+
+
+def test_gaps_never_turn_destructive_or_failed_turns_into_edits():
+    assert decide_workflow_turn("Start over", phase=WorkflowPhase.DRAFT_OPEN, legacy_intent="new_case",
+                                draft_has_gaps=True).kind is WorkflowTurnKind.CONFIRM_STATE_CHANGE
+    assert decide_workflow_turn("Please do something with that", phase=WorkflowPhase.DRAFT_OPEN, legacy_intent=None,
+                                classifier_failed=True, draft_has_gaps=True).kind is WorkflowTurnKind.CLARIFY

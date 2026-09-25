@@ -38,6 +38,7 @@ import logging
 import os
 import tempfile
 from pathlib import Path
+from data_paths import data_path
 
 from playwright.async_api import async_playwright
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -58,7 +59,7 @@ CDP_URL = os.environ.get("KAIZEN_CDP_URL", "http://localhost:18800")
 NOTIFICATION_CACHE_DIR = Path(
     os.environ.get(
         "PORTFOLIO_GURU_SUPERVISOR_CACHE_DIR",
-        os.path.expanduser("~/.openclaw/data/portfolio-guru/supervisor"),
+        str(data_path("supervisor")),
     )
 )
 

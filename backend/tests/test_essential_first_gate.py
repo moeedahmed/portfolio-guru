@@ -1,13 +1,14 @@
-"""Essential-first workflow: sufficiency is settled before anything is drafted.
+"""Essential-first workflow: every essential is judged before drafting.
 
-Owner's decision (19 Sep 2026). The bot picks the form, then reads the case
-the doctor already sent against that form's genuinely essential requirements
-*before* the drafting call. A complete judgement that every essential is
-present is the only thing that permits drafting:
+Owner's decisions: 19 Sep 2026 (judge the case against the form's essentials
+before drafting) and 25 Sep 2026 (draft first: never make the doctor answer
+questions before they see a draft). The bot picks the form, then reads the
+case the doctor already sent against that form's genuinely essential
+requirements *before* the drafting call:
 
-* still missing → one grouped question naming only what is genuinely still
-  absent; an item the doctor has since supplied is never asked again, and an
-  item still absent is never waved through because it was asked about once;
+* still missing → the draft is shown at once with those fields left blank,
+  never filled by the model, and one closing line names what is still needed
+  and invites a reply; Save stays available as a Kaizen draft;
 * unavailable to the doctor → the case is kept and a different form offered,
   never invented and never skipped;
 * judgement incomplete (outage, timeout, partial/duplicated/malformed answer)
@@ -157,40 +158,6 @@ async def test_sufficient_case_preview_is_the_draft_only():
 
 
 # --- missing essentials: one grouped question, before drafting -------------
-
-
-@pytest.mark.asyncio
-async def test_missing_essentials_asked_once_before_any_drafting_call():
-    sim = BotSimulator()
-    update = sim._make_callback_update("FORM|CBD")
-    context = sim._make_context()
-    context.user_data["case_text"] = THIN_CASE
-
-    analyse = AsyncMock(return_value=_cbd_draft())
-    statuses = _all(
-        "CBD",
-        ESSENTIAL_PRESENT,
-        reflection=ESSENTIAL_MISSING,
-        level_of_supervision=ESSENTIAL_MISSING,
-    )
-    with patch("bot.assess_form_essentials", new=_assess(statuses)), \
-         patch("bot._analyse_selected_form", new=analyse):
-        result = await handle_form_choice(update, context)
-
-    assert result == AWAIT_CASE_INPUT
-    analyse.assert_not_awaited()
-
-    asks = [text for text in _texts(sim) if "I still need" in (text or "")]
-    assert len(asks) == 1, "essentials must be one grouped question, not several"
-    ask = asks[0].lower()
-    assert "reflection" in ask
-    assert "level of supervision" in ask
-    # Only the missing ones are named, and optional fields never appear.
-    assert "patient presentation" not in ask
-    assert "curriculum" not in ask and "key capabilities" not in ask
-    assert context.user_data["awaiting_detail"] is True
-    assert context.user_data["chosen_form"] == "CBD"
-    assert context.user_data["case_text"] == THIN_CASE
 
 
 @pytest.mark.asyncio
@@ -358,247 +325,15 @@ def test_a_blank_title_is_still_caught_at_save():
 # --- the follow-up: every input mode, nothing lost, nothing re-asked -------
 
 
-async def _ask_first(sim, context, *, form_type="CBD", missing=("reflection",)):
+async def _draft_with_gaps(sim, context, *, form_type="CBD", missing=("reflection",)):
     update = sim._make_callback_update(f"FORM|{form_type}")
     statuses = _all(form_type, ESSENTIAL_PRESENT, **{key: ESSENTIAL_MISSING for key in missing})
+    draft = _cbd_draft(**{key: "" for key in missing})
     with patch("bot.assess_form_essentials", new=_assess(statuses)), \
-         patch("bot._analyse_selected_form", new=AsyncMock()):
+         patch("bot._analyse_selected_form", new=AsyncMock(return_value=draft)):
         state = await handle_form_choice(update, context)
-    assert state == AWAIT_CASE_INPUT
+    assert state == AWAIT_APPROVAL
     sim.clear_messages()
-
-
-@pytest.mark.asyncio
-async def test_text_followup_merges_and_drafts_once_without_reasking():
-    sim = BotSimulator()
-    context = sim._make_context()
-    context.user_data["case_text"] = THIN_CASE
-    await _ask_first(sim, context)
-
-    analyse = AsyncMock(return_value=_cbd_draft())
-    reply = sim._make_text_update("I learned to escalate ECG review earlier and will do so in future.")
-    patches = _common_patches()
-    with patches[0], patches[1], patches[2], \
-         patch("bot.assess_form_essentials", new=_assess(_all("CBD", ESSENTIAL_PRESENT))), \
-         patch("bot._analyse_selected_form", new=analyse):
-        result = await handle_case_input(reply, context)
-
-    assert result == AWAIT_APPROVAL
-    analyse.assert_awaited_once()
-    merged = analyse.await_args.args[2]
-    assert THIN_CASE in merged
-    assert "escalate ECG review earlier" in merged
-    assert "I still need" not in " ".join(_texts(sim))
-
-
-@pytest.mark.asyncio
-async def test_partial_answer_asks_only_the_remaining_essential_and_does_not_draft():
-    """One of two gaps answered: the case keeps everything already sent, the
-    answered gap is never asked again, the one genuinely still missing is
-    asked for on its own — and nothing is drafted from it."""
-    sim = BotSimulator()
-    context = sim._make_context()
-    context.user_data["case_text"] = THIN_CASE
-    await _ask_first(sim, context, missing=("reflection", "level_of_supervision"))
-
-    analyse = AsyncMock(return_value=_cbd_draft(level_of_supervision=""))
-    reply = sim._make_text_update("I learned to escalate ECG review earlier next time.")
-    still_missing = _all(
-        "CBD",
-        ESSENTIAL_PRESENT,
-        level_of_supervision=ESSENTIAL_MISSING,
-    )
-    patches = _common_patches()
-    with patches[0], patches[1], patches[2], \
-         patch("bot.assess_form_essentials", new=_assess(still_missing)), \
-         patch("bot._analyse_selected_form", new=analyse):
-        result = await handle_case_input(reply, context)
-
-    assert result == AWAIT_CASE_INPUT
-    assert analyse.await_count == 0, "a partial answer must not produce a draft"
-    # Everything the doctor has sent so far is still the case.
-    assert THIN_CASE in context.user_data["case_text"]
-    assert "escalate ECG review earlier" in context.user_data["case_text"]
-
-    asks = [text for text in _texts(sim) if "I still need" in text]
-    assert len(asks) == 1
-    assert "level of supervision" in asks[0].lower()
-    assert "reflection" not in asks[0].lower(), "an answered item must never be asked again"
-
-
-@pytest.mark.asyncio
-async def test_second_answer_completing_the_essentials_finally_drafts():
-    """The other half of the partial-answer case: once the last genuinely
-    missing essential arrives, the draft is produced from the full combined
-    source — one drafting call, no earlier ones."""
-    sim = BotSimulator()
-    context = sim._make_context()
-    context.user_data["case_text"] = THIN_CASE
-    await _ask_first(sim, context, missing=("reflection", "level_of_supervision"))
-
-    analyse = AsyncMock(return_value=_cbd_draft())
-    patches = _common_patches()
-    with patches[0], patches[1], patches[2], \
-         patch("bot.assess_form_essentials", new=_assess(
-             _all("CBD", ESSENTIAL_PRESENT, level_of_supervision=ESSENTIAL_MISSING))), \
-         patch("bot._analyse_selected_form", new=analyse):
-        await handle_case_input(
-            sim._make_text_update("I learned to escalate ECG review earlier next time."),
-            context,
-        )
-    assert analyse.await_count == 0
-
-    with patches[0], patches[1], patches[2], \
-         patch("bot.assess_form_essentials", new=_assess(_all("CBD", ESSENTIAL_PRESENT))), \
-         patch("bot._analyse_selected_form", new=analyse):
-        result = await handle_case_input(
-            sim._make_text_update("The consultant supervised indirectly."), context
-        )
-
-    assert result == AWAIT_APPROVAL
-    analyse.assert_awaited_once()
-    merged = analyse.await_args.args[2]
-    assert THIN_CASE in merged
-    assert "escalate ECG review earlier" in merged
-    assert "consultant supervised indirectly" in merged
-
-
-@pytest.mark.asyncio
-async def test_voice_followup_merges_and_drafts():
-    sim = BotSimulator()
-    context = sim._make_context()
-    context.user_data["case_text"] = THIN_CASE
-    context.user_data["case_input_source"] = "text"
-    await _ask_first(sim, context)
-
-    update = sim._make_text_update("")
-    update.message.text = None
-    voice = AsyncMock()
-    voice.file_name = "voice.ogg"
-    voice.mime_type = "audio/ogg"
-    voice_file = AsyncMock()
-    voice.get_file = AsyncMock(return_value=voice_file)
-    voice_file.download_to_drive = AsyncMock()
-    update.message.voice = voice
-
-    analyse = AsyncMock(return_value=_cbd_draft())
-    patches = _common_patches()
-    with patches[0], patches[1], patches[2], \
-         patch("bot.transcribe_voice", new=AsyncMock(
-             return_value="I learned to escalate ECG review earlier next time.")), \
-         patch("bot.assess_form_essentials", new=_assess(_all("CBD", ESSENTIAL_PRESENT))), \
-         patch("bot._analyse_selected_form", new=analyse):
-        result = await handle_case_input(update, context)
-
-    assert result == AWAIT_APPROVAL
-    analyse.assert_awaited_once()
-    merged = analyse.await_args.args[2]
-    assert THIN_CASE in merged
-    assert "escalate ECG review earlier" in merged
-    assert context.user_data["case_input_source"] == "mixed"
-
-
-@pytest.mark.asyncio
-async def test_photo_followup_merges_and_drafts():
-    """A photo answering the question keeps its existing use/attach choice,
-    then merges into the case exactly like text does."""
-    sim = BotSimulator()
-    context = sim._make_context()
-    context.user_data["case_text"] = THIN_CASE
-    context.user_data["case_input_source"] = "text"
-    await _ask_first(sim, context)
-
-    update = sim._make_callback_update("DOCUSE|info")
-    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as handle:
-        temp_path = handle.name
-        handle.write(b"not really a jpeg")
-    context.user_data["_pending_doc"] = {
-        "path": temp_path,
-        "name": "notes.jpg",
-        "kind": "image",
-    }
-
-    analyse = AsyncMock(return_value=_cbd_draft())
-    patches = _common_patches()
-    try:
-        with patches[0], patches[1], patches[2], \
-             patch("bot._read_image_text", new=AsyncMock(
-                 return_value=("Learning point: escalate ECG review earlier next time.", []))), \
-             patch("bot.assess_form_essentials", new=_assess(_all("CBD", ESSENTIAL_PRESENT))), \
-             patch("bot._analyse_selected_form", new=analyse):
-            result = await handle_document_intent(update, context)
-
-        assert result == AWAIT_APPROVAL
-        analyse.assert_awaited_once()
-        merged = analyse.await_args.args[2]
-        assert THIN_CASE in merged
-        assert "escalate ECG review earlier" in merged
-    finally:
-        if os.path.exists(temp_path):
-            os.unlink(temp_path)
-
-
-@pytest.mark.asyncio
-async def test_photo_answer_reaches_the_followup_route_not_a_new_case():
-    """The photo itself lands on the existing use/attach prompt and keeps the
-    open question's state, rather than restarting form recommendation."""
-    sim = BotSimulator()
-    context = sim._make_context()
-    context.user_data["case_text"] = THIN_CASE
-    await _ask_first(sim, context)
-
-    update = sim._make_text_update("")
-    update.message.text = None
-    photo = MagicMock()
-    photo_file = AsyncMock()
-    photo.get_file = AsyncMock(return_value=photo_file)
-    photo_file.download_to_drive = AsyncMock()
-    update.message.photo = [photo]
-
-    patches = _common_patches()
-    with patches[0], patches[1], patches[2], \
-         patch("bot._read_image_text", new=AsyncMock(return_value=("Learning point.", []))), \
-         patch("bot._analyse_selected_form", new=AsyncMock()) as analyse:
-        await handle_case_input(update, context)
-
-    analyse.assert_not_awaited()
-    assert context.user_data["case_text"] == THIN_CASE
-    assert context.user_data["chosen_form"] == "CBD"
-    assert context.user_data["awaiting_detail"] is True
-
-
-@pytest.mark.asyncio
-async def test_document_followup_merges_and_drafts():
-    sim = BotSimulator()
-    context = sim._make_context()
-    context.user_data["case_text"] = THIN_CASE
-    context.user_data["case_input_source"] = "text"
-    await _ask_first(sim, context)
-
-    update = sim._make_callback_update("DOCUSE|info")
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as handle:
-        temp_path = handle.name
-        handle.write(b"dummy pdf content")
-    context.user_data["_pending_doc"] = {"path": temp_path, "name": "clinic-note.pdf"}
-
-    analyse = AsyncMock(return_value=_cbd_draft())
-    patches = _common_patches()
-    try:
-        with patches[0], patches[1], patches[2], \
-             patch("bot.extract_from_document", new=AsyncMock(
-                 return_value="Learning point: escalate ECG review earlier next time.")), \
-             patch("bot.assess_form_essentials", new=_assess(_all("CBD", ESSENTIAL_PRESENT))), \
-             patch("bot._analyse_selected_form", new=analyse):
-            result = await handle_document_intent(update, context)
-
-        assert result == AWAIT_APPROVAL
-        analyse.assert_awaited_once()
-        merged = analyse.await_args.args[2]
-        assert THIN_CASE in merged
-        assert "escalate ECG review earlier" in merged
-    finally:
-        if os.path.exists(temp_path):
-            os.unlink(temp_path)
 
 
 # --- an essential the doctor cannot supply ---------------------------------
@@ -694,11 +429,11 @@ async def test_changed_case_text_is_reassessed():
 
 
 @pytest.mark.asyncio
-async def test_cancel_clears_the_pending_essentials_question():
+async def test_cancel_clears_the_essentials_state():
     sim = BotSimulator()
     context = sim._make_context()
     context.user_data["case_text"] = THIN_CASE
-    await _ask_first(sim, context)
+    await _draft_with_gaps(sim, context)
 
     result = await handle_callback(sim._make_callback_update("CANCEL|draft"), context)
 
@@ -713,33 +448,11 @@ async def test_new_case_clears_essentials_state():
     sim = BotSimulator()
     context = sim._make_context()
     context.user_data["case_text"] = THIN_CASE
-    await _ask_first(sim, context)
+    await _draft_with_gaps(sim, context)
 
     await handle_callback(sim._make_callback_update("CASE|new"), context)
 
     assert bot._ESSENTIALS_ASSESSMENT_KEY not in context.user_data
-
-
-@pytest.mark.asyncio
-async def test_retry_with_the_case_unchanged_reuses_the_judgement_and_still_asks():
-    """Retry is not a way past the question. The cached judgement stands (no
-    second model call), the outstanding essential is still outstanding, and
-    nothing is drafted."""
-    sim = BotSimulator()
-    context = sim._make_context()
-    context.user_data["case_text"] = THIN_CASE
-    await _ask_first(sim, context)
-
-    analyse = AsyncMock(return_value=_cbd_draft())
-    assess = _assess(_all("CBD", ESSENTIAL_PRESENT))
-    with patch("bot.assess_form_essentials", new=assess), \
-         patch("bot._analyse_selected_form", new=analyse):
-        result = await handle_callback(sim._make_callback_update("ACTION|retry_template"), context)
-
-    assert result == AWAIT_CASE_INPUT
-    assert analyse.await_count == 0
-    assess.assert_not_awaited()
-    assert any("I still need" in text for text in _texts(sim))
 
 
 # --- an assessment that did not complete: never draft anyway ---------------
@@ -883,70 +596,6 @@ async def test_a_complete_valid_answer_is_accepted():
 # --- every drafting entrypoint is gated ------------------------------------
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("entrypoint", ["form_choice", "retry_template", "case_improve", "accumulate"])
-async def test_all_drafting_entrypoints_route_through_the_gate(entrypoint):
-    sim = BotSimulator()
-    context = sim._make_context()
-    context.user_data["case_text"] = THIN_CASE
-    context.user_data["chosen_form"] = "CBD"
-
-    analyse = AsyncMock(return_value=_cbd_draft())
-    statuses = _all("CBD", ESSENTIAL_PRESENT, reflection=ESSENTIAL_MISSING)
-    patches = _common_patches()
-    with patches[0], patches[1], patches[2], \
-         patch("bot.assess_form_essentials", new=_assess(statuses)), \
-         patch("bot._analyse_selected_form", new=analyse):
-        if entrypoint == "form_choice":
-            result = await handle_form_choice(sim._make_callback_update("FORM|CBD"), context)
-        elif entrypoint == "retry_template":
-            result = await handle_callback(sim._make_callback_update("ACTION|retry_template"), context)
-        elif entrypoint == "case_improve":
-            context.user_data["pending_new_case_text"] = "The consultant supervised indirectly."
-            result = await handle_callback(sim._make_callback_update("CASE|improve"), context)
-        else:
-            context.user_data["pending_draft_data"] = {
-                "_type": "FORM",
-                "form_type": "CBD",
-                "fields": dict(CBD_FIELDS),
-                "uuid": "uuid-cbd",
-            }
-            result = await bot._accumulate_and_refresh(
-                sim._make_text_update("The consultant supervised indirectly."),
-                context,
-                "The consultant supervised indirectly.",
-            )
-
-    assert result == AWAIT_CASE_INPUT, f"{entrypoint} drafted without settling essentials"
-    analyse.assert_not_awaited()
-    assert any("I still need" in text for text in _texts(sim))
-    # Whatever the doctor had already sent is still the case, exactly once.
-    assert context.user_data["case_text"].count(THIN_CASE) == 1
-    assert "accumulation_additions" not in context.user_data
-
-
-@pytest.mark.asyncio
-async def test_resume_paused_flow_is_gated_too():
-    sim = BotSimulator()
-    context = sim._make_context()
-    context.user_data["case_text"] = THIN_CASE
-    context.user_data["chosen_form"] = "CBD"
-    context.user_data["pending_draft_data"] = {
-        "_type": "FORM",
-        "form_type": "CBD",
-        "fields": {**CBD_FIELDS, "reflection": ""},
-        "uuid": "uuid-cbd",
-    }
-
-    statuses = _all("CBD", ESSENTIAL_PRESENT, reflection=ESSENTIAL_MISSING)
-    with patch("bot.assess_form_essentials", new=_assess(statuses)), \
-         patch("bot._setup_needs_finishing", return_value=False):
-        result = await bot._resume_paused_flow(sim._make_text_update("anything"), context, "Resuming.")
-
-    assert result == AWAIT_CASE_INPUT
-    assert any("I still need" in text for text in _texts(sim))
-
-
 # --- grounding ------------------------------------------------------------
 
 
@@ -995,68 +644,6 @@ async def test_essentials_prompt_judges_attribution_and_specificity():
     assert "Attribution matters" in prompt
     assert "Specificity matters" in prompt
     assert "You are NOT writing the portfolio entry" in prompt
-
-
-@pytest.mark.asyncio
-async def test_no_draft_is_written_while_the_doctors_learning_is_still_missing():
-    """RCEM: the model may structure a reflection, never author one. While a
-    CBD's required reflection is still judged absent from the doctor's own
-    words, no drafting call happens at all — there is no draft for a
-    model-written reflection to appear in."""
-    sim = BotSimulator()
-    context = sim._make_context()
-    context.user_data["case_text"] = THIN_CASE
-    await _ask_first(sim, context)
-
-    invented = _cbd_draft(reflection="This case reinforced the importance of early ECG review.")
-    analyse = AsyncMock(return_value=invented)
-    reply = sim._make_text_update("The consultant supervised indirectly.")
-    statuses = _all("CBD", ESSENTIAL_PRESENT, reflection=ESSENTIAL_MISSING)
-    patches = _common_patches()
-    with patches[0], patches[1], patches[2], \
-         patch("bot.assess_form_essentials", new=_assess(statuses)), \
-         patch("bot._analyse_selected_form", new=analyse):
-        result = await handle_case_input(reply, context)
-
-    assert result == AWAIT_CASE_INPUT
-    assert analyse.await_count == 0
-    ask = [text for text in _texts(sim) if "I still need" in text]
-    assert ask and "reflection" in ask[-1].lower()
-
-
-@pytest.mark.asyncio
-async def test_refine_does_not_regenerate_a_draft_from_missing_essentials():
-    """An edit is drafting too: with an essential judged missing in the
-    combined source, the regeneration does not happen and the doctor's
-    combined case — original plus the new reply — is kept."""
-    sim = BotSimulator()
-    context = sim._make_context()
-    context.user_data["case_text"] = THIN_CASE
-    context.user_data["chosen_form"] = "CBD"
-    context.user_data["draft_data"] = {
-        "_type": "FORM",
-        "form_type": "CBD",
-        "fields": {**CBD_FIELDS, "reflection": ""},
-        "uuid": "uuid-cbd",
-    }
-
-    extract = AsyncMock(return_value=_cbd_draft())
-    statuses = _all("CBD", ESSENTIAL_PRESENT, reflection=ESSENTIAL_MISSING)
-    with patch("bot.assess_form_essentials", new=_assess(statuses)), \
-         patch("bot.extract_cbd_data", new=extract), \
-         patch("bot.extract_form_data", new=extract):
-        result = await bot._regenerate_active_draft_with_feedback(
-            sim._make_text_update("Add that the registrar was present."),
-            context,
-            "Add that the registrar was present.",
-            append_to_case=True,
-        )
-
-    assert result == AWAIT_CASE_INPUT
-    assert extract.await_count == 0, "an edit must not rebuild a draft from missing essentials"
-    assert THIN_CASE in context.user_data["case_text"]
-    assert "registrar was present" in context.user_data["case_text"]
-    assert any("I still need" in text for text in _texts(sim))
 
 
 @pytest.mark.asyncio
@@ -1151,3 +738,167 @@ async def test_unknown_status_from_the_model_is_ignored_not_guessed():
         )
 
     assert statuses == {}
+
+
+# --- draft first: missing essentials become gaps inside the draft ----------
+
+
+@pytest.mark.asyncio
+async def test_missing_essentials_draft_at_once_with_the_gaps_named():
+    """Owner's decision, 25 Sep 2026: no questions before the draft."""
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["case_text"] = THIN_CASE
+
+    analyse = AsyncMock(return_value=_cbd_draft(reflection="", level_of_supervision=""))
+    statuses = _all("CBD", ESSENTIAL_PRESENT, reflection=ESSENTIAL_MISSING, level_of_supervision=ESSENTIAL_MISSING)
+    with patch("bot.assess_form_essentials", new=_assess(statuses)), \
+         patch("bot._analyse_selected_form", new=analyse):
+        result = await handle_form_choice(sim._make_callback_update("FORM|CBD"), context)
+
+    assert result == AWAIT_APPROVAL
+    analyse.assert_awaited_once()
+    joined = " ".join(_texts(sim))
+    assert "I still need" not in joined
+    hint = sim.get_last_text().lower().split("still needed:", 1)[1]
+    assert "reply with them" in hint
+    assert "reflection" in hint and "level of supervision" in hint
+    assert "patient presentation" not in hint, "only the gaps are named"
+    buttons = sim.get_last_buttons()
+    assert ("💾 Save draft now, finish in Kaizen", "APPROVE|draft") in buttons
+
+
+@pytest.mark.asyncio
+async def test_a_model_guess_for_a_missing_essential_never_reaches_the_draft():
+    """Drafting before the doctor answers must not let the model fill a role,
+    supervision level or reflection they never described."""
+    from models import CBDData
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["case_text"] = THIN_CASE
+    guessed = CBDData(
+        date_of_encounter="2026-03-17",
+        patient_presentation="Chest pain",
+        trainee_role="Assessed and managed the patient",
+        clinical_reasoning="Managed as ACS.",
+        reflection="This case reinforced the importance of early ECG review.",
+        level_of_supervision="Direct",
+    )
+    statuses = _all("CBD", ESSENTIAL_PRESENT, reflection=ESSENTIAL_MISSING, level_of_supervision=ESSENTIAL_MISSING)
+    with patch("bot.assess_form_essentials", new=_assess(statuses)), \
+         patch("bot.extract_cbd_data", new=AsyncMock(return_value=guessed)), \
+         patch("bot.get_voice_profile", return_value=""):
+        assert await bot._essentials_gate_before_draft(MagicMock(), context, THIN_CASE, "CBD") is None
+        draft = await bot._analyse_selected_form(context, 4242, THIN_CASE, "CBD")
+
+    assert draft.reflection == ""
+    assert draft.level_of_supervision is None
+    assert draft.trainee_role == "Assessed and managed the patient", "present essentials are kept"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entrypoint", ["form_choice", "retry_template", "case_improve", "accumulate"])
+async def test_every_drafting_entrypoint_judges_essentials_before_drafting(entrypoint):
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["case_text"] = THIN_CASE
+    context.user_data["chosen_form"] = "CBD"
+
+    order = []
+    statuses = _all("CBD", ESSENTIAL_PRESENT, reflection=ESSENTIAL_MISSING)
+
+    async def assess(*args, **kwargs):
+        order.append("assess")
+        return statuses
+
+    async def analyse(*args, **kwargs):
+        order.append("draft")
+        return _cbd_draft(reflection="")
+
+    patches = _common_patches()
+    with patches[0], patches[1], patches[2], \
+         patch("bot.assess_form_essentials", new=assess), \
+         patch("bot._analyse_selected_form", new=analyse):
+        if entrypoint == "form_choice":
+            await handle_form_choice(sim._make_callback_update("FORM|CBD"), context)
+        elif entrypoint == "retry_template":
+            await handle_callback(sim._make_callback_update("ACTION|retry_template"), context)
+        elif entrypoint == "case_improve":
+            context.user_data["pending_new_case_text"] = "The consultant supervised indirectly."
+            await handle_callback(sim._make_callback_update("CASE|improve"), context)
+        else:
+            context.user_data["pending_draft_data"] = {
+                "_type": "FORM",
+                "form_type": "CBD",
+                "fields": dict(CBD_FIELDS),
+                "uuid": "uuid-cbd",
+            }
+            await bot._accumulate_and_refresh(
+                sim._make_text_update("The consultant supervised indirectly."),
+                context,
+                "The consultant supervised indirectly.",
+            )
+
+    assert order and order[0] == "assess", f"{entrypoint} drafted before judging essentials"
+    assert "I still need" not in " ".join(_texts(sim))
+
+
+@pytest.mark.asyncio
+async def test_a_reply_regenerates_the_draft_but_still_missing_essentials_stay_blank():
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["case_text"] = THIN_CASE
+    context.user_data["chosen_form"] = "CBD"
+    context.user_data["draft_data"] = {
+        "_type": "FORM",
+        "form_type": "CBD",
+        "fields": {**CBD_FIELDS, "reflection": ""},
+        "uuid": "uuid-cbd",
+    }
+    extract = AsyncMock(return_value=_cbd_draft(reflection="An invented learning point."))
+    statuses = _all("CBD", ESSENTIAL_PRESENT, reflection=ESSENTIAL_MISSING)
+    with patch("bot.assess_form_essentials", new=_assess(statuses)), \
+         patch("bot.extract_cbd_data", new=extract), \
+         patch("bot.extract_form_data", new=extract):
+        result = await bot._regenerate_active_draft_with_feedback(
+            sim._make_text_update("The registrar was present."),
+            context,
+            "The registrar was present.",
+            append_to_case=True,
+        )
+
+    assert result == AWAIT_APPROVAL
+    assert extract.await_count == 1
+    assert bot._load_draft(context).fields["reflection"] == ""
+    assert "registrar was present" in context.user_data["case_text"]
+
+
+
+@pytest.mark.asyncio
+async def test_case_content_is_drafted_even_when_judged_missing():
+    """Only doctor-only details are held back. A strict "missing" on the case
+    narrative or setting blanked content the case plainly contained."""
+    from models import CBDData
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["case_text"] = THIN_CASE
+    drafted = CBDData(
+        clinical_setting="Emergency Department",
+        clinical_reasoning="Collapse with vertigo; peripheral features on examination.",
+        trainee_role="Assessed and managed the patient",
+    )
+    statuses = _all(
+        "CBD", ESSENTIAL_PRESENT,
+        clinical_setting=ESSENTIAL_MISSING, clinical_reasoning=ESSENTIAL_MISSING, trainee_role=ESSENTIAL_MISSING,
+    )
+    with patch("bot.assess_form_essentials", new=_assess(statuses)), \
+         patch("bot.extract_cbd_data", new=AsyncMock(return_value=drafted)), \
+         patch("bot.get_voice_profile", return_value=""):
+        await bot._essentials_gate_before_draft(MagicMock(), context, THIN_CASE, "CBD")
+        draft = await bot._analyse_selected_form(context, 4242, THIN_CASE, "CBD")
+
+    assert draft.clinical_setting == "Emergency Department"
+    assert draft.clinical_reasoning.startswith("Collapse with vertigo")
+    assert draft.trainee_role == "", "the doctor's own role is never assumed"

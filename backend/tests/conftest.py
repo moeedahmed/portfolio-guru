@@ -22,6 +22,19 @@ for _name in ("SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"):
 # CI's throwaway values (.github/workflows/test.yml), for callers such as a
 # direct `scripts/preflight.sh` that no longer get a key from backend/.env.
 os.environ.setdefault("FERNET_SECRET_KEY", "5Wv33F9sq99WGD2lEzwwd3J_JH5p6vxKdDiAwCWqoYQ=")
+# The Mac Mini runs this suite beside the live bot, and every store defaults to
+# ~/.openclaw/data/portfolio-guru. Before this, test runs wrote ~2,000 synthetic
+# filing attempts a week into the live logs and counted fixture users as real.
+# One throwaway data dir for the session, set before any backend import, moves
+# every store; per-store overrides a shell may export are dropped so none can
+# point back at live data. Tests that need their own paths still set them.
+import tempfile as _tempfile
+
+for _name in [n for n in os.environ if n.startswith("PORTFOLIO_GURU_") and n.endswith(("_PATH", "_DIR"))]:
+    os.environ.pop(_name)
+for _name in ("USAGE_DB_PATH", "DATABASE_URL"):
+    os.environ.pop(_name, None)
+os.environ["PORTFOLIO_GURU_DATA_DIR"] = _tempfile.mkdtemp(prefix="pg-test-data-")
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "fake")
 os.environ.setdefault("GOOGLE_API_KEY", "fake")
 
@@ -65,6 +78,23 @@ def _isolate_filing_artefacts(tmp_path, monkeypatch):
     monkeypatch.setenv("PORTFOLIO_GURU_DOM_LEARNING_LOG_PATH", str(learning_log_path))
     monkeypatch.setenv("PORTFOLIO_GURU_KAIZEN_FILER_PATH", str(filer_copy))
     monkeypatch.delenv("PORTFOLIO_GURU_DOM_AUTOLEARN", raising=False)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _no_real_passwordless_connections(monkeypatch):
+    """Default every test user to 'not connected passwordless'.
+
+    profile_store reads the on-disk profile database, which on the Mac Mini
+    (where CI also runs) is production's. Without this, a real passwordless
+    connection for a user id a test happens to reuse would flip that test's
+    "is this user connected?" answer. Tests of the passwordless flow patch
+    ``profile_store.get_kaizen_connection`` or use their own engine.
+    """
+    import profile_store
+
+    monkeypatch.setattr(profile_store, "get_kaizen_connection", lambda telegram_user_id: None)
+    monkeypatch.setenv("PG_ENABLE_PASSWORDLESS_CONNECT", "")
     yield
 
 

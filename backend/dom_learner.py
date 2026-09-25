@@ -26,10 +26,11 @@ import re
 from datetime import date
 from pathlib import Path
 from typing import Any, Dict, Optional
+from data_paths import data_dir
 
 logger = logging.getLogger(__name__)
 
-_RUNTIME_DATA_DIR = Path.home() / ".openclaw" / "data" / "portfolio-guru"
+_RUNTIME_DATA_DIR = data_dir()
 
 
 def _autolearn_enabled() -> bool:

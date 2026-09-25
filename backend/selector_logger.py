@@ -18,12 +18,13 @@ import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from data_paths import data_path
 
 from selector_strategy import build_selector_plan, rank_selector_candidates
 
 logger = logging.getLogger(__name__)
 
-SELECTOR_LOG_DIR = Path.home() / ".openclaw/data/portfolio-guru/selector-logs"
+SELECTOR_LOG_DIR = data_path("selector-logs")
 
 
 class SelectorLogger:
