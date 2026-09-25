@@ -42,11 +42,11 @@ _DECORATIVE_EMOJI_RE = re.compile("[✨🤖🎉⭐]")
 
 # The one canonical list of genuinely supported input types for "send me
 # more" moments: initial capture (file_case_prompt), extending a case
-# (gathering_captured), missing essentials (pre_draft_completeness_request),
-# and attachment context (attachment_captured). Telegram's Reply-to-message
-# feature is never implied as required — this is about what media types are
-# accepted, not how to send them. Every template that names supported inputs
-# should reuse this phrase rather than drift into its own wording.
+# (gathering_captured) and attachment context (attachment_captured).
+# Telegram's Reply-to-message feature is never implied as required — this is
+# about what media types are accepted, not how to send them. Every template
+# that names supported inputs should reuse this phrase rather than drift into
+# its own wording.
 MODALITY_CLAUSE = "text, voice/audio, photos, documents, or video with a description"
 
 
@@ -140,16 +140,6 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         ),
         safety_critical=True,
     ),
-    "pre_draft_completeness_request": MessageTemplate(
-        key="pre_draft_completeness_request",
-        message_class=MessageClass.TEMPLATED,
-        text=(
-            "📋 Before I draft this, I still need: {items}.\n\n"
-            f"Send it as {MODALITY_CLAUSE} and I'll add it to your case — "
-            "everything you've already sent is kept."
-        ),
-        safety_critical=True,
-    ),
     "essentials_check_retry": MessageTemplate(
         key="essentials_check_retry",
         message_class=MessageClass.TEMPLATED,
@@ -206,10 +196,13 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         message_class=MessageClass.FIXED,
         text="\n\n💬 Reply to refine this draft, or use the buttons below to save.",
     ),
-    "draft_reply_hint_reflection_needed": MessageTemplate(
-        key="draft_reply_hint_reflection_needed",
-        message_class=MessageClass.FIXED,
-        text="\n\n💬 Reply to refine this draft with your own learning point, interpretation or intended practice change to unlock saving.",
+    "draft_gap_hint": MessageTemplate(
+        key="draft_gap_hint",
+        message_class=MessageClass.TEMPLATED,
+        text=(
+            "\n\n👉 Still needed: {items}. Reply with {it_or_them} "
+            "(text or a voice note), or save now and finish it in Kaizen."
+        ),
     ),
     "capability_overview": MessageTemplate(
         key="capability_overview",

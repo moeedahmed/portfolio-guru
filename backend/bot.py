@@ -4710,12 +4710,16 @@ def _is_stale_case_button(context, data: str | None) -> bool:
 def _build_approval_keyboard(
     improved_once: bool = False,
     can_back_to_missing: bool = False,
-    needs_reflection_detail: bool = False,
     context=None,
 ):
     rows = []
     save, cancel = _case_button("APPROVE|draft", context), _case_button("CANCEL|draft", context)
-    if not needs_reflection_detail:
+    gaps = _draft_gaps(context) if context is not None else []
+    # Save is always offered: it only ever makes a Kaizen draft, which the
+    # doctor can finish there. Gaps are filled by replying, not by buttons.
+    if gaps:
+        rows.append([InlineKeyboardButton("💾 Save draft now, finish in Kaizen", callback_data=save)])
+    else:
         rows.append([InlineKeyboardButton("💾 Save to Kaizen", callback_data=save)])
     if can_back_to_missing:
         rows.append(_nav_row("Back", "ACTION|back_to_missing", "Cancel", cancel))
@@ -4797,7 +4801,6 @@ def _active_draft_keyboard(context) -> InlineKeyboardMarkup:
         return _build_amend_keyboard(improved_once=context.user_data.get("quick_improve_used", False), context=context)
     return _build_approval_keyboard(
         improved_once=context.user_data.get("quick_improve_used", False),
-        needs_reflection_detail=context.user_data.get("needs_reflection_detail", False),
         context=context,
     )
 
@@ -5247,6 +5250,10 @@ def _draft_coach_note(draft) -> str:
     Returns "" for solid reflections so the preview isn't padded with noise."""
     reflection = _draft_reflection_text(draft).strip()
     if not reflection:
+        # A required reflection is already named in the closing "Still
+        # needed" line; only an optional one needs this nudge.
+        if _form_requires_reflection(_draft_form_type(draft), draft):
+            return ""
         return "Coach note: Reply with what you learned or would do differently."
     if len(reflection.split()) < 18:
         return "Coach note: This reflection is brief. Reply if you'd like to expand or change it."
@@ -5443,6 +5450,22 @@ def _remember_case_context_source(
         context.user_data["case_has_user_context"] = False
 
 
+def _without_reflection_text(draft):
+    """The draft with its reflection fields emptied, for saving without the
+    doctor's own reflection."""
+    fields = _draft_fields_for_review(draft)
+    keys = _find_reflection_keys(fields, _draft_form_type(draft))
+    if not keys:
+        return draft
+    if isinstance(draft, FormDraft):
+        return FormDraft(
+            form_type=draft.form_type,
+            fields={**draft.fields, **{key: "" for key in keys}},
+            uuid=draft.uuid,
+        )
+    return draft.model_copy(update={key: "" for key in keys if key in type(draft).model_fields})
+
+
 def _set_reflection_detail_gate(context, draft) -> bool:
     needs_reflection_detail = _draft_needs_reflection_detail_before_save(context, draft)
     if needs_reflection_detail:
@@ -5553,15 +5576,28 @@ _MISSING_MARKER = "_— needs your detail_"
 # Appended to draft previews shown with the approval keyboard so the user
 # knows they can reply to refine, instead of relying on a removed Edit button.
 _REPLY_HINT_SUFFIX = render_message("draft_reply_hint")
-# Used instead when Save is hidden pending the doctor's own reflection, since
-# the keyboard only offers Cancel while the doctor replies with reflection.
-_REPLY_HINT_SUFFIX_REFLECTION_NEEDED = render_message("draft_reply_hint_reflection_needed")
 
 
 def _draft_reply_hint(context) -> str:
-    if context.user_data.get("needs_reflection_detail"):
-        return _REPLY_HINT_SUFFIX_REFLECTION_NEEDED
-    return _REPLY_HINT_SUFFIX
+    gaps = _draft_gaps(context)
+    if not gaps:
+        return _REPLY_HINT_SUFFIX
+    return render_message(
+        "draft_gap_hint",
+        items=_format_completeness_gap_items(gaps),
+        it_or_them="it" if len(gaps) == 1 else "them",
+    )
+
+
+def _draft_gaps(context) -> list[dict]:
+    """Required fields the open draft still lacks, reflection last."""
+    draft = _load_draft(context)
+    if draft is None:
+        return []
+    form_type = context.user_data.get("chosen_form") or _draft_form_type(draft)
+    gaps = _pre_draft_completeness_gaps(context, draft, form_type)
+    gaps.sort(key=lambda gap: gap["key"] == "reflection")
+    return gaps
 
 # Visual divider separating portfolio content from bot guidance/rationale in
 # draft previews (after draft body). Post-filing confirmations should stay
@@ -5679,48 +5715,6 @@ def _source_label(input_source: str | None) -> str:
     return _SOURCE_LABELS.get(str(input_source or "").strip().lower(), "case note")
 
 
-def _reflection_review_line(draft) -> str:
-    fields = _draft_fields_for_review(draft)
-    form_type = _draft_form_type(draft)
-    keys = _find_reflection_keys(fields, form_type)
-
-    if not keys:
-        return "• AI-filled fields: review the wording; blank fields mean I could not safely infer detail."
-
-    present = [key for key in keys if not _is_missing_field_value(fields.get(key))]
-    missing = [key for key in keys if _is_missing_field_value(fields.get(key))]
-
-    if present and missing:
-        return (
-            f"• Reflection fields: {len(present)} AI-filled for review; "
-            f"{len(missing)} still needs your detail."
-        )
-    if present:
-        noun = "field" if len(present) == 1 else "fields"
-        return f"• Reflection fields: {len(present)} AI-filled {noun} for you to check."
-    return "• Reflection fields: no reflection text was safely found yet."
-
-
-def _missing_fields_review_line(draft) -> str:
-    """Name the required fields still waiting on the user.
-
-    A bare count next to the inline ``needs your detail`` markers told the user
-    something they could already see; the field names tell them where to type.
-    """
-    form_type = _draft_form_type(draft)
-    missing_required, _, _ = _missing_template_fields(draft, form_type)
-    if not missing_required:
-        return ""
-    labels = [str(field.get("label") or field.get("key") or "").strip() for field in missing_required]
-    labels = [label for label in labels if label]
-    if not labels:
-        return ""
-    shown = ", ".join(labels[:3])
-    if len(labels) > 3:
-        shown = f"{shown}, +{len(labels) - 3} more"
-    return f"• Still needed: {shown}."
-
-
 def _draft_transparency_layer(
     draft,
     *,
@@ -5732,36 +5726,26 @@ def _draft_transparency_layer(
 
     The AI-use declaration already lives once, in the reflection field text
     itself (see `_with_rcem_ai_declaration`); this layer must not repeat it
-    as a second footer. It only renders when the doctor's own reflective
-    input is still missing and saving needs to be gated on that.
+    as a second footer. It only renders for a photo-only case, whose
+    reflection must come from the doctor's own words.
 
     Names the source *type* only — it never quotes raw case text, so
     patient-identifying detail in the source is not surfaced in the preview.
     """
     if not _draft_has_reflection_fields(draft) or not needs_reflection_detail:
         return ""
-
-    lines = ["", "⚠️ *Your reflection is needed before saving*"]
-
+    # What is still missing is named once, in the closing reply hint. This
+    # note only adds what the hint cannot: a photo alone carries none of the
+    # doctor's own words, so the reflection must come from them.
     if (
         str(input_source or "").strip().lower() in _USER_CONTEXT_REQUIRED_SOURCES
         and not has_user_context
     ):
-        # A photo-origin draft with no words of the doctor's own still warns
-        # here rather than saving quietly — this is purely a reflection-detail
-        # note, not a refusal to draft.
-        source_label = _source_label(input_source)
-        lines.append(
-            f"• Source: {source_label}. Add your own interpretation/reflection before saving."
+        return (
+            f"\n⚠️ Source: {_source_label(input_source)}. Add your own interpretation "
+            "and reflection. I won't write them for you."
         )
-    else:
-        lines.append("• Add what you learned or what you would do differently before saving.")
-
-    gap_line = _missing_fields_review_line(draft)
-    if gap_line:
-        lines.append(gap_line)
-
-    return "\n".join(lines)
+    return ""
 
 
 def _template_requirements(form_type: str):
@@ -5851,7 +5835,6 @@ async def _show_draft_review(
     text = preview + _draft_reply_hint(context)
     keyboard = _build_approval_keyboard(
         improved_once=context.user_data.get("quick_improve_used", False),
-        needs_reflection_detail=needs_reflection_detail,
         context=context,
     )
     if edit:
@@ -5948,11 +5931,10 @@ def _format_completeness_gap_items(gaps: list[dict]) -> str:
 # is the product model's (`assess_form_essentials`) reading the doctor's own
 # words against requirements derived from the Kaizen schema — not a keyword
 # rule, and not a second opinion on the model's own draft. Everything that
-# can draft a form routes through `_essentials_gate_before_draft`, and only a
-# complete judgement that every essential is present permits a drafting call:
-# a missing essential is asked for, an unavailable one offers a different
-# form, and an assessment that did not complete is retried. There is no path
-# that drafts anyway.
+# can draft a form routes through `_essentials_gate_before_draft`. A missing
+# essential is drafted as a blank gap for the doctor to fill (never invented),
+# an unavailable one offers a different form, and an assessment that did not
+# complete is retried.
 
 # How each essential reads to the doctor when it has to be asked for, and
 # what it means to the model when it is being judged. Anything not named
@@ -6121,49 +6103,6 @@ def _form_requires_reflection(form_type: str, draft=None) -> bool:
     )
 
 
-async def _ask_for_missing_essentials(
-    message,
-    context: ContextTypes.DEFAULT_TYPE,
-    form_type: str,
-    missing: list[dict],
-    *,
-    edit: bool,
-) -> int:
-    """One grouped question naming exactly the essentials still missing.
-
-    Asked items are not remembered, because they are not the question: the
-    question is what the *current* case still lacks. Anything the doctor has
-    since supplied is judged present and drops out of the next ask, so an
-    answered item is never repeated, and a still-missing required detail is
-    never waved through because it was mentioned once before.
-    """
-    context.user_data["chosen_form"] = form_type
-    context.user_data["awaiting_detail"] = True
-    _audit_event(
-        context,
-        "decision_path",
-        decision="essentials_question_asked",
-        form_type=form_type,
-        missing_keys=[item["key"] for item in missing],
-    )
-    _track_funnel_event(
-        context,
-        "essentials_requested",
-        form_type=form_type,
-        missing_count=len(missing),
-    )
-    text = render_message(
-        "pre_draft_completeness_request",
-        items=_format_completeness_gap_items(missing),
-    )
-    if edit:
-        await _safe_edit_text(message, text, reply_markup=_KB_CANCEL)
-        _track_latest_message(context, message)
-    else:
-        await _send_latest_message(message, context, text, reply_markup=_KB_CANCEL)
-    return AWAIT_CASE_INPUT
-
-
 async def _ask_to_retry_essentials_check(
     message,
     context: ContextTypes.DEFAULT_TYPE,
@@ -6239,6 +6178,33 @@ async def _offer_change_form_for_unavailable_essentials(
     return AWAIT_CASE_INPUT
 
 
+def _blank_judged_missing_essentials(context, draft, case_text: str, form_type: str):
+    """Leave every essential the doctor has not supplied blank in the draft.
+
+    Drafting now happens before those details are given, so this is what keeps
+    the model from filling a role, a supervision level or a reflection the
+    doctor never described. The blanks show in the preview as gaps to fill.
+    """
+    statuses = _cached_essential_statuses(context, case_text, form_type) or {}
+    missing = [key for key, status in statuses.items() if status == ESSENTIAL_MISSING]
+    if not missing or draft is None:
+        return draft
+    if isinstance(draft, FormDraft):
+        fields = dict(draft.fields)
+        changed = False
+        for key in missing:
+            if key in fields and not _is_missing_field_value(fields[key]):
+                fields[key] = ""
+                changed = True
+        return FormDraft(form_type=draft.form_type, fields=fields, uuid=draft.uuid) if changed else draft
+    blanks = {
+        key: type(draft).model_fields[key].default
+        for key in missing
+        if key in type(draft).model_fields and not _is_missing_field_value(getattr(draft, key, None))
+    }
+    return draft.model_copy(update=blanks) if blanks else draft
+
+
 async def _essentials_gate_before_draft(
     message,
     context: ContextTypes.DEFAULT_TYPE,
@@ -6249,22 +6215,17 @@ async def _essentials_gate_before_draft(
 ) -> int | None:
     """Settle the form's essentials before anything is drafted.
 
-    Returns ``None`` **only** when every essential of this form has been
-    judged present — that is the single condition under which a caller may
-    make a drafting call. Every other outcome returns the conversation state
-    to hand back, with the doctor's case retained exactly as sent:
+    Returns ``None`` when the caller may draft: every essential is judged
+    either present or missing. Missing essentials are not asked for up front;
+    the draft leaves them blank and shows them as gaps to fill (draft first,
+    decided 25 Sep 2026). Two outcomes still return a conversation state, with
+    the doctor's case retained exactly as sent:
 
-    * an essential is still missing → one grouped question naming only what
-      is genuinely still absent;
     * an essential is unavailable to the doctor → a different form is
       offered rather than the requirement being invented or skipped;
     * the judgement did not complete (outage, timeout, or a partial,
       duplicated or malformed answer) → a short retry, because a requirement
-      that was never judged cannot be assumed satisfied.
-
-    There is deliberately no "asked once already" exception: a cap on
-    questions would let required content through, which is the one thing
-    this gate exists to prevent.
+      that was never judged cannot be safely blanked or assumed present.
     """
     essentials = _form_essential_requirements(form_type)
     if not essentials or not str(case_text or "").strip():
@@ -6282,7 +6243,24 @@ async def _essentials_gate_before_draft(
 
     missing = [item for item in essentials if statuses.get(item["key"]) == ESSENTIAL_MISSING]
     if missing:
-        return await _ask_for_missing_essentials(message, context, form_type, missing, edit=edit)
+        # Draft first (Moeed, 25 Sep 2026): asking before drafting was a wall
+        # doctors stopped at. The draft is built now, with these fields left
+        # blank on purpose (_blank_judged_missing_essentials) and shown as
+        # gaps the doctor fills inside the draft, one at a time.
+        _audit_event(
+            context,
+            "decision_path",
+            decision="essentials_missing_drafting_with_gaps",
+            form_type=form_type,
+            missing_keys=[item["key"] for item in missing],
+        )
+        _track_funnel_event(
+            context,
+            "essentials_requested",
+            form_type=form_type,
+            missing_count=len(missing),
+        )
+        return None
 
     _audit_event(
         context,
@@ -10967,6 +10945,7 @@ async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: in
     else:
         context.user_data.pop("name_check_unavailable", None)
 
+    draft = _blank_judged_missing_essentials(context, draft, case_text, form_type)
     _apply_profile_training_stage(draft, user_id, form_type)
     _apply_default_dates(draft, form_type)
     _store_pending_draft(context, draft)
@@ -11298,7 +11277,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=_build_approval_keyboard(
                 improved_once=context.user_data.get("quick_improve_used", False),
                 can_back_to_missing=True,
-                needs_reflection_detail=needs_reflection_detail,
                 context=context,
             ),
             parse_mode="Markdown",
@@ -12089,6 +12067,7 @@ async def _regenerate_active_draft_with_feedback(
                 ),
                 timeout=45,
         )
+        updated = _blank_judged_missing_essentials(context, updated, case_text, form_type)
         _store_draft(context, updated)
         # The gate above already judged this exact case and form, so the
         # reflection decision here reads that fresh judgement rather than a
@@ -14348,48 +14327,12 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             context,
             "That earlier draft is no longer active.",
         )
+    # Save is always available (draft first, 25 Sep 2026): a Kaizen draft may
+    # be incomplete and the doctor finishes it there. RCEM's rule still holds:
+    # a reflection the doctor has not supplied is left blank, never saved as
+    # AI wording. The post-save report names the blank fields to complete.
     if _set_reflection_detail_gate(context, draft):
-        context.user_data.pop("filing_in_progress", None)
-        context.user_data.pop("retry_filing_requested", None)
-        review_text = _format_draft_preview_for_context(draft, context) + _draft_reply_hint(context)
-        if query:
-            await _safe_edit_text(
-                source_message,
-                review_text,
-                reply_markup=_active_draft_keyboard(context),
-                parse_mode="Markdown",
-            )
-        else:
-            await source_message.reply_text(
-                review_text,
-                reply_markup=_active_draft_keyboard(context),
-                parse_mode="Markdown",
-            )
-        return AWAIT_APPROVAL
-    # Reflection is covered above by the dedicated add-reflection button. A
-    # doctor can still edit a shown draft down to below the schema's other
-    # required fields (e.g. clearing the clinical setting) before tapping
-    # Save. Reuse the same completeness decision used before the preview, so
-    # a removed essential is caught here too instead of filing an incomplete
-    # draft, and the doctor is only asked for what is now actually missing.
-    pre_file_form_type = context.user_data.get("chosen_form") or _draft_form_type(draft)
-    pre_file_gaps = [
-        gap for gap in _pre_draft_completeness_gaps(context, draft, pre_file_form_type)
-        if gap["key"] != "reflection"
-    ]
-    if pre_file_gaps:
-        context.user_data.pop("filing_in_progress", None)
-        context.user_data.pop("retry_filing_requested", None)
-        context.user_data["awaiting_detail"] = True
-        gap_text = render_message(
-            "pre_draft_completeness_request",
-            items=_format_completeness_gap_items(pre_file_gaps),
-        )
-        if query:
-            await _safe_edit_text(source_message, gap_text, reply_markup=_KB_CANCEL)
-        else:
-            await _send_latest_message(source_message, context, gap_text, reply_markup=_KB_CANCEL)
-        return AWAIT_CASE_INPUT
+        draft = _without_reflection_text(draft)
     filing_draft = _with_rcem_ai_declaration(draft)
     if _needs_filing_curriculum_choice(user_id):
         context.user_data.pop("filing_in_progress", None)
@@ -16004,6 +15947,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
         phase=phase,
         legacy_intent=intent,
         classifier_failed=classifier_failed,
+        draft_has_gaps=has_draft and bool(_draft_gaps(context)),
     )
 
     if amend_mode:

@@ -98,8 +98,40 @@ def decide_workflow_turn(
     phase: WorkflowPhase,
     legacy_intent: str | None,
     classifier_failed: bool = False,
+    draft_has_gaps: bool = False,
 ) -> WorkflowTurnDecision:
-    """Classify a workflow turn without mutating workflow or content state."""
+    """Classify a workflow turn without mutating workflow or content state.
+
+    While an open draft still has blank required fields, the doctor has been
+    asked to reply with them, so a short answer such as "indirect" fills the
+    draft instead of being turned away as unclear.
+    """
+    decision = _decide_workflow_turn(
+        text,
+        phase=phase,
+        legacy_intent=legacy_intent,
+        classifier_failed=classifier_failed,
+    )
+    raw = (text or "").strip()
+    if (
+        draft_has_gaps
+        and phase is WorkflowPhase.DRAFT_OPEN
+        and decision.kind is WorkflowTurnKind.CLARIFY
+        and not classifier_failed
+        and raw
+        and not _looks_like_question(raw)
+    ):
+        return WorkflowTurnDecision(WorkflowTurnKind.ENRICH, canonical_intent=decision.canonical_intent)
+    return decision
+
+
+def _decide_workflow_turn(
+    text: str,
+    *,
+    phase: WorkflowPhase,
+    legacy_intent: str | None,
+    classifier_failed: bool = False,
+) -> WorkflowTurnDecision:
     raw = (text or "").strip()
     routed = route_message(raw)
     canonical = routed.intent

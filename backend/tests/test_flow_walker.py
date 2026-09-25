@@ -1021,15 +1021,14 @@ class TestFlowWalker:
 
         preview = _format_draft_preview_for_context(thin_draft, context, 'CBD')
 
-        assert 'Your reflection is needed before saving' in preview
         assert 'AI reflection check' not in preview
         assert 'Source cue' not in preview
         assert 'John Smith' not in preview
         assert '943 476 5919' not in preview
         assert 'reflected on escalation' not in preview
 
-    def test_image_only_draft_requires_user_reflection_before_save(self, thin_draft):
-        from bot import _build_approval_keyboard, _format_draft_preview_for_context, _set_reflection_detail_gate
+    def test_image_only_draft_asks_for_the_doctors_own_reflection(self, thin_draft):
+        from bot import _format_draft_preview_for_context, _set_reflection_detail_gate
         from tests.bot_simulator import BotSimulator
 
         sim = BotSimulator()
@@ -1039,16 +1038,9 @@ class TestFlowWalker:
 
         assert _set_reflection_detail_gate(context, thin_draft) is True
         preview = _format_draft_preview_for_context(thin_draft, context, 'CBD')
-        buttons = {
-            button.callback_data
-            for row in _build_approval_keyboard(needs_reflection_detail=True).inline_keyboard
-            for button in row
-        }
 
-        assert 'Your reflection is needed before saving' in preview
-        assert 'Add your own interpretation/reflection' in preview
-        assert buttons == {'CANCEL|draft'}
-        assert 'APPROVE|draft' not in buttons
+        assert 'Add your own interpretation and reflection' in preview
+        assert "I won't write them for you" in preview
 
     def test_image_with_user_context_can_show_save_when_reflection_is_useful(self, thin_draft):
         from bot import _build_approval_keyboard, _set_reflection_detail_gate
@@ -1074,7 +1066,7 @@ class TestFlowWalker:
         assert _set_reflection_detail_gate(context, strong_draft) is False
         buttons = {
             button.callback_data
-            for row in _build_approval_keyboard(needs_reflection_detail=False).inline_keyboard
+            for row in _build_approval_keyboard().inline_keyboard
             for button in row
         }
 
@@ -4778,7 +4770,7 @@ class TestPhotoGroundingGate:
         extract_mock.assert_awaited(), 'A captioned photo carries the doctor\'s words and must draft'
 
     def test_review_block_names_missing_fields_and_drops_duplicate_coach_note(self):
-        from bot import _format_draft_preview_for_context
+        from bot import _draft_reply_hint, _format_draft_preview_for_context, _store_draft
         from models import FormDraft
         from tests.bot_simulator import BotSimulator
 
@@ -4792,9 +4784,12 @@ class TestPhotoGroundingGate:
         context.user_data['case_has_user_context'] = True
         context.user_data['needs_reflection_detail'] = True
 
-        preview = _format_draft_preview_for_context(draft, context, 'REFLECT_LOG')
+        context.user_data['chosen_form'] = 'REFLECT_LOG'
+        _store_draft(context, draft)
+        preview = _format_draft_preview_for_context(draft, context, 'REFLECT_LOG') + _draft_reply_hint(context)
 
-        assert 'Still needed: Description / What happened.' in preview
+        # Missing fields are named once, in the closing line that invites a reply.
+        assert 'Still needed:' in preview and 'your reflection' in preview.split('Still needed:', 1)[1]
         assert 'photo/OCR text' not in preview, (
             'Source jargon must not appear once the doctor has supplied context'
         )

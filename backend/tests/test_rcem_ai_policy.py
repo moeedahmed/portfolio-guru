@@ -1,6 +1,8 @@
 """Behavioural proof for the September 2025 RCEM reflective-log AI policy."""
 
 from types import SimpleNamespace
+
+import bot
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -202,18 +204,24 @@ def test_genuine_non_first_person_learning_unlocks_save_with_keyboard_and_footer
 
     preview = _format_draft_preview(draft, needs_reflection_detail=needs_reflection_detail)
     callbacks = _callbacks(
-        _build_approval_keyboard(needs_reflection_detail=needs_reflection_detail)
+        _build_approval_keyboard()
     )
     assert "ACTION|add_reflection_detail" not in callbacks
     assert "APPROVE|draft" in callbacks
     assert "add your own learning point" not in preview.lower()
 
 
-def test_improve_and_save_are_hidden_until_doctor_adds_reflection():
-    from bot import _build_approval_keyboard
+def test_save_stays_available_while_the_reflection_is_missing():
+    """Draft first (25 Sep 2026): the doctor can always save a Kaizen draft;
+    a reflection they never wrote is saved blank, not held against them."""
+    from bot import _build_approval_keyboard, _store_draft
 
-    callbacks = _callbacks(_build_approval_keyboard(needs_reflection_detail=True))
-    assert callbacks == {"CANCEL|draft"}
+    context = _context("I assessed the patient and discussed admission with medicine.")
+    context.user_data["chosen_form"] = "CBD"
+    _store_draft(context, CBDData(clinical_reasoning="Assessed chest pain.", reflection=""))
+
+    labels = {button.text for row in _build_approval_keyboard(context=context).inline_keyboard for button in row}
+    assert "💾 Save draft now, finish in Kaizen" in labels
 
 
 def test_actual_learning_point_source_unlocks_save_without_warning():
@@ -240,27 +248,34 @@ def test_actual_learning_point_source_unlocks_save_without_warning():
 
     preview = _format_draft_preview(draft, needs_reflection_detail=needs_reflection_detail)
     callbacks = _callbacks(
-        _build_approval_keyboard(needs_reflection_detail=needs_reflection_detail)
+        _build_approval_keyboard()
     )
     assert "ACTION|add_reflection_detail" not in callbacks
     assert "APPROVE|draft" in callbacks
     assert "reflection is needed before saving" not in preview.lower()
 
 
-def test_missing_reflection_footer_does_not_claim_a_save_button_exists():
+def test_footer_names_what_is_still_needed_and_how_to_add_it():
     from bot import _draft_reply_hint
 
     context = _context(
         "I assessed the patient, arranged blood tests and discussed admission with medicine."
     )
-    context.user_data["needs_reflection_detail"] = True
-    footer = _draft_reply_hint(context)
-    assert "use the buttons below to save" not in footer.lower()
-    assert "reply" in footer.lower()
+    context.user_data["chosen_form"] = "CBD"
+    bot._store_draft(context, CBDData(clinical_reasoning="Assessed the patient.", reflection=""))
+    footer = _draft_reply_hint(context).lower()
+    assert "still needed" in footer and "reflection" in footer
+    assert "reply with" in footer and "save now" in footer
 
-    context.user_data["needs_reflection_detail"] = False
-    footer = _draft_reply_hint(context)
-    assert "use the buttons below to save" in footer.lower()
+    bot._store_draft(context, CBDData(
+        date_of_encounter="2026-03-17", patient_presentation="Chest pain", clinical_setting="Emergency Department",
+        stage_of_training="Higher/ST4-ST6", trainee_role="Assessed", clinical_reasoning="Assessed the patient.",
+        reflection="I learned to escalate earlier.", level_of_supervision="Indirect",
+    ))
+    context.user_data["case_text"] = "I learned to escalate earlier and will do so in future."
+    footer = _draft_reply_hint(context).lower()
+    assert "still needed" not in footer
+    assert "use the buttons below to save" in footer
 
 
 def test_refinement_clears_stale_reflection_gate_after_initial_block():
