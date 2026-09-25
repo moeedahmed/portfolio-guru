@@ -262,6 +262,99 @@ async def test_cbd_reflection_is_essential_per_schema():
     assert bot._form_requires_reflection("DOPS") is False
 
 
+# --- reflection titles: composed by the drafter, never asked for -----------
+#
+# Demo regression (24 Sep 2026): an Ultrasound Case's only required field is
+# "Case reflection title". The gate asked the doctor for it, the doctor read it
+# as "your reflection" and sent reflections, and the model kept judging the
+# *title* missing — a loop with no way through to a draft. A title summarises
+# the case; the drafter writes it and the doctor reviews it in the preview.
+
+US_CASE_TEXT = (
+    "Patient with a suspected AAA in the ED. I did a bedside aortic scan, got usable "
+    "images and measured the aorta at 6 cm, which changed management to an urgent "
+    "vascular referral. I learned to scan early when the pain does not fit."
+)
+
+
+def _us_case_draft(**overrides) -> FormDraft:
+    fields = {
+        "case_reflection_title": "Bedside ultrasound confirming a suspected AAA",
+        "date_of_case": "2026-09-24",
+        "clinical_scenario": "Suspected AAA in the ED.",
+        "how_used": "Bedside aortic scan.",
+        "learning_points": "I learned to scan early when the pain does not fit.",
+        **overrides,
+    }
+    return FormDraft(form_type="US_CASE", uuid="uuid-us", fields=fields)
+
+
+@pytest.mark.parametrize(
+    ("form_type", "title_key"),
+    [
+        ("US_CASE", "case_reflection_title"),
+        ("US_CASE_2021", "case_reflection_title"),
+        ("SDL", "reflection_title"),
+        ("COMPLAINT", "reflection_title"),
+        ("SERIOUS_INC", "reflection_title"),
+    ],
+)
+def test_reflection_titles_are_never_a_pre_draft_question(form_type, title_key):
+    assert title_key not in {item["key"] for item in bot._form_essential_requirements(form_type)}
+
+
+def test_factual_titles_are_still_asked_for():
+    """A journal paper's or teaching session's title is a fact the drafter
+    cannot know, unlike a reflection title it composes from the case."""
+    assert "paper_title" in {item["key"] for item in bot._form_essential_requirements("JCF")}
+    assert "title_of_session" in {item["key"] for item in bot._form_essential_requirements("TEACH")}
+
+
+def test_a_title_is_not_the_reflection():
+    fields = {"case_reflection_title": "AAA scan", "learning_points": "I learned to scan early."}
+    assert bot._find_reflection_keys(fields, "US_CASE") == ["learning_points"]
+    assert bot._find_reflection_keys({"reflection_title": "Sepsis module"}, "SDL") == []
+    # The schema, not the title, decides whether a reflection is required.
+    assert bot._form_requires_reflection("US_CASE") is False
+    assert bot._form_requires_reflection("COMPLAINT") is True
+
+
+def test_ai_declaration_is_never_appended_to_a_title():
+    declared = bot._with_rcem_ai_declaration(_us_case_draft(learning_points=""))
+    assert declared.fields["case_reflection_title"] == "Bedside ultrasound confirming a suspected AAA"
+
+
+@pytest.mark.asyncio
+async def test_ultrasound_case_drafts_without_asking_for_a_title():
+    sim = BotSimulator()
+    update = sim._make_callback_update("FORM|US_CASE")
+    context = sim._make_context()
+    context.user_data["case_text"] = US_CASE_TEXT
+
+    assess = AsyncMock(return_value={})
+    analyse = AsyncMock(return_value=_us_case_draft())
+    with patch("bot.assess_form_essentials", new=assess), \
+         patch("bot._analyse_selected_form", new=analyse):
+        result = await handle_form_choice(update, context)
+
+    assert result == AWAIT_APPROVAL
+    analyse.assert_awaited_once()
+    assert all("I still need" not in text for text in _texts(sim))
+    assert context.user_data.get("needs_reflection_detail") is not True
+    buttons = {data for _, data in sim.get_last_buttons()}
+    assert "APPROVE|draft" in buttons
+    assert "ACTION|add_reflection_detail" not in buttons
+
+
+def test_a_blank_title_is_still_caught_at_save():
+    """Not asking for the title is not the same as filing without one."""
+    context = BotSimulator()._make_context()
+    gaps = bot._pre_draft_completeness_gaps(
+        context, _us_case_draft(case_reflection_title=""), "US_CASE"
+    )
+    assert [gap["key"] for gap in gaps] == ["case_reflection_title"]
+
+
 # --- the follow-up: every input mode, nothing lost, nothing re-asked -------
 
 
