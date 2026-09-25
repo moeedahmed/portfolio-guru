@@ -153,6 +153,20 @@ def mirror_credentials(
         logger.warning("mirror_credentials failed for %s: %s", telegram_user_id, exc)
 
 
+def delete_mirrored_credentials(telegram_user_id: int) -> None:
+    """Remove the mirrored Kaizen login only (user chose passwordless)."""
+    sb = _supabase()
+    if sb is None:
+        return
+    uid = _resolve_emgurus_user_id(telegram_user_id)
+    if uid is None:
+        return
+    try:
+        sb.table("portfolio_credentials").delete().eq("emgurus_user_id", uid).execute()
+    except Exception as exc:
+        logger.warning("delete_mirrored_credentials failed for %s: %s", telegram_user_id, exc)
+
+
 def mirror_profile(
     telegram_user_id: int,
     *,

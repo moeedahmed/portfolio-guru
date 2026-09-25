@@ -13,7 +13,8 @@ Three steps, run in order by the operator for their own Telegram user id:
                    beta's own filer with no username and no password, using
                    only the kept session. Never submits to a supervisor.
 
-The broker must be running (scripts/mobile_kaizen_handoff_test.sh start).
+The Connect Kaizen page must be running; the bot starts it when
+PG_ENABLE_PASSWORDLESS_CONNECT is on (backend/run_local.sh).
 Nothing here reads, prompts for, or stores a Kaizen password.
 """
 
@@ -24,15 +25,12 @@ import asyncio
 import json
 import sys
 import time
-import urllib.error
-import urllib.request
 from datetime import date, datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "backend"))
 
-BROKER_URL = "http://127.0.0.1:8100"
 DEFAULT_LOG = (
     Path.home() / ".openclaw/data/portfolio-guru/mobile-handoff/session-lifetime.jsonl"
 )
@@ -40,34 +38,15 @@ TEST_DRAFT_MARKER = "PORTFOLIO GURU PASSWORDLESS TEST DRAFT - SAFE TO DELETE"
 
 
 def cmd_link(user_id: int) -> int:
-    from mobile_kaizen_handoff import DEFAULT_INTERNAL_KEY_FILE
+    from mobile_kaizen_handoff import ConnectLinkUnavailable, create_connect_link
 
-    key = DEFAULT_INTERNAL_KEY_FILE.read_text(encoding="utf-8").strip()
-    request = urllib.request.Request(
-        f"{BROKER_URL}/internal/handoffs",
-        data=json.dumps({"telegram_user_id": user_id}).encode(),
-        headers={
-            "Content-Type": "application/json",
-            "X-Portfolio-Handoff-Key": key,
-        },
-        method="POST",
-    )
     try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            body = json.loads(response.read())
-    except urllib.error.HTTPError as exc:
-        print(f"Broker refused the link ({exc.code}).", file=sys.stderr)
+        link = create_connect_link(user_id)
+    except ConnectLinkUnavailable as exc:
+        print(f"No link: {exc}.", file=sys.stderr)
         return 1
-    except urllib.error.URLError:
-        print(
-            "Broker is not running. Start it with: "
-            "bash scripts/mobile_kaizen_handoff_test.sh start",
-            file=sys.stderr,
-        )
-        return 1
-    minutes = body["expires_in_seconds"] // 60
-    print(f"Open on your phone within {minutes} minutes (single use):")
-    print(body["url"])
+    print(f"Open within {link.expires_in_seconds // 60} minutes (single use):")
+    print(link.url)
     return 0
 
 

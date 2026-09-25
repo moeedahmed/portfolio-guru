@@ -69,6 +69,23 @@ def _isolate_filing_artefacts(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_passwordless_connections(monkeypatch):
+    """Default every test user to 'not connected passwordless'.
+
+    profile_store reads the on-disk profile database, which on the Mac Mini
+    (where CI also runs) is production's. Without this, a real passwordless
+    connection for a user id a test happens to reuse would flip that test's
+    "is this user connected?" answer. Tests of the passwordless flow patch
+    ``profile_store.get_kaizen_connection`` or use their own engine.
+    """
+    import profile_store
+
+    monkeypatch.setattr(profile_store, "get_kaizen_connection", lambda telegram_user_id: None)
+    monkeypatch.setenv("PG_ENABLE_PASSWORDLESS_CONNECT", "")
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _default_gathering_mode_off(monkeypatch):
     """Default tests to the legacy instant-draft flow.
 

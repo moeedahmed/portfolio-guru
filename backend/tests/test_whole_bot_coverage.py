@@ -362,6 +362,32 @@ async def test_registered_callback_recovery(scenario, payload):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("payload", "expected_text"), [
+    ("ACTION|pwl_reconnect", "isn't available right now"),
+    ("ACTION|pwl_reconnected", "can't see a Kaizen sign-in yet"),
+])
+async def test_passwordless_sign_in_again_buttons_never_save_without_a_session(
+    scenario, monkeypatch, payload, expected_text
+):
+    """Real dispatch of the passwordless "sign in again" buttons.
+
+    With the sign-in page down, "Sign in again" explains and stops; with no
+    working kept session, "I've signed in" keeps waiting. Neither may reach
+    the filer.
+    """
+    app, collector, draft, filing, errors = scenario
+    monkeypatch.setattr(bot, "_create_passwordless_link", AsyncMock(return_value=None))
+    monkeypatch.setattr(bot, "_probe_kept_kaizen_session", AsyncMock(return_value=False))
+    app.user_data[TEST_USER.id].update(draft_data={"_type": "FORM", **draft.model_dump()})
+    update = make_callback_update(payload)
+    _prepare_update(update, app.bot)
+    await app.process_update(update)
+    assert not errors
+    assert any(expected_text in t for t in collector.texts), collector.texts
+    filing.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("choice", ["3m", "6m", "12m", "all", "cancel", "custom"])
 async def test_unsigned_range_has_observed_destination(scenario, monkeypatch, choice):
     app, collector, draft, filing, errors = scenario
@@ -905,6 +931,8 @@ async def test_each_state_slot_dispatches_its_guard_or_effect(scenario, monkeypa
     monkeypatch.setattr(bot, "_test_kaizen_login", login)
     monkeypatch.setattr(bot, "store_training_level", store_level)
     monkeypatch.setattr(bot, "store_curriculum", store_curriculum)
+    # No kept Kaizen session and no sign-in service in the offline suite.
+    monkeypatch.setattr(bot.kaizen_connection, "has_kept_session", lambda uid: False)
     expected = ConversationHandler.END
     payload = None
     if kind == "callback":
@@ -925,6 +953,12 @@ async def test_each_state_slot_dispatches_its_guard_or_effect(scenario, monkeypa
             "handle_quick_improve": ("IMPROVE|reflection", -1),
             "handle_review_draft": ("REVIEW|draft", -1),
             "voice_collect_example": ("VOICE|more", bot.AWAIT_VOICE_EXAMPLES),
+            # Passwordless is switched off offline, so starting or re-linking
+            # falls back to the username prompt; "I've signed in" with no kept
+            # session keeps waiting for the sign-in.
+            "passwordless_setup_start": ("ACTION|connect_passwordless", bot.AWAIT_USERNAME),
+            "passwordless_setup_new_link": ("ACTION|passwordless_link", bot.AWAIT_USERNAME),
+            "passwordless_setup_done": ("ACTION|passwordless_done", bot.AWAIT_PASSWORDLESS),
         }
         if owner == "handle_callback":
             routes_by_input = [("ACTION|cancel", -1), ("CANCEL|draft", -1),
@@ -944,6 +978,8 @@ async def test_each_state_slot_dispatches_its_guard_or_effect(scenario, monkeypa
             expected = bot.AWAIT_USERNAME
         elif owner == "handle_form_search_text":
             expected = bot.AWAIT_FORM_CHOICE
+        elif owner == "passwordless_awaiting_text":
+            expected = bot.AWAIT_PASSWORDLESS
         elif owner == "handle_pending_media_context":
             expected = bot.AWAIT_DOC_INTENT
         elif owner == "voice_collect_example":

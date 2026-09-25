@@ -125,8 +125,16 @@ class HandoffStore:
                 for record in self._records.values()
                 if record.status not in {"complete", "failed", "expired"}
             ]
-            if any(record.subject_key == subject_key for record in pending):
-                raise HandoffAlreadyPending("this user already has a pending handoff")
+            for record in pending:
+                if record.subject_key != subject_key:
+                    continue
+                # A user asking again has lost or burned their link. Replace
+                # it, unless someone is signing in through it right now.
+                if record.browser_active:
+                    raise HandoffAlreadyPending("this user is signing in right now")
+                record.status = "expired"
+                record.request = None
+            pending = [record for record in pending if record.status != "expired"]
             if len(pending) >= self.max_pending:
                 raise HandoffCapacityReached("the handoff queue is full")
             session_id = secrets.token_urlsafe(18)
@@ -715,6 +723,60 @@ async def _close_browser_page(page: Any, playwright_handle: Any) -> None:
             pass
 
 
+class ConnectLinkUnavailable(RuntimeError):
+    """The Connect Kaizen service could not issue a link right now."""
+
+
+@dataclass(frozen=True)
+class ConnectLink:
+    url: str
+    expires_in_seconds: int
+
+
+def connect_broker_url() -> str:
+    return os.environ.get("PG_KAIZEN_CONNECT_BROKER_URL", "http://127.0.0.1:8101").rstrip("/")
+
+
+def create_connect_link(
+    telegram_user_id: int,
+    *,
+    key_path: Path | None = None,
+    timeout: float = 10.0,
+) -> ConnectLink:
+    """Ask the local Connect Kaizen service for a one-time sign-in link.
+
+    Blocking (urllib); call it from async code via ``asyncio.to_thread``.
+    Raises :class:`ConnectLinkUnavailable` with a safe, generic reason.
+    """
+    import urllib.error
+    import urllib.request
+
+    broker = connect_broker_url()
+    if urlparse(broker).hostname not in {"127.0.0.1", "localhost"}:
+        raise ConnectLinkUnavailable("the connect service must be local")
+    path = key_path or Path(
+        os.environ.get("PG_MOBILE_HANDOFF_INTERNAL_KEY_FILE", str(DEFAULT_INTERNAL_KEY_FILE))
+    )
+    try:
+        key = path.expanduser().read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise ConnectLinkUnavailable("the connect service is not set up") from exc
+    request = urllib.request.Request(
+        f"{broker}/internal/handoffs",
+        data=json.dumps({"telegram_user_id": int(telegram_user_id)}).encode(),
+        headers={"Content-Type": "application/json", "X-Portfolio-Handoff-Key": key},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = json.loads(response.read())
+    except urllib.error.HTTPError as exc:
+        raise ConnectLinkUnavailable(f"the connect service refused ({exc.code})") from exc
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        raise ConnectLinkUnavailable("the connect service is not running") from exc
+    return ConnectLink(url=str(body["url"]), expires_in_seconds=int(body["expires_in_seconds"]))
+
+
 def ensure_internal_key(path: Path = DEFAULT_INTERNAL_KEY_FILE) -> str:
     path = path.expanduser()
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -853,7 +915,7 @@ HANDOFF_JS = r"""
     const states = {
       opening: ['Opening Kaizen', 'Preparing an isolated browser…'],
       queued: ['Browser queued', 'Another clinician is using the secure browser. Keep this page open.'],
-      login: ['Sign in yourself', 'Tap a field above and type using your phone keyboard.'],
+      login: ['Sign in yourself', 'Tap a field above, then type. You can paste your password from your password manager.'],
       saving: ['Login confirmed', 'Keeping your Kaizen session…'],
       complete: ['Kaizen connected', 'You can close this page and return to Telegram.'],
       failed: ['Connection stopped', message || 'Return to Telegram and request a new link.'],
@@ -905,13 +967,18 @@ HANDOFF_JS = r"""
     connect();
   };
 
+  // The image is drawn with object-fit: contain, so on wide or short screens
+  // it is letterboxed inside its box. Map taps to the drawn image only.
   const point = event => {
     const touch = event.touches ? event.touches[0] : event;
     const box = screen.getBoundingClientRect();
-    return {
-      x: Math.max(0, Math.min(430, (touch.clientX - box.left) * 430 / box.width)),
-      y: Math.max(0, Math.min(850, (touch.clientY - box.top) * 850 / box.height)),
-    };
+    const scale = Math.min(box.width / 430, box.height / 850);
+    const left = box.left + (box.width - 430 * scale) / 2;
+    const top = box.top + (box.height - 850 * scale) / 2;
+    const x = (touch.clientX - left) / scale;
+    const y = (touch.clientY - top) / scale;
+    if (x < 0 || x > 430 || y < 0 || y > 850) return null;
+    return {x, y};
   };
 
   screen.addEventListener('pointerdown', event => { pointerStart = {point: point(event), y: event.clientY}; });
@@ -919,7 +986,10 @@ HANDOFF_JS = r"""
     if (!pointerStart) return;
     const delta = event.clientY - pointerStart.y;
     if (Math.abs(delta) > 28) send({type: 'scroll', delta_y: -delta * 4});
-    else { send({type: 'click', ...point(event)}); keyboard.focus({preventScroll: true}); }
+    else {
+      const at = point(event);
+      if (at) { send({type: 'click', ...at}); keyboard.focus({preventScroll: true}); }
+    }
     pointerStart = null;
   });
   keyboard.addEventListener('input', () => {

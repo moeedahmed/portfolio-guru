@@ -45,8 +45,9 @@ def producer_digest():
     return hashlib.sha256(json.dumps(modules).encode()).hexdigest()
 
 
-PRODUCER_DIGEST = '8ac448bf1ce27424c70ecaac18c6694eaa47ca4027119b06ebae05ae846d2034'
+PRODUCER_DIGEST = 'e241b5a8eae08d86e1935a5d7b3f8ff91fea010b1942b52619333d1b8879a52d'
 CALLBACK_BRANCHES = set("""
+ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
 ACTION|change_pathway ACTION|confirm_refresh_for_health ACTION|confirm_refresh_portfolio ACTION|continue_thin
 ACTION|delete ACTION|file ACTION|health ACTION|health_limited ACTION|health_page|*
@@ -102,6 +103,13 @@ def state_expectation(slot, kind):
     """
     callbacks = {
         "setup_retry_login": ("ACTION|retry_setup_login", 0),
+        # Passwordless setup. Offline the option is switched off / the sign-in
+        # service is absent, so starting or re-linking falls back to asking for
+        # the username (AWAIT_USERNAME); "I've signed in" with no kept session
+        # stays waiting (AWAIT_PASSWORDLESS).
+        "passwordless_setup_start": ("ACTION|connect_passwordless", 0),
+        "passwordless_setup_new_link": ("ACTION|passwordless_link", 0),
+        "passwordless_setup_done": ("ACTION|passwordless_done", 15),
         "setup_training_level": ("SETLEVEL|ST5", -1),
         "setup_curriculum": ("SETUP_CURRICULUM|2025", -1),
         "gather_done_callback": ("GATHER|done", -1),
@@ -135,7 +143,7 @@ def state_expectation(slot, kind):
             "voice_collect_example": 8, "handle_template_review_media": 9,
             "handle_approval_media_feedback": 3, "handle_mid_conversation_text": 6,
             "handle_edit_value_with_intent": -1, "handle_edit_value": -1,
-            "_setup_wrong_input": slot.state}
+            "_setup_wrong_input": slot.state, "passwordless_awaiting_text": 15}
         target = targets[slot.callback]
     return {"from": slot.state, "input": kind, "payload": payload, "to": target}
 
@@ -182,7 +190,7 @@ def reviewed_units(slots):
     return dict(sorted(units.items()))
 
 
-CATALOGUE_DIGEST = '7ed91ea99ddf2b3d7a6b1bd3b3ec87abb8da0d5dfed3bf8663b5a6eeb8805ed1'
+CATALOGUE_DIGEST = '80d80f6caa1276539b85e0829b6ffdce23221c7ca5bfd5f984bfb9432b79b500'
 
 
 def requirements_digest(units):

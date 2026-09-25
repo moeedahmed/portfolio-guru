@@ -1,80 +1,80 @@
-# Passwordless Kaizen connection — proof stage
+# Passwordless Kaizen connection
 
-**Status:** Proof on the operator's own account. Not wired into the beta bot.
-**Date:** 2026-09-23
+**Status:** Built into the beta bot behind a switch; on for the operator only.
+**Proven:** 2026-09-23 (draft saved with no password) · **Session lifetime measured:** about 24 hours (2026-09-24)
 
 ## Why
 
 Beta users reuse their Kaizen password elsewhere and do not want to hand it
-over. The beta today stores it (Fernet-encrypted) in `credentials.py`. A stored
-copy is the main way a password leaks, so the goal is to never hold one.
+over. The beta stores it (Fernet-encrypted) in `credentials.py`. A stored copy
+is the main way a password leaks, so this option never holds one.
+
+## What the user sees
+
+- `/setup`, `/start` and the "connect first" prompt ask for the Kaizen
+  username as before, with a second button: **🔒 Connect without sharing my
+  password**, and the line "you'll need to sign in again about once a day".
+- That button sends **Sign in to Kaizen** (opens `connect.emgurus.com`) and
+  **I've signed in**. The bot believes "I've signed in" only after it has opened
+  Kaizen with the kept session, and reads the portfolio type as the password
+  route does, then continues with the usual profile questions.
+- Choosing it deletes any stored password, locally and in the Supabase mirror.
+- When Kaizen has ended the session, saving shows **"Kaizen has signed you
+  out"** with **🔒 Sign in again**. The draft is kept and saves once they have
+  signed in. There are no background messages and no operator alert for this
+  expected expiry.
+- `/unsigned` and learning your writing style from Kaizen still need a
+  password connection. Passwordless users get a plain explanation.
+
+| Connection                   | Stays connected                                       |
+| ---------------------------- | ----------------------------------------------------- |
+| Username and password        | Until the user deletes their data                     |
+| Without sharing the password | About a day, then sign in again (usually when saving) |
 
 ## How it works
 
-1. A one-time link (10 minutes, single use, token kept only as a SHA-256
-   digest) is created through the loopback, key-protected broker.
-2. The clinician opens it on their phone and signs into the real RCEM login
-   page, which runs in an isolated headless browser beside Portfolio Guru and
-   is streamed to the phone.
-3. When Kaizen reaches a known signed-in route, the browser's session cookies
-   are encrypted into the beta's existing per-user session cache
-   (`kaizen_form_filer.save_session_state`) with **no username**. The browser
-   is then closed.
-4. The filer already replays that cache before any login. Called with no
-   username, it looks up exactly the file the link wrote
-   (`_session_cache_path(uid, "") == _session_cache_path(uid)`, pinned by a
-   test), so it can save drafts without a password.
-
-When Kaizen eventually ends the session, the filer bounces to login and fails
-cleanly; the fix is a fresh link, not a password.
+- `backend/mobile_kaizen_handoff.py` serves the sign-in page on
+  `127.0.0.1:8101`. It streams an isolated headless browser showing the real
+  RCEM login. Once Kaizen reaches a signed-in route, the browser's cookies are
+  encrypted into the existing per-user session cache
+  (`kaizen_form_filer.save_session_state`, no username) and the browser closes.
+- `backend/run_local.sh` starts it with the bot when
+  `PG_ENABLE_PASSWORDLESS_CONNECT` is on. It gets an empty environment plus the
+  session-encryption key only, never the bot, payment or AI keys.
+- `backend/kaizen_connection.py` answers "how is this user connected?"
+  (`password` / `passwordless` / `none`). The choice is stored in
+  `userprofile.kaizen_connection`; it is not mirrored to Supabase.
+- Saving passes empty credentials; the filer replays the kept session. With no
+  password, `_login` never contacts RCEM, so an expired session is reported as
+  a login failure and the bot offers a fresh link.
+- Links are single-use, expire in 10 minutes, one per user (asking again
+  replaces an unused one), and at most two sign-in browsers run at once. The
+  link endpoint accepts only a Telegram user id, refuses any other field and
+  never echoes rejected input.
 
 ## Honest security claim
 
-Say **"your password is not stored"**, not "we never see it". Keystrokes pass
-through the Portfolio Guru-controlled browser on their way to Kaizen. They are
-never written to disk, logged, or sent to an AI model. The kept session is a
-bearer credential in its own right, protected with the same Fernet encryption
-as today's stored passwords.
+Say **"we never store your password"**, not "we never see it". Keystrokes pass
+through the Portfolio Guru-hosted browser on their way to Kaizen; they are
+never written down, logged, or sent to an AI model. The kept session is itself a
+short-lived credential, protected like stored passwords.
 
-Link requests accept only a Telegram user id; any extra field is refused, and
-refusals never echo the rejected input.
+## Rollout
 
-## Running the proof (operator, own account)
+- `PG_ENABLE_PASSWORDLESS_CONNECT` (default on in `run_local.sh`) and
+  `PG_PASSWORDLESS_ALLOWLIST` (default: the operator only; `*` for everyone).
+- Needs `connect.emgurus.com → http://127.0.0.1:8101` on the Cloudflare tunnel.
+- Legal drafts (`docs/legal/privacy-policy.md`, `docs/legal/dpia.md`) carry
+  «REVIEW» paragraphs for the solicitor review that gates the wider beta.
 
-```bash
-bash scripts/mobile_kaizen_handoff_test.sh start
-backend/venv/bin/python3 scripts/kaizen_passwordless_proof.py link --user-id <your id>
-# open the link on your phone and sign in; the page says "Kaizen connected"
-backend/venv/bin/python3 scripts/kaizen_passwordless_proof.py status --user-id <your id>
-backend/venv/bin/python3 scripts/kaizen_passwordless_proof.py save-test-draft --user-id <your id>
-```
+## Operator tool
 
-`save-test-draft` writes one synthetic CBD draft labelled
-"PORTFOLIO GURU PASSWORDLESS TEST DRAFT - SAFE TO DELETE" using no username or
-password. It refuses to run without a kept session, so it can never fall
-through to a login with empty credentials. Delete the draft in Kaizen after
-checking it.
-
-`status` appends to `~/.openclaw/data/portfolio-guru/mobile-handoff/session-lifetime.jsonl`.
-Running it every few hours until it reports `EXPIRED` measures how long a
-Kaizen session lasts — the number that decides whether this is usable.
-
-The proof session is stored as `<uid>.encrypted`, separate from a password
-user's `<uid>-<fingerprint>.encrypted`, so it neither disturbs nor borrows from
-an existing beta login.
-
-## Not done yet (gates before users see it)
-
-- One real sign-in and draft save on the operator's account.
-- Measured session lifetime.
-- A stable, protected hostname. The TryCloudflare tunnel changes on restart and
-  is for this proof only.
-- Beta wiring: `/setup` offer, filing gate accepting a kept session instead of
-  `get_credentials`, and an expiry message that sends a fresh link.
-- Legal/DPIA wording for typing through a Portfolio Guru-hosted browser.
+`scripts/kaizen_passwordless_proof.py link | status | save-test-draft --user-id <id>`
+makes a link, checks whether a kept session still opens Kaizen, or saves one
+labelled synthetic CBD draft ("SAFE TO DELETE") with no username or password.
 
 ## Rollback
 
-`bash scripts/mobile_kaizen_handoff_test.sh stop`, then delete
-`~/.openclaw/data/portfolio-guru/sessions/<uid>.encrypted`. The beta bot is
-unchanged by this stage.
+Set `PG_ENABLE_PASSWORDLESS_CONNECT=` (empty) and restart the bot: the option
+and the sign-in page disappear. Passwordless users are then shown as not
+connected and are asked to connect again; nothing else changes.

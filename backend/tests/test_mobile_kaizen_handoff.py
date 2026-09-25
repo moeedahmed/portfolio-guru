@@ -37,20 +37,29 @@ def _connect_request(telegram_user_id: int = 4242) -> dict:
     }
 
 
-def test_store_limits_one_pending_link_per_user_and_caps_pending_sessions():
+def test_store_replaces_a_users_unused_link_and_caps_pending_sessions():
     store = HandoffStore(max_pending=2)
     first = store.create(_connect_request(1))
 
-    with pytest.raises(HandoffAlreadyPending):
-        store.create(_connect_request(1))
+    # Asking again replaces the unused link; the old one stops working.
+    replacement = store.create(_connect_request(1))
+    assert replacement.session_id != first.session_id
+    assert store.exchange(first.token) is None
+    assert store.get_by_id(first.session_id).request is None
 
     store.create(_connect_request(2))
     with pytest.raises(HandoffCapacityReached):
         store.create(_connect_request(3))
 
-    store.complete(first.session_id, {"status": "connected"})
-    replacement = store.create(_connect_request(1))
-    assert replacement.session_id != first.session_id
+
+def test_store_will_not_replace_a_link_someone_is_signing_in_through():
+    store = HandoffStore()
+    created = store.create(_connect_request(1))
+    record = store.get_by_viewer_token(store.exchange(created.token))
+    assert store.claim_browser(record.session_id) is True
+
+    with pytest.raises(HandoffAlreadyPending):
+        store.create(_connect_request(1))
 
 
 def test_store_keeps_only_token_digests_and_exchanges_link_once():
@@ -353,17 +362,21 @@ def test_known_kaizen_app_routes_count_as_signed_in(url):
     assert _authenticated_kaizen_url(url) is True
 
 
-def test_test_runner_is_secret_free_and_exposes_only_the_handoff_port():
-    script = REPO_ROOT / "scripts/mobile_kaizen_handoff_test.sh"
-    text = script.read_text(encoding="utf-8")
+def test_bot_starts_the_sign_in_page_only_when_enabled_and_without_other_secrets():
+    """run_local.sh owns the sign-in page's lifecycle. It must run on its own
+    port (8100 is already published as another hostname), start only when the
+    option is enabled, and get an empty environment plus the one key it needs."""
+    script = (REPO_ROOT / "backend/run_local.sh").read_text(encoding="utf-8")
+    block = script[script.index("CONNECT_PORT=8101"):script.index("# Start bot (foreground)")]
 
-    assert "PORTFOLIO_GURU_TELEGRAM_BOT_TOKEN" not in text
-    assert "TELEGRAM_BOT_TOKEN_PORTFOLIO_TEST" not in text
-    assert "bws" not in text.lower()
-    assert "127.0.0.1:8100" in text
-    assert "--no-access-log" in text
-    assert "--config /dev/null" in text
-    assert "_archived" in text
+    assert 'pg_is_truthy "${PG_ENABLE_PASSWORDLESS_CONNECT:-}"' in block
+    assert "env -i" in block
+    assert 'FERNET_SECRET_KEY="$FERNET_SECRET_KEY"' in block
+    assert "--host 127.0.0.1" in block
+    assert "--no-access-log" in block
+    for secret in ("TELEGRAM_BOT_TOKEN", "STRIPE", "GOOGLE_API_KEY", "PORTFOLIO_OUTBOUND"):
+        assert secret not in block
+    assert "8100" not in block
 
 
 class _ClosedTracker:
@@ -465,3 +478,80 @@ def test_proof_test_draft_is_labelled_synthetic_and_carries_no_credentials():
 
     assert proof.TEST_DRAFT_MARKER in fields["clinical_reasoning"]
     assert not {"username", "password", "credentials"} & {key.lower() for key in fields}
+
+
+def test_create_connect_link_refuses_a_non_local_service(monkeypatch, tmp_path):
+    import mobile_kaizen_handoff as handoff
+
+    key = tmp_path / "internal.key"
+    key.write_text("k" * 40)
+    monkeypatch.setenv("PG_KAIZEN_CONNECT_BROKER_URL", "https://evil.example")
+
+    with pytest.raises(handoff.ConnectLinkUnavailable):
+        handoff.create_connect_link(4242, key_path=key)
+
+
+def test_create_connect_link_reports_a_stopped_service_safely(monkeypatch, tmp_path):
+    import mobile_kaizen_handoff as handoff
+
+    import urllib.error
+    import urllib.request
+
+    key = tmp_path / "internal.key"
+    key.write_text("k" * 40)
+    monkeypatch.delenv("PG_KAIZEN_CONNECT_BROKER_URL", raising=False)
+
+    def refused(request, timeout):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(urllib.request, "urlopen", refused)
+
+    with pytest.raises(handoff.ConnectLinkUnavailable) as raised:
+        handoff.create_connect_link(4242, key_path=key, timeout=1)
+    assert "k" * 40 not in str(raised.value)
+
+
+def test_create_connect_link_returns_the_service_link(monkeypatch, tmp_path):
+    import io
+    import json as _json
+    import urllib.request
+
+    import mobile_kaizen_handoff as handoff
+
+    key = tmp_path / "internal.key"
+    key.write_text("k" * 40)
+    monkeypatch.delenv("PG_KAIZEN_CONNECT_BROKER_URL", raising=False)
+    sent = {}
+
+    class Response(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def fake_urlopen(request, timeout):
+        sent["url"] = request.full_url
+        sent["key"] = request.get_header("X-portfolio-handoff-key")
+        sent["body"] = _json.loads(request.data)
+        return Response(_json.dumps(
+            {"url": "https://connect.emgurus.com/handoff#t", "expires_in_seconds": 600}
+        ).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    link = handoff.create_connect_link(4242, key_path=key)
+
+    assert link.url == "https://connect.emgurus.com/handoff#t"
+    assert sent == {
+        "url": "http://127.0.0.1:8101/internal/handoffs",
+        "key": "k" * 40,
+        "body": {"telegram_user_id": 4242},
+    }
+
+
+def test_taps_outside_the_letterboxed_picture_are_ignored():
+    from mobile_kaizen_handoff import HANDOFF_JS
+
+    assert "Math.min(box.width / 430, box.height / 850)" in HANDOFF_JS
+    assert "if (at)" in HANDOFF_JS

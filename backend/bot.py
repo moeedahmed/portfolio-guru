@@ -19,6 +19,7 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler, PicklePersistence,
 )
 from store import store_credentials, get_credentials, has_credentials, init
+import kaizen_connection
 from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, is_reuse_request, review_draft, analyse_portfolio_health, summarise_recent_activity, generate_nudge_copy, extract_field_updates, compose_filing_recovery_copy, combine_case_inputs, _has_qi_project_signal, schema_form_type, assess_form_essentials, ESSENTIAL_PRESENT, ESSENTIAL_MISSING, ESSENTIAL_UNAVAILABLE
 from usage import record_case_filed, get_cases_this_month, check_can_file, get_user_tier, set_user_tier, get_case_history, TIER_LIMITS, get_all_active_users, get_cases_this_week, is_beta_tester, set_beta_tester, save_kc_coverage, delete_portfolio_evidence
 # Module-attribute access (consent.fn) rather than from-imports: test_smoke
@@ -874,7 +875,7 @@ async def signoff_chase_push(context: ContextTypes.DEFAULT_TYPE) -> None:
                 # refreshed next week.
                 if (
                     refreshed < SIGNOFF_CHASE_MAX_REFRESH_PER_RUN
-                    and has_credentials(user_id)
+                    and _kaizen_connected(user_id)
                     and await _health_needs_kaizen_refresh(user_id)
                 ):
                     try:
@@ -2255,7 +2256,7 @@ def _pop_source_detail_prompt_refs(context) -> list[dict]:
  AWAIT_VOICE_EXAMPLES, AWAIT_TEMPLATE_REVIEW,
  AWAIT_CURRICULUM, AWAIT_FORM_SEARCH,
  AWAIT_GATHERING, AWAIT_PATHWAY,
- AWAIT_DOC_INTENT) = range(15)
+ AWAIT_DOC_INTENT, AWAIT_PASSWORDLESS) = range(16)
 
 # Common button patterns used across the bot
 _BTN_SETUP = InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")
@@ -2312,6 +2313,139 @@ _KB_RETYPE_SETUP = InlineKeyboardMarkup([
     [_BTN_CANCEL],
 ])
 
+# --- Passwordless Kaizen connection ------------------------------------------
+# Opt-in alternative to storing a password: the doctor signs in to Kaizen on
+# the Connect Kaizen page (mobile_kaizen_handoff), and only the signed-in
+# session is kept. Kaizen ends it after about a day; the doctor then signs in
+# again when they next save. Offered only where kaizen_connection says so.
+_PASSWORDLESS_SETUP_OFFER = (
+    "\n\nPrefer not to share your password? Tap below and sign in to Kaizen "
+    "yourself instead. You'll need to sign in again about once a day, "
+    "usually when you save a draft."
+)
+_BTN_CONNECT_PASSWORDLESS = InlineKeyboardButton(
+    "🔒 Connect without sharing my password",
+    callback_data="ACTION|connect_passwordless",
+)
+_PASSWORDLESS_LINK_TEXT = (
+    "🔒 Sign in to Kaizen\n\n"
+    "1. Tap *Sign in to Kaizen* and sign in on the page that opens.\n"
+    "2. When it says *Kaizen connected*, come back here and tap *I've signed in*.\n\n"
+    "_The link works once and expires in 10 minutes. Portfolio Guru never stores "
+    "your password; it keeps only the signed-in session, which Kaizen ends after "
+    "about a day._"
+)
+_PASSWORDLESS_UNAVAILABLE_TEXT = (
+    "⚠️ The Kaizen sign-in page isn't available right now. Try again in a few "
+    "minutes, or connect with your username and password instead."
+)
+_PASSWORDLESS_NOT_SIGNED_IN_TEXT = (
+    "I can't see a Kaizen sign-in yet.\n\n"
+    "Tap *Sign in to Kaizen*, finish signing in until the page says "
+    "*Kaizen connected*, then tap *I've signed in*. If the link has expired, "
+    "tap *New link*."
+)
+_PASSWORDLESS_FEATURE_UNAVAILABLE_TEXT = (
+    "This feature needs a username-and-password connection, because it signs in "
+    "to Kaizen on its own. You're connected without sharing your password, so "
+    "it isn't available yet. Saving drafts and /health work as normal."
+)
+_PASSWORDLESS_CHECK_FAILED_TEXT = (
+    "⚠️ I couldn't reach Kaizen to check just now. Tap *I've signed in* again "
+    "in a moment."
+)
+
+
+def _passwordless_keyboard(url: str, *, done_action: str, link_action: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔒 Sign in to Kaizen", url=url)],
+        [InlineKeyboardButton("✅ I've signed in", callback_data=f"ACTION|{done_action}")],
+        [
+            InlineKeyboardButton("🔁 New link", callback_data=f"ACTION|{link_action}"),
+            _BTN_CANCEL,
+        ],
+    ])
+
+
+def _kaizen_connected(user_id: int) -> bool:
+    """Connected with a stored password, or passwordless.
+
+    Goes through this module's ``has_credentials`` name (which tests patch)
+    and ``profile_store`` by attribute, so both stay patchable.
+    """
+    if has_credentials(user_id):
+        return True
+    import profile_store
+
+    return profile_store.get_kaizen_connection(user_id) == kaizen_connection.PASSWORDLESS
+
+
+def _is_passwordless_user(user_id: int) -> bool:
+    if has_credentials(user_id):
+        return False
+    import profile_store
+
+    return profile_store.get_kaizen_connection(user_id) == kaizen_connection.PASSWORDLESS
+
+
+async def _create_passwordless_link(user_id: int):
+    """One-time Connect Kaizen link, or None when the sign-in page is down."""
+    from mobile_kaizen_handoff import ConnectLinkUnavailable, create_connect_link
+
+    try:
+        return await asyncio.to_thread(create_connect_link, user_id)
+    except ConnectLinkUnavailable as exc:
+        logger.warning("Connect Kaizen link unavailable: %s", exc)
+        return None
+
+
+async def _probe_kept_kaizen_session(user_id: int) -> bool | str | None:
+    """Open Kaizen with the kept session and read the portfolio type.
+
+    Returns the detected role (as the password login test does) when the kept
+    session really opens Kaizen, ``False`` when there is no working session,
+    and ``None`` when Kaizen could not be reached to find out.
+    """
+    from engine.portfoliotypes.base import detect_portfolio_type
+    from engine.providers.kaizen import KAIZEN_DASHBOARD_BODY_PREVIEW_CHARS
+    from kaizen_form_filer import _connect_cdp, use_cached_session
+
+    if not kaizen_connection.has_kept_session(user_id):
+        return False
+    page = None
+    pw = None
+    browser_context = None
+    try:
+        page, pw = await _connect_cdp()
+        if page is None:
+            return None
+        browser_context = getattr(page, "context", None)
+        if not await asyncio.wait_for(use_cached_session(page, user_id), timeout=60):
+            return False
+        try:
+            title = await page.title()
+        except Exception:
+            title = ""
+        try:
+            body = await page.locator("body").inner_text(timeout=5000)
+        except Exception:
+            body = ""
+        return detect_portfolio_type(title, body[:KAIZEN_DASHBOARD_BODY_PREVIEW_CHARS]) or "unknown"
+    except Exception as exc:
+        logger.warning("Kept Kaizen session probe failed: %s", type(exc).__name__)
+        return None
+    finally:
+        if browser_context is not None:
+            try:
+                await browser_context.close()
+            except Exception:
+                pass
+        if pw is not None:
+            try:
+                await pw.stop()
+            except Exception:
+                pass
+
 # Substrings that indicate the LLM call hit a transient upstream issue (rate
 # limiting, quota, service overload) rather than a code bug. Matching is
 # case-insensitive on str(exception). Keep tight — false positives would hide
@@ -2346,7 +2480,7 @@ def _is_transient_llm_error(exc: BaseException) -> bool:
 
 def _setup_needs_finishing(user_id: int) -> bool:
     try:
-        return not has_credentials(user_id)
+        return not _kaizen_connected(user_id)
     except Exception:
         logger.warning("Credential setup check failed; treating setup as unfinished", exc_info=True)
         return True
@@ -2367,8 +2501,16 @@ def _build_data_clear_keyboard() -> None:
     return None
 
 
+def _username_prompt_with_offer(user_id: int, prompt: str) -> tuple[str, InlineKeyboardMarkup | None]:
+    """Add the passwordless option to a username prompt where it's offered."""
+    if kaizen_connection.passwordless_offered_to(user_id):
+        return prompt + _PASSWORDLESS_SETUP_OFFER, InlineKeyboardMarkup([[_BTN_CONNECT_PASSWORDLESS]])
+    return prompt, None
+
+
 async def _send_start_setup_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text(_KAIZEN_USERNAME_PROMPT, parse_mode="Markdown")
+    text, markup = _username_prompt_with_offer(update.effective_user.id, _KAIZEN_USERNAME_PROMPT)
+    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=markup)
     context.user_data["_setup_state_hint"] = "username"
     return AWAIT_USERNAME
 
@@ -2380,12 +2522,13 @@ async def _prompt_implicit_kaizen_username(update: Update, context: ContextTypes
     # the only usable next step. A Cancel would just loop back to the same
     # "connect first" state. Explicit Connect Kaizen routes (/start, /settings)
     # keep their buttons.
-    await update.message.reply_text(
+    text, markup = _username_prompt_with_offer(
+        update.effective_user.id,
         "Before I can save drafts to Kaizen, I need to connect your account.\n\n"
         "Send your Kaizen username or email to start.\n\n"
         f"{_KAIZEN_USERNAME_PRIVACY_NOTE}",
-        parse_mode="Markdown",
     )
+    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=markup)
     return AWAIT_USERNAME
 
 
@@ -6528,12 +6671,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             await setup_start(update, context)
             return ConversationHandler.END
         elif deep_link == "file":
-            if has_credentials(update.effective_user.id):
+            if _kaizen_connected(update.effective_user.id):
                 await update.message.reply_text(FILE_CASE_PROMPT)
                 return AWAIT_CASE_INPUT
 
     user_id = update.effective_user.id
-    connected = has_credentials(user_id)
+    connected = _kaizen_connected(user_id)
     if not connected:
         return await _send_start_setup_messages(update, context)
     if not await consent.has_current_consent(user_id):
@@ -6589,7 +6732,7 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
     # /setup command guard: connected users get settings; explicit button
     # clicks (Update Kaizen login / Connect Kaizen) always start setup.
-    if not query and has_credentials(update.effective_user.id):
+    if not query and _kaizen_connected(update.effective_user.id):
         await settings_command(update, context)
         return ConversationHandler.END
 
@@ -6599,9 +6742,11 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         await _retire_clicked_keyboard(query)
     _flow_done(context, "setup")  # fresh start — drop any stale anchor
     context.user_data["_setup_state_hint"] = "username"
+    text, markup = _username_prompt_with_offer(update.effective_user.id, _KAIZEN_USERNAME_PROMPT)
     await _flow_msg(
         update, context,
-        _KAIZEN_USERNAME_PROMPT,
+        text,
+        reply_markup=markup,
         parse_mode="Markdown",
         flow_key="setup",
     )
@@ -6866,6 +7011,17 @@ async def _complete_setup_login(
         await _clear_local_portfolio_account_data(user_id, reason="kaizen_account_switch")
 
     store_credentials(user_id, username, password)
+    kaizen_connection.clear_passwordless(user_id)
+    return await _finish_setup_after_connect(update, context, login_ok)
+
+
+async def _finish_setup_after_connect(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    login_ok: bool | str,
+) -> int:
+    """Everything after Kaizen is connected, for either connection method."""
+    user_id = update.effective_user.id
     _track_funnel_event(context, "credentials_connected")
     _clear_setup_retry_credentials(context)
     context.user_data.pop("setup_username", None)
@@ -6951,6 +7107,124 @@ async def _complete_setup_login(
 
     _flow_done(context, "setup")
     return ConversationHandler.END
+
+
+async def passwordless_setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Setup: send a Connect Kaizen link instead of asking for a password."""
+    query = update.callback_query
+    user_id = update.effective_user.id
+    if query:
+        await query.answer()
+        await _retire_clicked_keyboard(query)
+    if not kaizen_connection.passwordless_offered_to(user_id):
+        await _flow_msg(update, context, _KAIZEN_USERNAME_PROMPT, parse_mode="Markdown", flow_key="setup")
+        return AWAIT_USERNAME
+    context.user_data.pop("setup_username", None)
+    context.user_data["_setup_state_hint"] = "passwordless"
+    link = await _create_passwordless_link(user_id)
+    if link is None:
+        await _flow_msg(
+            update, context,
+            _PASSWORDLESS_UNAVAILABLE_TEXT + "\n\n" + _KAIZEN_USERNAME_PROMPT,
+            parse_mode="Markdown",
+            flow_key="setup",
+        )
+        context.user_data["_setup_state_hint"] = "username"
+        return AWAIT_USERNAME
+    await _flow_msg(
+        update, context,
+        _PASSWORDLESS_LINK_TEXT,
+        reply_markup=_passwordless_keyboard(
+            link.url, done_action="passwordless_done", link_action="passwordless_link"
+        ),
+        parse_mode="Markdown",
+        flow_key="setup",
+    )
+    return AWAIT_PASSWORDLESS
+
+
+async def passwordless_setup_new_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Setup: the doctor's link expired or was used; send a fresh one."""
+    return await passwordless_setup_start(update, context)
+
+
+async def passwordless_setup_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Setup: the doctor says they signed in. Prove it before connecting."""
+    query = update.callback_query
+    user_id = update.effective_user.id
+    await query.answer("Checking Kaizen…")
+    probe = await _probe_kept_kaizen_session(user_id)
+    if not probe:
+        text = _PASSWORDLESS_CHECK_FAILED_TEXT if probe is None else _PASSWORDLESS_NOT_SIGNED_IN_TEXT
+        await query.message.reply_text(
+            text,
+            parse_mode="Markdown",
+            reply_markup=query.message.reply_markup,
+        )
+        return AWAIT_PASSWORDLESS
+    await _retire_clicked_keyboard(query)
+    was_password_user = has_credentials(user_id)
+    if was_password_user:
+        # The password is about to be deleted and we can't tell whether the
+        # doctor signed in to the same Kaizen account, so clear the previous
+        # account's local evidence exactly as an account switch does.
+        await _clear_local_portfolio_account_data(user_id, reason="kaizen_account_switch")
+    kaizen_connection.mark_passwordless(user_id)
+    context.user_data.pop("_setup_state_hint", None)
+    return await _finish_setup_after_connect(update, context, probe)
+
+
+async def passwordless_awaiting_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text(
+        "Finish signing in on the Kaizen page, then tap *I've signed in* above. "
+        "Tap *New link* if it has expired.",
+        parse_mode="Markdown",
+    )
+    return AWAIT_PASSWORDLESS
+
+
+async def passwordless_reconnect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Kaizen signed a passwordless user out: send a fresh sign-in link.
+
+    Works from anywhere (after a failed save, from settings); the draft being
+    saved stays in place and is saved once the doctor has signed in again.
+    """
+    query = update.callback_query
+    user_id = update.effective_user.id
+    link = await _create_passwordless_link(user_id)
+    if link is None:
+        await query.message.reply_text(_PASSWORDLESS_UNAVAILABLE_TEXT)
+        return
+    await query.message.reply_text(
+        _PASSWORDLESS_LINK_TEXT,
+        parse_mode="Markdown",
+        reply_markup=_passwordless_keyboard(
+            link.url, done_action="pwl_reconnected", link_action="pwl_reconnect"
+        ),
+    )
+
+
+async def passwordless_reconnected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """After signing in again: check it worked, then finish the waiting save."""
+    query = update.callback_query
+    user_id = update.effective_user.id
+    await query.answer("Checking Kaizen…")
+    probe = await _probe_kept_kaizen_session(user_id)
+    if not probe:
+        text = _PASSWORDLESS_CHECK_FAILED_TEXT if probe is None else _PASSWORDLESS_NOT_SIGNED_IN_TEXT
+        await query.message.reply_text(
+            text,
+            parse_mode="Markdown",
+            reply_markup=query.message.reply_markup,
+        )
+        return None
+    if _load_draft(context):
+        # Same path as the Retry button: the kept draft is saved now.
+        context.user_data["retry_filing_requested"] = True
+        return await handle_approval_approve(update, context)
+    await _retire_clicked_keyboard(query)
+    await query.message.reply_text("✅ Kaizen connected again. Send your next case whenever you're ready.")
+    return None
 
 
 async def setup_retry_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -7194,7 +7468,7 @@ async def _voice_show_settings_screen(update: Update, context: ContextTypes.DEFA
         user_id,
         tier=await get_user_tier(user_id),
         used=used,
-        connected=has_credentials(user_id),
+        connected=_kaizen_connected(user_id),
         is_beta=await is_beta_tester(user_id),
         kaizen_sync=await _safe_kaizen_sync_status(user_id),
     )
@@ -7529,7 +7803,14 @@ async def _voice_run_kaizen_sample(
         )
 
     rows = []
-    if getattr(result, "reason", None) in {
+    passwordless = _is_passwordless_user(update.effective_user.id)
+    if passwordless and getattr(result, "reason", None) == "credentials_missing":
+        body = (
+            "Learning from your previous Kaizen entries needs a username-and-password "
+            "connection, so it isn't available when you connect without sharing your "
+            "password. You can add 3-5 examples manually instead."
+        )
+    elif getattr(result, "reason", None) in {
         "login_required",
         "credentials_missing",
         "credentials_unavailable",
@@ -7683,7 +7964,7 @@ async def handle_info_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     user_id = update.effective_user.id
-    primary = [_BTN_SETUP] if not has_credentials(user_id) else []
+    primary = [_BTN_SETUP] if not _kaizen_connected(user_id) else []
     rows = []
     if primary:
         rows.append(primary)
@@ -7756,15 +8037,21 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
     if action == "retry_filing":
         context.user_data["retry_filing_requested"] = True
         return await handle_approval_approve(update, context)
+    if action == "pwl_reconnected":
+        return await passwordless_reconnected(update, context)
 
     await query.answer()
+
+    if action == "pwl_reconnect":
+        await passwordless_reconnect(update, context)
+        return None
 
     if action == "setup":
         # force_reconnect is set when the user lands here after a Login failed
         # filing — their saved credentials no longer work, so the
         # "already connected" branch would leave them stuck.
         force_reconnect = context.user_data.pop("force_reconnect", False)
-        if has_credentials(user_id) and not force_reconnect:
+        if _kaizen_connected(user_id) and not force_reconnect:
             await query.message.reply_text(
                 "Your Kaizen account is already connected. Just send your next case to file it."
             )
@@ -7789,7 +8076,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
 
     elif action == "file":
-        if not has_credentials(user_id):
+        if not _kaizen_connected(user_id):
             await query.message.reply_text(
                 "🔗 Connect your Kaizen account first.",
                 reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]])
@@ -7825,7 +8112,9 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         )
 
     elif action == "unsigned":
-        if not has_credentials(user_id):
+        if _is_passwordless_user(user_id):
+            await query.message.reply_text(_PASSWORDLESS_FEATURE_UNAVAILABLE_TEXT)
+        elif not has_credentials(user_id):
             await query.message.reply_text(
                 "🔗 Connect your Kaizen account first.",
                 reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]])
@@ -7851,7 +8140,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         back_btn = InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")
         back_markup = InlineKeyboardMarkup([[back_btn]])
 
-        if not has_credentials(user_id):
+        if not _kaizen_connected(user_id):
             await query.message.edit_text(
                 "🔗 Connect your Kaizen account first.",
                 reply_markup=InlineKeyboardMarkup([[_BTN_SETUP], [back_btn]]),
@@ -8075,13 +8364,13 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             user_id,
             tier=tier,
             used=used,
-            connected=has_credentials(user_id),
+            connected=_kaizen_connected(user_id),
             kaizen_sync=await _safe_kaizen_sync_status(user_id),
         )
         await query.message.edit_text(text, reply_markup=keyboard)
 
     elif action == "refresh_portfolio":
-        if not has_credentials(user_id):
+        if not _kaizen_connected(user_id):
             await query.message.edit_text(
                 "🔗 Connect your Kaizen account first, then you can sync Kaizen evidence.",
                 reply_markup=InlineKeyboardMarkup([
@@ -8097,7 +8386,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         )
 
     elif action == "confirm_refresh_portfolio":
-        if not has_credentials(user_id):
+        if not _kaizen_connected(user_id):
             await query.message.edit_text(
                 "🔗 Connect your Kaizen account first, then you can sync Kaizen evidence.",
                 reply_markup=InlineKeyboardMarkup([
@@ -8137,7 +8426,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         back_btn = InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")
         back_markup = InlineKeyboardMarkup([[back_btn]])
 
-        if not has_credentials(user_id):
+        if not _kaizen_connected(user_id):
             await query.message.edit_text(
                 "🔗 Connect your Kaizen account first.",
                 reply_markup=InlineKeyboardMarkup([[_BTN_SETUP], [back_btn]]),
@@ -8278,7 +8567,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         )
 
     elif action == "back_to_menu":
-        connected = has_credentials(user_id)
+        connected = _kaizen_connected(user_id)
         msg_text = WELCOME_MSG_CONNECTED if connected else WELCOME_MSG
         await query.message.edit_text(
             msg_text,
@@ -8597,7 +8886,7 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         user_id,
         tier=tier,
         used=used,
-        connected=has_credentials(user_id),
+        connected=_kaizen_connected(user_id),
         is_beta=await is_beta_tester(user_id),
         kaizen_sync=await _safe_kaizen_sync_status(user_id),
     )
@@ -9012,7 +9301,7 @@ def _sync_status_is_fresh(status: KaizenSyncStatus | None) -> bool:
 
 async def _health_needs_kaizen_refresh(user_id: int) -> bool:
     """Gate the primary /health journey through refresh when data is stale."""
-    if not has_credentials(user_id):
+    if not _kaizen_connected(user_id):
         return False
     return not _sync_status_is_fresh(await _safe_kaizen_sync_status(user_id))
 
@@ -9423,7 +9712,7 @@ async def handle_pathway_choice(update: Update, context: ContextTypes.DEFAULT_TY
             update.effective_user.id,
             tier=await get_user_tier(update.effective_user.id),
             used=used,
-            connected=has_credentials(update.effective_user.id),
+            connected=_kaizen_connected(update.effective_user.id),
             is_beta=await is_beta_tester(update.effective_user.id),
             kaizen_sync=await _safe_kaizen_sync_status(update.effective_user.id),
         )
@@ -10883,7 +11172,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "ACTION|file":
         await query.answer()
         user_id = update.effective_user.id
-        if not has_credentials(user_id):
+        if not _kaizen_connected(user_id):
             await query.message.reply_text(
                 "Connect your Kaizen account first.",
                 reply_markup=InlineKeyboardMarkup([
@@ -12244,7 +12533,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         context.user_data.pop("last_bot_chat_id", None)
 
     # Check credentials
-    if not has_credentials(user_id):
+    if not _kaizen_connected(user_id):
         if update.message and update.message.text:
             email = _extract_setup_email_candidate(update.message.text)
             if email:
@@ -12458,7 +12747,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     user_id,
                     tier=tier,
                     used=used,
-                    connected=has_credentials(user_id),
+                    connected=_kaizen_connected(user_id),
                     is_beta=await is_beta_tester(user_id),
                     kaizen_sync=await _safe_kaizen_sync_status(user_id),
                 )
@@ -12478,7 +12767,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     user_id,
                     tier=tier,
                     used=used,
-                    connected=has_credentials(user_id),
+                    connected=_kaizen_connected(user_id),
                     is_beta=await is_beta_tester(user_id),
                     kaizen_sync=await _safe_kaizen_sync_status(user_id),
                 )
@@ -13958,6 +14247,10 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
 
     user_id = update.effective_user.id
     creds = get_credentials(user_id)
+    if not creds and _is_passwordless_user(user_id):
+        # No stored login: the filer uses the kept session, and a lapsed
+        # session comes back as a login failure that offers a fresh link.
+        creds = ("", "")
     if not creds:
         context.user_data.clear()
         await source_message.reply_text(
@@ -14657,6 +14950,36 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         # message. force_reconnect lets the ACTION|setup handler bypass the
         # "already connected" short-circuit when the user taps Reconnect.
         is_login_failure = _is_session_failure_error(error)
+        if is_login_failure and platform == "kaizen" and _is_passwordless_user(user_id):
+            # Expected about once a day for passwordless users, so no operator
+            # alert. The draft stays; signing in again saves it.
+            msg = (
+                f"🔒 Kaizen has signed you out\n"
+                f"{form_name}\n\n"
+                "This happens about once a day when you connect without sharing "
+                "your password. Your draft is kept. Tap below to sign in again "
+                "and I'll save it."
+            )
+            end_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔒 Sign in again", callback_data="ACTION|pwl_reconnect")],
+                [InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|reset")],
+            ])
+            context.user_data["last_filing_status"] = status
+            context.user_data["last_filing_form_name"] = form_name
+            context.user_data["last_filing_report"] = msg
+            try:
+                await ack.edit_text(msg, reply_markup=end_keyboard)
+            except Exception:
+                logger.warning("Could not edit sign-in-again report, sending fresh message", exc_info=True)
+                try:
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text=msg,
+                        reply_markup=end_keyboard,
+                    )
+                except Exception:
+                    logger.warning("Could not send sign-in-again report", exc_info=True)
+            return AWAIT_APPROVAL
         if is_login_failure and platform == "kaizen":
             await _alert_filing_failure(
                 context,
@@ -15956,6 +16279,9 @@ async def unsigned_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     """Handle /unsigned — Unlimited feature. Shows date-range picker, then scans Kaizen."""
     user_id = update.effective_user.id
 
+    if _is_passwordless_user(user_id):
+        await update.message.reply_text(_PASSWORDLESS_FEATURE_UNAVAILABLE_TEXT)
+        return
     if not has_credentials(user_id):
         await update.message.reply_text(
             "🔗 Connect your Kaizen account first.\n\nOpen /settings to get started.",
@@ -16395,7 +16721,13 @@ async def privacy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         f"{status_line}\n\n"
         "• When drafting, the anonymised case details you provide are processed by Google Gemini via Vertex AI in the UK (London region).\n"
         "• Kaizen credentials are stored encrypted and never shared with the AI model.\n"
-        "• Drafts only — nothing is ever submitted to a supervisor.\n"
+        + (
+            "• Or connect without sharing your password: you sign in to Kaizen yourself and only "
+            "the signed-in session is kept, encrypted, until Kaizen ends it (about a day).\n"
+            if kaizen_connection.passwordless_offered_to(update.effective_user.id)
+            else ""
+        )
+        + "• Drafts only — nothing is ever submitted to a supervisor.\n"
         "• You are responsible for anonymising patients before sending.\n"
         "• /reset withdraws consent and erases Portfolio Guru's stored data (UK GDPR Art. 17)."
     )
@@ -16472,8 +16804,15 @@ def build_application() -> Application:
             ],
             AWAIT_USERNAME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, setup_username),
+                CallbackQueryHandler(passwordless_setup_start, pattern=r"^ACTION\|connect_passwordless$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|cancel$"),
                 MessageHandler(~filters.TEXT & ~filters.COMMAND, _setup_wrong_input),
+            ],
+            AWAIT_PASSWORDLESS: [
+                CallbackQueryHandler(passwordless_setup_done, pattern=r"^ACTION\|passwordless_done$"),
+                CallbackQueryHandler(passwordless_setup_new_link, pattern=r"^ACTION\|passwordless_link$"),
+                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|cancel$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, passwordless_awaiting_text),
             ],
             AWAIT_PASSWORD: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, setup_password),
@@ -16613,8 +16952,15 @@ def build_application() -> Application:
         states={
             AWAIT_USERNAME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, setup_username),
+                CallbackQueryHandler(passwordless_setup_start, pattern=r"^ACTION\|connect_passwordless$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|cancel$"),
                 MessageHandler(~filters.TEXT & ~filters.COMMAND, _setup_wrong_input),
+            ],
+            AWAIT_PASSWORDLESS: [
+                CallbackQueryHandler(passwordless_setup_done, pattern=r"^ACTION\|passwordless_done$"),
+                CallbackQueryHandler(passwordless_setup_new_link, pattern=r"^ACTION\|passwordless_link$"),
+                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|cancel$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, passwordless_awaiting_text),
             ],
             AWAIT_PASSWORD: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, setup_password),
@@ -16681,7 +17027,7 @@ def build_application() -> Application:
     application.add_handler(
         CallbackQueryHandler(
             handle_action_button,
-            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|setup$|voice$|same_case_another$|retry_recommend$|retry_template$|back_to_missing$|retry_setup_login$).+",
+            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|setup$|voice$|same_case_another$|retry_recommend$|retry_template$|back_to_missing$|retry_setup_login$|connect_passwordless$|passwordless_done$|passwordless_link$).+",
         )
     )
     application.add_handler(CallbackQueryHandler(handle_feedback, pattern=r"^FEEDBACK\|"))

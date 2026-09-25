@@ -129,6 +129,28 @@ def get_credentials(telegram_user_id: int) -> Optional[tuple[str, str]]:
         return username, password
 
 
+def delete_credentials(telegram_user_id: int) -> bool:
+    """Delete the stored Kaizen login, here and in the Supabase mirror.
+
+    Used when a user switches to the passwordless connection, so no copy of
+    their password is kept anywhere. Returns True if a local row existed.
+    """
+    with Session(engine) as session:
+        cred = session.exec(
+            select(UserCredential).where(UserCredential.telegram_user_id == telegram_user_id)
+        ).first()
+        existed = cred is not None
+        if cred:
+            session.delete(cred)
+            session.commit()
+    try:
+        from supabase_sync import delete_mirrored_credentials
+        delete_mirrored_credentials(telegram_user_id)
+    except Exception:
+        pass
+    return existed
+
+
 def has_credentials(telegram_user_id: int) -> bool:
     with Session(engine) as session:
         cred = session.exec(

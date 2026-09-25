@@ -2022,7 +2022,15 @@ async def _login(page: Page, username: str, password: str) -> bool:
     A timeout, navigation failure, or any other browser problem means we could
     not test the credentials at all and raises ``KaizenInfrastructureError`` —
     downgrading those to ``False`` tells doctors to retype a working password.
+
+    Passwordless users have no username or password, only a kept session.
+    When that session has lapsed there is nothing to log in with, so return
+    ``False`` without touching the portal: every caller then reports a login
+    failure, which the bot turns into "sign in again", instead of submitting
+    an empty login form to RCEM.
     """
+    if not username or not password:
+        return False
     try:
         await page.goto("https://eportfolio.rcem.ac.uk", wait_until="load", timeout=30000)
         await asyncio.sleep(2)
