@@ -51,6 +51,22 @@ def _allow_non_eu_extraction_in_tests(monkeypatch):
     monkeypatch.setenv("PG_ALLOW_NON_EU_EXTRACTION", "1")
 
 
+# An in-memory DATABASE_URL ("sqlite://") once leaked into a file literally
+# named "sqlite:" in backend/ whenever a subprocess-based test imported the
+# stores. Fail the run if any test creates it again.
+_STRAY_SQLITE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sqlite:")
+_STRAY_SQLITE_EXISTED_AT_START = os.path.exists(_STRAY_SQLITE_FILE)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    if not _STRAY_SQLITE_EXISTED_AT_START and os.path.exists(_STRAY_SQLITE_FILE):
+        session.exitstatus = 1
+        sys.stderr.write(
+            "\nERROR: the test run created backend/sqlite: — something turned an "
+            "in-memory DATABASE_URL into a file path.\n"
+        )
+
+
 def pytest_configure(config):
     config.addinivalue_line("markers", "e2e: end-to-end tests requiring Telegram credentials")
     config.addinivalue_line("markers", "live: live Telegram tests (requires personal account session)")

@@ -22,6 +22,20 @@ FERNET_KEY = _get_fernet_key()
 engine = create_engine(DATABASE_URL)
 
 
+def _sqlite_file_path() -> str | None:
+    """The file behind this SQLite database, or None when it lives in memory.
+
+    Read from the parsed URL, not by string-stripping "sqlite:///": an
+    in-memory URL such as "sqlite://" would otherwise become the relative
+    path "sqlite://", and opening that creates a stray file called "sqlite:"
+    in the working directory.
+    """
+    database = engine.url.database
+    if not database or database == ":memory:" or database.startswith("file::memory:"):
+        return None
+    return database
+
+
 class UserCredential(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     telegram_user_id: int = Field(unique=True, index=True)
@@ -33,8 +47,9 @@ class UserCredential(SQLModel, table=True):
 
 def init_db():
     import pathlib
-    db_path = DATABASE_URL.replace("sqlite:///", "")
-    pathlib.Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    db_path = _sqlite_file_path()
+    if db_path:
+        pathlib.Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     SQLModel.metadata.create_all(engine)
 
 
