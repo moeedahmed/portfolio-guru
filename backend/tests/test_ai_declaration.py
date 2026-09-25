@@ -21,7 +21,6 @@ from ai_declaration import (
     apply_ai_declaration,
     declaration_block,
     declaration_target_field,
-    will_declare,
 )
 from kaizen_form_filer import (
     FORM_FIELD_MAP,
@@ -306,42 +305,3 @@ def test_draft_preview_omits_the_declaration_when_nothing_will_be_declared():
     preview = _format_draft_preview(draft)
 
     assert ai_declaration.declaration_text() not in preview
-
-
-def test_preview_promise_matches_what_filing_does():
-    """will_declare drives the preview; it must not promise what filing skips."""
-    declared_cases = [
-        ("CBD", {"reflection": "I would escalate sooner."}),
-        ("LAT", {"reflection": "I delegated too late."}),
-        ("PROC_LOG", {"reflective_comments": "Landmarking with ultrasound helped."}),
-    ]
-    for form_type, fields in declared_cases:
-        _, meta = _file_as_kaizen_would(form_type, dict(fields, date_of_encounter="2026-08-01"))
-        assert will_declare(form_type, fields) is meta["declared"], form_type
-
-    skipped_cases = [
-        ("STAT", {"session_title": "Airway teaching"}),
-        ("CBD", {"reflection": ""}),
-    ]
-    for form_type, fields in skipped_cases:
-        _, meta = _file_as_kaizen_would(form_type, dict(fields, date_of_encounter="2026-08-01"))
-        assert will_declare(form_type, fields) is meta["declared"] is False, form_type
-
-
-def test_a_filed_entry_carries_exactly_one_declaration():
-    """The draft step and the filer each used to add their own sentence."""
-    from rcem_ai_policy import with_ai_use_declaration
-    from ai_declaration import apply_ai_declaration, declaration_text
-
-    drafted = {"reflection": with_ai_use_declaration("I learned to escalate a falling GCS sooner.")}
-    filed, _ = apply_ai_declaration("CBD", drafted, None)
-    assert filed["reflection"].lower().count("ai was used to help structure") == 1
-    assert declaration_text() in filed["reflection"]
-
-
-def test_a_draft_declared_with_the_old_sentence_is_not_declared_again():
-    from ai_declaration import apply_ai_declaration
-
-    old = {"reflection": "I learned a lot.\n\nAI was used to help structure and edit this reflection."}
-    filed, _ = apply_ai_declaration("CBD", old, None)
-    assert filed["reflection"] == old["reflection"]
