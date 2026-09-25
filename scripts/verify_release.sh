@@ -23,9 +23,13 @@ echo "=== verify:release — Portfolio Guru full offline release gate ==="
 bash scripts/verify_changed.sh
 
 cd backend
-# shellcheck source=scripts/lib/test_env.sh
-. "$ROOT/scripts/lib/test_env.sh"
-pg_setup_test_env
+if [[ -x venv/bin/python3 ]]; then
+  PY="venv/bin/python3"
+elif [[ -x .venv/bin/python3 ]]; then
+  PY=".venv/bin/python3"
+else
+  PY="python3"
+fi
 
 echo
 echo "--- Full offline pytest suite (matches CI Tests job) ---"

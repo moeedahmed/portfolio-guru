@@ -36,11 +36,13 @@ if [[ ! -d backend ]]; then
 fi
 
 cd backend
-# Resolves $PY and guarantees FERNET_SECRET_KEY; fails fast with one clear
-# line if the virtualenv is missing. See scripts/lib/test_env.sh.
-# shellcheck source=scripts/lib/test_env.sh
-. "$ROOT/scripts/lib/test_env.sh"
-pg_setup_test_env
+if [[ -x venv/bin/python3 ]]; then
+  PY="venv/bin/python3"
+elif [[ -x .venv/bin/python3 ]]; then
+  PY=".venv/bin/python3"
+else
+  PY="python3"
+fi
 
 JOURNEY_TESTS=(
   # 1. Case capture -> extraction -> form recommendation
