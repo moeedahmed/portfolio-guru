@@ -842,6 +842,9 @@ FORM_FIELD_MAP = {
         "stage_of_training": "e0864e88-62cf-43aa-a9e5-51abd98a1cce",
         "date_of_esle": "2c86886b-0a18-4771-9b25-6c2272fdad6b",
         "reflection": "488e8e63-300d-4ed9-a4f4-eaee53608f05",
+        # Required custom multi-select widget (a DIV, not a SELECT) — see
+        # _fill_domain_multiselect.
+        "domains_of_performance": "7683f17f-cc85-47fe-b0fa-e6ad817f0045",
     },
     # ESLE Reflection — supplementary reflective entry. Does not go to assessor.
     "ESLE_REFLECTION": {
@@ -1246,6 +1249,15 @@ def normalise_fields_for_deterministic_filing(form_type: str, fields: dict) -> d
         out["resource_details"] = _append_section(out.get("resource_details"), "Learning activity type", value)
         out.pop("learning_activity_type", None)
 
+    # Resolved through filing_form_base so every ESLE variant — including
+    # ESLE_2021, which shares the ESLE_PART1_2 field map — gets the same pass.
+    elif filing_form_base(form_type) == "ESLE_PART1_2" and out.get("domains_of_performance"):
+        # "All Domains" is exclusive on the Kaizen form; resolve the selection
+        # here too so an edited or restored draft cannot reach the widget with
+        # a combination the form forbids.
+        from esle_domains import normalise_domains
+        out["domains_of_performance"] = normalise_domains(out["domains_of_performance"])
+
     elif handling_key == "QIAT":
         for key in ("pdp_summary", "qi_engagement", "qi_understanding", "reflection", "next_pdp"):
             if isinstance(out.get(key), (list, tuple, set, dict)):
@@ -1573,7 +1585,48 @@ for _variant, _base in _FORM_FIELD_MAP_VARIANT_BASES.items():
         FORM_FIELD_MAP.setdefault(_variant, FORM_FIELD_MAP[_base])
 
 
+def filing_form_base(form_type: str) -> str:
+    """The form whose DOM this code is actually driving.
+
+    A ``_2021`` curriculum variant is a different Kaizen form code but the same
+    rendered form, and it is resolved by ``_FORM_FIELD_MAP_VARIANT_BASES``
+    rather than by ``FORM_TYPE_ALIASES``. Anything keyed on "which form is this
+    really" has to apply both, or it silently treats the variant as an unknown
+    form: ``ESLE_2021`` filed through the ``ESLE_PART1_2`` field map while the
+    post-save required-field guard skipped it entirely.
+    """
+    canonical = canonical_form_type(form_type)
+    base = _FORM_FIELD_MAP_VARIANT_BASES.get(canonical, canonical)
+    return canonical_form_type(base)
+
+
 # ─── JS snippets (passed as separate strings, NEVER f-string interpolated) ───
+
+# The curriculum tree is rendered by Angular after the rest of the form, about
+# 1.7s behind domcontentloaded when measured live on a US_CASE new-section
+# page. The expand step used to fire immediately, so whenever the preceding
+# field fills finished first, the anchors did not exist yet and every SLO
+# failed identically — "Could not expand: Higher SLO1:" — leaving no capability
+# ticked. Waiting removes the race; when the anchors are already there this
+# returns at once.
+SLO_ANCHORS_PRESENT_JS = (
+    "() => Array.from(document.querySelectorAll('a'))"
+    ".some((a) => /SLO\\s*\\d/i.test(a.textContent || ''))"
+)
+
+
+async def _await_curriculum_tree(page: Page, timeout_ms: int = 15000) -> bool:
+    """Wait for the SLO anchors to exist. False means they never rendered."""
+    try:
+        await page.wait_for_function(SLO_ANCHORS_PRESENT_JS, timeout=timeout_ms)
+        return True
+    except Exception:
+        logger.warning(
+            "Curriculum tree did not render within %dms — SLO expansion will fail",
+            timeout_ms,
+        )
+        return False
+
 
 EXPAND_SLO_JS = """(sloText) => {
     var anchors = document.querySelectorAll('a.ng-binding');
@@ -1911,8 +1964,65 @@ async def use_cached_session(page: Page, telegram_user_id: int, username: Option
 
 # ─── Login ────────────────────────────────────────────────────────────────────
 
+# Surfaces the RCEM portal uses to announce a failed sign-in. Anything else on
+# the page (headings, help text, "Forgotten password?") is not a rejection.
+_LOGIN_ERROR_SELECTOR = (
+    ".alert-danger, .alert-error, [role='alert'], .validation-summary-errors, "
+    ".field-validation-error, .login-error, .error-message"
+)
+
+# Conservative: each phrase means the portal explicitly refused the supplied
+# identity. Ambiguous states (locked out, MFA required, service unavailable)
+# deliberately fall through to KaizenInfrastructureError rather than telling a
+# doctor to retype a password that is fine.
+_LOGIN_REJECTION_PHRASES = (
+    "username or password",
+    "email or password",
+    "password is incorrect",
+    "incorrect password",
+    "invalid password",
+    "invalid username",
+    "invalid email",
+    "invalid credentials",
+    "incorrect username",
+    "credentials are incorrect",
+    "login details are incorrect",
+    "not recognised",
+    "not recognized",
+)
+
+
+def _kaizen_infrastructure_error(message: str) -> Exception:
+    """Build the shared 'we could not even ask Kaizen' error."""
+    from engine.providers.kaizen import KaizenInfrastructureError
+
+    return KaizenInfrastructureError(message)
+
+
+async def _has_credential_rejection(page: Page) -> bool:
+    """True only when the page carries an explicit bad-credentials message.
+
+    Never logs the matched text — the portal echoes the submitted identity.
+    """
+    try:
+        texts = await page.locator(_LOGIN_ERROR_SELECTOR).all_inner_texts()
+    except Exception:
+        return False
+    for text in texts or []:
+        lowered = (text or "").lower()
+        if any(phrase in lowered for phrase in _LOGIN_REJECTION_PHRASES):
+            return True
+    return False
+
+
 async def _login(page: Page, username: str, password: str) -> bool:
-    """Log in to Kaizen via RCEM portal (two-step: username → password)."""
+    """Log in to Kaizen via RCEM portal (two-step: username → password).
+
+    Returns ``False`` only when the portal explicitly rejected the credentials.
+    A timeout, navigation failure, or any other browser problem means we could
+    not test the credentials at all and raises ``KaizenInfrastructureError`` —
+    downgrading those to ``False`` tells doctors to retype a working password.
+    """
     try:
         await page.goto("https://eportfolio.rcem.ac.uk", wait_until="load", timeout=30000)
         await asyncio.sleep(2)
@@ -1929,14 +2039,29 @@ async def _login(page: Page, username: str, password: str) -> bool:
         if await pwd_input.count() > 0:
             await pwd_input.fill(password)
             await page.locator('button[type="submit"]').click()
-
-        await page.wait_for_url("**/kaizenep.com/**", timeout=30000)
-        await asyncio.sleep(3)
-        logger.info(f"Login success: {page.url}")
-        return True
     except Exception as e:
-        logger.error(f"Login failed: {e}")
-        return False
+        logger.error(f"Kaizen login could not be attempted: {type(e).__name__}")
+        raise _kaizen_infrastructure_error(
+            f"Kaizen login form could not be driven: {type(e).__name__}"
+        ) from e
+
+    try:
+        await page.wait_for_url("**/kaizenep.com/**", timeout=30000)
+    except Exception as e:
+        if await _has_credential_rejection(page):
+            logger.info("Kaizen rejected the supplied credentials")
+            return False
+        logger.error(
+            f"Kaizen login did not reach the portfolio and showed no credential "
+            f"error: {type(e).__name__}"
+        )
+        raise _kaizen_infrastructure_error(
+            f"Kaizen login never reached the portfolio: {type(e).__name__}"
+        ) from e
+
+    await asyncio.sleep(3)
+    logger.info(f"Login success: {page.url}")
+    return True
 
 
 # ─── Date filling (THE critical fix) ─────────────────────────────────────────
@@ -2250,11 +2375,160 @@ async def _fill_select(page: Page, dom_id: Any, value: str) -> bool:
             return False
 
 
+# ─── Custom (DIV-based) multi-select widgets ─────────────────────────────────
+#
+# Kaizen renders a few required questions as an Angular widget wrapped in a
+# DIV rather than a <select>, so the generic select/text fillers cannot touch
+# them and the field silently stays blank on the saved draft. ESLE's "Domains
+# of performance" question is one of these.
+
+_MULTISELECT_WIDGET_FIELDS = frozenset({"domains_of_performance"})
+
+_WIDGET_STATE_JS = """(domId) => {
+    const root = document.getElementById(domId);
+    if (!root) return {missing: true};
+    const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+    const rows = Array.from(root.querySelectorAll(
+        '[role="option"], li, label, option, .ui-select-choices-row, .dropdown-item'
+    ));
+    const options = [];
+    const seen = new Set();
+    for (const row of rows) {
+        const text = norm(row.innerText || row.textContent);
+        if (!text || text.length > 80 || seen.has(text)) continue;
+        seen.add(text);
+        const box = row.querySelector('input[type="checkbox"]') ||
+                    (row.tagName === 'INPUT' ? row : null);
+        let selected;
+        if (box) {
+            selected = !!box.checked;
+        } else if (row.tagName === 'OPTION') {
+            selected = !!row.selected;
+        } else {
+            selected = row.getAttribute('aria-selected') === 'true' ||
+                       /(^|\\s)(selected|active|ui-select-choices-row-active)(\\s|$)/.test(row.className || '');
+        }
+        options.push({text: text, selected: selected});
+    }
+    const chips = Array.from(root.querySelectorAll(
+        '.ui-select-match-item, .select2-search-choice, .chip, .tag, .badge, .selected-item'
+    )).map((el) => norm(el.innerText || el.textContent)).filter(Boolean);
+    return {missing: false, options: options, chips: chips, text: norm(root.innerText || root.textContent)};
+}"""
+
+_WIDGET_PICK_JS = """({domId, wanted}) => {
+    const root = document.getElementById(domId);
+    if (!root) return false;
+    const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const target = norm(wanted);
+    const rows = Array.from(root.querySelectorAll(
+        '[role="option"], li, label, option, .ui-select-choices-row, .dropdown-item'
+    ));
+    for (const row of rows) {
+        if (norm(row.innerText || row.textContent) !== target) continue;
+        const box = row.querySelector('input[type="checkbox"]') ||
+                    (row.tagName === 'INPUT' ? row : null);
+        if (box) {
+            if (!box.checked) box.click();
+            box.dispatchEvent(new Event('change', {bubbles: true}));
+            return true;
+        }
+        if (row.tagName === 'OPTION') {
+            row.selected = true;
+            const select = row.closest('select');
+            if (select) select.dispatchEvent(new Event('change', {bubbles: true}));
+            return true;
+        }
+        row.click();
+        row.dispatchEvent(new Event('change', {bubbles: true}));
+        return true;
+    }
+    return false;
+}"""
+
+
+def _widget_selected_values(state: Any) -> List[str]:
+    """Selected option labels reported by a custom multi-select widget."""
+    if not isinstance(state, dict) or state.get("missing"):
+        return []
+    selected = [
+        str(option.get("text") or "").strip()
+        for option in (state.get("options") or [])
+        if isinstance(option, dict) and option.get("selected")
+    ]
+    chips = [str(chip).strip() for chip in (state.get("chips") or []) if str(chip).strip()]
+    merged: List[str] = []
+    for value in selected + chips:
+        if value and value not in merged:
+            merged.append(value)
+    return merged
+
+
+async def _read_widget_state(page: Page, dom_id: str) -> Dict[str, Any]:
+    try:
+        state = await page.evaluate(_WIDGET_STATE_JS, dom_id)
+    except Exception as exc:
+        logger.warning(f"Could not read multi-select widget {dom_id}: {exc}")
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+async def _fill_domain_multiselect(page: Page, field_target: Any, values: Any) -> bool:
+    """Select options on a DIV-wrapped Angular multi-select.
+
+    The widget has to be opened before its option rows exist, so the toggle is
+    clicked first and each wanted option is then matched by its visible label.
+    Returns True only when the widget itself reports every wanted option as
+    selected — a click that Angular ignored must not be reported as filled.
+    """
+    from esle_domains import normalise_domains
+
+    wanted = normalise_domains(values)
+    if not wanted:
+        return False
+
+    dom_id = _field_dom_id(field_target)
+    if not dom_id:
+        return False
+
+    scope = f'[id="{dom_id}"]'
+    await _click_first_visible(page, [
+        f"{scope} .ui-select-toggle",
+        f"{scope} .dropdown-toggle",
+        f"{scope} button",
+        f"{scope} input",
+        scope,
+    ])
+    await asyncio.sleep(1)
+
+    for value in wanted:
+        try:
+            picked = await page.evaluate(_WIDGET_PICK_JS, {"domId": dom_id, "wanted": value})
+        except Exception as exc:
+            logger.warning(f"Multi-select pick failed for {dom_id} = {value}: {exc}")
+            picked = False
+        if not picked:
+            logger.warning(f"Multi-select option not found for {dom_id}: {value}")
+        await asyncio.sleep(0.5)
+
+    state = await _read_widget_state(page, dom_id)
+    selected = {value.lower() for value in _widget_selected_values(state)}
+    missing = [value for value in wanted if value.lower() not in selected]
+    if missing:
+        logger.warning(
+            "Multi-select %s did not confirm %s (selected: %s)",
+            dom_id, missing, sorted(selected),
+        )
+        return False
+    logger.info(f"Multi-select set: {dom_id} = {wanted}")
+    return True
+
+
 _PROCEDURAL_SKILL_NA_SELECT_IDS = (
     "eed0e8dc-075d-4661-aea5-2c3238af4c5b",  # ACCS Procedural skills
     "31bd55b7-0e32-4918-8cc0-4ba33af83772",  # Intermediate Procedural skills
     "8def931e-3a00-43ac-8529-44cdaf34be2d",  # ST4-ST6 Higher EM Procedural Skills
-    "131840e2-282d-4979-bfed-45deb28d4851",  # Procedural skills list
+    "131840e2-282d-4979-bfed-45deb28d4851",  # Procedural skills list (ESLE)
 )
 
 _PROCEDURAL_FORMS_REQUIRING_A_REAL_SKILL = {
@@ -2267,73 +2541,101 @@ _PROCEDURAL_FORMS_REQUIRING_A_REAL_SKILL = {
 }
 
 
-async def _default_non_applicable_procedural_selects(page: Page, form_type: str) -> list[str]:
-    """Select ``- n/a -`` for non-procedural forms with procedural-skill widgets.
+_PROCEDURAL_SKILL_SCAN_JS = """(knownIds) => {
+  const known = new Set(knownIds);
+  const selects = Array.from(document.querySelectorAll('select'));
+  return selects.map((select) => {
+    const options = Array.from(select.options || [])
+      .map((option) => (option.textContent || '').trim())
+      .filter(Boolean);
+    const selected = select.options?.[select.selectedIndex];
+    const selectedText = (selected?.textContent || '').trim();
+    const selectedValue = select.value || '';
+    const container = select.closest('.form-group, .formly-field, .control-group, div');
+    const label = (
+      select.getAttribute('aria-label')
+      || select.getAttribute('placeholder')
+      || container?.textContent
+      || ''
+    ).replace(/\\s+/g, ' ').trim();
+    return {
+      id: select.id || select.getAttribute('name') || '',
+      label,
+      options,
+      selectedText,
+      selectedValue,
+    };
+  }).filter((item) => {
+    if (!item.id) return false;
+    const looksProcedural = known.has(item.id) || /procedural\\s+skills?/i.test(item.label);
+    const blank = !item.selectedText || item.selectedValue === '?' || item.selectedText === 'Please select';
+    return looksProcedural && blank;
+  });
+}"""
 
-    Kaizen renders procedural-skill dropdowns on several curriculum-bearing
-    forms, including CBD. For clinical/non-procedural WBAs, a blank dropdown is
-    worse than an explicit ``n/a``. Procedural forms are excluded so DOPS and
-    procedural logs still require a real skill choice.
+
+async def _resolve_procedural_skill_selects(
+    page: Page,
+    form_type: str,
+    fields: Optional[Dict[str, Any]] = None,
+) -> tuple[list[str], list[str]]:
+    """Answer every blank procedural-skills dropdown the page is showing.
+
+    Kaizen renders these on several curriculum-bearing forms, including ESLE and
+    CBD, and each one is required. Blank is never a correct answer: the session
+    either evidences a procedural skill or the answer is the form's own
+    not-applicable option. Procedural forms are excluded so DOPS and procedural
+    logs still require a real skill choice rather than being defaulted.
+
+    Which option to pick is decided in ``procedural_skills.resolve_procedural_skill``
+    from the labels the page actually rendered — the previous version looked for
+    an option spelled ``n/a`` inside the page script and so skipped the ESLE
+    control, whose option is spelled "Not applicable".
+
+    Returns ``(answered_dom_ids, unresolved_descriptions)``. An unresolved entry
+    is a blank required dropdown this code could not answer, which the caller
+    must surface instead of reporting a clean save.
     """
-    form_type = canonical_form_type(form_type)
-    if form_type in _PROCEDURAL_FORMS_REQUIRING_A_REAL_SKILL:
-        return []
+    from procedural_skills import resolve_procedural_skill
+
+    if filing_form_base(form_type) in _PROCEDURAL_FORMS_REQUIRING_A_REAL_SKILL:
+        return [], []
 
     try:
         candidates = await page.evaluate(
-            """(knownIds) => {
-              const known = new Set(knownIds);
-              const selects = Array.from(document.querySelectorAll('select'));
-              return selects.map((select) => {
-                const options = Array.from(select.options || []).map((option) => ({
-                  text: (option.textContent || '').trim(),
-                  value: option.value || '',
-                }));
-                const selected = select.options?.[select.selectedIndex];
-                const selectedText = (selected?.textContent || '').trim();
-                const selectedValue = select.value || '';
-                const container = select.closest('.form-group, .formly-field, .control-group, div');
-                const label = (
-                  select.getAttribute('aria-label')
-                  || select.getAttribute('placeholder')
-                  || container?.textContent
-                  || ''
-                ).replace(/\\s+/g, ' ').trim();
-                return {
-                  id: select.id || select.getAttribute('name') || '',
-                  label,
-                  selectedText,
-                  selectedValue,
-                  hasNa: options.some((option) => /n\\/?a/i.test(option.text)),
-                };
-              }).filter((item) => {
-                if (!item.id || !item.hasNa) return false;
-                const looksProcedural = known.has(item.id) || /procedural\\s+skills?/i.test(item.label);
-                const blank = !item.selectedText || item.selectedValue === '?' || item.selectedText === 'Please select';
-                return looksProcedural && blank;
-              });
-            }""",
+            _PROCEDURAL_SKILL_SCAN_JS,
             list(_PROCEDURAL_SKILL_NA_SELECT_IDS),
         )
     except Exception as exc:
-        logger.warning("Could not inspect procedural-skill n/a dropdowns: %s", exc)
+        logger.warning("Could not inspect procedural-skill dropdowns: %s", exc)
         candidates = []
 
-    defaulted = []
+    answered: list[str] = []
+    unresolved: list[str] = []
     seen = set()
     for candidate in candidates or []:
         dom_id = str(candidate.get("id") or "").strip()
         if not dom_id or dom_id in seen:
             continue
         seen.add(dom_id)
-        if await _fill_select(page, dom_id, "- n/a -"):
-            defaulted.append(dom_id)
-            logger.info(
-                "Defaulted non-applicable procedural skill select to n/a: %s (%s)",
-                dom_id,
-                candidate.get("label") or "unlabelled select",
+        label = str(candidate.get("label") or "").strip() or "procedural skills list"
+        choice = resolve_procedural_skill(candidate.get("options") or [], fields or {})
+        if not choice:
+            unresolved.append(_trim_to_word_boundary(label, 60))
+            logger.warning(
+                "Procedural-skill dropdown %s offered no usable option (%s)",
+                dom_id, candidate.get("options"),
             )
-    return defaulted
+            continue
+        if await _fill_select(page, dom_id, choice):
+            answered.append(dom_id)
+            logger.info("Procedural skill select set: %s = %s", dom_id, choice)
+        else:
+            unresolved.append(_trim_to_word_boundary(label, 60))
+            logger.warning(
+                "Procedural-skill dropdown %s would not accept %r", dom_id, choice,
+            )
+    return answered, unresolved
 
 
 async def _normalise_dops_select_value(page: Page, field_key: str, dom_id: str, value: Any) -> str:
@@ -2553,6 +2855,8 @@ async def _fill_curriculum_links(
                 stage_prefix = s
                 break
 
+
+    await _await_curriculum_tree(page)
     for slo in sorted(slos):
         slo_text = f"{stage_prefix} {slo}:"
         expanded = await page.evaluate(EXPAND_SLO_JS, slo_text)
@@ -2726,6 +3030,8 @@ async def _fill_curriculum_tags(
                 stage_prefix = stage
                 break
 
+
+    await _await_curriculum_tree(page)
     for slo in sorted(slos):
         expanded = await page.evaluate(EXPAND_TAG_TREE_LINK_JS, f"{stage_prefix} {slo}:")
         if not expanded:
@@ -2941,6 +3247,12 @@ async def _verify_fields(page: Page, form_type: str, fields: dict, field_map: di
         dom_id = _field_dom_id(field_map.get(key))
         if not dom_id or dom_id in ("startDate", "endDate"):
             continue
+        if key in _MULTISELECT_WIDGET_FIELDS:
+            # The widget's own text includes every option label, so "has text"
+            # proves nothing here — ask it what is selected.
+            if not _widget_selected_values(await _read_widget_state(page, dom_id)):
+                issues.append(f"{key} has no selected option (dom_id={dom_id})")
+            continue
         val = await page.evaluate(
             "(domId) => { var el = document.getElementById(domId); return el ? (el.value || el.textContent || '').trim() : null; }",
             dom_id
@@ -3112,6 +3424,34 @@ async def _verify_filing_qa(
 
     for key, field_target in field_map.items():
         dom_id = _field_dom_id(field_target)
+        if key in _MULTISELECT_WIDGET_FIELDS:
+            # A DIV widget's textContent includes its own option labels, so the
+            # generic "has text" read would call an untouched widget filled.
+            # Ask the widget which options are actually selected instead.
+            widget_state = await _read_widget_state(page, dom_id)
+            selected = _widget_selected_values(widget_state)
+            field_states[key] = {"tag": "DIV", "value": ", ".join(selected)}
+            expected_value = expected_fields.get(key)
+            if selected:
+                filled.append(key)
+            elif _is_meaningful(expected_value):
+                empty_expected.append(key)
+                gaps.append({
+                    "field": key,
+                    "dom_id": dom_id,
+                    "form_type": form_type,
+                    "kind": "multi_select_widget",
+                    "missing_dom": bool(widget_state.get("missing")),
+                    "expected_preview": _expected_preview(expected_value),
+                    "reason": (
+                        "dom_element_missing" if widget_state.get("missing")
+                        else "value_not_persisted"
+                    ),
+                })
+            else:
+                empty_acceptable.append(key)
+            continue
+
         try:
             state = await page.evaluate(_QA_READ_FIELD_JS, dom_id)
         except Exception as exc:
@@ -3273,6 +3613,77 @@ async def _verify_filing_qa(
     }
 
 
+# ─── Required-field guard (post-save) ────────────────────────────────────────
+#
+# Field-map-driven QA can only see fields the map knows about, so a required
+# control that was never mapped — ESLE's "Domains of performance" widget was
+# exactly this — stays invisible and the save is reported as complete while
+# Kaizen shows "This field is required" on the draft. This guard asks the
+# saved form itself which required questions it is still complaining about.
+#
+# Scoped to ESLE for now because that is the form with observed evidence of
+# the miss. Widening it to every form is a one-line change to
+# _REQUIRED_FIELD_GUARD_FORMS, but it should only be done with a real saved
+# draft per form to check Kaizen does not mark optional-but-untouched
+# controls the same way.
+#
+# Membership is checked through filing_form_base, so a _2021 curriculum variant
+# of a guarded form is guarded too. Name base forms here, not variants.
+
+_REQUIRED_FIELD_GUARD_FORMS = frozenset({"ESLE_PART1_2", "ESLE_REFLECTION"})
+
+_REQUIRED_FIELD_MARKER_JS = """() => {
+    const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+    const labels = [];
+    const nodes = Array.from(document.querySelectorAll('body *'));
+    for (const node of nodes) {
+        if (node.children && node.children.length) continue;
+        const text = norm(node.innerText || node.textContent);
+        if (!/this field is required/i.test(text)) continue;
+        if (node.offsetParent === null && (!node.getClientRects || node.getClientRects().length === 0)) continue;
+        let container = node.parentElement;
+        let label = '';
+        for (let depth = 0; container && depth < 6; depth++) {
+            const labelEl = container.querySelector('label, .control-label, legend, h4, h5');
+            if (labelEl) {
+                const candidate = norm(labelEl.innerText || labelEl.textContent);
+                if (candidate && !/this field is required/i.test(candidate)) {
+                    label = candidate;
+                    break;
+                }
+            }
+            container = container.parentElement;
+        }
+        label = label.replace(/[*★\\s]+$/, '').trim();
+        if (label && labels.indexOf(label) === -1) labels.push(label);
+    }
+    return labels;
+}"""
+
+
+async def _required_field_gaps(page: Page, form_type: str) -> List[str]:
+    """Required questions the saved Kaizen draft still flags as unanswered."""
+    # filing_form_base, not canonical_form_type: the _2021 variants share this
+    # form's DOM and so need the same guard.
+    if filing_form_base(form_type) not in _REQUIRED_FIELD_GUARD_FORMS:
+        return []
+    try:
+        labels = await page.evaluate(_REQUIRED_FIELD_MARKER_JS)
+    except Exception as exc:
+        logger.warning(f"Required-field guard could not read {form_type} draft: {exc}")
+        return []
+    if not isinstance(labels, list):
+        return []
+    gaps = []
+    for label in labels:
+        text = _trim_to_word_boundary(str(label).strip(), 60)
+        if text and text not in gaps:
+            gaps.append(text)
+    if gaps:
+        logger.warning(f"Required fields still blank on saved {form_type} draft: {gaps}")
+    return gaps
+
+
 # ─── Main entry point ────────────────────────────────────────────────────────
 
 async def fill_kaizen_form(
@@ -3428,6 +3839,13 @@ async def fill_kaizen_form(
                 skipped.append(key)
                 continue
 
+            if key in _MULTISELECT_WIDGET_FIELDS:
+                if await _fill_domain_multiselect(page, dom_id, value):
+                    filled.append(key)
+                else:
+                    errors.append(f"{key}: multi-select fill failed")
+                continue
+
             # Detect field type
             tag = await _field_tag(page, dom_id, field_key=key)
 
@@ -3463,9 +3881,13 @@ async def fill_kaizen_form(
         ):
             errors.append("Other procedural skill detail was not filled")
 
-        defaulted_proc_na = await _default_non_applicable_procedural_selects(page, form_type)
-        if defaulted_proc_na:
-            filled.append(f"procedural_skills_n/a ({len(defaulted_proc_na)})")
+        answered_proc, unresolved_proc = await _resolve_procedural_skill_selects(
+            page, form_type, fields,
+        )
+        if answered_proc:
+            filled.append(f"procedural_skills ({len(answered_proc)})")
+        for gap in unresolved_proc:
+            errors.append(f"required field left blank: {gap}")
 
         # ─── STEP 4: Curriculum links (SLO expansion + KC ticking) ───────────
         slo_codes = fields.get("curriculum_links", [])
@@ -3513,6 +3935,9 @@ async def fill_kaizen_form(
 
         # ─── STEP 7: Save ────────────────────────────────────────────────────
         saved = await _save_form(page, save_as_draft)
+        if saved:
+            for required_gap in await _required_field_gaps(page, form_type):
+                errors.append(f"required field still blank on the saved draft: {required_gap}")
         if not saved:
             errors.append("Save may have failed")
         elif not save_as_draft:
@@ -3711,6 +4136,9 @@ async def _fill_field_legacy(page: Page, dom_id: Any, value: Any, field_key: str
     try:
         if field_key == "stage_of_training":
             return await _fill_stage(page, dom_id, str(value))
+
+        if field_key in _MULTISELECT_WIDGET_FIELDS:
+            return await _fill_domain_multiselect(page, dom_id, value)
 
         field_target = dom_id
         el = await _first_field_locator(page, field_target, field_key=field_key)
@@ -4008,11 +4436,28 @@ def _download_drive_file(url: str) -> Optional[str]:
         return None
 
 
-async def _attach_file(page: Page, file_path: str) -> bool:
-    """Attach a file using Kaizen's Upload button/file chooser flow."""
+async def _attach_file(page: Page, file_path: str | list[str]) -> bool:
+    """Attach one or more files via Kaizen's Upload button/file chooser flow.
+
+    Accepts a list because a doctor can send several files for one case and
+    Kaizen's chooser takes them in a single `set_files` call — uploading them
+    one at a time would mean re-opening the chooser per file, and previously
+    only the last file survived at all.
+
+    Success still requires positive confirmation from the page: a chooser that
+    fired is not evidence Kaizen accepted anything.
+    """
+    file_paths = [file_path] if isinstance(file_path, str) else list(file_path)
+    file_paths = [p for p in file_paths if p]
+    if not file_paths:
+        return False
+
     try:
-        if not os.path.isfile(file_path):
-            logger.warning(f"Attachment file not found: {file_path}")
+        missing = [p for p in file_paths if not os.path.isfile(p)]
+        if missing:
+            logger.warning(f"Attachment file(s) not found: {missing}")
+            file_paths = [p for p in file_paths if p not in missing]
+        if not file_paths:
             return False
 
         upload_selectors = [
@@ -4030,37 +4475,50 @@ async def _attach_file(page: Page, file_path: str) -> bool:
                 async with page.expect_file_chooser(timeout=5000) as chooser_info:
                     await upload_button.click()
                 chooser = await chooser_info.value
-                await chooser.set_files(file_path)
+                await chooser.set_files(file_paths)
                 await asyncio.sleep(2)
 
-                filename = os.path.basename(file_path)
-                verification_targets = [
-                    page.get_by_text(filename, exact=False),
-                    page.get_by_text(KAIZEN_FILE_UPLOAD["uploaded_status_text"], exact=False),
-                    page.get_by_text("Remove", exact=False),
-                    page.get_by_text("Replace", exact=False),
-                ]
-                for target in verification_targets:
+                # Every filename must show. Confirming only the first would let
+                # a partial upload be reported as a complete one, which is the
+                # silent-loss failure this change exists to remove.
+                unconfirmed = []
+                for path in file_paths:
+                    filename = os.path.basename(path)
                     try:
-                        if await target.first.is_visible(timeout=5000):
-                            logger.info(f"Attached file via upload button: {file_path}")
-                            return True
+                        if await page.get_by_text(filename, exact=False).first.is_visible(
+                            timeout=5000
+                        ):
+                            continue
                     except Exception:
-                        continue
+                        pass
+                    unconfirmed.append(filename)
 
-                # The file chooser fired and a file was handed to it, but
-                # nothing on the page confirms Kaizen actually accepted it —
-                # no filename, no "Uploaded" status, no Remove/Replace
-                # controls. Reporting success here is exactly how a failed
-                # upload gets counted as a completed field: don't retry with a
-                # broader selector (that risks clicking an unrelated upload
-                # control and attaching to the wrong section) and don't claim
-                # the attachment filled.
+                if not unconfirmed:
+                    logger.info(f"Attached {len(file_paths)} file(s) via upload button")
+                    return True
+
+                # No filename matched at all: fall back to the generic upload
+                # indicators, but only when a single file was requested — with
+                # several, a lone "Uploaded" badge cannot tell us which landed.
+                if len(unconfirmed) == len(file_paths) == 1:
+                    for target in (
+                        page.get_by_text(KAIZEN_FILE_UPLOAD["uploaded_status_text"], exact=False),
+                        page.get_by_text("Remove", exact=False),
+                        page.get_by_text("Replace", exact=False),
+                    ):
+                        try:
+                            if await target.first.is_visible(timeout=5000):
+                                logger.info(f"Attached file via upload button: {file_paths[0]}")
+                                return True
+                        except Exception:
+                            continue
+
                 logger.warning(
-                    f"Attach file click+chooser fired for {file_path} but no upload "
-                    "confirmation was visible — not counting as attached."
+                    f"Upload chooser fired but {len(unconfirmed)} of {len(file_paths)} "
+                    f"file(s) were not confirmed on the page: {unconfirmed}"
                 )
                 return False
+
             except Exception as e:
                 logger.debug(f"Upload button selector failed ({selector}): {e}")
                 continue
@@ -4069,9 +4527,9 @@ async def _attach_file(page: Page, file_path: str) -> bool:
         file_input = page.locator('input[type="file"]')
         count = await file_input.count()
         if count > 0:
-            await file_input.first.set_input_files(file_path)
+            await file_input.first.set_input_files(file_paths)
             await asyncio.sleep(2)
-            logger.info(f"Attached file: {file_path}")
+            logger.info(f"Attached {len(file_paths)} file(s) via static input")
             return True
 
         logger.warning("No file input element found on form")
@@ -4302,7 +4760,7 @@ async def file_to_kaizen(
     password: str,
     curriculum_links: Optional[List[str]] = None,
     submit: bool = False,
-    attachment_path: Optional[str] = None,
+    attachment_path: Optional[str | list[str]] = None,
     attachment_drive_url: Optional[str] = None,
     reuse_draft: bool = False,
     telegram_user_id: Optional[int] = None,
@@ -4462,9 +4920,14 @@ async def file_to_kaizen(
             else:
                 skipped.append(field_key)
 
-        defaulted_proc_na = await _default_non_applicable_procedural_selects(page, form_type)
-        if defaulted_proc_na:
-            filled.append(f"procedural_skills_n/a ({len(defaulted_proc_na)})")
+        answered_proc, unresolved_proc = await _resolve_procedural_skill_selects(
+            page, form_type, fields,
+        )
+        if answered_proc:
+            filled.append(f"procedural_skills ({len(answered_proc)})")
+        for gap in unresolved_proc:
+            if gap not in skipped:
+                skipped.append(gap)
 
         # Curriculum links
         kc_targets = fields.get("key_capabilities", []) or curriculum_links or []
@@ -4501,6 +4964,8 @@ async def file_to_kaizen(
                 attachment_path = temp_attachment
 
         if attachment_path:
+            # str or list: a case can carry several files, and they upload in a
+            # single chooser call rather than one round trip each.
             if await _attach_file(page, attachment_path):
                 filled.append("attachment")
             else:
@@ -4591,6 +5056,15 @@ async def file_to_kaizen(
 
             if status == "success":
                 status = "partial"
+
+        # A draft Kaizen itself still marks as incomplete is never a clean
+        # save, whatever the field map managed to fill.
+        if saved and not submit:
+            for required_gap in await _required_field_gaps(page, form_type):
+                if required_gap not in skipped:
+                    skipped.append(required_gap)
+                if status == "success":
+                    status = "partial"
 
         # Log filing result for the autonomous gap-fix loop
         from filing_result_logger import log_filing_result

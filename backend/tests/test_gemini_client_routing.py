@@ -5,6 +5,7 @@ changes; with it on AND a project configured, clients go to Vertex (EU) and the
 extractor stops using DeepSeek (China).
 """
 import google.genai as genai
+import pytest
 
 import gemini_client
 
@@ -48,8 +49,36 @@ def test_make_client_vertex_mode(monkeypatch):
     monkeypatch.setenv("GCP_VERTEX_LOCATION", "europe-west2")
     captured = {}
     monkeypatch.setattr(genai, "Client", lambda **kw: captured.update(kw) or "client")
+
+    import vertex_credentials
+
+    fake_credentials = object()
+    monkeypatch.setattr(vertex_credentials, "get_credentials", lambda project: fake_credentials)
+
     gemini_client.make_client()
-    assert captured == {"vertexai": True, "project": "emgurus-portfolio", "location": "europe-west2"}
+    assert captured == {
+        "vertexai": True,
+        "project": "emgurus-portfolio",
+        "location": "europe-west2",
+        "credentials": fake_credentials,
+    }
+
+
+def test_make_client_vertex_mode_raises_on_credential_failure(monkeypatch):
+    _clear(monkeypatch)
+    monkeypatch.setenv("PG_USE_VERTEX", "true")
+    monkeypatch.setenv("GCP_PROJECT_ID", "emgurus-portfolio")
+
+    import vertex_credentials
+
+    def boom(project):
+        raise vertex_credentials.VertexCredentialError("fetch failed")
+
+    monkeypatch.setattr(vertex_credentials, "get_credentials", boom)
+    monkeypatch.setattr(genai, "Client", lambda **kw: "client")
+
+    with pytest.raises(vertex_credentials.VertexCredentialError):
+        gemini_client.make_client()
 
 
 def test_vertex_location_default_and_override(monkeypatch):

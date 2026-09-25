@@ -68,7 +68,7 @@ async def stripe_webhook(request: Request):
         logger.error("Webhook processing failed: %s", e)
         try:
             import ops_alert
-            ops_alert.notify_operator_sync(f"Stripe webhook FAILED: {e}", key="webhook_fail")
+            ops_alert.notify_operator_sync(key="webhook_fail")
         except Exception:
             logger.debug("operator alert failed", exc_info=True)
         raise HTTPException(status_code=400, detail=str(e))
@@ -79,11 +79,7 @@ async def stripe_webhook(request: Request):
     if result.get("action") in {"error", "ignored", "user_not_found"}:
         try:
             import ops_alert
-            ops_alert.notify_operator_sync(
-                f"Stripe webhook unhandled outcome: {result.get('action')} "
-                f"({result.get('error') or result.get('type') or ''})",
-                key="webhook_unhandled",
-            )
+            ops_alert.notify_operator_sync(key="webhook_unhandled")
         except Exception:
             logger.debug("operator alert failed", exc_info=True)
 
@@ -227,6 +223,7 @@ from channel_contract import (
     accept_inbound,
 )
 from conversation_supervisor import (
+    CHOOSE_FORM_ACTION,
     DRAFT_NOW_ACTION,
     GatheringTurnKind,
     decide_gathering_turn,
@@ -583,7 +580,7 @@ def _make_gathering_captured_reply() -> ChannelReply:
     """Channel-neutral capture acknowledgement with a WhatsApp-resolvable action."""
     return ChannelReply(
         body=render_message("gathering_captured"),
-        actions=(DRAFT_NOW_ACTION,),
+        actions=(CHOOSE_FORM_ACTION,),
     )
 
 
@@ -608,14 +605,14 @@ def _looks_like_unmatched_plain_choice(text: str | None) -> bool:
 async def _make_workflow_finish_reply(
     state: _InboundWorkflowState | None,
 ) -> ChannelReply:
-    """Resolve a WhatsApp Draft now/done turn without saving or generating a draft."""
+    """Resolve a WhatsApp choose-form/done turn without saving or generating a draft."""
     case_text = state.combined_text() if state is not None else ""
     if not case_text.strip():
         return ChannelReply(
             body=(
                 "📋 Case details needed\n\n"
                 "I do not have a case captured for that option yet. Send "
-                "anonymised case details, then choose Draft now."
+                "anonymised case details, then choose a form."
             )
         )
     return await _make_case_insight_reply(case_text)

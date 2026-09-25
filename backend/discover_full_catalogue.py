@@ -5,10 +5,11 @@ Extracts eventType._id from Angular scope for every form on /events/new.
 """
 import asyncio
 import json
+import os
 from pathlib import Path
 from playwright.async_api import async_playwright
 
-CDP_URL = "http://localhost:18800"
+CDP_URL = os.environ.get("KAIZEN_CDP_URL", "http://localhost:18800")
 
 
 async def discover_all_forms():

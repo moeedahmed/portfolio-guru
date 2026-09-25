@@ -557,15 +557,15 @@ def test_serialise_reply_actions_preserve_order() -> None:
         body="Which form?",
         continuation=None,
         actions=(
-            ca.ChannelAction("cbd", "Case-Based Discussion"),
-            ca.ChannelAction("dops", "DOPS"),
+            ca.ChannelAction("cbd", "🩺 Case-Based Discussion"),
+            ca.ChannelAction("dops", "🔪 DOPS"),
         ),
     )
     result = bridge.serialise_reply(reply)
 
     assert len(result["actions"]) == 2
-    assert result["actions"][0] == {"action_id": "cbd", "label": "Case-Based Discussion"}
-    assert result["actions"][1] == {"action_id": "dops", "label": "DOPS"}
+    assert result["actions"][0] == {"action_id": "cbd", "label": "🩺 Case-Based Discussion"}
+    assert result["actions"][1] == {"action_id": "dops", "label": "🔪 DOPS"}
 
 
 def test_serialise_decision_handle_has_no_refusal() -> None:
@@ -623,8 +623,8 @@ def test_deserialise_reply_drops_malformed_actions() -> None:
         "body": "Choose a form.",
         "continuation": None,
         "actions": [
-            {"action_id": "cbd", "label": "CBD"},      # valid
-            {"label": "DOPS"},                          # missing action_id — dropped
+            {"action_id": "cbd", "label": "🩺 CBD"},  # valid
+            {"label": "🔪 DOPS"},                       # missing action_id — dropped
             {"action_id": "mcr"},                       # missing label — dropped
             {},                                         # empty — dropped
         ],

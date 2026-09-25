@@ -7,7 +7,7 @@ preview (no bare SLO2, no ultra-truncated KC line, no duplicate KC entries).
 """
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -40,6 +40,64 @@ def test_clinical_supplement_keeps_external_team_kc_for_referral():
     )
     assert "SLO7 KC3" in codes
     assert "SLO7 KC1" not in codes
+
+
+# Exact fictional software fixture from the reported ankle case (no live
+# model call; deterministic supplement heuristic only).
+ANKLE_CASE_DETERMINISTIC = (
+    "Please create a Case-Based Discussion for today. Setting: Emergency Department. "
+    "I assessed an adult with an ankle injury after a fall. I examined the ankle, "
+    "checked and documented neurovascular status, and discussed the assessment and "
+    "imaging decision with my supervisor. I provided discharge advice and safety-netting. "
+    "Learning point: the importance of documenting neurovascular findings clearly and "
+    "checking that the patient understands when to return for reassessment."
+)
+
+
+def test_clinical_supplement_does_not_credit_teaching_kc_for_being_supervised():
+    """'my supervisor' names who supervised the trainee — the trainee did not
+    teach or supervise anyone, so SLO9 KC1 (training/supervision *given* by
+    the trainee) must not be fabricated from the bare 'supervis' stem. Only
+    the two genuinely supported KCs (SLO2 KC1 for the decision discussed with
+    a senior, SLO1 KC1 for the assessment) should be offered; a third KC must
+    not be padded in without support."""
+    codes = _clinical_kc_supplement_codes(ANKLE_CASE_DETERMINISTIC)
+    assert "SLO9 KC1" not in codes, f"'my supervisor' must not imply the trainee taught/supervised, got {codes}"
+    assert codes == ["SLO2 KC1", "SLO1 KC1"], (
+        f"expected exactly the two genuinely supported KCs, got {codes}"
+    )
+
+
+def test_supplement_preserves_extracted_trainee_teaching():
+    from extractor import KC_FULL_TEXT
+    kc = KC_FULL_TEXT["SLO9 KC1"]
+    out = _supplement_supported_key_capabilities(
+        {"curriculum_links": ["SLO9"], "key_capabilities": [kc]},
+        case_description="I taught a junior doctor and provided feedback.",
+        schema_key="REFLECT_LOG", has_kc_tick=True,
+    )
+    assert kc in out["key_capabilities"]
+
+
+@pytest.mark.parametrize(
+    "case_description",
+    [
+        "I was supervised by my consultant throughout the case.",
+        "I was supervised by a senior colleague.",
+        "My consultant provided feedback on my assessment.",
+        "I received feedback from my supervisor afterwards.",
+        "I attended teaching on ankle injuries this week.",
+        "Feedback was given to me by the registrar after the shift.",
+    ],
+)
+def test_clinical_supplement_does_not_credit_teaching_kc_for_passive_receipt(case_description):
+    """Being on the receiving end of supervision, feedback or teaching shows
+    no training capability delivered by the trainee — 'was supervised',
+    'received feedback' and 'attended teaching' must not be credited as
+    SLO9 KC1 just because they share the teach/feedback/supervis stems with
+    the genuinely trainee-delivered phrasing."""
+    codes = _clinical_kc_supplement_codes(case_description)
+    assert "SLO9 KC1" not in codes, f"passive receipt must not imply trainee-delivered teaching, got {codes}"
 
 
 def test_clinical_supplement_does_not_pad_broad_kc1_without_support():
@@ -112,6 +170,126 @@ async def test_reflect_log_difficult_case_supplemented_end_to_end():
     assert any(kc.startswith("SLO2 KC1:") for kc in kcs)
     assert any(kc.startswith("SLO7 KC1:") for kc in kcs)
     assert set(draft.fields["curriculum_links"]) >= {"SLO2", "SLO7"}
+
+
+# --- CBD curriculum_links/key_capabilities drift (SLO4 KC1-alone regression) ---
+
+ANKLE_CASE = (
+    "Setting: Emergency Department. I assessed an adult with an ankle injury after "
+    "a fall. I examined the ankle, checked and documented neurovascular status, and "
+    "discussed the assessment and imaging decision with my supervisor. I provided "
+    "discharge advice and safety-netting.\n\n"
+    "Learning point: the importance of documenting neurovascular findings clearly "
+    "and checking that the patient understands when to return for reassessment."
+)
+
+
+@pytest.mark.asyncio
+async def test_cbd_curriculum_links_reflect_every_selected_kc():
+    """Reproduces the reported *shape* of the defect for this exact fictional
+    ankle case: a curriculum_links/key_capabilities drift where the model
+    names only one SLO in curriculum_links despite selecting KCs across three.
+    The three KCs below (SLO4 KC1, SLO2 KC1, SLO9 KC1) are genuine entries
+    from `KC_FULL_TEXT`, but this payload is a constructed reproduction of the
+    drift pattern, not a captured/verified historical model response for this
+    case — no live model call was made or logged for it, so this proves the
+    re-derivation fix, not what Gemini actually returned for the doctor's
+    report. Because the preview hierarchy only shows a KC under an SLO
+    already in curriculum_links, the other two KCs would otherwise silently
+    vanish from the doctor's draft, appearing as if only "SLO4 KC1" had been
+    selected. curriculum_links must be re-derived from the actual selected
+    KCs so none are dropped."""
+    from extractor import extract_cbd_data
+    from bot import _format_curriculum_hierarchy
+
+    payload = {
+        "form_type": "CBD",
+        "date_of_encounter": "2026-06-29",
+        "patient_age": "adult",
+        "patient_presentation": "Ankle injury after a fall",
+        "clinical_setting": "Emergency Department",
+        "stage_of_training": None,
+        "trainee_role": "",
+        "clinical_reasoning": "Examined the ankle and documented neurovascular status.",
+        "reflection": (
+            "The importance of documenting neurovascular findings clearly and "
+            "checking that the patient understands when to return for reassessment."
+        ),
+        "level_of_supervision": "Indirect",
+        "supervisor_name": None,
+        # The model names only SLO4, even though key_capabilities below spans
+        # SLO4, SLO2 and SLO9 — this is the drift that caused the defect.
+        "curriculum_links": ["SLO4"],
+        "key_capabilities": [
+            "SLO4 KC1: be expert in assessment, investigation and clinical "
+            "management of patients attending with all injuries, regardless of "
+            "complexity (2025 Update)",
+            "SLO2 KC1: able to support the pre-hospital, medical, nursing and "
+            "administrative team in answering clinical questions and in making "
+            "safe decisions for patients with appropriate levels of risk in the ED (2025 Update)",
+            "SLO9 KC1: be able to undertake training and supervision of members "
+            "of the ED team in the clinical environment (2025 Update)",
+        ],
+    }
+    with patch("extractor._generate", new=AsyncMock(return_value=json.dumps(payload))):
+        draft = await extract_cbd_data(ANKLE_CASE)
+
+    assert len(draft.key_capabilities) == 3
+    assert set(draft.curriculum_links) == {"SLO4", "SLO2", "SLO9"}, (
+        f"curriculum_links must cover every selected KC's SLO, got {draft.curriculum_links}"
+    )
+
+    rendered = _format_curriculum_hierarchy(draft.curriculum_links, draft.key_capabilities)
+    assert "SLO4" in rendered and "SLO2" in rendered and "SLO9" in rendered
+    assert rendered.count("↳ KC1:") == 3, f"all three KCs must render, got:\n{rendered}"
+
+
+@pytest.mark.asyncio
+async def test_cbd_curriculum_links_untouched_when_no_kcs_selected():
+    from extractor import extract_cbd_data
+
+    payload = {
+        "form_type": "CBD",
+        "date_of_encounter": "",
+        "patient_age": "",
+        "patient_presentation": "",
+        "clinical_setting": "",
+        "stage_of_training": None,
+        "trainee_role": "",
+        "clinical_reasoning": "",
+        "reflection": "",
+        "level_of_supervision": "",
+        "supervisor_name": None,
+        "curriculum_links": [],
+        "key_capabilities": [],
+    }
+    with patch("extractor._generate", new=AsyncMock(return_value=json.dumps(payload))):
+        draft = await extract_cbd_data("Reviewed a set of blood results and documented a plan.")
+
+    assert draft.curriculum_links == []
+    assert draft.key_capabilities == []
+
+
+def test_derive_curriculum_links_skips_malformed_kc_strings():
+    """A malformed or empty KC entry (no SLO prefix) must not raise and must
+    not block sound links from valid entries elsewhere in the same list."""
+    from extractor import _derive_curriculum_links_from_kcs
+
+    assert _derive_curriculum_links_from_kcs(None) == []
+    assert _derive_curriculum_links_from_kcs([]) == []
+    assert _derive_curriculum_links_from_kcs(["", "   ", "not a kc string"]) == []
+    links = _derive_curriculum_links_from_kcs([
+        "not a kc string",
+        "SLO4 KC1: be expert in assessment, investigation and clinical management "
+        "of patients attending with all injuries, regardless of complexity (2025 Update)",
+        "",
+        "SLO4 KC1: be expert in assessment, investigation and clinical management "
+        "of patients attending with all injuries, regardless of complexity (2025 Update)",
+        "SLO2 KC1: able to support the pre-hospital, medical, nursing and "
+        "administrative team in answering clinical questions and in making safe "
+        "decisions for patients with appropriate levels of risk in the ED (2025 Update)",
+    ])
+    assert links == ["SLO4", "SLO2"]
 
 
 # --- Curriculum preview formatting ---
@@ -299,3 +477,312 @@ def test_unticked_kc_targets_matches_by_code_not_verbose_text():
     assert missed[0].startswith("SLO7 KC1:")
     # Nothing ticked → every target is missed (no double-counting of errors).
     assert len(_unticked_kc_targets(targets, [])) == 3
+
+
+# --- CBD prompt no longer stops at the first plausible KC: regression via
+# actual bot dispatch (bot._analyse_selected_form -> extract_cbd_data ->
+# _format_curriculum_hierarchy), not a hand-called extractor function. These
+# payloads are fabricated stand-ins for what a full-curriculum-aware model
+# response should look like; they are not captured live Gemini output. See
+# KC_EVIDENCE.md for why a live call is still required before this can be
+# called verified.
+
+async def _dispatch_cbd_draft(monkeypatch, payload: dict):
+    import bot
+
+    monkeypatch.setattr(bot, "get_voice_profile", lambda user_id: "")
+    monkeypatch.setattr(bot, "get_training_level", lambda user_id: None)
+    monkeypatch.setattr(bot, "_audit_event", lambda *a, **k: None)
+
+    context = MagicMock()
+    context.user_data = {}
+
+    with patch("extractor._generate", new=AsyncMock(return_value=json.dumps(payload))):
+        draft = await bot._analyse_selected_form(context, 999999, ANKLE_CASE, "CBD")
+    return draft
+
+
+@pytest.mark.asyncio
+async def test_cbd_dispatch_keeps_single_kc_when_only_one_is_supported(monkeypatch):
+    """A sparse but genuinely one-KC-supported case must render exactly one
+    KC — the prompt change must not introduce padding to hit ~3."""
+    from bot import _format_curriculum_hierarchy
+
+    payload = {
+        "form_type": "CBD",
+        "date_of_encounter": "2026-06-29",
+        "patient_age": "adult",
+        "patient_presentation": "Ankle injury after a fall",
+        "clinical_setting": "Emergency Department",
+        "stage_of_training": None,
+        "trainee_role": "",
+        "clinical_reasoning": "Examined the ankle and documented neurovascular status.",
+        "reflection": (
+            "The importance of documenting neurovascular findings clearly and "
+            "checking that the patient understands when to return for reassessment."
+        ),
+        "level_of_supervision": "Indirect",
+        "supervisor_name": None,
+        "curriculum_links": ["SLO4"],
+        "key_capabilities": [
+            "SLO4 KC1: be expert in assessment, investigation and clinical "
+            "management of patients attending with all injuries, regardless of "
+            "complexity (2025 Update)",
+        ],
+    }
+    draft = await _dispatch_cbd_draft(monkeypatch, payload)
+
+    assert len(draft.key_capabilities) == 1
+    rendered = _format_curriculum_hierarchy(draft.curriculum_links, draft.key_capabilities)
+    assert rendered.count("↳ KC") == 1
+
+
+@pytest.mark.asyncio
+async def test_cbd_dispatch_renders_full_multi_kc_response_with_correct_slo_links(monkeypatch):
+    """A case genuinely supporting multiple independent capabilities must
+    render all of them, each under the correct SLO, using the full KC text."""
+    from bot import _format_curriculum_hierarchy
+
+    payload = {
+        "form_type": "CBD",
+        "date_of_encounter": "2026-06-29",
+        "patient_age": "adult",
+        "patient_presentation": "Ankle injury after a fall",
+        "clinical_setting": "Emergency Department",
+        "stage_of_training": None,
+        "trainee_role": "",
+        "clinical_reasoning": "Examined the ankle and documented neurovascular status.",
+        "reflection": (
+            "The importance of documenting neurovascular findings clearly and "
+            "checking that the patient understands when to return for reassessment."
+        ),
+        "level_of_supervision": "Indirect",
+        "supervisor_name": None,
+        "curriculum_links": ["SLO4"],
+        "key_capabilities": [
+            "SLO4 KC1: be expert in assessment, investigation and clinical "
+            "management of patients attending with all injuries, regardless of "
+            "complexity (2025 Update)",
+            "SLO2 KC1: able to support the pre-hospital, medical, nursing and "
+            "administrative team in answering clinical questions and in making "
+            "safe decisions for patients with appropriate levels of risk in the ED (2025 Update)",
+            "SLO9 KC1: be able to undertake training and supervision of members "
+            "of the multi-professional team (2025 Update)",
+        ],
+    }
+    draft = await _dispatch_cbd_draft(monkeypatch, payload)
+
+    assert len(draft.key_capabilities) == 3
+    assert set(draft.curriculum_links) >= {"SLO4", "SLO2", "SLO9"}
+    rendered = _format_curriculum_hierarchy(draft.curriculum_links, draft.key_capabilities)
+    assert rendered.count("↳ KC") == 3
+    assert "SLO4" in rendered and "SLO2" in rendered and "SLO9" in rendered
+
+
+STEMI_CASE = (
+    "I assessed an adult in the ED with chest pain and inferior ST elevation. "
+    "I recognised an inferior STEMI, discussed safe immediate treatment with "
+    "the nursing team, started emergency management and coordinated urgent "
+    "transfer with the primary PCI team. I learned to activate the pathway early."
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("initial_count,reviewed_count", [(3, 3), (2, 3), (2, 2)])
+async def test_cbd_reviews_short_kc_selection_without_padding(initial_count, reviewed_count):
+    from extractor import KC_FULL_TEXT, RCEM_KC_MAP, extract_cbd_data
+
+    kcs = [KC_FULL_TEXT[code] for code in ("SLO1 KC1", "SLO2 KC1", "SLO3 KC3")]
+    source = STEMI_CASE if reviewed_count == 3 else (
+        "I assessed an adult with a headache, explained my assessment to the "
+        "nursing team and agreed a safe discharge plan."
+    )
+    payload = {"clinical_reasoning": source, "key_capabilities": kcs[:initial_count]}
+    reviewed = {**payload, "key_capabilities": kcs[:reviewed_count],
+                "clinical_reasoning": "Invented narrative must not replace the draft."}
+    generate = AsyncMock(side_effect=[json.dumps(payload), json.dumps(reviewed)])
+    with patch("extractor._generate", generate):
+        draft = await extract_cbd_data(source)
+
+    assert draft.key_capabilities == kcs[:reviewed_count]
+    assert "Invented narrative" not in draft.clinical_reasoning
+    assert draft.curriculum_links == ["SLO1", "SLO2", "SLO3"][:reviewed_count]
+    assert generate.await_count == (1 if initial_count == 3 else 2)
+    if initial_count < 3:
+        review_prompt = generate.call_args.args[0]
+        assert RCEM_KC_MAP in review_prompt
+        assert source in review_prompt
+        assert "fewer" in review_prompt.lower()
+
+
+@pytest.mark.asyncio
+async def test_cbd_short_selection_review_keeps_feedback_and_source_fidelity_rules():
+    from extractor import KC_FULL_TEXT, _SOURCE_FIDELITY_RULES, extract_cbd_data
+
+    kcs = [KC_FULL_TEXT[code] for code in ("SLO1 KC1", "SLO2 KC1")]
+    source = "FAST was done, a CT was arranged."
+    feedback = "I did not perform the FAST. No CT body region was specified."
+    payload = {"clinical_reasoning": source, "key_capabilities": kcs}
+    generate = AsyncMock(return_value=json.dumps(payload))
+    with patch("extractor._generate", generate):
+        draft = await extract_cbd_data(
+            source, edit_feedback=feedback, current_draft=source,
+            previous_key_capabilities=kcs,
+        )
+    assert generate.await_count == 2
+    review_prompt = generate.call_args.args[0]
+    assert feedback in review_prompt
+    assert _SOURCE_FIDELITY_RULES in review_prompt
+    assert draft.key_capabilities == kcs
+    assert "I performed" not in draft.clinical_reasoning
+    assert "CT head" not in draft.clinical_reasoning
+    assert "CT abdomen" not in draft.clinical_reasoning
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("review_response", [
+    "invalid JSON", "```json\ninvalid JSON\n```", "null", "[]", "{}",
+    '{"key_capabilities": null}', '{"key_capabilities": "SLO3 KC3"}',
+    '{"key_capabilities": [null]}', '{"key_capabilities": [{}]}',
+    '{"key_capabilities": ["   "]}',
+])
+async def test_unusable_cbd_kc_review_preserves_original_without_padding_or_retry(review_response):
+    from extractor import KC_FULL_TEXT, extract_cbd_data
+
+    kcs = [KC_FULL_TEXT["SLO1 KC1"], KC_FULL_TEXT["SLO2 KC1"]]
+    payload = {"clinical_reasoning": STEMI_CASE, "key_capabilities": kcs}
+    generate = AsyncMock(side_effect=[json.dumps(payload), review_response])
+    with patch("extractor._generate", generate):
+        draft = await extract_cbd_data(STEMI_CASE)
+    assert draft.key_capabilities == kcs
+    assert draft.curriculum_links == ["SLO1", "SLO2"]
+    assert "inferior STEMI" in draft.clinical_reasoning
+    assert generate.await_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("response", [
+    None, RuntimeError("provider failed"), TimeoutError("provider timeout"),
+    '{"key_capabilities": ["invented capability"]}',
+    '{"key_capabilities": ["SLO99 KC1: unknown"]}',
+    '{"key_capabilities": ["SLO1 KC99: unknown"]}',
+    '{"key_capabilities": ["SLO1 KC1garbage"]}',
+])
+async def test_optional_review_failure_preserves_whole_draft(response):
+    from extractor import KC_FULL_TEXT, extract_cbd_data
+
+    payload = {"key_capabilities": [KC_FULL_TEXT["SLO1 KC1"]],
+               "clinical_reasoning": STEMI_CASE, "reflection": "I learned to activate the pathway early."}
+    with patch("extractor._generate", AsyncMock(return_value=json.dumps(payload))):
+        baseline = await extract_cbd_data(STEMI_CASE)
+    generate = AsyncMock(side_effect=[json.dumps(payload), response])
+    with patch("extractor._generate", generate):
+        draft = await extract_cbd_data(STEMI_CASE)
+    assert draft == baseline
+    assert generate.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_review_counts_and_adopts_canonical_distinct_identities():
+    from extractor import KC_FULL_TEXT, extract_cbd_data
+
+    initial = ["SLO1 KC1: adult assessment", "slo1 kc1: different wording", "SLO2 KC1: team decisions"]
+    reviewed = [*initial, "SLO3 KC3: emergency management"]
+    generate = AsyncMock(side_effect=[json.dumps({"key_capabilities": initial}),
+                                      json.dumps({"key_capabilities": reviewed})])
+    with patch("extractor._generate", generate):
+        draft = await extract_cbd_data(STEMI_CASE)
+    assert generate.await_count == 2
+    assert draft.key_capabilities == [KC_FULL_TEXT[k] for k in ("SLO1 KC1", "SLO2 KC1", "SLO3 KC3")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("claims", [None, [], "invalid", [{}],
+    [{"capability": "SLO2 KC1", "reason": {"invalid": True}}]])
+async def test_review_cannot_erase_or_reintroduce_justified_removal(claims):
+    from extractor import KC_FULL_TEXT, extract_cbd_data
+
+    kcs = [KC_FULL_TEXT[k] for k in ("SLO1 KC1", "SLO2 KC1")]
+    original = {"key_capabilities": kcs[:1], "dropped_key_capabilities": [
+        {"capability": kcs[1], "reason": "I did not support team decisions."}]}
+    reviewed = {"key_capabilities": kcs, "dropped_key_capabilities": claims}
+    with patch("extractor._generate", AsyncMock(side_effect=[json.dumps(original), json.dumps(reviewed)])):
+        draft = await extract_cbd_data(STEMI_CASE, edit_feedback="Remove team decisions.",
+                                       previous_key_capabilities=kcs)
+    assert draft.key_capabilities == kcs[:1]
+
+
+@pytest.mark.asyncio
+async def test_optional_review_has_real_timeout_and_cancels(monkeypatch):
+    import asyncio
+    import extractor
+
+    monkeypatch.setattr(extractor, "_KC_REVIEW_TIMEOUT_SECONDS", 0.01, raising=False)
+    cancelled = asyncio.Event()
+    kcs = [extractor.KC_FULL_TEXT["SLO1 KC1"]]
+    async def generate(prompt, **kwargs):
+        if "KC selection review:" not in prompt:
+            return json.dumps({"key_capabilities": kcs})
+        assert kwargs["retries"] == 0
+        assert kwargs["max_attempts"] == 1
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+    with patch("extractor._generate", generate):
+        draft = await asyncio.wait_for(extractor.extract_cbd_data(STEMI_CASE), timeout=0.5)
+    assert cancelled.is_set()
+    assert draft.key_capabilities == kcs
+
+
+@pytest.mark.asyncio
+async def test_optional_review_skipped_when_extraction_used_budget(monkeypatch):
+    import asyncio
+    import extractor
+
+    monkeypatch.setattr(extractor, "_KC_REVIEW_DEADLINE_SECONDS", 0.01)
+    kcs = [extractor.KC_FULL_TEXT["SLO1 KC1"]]
+    async def slow_initial(*args, **kwargs):
+        await asyncio.sleep(0.02)
+        return json.dumps({"key_capabilities": kcs})
+    generate = AsyncMock(side_effect=slow_initial)
+    with patch("extractor._generate", generate):
+        draft = await extractor.extract_cbd_data(STEMI_CASE)
+    assert generate.await_count == 1
+    assert draft.key_capabilities == kcs
+
+
+@pytest.mark.asyncio
+async def test_review_valid_removal_merges_with_original_exclusions():
+    from extractor import KC_FULL_TEXT, extract_cbd_data
+
+    kcs = [KC_FULL_TEXT[k] for k in ("SLO1 KC1", "SLO2 KC1", "SLO3 KC3")]
+    original = {"key_capabilities": kcs[:1], "dropped_key_capabilities": [
+        {"capability": kcs[1], "reason": "No team decisions."}]}
+    reviewed = {"key_capabilities": kcs, "dropped_key_capabilities": [
+        {"capability": "SLO3 KC3: other wording", "reason": "No emergency management."}]}
+    with patch("extractor._generate", AsyncMock(side_effect=[json.dumps(original), json.dumps(reviewed)])):
+        draft = await extract_cbd_data(STEMI_CASE, edit_feedback="Correct the curriculum links.",
+                                       previous_key_capabilities=kcs)
+    assert draft.key_capabilities == kcs[:1]
+
+
+@pytest.mark.asyncio
+async def test_generate_attempt_cap_prevents_retry_and_provider_fallback(monkeypatch):
+    import extractor
+    from unittest.mock import MagicMock
+
+    providers = [{"name": "fixture", "type": "openai_compat", "model": "fixture",
+                  "base_url": "https://example.invalid", "env_key": "FIXTURE_KEY"}] * 2
+    monkeypatch.setenv("FIXTURE_KEY", "offline-fixture")
+    post = AsyncMock(side_effect=RuntimeError("503 unavailable"))
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    client.post = post
+    with patch("extractor._select_providers", return_value=providers), \
+         patch("extractor.httpx.AsyncClient", return_value=client), \
+         patch("extractor.ai_telemetry.record"):
+        with pytest.raises(RuntimeError, match="503"):
+            await extractor._generate("fixture", retries=0, max_attempts=1)
+    assert post.await_count == 1

@@ -21,7 +21,7 @@ from kaizen_form_filer import (
     _QA_READ_FIELD_JS,
     _QA_READ_KC_JS,
     _session_cache_path,
-    _default_non_applicable_procedural_selects,
+    _resolve_procedural_skill_selects,
     _is_kaizen_app_url,
     _strip_emojis,
     _to_uk_date,
@@ -170,7 +170,9 @@ async def test_attach_file_uses_kaizen_upload_button_file_chooser(tmp_path, monk
 
     assert await _attach_file(page, str(attachment)) is True
     upload_button.click.assert_awaited_once()
-    chooser.set_files.assert_awaited_once_with(str(attachment))
+    # A list now, because one case can carry several files and they
+    # upload in a single chooser call.
+    chooser.set_files.assert_awaited_once_with([str(attachment)])
 
 
 @pytest.mark.asyncio
@@ -227,7 +229,9 @@ async def test_attach_file_without_visible_confirmation_returns_false(tmp_path, 
 
     assert await _attach_file(page, str(attachment)) is False
     upload_button.click.assert_awaited_once()
-    chooser.set_files.assert_awaited_once_with(str(attachment))
+    # A list now, because one case can carry several files and they
+    # upload in a single chooser call.
+    chooser.set_files.assert_awaited_once_with([str(attachment)])
 
 
 @pytest.mark.asyncio
@@ -750,16 +754,17 @@ async def test_cbd_defaults_visible_procedural_skill_dropdown_to_na():
         {
             "id": "8def931e-3a00-43ac-8529-44cdaf34be2d",
             "label": "ST4-ST6 Higher EM Procedural Skills",
+            "options": ["Please select", "- n/a -", "Chest drain insertion"],
             "selectedText": "",
             "selectedValue": "?",
-            "hasNa": True,
         }
     ])
 
     with patch("kaizen_form_filer._fill_select", AsyncMock(return_value=True)) as fill_select:
-        defaulted = await _default_non_applicable_procedural_selects(page, "CBD")
+        answered, unresolved = await _resolve_procedural_skill_selects(page, "CBD", {})
 
-    assert defaulted == ["8def931e-3a00-43ac-8529-44cdaf34be2d"]
+    assert answered == ["8def931e-3a00-43ac-8529-44cdaf34be2d"]
+    assert unresolved == []
     fill_select.assert_awaited_once_with(
         page,
         "8def931e-3a00-43ac-8529-44cdaf34be2d",
@@ -773,9 +778,9 @@ async def test_dops_does_not_default_required_procedural_skill_to_na():
     page.evaluate = AsyncMock()
 
     with patch("kaizen_form_filer._fill_select", AsyncMock(return_value=True)) as fill_select:
-        defaulted = await _default_non_applicable_procedural_selects(page, "DOPS")
+        answered, unresolved = await _resolve_procedural_skill_selects(page, "DOPS", {})
 
-    assert defaulted == []
+    assert (answered, unresolved) == ([], [])
     page.evaluate.assert_not_called()
     fill_select.assert_not_awaited()
 
@@ -786,8 +791,8 @@ async def test_file_to_kaizen_records_cbd_procedural_na_default(mock_playwright_
         with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
             with patch("kaizen_form_filer._verify_entry_saved", AsyncMock(return_value=True)):
                 with patch(
-                    "kaizen_form_filer._default_non_applicable_procedural_selects",
-                    AsyncMock(return_value=["8def931e-3a00-43ac-8529-44cdaf34be2d"]),
+                    "kaizen_form_filer._resolve_procedural_skill_selects",
+                    AsyncMock(return_value=(["8def931e-3a00-43ac-8529-44cdaf34be2d"], [])),
                 ) as default_na:
                     fields = {
                         "date_of_encounter": "2026-03-21",
@@ -798,7 +803,7 @@ async def test_file_to_kaizen_records_cbd_procedural_na_default(mock_playwright_
                     result = await file_to_kaizen("CBD", fields, "user", "pass")
 
     default_na.assert_awaited_once()
-    assert "procedural_skills_n/a (1)" in result["filled"]
+    assert "procedural_skills (1)" in result["filled"]
 
 
 @pytest.mark.asyncio
@@ -1368,3 +1373,175 @@ async def test_file_to_kaizen_qa_exception_does_not_fail_filing(mock_playwright_
                     result = await file_to_kaizen("CBD", fields, "user", "pass")
                     assert result["status"] in ("success", "partial")
                     assert "filing_qa" in result
+
+
+# ── Multi-file attachment ────────────────────────────────────────────────────
+# A doctor can send several files for one case. Previously each new file
+# overwrote the last, so only one ever reached Kaizen — silently, because every
+# upload had been acknowledged in chat.
+
+
+def _chooser_page(visible_names):
+    """Page double whose get_by_text only confirms `visible_names`."""
+    upload_button = MagicMock()
+    upload_button.is_visible = AsyncMock(return_value=True)
+    upload_button.click = AsyncMock()
+    upload_locator = MagicMock()
+    upload_locator.first = upload_button
+
+    chooser = MagicMock()
+    chooser.set_files = AsyncMock()
+
+    class ChooserInfo:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        @property
+        def value(self):
+            async def _value():
+                return chooser
+
+            return _value()
+
+    def _get_by_text(text, exact=False):
+        hit = MagicMock()
+        hit.is_visible = AsyncMock(return_value=any(n in str(text) for n in visible_names))
+        hit.first = hit
+        return hit
+
+    page = MagicMock()
+    page.locator.return_value = upload_locator
+    page.expect_file_chooser.return_value = ChooserInfo()
+    page.get_by_text.side_effect = _get_by_text
+    return page, chooser
+
+
+@pytest.mark.asyncio
+async def test_attach_file_uploads_every_file_in_one_chooser_call(tmp_path):
+    first = tmp_path / "echo-clip.mp4"
+    second = tmp_path / "ecg.png"
+    third = tmp_path / "notes.pdf"
+    for path in (first, second, third):
+        path.write_bytes(b"bytes")
+    paths = [str(first), str(second), str(third)]
+
+    page, chooser = _chooser_page(["echo-clip.mp4", "ecg.png", "notes.pdf"])
+
+    assert await _attach_file(page, paths) is True
+    chooser.set_files.assert_awaited_once_with(paths)
+
+
+@pytest.mark.asyncio
+async def test_partial_upload_is_not_reported_as_success(tmp_path):
+    """Confirming only the first filename would let a partial upload count as
+    complete — the exact silent loss this change removes."""
+    first = tmp_path / "echo-clip.mp4"
+    second = tmp_path / "ecg.png"
+    for path in (first, second):
+        path.write_bytes(b"bytes")
+
+    # Kaizen shows the first file but never the second.
+    page, _chooser = _chooser_page(["echo-clip.mp4"])
+
+    assert await _attach_file(page, [str(first), str(second)]) is False
+
+
+@pytest.mark.asyncio
+async def test_missing_file_is_dropped_without_losing_the_rest(tmp_path):
+    present = tmp_path / "ecg.png"
+    present.write_bytes(b"bytes")
+    absent = tmp_path / "gone.png"
+
+    page, chooser = _chooser_page(["ecg.png"])
+
+    assert await _attach_file(page, [str(absent), str(present)]) is True
+    chooser.set_files.assert_awaited_once_with([str(present)])
+
+
+# ── Curriculum tree render race ──────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_expand_waits_for_the_curriculum_tree_to_render():
+    """Measured live: the Angular tree paints ~1.7s after domcontentloaded.
+
+    The expand step fired immediately, so whenever the preceding field fills
+    finished first the anchors did not exist and every SLO failed identically
+    ("Could not expand: Higher SLO1:"), leaving the entry untagged. Proven on
+    the real form: without the wait all three expands returned False, with it
+    all three returned True.
+    """
+    from kaizen_form_filer import _await_curriculum_tree
+
+    page = MagicMock()
+    page.wait_for_function = AsyncMock()
+
+    assert await _await_curriculum_tree(page) is True
+    page.wait_for_function.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_tree_that_never_renders_is_reported_not_swallowed():
+    from kaizen_form_filer import _await_curriculum_tree
+
+    page = MagicMock()
+    page.wait_for_function = AsyncMock(side_effect=Exception("timeout"))
+
+    # False, not an exception: a missing tree must not abort the whole filing,
+    # but it must be visible in the log rather than silently producing an
+    # untagged entry.
+    assert await _await_curriculum_tree(page) is False
+
+
+def test_both_expand_loops_wait_first():
+    """Two call sites expand the tree; a wait on only one leaves the race."""
+    import inspect
+
+    import kaizen_form_filer
+
+    source = inspect.getsource(kaizen_form_filer)
+    assert source.count("await _await_curriculum_tree(page)") == 2
+
+
+# ─── Required-field guard through the real filing path ───────────────────────
+
+@pytest.mark.asyncio
+async def test_esle_save_is_not_reported_clean_while_kaizen_flags_a_required_field(
+    mock_playwright_ctx,
+):
+    """Observed live (2026-09-17): an ESLE saved with the required "Domains of
+    performance" question blank was still reported as a clean save with seven
+    fields completed. A draft Kaizen itself marks incomplete is partial.
+    """
+    from kaizen_form_filer import _REQUIRED_FIELD_MARKER_JS, _WIDGET_STATE_JS
+
+    mock_page = mock_playwright_ctx
+    original_evaluate = mock_page.evaluate.side_effect
+
+    async def evaluate(expr, *args):
+        if expr == _REQUIRED_FIELD_MARKER_JS:
+            return [
+                "Which specific Domains of performance in this session would "
+                "you like focused on in this ESLE?"
+            ]
+        if expr == _WIDGET_STATE_JS:
+            return {"missing": False, "options": [], "chips": [], "text": ""}
+        return await original_evaluate(expr, *args)
+
+    mock_page.evaluate = AsyncMock(side_effect=evaluate)
+
+    with patch("kaizen_form_filer._login", AsyncMock(return_value=True)):
+        with patch("kaizen_form_filer._save_form", AsyncMock(return_value=True)):
+            with patch("kaizen_form_filer._verify_entry_saved", AsyncMock(return_value=True)):
+                result = await file_to_kaizen(
+                    "ESLE_ASSESS",
+                    {"reflection": "Synthetic ESLE reflection for an offline test."},
+                    "user",
+                    "pass",
+                )
+
+    assert result["status"] == "partial"
+    assert any("Domains of performance" in str(item) for item in result["skipped"])

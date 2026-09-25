@@ -26,6 +26,11 @@ echo "$$" > "$LOCK_DIR/pid"
 
 echo "Loading secrets from BWS..."
 BWS_ACCESS_TOKEN=$(cat ~/.openclaw/.bws-token)
+# Shell-local only. The Vertex service-account secret is fetched by the
+# Python runtime itself (vertex_credentials.py), which reads the BWS access
+# token from PG_VERTEX_BWS_TOKEN_PATH at call time — never from this
+# process's environment. Every other secret below is resolved here, in the
+# shell, and only the resolved value is exported.
 BWS_BIN=$(command -v bws 2>/dev/null || echo "/Users/moeedahmed/.cargo/bin/bws")
 
 if [ ! -x "$BWS_BIN" ]; then
@@ -49,6 +54,13 @@ get_secret_by_key() {
   local key="$1"
   BWS_ACCESS_TOKEN=$BWS_ACCESS_TOKEN "$BWS_BIN" secret list --output json 2>/dev/null \
     | python3 -c "import json,sys; d=json.load(sys.stdin); print(next((s['value'] for s in d if s.get('key')=='$key'), ''))" 2>/dev/null || true
+}
+
+pg_is_truthy() {
+  case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 get_mapped_secret() {
@@ -75,43 +87,109 @@ export TELEGRAM_BOT_TOKEN
 GOOGLE_API_KEY="$(get_secret af6579a0-2cbe-4cef-94b3-b405017b48fe)"
 export GOOGLE_API_KEY
 echo "Google key loaded for OCR/voice utilities (last4): ${GOOGLE_API_KEY: -4}"
-export PORTFOLIO_GURU_EXTRACTOR_PROVIDER="deepseek-v4-flash"
+# Clinical extraction runs on Vertex AI (europe-west2). This label is what the
+# startup banner reports; it must not name an off-region provider.
+export PORTFOLIO_GURU_EXTRACTOR_PROVIDER="vertex-gemini-eu"
 export GEMINI_3_5_FLASH_MODEL="${GEMINI_3_5_FLASH_MODEL:-gemini-3.5-flash}"
 export PG_GATHERING_MODE="${PG_GATHERING_MODE:-1}"
 echo "Model: extractor=$PORTFOLIO_GURU_EXTRACTOR_PROVIDER fallback=$GEMINI_3_5_FLASH_MODEL"
 
 # --- Vertex AI (EU) routing for clinical extraction -----------------------
-# Inert until the GCP secrets exist in BWS. When GCP_PROJECT_ID + the service-
-# account JSON are present, the SA key is materialised to a temp file and
-# GOOGLE_APPLICATION_CREDENTIALS is set. Routing only switches on when
-# PG_USE_VERTEX is also truthy (so creds can land and be model-verified BEFORE
-# the flip). use_vertex() additionally requires GCP_PROJECT_ID, so a stray flag
-# without creds safely falls back to the developer API.
+# Inert until the GCP secrets exist in BWS. Credential provisioning is BWS's
+# job, not this launcher's: no service-account key is fetched, materialised,
+# or written to disk here. The Python runtime (vertex_credentials.py, via
+# gemini_client.make_client()) fetches the service-account secret from BWS
+# directly into process memory, reading the BWS access token itself from
+# PG_VERTEX_BWS_TOKEN_PATH — never inherited from this shell — and never
+# falls back to Application Default Credentials. Missing configuration
+# fails the launcher closed rather than silently falling back to the
+# (off-region) developer API.
 GCP_PROJECT_ID="$(get_secret_by_key GCP_PROJECT_ID)"
+PG_USE_VERTEX="$(get_secret_by_key PG_USE_VERTEX)"
+
+# Checked before any project-scoped lookup below: a truthy flag with no
+# project must fail here, not fall through silently to the developer API.
+if pg_is_truthy "${PG_USE_VERTEX:-}" && [ -z "$GCP_PROJECT_ID" ]; then
+  echo "PG_USE_VERTEX is enabled but GCP_PROJECT_ID is not set; refusing to start (no fallback to the developer API)." >&2
+  exit 1
+fi
+
 if [ -n "$GCP_PROJECT_ID" ]; then
   export GCP_PROJECT_ID
+  export PG_USE_VERTEX
   GCP_VERTEX_LOCATION="$(get_secret_by_key GCP_VERTEX_LOCATION)"
   export GCP_VERTEX_LOCATION="${GCP_VERTEX_LOCATION:-europe-west2}"
   # Optional model override (empty -> gemini_client default gemini-3.5-flash).
   export GEMINI_VERTEX_MODEL="$(get_secret_by_key GEMINI_VERTEX_MODEL)"
-  GCP_VERTEX_SA_JSON="$(get_secret_by_key GCP_VERTEX_SA_JSON)"
-  if [ -n "$GCP_VERTEX_SA_JSON" ]; then
-    _SA_FILE="$(mktemp -t pg-vertex-sa)"
-    printf '%s' "$GCP_VERTEX_SA_JSON" > "$_SA_FILE"
-    chmod 600 "$_SA_FILE"
-    export GOOGLE_APPLICATION_CREDENTIALS="$_SA_FILE"
-    unset GCP_VERTEX_SA_JSON
+  export PG_VERTEX_SA_SECRET_ID="${PG_VERTEX_SA_SECRET_ID:-}"
+  # Nonsecret expected identity pin — the exact existing service-account
+  # email, so a re-pointed secret id in the same project cannot silently
+  # authenticate as a different account.
+  export PG_VERTEX_SA_CLIENT_EMAIL="${PG_VERTEX_SA_CLIENT_EMAIL:-}"
+  # Nonsecret absolute path to the SAME existing beta BWS token file this
+  # launcher already reads above (e.g. ~/.openclaw/.bws-token or the
+  # canonical ~/.hermes/.bws-token route) — the operator sets this to the
+  # already-authorised route; this launcher does not choose or default it.
+  export PG_VERTEX_BWS_TOKEN_PATH="${PG_VERTEX_BWS_TOKEN_PATH:-}"
+
+  if pg_is_truthy "${PG_USE_VERTEX:-}"; then
+    if [ -z "${PG_VERTEX_SA_SECRET_ID:-}" ]; then
+      echo "PG_USE_VERTEX is enabled but PG_VERTEX_SA_SECRET_ID is not set; refusing to start (no fallback to the developer API)." >&2
+      exit 1
+    fi
+    if [ -z "${PG_VERTEX_SA_CLIENT_EMAIL:-}" ]; then
+      echo "PG_USE_VERTEX is enabled but PG_VERTEX_SA_CLIENT_EMAIL is not set; refusing to start." >&2
+      exit 1
+    fi
+    if [ -z "${PG_VERTEX_BWS_TOKEN_PATH:-}" ]; then
+      echo "PG_USE_VERTEX is enabled but PG_VERTEX_BWS_TOKEN_PATH is not set; refusing to start." >&2
+      exit 1
+    fi
+    echo "Vertex AI (EU) configured: project=$GCP_PROJECT_ID location=$GCP_VERTEX_LOCATION (service-account credential fetched from BWS into process memory at first use)"
+  else
+    echo "Vertex AI (EU) configured but PG_USE_VERTEX not enabled: project=$GCP_PROJECT_ID"
   fi
-  export PG_USE_VERTEX="$(get_secret_by_key PG_USE_VERTEX)"
-  echo "Vertex AI (EU) creds present: project=$GCP_PROJECT_ID location=$GCP_VERTEX_LOCATION use_vertex=${PG_USE_VERTEX:-off}"
 fi
 
 FERNET_SECRET_KEY="$(get_secret 9e653679-9a33-4c23-a15c-b405015713de)"
 export FERNET_SECRET_KEY
-# OpenAI keys not in use — extractor uses DeepSeek V4 Flash
-# DEEPSEEK_API_KEY_PORTFOLIO is loaded below
-DEEPSEEK_API_KEY="$(get_secret c5d82503-3d1d-427b-9be1-b44e01564203)"
-export DEEPSEEK_API_KEY
+
+# Liveness heartbeat target (Healthchecks.io ping URL). bot.py already schedules
+# the 5-minute ping; without this the whole mechanism is a silent no-op, which
+# is exactly how it sat unused until 2026-08-18. Non-fatal when absent so a
+# missing secret degrades to "no monitoring", never "bot won't start".
+PG_HEARTBEAT_URL="$(get_secret_by_key PG_HEARTBEAT_URL)"
+export PG_HEARTBEAT_URL
+if [ -n "$PG_HEARTBEAT_URL" ]; then
+  echo "Liveness heartbeat: configured"
+else
+  echo "Liveness heartbeat: NOT configured (set PG_HEARTBEAT_URL in BWS to enable)"
+fi
+
+# Weekly Portfolio Health sign-off chase. The chase itself is OFF unless
+# PG_ENABLE_SIGNOFF_CHASE is set — it messages doctors unprompted, so it stays
+# opt-in. The ping URL is loaded regardless so that enabling the chase is a
+# one-line change and never ships an unmonitored job: this feature's success
+# signal is silence, so a dead job and a clean portfolio look identical
+# without it.
+PG_SIGNOFF_CHASE_HEALTHCHECK_URL="$(get_secret_by_key PG_SIGNOFF_CHASE_HEALTHCHECK_URL)"
+export PG_SIGNOFF_CHASE_HEALTHCHECK_URL
+# Enabled 2026-08-26 for the whole beta cohort, once the chase stopped
+# re-listing and began reporting only what moved. Set to empty to disable.
+export PG_ENABLE_SIGNOFF_CHASE="${PG_ENABLE_SIGNOFF_CHASE:-1}"
+export PG_SIGNOFF_CHASE_USER_IDS="${PG_SIGNOFF_CHASE_USER_IDS:-}"
+if [ -n "$PG_ENABLE_SIGNOFF_CHASE" ]; then
+  echo "Sign-off chase: ENABLED${PG_SIGNOFF_CHASE_USER_IDS:+ (users: $PG_SIGNOFF_CHASE_USER_IDS)}"
+else
+  echo "Sign-off chase: off (set PG_ENABLE_SIGNOFF_CHASE=1 to enable)"
+fi
+# DEEPSEEK_API_KEY is deliberately NOT exported. Clinical extraction runs on
+# Vertex AI in europe-west2; DeepSeek is a Chinese endpoint with no UK adequacy
+# decision and no DPA, and having the key present meant one unset PG_USE_VERTEX
+# away from routing Art. 9 health data off-region. extractor._select_providers
+# now refuses to start in that state rather than falling back. Bake-off scripts
+# that legitimately need it load it themselves.
+#   BWS secret: c5d82503-3d1d-427b-9be1-b44e01564203 (DEEPSEEK_API_KEY_PORTFOLIO)
 
 # OpenAI keys — NOT loaded unless explicitly requested
 # if [ -n "$OPENAI_API_KEY" ]; then
@@ -162,6 +240,19 @@ elif [ -x "./venv/bin/python3" ]; then
 else
   echo "Python venv not found (expected backend/venv or backend/.venv)." >&2
   exit 1
+fi
+
+# Eager Vertex credential preflight — fetch + refresh against the real
+# Google token endpoint now, before the webhook server, before Telegram
+# polling, and before any readiness/health signal. A broken credential
+# aborts the launcher here instead of surfacing on the first clinical
+# request. No-op when PG_USE_VERTEX is not enabled.
+if pg_is_truthy "${PG_USE_VERTEX:-}"; then
+  echo "Vertex AI (EU): running credential preflight (fetch + refresh, before any traffic)..."
+  if ! "$PYTHON" -m vertex_preflight; then
+    echo "Vertex AI (EU) credential preflight failed; refusing to start (no ADC fallback, no traffic admitted)." >&2
+    exit 1
+  fi
 fi
 
 # Playwright package upgrades can leave the local browser cache one revision

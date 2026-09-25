@@ -333,33 +333,6 @@ def mirror_chase(
         logger.warning("mirror_chase failed for %s: %s", telegram_user_id, exc)
 
 
-def _encrypt_fields(fields: dict | None) -> dict:
-    """Encrypt the extracted clinical fields before they leave the bot.
-
-    ``extracted_fields`` can contain special-category patient detail (age, sex,
-    presentation, and any identifiers the extractor lifted from the case). It is
-    NEVER stored as plaintext in Supabase. The dict is JSON-encoded and
-    Fernet-encrypted with the same key the credentials/case_text use; the column
-    holds ``{"_encrypted": "<token>"}``. A server-side reader holding the Fernet
-    key can decrypt it; without the key it is opaque ciphertext.
-
-    Fail-closed: if encryption is unavailable for any reason we drop the fields
-    rather than fall back to plaintext PII.
-    """
-    if not fields:
-        return {}
-    try:
-        from credentials import _fernet
-
-        token = _fernet().encrypt(json.dumps(fields, default=str).encode()).decode()
-        return {"_encrypted": token}
-    except Exception as exc:  # pragma: no cover - defensive, must never leak plaintext
-        logger.warning(
-            "extracted_fields encryption failed for mirror; dropping fields: %s", exc
-        )
-        return {}
-
-
 def mirror_case(
     telegram_user_id: int,
     form_type: str,
@@ -372,14 +345,17 @@ def mirror_case(
     key_capabilities: list | None = None,
     source: str = "bot",
 ) -> None:
-    """Mirror a filed case (success / partial / failed) to portfolio_cases.
+    """Mirror the FACT of a filed case — never its content.
 
-    This is the first time the bot durably persists case content. Both the
-    free-text ``case_text`` AND the structured ``extracted_fields`` are
-    Fernet-encrypted with the same key the credentials use — no plaintext
-    clinical content (narrative or structured patient detail) ever leaves the
-    bot. ``curriculum_links``/``key_capabilities`` are RCEM taxonomy references
-    (no patient data) and are stored as-is.
+    Portfolio Guru no longer keeps clinical narrative once Kaizen has confirmed
+    the save (docs/data-architecture-plan-2026-08-24.md, decision 2). Kaizen
+    holds the evidence; a second encrypted copy in a mirror bought nothing and
+    made every downstream store an Art. 9 store.
+
+    ``case_text_encrypted`` and ``extracted_fields`` are still accepted so the
+    call sites don't have to change, and are deliberately DISCARDED here. The
+    row keeps form type, status, Kaizen event id and RCEM taxonomy references,
+    which is everything /health, KC coverage and ARCP projection actually read.
     """
     sb = _supabase()
     if sb is None:
@@ -392,14 +368,11 @@ def mirror_case(
         "form_type": form_type,
         "status": status,
         "source": source,
-        "extracted_fields": _encrypt_fields(extracted_fields),
         "curriculum_links": curriculum_links or [],
         "key_capabilities": key_capabilities or [],
     }
     if kaizen_event_id:
         payload["kaizen_event_id"] = kaizen_event_id
-    if case_text_encrypted:
-        payload["case_text_encrypted"] = case_text_encrypted.decode("latin1")
     try:
         sb.table("portfolio_cases").insert(payload).execute()
     except Exception as exc:

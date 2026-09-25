@@ -254,15 +254,25 @@ def test_doc_uses_honesty_labels(doc: Path) -> None:
 
 # ── capability map code citations must be fresh ────────────────────────
 
-# The capability map and its "verify in two minutes" section point a judge
-# at exact `backend/<file>.py:<line>` locations. If bot.py shifts and the
-# citations are not updated, a judge jumps to the wrong line and the trust
-# claim breaks. This guard reads each citation FROM the doc and validates
-# it against the real file, so the doc stays the source of the line number
-# while the test proves the number is still correct.
+# The capability map points a judge at exact code locations. If the file
+# shifts and the citation is not updated, the judge lands in the wrong place
+# and the trust claim breaks. This guard reads each citation FROM the doc and
+# validates it against the real file.
+#
+# Two forms are accepted:
+#
+#   `backend/bot.py` `handle_approval_approve`   — preferred where a symbol
+#       exists. Verified by finding the definition, so it cannot go stale when
+#       unrelated edits shift the file, and a judge finds it with one search.
+#   `backend/model_config.py:35`                 — for locations with no symbol
+#       to name. Still verified, still rots; use only when unavoidable.
+#
+# The line-numbered form broke on every bot.py edit during a single evening of
+# work, five gate runs lost to renumbering citations that were never wrong
+# about anything a reader cared about.
 
 _CITATION_RE = re.compile(
-    r"`backend/([\w/]+\.py):(\d+)(?:-(\d+))?`(?:\s+`(\w+)`)?"
+    r"`backend/([\w/]+\.py)(?::(\d+)(?:-(\d+))?)?`(?:\s+`(\w+)`)?"
 )
 
 
@@ -283,6 +293,23 @@ def test_capability_map_code_citations_resolve() -> None:
                 encoding="utf-8"
             ).splitlines()
         lines = file_lines[rel_path]
+
+        if not start_s:
+            if not symbol:
+                # A bare filename in prose is a mention, not a citation: it
+                # claims nothing about a location, so there is nothing to rot.
+                continue
+            # Symbol-only citation: verify the definition exists anywhere.
+            if not any(
+                line.lstrip().startswith((f"def {symbol}", f"async def {symbol}", f"class {symbol}"))
+                or line.startswith(f"{symbol} =")
+                for line in lines
+            ):
+                problems.append(
+                    f"backend/{rel_path} should define {symbol!r} but does not"
+                )
+            continue
+
         start = int(start_s)
         end = int(end_s) if end_s else start
         if end > len(lines):

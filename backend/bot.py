@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import sys
+import shutil
 import tempfile
 import time
 from datetime import UTC, datetime, timedelta
@@ -18,7 +19,7 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler, PicklePersistence,
 )
 from store import store_credentials, get_credentials, has_credentials, init
-from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, is_reuse_request, review_draft, analyse_portfolio_health, summarise_recent_activity, generate_nudge_copy, extract_field_updates, compose_filing_recovery_copy, combine_case_inputs, _has_qi_project_signal, schema_form_type
+from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, is_reuse_request, review_draft, analyse_portfolio_health, summarise_recent_activity, generate_nudge_copy, extract_field_updates, compose_filing_recovery_copy, combine_case_inputs, _has_qi_project_signal, schema_form_type, assess_form_essentials, ESSENTIAL_PRESENT, ESSENTIAL_MISSING, ESSENTIAL_UNAVAILABLE
 from usage import record_case_filed, get_cases_this_month, check_can_file, get_user_tier, set_user_tier, get_case_history, TIER_LIMITS, get_all_active_users, get_cases_this_week, is_beta_tester, set_beta_tester, save_kc_coverage, delete_portfolio_evidence
 # Module-attribute access (consent.fn) rather than from-imports: test_smoke
 # pops `bot` from sys.modules, so multiple bot module objects can be alive in
@@ -39,6 +40,18 @@ from documents import extract_from_document, is_supported_attachment, is_support
 from profile_store import init_profile_db, store_training_level, get_training_level, get_voice_profile, store_voice_profile, clear_voice_profile, store_curriculum, get_curriculum, get_kaizen_role
 from health_models import CORE_DOMAINS, HealthProfile, HealthDomain, Pathway
 from health_engine import case_history_to_evidence_items, compute_snapshot
+from health_assessment import compute_health_assessment
+from health_report import (
+    action_queue_page_count,
+    actions_page_count,
+    format_about,
+    format_action_queue,
+    format_actions,
+    format_coverage,
+    format_curriculum,
+    format_priorities,
+    format_scan_info,
+)
 from health_profile_store import get_health_profile, save_health_profile, delete_health_profile
 from kaizen_index import (
     KaizenSyncStatus,
@@ -60,6 +73,17 @@ from workflow_turn_policy import (
     decide_workflow_turn,
 )
 from message_policy import render_message, safety_redirect_text, style_grounded_answer
+from evidence_artifact import (
+    classify_evidence_artifact,
+    evidence_artifact_text_message,
+    evidence_artifact_upload_message,
+    looks_like_evidence_artifact,
+)
+from rcem_ai_policy import (
+    AI_USE_DECLARATION,
+    has_personal_reflective_input,
+    with_ai_use_declaration,
+)
 from runtime_identity import write_runtime_identity
 import chase_guard
 import dogfood_audit
@@ -72,8 +96,9 @@ logging.basicConfig(level=logging.INFO)
 # Token redaction for bot/API logging. Telegram Bot API URLs contain the
 # token immediately after "/bot", so a plain word-boundary regex misses them.
 _token_pattern = re.compile(
-    r"(?<=bot)\d{8,10}:[A-Za-z0-9_-]{30,}|"
-    r"(?<![A-Za-z0-9_])\d{8,10}:[A-Za-z0-9_-]{30,}(?![A-Za-z0-9_])"
+    r"(?<=bot)\d{8,10}(?::|%3A)[A-Za-z0-9_-]{30,}|"
+    r"(?<![A-Za-z0-9_])\d{8,10}(?::|%3A)[A-Za-z0-9_-]{30,}(?![A-Za-z0-9_])",
+    re.IGNORECASE,
 )
 def _redact_token_string(s: str) -> str:
     s = _token_pattern.sub("<REDACTED_TELEGRAM_TOKEN>", s)
@@ -340,6 +365,12 @@ async def _safe_edit_text(target, text: str, **kwargs):
             )
             return result
         except BadRequest as exc:
+            if _telegram_message_not_modified_error(exc):
+                # Telegram reports an identical text + reply-markup edit as a
+                # BadRequest even though the requested end state is already
+                # present. Callback navigation treats that as a successful
+                # idempotent no-op; every other BadRequest still propagates.
+                return None
             if "can't parse entities" in str(exc).lower() and kwargs.get("parse_mode"):
                 plain_kwargs = {k: v for k, v in kwargs.items() if k != "parse_mode"}
                 result = await target.edit_text(text, **plain_kwargs)
@@ -724,6 +755,210 @@ async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info("weekly_push complete: %d sent, %d failed", sent, failed)
 
 
+# ── Sign-off chase (proactive Portfolio Health watcher) ─────────────────────
+
+
+# A Kaizen scan is minutes of browser work and this job shares the bot's event
+# loop. These bound the damage: at most this many users refreshed per weekly
+# run, each given at most this long.
+SIGNOFF_CHASE_MAX_REFRESH_PER_RUN = 5
+SIGNOFF_CHASE_REFRESH_TIMEOUT_S = 900
+
+# How often the chase may speak to one doctor, by distance to their review.
+# docs/PORTFOLIO_HEALTH_SPEC.md: monthly is the default proactive cadence and
+# weekly is reserved for deadline mode. Unfinished evidence six months out is
+# worth a monthly mention; six weeks out it is worth a weekly one, because the
+# cost of not knowing has changed even though the evidence has not.
+CHASE_DEADLINE_WEEKS = 8
+CHASE_INTERVAL_DEFAULT_DAYS = 28
+CHASE_INTERVAL_DEADLINE_DAYS = 7
+
+
+def _chase_interval_days(user_id: int) -> int:
+    """Minimum days between chase messages for this user."""
+    from datetime import date as _date
+
+    review = _stored_review_date(_get_or_default_health_profile(user_id))
+    if not review:
+        return CHASE_INTERVAL_DEFAULT_DAYS
+    days_away = (review - _date.today()).days
+    if 0 <= days_away <= CHASE_DEADLINE_WEEKS * 7:
+        return CHASE_INTERVAL_DEADLINE_DAYS
+    return CHASE_INTERVAL_DEFAULT_DAYS
+
+
+def _signoff_chase_enabled() -> bool:
+    """The proactive chase is opt-in.
+
+    It messages real doctors unprompted, so it stays off until deliberately
+    enabled — the same fail-closed shape as PG_ENABLE_BROWSER_USE_FALLBACK.
+    """
+    return os.environ.get("PG_ENABLE_SIGNOFF_CHASE", "").strip() not in ("", "0", "false", "False")
+
+
+def _signoff_chase_audience(user_ids: list) -> list:
+    """Narrow the chase to an explicit allowlist when one is configured.
+
+    PG_SIGNOFF_CHASE_USER_IDS lets the feature run against a single portfolio
+    (dogfood) before it is pointed at the whole beta cohort. Unset means every
+    active user, which only happens once the flag above is deliberately on.
+    """
+    raw = os.environ.get("PG_SIGNOFF_CHASE_USER_IDS", "").strip()
+    if not raw:
+        return list(user_ids)
+    allowed = {part.strip() for part in raw.split(",") if part.strip()}
+    return [user_id for user_id in user_ids if str(user_id) in allowed]
+
+
+async def signoff_chase_push(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Message users whose Kaizen evidence has been sitting unsigned.
+
+    Read-only and self-gating: users with no Kaizen index, or with nothing
+    stuck past the threshold, are never messaged. That silence is the point —
+    a watcher that pings every week regardless of whether anything is wrong
+    gets muted, and then it cannot warn about the thing that matters.
+
+    Guarded by the same file-sentinel pattern as ``weekly_push`` so a bot
+    restart cannot turn a weekly cadence into a daily one.
+    """
+    import json
+    import os
+    from datetime import UTC, datetime
+
+    import ops_alert
+    from health_watch import detect_changes, format_change_report
+
+    heartbeat_url = os.environ.get("PG_SIGNOFF_CHASE_HEALTHCHECK_URL", "")
+    seen_path = os.path.expanduser("~/.openclaw/data/portfolio-guru/signoff_chase_seen.json")
+    sentinel = os.path.expanduser("~/.openclaw/data/portfolio-guru/signoff_chase_last_run")
+    os.makedirs(os.path.dirname(sentinel), exist_ok=True)
+    now = time.time()
+    if os.path.exists(sentinel):
+        try:
+            last_run = float(open(sentinel).read().strip())
+        except (OSError, ValueError):
+            last_run = 0.0
+        if now - last_run < 518400:
+            logger.info("signoff_chase skipped — ran %.1f days ago", (now - last_run) / 86400)
+            return
+
+    with open(sentinel, "w") as fh:
+        fh.write(str(now))
+    logger.info("signoff_chase starting")
+    ops_alert.ping_check(heartbeat_url, "/start")
+
+    sent = 0
+    skipped = 0
+    failed = 0
+    refreshed = 0
+    try:
+        seen: dict = {}
+        if os.path.exists(seen_path):
+            try:
+                seen = json.load(open(seen_path))
+            except (OSError, ValueError):
+                seen = {}
+
+        for user_id in _signoff_chase_audience(await get_all_active_users()):
+            try:
+                # Change detection needs current data. Without a refresh the
+                # watcher could never learn that an assessor signed something
+                # off, and would only ever repeat what the last /health saw.
+                #
+                # But a Kaizen scan is minutes of browser work, and this job
+                # runs inside the bot's event loop. Refreshing every user every
+                # week would tie the bot up for hours and make it unresponsive
+                # to the doctors actually using it, so the refresh is capped
+                # per run, skipped when the index is already fresh, and bounded
+                # by a timeout. Users not refreshed this week are simply
+                # refreshed next week.
+                if (
+                    refreshed < SIGNOFF_CHASE_MAX_REFRESH_PER_RUN
+                    and has_credentials(user_id)
+                    and await _health_needs_kaizen_refresh(user_id)
+                ):
+                    try:
+                        await asyncio.wait_for(
+                            sync_kaizen_portfolio_index_for_user(user_id),
+                            timeout=SIGNOFF_CHASE_REFRESH_TIMEOUT_S,
+                        )
+                        refreshed += 1
+                    except asyncio.TimeoutError:
+                        logger.warning("signoff_chase refresh timed out for %s", user_id)
+                        refreshed += 1
+                    except Exception as exc:
+                        logger.warning("signoff_chase refresh failed for %s: %s", user_id, exc)
+
+                previous = seen.get(str(user_id))
+                since = None
+                if previous:
+                    try:
+                        since = datetime.fromisoformat(str(previous))
+                    except ValueError:
+                        since = None
+
+                # Diff against the last message sent, not the last look. News
+                # found while the cadence says "too soon" has to survive to the
+                # next send rather than being quietly swallowed.
+                changes = await detect_changes(user_id, since=since)
+
+                text = format_change_report(changes)
+                if not text:
+                    # Silence is the feature: a weekly repeat of an unchanged
+                    # list is what gets muted, and a muted watcher cannot
+                    # report the week something actually moves.
+                    skipped += 1
+                    continue
+                interval = _chase_interval_days(user_id)
+                if since is not None and (datetime.now(UTC) - since).days < interval:
+                    logger.info(
+                        "signoff_chase holding news for %s: %d-day cadence not elapsed",
+                        user_id,
+                        interval,
+                    )
+                    skipped += 1
+                    continue
+
+                seen[str(user_id)] = datetime.now(UTC).isoformat()
+                logger.info(
+                    "Portfolio Guru funnel event=signoff_chase_sent user_id=%s "
+                    "new=%d cleared=%d waiting=%d",
+                    user_id,
+                    len(changes.newly_stuck),
+                    len(changes.cleared),
+                    changes.still_waiting,
+                )
+                await context.bot.send_message(
+                    chat_id=user_id, text=text, parse_mode="Markdown"
+                )
+                sent += 1
+            except Exception as exc:
+                logger.warning("signoff_chase failed for %s: %s", user_id, exc)
+                failed += 1
+
+        try:
+            with open(seen_path, "w") as fh:
+                json.dump(seen, fh)
+        except OSError as exc:
+            logger.warning("signoff_chase could not persist seen state: %s", exc)
+    except Exception:
+        logger.error("signoff_chase aborted", exc_info=True)
+        ops_alert.ping_check(heartbeat_url, "/fail")
+        raise
+
+    logger.info(
+        "signoff_chase complete: %d sent, %d with nothing new, %d failed, %d refreshed",
+        sent,
+        skipped,
+        failed,
+        refreshed,
+    )
+    # Ping on EVERY completed run, including runs that messaged nobody. This
+    # feature's success signal is silence, so a dead job and a clean portfolio
+    # look identical from the outside — only this ping tells them apart.
+    ops_alert.ping_check(heartbeat_url)
+
+
 async def _edit_last_bot_msg(context, chat_id, text, reply_markup=None, parse_mode=None):
     """Edit the last bot ack message in place. Falls back to new message if not found."""
     msg_id = context.user_data.get("last_bot_msg_id")
@@ -819,6 +1054,10 @@ def _telegram_file_too_big_error(exc: Exception) -> bool:
 
 def _telegram_message_not_modified_error(exc: Exception) -> bool:
     return isinstance(exc, BadRequest) and "message is not modified" in str(exc).lower()
+
+
+def _telegram_message_not_found_error(exc: Exception) -> bool:
+    return isinstance(exc, BadRequest) and "not found" in str(exc).lower()
 
 
 def _oversized_video_text(*, gathering: bool = False) -> str:
@@ -977,6 +1216,115 @@ async def _retire_active_source_detail_message(context) -> None:
         context.user_data.pop(key, None)
 
 
+_RETIRED_ESSENTIALS_PROMPT_REFS_KEY = "_retired_essentials_prompt_refs"
+_RETIRED_ESSENTIALS_PROMPT_REFS_MAX = 8
+
+
+def _mark_essentials_prompt_retired(context, chat_id, msg_id) -> None:
+    """Remember a retired essentials-gap prompt so a stale Cancel tap on it
+    can be recognised even when the Telegram-side edit/markup removal failed
+    and the button is still visually live in the chat."""
+    if not chat_id or not msg_id:
+        return
+    refs = context.user_data.setdefault(_RETIRED_ESSENTIALS_PROMPT_REFS_KEY, [])
+    ref = [chat_id, msg_id]
+    if ref in refs:
+        return
+    refs.append(ref)
+    del refs[:-_RETIRED_ESSENTIALS_PROMPT_REFS_MAX]
+
+
+def _is_retired_essentials_prompt_ref(context, chat_id, msg_id) -> bool:
+    if not chat_id or not msg_id:
+        return False
+    refs = context.user_data.get(_RETIRED_ESSENTIALS_PROMPT_REFS_KEY) or []
+    return [chat_id, msg_id] in refs
+
+
+async def _retire_active_missing_essentials_prompt(context) -> None:
+    """Resolve the tracked essentials-gap prompt before the followup reply.
+
+    That prompt sits in the chat *before* the doctor's new message, so
+    editing it in place (as picker navigation does) would leave the
+    acknowledgement or final draft looking like it was sent before the
+    doctor's own reply. It is bot-owned and fully resolved by the doctor's
+    reply, so it is deleted outright rather than left behind with an "Added
+    — see below" placeholder; the caller then sends a fresh message that
+    lands after the doctor's contribution instead.
+
+    A "message to delete not found" error means a prior retirement attempt
+    already removed it server-side (or Telegram's own retention already
+    dropped it) — that is treated as an already-clean retirement, not a
+    failure. Only when deletion itself is refused (permission, or Telegram's
+    delete time limit) does the prompt fall back to stripping its keyboard
+    and leaving a minimal "Details received." acknowledgement in its place.
+
+    The retirement is recorded in `_retired_essentials_prompt_refs`
+    regardless of outcome, so a Cancel tap that still lands on this message
+    is recognised as stale by the callback router instead of cancelling
+    whatever draft is active by the time it arrives.
+    """
+    chat_id = context.user_data.get("last_bot_chat_id")
+    msg_id = context.user_data.get("last_bot_msg_id")
+    for key in ("last_bot_msg_id", "last_bot_chat_id", "status_msg_id", "status_msg_chat"):
+        context.user_data.pop(key, None)
+    if not chat_id or not msg_id:
+        return
+    try:
+        await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+        _audit_event(
+            context,
+            "prompt_retired",
+            action="missing_essentials_prompt_deleted",
+            message_id=msg_id,
+            chat_id=chat_id,
+        )
+        _mark_essentials_prompt_retired(context, chat_id, msg_id)
+        return
+    except Exception as exc:
+        if _telegram_message_not_found_error(exc):
+            _audit_event(
+                context,
+                "prompt_retired",
+                action="missing_essentials_prompt_already_retired",
+                message_id=msg_id,
+                chat_id=chat_id,
+            )
+            _mark_essentials_prompt_retired(context, chat_id, msg_id)
+            return
+    try:
+        await context.bot.edit_message_reply_markup(
+            chat_id=chat_id,
+            message_id=msg_id,
+            reply_markup=None,
+        )
+        _audit_event(
+            context,
+            "prompt_retired",
+            action="missing_essentials_reply_markup_removed",
+            message_id=msg_id,
+            chat_id=chat_id,
+        )
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=msg_id,
+                text="Details received.",
+            )
+        except Exception:
+            pass
+    except Exception as markup_exc:
+        if not _telegram_message_not_modified_error(markup_exc):
+            _audit_event(
+                context,
+                "prompt_retired",
+                action="missing_essentials_retire_failed",
+                message_id=msg_id,
+                chat_id=chat_id,
+            )
+    _mark_essentials_prompt_retired(context, chat_id, msg_id)
+
+
 async def _send_pending_bundle_status(message, context, text, reply_markup=None, parse_mode=None):
     """Edit the current bundle status only, otherwise send a fresh bundle status."""
     chat_id = getattr(message, "chat_id", None) or getattr(getattr(message, "chat", None), "id", None)
@@ -1112,6 +1460,51 @@ def _case_review_state_snapshot(context) -> dict:
     }
 
 
+_MISSING_ESSENTIALS_REPLAY_KEY = "_missing_essentials_replay"
+
+
+def _missing_essentials_replay_check(context, update) -> tuple[bool, int | None]:
+    """Scoped replay guard for the chosen_form+awaiting_detail essentials followup.
+
+    Telegram can redeliver the same update (webhook retry, or PTB firing a
+    matching handler twice for one update) while the essentials followup is
+    mid-flight. Without this, a replayed identical inbound would re-append
+    the same case text and re-run extraction/draft. The guard is set
+    synchronously before any await so a concurrent duplicate of the same
+    update is caught before it can start its own extraction pass. A genuine
+    failure (timeout/exception) resets the guard so the doctor's retry of
+    that same update still works; a genuinely new message always carries a
+    different update_id and is never affected.
+    """
+    guard = context.user_data.get(_MISSING_ESSENTIALS_REPLAY_KEY)
+    if guard and guard.get("update_id") == update.update_id:
+        if guard.get("status") == "failed":
+            context.user_data[_MISSING_ESSENTIALS_REPLAY_KEY] = {
+                "update_id": update.update_id,
+                "status": "in_flight",
+            }
+            return False, None
+        return True, guard.get("result", AWAIT_CASE_INPUT)
+    context.user_data[_MISSING_ESSENTIALS_REPLAY_KEY] = {
+        "update_id": update.update_id,
+        "status": "in_flight",
+    }
+    return False, None
+
+
+def _mark_missing_essentials_replay_done(context, update, result: int) -> None:
+    guard = context.user_data.get(_MISSING_ESSENTIALS_REPLAY_KEY)
+    if guard and guard.get("update_id") == update.update_id:
+        guard["status"] = "done"
+        guard["result"] = result
+
+
+def _mark_missing_essentials_replay_failed(context, update) -> None:
+    guard = context.user_data.get(_MISSING_ESSENTIALS_REPLAY_KEY)
+    if guard and guard.get("update_id") == update.update_id:
+        guard["status"] = "failed"
+
+
 def _clear_case_review_state(context, keep_case: bool = True) -> None:
     """Clear transient case-review flags while optionally preserving the stored case text."""
     for key in (
@@ -1134,6 +1527,8 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
         "pending_case_bundle",
         "pending_bundle_msg_id",
         "pending_bundle_chat_id",
+        _MISSING_ESSENTIALS_REPLAY_KEY,
+        _ESSENTIALS_ASSESSMENT_KEY,
     ):
         context.user_data.pop(key, None)
     if not keep_case:
@@ -1152,10 +1547,12 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
             "last_amend_chosen_form",
             "last_bot_msg_id",
             "last_bot_chat_id",
+            "attachments",
+            "_pending_media_prompt",
             "attachment_path",
             "attachment_name",
             "attachment_kind",
-            "needs_reflection_detail",
+            "needs_reflection_detail", "rcem_personal_reflection_confirmed",
         ):
             context.user_data.pop(key, None)
 
@@ -1763,32 +2160,13 @@ def _combined_gathering_case(context) -> tuple[str, str]:
 
 def _gathering_done_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Draft now", callback_data="GATHER|done"),
-        InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel"),
+        InlineKeyboardButton("📋 Choose form", callback_data="GATHER|done"),
+        InlineKeyboardButton("❌ Discard case", callback_data="ACTION|cancel"),
     ]])
 
 
 def _gathering_reply(context) -> tuple[str, InlineKeyboardMarkup]:
     return render_message("gathering_captured"), _gathering_done_keyboard()
-
-
-def _gathering_case_has_draftable_context(context) -> bool:
-    case_text, _ = _combined_gathering_case(context)
-    return _case_context_has_user_grounding(case_text)
-
-
-async def _show_gathering_context_request(message, context, input_source: str) -> int:
-    """Keep gathering active, but do not expose Draft now until context is credible."""
-    await _delete_previous_gathering_message(context)
-    await _retire_active_source_detail_message(context)
-    prompt_msg = await _send_latest_message(
-        message,
-        context,
-        _source_context_detail_request(input_source),
-        reply_markup=_KB_CANCEL,
-    )
-    _track_source_detail_prompt(context, prompt_msg.message_id, prompt_msg.chat_id)
-    return AWAIT_GATHERING
 
 
 async def _show_gathering_ready_prompt(message, context) -> int:
@@ -1884,8 +2262,8 @@ _BTN_SETUP = InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|s
 _BTN_CANCEL = InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel")
 _BTN_HELP = InlineKeyboardButton("ℹ️ Help", callback_data="INFO|what")
 _BTN_VOICE = InlineKeyboardButton("✍️ Writing style", callback_data="ACTION|voice")
-_BTN_CONTINUE_THIN = InlineKeyboardButton("✅ Show me the draft", callback_data="ACTION|continue_thin")
-_BTN_BACK_TO_MISSING = InlineKeyboardButton("⬅️ Back to missing details", callback_data="ACTION|back_to_missing")
+_BTN_CONTINUE_THIN = InlineKeyboardButton("📄 Show draft", callback_data="ACTION|continue_thin")
+_BTN_BACK_TO_MISSING = InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_missing")
 _DATA_CLEAR_TEXT = (
     "✅ Your Portfolio Guru data is clear.\n\n"
     "Your local Portfolio Guru details have been removed. Cases already saved in Kaizen are unaffected."
@@ -1901,17 +2279,17 @@ _KAIZEN_USERNAME_PROMPT = (
 def _nav_row(
     back_text: str,
     back_callback: str,
-    cancel_text: str = "❌ Cancel",
+    cancel_text: str = "Cancel",
     cancel_callback: str = "ACTION|cancel",
 ) -> list[InlineKeyboardButton]:
     """Compact Back + Cancel row for navigation-heavy mobile screens."""
     return [
-        InlineKeyboardButton(back_text, callback_data=back_callback),
-        InlineKeyboardButton(cancel_text, callback_data=cancel_callback),
+        InlineKeyboardButton(f"🔙 {back_text}", callback_data=back_callback),
+        InlineKeyboardButton(f"❌ {cancel_text}", callback_data=cancel_callback),
     ]
 
 
-# Single-button "❌ Cancel" keyboard used in error / recovery surfaces where
+# Single-button "Cancel" keyboard used in error / recovery surfaces where
 # the user needs an obvious way out. ACTION|cancel clears flow state and
 # returns the user to a clean "ready to file" message.
 _KB_CANCEL = InlineKeyboardMarkup([[_BTN_CANCEL]])
@@ -1920,17 +2298,17 @@ _KB_CANCEL = InlineKeyboardMarkup([[_BTN_CANCEL]])
 # upstream LLM outage). Pairs with ACTION|retry_template — the bot re-runs
 # `_analyse_selected_form` using context.user_data["chosen_form"].
 _KB_RETRY_TEMPLATE = InlineKeyboardMarkup([
-    [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_template")],
+    [InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_template")],
     [_BTN_CANCEL],
 ])
 
 _KB_RETRY_SETUP = InlineKeyboardMarkup([
-    [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_setup_login")],
+    [InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_setup_login")],
     [_BTN_CANCEL],
 ])
 
 _KB_RETYPE_SETUP = InlineKeyboardMarkup([
-    [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|setup")],
+    [InlineKeyboardButton("🔄 Retry", callback_data="ACTION|setup")],
     [_BTN_CANCEL],
 ])
 
@@ -2064,20 +2442,28 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
         await _send_latest_message(
             message,
             context,
-            _format_draft_preview_for_context(draft, context) + _REPLY_HINT_SUFFIX,
+            _format_draft_preview_for_context(draft, context) + _draft_reply_hint(context),
             reply_markup=_build_approval_keyboard(improved_once=context.user_data.get("quick_improve_used", False)),
             parse_mode="Markdown",
         )
         return AWAIT_APPROVAL
 
     if pending_draft and chosen_form:
+        if not _draft_has_useful_content(pending_draft, chosen_form):
+            return await _ask_for_more_detail_before_draft(message, context, edit=False)
+        # Re-offering an older pending draft is still putting a draft in front
+        # of the doctor, so it is settled the same way. Nothing about the case
+        # is lost if the gate stops here.
+        gate = await _essentials_gate_before_draft(
+            message, context, case_text, chosen_form, edit=False
+        )
+        if gate is not None:
+            return gate
         await _send_latest_message(
             message,
             context,
             f"{reason}\n\nYour draft is still ready below.",
         )
-        if not _draft_has_useful_content(pending_draft, chosen_form):
-            return await _ask_for_more_detail_before_draft(message, context, edit=False)
         return await _show_draft_review(message, context, pending_draft, chosen_form, edit=False)
 
     if case_text and chosen_form and context.user_data.get("paused_flow_rebuild"):
@@ -2087,6 +2473,11 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
             context,
             f"{reason}\n\nI rebuilt the latest {_form_display_name(chosen_form)} step below so you can keep going.",
         )
+        gate = await _essentials_gate_before_draft(
+            message, context, case_text, chosen_form, edit=False
+        )
+        if gate is not None:
+            return gate
         try:
             refreshed_draft = await _analyse_selected_form(context, user_id, case_text, chosen_form)
         except asyncio.TimeoutError:
@@ -2642,22 +3033,27 @@ def _profile_blocked_fallback_recommendations(original_recs, allowed, excluded):
         ))
     return fallbacks
 
-# Category groupings for "See all forms" navigation
+# Category groupings for Forms navigation. Base form codes only — curriculum
+# variants (e.g. _2021) are resolved at display/filing time via
+# _form_type_for_curriculum, so listing both here would render duplicate
+# buttons for the same form.
 FORM_CATEGORIES = {
-    "🩺 Clinical": ["CBD", "DOPS", "DOPS_ACCS", "MINI_CEX", "ACAT", "LAT", "LAT_2021", "ACAF", "STAT", "MSF", "QIAT", "QIAT_2021", "JCF", "JCF_2021", "ESLE_ASSESS", "AUDIT", "AUDIT_2021"],
-    "📝 Reflective": ["REFLECT_LOG", "REFLECT_LOG_2021", "COMPLAINT", "SERIOUS_INC", "CRIT_INCIDENT", "PDP", "APPRAISAL"],
-    "👨‍🏫 Teaching": ["TEACH", "TEACH_OBS", "TEACH_CONFID", "SDL", "EDU_ACT", "EDU_MEETING", "EDU_MEETING_SUPP", "FORMAL_COURSE"],
-    "🔬 Procedural": ["PROC_LOG", "PROCEDURAL_LOG_ACCS", "US_CASE"],
-    "🔍 Quality": ["RESEARCH", "CLIN_GOV", "COST_IMPROVE", "EQUIP_SERVICE", "BUSINESS_CASE"],
-    "🏛️ Management": ["MGMT_ROTA", "MGMT_RISK", "MGMT_RECRUIT", "MGMT_PROJECT", "MGMT_RISK_PROC", "MGMT_TRAINING_EVT", "MGMT_GUIDELINE", "MGMT_INFO", "MGMT_INDUCTION", "MGMT_EXPERIENCE", "MGMT_REPORT", "MGMT_COMPLAINT"],
+    "🩺 Clinical": ["CBD", "DOPS", "DOPS_ACCS", "MINI_CEX", "ACAT", "LAT", "ACAF", "STAT", "MSF", "ESLE_ASSESS"],
+    "📝 Reflection": ["REFLECT_LOG", "COMPLAINT", "SERIOUS_INC", "CRIT_INCIDENT", "TEACH_CONFID", "PDP", "APPRAISAL", "EDU_MEETING", "EDU_MEETING_SUPP"],
+    "👨‍🏫 Learning": ["TEACH", "TEACH_OBS", "SDL", "EDU_ACT", "FORMAL_COURSE", "JCF"],
+    "🔬 Procedures": ["DOPS", "DOPS_ACCS", "PROC_LOG", "PROCEDURAL_LOG_ACCS", "US_CASE"],
+    "🔍 Quality": ["QIAT", "AUDIT", "RESEARCH", "CLIN_GOV", "MGMT_GUIDELINE", "MGMT_PROJECT", "MGMT_RISK", "MGMT_RISK_PROC"],
+    "🏛️ Management": ["LAT", "MGMT_ROTA", "MGMT_RISK", "MGMT_RISK_PROC", "MGMT_RECRUIT", "MGMT_PROJECT", "MGMT_TRAINING_EVT", "MGMT_GUIDELINE", "MGMT_INFO", "MGMT_INDUCTION", "MGMT_EXPERIENCE", "MGMT_REPORT", "MGMT_COMPLAINT", "BUSINESS_CASE", "COST_IMPROVE", "EQUIP_SERVICE"],
 }
 
-# Slug mapping for callback data (Telegram limits callback_data to 64 bytes)
+# Slug mapping for callback data (Telegram limits callback_data to 64 bytes).
+# Slugs are frozen independently of the display label above so existing
+# callback buttons already sent to users keep routing correctly.
 _CAT_SLUGS = {
     "🩺 Clinical": "CLINICAL",
-    "📝 Reflective": "REFLECTIVE",
-    "👨‍🏫 Teaching": "TEACHING",
-    "🔬 Procedural": "PROCEDURAL",
+    "📝 Reflection": "REFLECTIVE",
+    "👨‍🏫 Learning": "TEACHING",
+    "🔬 Procedures": "PROCEDURAL",
     "🔍 Quality": "QUALITY",
     "🏛️ Management": "MANAGEMENT",
 }
@@ -2846,8 +3242,8 @@ def _refresh_portfolio_confirm_text() -> str:
 
 def _refresh_portfolio_confirm_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Sync now", callback_data="ACTION|confirm_refresh_portfolio")],
-        [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
+        [InlineKeyboardButton("🔄 Sync Kaizen", callback_data="ACTION|confirm_refresh_portfolio")],
+        [InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")],
     ])
 
 
@@ -2865,29 +3261,168 @@ def _health_refresh_confirm_text() -> str:
 
 def _health_refresh_confirm_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Refresh and show health", callback_data="ACTION|confirm_refresh_for_health")],
-        [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
+        [InlineKeyboardButton("🔄 Refresh health", callback_data="ACTION|confirm_refresh_for_health")],
+        [InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")],
     ])
 
 
-def _health_result_keyboard() -> InlineKeyboardMarkup:
+# Callbacks still sitting in older chat messages, mapped onto their successor
+# view so tapping one never dead-ends.
+LEGACY_HEALTH_DETAIL_VIEWS = {"stuck": "actions", "domains": "coverage", "basis": "scan"}
+
+
+def _health_view_keyboard(
+    view: str = "priorities",
+    *,
+    page: int = 0,
+    page_count: int = 1,
+    queue: str | None = None,
+    queue_totals: dict[str, int] | None = None,
+    needs_review_month: bool = False,
+) -> InlineKeyboardMarkup:
+    """Show only the controls that are useful from the current Health view.
+
+    ``needs_review_month`` remains in the signature for callers and stored
+    reports created before action-first navigation. It no longer changes the
+    everyday keyboard.
+    """
+    rows: list[list[InlineKeyboardButton]] = []
+
+    if view == "priorities":
+        totals = queue_totals or {}
+        draft_total = int(totals.get("draft", 0))
+        awaiting_total = int(totals.get("awaiting", 0))
+        if draft_total:
+            rows.append([InlineKeyboardButton(
+                f"📝 Review drafts ({draft_total})",
+                callback_data="ACTION|health_queue|draft|0",
+            )])
+        secondary: list[InlineKeyboardButton] = []
+        if awaiting_total:
+            secondary.append(InlineKeyboardButton(
+                f"⏳ Awaiting ({awaiting_total})",
+                callback_data="ACTION|health_queue|awaiting|0",
+            ))
+        secondary.append(InlineKeyboardButton(
+            "ℹ️ About", callback_data="ACTION|health_view|about"
+        ))
+        rows.append(secondary)
+
+    elif view == "actions" and queue_totals is not None:
+        totals = queue_totals or {}
+        rows.append([
+            InlineKeyboardButton(
+                f"📝 Drafts ({int(totals.get('draft', 0))})",
+                callback_data="ACTION|health_queue|draft|0",
+            ),
+            InlineKeyboardButton(
+                f"⏳ Awaiting ({int(totals.get('awaiting', 0))})",
+                callback_data="ACTION|health_queue|awaiting|0",
+            ),
+        ])
+        rows.append([
+            InlineKeyboardButton("🔙 Health", callback_data="ACTION|health_view|priorities")
+        ])
+
+    elif view == "action_queue" and queue in {"draft", "awaiting"}:
+        pager: list[InlineKeyboardButton] = []
+        if page > 0:
+            pager.append(InlineKeyboardButton(
+                "⬅️ Previous",
+                callback_data=f"ACTION|health_queue|{queue}|{page - 1}",
+            ))
+        if page < page_count - 1:
+            pager.append(InlineKeyboardButton(
+                "➡️ Next",
+                callback_data=f"ACTION|health_queue|{queue}|{page + 1}",
+            ))
+        if pager:
+            rows.append(pager)
+        rows.append([
+            InlineKeyboardButton("🔙 Health", callback_data="ACTION|health_view|priorities")
+        ])
+
+    # Direct callers and buttons sent before V2.1 used one combined page
+    # number. Keep their previous/next route alive while new reports pass
+    # queue totals and use the independent queue controls above.
+    elif view == "actions" and queue_totals is None:
+        pager: list[InlineKeyboardButton] = []
+        if page > 0:
+            pager.append(InlineKeyboardButton(
+                "⬅️ Previous", callback_data=f"ACTION|health_page|{page - 1}"
+            ))
+        if page < page_count - 1:
+            pager.append(InlineKeyboardButton(
+                "➡️ Next", callback_data=f"ACTION|health_page|{page + 1}"
+            ))
+        if pager:
+            rows.append(pager)
+        rows.append([
+            InlineKeyboardButton("🔙 Health", callback_data="ACTION|health_view|priorities")
+        ])
+
+    # Buttons sent before V2.1 used one combined page number. Keep their
+    # previous/next route alive while new reports use independent queues.
+    elif view == "legacy_actions":
+        pager: list[InlineKeyboardButton] = []
+        if page > 0:
+            pager.append(InlineKeyboardButton(
+                "⬅️ Previous", callback_data=f"ACTION|health_page|{page - 1}"
+            ))
+        if page < page_count - 1:
+            pager.append(InlineKeyboardButton(
+                "➡️ Next", callback_data=f"ACTION|health_page|{page + 1}"
+            ))
+        if pager:
+            rows.append(pager)
+        rows.append([
+            InlineKeyboardButton("🔙 Health", callback_data="ACTION|health_view|priorities")
+        ])
+
+    elif view in {"about", "more", "coverage", "curriculum", "scan"}:
+        rows.append([
+            InlineKeyboardButton("🔙 Health", callback_data="ACTION|health_view|priorities")
+        ])
+
+    return InlineKeyboardMarkup(rows)
+
+
+def _health_refresh_route_keyboard() -> InlineKeyboardMarkup:
+    """Offered when a tapped button belongs to a report this chat no longer holds."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Refresh health", callback_data="ACTION|health")],
+    ])
+
+
+def _health_empty_keyboard() -> InlineKeyboardMarkup:
+    """Useful next routes when a scan can see no portfolio evidence."""
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🔎 Evidence basis", callback_data="ACTION|health_detail|basis"),
-            InlineKeyboardButton("📈 Activity snapshot", callback_data="ACTION|health_detail|activity"),
+            InlineKeyboardButton("🔄 Refresh health", callback_data="ACTION|health"),
+            InlineKeyboardButton("➕ New case", callback_data="ACTION|file"),
         ],
-        [
-            InlineKeyboardButton("📋 Domain detail", callback_data="ACTION|health_detail|domains"),
-            InlineKeyboardButton("➕ File another case", callback_data="ACTION|file"),
-        ],
+        [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")],
     ])
 
 
-def _health_detail_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("➕ File another case", callback_data="ACTION|file")],
-        [InlineKeyboardButton("↩️ Back to health report", callback_data="ACTION|health_back_to_report")],
-    ])
+_HEALTH_REPORT_EXPIRED = (
+    "That health report is no longer in memory for this chat.\n\n"
+    "Tap Refresh health to run a new read-only scan."
+)
+
+# Persisted Telegram callbacks can outlive a release. Do not replay text from
+# older Health presentations whose claims no longer match the current filter.
+_HEALTH_REPORT_VERSION = 2
+
+_HEALTH_ABOUT_FALLBACK = (
+    "ℹ️ *About Portfolio Health*\n\n"
+    "Source: this older report has no current read-only scan details.\n"
+    "Freshness unconfirmed: recent Kaizen activity may be missing.\n\n"
+    "Counts highlight older Kaizen workflow items visible to its scan, not every unfinished item.\n"
+    "Automated classification can be wrong; check the linked Kaizen item if something looks wrong.\n"
+    "Portfolio Health does not edit, file, chase or delete anything.\n\n"
+    "_Read-only planning aid, not a formal training or appraisal judgement._"
+)
 
 
 def _heading_key(line: str) -> str:
@@ -2994,23 +3529,259 @@ def _health_compact_report_text(full_text: str) -> str:
     sections = _health_report_sections(full_text)
     basis_lines = [
         line for line in sections["basis"].splitlines()
-        if line.startswith("Scanned:") or line.startswith("Confidence:")
+        if line.startswith("Scanned:") or line.startswith("Refresh:")
     ]
     basis_summary = "\n".join(basis_lines[:2])
 
     if basis_summary and "Scanned:" not in text:
-        text = f"{text}\n\n*Scan confidence*\n{basis_summary}"
+        text = f"{text}\n\n*Scan facts*\n{basis_summary}"
 
     return text
 
 
-def _store_health_report_context(context, full_text: str) -> str:
-    summary = _health_compact_report_text(full_text)
+REVIEW_DATE_KEY = "review_date"
+
+
+def _parse_review_month(raw: str):
+    """Accept "Oct 2026", "October 2026", "10/2026" or "2026-10".
+
+    Stored as the first of the month: a doctor knows the month of their ARCP
+    long before the day, and a made-up day would read as precision we do not
+    have.
+    """
+    from datetime import datetime as _d
+
+    text = (raw or "").strip()
+    if not text:
+        return None
+    for fmt in ("%b %Y", "%B %Y", "%m/%Y", "%Y-%m", "%b%Y", "%B%Y"):
+        try:
+            return _d.strptime(text, fmt).date().replace(day=1)
+        except ValueError:
+            continue
+    return None
+
+
+def _stored_review_date(profile):
+    """Read the review date off a health profile, tolerating older records."""
+    from datetime import date as _date
+
+    raw = (getattr(profile, "pathway_config", None) or {}).get(REVIEW_DATE_KEY)
+    if not raw:
+        return None
+    try:
+        parts = str(raw).split("-")
+        return _date(int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 1)
+    except (ValueError, IndexError):
+        return None
+
+
+def _save_review_month(user_id: int, review_month) -> None:
+    """Persist one confirmed review month through the existing profile store."""
+    profile = _get_or_default_health_profile(user_id)
+    config = dict(profile.pathway_config or {})
+    config[REVIEW_DATE_KEY] = review_month.replace(day=1).isoformat()
+    save_health_profile(
+        HealthProfile(
+            user_id=str(user_id),
+            pathway=profile.pathway,
+            pathway_config=config,
+            created_at=profile.created_at,
+            updated_at=datetime.now(UTC),
+        )
+    )
+
+
+def _health_review_month_picker_keyboard(reference=None) -> InlineKeyboardMarkup:
+    """The next twelve calendar months; tapping one only previews it."""
+    from datetime import date as _date
+
+    current = reference or _date.today()
+    choices = []
+    for offset in range(12):
+        absolute_month = current.year * 12 + current.month - 1 + offset
+        choice = _date(absolute_month // 12, absolute_month % 12 + 1, 1)
+        choices.append(InlineKeyboardButton(
+            f"📅 {choice.strftime('%b %Y')}",
+            callback_data=f"ACTION|health_review_select|{choice.strftime('%Y-%m')}",
+        ))
+    rows = [choices[index:index + 3] for index in range(0, len(choices), 3)]
+    rows.append([
+        InlineKeyboardButton("🔙 Cancel", callback_data="ACTION|health_view|more")
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def _health_review_month_confirmation_keyboard(review_month) -> InlineKeyboardMarkup:
+    token = review_month.strftime("%Y-%m")
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            "✅ Confirm",
+            callback_data=f"ACTION|health_review_confirm|{token}",
+        )],
+        [InlineKeyboardButton(
+            "📅 Choose another month", callback_data="ACTION|health_review_setup"
+        )],
+        [InlineKeyboardButton("🔙 Cancel", callback_data="ACTION|health_view|more")],
+    ])
+
+
+async def arcp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Set the review month everything else is timed against."""
+    user_id = update.effective_user.id
+    raw = " ".join(context.args) if getattr(context, "args", None) else ""
+    parsed = _parse_review_month(raw)
+    if not parsed:
+        current = _stored_review_date(_get_or_default_health_profile(user_id))
+        shown = current.strftime("%B %Y") if current else "not set"
+        await update.message.reply_text(
+            f"\U0001F4C5 *Review date*\n\nCurrently: {shown}\n\n"
+            "Set it with the month of your next ARCP or review, for example:\n"
+            "`/arcp Oct 2026`\n\n"
+            "_Portfolio Health uses it to count down and to time reminders. "
+            "The month is enough — no day needed._",
+            parse_mode="Markdown",
+        )
+        return
+
+    _save_review_month(user_id, parsed)
+    await update.message.reply_text(
+        f"\u2705 Review date set to *{parsed.strftime('%B %Y')}*.\n\n"
+        "Run /health to see everything timed to it.",
+        parse_mode="Markdown",
+    )
+
+
+def _format_last_scanned(sync_status) -> str | None:
+    """Human "scanned at" stamp for the report footer, or None if never run."""
+    run = getattr(sync_status, "last_run", None) if sync_status else None
+    finished = getattr(run, "finished_at", None) if run else None
+    if not finished:
+        return None
+    try:
+        from datetime import datetime as _d
+        parsed = _d.fromisoformat(str(finished).replace("Z", "+00:00"))
+        return parsed.astimezone().strftime("%-d %b %Y %H:%M")
+    except Exception:
+        return None
+
+
+def _store_health_report_context(
+    context,
+    *,
+    views: dict[str, str],
+    action_pages: list[str],
+    action_queue_pages: dict[str, list[str]],
+    action_queue_totals: dict[str, int],
+    needs_review_month: bool,
+) -> None:
+    """Remember the rendered views so the navigation buttons have something to show.
+
+    Every view — including each Actions page — is rendered once, from the
+    assessment, at scan time. Nothing is re-derived from the sent Markdown: a
+    reworded heading used to break the detail buttons into "no longer
+    available", and re-running the assessment on a button press would let the
+    page a doctor is paging through change underneath them.
+    """
     context.user_data["last_health_report"] = {
-        "summary": summary,
-        "sections": _health_report_sections(full_text),
+        "version": _HEALTH_REPORT_VERSION,
+        "views": views,
+        "action_pages": action_pages,
+        "page": 0,
+        "action_queue_pages": action_queue_pages,
+        "action_queue_totals": action_queue_totals,
+        "queue_page": {"draft": 0, "awaiting": 0},
+        "needs_review_month": needs_review_month,
     }
-    return summary
+
+
+def _health_view_payload(
+    context,
+    view: str,
+    *,
+    page: int | None = None,
+    queue: str | None = None,
+):
+    """Return ``(text, keyboard)`` for a stored view, or ``None`` if it is gone.
+
+    ``page`` of ``None`` means "wherever they were": coming back to Actions
+    from another view resumes the page they left, rather than sending someone
+    who had paged to item 16 back to item 1.
+
+    Also the recovery path for a button tapped on an old message: a page number
+    beyond what is stored is clamped to the stored report rather than treated
+    as an error, so the doctor lands on real evidence instead of a dead end.
+    """
+    report = context.user_data.get("last_health_report") or {}
+    if report.get("version") != _HEALTH_REPORT_VERSION:
+        return None
+    views = report.get("views") or {}
+    pages = report.get("action_pages") or []
+    queue_pages = report.get("action_queue_pages") or {}
+    queue_totals = report.get("action_queue_totals") or {}
+    if not views:
+        return None
+
+    if view == "actions":
+        text = views.get("actions")
+        if text is None:
+            # Reports stored before V2.1 did not have an Actions landing.
+            if not pages:
+                return None
+            page = max(0, min(int(report.get("page", 0)), len(pages) - 1))
+            report["page"] = page
+            return pages[page], _health_view_keyboard(
+                "legacy_actions", page=page, page_count=len(pages)
+            )
+        return text, _health_view_keyboard(
+            "actions", queue_totals=queue_totals
+        )
+
+    if view == "priorities":
+        text = views.get("priorities")
+        if text is None:
+            return None
+        return text, _health_view_keyboard(
+            "priorities", queue_totals=queue_totals
+        )
+
+    if view == "about":
+        return (
+            views.get("about") or _HEALTH_ABOUT_FALLBACK,
+            _health_view_keyboard("about"),
+        )
+
+    if view == "action_queue" and queue in {"draft", "awaiting"}:
+        selected_pages = queue_pages.get(queue) or []
+        if not selected_pages:
+            return None
+        positions = report.setdefault("queue_page", {"draft": 0, "awaiting": 0})
+        page = positions.get(queue, 0) if page is None else page
+        page = max(0, min(int(page), len(selected_pages) - 1))
+        positions[queue] = page
+        return selected_pages[page], _health_view_keyboard(
+            "action_queue",
+            page=page,
+            page_count=len(selected_pages),
+            queue=queue,
+        )
+
+    if view == "legacy_actions":
+        if not pages:
+            return None
+        page = report.get("page", 0) if page is None else page
+        page = max(0, min(int(page), len(pages) - 1))
+        report["page"] = page
+        return pages[page], _health_view_keyboard(
+            "legacy_actions", page=page, page_count=len(pages)
+        )
+
+    text = views.get(view)
+    if text is None:
+        return None
+    return text, _health_view_keyboard(
+        view, needs_review_month=bool(report.get("needs_review_month"))
+    )
 
 
 def _health_sync_recovery_keyboard(status: str) -> InlineKeyboardMarkup:
@@ -3025,20 +3796,28 @@ def _health_sync_recovery_keyboard(status: str) -> InlineKeyboardMarkup:
             [InlineKeyboardButton("🔗 Reconnect Kaizen", callback_data="ACTION|setup")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 Try scan again", callback_data="ACTION|health")],
-        [InlineKeyboardButton("📊 Show limited view", callback_data="ACTION|health_limited")],
+        [
+            InlineKeyboardButton("🔄 Retry", callback_data="ACTION|health"),
+            InlineKeyboardButton("📊 Limited view", callback_data="ACTION|health_limited"),
+        ],
     ])
 
 
 def _refresh_portfolio_result_keyboard(status: str) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     if status in {"ok", "partial"}:
-        rows.append([InlineKeyboardButton("📊 View portfolio health", callback_data="ACTION|health")])
+        rows.append([
+            InlineKeyboardButton("📊 Portfolio health", callback_data="ACTION|health"),
+            InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings"),
+        ])
     elif status == "auth_required":
         rows.append([InlineKeyboardButton("🔗 Reconnect Kaizen", callback_data="ACTION|setup")])
+        rows.append([InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")])
     else:
-        rows.append([InlineKeyboardButton("🔄 Try again", callback_data="ACTION|refresh_portfolio")])
-    rows.append([InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")])
+        rows.append([
+            InlineKeyboardButton("🔄 Retry", callback_data="ACTION|refresh_portfolio"),
+            InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings"),
+        ])
     return InlineKeyboardMarkup(rows)
 
 
@@ -3125,7 +3904,7 @@ def _settings_view_components(
     pathway_label = _pathway_label(_get_or_default_health_profile(user_id).pathway)
     voice_profile = get_voice_profile(user_id)
     voice_status = "Active" if voice_profile else "Not set"
-    voice_cta = f"✍️ Writing style: {voice_status}"
+    voice_cta = "Writing style"
     voice_hint = "Helps drafts match your portfolio writing." if not voice_profile else "Drafts already use your writing style."
 
     plan_lines = []
@@ -3149,14 +3928,16 @@ def _settings_view_components(
         plan_lines.append(kaizen_row)
     plan_block = ("\n".join(plan_lines) + "\n\n") if plan_lines else ""
 
-    setup_button_label = "🔗 Connect Kaizen" if connected is False else "🔗 Update Kaizen login"
+    setup_button_label = "Connect Kaizen" if connected is False else "Update Kaizen login"
 
     portfolio_defaults_summary = f"{training_level} · {pathway_label} · {curriculum_label}"
 
     buttons: list[list[InlineKeyboardButton]] = [
-        [InlineKeyboardButton(setup_button_label, callback_data="ACTION|setup")],
-        [InlineKeyboardButton(voice_cta, callback_data="ACTION|voice")],
-        [InlineKeyboardButton("📋 Portfolio defaults", callback_data="ACTION|portfolio_defaults")],
+        [InlineKeyboardButton(f"🔗 {setup_button_label}", callback_data="ACTION|setup")],
+        [
+            InlineKeyboardButton(f"✍️ {voice_cta}", callback_data="ACTION|voice"),
+            InlineKeyboardButton("📋 Portfolio defaults", callback_data="ACTION|portfolio_defaults"),
+        ],
         [InlineKeyboardButton("🔄 Reset data", callback_data="ACTION|delete")],
     ]
     text = (
@@ -3188,7 +3969,7 @@ def _build_welcome_keyboard(connected: bool = False):
 FORM_EMOJIS = {
     "CBD": "🩺", "DOPS": "🔪", "DOPS_ACCS": "🔪", "MINI_CEX": "🏥", "ACAT": "📋",
     "MSF": "👥", "QIAT": "🎓", "LAT": "📖", "JCF": "💼",
-    "ACAF": "✅", "STAT": "📊",
+    "ACAF": "📋", "STAT": "📊",
     "TEACH": "👨‍🏫", "PROC_LOG": "🔬", "PROCEDURAL_LOG_ACCS": "🔬", "SDL": "📖", "US_CASE": "🔊",
     "COMPLAINT": "📝", "SERIOUS_INC": "🚨",
     "EDU_ACT": "🎓", "FORMAL_COURSE": "📋",
@@ -3241,7 +4022,7 @@ FORM_BUTTON_LABELS = {
     "PDP": "PDP",
     "RPL": "Reflective Practice Log",
     # Newly visible forms
-    "REFLECT_LOG": "Reflective Log",
+    "REFLECT_LOG": "Reflective log",
     "TEACH_OBS": "Teaching Observation",
     "ESLE_ASSESS": "ESLE",
     "TEACH_CONFID": "Confidentiality",
@@ -3305,6 +4086,11 @@ FIELD_EMOJIS = {
     "esle_description":       "📝",
     "us_findings":            "🔊",
     "us_indication":          "🔊",
+    "date_of_case":           "📅",
+    "us_application":         "🔊",
+    "changed_management":     "🔀",
+    "usable_images":          "🖼️",
+    "interpret_images":       "🔎",
     "procedure_type":         "🔬",
     "complications":          "⚠️",
     "outcome":                "📊",
@@ -3337,12 +4123,30 @@ def _recommendation_form_display_name(form_type: str, curriculum: str = "2025") 
     return name
 
 
+_FUNNEL_METADATA_KEYS = frozenset({
+    "source",
+    "form_type",
+    "state",
+    "count",
+    "has_draft",
+    "has_missing",
+    "tier",
+    "reason",
+    # Health interaction telemetry is structural only. Values at each call
+    # site are bounded pane/queue names or page indexes. The chosen review
+    # month is deliberately not retained in analytics.
+    "view",
+    "queue",
+    "page",
+})
+
+
 def _track_funnel_event(context, event: str, *, update_last: bool = True, **metadata) -> None:
     """Log PHI-free UX funnel events for friction analysis."""
     safe = {
         key: value
         for key, value in metadata.items()
-        if key in {"source", "form_type", "state", "count", "has_draft", "has_missing", "tier", "reason"}
+        if key in _FUNNEL_METADATA_KEYS
     }
     try:
         if update_last:
@@ -3372,15 +4176,36 @@ async def _alert_filing_failure(
     reason: str | None = None,
     user_id: int | None = None,
 ) -> None:
-    """Page the operator for live Kaizen filing failures without PHI."""
+    """Page the operator ONLY when a Kaizen draft save is uncertain.
+
+    Classification is status-first, reason-second:
+
+    - ``partial`` / ``timeout`` / ``exception`` -> page regardless of reason
+      (completion unknown; a mid-filing failure cannot prove nothing was
+      written, even when the reason is FORM_UNAVAILABLE).
+    - ``failed`` + ``SAVE_FAILURE`` -> page (fields filled, save not confirmed).
+    - ``failed`` + FORM_UNAVAILABLE / LOGIN_FAILED / FIELD_FAILURE / UNKNOWN,
+      and any status/reason outside the known set -> quiet. These are routine
+      and already covered by filing-attempt + funnel telemetry and the
+      affected-user recovery report.
+
+    ``form_type``, ``reason`` and ``user_id`` never reach the operator: the
+    message is a fixed template keyed ``filing_uncertain`` with one
+    category-wide 900 s cooldown (not per person/form).
+    """
+    if status in ("partial", "timeout", "exception"):
+        uncertain = True
+    elif status == "failed" and reason == "SAVE_FAILURE":
+        uncertain = True
+    else:
+        uncertain = False
+    if not uncertain:
+        return
     try:
         import ops_alert
-        reason_text = f" ({reason})" if reason else ""
-        user_text = f" user={user_id}" if user_id is not None else ""
         await ops_alert.notify_operator(
             getattr(context, "bot", None),
-            f"Kaizen filing {status}{reason_text} for {form_type}.{user_text}",
-            key=f"kaizen_filing_failure:{form_type}:{status}:{reason or 'unknown'}",
+            key="filing_uncertain",
             cooldown=900,
         )
     except Exception:
@@ -3555,32 +4380,29 @@ def _filtered_recommendations_for_curriculum(recommendations, curriculum="2025")
 
 
 def _build_form_choice_keyboard(recommendations, curriculum="2025"):
-    """Build inline keyboard for form type selection — AI suggestions + See all forms escape hatch.
+    """Build inline keyboard for form type selection — AI suggestions + Forms escape hatch.
     Filters recommendations by curriculum preference."""
     filtered = _filtered_recommendations_for_curriculum(recommendations, curriculum)
 
+    best = next((rec for rec in filtered if getattr(rec, "uuid", None)), None)
+    ordered = ([best] + [rec for rec in filtered if rec is not best]) if best else filtered
     buttons = []
-    for rec in filtered:
+    for rec in ordered:
         base_ft = rec.form_type.replace("_2021", "") if rec.form_type.endswith("_2021") else rec.form_type
-        emoji = FORM_EMOJIS.get(base_ft, "📄")
         label = FORM_BUTTON_LABELS.get(rec.form_type) or FORM_BUTTON_LABELS.get(base_ft) or _recommendation_form_display_name(base_ft, curriculum)[:24]
+        emoji = FORM_EMOJIS.get(rec.form_type) or FORM_EMOJIS.get(base_ft, "📋")
         if rec.uuid:
-            buttons.append(InlineKeyboardButton(f"{emoji} {label}", callback_data=f"FORM|{rec.form_type}"))
+            if rec is best:
+                buttons.append(InlineKeyboardButton(f"{emoji} {label}", callback_data="FORM|best"))
+            else:
+                buttons.append(InlineKeyboardButton(f"{emoji} {label}", callback_data=f"FORM|{rec.form_type}"))
         else:
             buttons.append(InlineKeyboardButton(f"{emoji} {label} (soon)", callback_data="FORM|disabled"))
 
-    rows = []
-    best = next((rec for rec in filtered if getattr(rec, "uuid", None)), None)
-    if best:
-        base_ft = best.form_type.replace("_2021", "") if best.form_type.endswith("_2021") else best.form_type
-        best_label = FORM_BUTTON_LABELS.get(best.form_type) or FORM_BUTTON_LABELS.get(base_ft) or _recommendation_form_display_name(base_ft, curriculum)
-        rows.append([InlineKeyboardButton(f"✅ Use best fit: {best_label}", callback_data="FORM|best")])
-        buttons = [button for button in buttons if button.callback_data != f"FORM|{best.form_type}"]
-
-    rows.extend([buttons[i:i+2] for i in range(0, len(buttons), 2)])
+    rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
     rows.append([
-        InlineKeyboardButton("📋 See all forms", callback_data="FORM|show_all"),
-        InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|form"),
+        InlineKeyboardButton("📋 Forms", callback_data="FORM|show_all"),
+        InlineKeyboardButton("🔄 Restart", callback_data="CANCEL|form"),
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -3630,7 +4452,7 @@ def _build_category_picker_keyboard(user_id):
             row = []
     if row:
         rows.append(row)
-    rows.append([InlineKeyboardButton("⬅️ Back", callback_data="FORM|back")])
+    rows.append([InlineKeyboardButton("🔙 Back", callback_data="FORM|back")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -3653,11 +4475,11 @@ def _build_category_forms_keyboard(user_id, cat_slug):
             else:
                 continue
         base_ft = actual_ft.replace("_2021", "") if actual_ft.endswith("_2021") else actual_ft
-        emoji = FORM_EMOJIS.get(base_ft, "📄")
         label = FORM_BUTTON_LABELS.get(actual_ft) or FORM_BUTTON_LABELS.get(base_ft) or _form_display_name(base_ft)[:24]
+        emoji = FORM_EMOJIS.get(actual_ft) or FORM_EMOJIS.get(base_ft, "📋")
         buttons.append(InlineKeyboardButton(f"{emoji} {label}", callback_data=f"FORM|{actual_ft}"))
     rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
-    rows.append([InlineKeyboardButton("⬅️ Back to categories", callback_data="FORM|show_all")])
+    rows.append([InlineKeyboardButton("🔙 Back", callback_data="FORM|show_all")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -3670,15 +4492,23 @@ def _build_curriculum_keyboard(callback_prefix: str = "SET_CURRICULUM"):
 
 def _build_template_review_keyboard():
     return InlineKeyboardMarkup([
-        [_BTN_CONTINUE_THIN],
-        [_BTN_CANCEL],
+        [_BTN_CONTINUE_THIN, _BTN_CANCEL],
     ])
 
 
 def _build_explicit_form_keyboard(form_type: str):
+    base_form_type = _normalise_form_type(form_type)
+    label = (
+        FORM_BUTTON_LABELS.get(form_type)
+        or FORM_BUTTON_LABELS.get(base_form_type)
+        or _form_display_name(form_type)
+    )
+    emoji = FORM_EMOJIS.get(form_type) or FORM_EMOJIS.get(base_form_type, "📋")
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"✅ Draft {_form_display_name(form_type)}", callback_data=f"FORM|{form_type}")],
-        [InlineKeyboardButton("📋 See all forms", callback_data="FORM|show_all")],
+        [
+            InlineKeyboardButton(f"{emoji} {label}", callback_data=f"FORM|{form_type}"),
+            InlineKeyboardButton("📋 Forms", callback_data="FORM|show_all"),
+        ],
         [_BTN_CANCEL],
     ])
 
@@ -3688,7 +4518,7 @@ def _store_explicit_form_choice_state(
     form_type: str,
     prompt_text: str,
 ) -> None:
-    """Persist an explicit-form screen so See all forms -> Back is stable."""
+    """Persist an explicit-form screen so Forms -> Back is stable."""
     from extractor import FORM_UUIDS
 
     context.user_data["form_recommendations"] = [
@@ -3708,43 +4538,26 @@ def _build_approval_keyboard(
     needs_reflection_detail: bool = False,
 ):
     rows = []
-    if needs_reflection_detail:
-        rows.append([
-            InlineKeyboardButton("✍️ Add reflection/context", callback_data="ACTION|add_reflection_detail"),
-        ])
-        if not improved_once:
-            rows.append([
-                InlineKeyboardButton("💡 Improve reflection", callback_data="IMPROVE|reflection"),
-            ])
-    elif improved_once:
-        # After Quick Improve is used, remove the improve button entirely
-        rows.append([
-            InlineKeyboardButton("📤 Save as draft", callback_data="APPROVE|draft"),
-        ])
-    else:
-        rows.append([
-            InlineKeyboardButton("📤 Save as draft", callback_data="APPROVE|draft"),
-            InlineKeyboardButton("💡 Improve reflection", callback_data="IMPROVE|reflection"),
-        ])
+    if not needs_reflection_detail:
+        rows.append([InlineKeyboardButton("💾 Save to Kaizen", callback_data="APPROVE|draft")])
     if can_back_to_missing:
-        rows.append(_nav_row("⬅️ Back to missing details", "ACTION|back_to_missing", "❌ Cancel", "CANCEL|draft"))
+        rows.append(_nav_row("Back", "ACTION|back_to_missing", "Cancel", "CANCEL|draft"))
     else:
         rows.append([InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|draft")])
     return InlineKeyboardMarkup(rows)
 
 
 def _build_amend_keyboard(improved_once: bool = False) -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton("📤 Save updated draft", callback_data="APPROVE|draft")]]
-    if not improved_once:
-        rows[0].append(InlineKeyboardButton("💡 Improve reflection", callback_data="IMPROVE|reflection"))
-    rows.append([InlineKeyboardButton("❌ Cancel amend", callback_data="AMEND|cancel")])
-    return InlineKeyboardMarkup(rows)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💾 Save to Kaizen", callback_data="APPROVE|draft")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="AMEND|cancel")],
+    ])
 
 
 def _build_doc_intent_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📝 Read as case info", callback_data="DOCUSE|info"),
+            InlineKeyboardButton("📝 Use as case", callback_data="DOCUSE|info"),
             InlineKeyboardButton("📎 Attach only", callback_data="DOCUSE|attach"),
         ],
         [
@@ -3754,15 +4567,41 @@ def _build_doc_intent_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def _build_evidence_artifact_keyboard() -> InlineKeyboardMarkup:
+    """Choices for a certificate/award upload.
+
+    "Use as case" is deliberately absent: there is no clinical case in a
+    certificate, and offering to read one is what pushed a doctor into a
+    Self-directed Learning Reflection they never described.
+    """
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📎 Attach as evidence", callback_data="DOCUSE|attach"),
+            InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|doc_intent"),
+        ],
+    ])
+
+
+def _document_intent_prompt(file_name: str) -> tuple[str, InlineKeyboardMarkup]:
+    """Prompt for a received document, honest about non-case artifacts."""
+    if looks_like_evidence_artifact(file_name=file_name):
+        return evidence_artifact_upload_message(), _build_evidence_artifact_keyboard()
+    return "📄 How would you like to use this document?", _build_doc_intent_keyboard()
+
+
 def _build_image_intent_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📝 Use for drafting", callback_data="DOCUSE|info"),
+            # "Use for drafting" implied the bot would interpret the image. It
+            # will not: it reads text off it (report wording, labels, notes) and
+            # refuses to read the clinical picture itself without the doctor's
+            # own account. The label now says what actually happens.
+            InlineKeyboardButton("📝 Read text", callback_data="DOCUSE|info"),
             InlineKeyboardButton("📎 Attach only", callback_data="DOCUSE|attach"),
         ],
         [
-            InlineKeyboardButton("📎 Use + attach", callback_data="DOCUSE|both"),
-            InlineKeyboardButton("❌ Remove image", callback_data="DOCUSE|ignore"),
+            InlineKeyboardButton("📎 Read + attach", callback_data="DOCUSE|both"),
+            InlineKeyboardButton("❌ Remove", callback_data="DOCUSE|ignore"),
         ],
     ])
 
@@ -3770,8 +4609,8 @@ def _build_image_intent_keyboard() -> InlineKeyboardMarkup:
 def _build_video_intent_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📎 Attach video", callback_data="DOCUSE|attach"),
-            InlineKeyboardButton("❌ Remove video", callback_data="DOCUSE|ignore"),
+            InlineKeyboardButton("📎 Attach", callback_data="DOCUSE|attach"),
+            InlineKeyboardButton("❌ Remove", callback_data="DOCUSE|ignore"),
         ],
     ])
 
@@ -3787,8 +4626,10 @@ def _active_draft_keyboard(context) -> InlineKeyboardMarkup:
 
 def _build_amend_new_case_choice_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✏️ Update this draft", callback_data="AMEND|update_current")],
-        [InlineKeyboardButton("📋 Start a case", callback_data="AMEND|start_new")],
+        [
+            InlineKeyboardButton("✏️ Update draft", callback_data="AMEND|update_current"),
+            InlineKeyboardButton("➕ New case", callback_data="AMEND|start_new"),
+        ],
         [InlineKeyboardButton("❌ Cancel", callback_data="AMEND|cancel_choice")],
     ])
 
@@ -3802,18 +4643,24 @@ def _has_retryable_failed_filing_draft(context) -> bool:
 
 def _build_failed_filing_input_gate_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 Retry filing this draft", callback_data="ACTION|retry_filing")],
-        [InlineKeyboardButton("✏️ Keep editing this draft", callback_data="CASE|improve")],
-        [InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="CASE|new")],
-        [InlineKeyboardButton("❌ Cancel current draft", callback_data="ACTION|cancel")],
+        [
+            InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_filing"),
+            InlineKeyboardButton("✏️ Edit", callback_data="CASE|improve"),
+        ],
+        [
+            InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="CASE|new"),
+            InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel"),
+        ],
     ])
 
 
 def _build_open_case_new_case_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📋 Start new case", callback_data="CASE|new")],
-        [InlineKeyboardButton("✏️ Add to current draft", callback_data="CASE|improve")],
-        [InlineKeyboardButton("❌ Cancel current draft", callback_data="ACTION|cancel")],
+        [
+            InlineKeyboardButton("➕ New case", callback_data="CASE|new"),
+            InlineKeyboardButton("✏️ Add to draft", callback_data="CASE|improve"),
+        ],
+        [InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel")],
     ])
 
 
@@ -3878,8 +4725,8 @@ def _build_post_review_keyboard(improved_once: bool = False):
     return _build_approval_keyboard(improved_once=improved_once)
 
 
-_POST_FILING_SAME_CASE_LABEL = "💾 Save as another WBA"
-_POST_FILING_NEW_CASE_LABEL = "📋 File another case"
+_POST_FILING_SAME_CASE_LABEL = "📋 Another form"
+_POST_FILING_NEW_CASE_LABEL = "➕ New case"
 
 
 def _build_post_filing_keyboard(
@@ -3909,24 +4756,26 @@ def _build_post_filing_keyboard(
 
     if status == "failed":
         rows.append([
-            InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing"),
+            InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_filing"),
             InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file"),
-            _BTN_CANCEL,
         ])
+        rows.append([_BTN_CANCEL])
         return InlineKeyboardMarkup(rows)
 
     if status == "partial" or uncertain:
         if saved_url:
             rows.append([InlineKeyboardButton("🔗 Open saved draft", url=saved_url)])
         if same_case_available and not uncertain:
-            rows.append([InlineKeyboardButton(_POST_FILING_SAME_CASE_LABEL, callback_data="ACTION|same_case_another")])
-            rows.append([InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file")])
+            rows.append([
+                InlineKeyboardButton(_POST_FILING_SAME_CASE_LABEL, callback_data="ACTION|same_case_another"),
+                InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file"),
+            ])
         else:
             rows.append([InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file")])
         if not saved_url and FORM_UUIDS.get(form_type):
             rows.append([InlineKeyboardButton("🔗 Open Kaizen", url="https://kaizenep.com/activities")])
         if uncertain:
-            rows.append([InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")])
+            rows.append([InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_filing")])
         if uncertain:
             rows.append([_BTN_CANCEL])
         return InlineKeyboardMarkup(rows)
@@ -3934,8 +4783,10 @@ def _build_post_filing_keyboard(
     if saved_url:
         rows.append([InlineKeyboardButton("🔗 Open saved draft", url=saved_url)])
     if same_case_available:
-        rows.append([InlineKeyboardButton(_POST_FILING_SAME_CASE_LABEL, callback_data="ACTION|same_case_another")])
-        rows.append([InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file")])
+        rows.append([
+            InlineKeyboardButton(_POST_FILING_SAME_CASE_LABEL, callback_data="ACTION|same_case_another"),
+            InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file"),
+        ])
     else:
         rows.append([InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file")])
     if not saved_url and FORM_UUIDS.get(form_type):
@@ -3953,10 +4804,10 @@ def _build_edit_field_keyboard(draft=None):
         buttons = []
         for field in editable:
             label = field["label"][:20]
-            buttons.append(InlineKeyboardButton(label, callback_data=f"FIELD|{field['key']}"))
+            buttons.append(InlineKeyboardButton(f"✏️ {label}", callback_data=f"FIELD|{field['key']}"))
         # Arrange in rows of 2
         rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
-        rows.append([InlineKeyboardButton("↩️ Cancel edit", callback_data="CANCEL|edit")])
+        rows.append([InlineKeyboardButton("🔙 Back", callback_data="CANCEL|edit")])
         return InlineKeyboardMarkup(rows)
     # Default CBD keyboard
     return InlineKeyboardMarkup([
@@ -3972,7 +4823,7 @@ def _build_edit_field_keyboard(draft=None):
             InlineKeyboardButton("💭 Reflection", callback_data="FIELD|reflection"),
             InlineKeyboardButton("📚 SLOs", callback_data="FIELD|curriculum_links"),
         ],
-        [InlineKeyboardButton("↩️ Cancel edit", callback_data="CANCEL|edit")],
+        [InlineKeyboardButton("🔙 Back", callback_data="CANCEL|edit")],
     ])
 
 
@@ -4062,10 +4913,38 @@ def _recommendation_line(rec, *, index: int, total: int, curriculum: str) -> str
     return sanitize_internal_form_codes(f"- {name}: {rationale}")
 
 
-def _privacy_nudge_for_source(input_source: str | None) -> str:
+def _format_removed_labels(removed_labels: list[str] | None) -> str:
+    """"an NHS number, a date of birth and a clinician name" — or "" for none."""
+    labels = [label for label in (removed_labels or []) if label]
+    if not labels:
+        return ""
+    if len(labels) == 1:
+        return labels[0]
+    return ", ".join(labels[:-1]) + f" and {labels[-1]}"
+
+
+def _photo_redaction_note(removed_labels: list[str] | None) -> str:
+    """Short note for photos read mid-case, where there is no privacy nudge.
+
+    The nudge only rides along with the first form recommendation. A photo
+    sent into an open case gets this one line appended to the acknowledgement
+    it was already going to receive, so the doctor still learns what we took
+    out without a second message or any new blocking step.
+    """
+    shown = _format_removed_labels(removed_labels)
+    if not shown:
+        return ""
+    return f"\n\n🔒 I removed {shown} from that photo's text — please still check the rest."
+
+
+def _privacy_nudge_for_source(input_source: str | None, removed_labels: list[str] | None = None) -> str:
     if input_source not in {"photo", "image"}:
         return ""
-    return render_message("photo_privacy_nudge")
+    nudge = render_message("photo_privacy_nudge")
+    shown = _format_removed_labels(removed_labels)
+    if shown:
+        nudge += f"\nI already removed {shown} I could detect automatically — please still check the rest."
+    return nudge
 
 
 def _build_form_recommendation_text(
@@ -4073,10 +4952,18 @@ def _build_form_recommendation_text(
     *,
     input_source: str | None = None,
     curriculum: str = "2025",
-    opening: str = "📋 Here are the forms that fit your case:",
-    closing: str = "Tap \"Use best fit\" for a quick draft, or select a different form below.",
+    opening: str | None = None,
+    closing: str = "Select a form to draft it.",
+    removed_labels: list[str] | None = None,
 ) -> str:
     visible_recommendations = [r for r in recommendations if getattr(r, "uuid", None)]
+    if opening is None:
+        best_name = (
+            _recommendation_form_display_name(visible_recommendations[0].form_type, curriculum)
+            if visible_recommendations
+            else "No available form"
+        )
+        opening = f"📋 Best fit: {best_name}"
     rationale_lines = [
         _recommendation_line(
             r,
@@ -4092,7 +4979,7 @@ def _build_form_recommendation_text(
         opening=opening,
         recommendations=rationale_text,
         closing=closing,
-        privacy_nudge=_privacy_nudge_for_source(input_source),
+        privacy_nudge=_privacy_nudge_for_source(input_source, removed_labels),
     )
 
 
@@ -4144,14 +5031,43 @@ def _draft_reflection_text(draft) -> str:
     return ""
 
 
+def _draft_has_reflection_fields(draft) -> bool:
+    fields = _draft_fields_for_review(draft)
+    return bool(_find_reflection_keys(fields, _draft_form_type(draft)))
+
+
+def _with_rcem_ai_declaration(draft):
+    """Return a copy with RCEM's declaration in one populated reflection field."""
+    if isinstance(draft, CBDData):
+        declared = with_ai_use_declaration(draft.reflection)
+        return draft.model_copy(update={"reflection": declared}) if declared != draft.reflection else draft
+    if not isinstance(draft, FormDraft):
+        return draft
+
+    fields = dict(draft.fields)
+    reflection_keys = _find_reflection_keys(fields, draft.form_type)
+    declaration_key = next(
+        (key for key in reflection_keys if not _is_missing_field_value(fields.get(key))),
+        None,
+    )
+    if not declaration_key:
+        return draft
+    current = fields.get(declaration_key)
+    declared = with_ai_use_declaration(current)
+    if declared == str(current or "").strip():
+        return draft
+    fields[declaration_key] = declared
+    return FormDraft(form_type=draft.form_type, fields=fields, uuid=draft.uuid)
+
+
 def _draft_coach_note(draft) -> str:
     """Return a coach note only when the reflection genuinely needs help.
     Returns "" for solid reflections so the preview isn't padded with noise."""
     reflection = _draft_reflection_text(draft).strip()
     if not reflection:
-        return "Coach note: Tap 'Improve reflection' to help flesh out your thoughts."
+        return "Coach note: Reply with what you learned or would do differently."
     if len(reflection.split()) < 18:
-        return "Coach note: This reflection is brief. Tap 'Improve reflection' if you'd like to expand it."
+        return "Coach note: This reflection is brief. Reply if you'd like to expand or change it."
     return ""
 
 
@@ -4201,7 +5117,44 @@ _ATTACHMENT_PHI_LABEL_WORDS = {
     "PHONE": "a phone number",
     "NAMED_HOSPITAL": "a named hospital",
     "NAMED_WARD": "a named ward",
+    "ADDRESS": "an address",
 }
+
+
+def _deidentify_photo_case_text(case_text: str) -> tuple[str, list[str]]:
+    """Run our own de-identifier over text extracted from a photo.
+
+    The photo is a first-class case source, but a photo of a report or notes
+    can carry the same identifiers a typed case would. This runs before that
+    text becomes the case anywhere else (draft, storage, audit) so the doctor
+    is never relying on us alone to catch it — and is told plainly what we
+    already removed.
+    """
+    if not case_text or not case_text.strip():
+        return case_text, []
+    redacted, findings = deidentify_clinical_text(case_text)
+    labels: list[str] = []
+    for finding in findings:
+        word = _ATTACHMENT_PHI_LABEL_WORDS.get(finding.label)
+        if word and word not in labels:
+            labels.append(word)
+    return redacted, labels
+
+
+async def _read_image_text(path: str) -> tuple[str, list[str]]:
+    """Read an image and de-identify it in one step.
+
+    Every photo read in this module goes through here, so no raw OCR string
+    reaches storage, an audit record, a model prompt or a draft — not just the
+    photo that started the case. Redaction is idempotent, so a later pass over
+    an already-redacted string is a no-op.
+
+    The ``NOT_CLINICAL`` sentinel is returned untouched: callers branch on it.
+    """
+    text = await extract_from_image(path)
+    if not text or not text.strip() or text.strip() == "NOT_CLINICAL":
+        return text, []
+    return _deidentify_photo_case_text(text)
 
 
 def _attachment_confirmation_reason(context) -> str | None:
@@ -4222,13 +5175,18 @@ def _attachment_confirmation_reason(context) -> str | None:
     if context.user_data.get("attachment_upload_confirmed"):
         return None
 
-    kind = str(context.user_data.get("attachment_kind") or "").strip().lower()
-    if kind == "video":
-        return "I can't check what's visible in a video"
-
+    # Whether to attach at all was already asked and answered at upload time,
+    # where the prompt states the file is kept exactly as sent and cannot be
+    # reviewed once on the draft. Repeating that question here read as the bot
+    # asking the same thing twice. So this gate now fires only on information
+    # that did not exist at upload: identifiers found in the text extracted
+    # from the file afterwards.
+    #
+    # That means a video, and a file attached without being read, no longer
+    # stop here — nothing new is known about them by this point.
     case_text = str(context.user_data.get("case_text") or "")
     if not case_text.strip():
-        return "I couldn't read any text from it to check"
+        return None
 
     _redacted, findings = deidentify_clinical_text(case_text)
     labels: list[str] = []
@@ -4245,17 +5203,46 @@ def _attachment_confirmation_reason(context) -> str | None:
 
 def _build_attachment_confirm_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📎 Attach it anyway", callback_data="ATTACH|yes")],
-        [InlineKeyboardButton("🚫 Save without the file", callback_data="ATTACH|no")],
+        [InlineKeyboardButton("📎 Attach to Kaizen", callback_data="ATTACH|yes")],
+        [InlineKeyboardButton("💾 Save without file", callback_data="ATTACH|no")],
         [_BTN_CANCEL],
     ])
 
 
 def _draft_needs_reflection_detail_before_save(context, draft) -> bool:
-    source = str(context.user_data.get("case_input_source") or "").strip().lower()
-    if source not in {"photo", "image"}:
+    form_type = context.user_data.get("chosen_form") or _draft_form_type(draft)
+    if not _draft_has_reflection_fields(draft):
         return False
-    return _image_source_without_user_context(context) or _draft_reflection_needs_user_detail(draft)
+    # Schema-led: a DOPS reflection is optional, so an empty or AI-structured
+    # one must not hold up a save the way a CBD's required reflection does.
+    if not _form_requires_reflection(form_type, draft):
+        return False
+
+    source = str(context.user_data.get("case_input_source") or "").strip().lower()
+    if source in {"photo", "image"} and _image_source_without_user_context(context):
+        return True
+
+    case_text = str(context.user_data.get("case_text") or "").strip()
+    if case_text:
+        # The model's semantic reading of the doctor's own words is the
+        # judgement (cached by `_essentials_gate_before_draft` for this exact
+        # case and form). `has_personal_reflective_input` remains only as the
+        # deterministic fallback for a case that was never assessed — a model
+        # outage must not silently drop RCEM's authentic-reflection gate.
+        judged = _model_reflection_judgement(context, case_text, form_type)
+        if judged is None:
+            judged = has_personal_reflective_input(case_text)
+        context.user_data["rcem_personal_reflection_confirmed"] = judged
+
+    # Existing persisted drafts created before this control may not retain the
+    # original case text. Preserve their explicit review/save path; every new
+    # draft has case_text and is evaluated above.
+    confirmed = context.user_data.get("rcem_personal_reflection_confirmed")
+    if confirmed is False:
+        return True
+    if confirmed is None:
+        return source in {"photo", "image"} and _draft_reflection_needs_user_detail(draft)
+    return not bool(_draft_reflection_text(draft).strip())
 
 
 def _remember_case_context_source(
@@ -4303,10 +5290,15 @@ def _format_draft_preview(
     name_check_degraded: bool = False,
 ) -> str:
     """Format draft data as a preview message. Dispatches based on type."""
-    preview = _format_generic_draft(draft) if isinstance(draft, FormDraft) else _format_cbd_draft(draft)
+    preview_draft = _with_rcem_ai_declaration(draft) if include_safety_layer else draft
+    preview = (
+        _format_generic_draft(preview_draft)
+        if isinstance(preview_draft, FormDraft)
+        else _format_cbd_draft(preview_draft)
+    )
     layer = (
         _draft_transparency_layer(
-            draft,
+            preview_draft,
             input_source=input_source,
             needs_reflection_detail=needs_reflection_detail,
             has_user_context=has_user_context,
@@ -4379,6 +5371,15 @@ _MISSING_MARKER = "_— needs your detail_"
 # Appended to draft previews shown with the approval keyboard so the user
 # knows they can reply to refine, instead of relying on a removed Edit button.
 _REPLY_HINT_SUFFIX = render_message("draft_reply_hint")
+# Used instead when Save is hidden pending the doctor's own reflection, since
+# the keyboard only offers Cancel while the doctor replies with reflection.
+_REPLY_HINT_SUFFIX_REFLECTION_NEEDED = render_message("draft_reply_hint_reflection_needed")
+
+
+def _draft_reply_hint(context) -> str:
+    if context.user_data.get("needs_reflection_detail"):
+        return _REPLY_HINT_SUFFIX_REFLECTION_NEEDED
+    return _REPLY_HINT_SUFFIX
 
 # Visual divider separating portfolio content from bot guidance/rationale in
 # draft previews (after draft body). Post-filing confirmations should stay
@@ -4545,23 +5546,28 @@ def _draft_transparency_layer(
     needs_reflection_detail: bool = False,
     has_user_context: bool = True,
 ) -> str:
-    """Compact review note shown before the approval keyboard.
+    """Safety-critical review note shown before the approval keyboard.
+
+    The AI-use declaration already lives once, in the reflection field text
+    itself (see `_with_rcem_ai_declaration`); this layer must not repeat it
+    as a second footer. It only renders when the doctor's own reflective
+    input is still missing and saving needs to be gated on that.
 
     Names the source *type* only — it never quotes raw case text, so
     patient-identifying detail in the source is not surfaced in the preview.
     """
-    if not needs_reflection_detail:
+    if not _draft_has_reflection_fields(draft) or not needs_reflection_detail:
         return ""
 
-    lines = ["", "⚠️ *Review needed before saving*"]
+    lines = ["", "⚠️ *Your reflection is needed before saving*"]
 
     if (
         str(input_source or "").strip().lower() in _USER_CONTEXT_REQUIRED_SOURCES
         and not has_user_context
     ):
-        # Backstop only: `_source_context_needs_more_detail` should have asked
-        # for context before this draft existed. Kept so a draft restored from
-        # persistence without that flag still warns rather than saving quietly.
+        # A photo-origin draft with no words of the doctor's own still warns
+        # here rather than saving quietly — this is purely a reflection-detail
+        # note, not a refusal to draft.
         source_label = _source_label(input_source)
         lines.append(
             f"• Source: {source_label}. Add your own interpretation/reflection before saving."
@@ -4660,7 +5666,7 @@ async def _show_draft_review(
         update_last=False,
     )
     preview = _format_draft_preview_for_context(draft, context, form_type)
-    text = preview + _REPLY_HINT_SUFFIX
+    text = preview + _draft_reply_hint(context)
     keyboard = _build_approval_keyboard(
         improved_once=context.user_data.get("quick_improve_used", False),
         needs_reflection_detail=needs_reflection_detail,
@@ -4703,6 +5709,401 @@ async def _ask_for_more_detail_before_draft(
     else:
         await _send_latest_message(message, context, text, reply_markup=_KB_CANCEL)
     return AWAIT_CASE_INPUT
+
+
+def _pre_draft_completeness_gaps(context, draft, form_type: str) -> list[dict]:
+    """Required evidence genuinely lost from a draft that already exists.
+
+    Sufficiency is settled before drafting by ``_essentials_gate_before_draft``,
+    so this is not a pre-draft question and never re-litigates a judgement
+    already made: it is the quiet save-time safeguard for required evidence
+    that is genuinely absent from the draft about to be filed — typically
+    because an edit after the preview removed it.
+
+    It covers every schema-required field, including ones the gate never asks
+    the doctor about (the training stage comes from the saved profile, not
+    from the case), because a blank required field cannot be filed whatever
+    its origin. Required dates are excluded: they are defaulted to today at
+    both draft and filing time, so they are never actually lost. Optional
+    fields are never included, and reflection has its own gate above. Labels
+    are shared with the pre-draft gate so the two never describe the same
+    requirement differently.
+    """
+    gaps: list[dict] = []
+    if _draft_needs_reflection_detail_before_save(context, draft):
+        gaps.append({
+            "key": "reflection",
+            "label": "your reflection (what you learned or would do differently)",
+        })
+
+    fields = _draft_fields_for_review(draft)
+    reflection_keys = set(_find_reflection_keys(fields, _draft_form_type(draft)))
+    duplicates = _DUPLICATE_ESSENTIAL_KEYS.get(schema_form_type(form_type or ""), set())
+    essential_labels = {
+        item["key"]: item["label"] for item in _form_essential_requirements(form_type)
+    }
+    missing_required, _, _ = _missing_template_fields(draft, form_type)
+    for field in missing_required:
+        key = field["key"]
+        if key in reflection_keys or key in duplicates or field.get("type") == "date":
+            continue
+        gaps.append({"key": key, "label": essential_labels.get(key) or field.get("label") or key})
+    return gaps
+
+
+def _format_completeness_gap_items(gaps: list[dict]) -> str:
+    labels = [gap["label"] for gap in gaps]
+    if len(labels) == 1:
+        return labels[0]
+    return ", ".join(labels[:-1]) + f" and {labels[-1]}"
+
+
+# === ESSENTIAL-FIRST SUFFICIENCY GATE ===
+#
+# One decision, taken *before* any draft is generated: does the case the
+# doctor already sent carry what this form genuinely requires? The judgement
+# is the product model's (`assess_form_essentials`) reading the doctor's own
+# words against requirements derived from the Kaizen schema — not a keyword
+# rule, and not a second opinion on the model's own draft. Everything that
+# can draft a form routes through `_essentials_gate_before_draft`, and only a
+# complete judgement that every essential is present permits a drafting call:
+# a missing essential is asked for, an unavailable one offers a different
+# form, and an assessment that did not complete is retried. There is no path
+# that drafts anyway.
+
+# How each essential reads to the doctor when it has to be asked for, and
+# what it means to the model when it is being judged. Anything not named
+# here falls back to the schema's own label.
+_ESSENTIAL_FIELD_GUIDANCE: dict[str, dict[str, str]] = {
+    "reflection": {
+        "label": "your reflection (what you learned or would do differently)",
+        "description": "the doctor's own learning, interpretation, reaction, or intended change of practice",
+    },
+    "clinical_reasoning": {"description": "what the case was and why the doctor made the decisions they made"},
+    "trainee_role": {"description": "what this doctor personally did in this case"},
+    "trainee_performance": {"description": "how this doctor performed during the procedure"},
+    "indication": {"description": "why this patient needed the procedure"},
+    "patient_presentation": {"description": "what the patient presented with"},
+    "clinical_setting": {"description": "where the case happened, e.g. Emergency Department"},
+    "level_of_supervision": {"description": "how closely the doctor was supervised: direct, indirect, or distant"},
+    "case_observed": {"description": "the case that was observed"},
+    "procedure_name": {"description": "which procedure was performed"},
+    "placement": {"description": "which ACCS placement the doctor was in"},
+}
+
+# Schema-required fields Portfolio Guru fills itself, so they are never a
+# question for the doctor: required dates default to today at draft and
+# filing time, and the training stage comes from the saved profile.
+_SELF_FILLED_ESSENTIAL_KEYS = {"stage_of_training"}
+
+# Schema keys that restate another required key on the same form. Asking for
+# both would be one question the doctor has already answered.
+_DUPLICATE_ESSENTIAL_KEYS = {"DOPS": {"procedural_skill"}}
+
+_ESSENTIALS_ASSESSMENT_KEY = "essentials_assessment"
+
+
+def _form_essential_requirements(form_type: str) -> list[dict]:
+    """The form's genuinely essential, doctor-owned requirements.
+
+    Schema-required fields only: optional fields are never asked for, and
+    fields the product fills itself are excluded rather than turned into a
+    question the doctor was never going to be left with.
+    """
+    schema_key = schema_form_type(form_type or "")
+    duplicates = _DUPLICATE_ESSENTIAL_KEYS.get(schema_key, set())
+    required, _ = _template_requirements(form_type)
+    essentials: list[dict] = []
+    for field in required:
+        key = field["key"]
+        if field.get("type") == "date" or key in _SELF_FILLED_ESSENTIAL_KEYS or key in duplicates:
+            continue
+        guidance = _ESSENTIAL_FIELD_GUIDANCE.get(key, {})
+        essentials.append({
+            "key": key,
+            "label": guidance.get("label") or field.get("label") or key,
+            "description": guidance.get("description", ""),
+        })
+    return essentials
+
+
+def _essentials_cache_signature(case_text: str, form_type: str) -> tuple[str, str]:
+    """What a cached sufficiency judgement is actually about: form + case."""
+    return (
+        schema_form_type(form_type or ""),
+        dogfood_audit.text_fingerprint(case_text or ""),
+    )
+
+
+async def _assess_case_essentials(
+    context: ContextTypes.DEFAULT_TYPE,
+    case_text: str,
+    form_type: str,
+) -> dict[str, str]:
+    """Model judgement per essential, cached against this case and form.
+
+    A non-empty result always covers every essential of the form. An empty
+    result means the judgement did not complete — outage, timeout, or an
+    unusable answer — and callers must not read it as "nothing is missing".
+    An incomplete judgement is never cached, so a retry genuinely retries.
+    """
+    essentials = _form_essential_requirements(form_type)
+    if not essentials or not str(case_text or "").strip():
+        return {}
+
+    signature = _essentials_cache_signature(case_text, form_type)
+    cached = context.user_data.get(_ESSENTIALS_ASSESSMENT_KEY)
+    if isinstance(cached, dict) and tuple(cached.get("signature") or ()) == signature:
+        return dict(cached.get("statuses") or {})
+
+    try:
+        statuses = await asyncio.wait_for(
+            assess_form_essentials(
+                case_text,
+                form_type,
+                essentials,
+                input_source=context.user_data.get("case_input_source", "text"),
+            ),
+            timeout=25,
+        )
+    except Exception as exc:
+        logger.warning("Essentials assessment unavailable for %s: %s", form_type, exc)
+        context.user_data.pop(_ESSENTIALS_ASSESSMENT_KEY, None)
+        return {}
+
+    if not statuses:
+        context.user_data.pop(_ESSENTIALS_ASSESSMENT_KEY, None)
+        return {}
+
+    context.user_data[_ESSENTIALS_ASSESSMENT_KEY] = {
+        "signature": list(signature),
+        "statuses": dict(statuses),
+    }
+    return dict(statuses)
+
+
+def _cached_essential_statuses(
+    context: ContextTypes.DEFAULT_TYPE,
+    case_text: str,
+    form_type: str,
+) -> dict[str, str] | None:
+    cached = context.user_data.get(_ESSENTIALS_ASSESSMENT_KEY)
+    if not isinstance(cached, dict):
+        return None
+    if tuple(cached.get("signature") or ()) != _essentials_cache_signature(case_text, form_type):
+        return None
+    statuses = cached.get("statuses")
+    return dict(statuses) if isinstance(statuses, dict) else None
+
+
+def _model_reflection_judgement(
+    context: ContextTypes.DEFAULT_TYPE,
+    case_text: str,
+    form_type: str,
+) -> bool | None:
+    """Whether the model judged the doctor's own reflective input present.
+
+    ``None`` means this case and form were never assessed (model outage, or
+    a draft restored from an older session), not that reflection is absent.
+    """
+    statuses = _cached_essential_statuses(context, case_text, form_type)
+    if not statuses:
+        return None
+    reflection_keys = _find_reflection_keys(statuses, form_type)
+    if not reflection_keys:
+        return None
+    return any(statuses.get(key) == ESSENTIAL_PRESENT for key in reflection_keys)
+
+
+def _form_requires_reflection(form_type: str, draft=None) -> bool:
+    """Does this form's schema actually require a reflection field?
+
+    CBD does; DOPS marks it optional. An optional reflection must never
+    become a universal save blocker, so the gate is schema-led rather than
+    firing on any reflection-shaped key in the draft.
+    """
+    schema_fields = FORM_SCHEMAS.get(schema_form_type(form_type or ""), {}).get("fields", [])
+    if not schema_fields:
+        # Unregistered form: no schema to read, so fall back to the draft's
+        # own shape rather than assuming a requirement either way.
+        return _draft_has_reflection_fields(draft) if draft is not None else False
+    fields_by_key = {field["key"]: field for field in schema_fields}
+    return any(
+        fields_by_key[key].get("required")
+        for key in _find_reflection_keys(fields_by_key, form_type)
+    )
+
+
+async def _ask_for_missing_essentials(
+    message,
+    context: ContextTypes.DEFAULT_TYPE,
+    form_type: str,
+    missing: list[dict],
+    *,
+    edit: bool,
+) -> int:
+    """One grouped question naming exactly the essentials still missing.
+
+    Asked items are not remembered, because they are not the question: the
+    question is what the *current* case still lacks. Anything the doctor has
+    since supplied is judged present and drops out of the next ask, so an
+    answered item is never repeated, and a still-missing required detail is
+    never waved through because it was mentioned once before.
+    """
+    context.user_data["chosen_form"] = form_type
+    context.user_data["awaiting_detail"] = True
+    _audit_event(
+        context,
+        "decision_path",
+        decision="essentials_question_asked",
+        form_type=form_type,
+        missing_keys=[item["key"] for item in missing],
+    )
+    _track_funnel_event(
+        context,
+        "essentials_requested",
+        form_type=form_type,
+        missing_count=len(missing),
+    )
+    text = render_message(
+        "pre_draft_completeness_request",
+        items=_format_completeness_gap_items(missing),
+    )
+    if edit:
+        await _safe_edit_text(message, text, reply_markup=_KB_CANCEL)
+        _track_latest_message(context, message)
+    else:
+        await _send_latest_message(message, context, text, reply_markup=_KB_CANCEL)
+    return AWAIT_CASE_INPUT
+
+
+async def _ask_to_retry_essentials_check(
+    message,
+    context: ContextTypes.DEFAULT_TYPE,
+    form_type: str,
+    *,
+    edit: bool,
+) -> int:
+    """The sufficiency check did not complete, so nothing may be drafted yet.
+
+    A requirement that was never judged cannot be assumed satisfied, and a
+    draft built on that assumption is exactly the silent bypass this gate
+    exists to prevent. The case is kept as sent and the check is offered
+    again; more detail from the doctor also re-runs it.
+    """
+    context.user_data["chosen_form"] = form_type
+    context.user_data["awaiting_detail"] = True
+    _audit_event(
+        context,
+        "decision_path",
+        decision="essentials_check_incomplete",
+        form_type=form_type,
+    )
+    text = render_message("essentials_check_retry", form_name=_form_display_name(form_type))
+    if edit:
+        await _safe_edit_text(message, text, reply_markup=_KB_RETRY_TEMPLATE)
+        _track_latest_message(context, message)
+    else:
+        await _send_latest_message(message, context, text, reply_markup=_KB_RETRY_TEMPLATE)
+    return AWAIT_CASE_INPUT
+
+
+def _build_change_form_keyboard(context: ContextTypes.DEFAULT_TYPE) -> InlineKeyboardMarkup:
+    back_to = "FORM|back" if context.user_data.get("form_recommendations") else "FORM|show_all"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔀 Choose a different form", callback_data=back_to)],
+        [_BTN_CANCEL],
+    ])
+
+
+async def _offer_change_form_for_unavailable_essentials(
+    message,
+    context: ContextTypes.DEFAULT_TYPE,
+    form_type: str,
+    unavailable: list[dict],
+    *,
+    edit: bool,
+) -> int:
+    """The doctor cannot supply something this form genuinely requires.
+
+    The case is kept exactly as sent and a different form is offered. The
+    requirement is neither invented for them nor quietly skipped.
+    """
+    context.user_data["chosen_form"] = form_type
+    context.user_data["awaiting_detail"] = True
+    _audit_event(
+        context,
+        "decision_path",
+        decision="essential_unavailable_change_form_offered",
+        form_type=form_type,
+        unavailable_keys=[item["key"] for item in unavailable],
+    )
+    text = render_message(
+        "essential_unavailable_change_form",
+        form_name=_form_display_name(form_type),
+        items=_format_completeness_gap_items(unavailable),
+    )
+    keyboard = _build_change_form_keyboard(context)
+    if edit:
+        await _safe_edit_text(message, text, reply_markup=keyboard)
+        _track_latest_message(context, message)
+    else:
+        await _send_latest_message(message, context, text, reply_markup=keyboard)
+    return AWAIT_CASE_INPUT
+
+
+async def _essentials_gate_before_draft(
+    message,
+    context: ContextTypes.DEFAULT_TYPE,
+    case_text: str,
+    form_type: str,
+    *,
+    edit: bool = True,
+) -> int | None:
+    """Settle the form's essentials before anything is drafted.
+
+    Returns ``None`` **only** when every essential of this form has been
+    judged present — that is the single condition under which a caller may
+    make a drafting call. Every other outcome returns the conversation state
+    to hand back, with the doctor's case retained exactly as sent:
+
+    * an essential is still missing → one grouped question naming only what
+      is genuinely still absent;
+    * an essential is unavailable to the doctor → a different form is
+      offered rather than the requirement being invented or skipped;
+    * the judgement did not complete (outage, timeout, or a partial,
+      duplicated or malformed answer) → a short retry, because a requirement
+      that was never judged cannot be assumed satisfied.
+
+    There is deliberately no "asked once already" exception: a cap on
+    questions would let required content through, which is the one thing
+    this gate exists to prevent.
+    """
+    essentials = _form_essential_requirements(form_type)
+    if not essentials or not str(case_text or "").strip():
+        return None
+
+    statuses = await _assess_case_essentials(context, case_text, form_type)
+    if not statuses:
+        return await _ask_to_retry_essentials_check(message, context, form_type, edit=edit)
+
+    unavailable = [item for item in essentials if statuses.get(item["key"]) == ESSENTIAL_UNAVAILABLE]
+    if unavailable:
+        return await _offer_change_form_for_unavailable_essentials(
+            message, context, form_type, unavailable, edit=edit
+        )
+
+    missing = [item for item in essentials if statuses.get(item["key"]) == ESSENTIAL_MISSING]
+    if missing:
+        return await _ask_for_missing_essentials(message, context, form_type, missing, edit=edit)
+
+    _audit_event(
+        context,
+        "decision_path",
+        decision="essentials_sufficient",
+        form_type=form_type,
+    )
+    return None
 
 
 def _universal_pre_file_gate(form_type: str, fields: dict) -> list[str]:
@@ -5009,8 +6410,12 @@ def _format_generic_draft(draft: FormDraft) -> str:
             continue
 
         label = field["label"]
-        fe = FIELD_EMOJIS.get(key, "📌")
-        label_str = f"{fe} *{label}:*"
+        # No default marker. Falling back to 📌 for every unmapped field put an
+        # identical pin on eight lines of an ultrasound reflection, which marks
+        # nothing. An emoji here now means "this line is a different kind of
+        # thing" — a date, a learning point, a warning.
+        fe = FIELD_EMOJIS.get(key, "")
+        label_str = f"{fe} *{label}:*" if fe else f"*{label}:*"
 
         if empty:
             # Missing required field
@@ -5389,8 +6794,16 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         _stash_setup_retry_credentials(context, username, password)
         await _flow_edit(
             update, context,
-            "⏱ Kaizen took too long to respond. This is usually a brief outage on their side.\n\n"
-            "Tap Try again to check the same login, or Cancel and connect later.",
+            # Do not blame Kaizen. This timeout fires whenever the check does
+            # not finish in 60s, and the cause is just as often local — a
+            # wedged automation browser that still answers HTTP but can no
+            # longer hand out a session. Telling users it is "an outage on
+            # their side" sends them away to wait on Kaizen when Kaizen is
+            # fine. (Observed 2026-08-25: CDP attach hung for 45s+ while
+            # kaizenep.com was fully up.)
+            "⏱ The login check timed out before it finished.\n\n"
+            "Your details haven't been rejected — nothing got far enough to check them. "
+            "Select Retry to check the same login, or Cancel to connect later.",
             reply_markup=_KB_RETRY_SETUP,
             flow_key="setup",
         )
@@ -5406,7 +6819,7 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await _flow_edit(
             update, context,
             "⚠️ Couldn't reach Kaizen to verify the login. Try again in a moment.\n\n"
-            "Tap Try again to check the same login, or Cancel and connect later.",
+            "Select Retry to check the same login, or Cancel to connect later.",
             reply_markup=_KB_RETRY_SETUP,
             flow_key="setup",
         )
@@ -5418,7 +6831,7 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await _flow_edit(
             update, context,
             "❌ Login failed — please check your username and password.\n\n"
-            "Tap Try again, or type your Kaizen email below.",
+            "Select Retry, or type your Kaizen email below.",
             reply_markup=_KB_RETYPE_SETUP,
             flow_key="setup",
         )
@@ -5516,10 +6929,14 @@ async def _complete_setup_login(
             "✅ Kaizen connected! I couldn't auto-detect your portfolio.\n\nWhich Kaizen portfolio applies to you?",
             flow_key="setup",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("ACCS Profile", callback_data="SETLEVEL|ACCS")],
-                [InlineKeyboardButton("Intermediate Profile", callback_data="SETLEVEL|INTERMEDIATE")],
-                [InlineKeyboardButton("HST Profile", callback_data="SETLEVEL|HIGHER")],
-                [InlineKeyboardButton("Non-Training Profile", callback_data="SETLEVEL|SAS")],
+                [
+                    InlineKeyboardButton("🎓 ACCS", callback_data="SETLEVEL|ACCS"),
+                    InlineKeyboardButton("🎓 Intermediate profile", callback_data="SETLEVEL|INTERMEDIATE"),
+                ],
+                [
+                    InlineKeyboardButton("🎓 HST", callback_data="SETLEVEL|HIGHER"),
+                    InlineKeyboardButton("🎓 Non-training", callback_data="SETLEVEL|SAS"),
+                ],
             ])
         )
         return AWAIT_TRAINING_LEVEL
@@ -5554,7 +6971,7 @@ async def setup_retry_login(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             update,
             context,
             "⏱ Kaizen still isn't responding.\n\n"
-            "Tap Try again to check the same login, or Cancel and connect later.",
+            "Select Retry to check the same login, or Cancel to connect later.",
             reply_markup=_KB_RETRY_SETUP,
             flow_key="setup",
         )
@@ -5565,7 +6982,7 @@ async def setup_retry_login(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             update,
             context,
             "⚠️ Still couldn't reach Kaizen to verify the login.\n\n"
-            "Tap Try again to check the same login, or Cancel and connect later.",
+            "Select Retry to check the same login, or Cancel to connect later.",
             reply_markup=_KB_RETRY_SETUP,
             flow_key="setup",
         )
@@ -5576,7 +6993,7 @@ async def setup_retry_login(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             update,
             context,
             "❌ Login failed — please check your username and password.\n\n"
-            "Tap Try again, or type your Kaizen email below.",
+            "Select Retry, or type your Kaizen email below.",
             reply_markup=_KB_RETYPE_SETUP,
             flow_key="setup",
         )
@@ -5695,27 +7112,35 @@ VOICE_KAIZEN_SAMPLE_COPY = (
 
 def _voice_choice_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📖 Learn from Kaizen entries", callback_data="VOICE|path_kaizen")],
-        [InlineKeyboardButton("✍️ Add examples manually", callback_data="VOICE|path_manual")],
-        [InlineKeyboardButton("🔙 Back to settings", callback_data="VOICE|back_to_settings")],
+        [
+            InlineKeyboardButton("📖 Kaizen entries", callback_data="VOICE|path_kaizen"),
+            InlineKeyboardButton("✍️ Manual examples", callback_data="VOICE|path_manual"),
+        ],
+        [InlineKeyboardButton("🔙 Back", callback_data="VOICE|back_to_settings")],
     ])
 
 
 def _voice_rebuild_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📖 Learn from Kaizen entries", callback_data="VOICE|path_kaizen")],
-        [InlineKeyboardButton("✍️ Add examples manually", callback_data="VOICE|path_manual")],
-        [InlineKeyboardButton("🗑️ Remove Profile", callback_data="VOICE|remove")],
-        [InlineKeyboardButton("🔙 Back to settings", callback_data="VOICE|back_to_settings")],
+        [
+            InlineKeyboardButton("📖 Kaizen entries", callback_data="VOICE|path_kaizen"),
+            InlineKeyboardButton("✍️ Manual examples", callback_data="VOICE|path_manual"),
+        ],
+        [InlineKeyboardButton("🗑️ Remove profile", callback_data="VOICE|remove")],
+        [InlineKeyboardButton("🔙 Back", callback_data="VOICE|back_to_settings")],
     ])
 
 
 def _voice_kaizen_sample_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📋 Recent 10 entries", callback_data="VOICE|kaizen_sample|recent_10")],
-        [InlineKeyboardButton("📅 Last 6 months", callback_data="VOICE|kaizen_sample|last_6m")],
-        [InlineKeyboardButton("📅 Last 12 months", callback_data="VOICE|kaizen_sample|last_12m")],
-        [InlineKeyboardButton("🔙 Back", callback_data="VOICE|back_to_choice")],
+        [
+            InlineKeyboardButton("📋 Recent 10", callback_data="VOICE|kaizen_sample|recent_10"),
+            InlineKeyboardButton("📅 6 months", callback_data="VOICE|kaizen_sample|last_6m"),
+        ],
+        [
+            InlineKeyboardButton("📅 12 months", callback_data="VOICE|kaizen_sample|last_12m"),
+            InlineKeyboardButton("🔙 Back", callback_data="VOICE|back_to_choice"),
+        ],
     ])
 
 
@@ -5954,7 +7379,6 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
     # Photo example — extract text from image. "Reading image…" is a fresh
     # ack message; the next-step prompt then edits it into the result.
     elif msg and msg.photo:
-        from vision import extract_from_image
         await _flow_msg(update, context, "📷 Reading image…", flow_key="voice")
         try:
             photo = msg.photo[-1]
@@ -5963,7 +7387,9 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
             with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
                 tmp_path = tmp.name
                 await photo_file.download_to_drive(tmp_path)
-                text = await extract_from_image(tmp_path)
+                # A writing-style sample is stored on the profile and injected
+                # into every later extraction prompt, so it is redacted too.
+                text, _removed_labels = await _read_image_text(tmp_path)
             import os
             os.unlink(tmp_path)
             if text and text.strip() != "NOT_CLINICAL":
@@ -6007,8 +7433,10 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
 
     if len(examples) >= 3:
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton(f"✅ Build Profile ({len(examples)} examples)", callback_data="VOICE|done")],
-            [InlineKeyboardButton("➕ Add More", callback_data="VOICE|more")],
+            [
+                InlineKeyboardButton("🛠️ Build profile", callback_data="VOICE|done"),
+                InlineKeyboardButton("➕ Add more", callback_data="VOICE|more"),
+            ],
         ])
         await next_step(
             update, context,
@@ -6101,8 +7529,10 @@ async def _voice_run_kaizen_sample(
     }:
         rows.append([InlineKeyboardButton("🔗 Reconnect Kaizen", callback_data="ACTION|setup")])
     rows.extend([
-        [InlineKeyboardButton("✍️ Add examples manually", callback_data="VOICE|path_manual")],
-        [InlineKeyboardButton("🔙 Back", callback_data="VOICE|back_to_choice")],
+        [
+            InlineKeyboardButton("✍️ Manual examples", callback_data="VOICE|path_manual"),
+            InlineKeyboardButton("🔙 Back", callback_data="VOICE|back_to_choice"),
+        ],
     ])
 
     await _flow_edit(
@@ -6146,8 +7576,10 @@ def _clean_voice_preview_text(text: str) -> str:
 
 def _voice_post_activation_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📋 Start a case", callback_data="ACTION|file")],
-        [InlineKeyboardButton("🔄 Update voice profile", callback_data="ACTION|voice")],
+        [
+            InlineKeyboardButton("➕ New case", callback_data="ACTION|file"),
+            InlineKeyboardButton("✍️ Update profile", callback_data="ACTION|voice"),
+        ],
     ])
 
 
@@ -6205,7 +7637,7 @@ async def _build_voice_profile(update: Update, context: ContextTypes.DEFAULT_TYP
             update, context,
             "⚠️ Analysis took too long — please try again. This usually works on a second attempt.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|voice")],
+                [InlineKeyboardButton("🔄 Retry", callback_data="ACTION|voice")],
             ]),
             flow_key="voice",
         )
@@ -6218,7 +7650,7 @@ async def _build_voice_profile(update: Update, context: ContextTypes.DEFAULT_TYP
             update, context,
             "⚠️ Couldn't analyse your writing style. Try again or send different examples.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|voice")],
+                [InlineKeyboardButton("🔄 Retry", callback_data="ACTION|voice")],
             ]),
             flow_key="voice",
         )
@@ -6302,6 +7734,10 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     action = query.data.split("|", 1)[1] if "|" in query.data else ""
     user_id = update.effective_user.id
+    # A callback can be the first interaction after /start. Seed the existing
+    # audit identity before structural Health telemetry is persisted so a real
+    # doctor is not recorded as an unattributed event.
+    _remember_audit_user(context, update, user_id)
     logger.info(
         "Global ACTION callback: action=%s user=%s state=%s",
         action,
@@ -6393,7 +7829,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 "📬 Unsigned ticket scanning is included in Portfolio Guru Unlimited.\n\n"
                 "Upgrade to see all your pending assessments grouped by assessor, with chase guardrails (14-day cooldown, max 3 per assessor).",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📊 Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
+                    [InlineKeyboardButton("💳 Upgrade — £9.99/mo", callback_data="UPGRADE|pro_plus")],
                 ]),
             )
             return ConversationHandler.END
@@ -6404,7 +7840,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         # place and returns there, not to the generic filing menu. ``health``
         # runs the autonomous scan-to-report flow; ``health_limited`` is the
         # recovery path that skips the Kaizen scan and shows the limited view.
-        back_btn = InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")
+        back_btn = InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")
         back_markup = InlineKeyboardMarkup([[back_btn]])
 
         if not has_credentials(user_id):
@@ -6416,9 +7852,10 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
 
         if not await _health_gate_check(user_id):
             await query.message.edit_text(
-                "📊 Portfolio Health is included in Portfolio Guru Unlimited.\n\nUpgrade to get gap analysis and evidence review.",
+                "📊 Portfolio Health is included in Portfolio Guru Unlimited.\n\n"
+                "Upgrade for portfolio priorities, unfinished-item review and evidence coverage.",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📊 Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
+                    [InlineKeyboardButton("💳 Upgrade — £9.99/mo", callback_data="UPGRADE|pro_plus")],
                     [back_btn],
                 ]),
             )
@@ -6437,12 +7874,12 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 pass
 
         async def send_result(text, reply_markup):
-            text = _store_health_report_context(context, text)
+            # Panes are stored by _run_health_analysis from the assessment.
             await _safe_edit_text(
                 query.message,
                 text,
                 parse_mode="Markdown",
-                reply_markup=reply_markup or _health_result_keyboard(),
+                reply_markup=reply_markup or _health_view_keyboard("priorities"),
             )
 
         async def fail_fn(text):
@@ -6458,6 +7895,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 send_progress=send_progress,
                 send_result=send_result,
                 fail_fn=fail_fn,
+                context_store=context,
             )
         else:
             await _run_health_with_optional_kaizen_sync(
@@ -6468,34 +7906,154 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 send_result=send_result,
                 fail_fn=fail_fn,
                 show_recovery=show_recovery,
+                context_store=context,
             )
         return ConversationHandler.END
 
-    elif action.startswith("health_detail|"):
-        detail_key = action.split("|", 1)[1]
-        report = context.user_data.get("last_health_report") or {}
-        sections = report.get("sections") or {}
-        detail_text = sections.get(detail_key)
-        if not detail_text:
-            detail_text = "This health detail is no longer available. Run /health again to refresh the report."
+    elif (
+        action.startswith("health_view|")
+        or action.startswith("health_queue|")
+        or action.startswith("health_page|")
+        or action.startswith("health_detail|")
+        or action == "health_back_to_report"
+    ):
+        # One branch for every Health navigation button, including the ones
+        # left behind on messages sent before action-first Health: an old
+        # "Unfinished" tap lands on Actions rather than a dead end.
+        page = None
+        queue = None
+        if action.startswith("health_queue|"):
+            parts = action.split("|")
+            queue = parts[1] if len(parts) > 1 and parts[1] in {"draft", "awaiting"} else None
+            try:
+                page = int(parts[2]) if len(parts) > 2 else 0
+            except ValueError:
+                page = 0
+            view = "action_queue" if queue else "actions"
+        elif action.startswith("health_page|"):
+            view = "legacy_actions"
+            try:
+                page = int(action.split("|", 1)[1])
+            except ValueError:
+                page = 0
+        elif action.startswith("health_view|"):
+            view = action.split("|", 1)[1]
+            if view == "more":
+                view = "about"
+        elif action.startswith("health_detail|"):
+            view = LEGACY_HEALTH_DETAIL_VIEWS.get(action.split("|", 1)[1], "priorities")
+        else:
+            view = "priorities"
+
+        payload = _health_view_payload(context, view, page=page, queue=queue)
+        if payload is None:
+            await _safe_edit_text(
+                query.message,
+                _HEALTH_REPORT_EXPIRED,
+                reply_markup=_health_refresh_route_keyboard(),
+            )
+            return ConversationHandler.END
+
+        if view == "action_queue" and queue:
+            actual_page = (
+                (context.user_data.get("last_health_report") or {})
+                .get("queue_page", {})
+                .get(queue, 0)
+            )
+            _track_funnel_event(
+                context,
+                "health_queue_selected",
+                update_last=False,
+                queue=queue,
+                page=int(actual_page),
+            )
+        else:
+            tracked_view = "actions" if view == "legacy_actions" else view
+            _track_funnel_event(
+                context,
+                "health_pane_selected",
+                update_last=False,
+                view=tracked_view,
+            )
+
+        text, keyboard = payload
         await _safe_edit_text(
             query.message,
-            detail_text,
+            text,
             parse_mode="Markdown",
-            reply_markup=_health_detail_keyboard(),
+            reply_markup=keyboard,
         )
         return ConversationHandler.END
 
-    elif action == "health_back_to_report":
-        report = context.user_data.get("last_health_report") or {}
-        summary = report.get("summary")
-        if not summary:
-            summary = "This health report is no longer available. Run /health again to refresh it."
+    elif action == "health_review_setup":
+        current = _stored_review_date(_get_or_default_health_profile(user_id))
+        shown = current.strftime("%B %Y") if current else "not set"
+        _track_funnel_event(
+            context,
+            "health_review_month_setup",
+            update_last=False,
+        )
         await _safe_edit_text(
             query.message,
-            summary,
+            f"📅 *Review month*\n\nCurrently: {shown}\n\n"
+            "Choose the month of your next ARCP or review. Selecting a month "
+            "only previews it; nothing changes until you tap Confirm.\n\n"
+            "_Cancel returns to Health without changing the current setting._",
             parse_mode="Markdown",
-            reply_markup=_health_result_keyboard(),
+            reply_markup=_health_review_month_picker_keyboard(),
+        )
+        return ConversationHandler.END
+
+    elif action.startswith("health_review_select|"):
+        parsed = _parse_review_month(action.rsplit("|", 1)[-1])
+        if parsed is None:
+            await _safe_edit_text(
+                query.message,
+                "📅 That month option is no longer valid. Choose again.",
+                reply_markup=_health_review_month_picker_keyboard(),
+            )
+            return ConversationHandler.END
+        _track_funnel_event(
+            context,
+            "health_review_month_selected",
+            update_last=False,
+        )
+        await _safe_edit_text(
+            query.message,
+            f"📅 *Review month*\n\nSelected: *{parsed.strftime('%B %Y')}*\n\n"
+            "Nothing has been saved yet. Tap Confirm to use this month, choose "
+            "another month, or cancel without changing your setting.",
+            parse_mode="Markdown",
+            reply_markup=_health_review_month_confirmation_keyboard(parsed),
+        )
+        return ConversationHandler.END
+
+    elif action.startswith("health_review_confirm|"):
+        parsed = _parse_review_month(action.rsplit("|", 1)[-1])
+        if parsed is None:
+            await _safe_edit_text(
+                query.message,
+                "📅 That month option is no longer valid. Choose again.",
+                reply_markup=_health_review_month_picker_keyboard(),
+            )
+            return ConversationHandler.END
+        _save_review_month(user_id, parsed)
+        _track_funnel_event(
+            context,
+            "health_review_month_confirmed",
+            update_last=False,
+        )
+        await _safe_edit_text(
+            query.message,
+            f"✅ Review month set to *{parsed.strftime('%B %Y')}*.\n\n"
+            "Return to Health.",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(
+                    "🔙 Health",
+                    callback_data="ACTION|health_view|priorities",
+                )
+            ]]),
         )
         return ConversationHandler.END
 
@@ -6520,7 +8078,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 "🔗 Connect your Kaizen account first, then you can sync Kaizen evidence.",
                 reply_markup=InlineKeyboardMarkup([
                     [_BTN_SETUP],
-                    [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
+                    [InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")],
                 ]),
             )
             return ConversationHandler.END
@@ -6536,7 +8094,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 "🔗 Connect your Kaizen account first, then you can sync Kaizen evidence.",
                 reply_markup=InlineKeyboardMarkup([
                     [_BTN_SETUP],
-                    [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
+                    [InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")],
                 ]),
             )
             return ConversationHandler.END
@@ -6568,7 +8126,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
 
     elif action == "confirm_refresh_for_health":
-        back_btn = InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")
+        back_btn = InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")
         back_markup = InlineKeyboardMarkup([[back_btn]])
 
         if not has_credentials(user_id):
@@ -6580,9 +8138,10 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
 
         if not await _health_gate_check(user_id):
             await query.message.edit_text(
-                "📊 Portfolio Health is included in Portfolio Guru Unlimited.\n\nUpgrade to get gap analysis and evidence review.",
+                "📊 Portfolio Health is included in Portfolio Guru Unlimited.\n\n"
+                "Upgrade for portfolio priorities, unfinished-item review and evidence coverage.",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📊 Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
+                    [InlineKeyboardButton("💳 Upgrade — £9.99/mo", callback_data="UPGRADE|pro_plus")],
                     [back_btn],
                 ]),
             )
@@ -6621,12 +8180,12 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 pass
 
         async def send_result(text, reply_markup):
-            text = _store_health_report_context(context, text)
+            # Panes are stored by _run_health_analysis from the assessment.
             await _safe_edit_text(
                 query.message,
                 text,
                 parse_mode="Markdown",
-                reply_markup=reply_markup or _health_result_keyboard(),
+                reply_markup=reply_markup or _health_view_keyboard("priorities"),
             )
 
         async def fail_fn(text):
@@ -6638,6 +8197,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             send_progress=send_progress,
             send_result=send_result,
             fail_fn=fail_fn,
+            context_store=context,
         )
         return ConversationHandler.END
 
@@ -6662,7 +8222,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 [InlineKeyboardButton(f"🎓 Portfolio: {training_level}", callback_data="ACTION|change_level")],
                 [InlineKeyboardButton(f"📊 Pathway: {pathway_label}", callback_data="ACTION|change_pathway")],
                 [InlineKeyboardButton(f"📚 Curriculum: {curriculum_label}", callback_data="ACTION|change_curriculum")],
-                [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
+                [InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")],
             ]),
         )
 
@@ -6670,19 +8230,25 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.message.edit_text(
             "📚 Which curriculum should I use for form choices and links?",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("2025 Update", callback_data="SET_CURRICULUM|2025")],
-                [InlineKeyboardButton("2021 Curriculum", callback_data="SET_CURRICULUM|2021")],
-                [InlineKeyboardButton("🔙 Back to portfolio defaults", callback_data="ACTION|portfolio_defaults")],
+                [
+                    InlineKeyboardButton("📘 2025 Update", callback_data="SET_CURRICULUM|2025"),
+                    InlineKeyboardButton("📗 2021 Curriculum", callback_data="SET_CURRICULUM|2021"),
+                ],
+                [InlineKeyboardButton("🔙 Back", callback_data="ACTION|portfolio_defaults")],
             ]),
         )
 
     elif action == "change_level":
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("ACCS Profile", callback_data="SETLEVEL|ACCS")],
-            [InlineKeyboardButton("Intermediate Profile", callback_data="SETLEVEL|INTERMEDIATE")],
-            [InlineKeyboardButton("HST Profile", callback_data="SETLEVEL|HIGHER")],
-            [InlineKeyboardButton("Non-Training Profile", callback_data="SETLEVEL|SAS")],
-            [InlineKeyboardButton("🔙 Back to portfolio defaults", callback_data="ACTION|portfolio_defaults")],
+            [
+                InlineKeyboardButton("🎓 ACCS", callback_data="SETLEVEL|ACCS"),
+                InlineKeyboardButton("🎓 Intermediate profile", callback_data="SETLEVEL|INTERMEDIATE"),
+            ],
+            [
+                InlineKeyboardButton("🎓 HST", callback_data="SETLEVEL|HIGHER"),
+                InlineKeyboardButton("🎓 Non-training", callback_data="SETLEVEL|SAS"),
+            ],
+            [InlineKeyboardButton("🔙 Back", callback_data="ACTION|portfolio_defaults")],
         ])
         await query.message.edit_text(
             "🎓 Which Kaizen portfolio applies to you?",
@@ -6718,8 +8284,8 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.message.edit_text(
             "⚠️ This resets Portfolio Guru — it clears your saved Kaizen login, portfolio, pathway and curriculum choice, voice profile, and local filing history and Portfolio Health evidence. It does not affect cases already saved in Kaizen. Are you sure?",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Yes, reset", callback_data="CONFIRM|reset"),
-                 InlineKeyboardButton("❌ No, keep", callback_data="ACTION|cancel")],
+                [InlineKeyboardButton("🗑️ Delete data", callback_data="CONFIRM|reset")],
+                [InlineKeyboardButton("🛡️ Keep data", callback_data="ACTION|cancel")],
             ])
         )
 
@@ -6804,11 +8370,15 @@ async def handle_filing_feedback(update: Update, context: ContextTypes.DEFAULT_T
 
     # Common fields that might be missed
     field_buttons = [
-        [InlineKeyboardButton("Curriculum links / SLOs", callback_data=f"PUSHBACK|{form_type}|curriculum_links")],
-        [InlineKeyboardButton("Key Capabilities", callback_data=f"PUSHBACK|{form_type}|key_capabilities")],
-        [InlineKeyboardButton("Reflection", callback_data=f"PUSHBACK|{form_type}|reflection")],
-        [InlineKeyboardButton("Date", callback_data=f"PUSHBACK|{form_type}|date_of_encounter")],
-        [InlineKeyboardButton("Other field", callback_data=f"PUSHBACK|{form_type}|other")],
+        [
+            InlineKeyboardButton("📚 Curriculum links", callback_data=f"PUSHBACK|{form_type}|curriculum_links"),
+            InlineKeyboardButton("🎯 Key Capabilities", callback_data=f"PUSHBACK|{form_type}|key_capabilities"),
+        ],
+        [
+            InlineKeyboardButton("💭 Reflection", callback_data=f"PUSHBACK|{form_type}|reflection"),
+            InlineKeyboardButton("📅 Date", callback_data=f"PUSHBACK|{form_type}|date_of_encounter"),
+        ],
+        [InlineKeyboardButton("✏️ Other field", callback_data=f"PUSHBACK|{form_type}|other")],
     ]
 
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(field_buttons))
@@ -6948,6 +8518,11 @@ async def _clear_local_portfolio_account_data(user_id: int, *, reason: str) -> d
         cleared["session_cache"] = invalidate_session_cache(user_id)
     except Exception:
         logger.warning("Could not clear Kaizen session cache for %s", reason, exc_info=True)
+    try:
+        import draft_backup
+        cleared["draft_backups"] = draft_backup.purge_user(user_id)
+    except Exception:
+        logger.warning("Could not clear draft backups for %s", reason, exc_info=True)
     return cleared
 
 
@@ -7053,7 +8628,7 @@ def _upgrade_buttons(current_tier: str) -> list:
     if current_tier == "pro_plus":
         return []
     return [
-        [InlineKeyboardButton("📊 Upgrade to Unlimited (£9.99/mo)", callback_data="UPGRADE|pro_plus")],
+        [InlineKeyboardButton("💳 Upgrade — £9.99/mo", callback_data="UPGRADE|pro_plus")],
     ]
 
 
@@ -7083,7 +8658,7 @@ async def upgrade_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         "*Portfolio Guru Unlimited* — £9.99/month\n"
         "• Unlimited Kaizen WPBA filing\n"
         "• Draft Review (AI critique before filing)\n"
-        "• Portfolio Health — pathway-aware analysis (Training/CCT ARCP evidence review or CESR / Portfolio Pathway evidence plan)\n"
+        "• Portfolio Health — read-only priorities, unfinished-item review and evidence coverage\n"
         "• Unsigned ticket scanning\n"
     )
 
@@ -7441,6 +9016,7 @@ async def _run_health_analysis(
     send_result,
     fail_fn,
     send_photo_fn=None,
+    context_store=None,
 ) -> None:
     """Shared portfolio health pipeline.
 
@@ -7457,18 +9033,6 @@ async def _run_health_analysis(
     stored_profile = get_health_profile(user_id)
     profile = stored_profile or _get_or_default_health_profile(user_id)
     profile_is_default = stored_profile is None
-    is_cesr = profile.pathway == Pathway.cesr_portfolio
-    pathway_label = (
-        "CESR / Portfolio Pathway"
-        if is_cesr
-        else "Training (CCT) evidence scan"
-    )
-
-    empty_state_label = (
-        "CESR / Portfolio Pathway"
-        if profile.pathway == Pathway.cesr_portfolio
-        else "ARCP evidence review within the Training (CCT) pathway"
-    )
 
     training_level = get_training_level(user_id)
     if not training_level:
@@ -7478,19 +9042,102 @@ async def _run_health_analysis(
         level_note = ""
 
     evidence_items, history, evidence_source = await _resolve_health_evidence(user_id)
-    if not evidence_items:
-        await send_result(
-            f"📊 *Portfolio Health — {pathway_label}*\n\n"
-            f"No Portfolio Guru cases filed yet. Start filing here and come back to check your {empty_state_label} readiness.\n\n"
-            "This only reflects cases filed through Portfolio Guru — your existing Kaizen cases aren't affected.\n\n"
-            "Tip: Send a clinical case to get started.",
-            None,
-        )
-        return
 
     snapshot = compute_snapshot(profile, evidence_items)
     limited_view = evidence_source == "case_history"
     sync_status = await _safe_kaizen_sync_status(user_id)
+
+    # Deterministic assessment first. The old path scored presence only — five
+    # of six domains holding anything earned Green — then asked an LLM for
+    # prose, which is why a portfolio with 27 unfinished items and QI at 7
+    # against 250 clinical read as "Green, missing domains: none obvious" and
+    # why _reconcile_action_severity had to exist to stop the narrative
+    # contradicting the score. The assessment answers from the evidence, and
+    # no colour is claimed on top of it.
+    from datetime import datetime as _dt_module
+    assessment = compute_health_assessment(evidence_items)
+    review_date = _stored_review_date(profile)
+    review_month_needs_setup = (
+        review_date is None
+        or review_date < _dt_module.now().date().replace(day=1)
+    )
+    scan_is_fresh = _sync_status_is_fresh(sync_status)
+    scan_is_partial = (
+        getattr(getattr(sync_status, "last_run", None), "status", None) == "partial"
+    )
+
+    # Every evidence view is rendered here, once, from one assessment. A
+    # button press then only reads what this scan already decided.
+    priorities_text = format_priorities(
+        assessment,
+        month_label=_dt_module.now().strftime("%B %Y"),
+        review_date=review_date,
+        limited_view=limited_view,
+        partial_scan=scan_is_partial,
+        scan_is_fresh=scan_is_fresh,
+        pathway_readiness=snapshot.pathway_readiness,
+    )
+    await send_progress()
+    evidence_basis = _format_health_evidence_context(
+        source=evidence_source,
+        evidence_count=len(evidence_items),
+        history_count=len(history),
+        profile_is_default=profile_is_default,
+        sync_status=sync_status,
+        pathway=profile.pathway,
+    )
+    views = {
+        "priorities": priorities_text,
+        "actions": format_actions(assessment),
+        "about": format_about(
+            basis=evidence_basis,
+            limited_view=limited_view,
+            scan_is_fresh=scan_is_fresh,
+        ),
+        "coverage": format_coverage(assessment),
+        "curriculum": format_curriculum(assessment),
+        "scan": format_scan_info(
+            assessment,
+            basis=evidence_basis,
+            review_date=review_date,
+            limited_view=limited_view,
+            pathway_readiness=snapshot.pathway_readiness,
+        ),
+    }
+    action_pages = [
+        format_actions(assessment, page=page)
+        for page in range(actions_page_count(assessment))
+    ]
+    action_queue_pages = {
+        queue: [
+            format_action_queue(assessment, queue, page=page)
+            for page in range(action_queue_page_count(assessment, queue))
+        ]
+        for queue in ("draft", "awaiting")
+    }
+    action_queue_totals = {
+        "draft": len(assessment.stuck_drafts),
+        "awaiting": len(assessment.stuck_awaiting),
+    }
+    if context_store is not None:
+        _store_health_report_context(
+            context_store,
+            views=views,
+            action_pages=action_pages,
+            action_queue_pages=action_queue_pages,
+            action_queue_totals=action_queue_totals,
+            needs_review_month=review_month_needs_setup,
+        )
+    await send_result(
+        priorities_text,
+        _health_view_keyboard(
+            "priorities",
+            queue_totals=action_queue_totals,
+            needs_review_month=review_month_needs_setup,
+        ),
+    )
+    return
+
     evidence_context = _format_health_evidence_context(
         source=evidence_source,
         evidence_count=len(evidence_items),
@@ -7510,7 +9157,7 @@ async def _run_health_analysis(
             snapshot, history, month_label, evidence_context, limited_view=limited_view
         )
         msg = await _append_health_activity_snapshot(msg, user_id, history, training_level, limited_view=limited_view)
-        await send_result(msg, _health_result_keyboard())
+        await send_result(msg, _health_view_keyboard("priorities"))
         return
 
     try:
@@ -7529,7 +9176,7 @@ async def _run_health_analysis(
             limited_view=limited_view,
         )
         msg = await _append_health_activity_snapshot(msg, user_id, history, training_level, limited_view=limited_view)
-        await send_result(msg, _health_result_keyboard())
+        await send_result(msg, _health_view_keyboard("priorities"))
         return
     except Exception as e:
         logger.error(f"Portfolio health analysis failed: {e}", exc_info=True)
@@ -7543,7 +9190,7 @@ async def _run_health_analysis(
             limited_view=limited_view,
         )
         msg = await _append_health_activity_snapshot(msg, user_id, history, training_level, limited_view=limited_view)
-        await send_result(msg, _health_result_keyboard())
+        await send_result(msg, _health_view_keyboard("priorities"))
         return
 
     msg = _format_arcp_action_plan_message(
@@ -7556,7 +9203,7 @@ async def _run_health_analysis(
         limited_view=limited_view,
     )
     msg = await _append_health_activity_snapshot(msg, user_id, history, training_level, limited_view=limited_view)
-    await send_result(msg, _health_result_keyboard())
+    await send_result(msg, _health_view_keyboard("priorities"))
 
 
 async def _run_health_with_optional_kaizen_sync(
@@ -7568,6 +9215,7 @@ async def _run_health_with_optional_kaizen_sync(
     send_result,
     fail_fn,
     show_recovery,
+    context_store=None,
 ) -> None:
     """Autonomous /health: read-only Kaizen scan first when the local index is
     missing or stale, then the normal analysis — both rendered into the same
@@ -7616,6 +9264,7 @@ async def _run_health_with_optional_kaizen_sync(
         send_progress=send_progress,
         send_result=send_result,
         fail_fn=fail_fn,
+        context_store=context_store,
     )
 
 
@@ -7639,8 +9288,8 @@ async def _append_health_activity_snapshot(
     if limited_view:
         snapshot = (
             f"{snapshot}\n"
-            "- Confidence: low — based on Portfolio Guru filings only; "
-            "full Kaizen scan not available"
+            "- Scope: partial — based on Portfolio Guru filings only; "
+            "Kaizen index not available"
         )
     return f"{msg}\n\n{snapshot}"
 
@@ -7706,11 +9355,13 @@ def _pathway_label(pathway: Pathway) -> str:
 def _build_pathway_keyboard(*, from_settings: bool = False) -> InlineKeyboardMarkup:
     prefix = "PATHWAY_SETTINGS" if from_settings else "PATHWAY"
     rows = [
-        [InlineKeyboardButton("Training (CCT)", callback_data=f"{prefix}|{Pathway.training_arcp.value}")],
-        [InlineKeyboardButton("Portfolio (CESR)", callback_data=f"{prefix}|{Pathway.cesr_portfolio.value}")],
+        [
+            InlineKeyboardButton("🎓 Training (CCT)", callback_data=f"{prefix}|{Pathway.training_arcp.value}"),
+            InlineKeyboardButton("📁 Portfolio (CESR)", callback_data=f"{prefix}|{Pathway.cesr_portfolio.value}"),
+        ],
     ]
     if from_settings:
-        rows.append([InlineKeyboardButton("🔙 Back to portfolio defaults", callback_data="ACTION|portfolio_defaults")])
+        rows.append([InlineKeyboardButton("🔙 Back", callback_data="ACTION|portfolio_defaults")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -7909,19 +9560,20 @@ def _format_health_evidence_context(
         if history_count:
             scanned += f"; Portfolio Guru filings for activity: {history_count} in last 6 months"
         window = _health_window_label(pathway, source)
-        confidence = _health_confidence_label(
-            has_index=True,
-            profile_is_default=profile_is_default,
-            sync_is_fresh=_sync_status_is_fresh(sync_status),
+        run_status = getattr(getattr(sync_status, "last_run", None), "status", None)
+        scope = (
+            "partial indexed scan — the last refresh reported partial results"
+            if run_status == "partial"
+            else "indexed Kaizen evidence currently stored"
         )
     else:
-        scanned = f"Portfolio Guru filing history only: {history_count} case(s) in last 6 months"
-        window = _health_window_label(pathway, source)
-        confidence = _health_confidence_label(
-            has_index=False,
-            profile_is_default=profile_is_default,
-            sync_is_fresh=False,
+        scanned = (
+            "Portfolio Guru filing history only: "
+            f"{evidence_count} visible evidence item(s) from {history_count} "
+            "case(s) in last 6 months"
         )
+        window = _health_window_label(pathway, source)
+        scope = "partial — the Kaizen index was unavailable"
 
     if profile_is_default:
         pathway_line = "Assumed pathway: Training (CCT) — change if wrong"
@@ -7932,30 +9584,48 @@ def _format_health_evidence_context(
         "*Evidence basis*",
         f"Scanned: {scanned}",
     ]
-    last_scanned = _health_last_scanned_line(sync_status)
-    if last_scanned:
-        lines.append(last_scanned)
+    if source == "kaizen_index":
+        lines.append(_health_last_scanned_line(sync_status))
+    else:
+        lines.append("Refresh: no Kaizen refresh available; this is a partial local view")
     lines.extend([
         f"Window: {window}",
         f"{pathway_line}",
-        f"Confidence: {confidence}",
+        f"Scope: {scope}",
     ])
     return "\n".join(lines)
 
 
-def _health_last_scanned_line(sync_status: KaizenSyncStatus | None) -> str | None:
-    """Concise "Last scanned" line for the Evidence basis page.
-
-    Only shown when a real Kaizen index run exists, so the user can see how
-    fresh the scanned evidence is. Reuses the same local-time format as the
-    /settings sync row.
-    """
+def _health_last_scanned_line(sync_status: KaizenSyncStatus | None) -> str:
+    """Exact refresh timestamp plus freshness or partiality."""
     if sync_status is None or sync_status.last_run is None:
-        return None
+        return "Refresh: freshness unconfirmed — no completed refresh timestamp is available"
     when = (sync_status.last_run.finished_at or sync_status.last_run.started_at or "").strip()
     if not when:
-        return None
-    return f"Last scanned: {_format_user_local_timestamp(when)}"
+        return "Refresh: freshness unconfirmed — no completed refresh timestamp is available"
+    stamp = _format_user_local_timestamp(when)
+    status = (sync_status.last_run.status or "").lower()
+    if status == "partial":
+        return f"Refresh: {stamp} — partial; some Kaizen evidence may be missing"
+    unsuccessful = {
+        "failed": "failed",
+        "drift": "stopped because the source changed unexpectedly",
+        "auth_required": "needs Kaizen reconnection",
+        "running": "is still running",
+    }
+    if status in unsuccessful:
+        return (
+            f"Refresh: {stamp} — latest refresh {unsuccessful[status]}; "
+            "existing indexed evidence may be older"
+        )
+    if status != "ok":
+        return (
+            f"Refresh: {stamp} — latest refresh did not complete successfully; "
+            "existing indexed evidence may be older"
+        )
+    if _sync_status_is_fresh(sync_status):
+        return f"Refresh: {stamp} — fresh within 24 hours"
+    return f"Refresh: {stamp} — older than 24 hours; recent activity may be missing"
 
 
 def _health_window_label(pathway: Pathway, source: str) -> str:
@@ -7964,23 +9634,8 @@ def _health_window_label(pathway: Pathway, source: str) -> str:
             return "all indexed Kaizen evidence currently stored; CESR still needs a formal multi-year evidence map"
         return "last 6 months of Portfolio Guru filings only; not enough for a CESR judgement"
     if source == "kaizen_index":
-        return "all indexed Kaizen evidence currently stored; add your ARCP month to time this to your cycle"
-    return "last 6 months of Portfolio Guru filings only; add your ARCP month to time this to your cycle"
-
-
-def _health_confidence_label(
-    *,
-    has_index: bool,
-    profile_is_default: bool,
-    sync_is_fresh: bool,
-) -> str:
-    if not has_index:
-        return "low — Kaizen index not available, so this cannot reflect your full portfolio"
-    if profile_is_default:
-        return "medium — evidence was scanned, but the pathway is still the default"
-    if not sync_is_fresh:
-        return "medium — evidence was scanned, but the Kaizen index is not confirmed fresh"
-    return "high for scanned evidence; still cross-check against Kaizen and ARCP/CESR guidance"
+        return "all indexed Kaizen evidence currently stored; set your review month with /arcp to time this to your cycle"
+    return "last 6 months of Portfolio Guru filings only; set your review month with /arcp to time this to your cycle"
 
 
 def _format_arcp_risk_reason(snapshot) -> str:
@@ -8328,7 +9983,7 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "your Training (CCT) pathway (ARCP evidence review) or "
             "CESR / Portfolio Pathway view.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📊 Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
+                [InlineKeyboardButton("💳 Upgrade — £9.99/mo", callback_data="UPGRADE|pro_plus")],
             ]),
         )
         return ConversationHandler.END
@@ -8349,7 +10004,7 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await _set_progress_text("📊 Analysing your portfolio...")
 
     async def send_result(text, reply_markup):
-        text = _store_health_report_context(context, text)
+        # Panes are stored by _run_health_analysis from the assessment.
         msg = progress_holder.get("msg")
         if msg is not None:
             await _safe_edit_text(msg, text, parse_mode="Markdown", reply_markup=reply_markup)
@@ -8384,6 +10039,7 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         send_result=send_result,
         fail_fn=fail_fn,
         show_recovery=show_recovery,
+        context_store=context,
     )
     return ConversationHandler.END
 
@@ -8415,7 +10071,7 @@ async def handle_set_curriculum(update: Update, context: ContextTypes.DEFAULT_TY
     await query.edit_message_text(
         f"✅ Set to {label} — I'll only show you the relevant forms.",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
+            [InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")],
         ]),
     )
 
@@ -8430,7 +10086,7 @@ async def handle_set_level(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await query.edit_message_text(
         f"✅ Portfolio set to {_training_level_label(level)}.",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 Back to settings", callback_data="ACTION|settings")],
+            [InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")],
         ]),
     )
 
@@ -8449,6 +10105,23 @@ def _looks_like_clinical_case(case_text: str) -> bool:
     if not case_text or not case_text.strip():
         return False
     return len(case_text.split()) >= _MIN_CASE_WORDS
+
+
+_MIN_INPUT_WORDS = 3
+
+
+def _case_has_minimum_input(case_text: str, context=None) -> bool:
+    """The one automatic refusal left: genuinely empty input.
+
+    Fewer than 3 words and no attachment queued means there is nothing at all
+    to work with. Anything else — however sparse, whatever the source — goes
+    to the model, which decides whether there is a case to draft from."""
+    text = str(case_text or "").strip()
+    if len(text.split()) >= _MIN_INPUT_WORDS:
+        return True
+    if context is not None and _case_attachments(context):
+        return True
+    return False
 
 
 _VIDEO_CONTEXT_ACTION_MARKERS = (
@@ -8490,11 +10163,293 @@ _VIDEO_CONTEXT_ACTION_MARKERS = (
 )
 
 
+def _case_attachments(context) -> list[dict]:
+    """Every file queued for this case, oldest first.
+
+    A case can carry several files — a doctor sending three clips and a report
+    expects all four on the draft. The singular `attachment_*` keys are kept in
+    step with the most recent entry so the many existing readers of them keep
+    working, but this list is the source of truth for what gets filed.
+    """
+    items = context.user_data.get("attachments")
+    if isinstance(items, list) and items:
+        return items
+    # Pre-list drafts restored from persistence still carry only the singular keys.
+    path = context.user_data.get("attachment_path")
+    if not path:
+        return []
+    return [{
+        "path": path,
+        "name": context.user_data.get("attachment_name") or "attachment",
+        "kind": context.user_data.get("attachment_kind") or "document",
+    }]
+
+
+def _add_case_attachment(context, path: str, name: str, kind: str) -> bool:
+    """Queue a file for this case. Returns False if it was already queued.
+
+    Before this, each new file overwrote `attachment_path`, so sending three
+    files silently filed only the last one.
+    """
+    if not path:
+        return False
+    items = context.user_data.setdefault("attachments", [])
+    if not isinstance(items, list):
+        items = []
+        context.user_data["attachments"] = items
+
+    already = any(item.get("path") == path for item in items)
+    if not already:
+        items.append({"path": path, "name": name, "kind": kind})
+
+    # Mirror onto the singular keys for the existing readers (removal copy,
+    # audit events, per-file messaging), which all mean "the latest file".
+    context.user_data["attachment_path"] = path
+    context.user_data["attachment_name"] = name
+    context.user_data["attachment_kind"] = kind
+    return not already
+
+
+def _cache_and_queue_attachment(context, tmp_path: str, name: str, kind: str) -> bool:
+    """Keep a mid-conversation file and queue it for the Kaizen draft.
+
+    Only `handle_case_input` could attach anything. A photo or clip sent after
+    a form was chosen, or once the draft was on screen, went to a different
+    handler that read it for text and then deleted it in a `finally` — so a
+    doctor who remembered a clip after seeing the draft lost it silently.
+
+    The temp file is about to be unlinked by the caller, so it is copied into
+    the same cache directory `handle_case_input` uses before being queued.
+    """
+    if not tmp_path or not os.path.exists(tmp_path):
+        return False
+    if not is_supported_attachment(name or ""):
+        return False
+    try:
+        cache_dir = os.path.join(tempfile.gettempdir(), "portfolio_guru_cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        suffix = os.path.splitext(name)[1] or os.path.splitext(tmp_path)[1]
+        with tempfile.NamedTemporaryFile(dir=cache_dir, suffix=suffix, delete=False) as cached:
+            cached_path = cached.name
+        shutil.copy2(tmp_path, cached_path)
+    except OSError:
+        logger.warning("Could not cache mid-conversation attachment", exc_info=True)
+        return False
+
+    added = _add_case_attachment(context, cached_path, name, kind)
+    if added:
+        _audit_event(
+            context,
+            "media_document_flow",
+            action="mid_conversation_attachment_queued",
+            attachment_kind=kind,
+        )
+    return added
+
+
+def _clear_case_attachments(context) -> None:
+    context.user_data.pop("attachments", None)
+    for key in ("attachment_path", "attachment_name", "attachment_kind"):
+        context.user_data.pop(key, None)
+
+
+def _pending_media_items(context) -> list[dict]:
+    """Every file waiting on the intent prompt, in arrival order."""
+    items = context.user_data.get("_pending_docs")
+    if isinstance(items, list) and items:
+        return items
+    single = context.user_data.get("_pending_doc")
+    return [single] if single else []
+
+
+def _queue_pending_media(context, item: dict) -> int:
+    """Buffer one file of a possibly-multi-file upload. Returns the new count.
+
+    Telegram delivers an album as separate updates sharing a media_group_id,
+    never as one message. With a single `_pending_doc` slot and no media
+    handler registered in AWAIT_DOC_INTENT, the second and third files of an
+    album matched nothing and were dropped without a word — sending two videos
+    and a photo produced one prompt about one video.
+
+    `_pending_doc` stays pointed at the first item so the existing intent body,
+    which processes one file, keeps working unchanged.
+    """
+    items = context.user_data.setdefault("_pending_docs", [])
+    if not isinstance(items, list):
+        items = []
+        context.user_data["_pending_docs"] = items
+    if not any(existing.get("path") == item.get("path") for existing in items):
+        items.append(item)
+    context.user_data["_pending_doc"] = items[0]
+    return len(items)
+
+
+def _describe_pending_media(context) -> str:
+    """"2 videos and 1 image" — so the prompt names what actually arrived."""
+    counts: dict[str, int] = {}
+    for item in _pending_media_items(context):
+        kind = item.get("kind") or "document"
+        counts[kind] = counts.get(kind, 0) + 1
+    parts = [
+        f"{count} {kind if count == 1 else kind + 's'}"
+        for kind, count in counts.items()
+    ]
+    if not parts:
+        return "file"
+    if len(parts) == 1:
+        return parts[0]
+    return ", ".join(parts[:-1]) + f" and {parts[-1]}"
+
+
+def _pending_media_has_readable(context) -> bool:
+    """True when at least one queued file actually has text worth offering.
+
+    Documents qualify by type — text is the whole point of a PDF or a Word
+    file, and it is extracted later in the intent handler. Images qualify only
+    when the pre-read found something: an ultrasound or ECG has no text, and
+    offering to read it was a choice with a single real answer.
+    """
+    for item in _pending_media_items(context):
+        kind = item.get("kind") or "document"
+        if kind == "document":
+            return True
+        if kind == "image" and str(item.get("text") or "").strip():
+            return True
+    return False
+
+
+def _numbered_media_name(context, stem: str, suffix: str) -> str:
+    """First file keeps the plain name; later ones are numbered.
+
+    Several files in one upload would otherwise share a filename, which Kaizen
+    shows identically and which the filer's per-filename upload check cannot
+    tell apart.
+    """
+    position = len(_pending_media_items(context)) + 1
+    return f"{stem}{suffix}" if position == 1 else f"{stem}-{position}{suffix}"
+
+
+async def _show_pending_media_prompt(context, ack, *, single: str) -> int:
+    """Keep one prompt for the whole upload, updating it as files land.
+
+    Each file of an album arrives as its own update with its own "Receiving…"
+    ack, so editing each ack produced a stack of prompts — one saying "Video
+    received", the next "2 videos received", the next "2 videos and 1 image" —
+    each with live buttons. Buffering the files was right; leaving three
+    questions on screen was not.
+
+    The first arrival becomes the prompt and is remembered. Every later arrival
+    rewrites that same message and removes its own ack, so the doctor sees one
+    question that grows to describe everything they sent.
+    """
+    next_state = AWAIT_DOC_INTENT
+    if not _pending_media_has_readable(context):
+        next_state = AWAIT_CASE_INPUT
+        # Nothing to read, so there is nothing to decide. Attach and ask for
+        # the one thing that is actually needed next — the doctor's account.
+        # Re-running this as each album sibling lands is safe: queuing dedupes
+        # by path, so the same message simply grows.
+        for item in _pending_media_items(context):
+            if item.get("path") and is_supported_attachment(item.get("name") or ""):
+                _add_case_attachment(
+                    context, item["path"], item.get("name"), item.get("kind") or "document"
+                )
+        context.user_data["attachment_upload_confirmed"] = True
+        count = len(_case_attachments(context))
+        noun = "file" if count == 1 else "files"
+        text = (
+            f"📎 {count} {noun} attached to this case.\n\n"
+            "Kaizen keeps them exactly as you sent them, and you can't review a "
+            "file once it's on the draft — so check nothing identifying is visible.\n\n"
+            "Now tell me about the case in your own words: what happened, what you "
+            "did or decided, the outcome, and what you learned."
+        )
+        keyboard = None
+    else:
+        text = _pending_media_prompt_text(context, single=single)
+        keyboard = _build_pending_media_keyboard(context)
+
+    tracked = context.user_data.get("_pending_media_prompt")
+
+    if tracked:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=tracked["chat_id"],
+                message_id=tracked["message_id"],
+                text=text,
+                reply_markup=keyboard,
+            )
+            try:
+                await ack.delete()
+            except Exception:
+                logger.debug("could not remove duplicate ack", exc_info=True)
+            return next_state
+        except Exception:
+            # The tracked prompt is gone (deleted, too old). Fall through and
+            # let this ack become the prompt rather than losing it entirely.
+            logger.debug("pending-media prompt not editable, re-anchoring", exc_info=True)
+
+    await ack.edit_text(text, reply_markup=keyboard)
+    context.user_data["_pending_media_prompt"] = {
+        "chat_id": ack.chat_id,
+        "message_id": ack.message_id,
+    }
+    _track_latest_message(context, ack)
+    return next_state
+
+
+def _pending_media_prompt_text(context, *, single: str) -> str:
+    """Prompt copy that names the whole upload, not just the first file."""
+    items = _pending_media_items(context)
+    retention = (
+        "Kaizen keeps files exactly as you sent them, and you can't review a file "
+        "once it's on the draft — so check nothing identifying is visible."
+    )
+    if len(items) <= 1:
+        head = single
+    else:
+        head = (
+            f"📎 {_describe_pending_media(context)} received — "
+            "how would you like to use them?\n\n"
+            "Your choice applies to all of them. Send files one at a time if you "
+            "want to use some as context and attach others."
+        )
+
+    if _pending_media_has_readable(context):
+        # Says what "read" actually does. The old wording ("use for drafting")
+        # implied the bot would interpret an ECG or ultrasound, which it
+        # deliberately refuses to do — so the choice looked bigger than it was.
+        tail = (
+            "Reading means pulling out any text — report wording, labels, notes. "
+            "For an ECG, ultrasound, X-ray or wound photo I won't interpret the "
+            "picture itself; tell me about the case in your own words."
+        )
+    else:
+        tail = (
+            "I won't interpret clinical videos. Send your own context or findings "
+            "in text/voice."
+        )
+    return f"{head}\n\n{retention}\n\n{tail}"
+
+
+def _build_pending_media_keyboard(context) -> InlineKeyboardMarkup:
+    """Offer 'read' options only when something in the upload can be read.
+
+    A video-only upload must not offer "use for drafting" — the bot does not
+    interpret video, and offering it would promise something it refuses to do.
+    """
+    if _pending_media_has_readable(context):
+        return _build_image_intent_keyboard()
+    return _build_video_intent_keyboard()
+
+
 def _has_video_attachment_for_drafting(context) -> bool:
-    if context.user_data.get("attachment_kind") == "video":
-        return True
-    attachment_name = str(context.user_data.get("attachment_name") or "").lower()
-    return attachment_name.endswith(_VIDEO_DOCUMENT_EXTENSIONS)
+    for item in _case_attachments(context):
+        if item.get("kind") == "video":
+            return True
+        if str(item.get("name") or "").lower().endswith(_VIDEO_DOCUMENT_EXTENSIONS):
+            return True
+    return False
 
 
 def _video_context_has_user_grounding(case_text: str) -> bool:
@@ -8603,82 +10558,6 @@ def _case_context_has_user_grounding(case_text: str) -> bool:
     return clinical_hits >= 3 and action_hits >= 1 and len(words) >= 25
 
 
-def _source_context_needs_more_detail(
-    input_source: str | None,
-    case_text: str,
-    context=None,
-) -> bool:
-    source = str(input_source or "").strip().lower()
-    if source in _USER_CONTEXT_REQUIRED_SOURCES:
-        # Ask before drafting, not after. Without this the bot builds a draft
-        # from OCR alone and then apologises for it in the preview.
-        #
-        # Two independent signals, either of which clears the gate: the caption
-        # flag set by the attachment flow, and grounding detected in the text
-        # itself. The flag alone would block any path that forgot to set it;
-        # the text alone would be fooled by a caption-free clinical report.
-        if context is not None and context.user_data.get("case_has_user_context"):
-            return False
-        # "File this as a procedure log" is the doctor typing, not the scanner.
-        # An explicit form instruction can only have come from them, so it
-        # counts as context even though it is too short to look like a case.
-        if extract_explicit_form_type(case_text):
-            return False
-        return not _case_context_has_user_grounding(case_text)
-    return _source_grounding_required(source) and not _case_context_has_user_grounding(case_text)
-
-
-def _photo_media_needs_user_context(
-    context,
-    input_source: str | None,
-    caption: str,
-    extracted_text: str,
-) -> bool:
-    """True when a photo would drive a case the doctor has never described.
-
-    Photos sent *into an open case* are usually legitimate — a CXR backing up
-    a case the doctor already typed. The failure mode is narrower: a case that
-    originated from an image and still has no words of theirs, where each new
-    photo just rewrites an ungrounded draft from OCR.
-
-    So this fires only when the case is known to lack user context
-    (``case_has_user_context`` explicitly False, set for image-origin cases)
-    and this message adds none either — no caption, no grounding in the text.
-    """
-    if str(input_source or "").strip().lower() not in _USER_CONTEXT_REQUIRED_SOURCES:
-        return False
-    if context is None or context.user_data.get("case_has_user_context") is not False:
-        return False
-    if str(caption or "").strip():
-        return False
-    return not _case_context_has_user_grounding(extracted_text or "")
-
-
-def _source_context_detail_request(input_source: str | None) -> str:
-    source = str(input_source or "").strip().lower()
-    if source in _USER_CONTEXT_REQUIRED_SOURCES:
-        return render_message("photo_grounding_detail_request")
-    if source == "voice":
-        source_label = "the voice transcript"
-    elif source == "audio":
-        source_label = "the audio transcript"
-    else:
-        source_label = "what you sent"
-    return render_message("source_grounding_detail_request", source_label=source_label)
-
-
-def _video_context_detail_request() -> str:
-    return (
-        "📋 I need your own clinical context before drafting from a video attachment.\n\n"
-        "Send rough notes with: what the video shows, what you did or decided, the outcome, "
-        "and what you learned. I won't interpret the video myself."
-    )
-
-
-def _attached_video_context_needs_more_detail(context, case_text: str) -> bool:
-    return _has_video_attachment_for_drafting(context) and not _video_context_has_user_grounding(case_text)
-
-
 async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: int, case_text: str, form_type: str):
     """Create an explicit-only draft snapshot for the selected form.
 
@@ -8770,7 +10649,7 @@ async def _handle_reuse_request(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data["chosen_form"] = explicit_form
         prompt_text = (
             f"🔁 Reusing your previous case for *{_form_display_name(explicit_form)}*.\n\n"
-            f"Tap Draft to extract the fields from the case you already filed — "
+            f"Select the form below to extract the fields from the case you already filed — "
             f"I won't invent any new clinical details."
         )
         _store_explicit_form_choice_state(context, explicit_form, prompt_text)
@@ -8792,6 +10671,11 @@ async def _handle_reuse_request(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_id: int, case_text: str, input_source: str) -> int:
     """Store case text, suggest form types, or move directly to the chosen template review."""
+    photo_removed_labels: list[str] = []
+    if str(input_source or "").strip().lower() in {"photo", "image"}:
+        case_text, photo_removed_labels = _deidentify_photo_case_text(case_text)
+    context.user_data["_photo_redaction_labels"] = photo_removed_labels
+
     _track_funnel_event(context, "case_started", source=input_source, update_last=False)
     _track_funnel_event(context, "input_received", source=input_source)
     _audit_event(
@@ -8805,43 +10689,15 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
         case_text_sha256_16=dogfood_audit.text_fingerprint(case_text),
         case_chars=len(case_text or ""),
     )
-    # Anti-fabrication gate: never feed a too-thin input to the recommender or
-    # the field extractor. The LLM is instructed not to fabricate, but with no
-    # content to ground against it can still hallucinate plausible-sounding
-    # clinical details. Better to ask the user for more.
+    # Only automatic refusal left: genuinely empty input. Everything else goes
+    # to the model, which decides whether there is a case to draft from.
     context.user_data["case_text"] = case_text
     context.user_data["case_input_source"] = input_source
     _remember_case_context_source(context, input_source)
-
-    if _source_context_needs_more_detail(input_source, case_text, context):
-        context.user_data["awaiting_source_detail"] = True
-        _audit_event(
-            context,
-            "decision_path",
-            decision="source_context_needed",
-            input_source=input_source,
-            case_chars=len(case_text or ""),
-        )
-        prompt_msg = await _send_latest_message(
-            message,
-            context,
-            _source_context_detail_request(input_source),
-            reply_markup=_KB_CANCEL,
-        )
-        _track_source_detail_prompt(context, prompt_msg.message_id, prompt_msg.chat_id)
-        return AWAIT_CASE_INPUT
     context.user_data.pop("awaiting_source_detail", None)
 
     explicit_form = extract_explicit_form_type(case_text)
     if explicit_form:
-        if _attached_video_context_needs_more_detail(context, case_text):
-            await _send_latest_message(
-                message,
-                context,
-                _video_context_detail_request(),
-                reply_markup=_KB_CANCEL,
-            )
-            return AWAIT_CASE_INPUT
         context.user_data["chosen_form"] = explicit_form
         _audit_event(
             context,
@@ -8852,8 +10708,8 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
         )
         prompt_text = (
             f"I’ll use *{_form_display_name(explicit_form)}* for this entry.\n\n"
-            "Tap Draft to extract the fields from what you sent."
-        )
+            "Select the form below to draft from what you sent."
+        ) + _privacy_nudge_for_source(input_source, photo_removed_labels)
         _store_explicit_form_choice_state(context, explicit_form, prompt_text)
         await _send_latest_message(
             message,
@@ -8864,7 +10720,22 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
         )
         return AWAIT_FORM_CHOICE
 
-    if not _looks_like_clinical_case(case_text):
+    # A message that only describes a certificate or award has no case in it.
+    # Say what can and can't be done with it instead of recommending a form.
+    if classify_evidence_artifact(text=case_text).is_artifact:
+        _audit_event(
+            context,
+            "decision_path",
+            decision="evidence_artifact_not_a_case",
+            input_source=input_source,
+        )
+        # No case substance was captured, so nothing downstream should later
+        # claim "your case is still in progress".
+        context.user_data.pop("case_text", None)
+        await message.reply_text(evidence_artifact_text_message())
+        return AWAIT_CASE_INPUT
+
+    if not _case_has_minimum_input(case_text, context):
         _audit_event(
             context,
             "decision_path",
@@ -8872,21 +10743,8 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
             input_source=input_source,
             case_chars=len(case_text or ""),
         )
-        await message.reply_text(
-            _video_context_detail_request()
-            if _has_video_attachment_for_drafting(context)
-            else render_message("thin_case_detail_request")
-        )
-        return AWAIT_CASE_INPUT if _has_video_attachment_for_drafting(context) else ConversationHandler.END
-
-    if _attached_video_context_needs_more_detail(context, case_text):
-        await _send_latest_message(
-            message,
-            context,
-            _video_context_detail_request(),
-            reply_markup=_KB_CANCEL,
-        )
-        return AWAIT_CASE_INPUT
+        await message.reply_text(render_message("thin_case_detail_request"))
+        return ConversationHandler.END
 
     training_level = get_training_level(user_id)
     allowed_forms = _allowed_forms_for_training_level(training_level)
@@ -8910,8 +10768,10 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
                 message, context,
                 "Nothing left to recommend for this case — browse all types below.",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📋 See all forms", callback_data="FORM|show_all")],
-                    [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_recommend")],
+                    [
+                        InlineKeyboardButton("📋 Forms", callback_data="FORM|show_all"),
+                        InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_recommend"),
+                    ],
                 ]),
             )
             return AWAIT_FORM_CHOICE
@@ -8931,8 +10791,10 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
             message, context,
             render_message("ai_temporarily_unavailable"),
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_recommend")],
-                [InlineKeyboardButton("📋 Pick form manually", callback_data="FORM|show_all")],
+                [
+                    InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_recommend"),
+                    InlineKeyboardButton("📋 Forms", callback_data="FORM|show_all"),
+                ],
             ]),
         )
         return AWAIT_FORM_CHOICE
@@ -8944,6 +10806,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
         recommendations,
         input_source=input_source,
         curriculum=_effective_curriculum(user_id),
+        removed_labels=photo_removed_labels,
     )
     context.user_data["form_recommendations_text"] = prompt_text
     _track_funnel_event(
@@ -9061,7 +10924,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         preview = _format_draft_preview_for_context(draft, context, chosen_form)
         await _safe_edit_text(
             query.message,
-            preview + _REPLY_HINT_SUFFIX,
+            preview + _draft_reply_hint(context),
             reply_markup=_build_approval_keyboard(
                 improved_once=context.user_data.get("quick_improve_used", False),
                 can_back_to_missing=True,
@@ -9146,6 +11009,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return ConversationHandler.END
         await query.edit_message_text(f"🧩 Reviewing {_form_display_name(chosen_form)} template…")
+        gate = await _essentials_gate_before_draft(query.message, context, case_text, chosen_form)
+        if gate is not None:
+            return gate
         try:
             draft = await _analyse_selected_form(context, user_id, case_text, chosen_form)
         except asyncio.TimeoutError:
@@ -9193,6 +11059,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if chosen_form:
             context.user_data["case_text"] = merged
             await query.edit_message_text(f"🧩 Updating {_form_display_name(chosen_form)} draft…")
+            gate = await _essentials_gate_before_draft(query.message, context, merged, chosen_form)
+            if gate is not None:
+                return gate
             try:
                 draft = await _analyse_selected_form(context, user_id, merged, chosen_form)
             except Exception as exc:
@@ -9229,6 +11098,25 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("CANCEL|") or data in {"ACTION|reset", "ACTION|cancel"}:
         await query.answer()
+        stale_message = query.message
+        stale_chat_id = getattr(stale_message, "chat_id", None) or getattr(
+            getattr(stale_message, "chat", None), "id", None
+        )
+        stale_msg_id = getattr(stale_message, "message_id", None)
+        if _is_retired_essentials_prompt_ref(context, stale_chat_id, stale_msg_id):
+            # This Cancel button belonged to an essentials-gap prompt that was
+            # already retired (the doctor answered it) — a live active draft
+            # may already exist by the time this stale tap arrives, so treat
+            # it as a no-op on the old message rather than cancelling it.
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+            return await _resume_paused_flow(
+                update,
+                context,
+                "⏳ That earlier Cancel button is no longer active.",
+            )
         # Disarm buttons immediately — prevents double-tap
         await query.edit_message_reply_markup(reply_markup=None)
         user_id = update.effective_user.id
@@ -9289,6 +11177,41 @@ async def handle_pending_media_context(update: Update, context: ContextTypes.DEF
     return await handle_case_input(update, context)
 
 
+async def _document_followup_refresh_draft(
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    case_text: str,
+    input_source: str,
+    chosen_form: str,
+) -> int:
+    """Merge a document/photo followup into the case already awaiting detail
+    and re-run the chosen form's draft, instead of restarting recommendation."""
+    previous_case = context.user_data.get("case_text", "").strip()
+    if previous_case:
+        case_text = f"{previous_case}\n\n{case_text}".strip()
+    previous_source = context.user_data.get("case_input_source", input_source)
+    input_source = previous_source if previous_source == input_source else "mixed"
+    context.user_data["case_text"] = case_text
+    context.user_data["case_input_source"] = input_source
+    await query.edit_message_text(f"🧩 Updating {_form_display_name(chosen_form)} draft…")
+    gate = await _essentials_gate_before_draft(query.message, context, case_text, chosen_form)
+    if gate is not None:
+        return gate
+    try:
+        draft = await _analyse_selected_form(context, user_id, case_text, chosen_form)
+    except asyncio.TimeoutError:
+        await query.edit_message_text("⏳ Template review timed out. Please try again.")
+        return AWAIT_TEMPLATE_REVIEW
+    except Exception as exc:
+        logger.error("Document followup refresh failed for %s: %s", chosen_form, exc, exc_info=True)
+        await query.edit_message_text("⚠️ Could not refresh that template.", reply_markup=_KB_CANCEL)
+        return AWAIT_TEMPLATE_REVIEW
+    if not _draft_has_useful_content(draft, chosen_form):
+        return await _ask_for_more_detail_before_draft(query.message, context)
+    return await _show_draft_review(query.message, context, draft, chosen_form)
+
+
 async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Apply the user's explicit file/image intent: read, attach, both, or remove."""
     query = update.callback_query
@@ -9296,8 +11219,66 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
     mode = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else ""
     _remember_audit_user(context, update)
     content_state = _content_state_while_media_pending(context)
+    pending_items = _pending_media_items(context)
     pending_doc = context.user_data.pop("_pending_doc", None) or {}
+    context.user_data.pop("_pending_docs", None)
+    context.user_data.pop("_pending_media_prompt", None)
     pending_doc_context = context.user_data.pop("_pending_doc_context", "")
+
+    # The body below handles one file. Everything else in a multi-file upload is
+    # folded in here first: attachments queued, readable files' text merged into
+    # the context that the body already threads into the case. Before this they
+    # never arrived at all.
+    siblings = [
+        item for item in pending_items
+        if item.get("path") and item.get("path") != pending_doc.get("path")
+    ]
+    if siblings:
+        sibling_text: list[str] = []
+        for item in siblings:
+            sibling_path = item.get("path")
+            sibling_name = item.get("name") or "attachment"
+            sibling_kind = item.get("kind") or "document"
+
+            if mode == "ignore":
+                try:
+                    os.unlink(sibling_path)
+                except OSError:
+                    pass
+                continue
+
+            if mode in {"attach", "both"} and is_supported_attachment(sibling_name):
+                _add_case_attachment(context, sibling_path, sibling_name, sibling_kind)
+
+            if mode in {"info", "both"} and sibling_kind in {"image", "document"}:
+                try:
+                    # Images were read once on arrival to decide whether to ask
+                    # at all — reuse that instead of paying for a second call.
+                    cached = str(item.get("text") or "").strip()
+                    if cached:
+                        text = cached
+                    elif sibling_kind == "image":
+                        text, _removed_labels = await _read_image_text(sibling_path)
+                    else:
+                        text = await extract_from_document(sibling_path)
+                    if text and text.strip() and text.strip() != "NOT_CLINICAL":
+                        sibling_text.append(text.strip())
+                except Exception:
+                    logger.warning(
+                        "Could not read extra %s in multi-file upload", sibling_kind,
+                        exc_info=True,
+                    )
+        if sibling_text:
+            pending_doc_context = "\n\n".join(
+                part for part in [pending_doc_context, *sibling_text] if part
+            )
+        _audit_event(
+            context,
+            "media_document_flow",
+            action="multi_file_siblings_applied",
+            mode=mode,
+            sibling_count=len(siblings),
+        )
     file_path = pending_doc.get("path")
     file_name = pending_doc.get("name") or "document"
     attachment_kind = pending_doc.get("kind") or "document"
@@ -9398,10 +11379,8 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
         return AWAIT_CASE_INPUT
 
     if mode in {"attach", "both"}:
-        context.user_data["attachment_path"] = file_path
+        _add_case_attachment(context, file_path, file_name, attachment_kind)
         context.user_data.pop("attachment_upload_confirmed", None)
-        context.user_data["attachment_name"] = file_name
-        context.user_data["attachment_kind"] = attachment_kind
         _audit_event(
             context,
             "media_document_flow",
@@ -9461,7 +11440,7 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
     await query.edit_message_text(f"{read_icon} Reading {attachment_label}…")
     try:
         if is_image_attachment:
-            case_text = await extract_from_image(file_path)
+            case_text, _removed_labels = await _read_image_text(file_path)
             if case_text.strip() == "NOT_CLINICAL":
                 case_text = ""
         else:
@@ -9496,9 +11475,14 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
                 except OSError:
                     pass
             context.user_data["document_name"] = file_name
+            input_source = "photo" if is_image_attachment else "document"
+            chosen_form = context.user_data.get("chosen_form")
+            if chosen_form and context.user_data.get("awaiting_detail"):
+                return await _document_followup_refresh_draft(
+                    query, context, update.effective_user.id, case_text, input_source, chosen_form
+                )
             await query.edit_message_text(CAPTURED_ACK, parse_mode="Markdown")
             _track_latest_message(context, query.message)
-            input_source = "photo" if is_image_attachment else "document"
             return await _process_case_text(query.message, context, update.effective_user.id, case_text, input_source)
         if mode == "both":
             if is_image_attachment:
@@ -9529,6 +11513,31 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
         )
         return AWAIT_CASE_INPUT
 
+    # The filename check happens on arrival, but a certificate can be called
+    # anything. Re-check what was actually read before any of this becomes a
+    # "case" the recommender will pick a form for.
+    artifact_probe = "\n\n".join(part for part in [pending_doc_context.strip(), case_text] if part)
+    if classify_evidence_artifact(file_name=file_name, text=artifact_probe).is_artifact:
+        if mode == "info" and file_path and os.path.exists(file_path):
+            try:
+                os.unlink(file_path)
+            except OSError:
+                pass
+        _audit_event(
+            context,
+            "decision_path",
+            decision="evidence_artifact_not_a_case",
+            mode=mode,
+            attachment_kind=attachment_kind,
+        )
+        kept_note = (
+            "\n\nI've kept the file ready to attach after you choose a form. Nothing has been saved to Kaizen."
+            if mode == "both"
+            else ""
+        )
+        await query.edit_message_text(f"{evidence_artifact_upload_message()}{kept_note}")
+        return AWAIT_CASE_INPUT
+
     max_chars = 15000
     if len(case_text) > max_chars:
         case_text = case_text[:max_chars] + "\n\n[Document truncated — using first 15,000 characters]"
@@ -9546,12 +11555,21 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data["document_name"] = file_name
     input_source = "photo" if is_image_attachment else "document"
 
-    if _gathering_enabled(context) and not (context.user_data.get("chosen_form") and context.user_data.get("awaiting_detail")):
+    chosen_form = context.user_data.get("chosen_form")
+    if chosen_form and context.user_data.get("awaiting_detail"):
+        return await _document_followup_refresh_draft(
+            query, context, update.effective_user.id, case_text, input_source, chosen_form
+        )
+
+    if _gathering_enabled(context) and not (chosen_form and context.user_data.get("awaiting_detail")):
         if not _gathering_case_active(context):
+            existing_attachments = _case_attachments(context)
             existing_attachment_path = context.user_data.get("attachment_path")
             existing_attachment_name = context.user_data.get("attachment_name")
             existing_attachment_kind = context.user_data.get("attachment_kind")
             _clear_case_review_state(context, keep_case=False)
+            if existing_attachments:
+                context.user_data["attachments"] = existing_attachments
             if existing_attachment_path:
                 context.user_data["attachment_path"] = existing_attachment_path
                 context.user_data["attachment_name"] = existing_attachment_name
@@ -9591,15 +11609,6 @@ async def _accumulate_and_refresh(update: Update, context: ContextTypes.DEFAULT_
     combined = combine_case_inputs(initial_case, additions)
     context.user_data["case_text"] = combined
 
-    if _attached_video_context_needs_more_detail(context, combined):
-        await _send_latest_message(
-            update.message,
-            context,
-            _video_context_detail_request(),
-            reply_markup=_KB_CANCEL,
-        )
-        return AWAIT_CASE_INPUT
-
     form_name = _form_display_name(chosen_form)
     await update.effective_chat.send_action(constants.ChatAction.TYPING)
     ack = await _send_latest_message(
@@ -9607,6 +11616,15 @@ async def _accumulate_and_refresh(update: Update, context: ContextTypes.DEFAULT_
         context,
         f"🧩 Updating {form_name} draft…",
     )
+
+    gate = await _essentials_gate_before_draft(ack, context, combined, chosen_form)
+    if gate is not None:
+        # `case_text` already holds the combined case, so the additions list
+        # has done its job; leaving it set would append this same text again
+        # on the next pass through here.
+        context.user_data.pop("accumulating_case", None)
+        context.user_data.pop("accumulation_additions", None)
+        return gate
 
     try:
         draft = await _analyse_selected_form(context, user_id, combined, chosen_form)
@@ -9656,8 +11674,20 @@ async def _regenerate_active_draft_with_feedback(
         context.user_data["case_has_user_context"] = True
 
     ack = await msg.reply_text("✏️ Regenerating draft with your extra information…")
+
+    # Regenerating is drafting. An edit must not rebuild the draft from a case
+    # whose essentials are known to be missing, so the same gate runs here on
+    # the doctor's combined source — which stays saved either way.
+    form_type = (
+        draft.form_type
+        if isinstance(draft, FormDraft)
+        else (context.user_data.get("chosen_form") or "CBD")
+    )
+    gate = await _essentials_gate_before_draft(ack, context, case_text, form_type)
+    if gate is not None:
+        return gate
+
     try:
-        form_type = draft.form_type if isinstance(draft, FormDraft) else "CBD"
         current_draft_text = _format_draft_preview(
             draft,
             include_safety_layer=False,
@@ -9672,6 +11702,7 @@ async def _regenerate_active_draft_with_feedback(
                     current_draft=current_draft_text,
                     voice_profile_json=vp,
                     input_source=context.user_data.get("case_input_source", "text"),
+                    previous_key_capabilities=list(getattr(draft, "key_capabilities", None) or []),
                 ),
                 timeout=45,
             )
@@ -9688,6 +11719,9 @@ async def _regenerate_active_draft_with_feedback(
                 timeout=45,
         )
         _store_draft(context, updated)
+        # The gate above already judged this exact case and form, so the
+        # reflection decision here reads that fresh judgement rather than a
+        # stale one from before the doctor's reply.
         _set_reflection_detail_gate(context, updated)
     except asyncio.TimeoutError:
         await ack.edit_text(
@@ -9704,7 +11738,7 @@ async def _regenerate_active_draft_with_feedback(
     preview = _format_draft_preview_for_context(updated, context)
     await _safe_edit_text(
         ack,
-        preview + _REPLY_HINT_SUFFIX,
+        preview + _draft_reply_hint(context),
         reply_markup=_active_draft_keyboard(context),
         parse_mode="Markdown",
     )
@@ -9744,7 +11778,10 @@ async def handle_template_review_media(update: Update, context: ContextTypes.DEF
             with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
                 tmp_path = tmp.name
                 await photo_file.download_to_drive(tmp_path)
-                extracted_text = await extract_from_image(tmp_path)
+                extracted_text, removed_labels = await _read_image_text(tmp_path)
+                _cache_and_queue_attachment(
+                    context, tmp_path, _numbered_media_name(context, "portfolio-image", ".jpg"), "image"
+                )
             if extracted_text and extracted_text.strip() == "NOT_CLINICAL":
                 extracted_text = None
                 await ack.edit_text("That image doesn't look clinical — send text or another photo.")
@@ -9753,7 +11790,10 @@ async def handle_template_review_media(update: Update, context: ContextTypes.DEF
             # kept the scanner's words and discarded theirs.
             if caption:
                 extracted_text = combine_case_inputs(caption, [extracted_text or ""])
-            await ack.edit_text("📷 Got it — updating template…")
+            await ack.edit_text(
+                "📷 Got it — attached, and updating your draft…"
+                + _photo_redaction_note(removed_labels)
+            )
         except Exception:
             await ack.edit_text("⚠️ Couldn't read image. Try again or send text.")
             return AWAIT_TEMPLATE_REVIEW
@@ -9770,7 +11810,10 @@ async def handle_template_review_media(update: Update, context: ContextTypes.DEF
                 tmp_path = tmp.name
                 await video_file.download_to_drive(tmp_path)
                 extracted_text = await transcribe_voice(tmp_path)
-            await ack.edit_text("🎬 Got it — updating template…")
+            _cache_and_queue_attachment(
+                context, tmp_path, _numbered_media_name(context, "portfolio-video", ".mp4"), "video"
+            )
+            await ack.edit_text("🎬 Got it — attached, and updating your draft…")
         except Exception:
             await ack.edit_text("⚠️ Couldn't extract audio from video. Try again or send text.")
             return AWAIT_TEMPLATE_REVIEW
@@ -9793,13 +11836,14 @@ async def handle_template_review_media(update: Update, context: ContextTypes.DEF
                 tmp_path = tmp.name
                 await doc_file.download_to_drive(tmp_path)
                 extracted_text = await extract_from_document(tmp_path)
+                _cache_and_queue_attachment(context, tmp_path, file_name, "document")
             if not extracted_text or not extracted_text.strip():
                 await ack.edit_text("⚠️ Couldn't extract text from that file.")
                 return AWAIT_TEMPLATE_REVIEW
             max_chars = 15000
             if len(extracted_text) > max_chars:
                 extracted_text = extracted_text[:max_chars]
-            await ack.edit_text(f"📄 Got it — updating template…")
+            await ack.edit_text("📄 Got it — attached, and updating your draft…")
         except Exception:
             await ack.edit_text("⚠️ Couldn't read that file. Try again or send text.")
             return AWAIT_TEMPLATE_REVIEW
@@ -9812,16 +11856,6 @@ async def handle_template_review_media(update: Update, context: ContextTypes.DEF
         return AWAIT_TEMPLATE_REVIEW
 
     if not extracted_text or not extracted_text.strip():
-        return AWAIT_TEMPLATE_REVIEW
-
-    if _photo_media_needs_user_context(context, "photo" if msg.photo else "", caption, extracted_text):
-        _audit_event(
-            context,
-            "decision_path",
-            decision="photo_template_context_needed",
-            input_source="photo",
-        )
-        await ack.edit_text(_source_context_detail_request("photo"))
         return AWAIT_TEMPLATE_REVIEW
 
     return await _accumulate_and_refresh(update, context, extracted_text)
@@ -9863,13 +11897,19 @@ async def handle_approval_media_feedback(update: Update, context: ContextTypes.D
             with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
                 tmp_path = tmp.name
                 await photo_file.download_to_drive(tmp_path)
-                extracted_text = await extract_from_image(tmp_path)
+                extracted_text, removed_labels = await _read_image_text(tmp_path)
+                _cache_and_queue_attachment(
+                    context, tmp_path, _numbered_media_name(context, "portfolio-image", ".jpg"), "image"
+                )
             if extracted_text and extracted_text.strip() == "NOT_CLINICAL":
                 await ack.edit_text("That image doesn't look clinical — send text or another photo.")
                 return AWAIT_APPROVAL
             if caption:
                 extracted_text = combine_case_inputs(caption, [extracted_text or ""])
-            await ack.edit_text("📷 Got it — updating draft…")
+            await ack.edit_text(
+                "📷 Got it — attached, and updating your draft…"
+                + _photo_redaction_note(removed_labels)
+            )
         except Exception:
             await ack.edit_text("⚠️ Couldn't read image. Type your feedback instead.")
             return AWAIT_APPROVAL
@@ -9887,7 +11927,10 @@ async def handle_approval_media_feedback(update: Update, context: ContextTypes.D
                 tmp_path = tmp.name
                 await video_file.download_to_drive(tmp_path)
                 extracted_text = await transcribe_voice(tmp_path)
-            await ack.edit_text("🎬 Got it — updating draft…")
+            _cache_and_queue_attachment(
+                context, tmp_path, _numbered_media_name(context, "portfolio-video", ".mp4"), "video"
+            )
+            await ack.edit_text("🎬 Got it — attached, and updating your draft…")
         except Exception:
             await ack.edit_text("⚠️ Couldn't extract audio from video. Type your feedback instead.")
             return AWAIT_APPROVAL
@@ -9911,13 +11954,14 @@ async def handle_approval_media_feedback(update: Update, context: ContextTypes.D
                 tmp_path = tmp.name
                 await doc_file.download_to_drive(tmp_path)
                 extracted_text = await extract_from_document(tmp_path)
+                _cache_and_queue_attachment(context, tmp_path, file_name, "document")
             if not extracted_text or not extracted_text.strip():
                 await ack.edit_text("⚠️ Couldn't extract text from that file.")
                 return AWAIT_APPROVAL
             max_chars = 15000
             if len(extracted_text) > max_chars:
                 extracted_text = extracted_text[:max_chars]
-            await ack.edit_text("📄 Got it — updating draft…")
+            await ack.edit_text("📄 Got it — attached, and updating your draft…")
         except Exception:
             await ack.edit_text("⚠️ Couldn't read that file. Type your feedback instead.")
             return AWAIT_APPROVAL
@@ -9927,16 +11971,6 @@ async def handle_approval_media_feedback(update: Update, context: ContextTypes.D
 
     else:
         await msg.reply_text("Send text, voice, image, or a document with the extra detail.")
-        return AWAIT_APPROVAL
-
-    if _photo_media_needs_user_context(context, input_source, caption, extracted_text or ""):
-        _audit_event(
-            context,
-            "decision_path",
-            decision="photo_feedback_context_needed",
-            input_source=input_source,
-        )
-        await ack.edit_text(_source_context_detail_request(input_source))
         return AWAIT_APPROVAL
 
     if _has_retryable_failed_filing_draft(context):
@@ -10043,7 +12077,7 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
                 return AWAIT_FORM_CHOICE
             else:
                 await update.message.reply_text(
-                    f"Based on your case, {form_name} is still the best fit. Tap Show me the draft to carry on, or Cancel to start again."
+                    f"Based on your case, {form_name} is still the best fit. Select Show draft to carry on, or Cancel to start again."
                 )
                 return AWAIT_TEMPLATE_REVIEW
         except Exception:
@@ -10058,8 +12092,8 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
             context.user_data["pending_new_case_text"] = raw_text
             prompt_text = "Looks like a new case — start fresh or fold it into the current one?"
             markup = InlineKeyboardMarkup([[
-                InlineKeyboardButton("🆕 New case", callback_data="CASE|new"),
-                InlineKeyboardButton("✏️ Improve current", callback_data="CASE|improve"),
+                InlineKeyboardButton("➕ New case", callback_data="CASE|new"),
+                InlineKeyboardButton("✏️ Edit", callback_data="CASE|improve"),
             ]])
             await _edit_last_bot_msg(
                 context,
@@ -10186,10 +12220,15 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     context.user_data.pop("post_reset", None)
 
     # Clear stale status state from previous sessions, but keep active prompts
-    # editable while the user is adding bundle/source-detail context.
+    # editable while the user is adding bundle/source-detail context, or
+    # answering the missing-essentials gap prompt (`awaiting_detail`) — losing
+    # the tracked id here means the followup ack/draft is sent as a brand new
+    # message instead of retiring the essentials prompt, leaving its Cancel
+    # button live in the chat alongside the new draft.
     if not (
         context.user_data.get("pending_case_bundle")
         or context.user_data.get("awaiting_source_detail")
+        or (context.user_data.get("awaiting_detail") and context.user_data.get("chosen_form"))
     ):
         context.user_data.pop("status_msg_id", None)
         context.user_data.pop("status_msg_chat", None)
@@ -10595,7 +12634,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
                     tmp_path = tmp.name
                     await photo_file.download_to_drive(tmp_path)
-                    case_text = await extract_from_image(tmp_path)
+                    case_text, _removed_labels = await _read_image_text(tmp_path)
                 ocr_done.set()
                 progress_task.cancel()
                 if case_text.strip() == "NOT_CLINICAL":
@@ -10665,14 +12704,32 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 cached_path = cached_file.name
             shutil.copy2(tmp_path, cached_path)
 
-            context.user_data["_pending_doc"] = {
+            # Read the image once, now, and ask only if there was something to
+            # read. An ultrasound or ECG has no text, so offering "read text on
+            # it" was a choice with one real answer. The question is mechanical
+            # — is there text? — never "is anything abnormal", which would be
+            # the clinical interpretation this product refuses to do.
+            image_text = ""
+            try:
+                extracted, _removed_labels = await _read_image_text(cached_path)
+                if extracted and extracted.strip() != "NOT_CLINICAL":
+                    image_text = extracted.strip()
+            except Exception:
+                # Unreadable is not fatal: fall through and offer the choice
+                # rather than silently deciding for the doctor.
+                logger.warning("Pre-read of image failed", exc_info=True)
+                image_text = ""
+
+            _queue_pending_media(context, {
                 "path": cached_path,
-                "name": "portfolio-image.jpg",
+                "name": _numbered_media_name(context, "portfolio-image", ".jpg"),
                 "kind": "image",
+                "text": image_text,
+                "read_failed": not image_text,
                 "source_chat_id": update.message.chat_id,
                 "source_message_id": update.message.message_id,
                 "source_chat_type": getattr(update.message.chat, "type", None),
-            }
+            })
             caption = (update.message.caption or "").strip()
             if caption:
                 context.user_data["_pending_doc_context"] = caption
@@ -10685,14 +12742,9 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 has_caption=bool(caption),
             )
 
-            await ack.edit_text(
-                "📷 Image received — how would you like to use it?\n\n"
-                "For ECGs, ultrasound, X-rays, wounds or procedure photos, "
-                "I won't interpret the image unless you add your own context.",
-                reply_markup=_build_image_intent_keyboard(),
+            return await _show_pending_media_prompt(
+                context, ack, single="📷 Image received — how would you like to use it?"
             )
-            _track_latest_message(context, ack)
-            return AWAIT_DOC_INTENT
         except Exception as e:
             logger.warning("Photo download/cache failed: %s", e)
             _audit_event(
@@ -10765,14 +12817,14 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 cached_path = cached_file.name
             shutil.copy2(tmp_path, cached_path)
 
-            context.user_data["_pending_doc"] = {
+            _queue_pending_media(context, {
                 "path": cached_path,
-                "name": f"portfolio-video{suffix}",
+                "name": _numbered_media_name(context, "portfolio-video", suffix),
                 "kind": "video",
                 "source_chat_id": update.message.chat_id,
                 "source_message_id": update.message.message_id,
                 "source_chat_type": getattr(update.message.chat, "type", None),
-            }
+            })
             caption = (update.message.caption or "").strip()
             if caption:
                 context.user_data["_pending_doc_context"] = caption
@@ -10785,13 +12837,11 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 has_caption=bool(caption),
             )
 
-            await ack.edit_text(
-                "🎞️ Video received — would you like to attach it to the Kaizen draft?\n\n"
-                "I won't interpret clinical videos. Send your own context or findings in text/voice.",
-                reply_markup=_build_video_intent_keyboard(),
+            return await _show_pending_media_prompt(
+                context,
+                ack,
+                single="🎞️ Video received — would you like to attach it to the Kaizen draft?",
             )
-            _track_latest_message(context, ack)
-            return AWAIT_DOC_INTENT
         except BadRequest as e:
             logger.warning("Video download/cache failed: %s", e)
             _audit_event(
@@ -10921,10 +12971,8 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             action="document_cached_for_intent",
             file_name=dogfood_audit.message_metadata(update.message, include_text=False).get("file_name"),
         )
-        await ack.edit_text(
-            "📄 How would you like to use this document?",
-            reply_markup=_build_doc_intent_keyboard(),
-        )
+        intent_text, intent_markup = _document_intent_prompt(file_name)
+        await ack.edit_text(intent_text, reply_markup=intent_markup)
         _track_latest_message(context, ack)
         return AWAIT_DOC_INTENT
 
@@ -10933,12 +12981,19 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text("💬 Send a text message, voice note, photo, video, or document.")
         return ConversationHandler.END
 
+    if context.user_data.get("awaiting_detail") and context.user_data.get("chosen_form"):
+        is_replay, replay_result = _missing_essentials_replay_check(context, update)
+        if is_replay:
+            return replay_result
+
     if (
         context.user_data.get("awaiting_detail")
         and context.user_data.get("chosen_form")
         and _looks_like_explicit_new_case_request(case_text)
     ):
-        return await _show_open_case_new_case_gate(update.message, context, case_text)
+        gate_result = await _show_open_case_new_case_gate(update.message, context, case_text)
+        _mark_missing_essentials_replay_done(context, update, gate_result)
+        return gate_result
 
     # If the user is refining a chosen template, keep the original wording and append the new detail.
     if context.user_data.get("awaiting_detail") and context.user_data.get("chosen_form"):
@@ -10957,6 +13012,10 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if input_source in {"text", "voice"} and _pending_media_label(context) == "video":
         case_text = _merge_pending_video_context(context, case_text)
+
+    if context.user_data.get("awaiting_detail") and context.user_data.get("chosen_form"):
+        previous_source = context.user_data.get("case_input_source", input_source)
+        input_source = previous_source if previous_source == input_source else "mixed"
 
     if (
         source_detail_retry
@@ -10988,17 +13047,19 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         and not source_detail_retry
         and not (chosen_form and context.user_data.get("awaiting_detail"))
     ):
+        existing_attachments = _case_attachments(context)
         existing_attachment_path = context.user_data.get("attachment_path")
         existing_attachment_name = context.user_data.get("attachment_name")
         existing_attachment_kind = context.user_data.get("attachment_kind")
         if not _gathering_case_active(context):
             _clear_case_review_state(context, keep_case=False)
         if attachment_path_to_save:
-            context.user_data["attachment_path"] = attachment_path_to_save
+            _add_case_attachment(
+                context, attachment_path_to_save, attachment_name_to_save, "document"
+            )
             context.user_data.pop("attachment_upload_confirmed", None)
-            context.user_data["attachment_name"] = attachment_name_to_save
-            context.user_data["attachment_kind"] = "document"
         elif existing_attachment_path:
+            context.user_data["attachments"] = existing_attachments
             context.user_data["attachment_path"] = existing_attachment_path
             context.user_data["attachment_name"] = existing_attachment_name
             context.user_data["attachment_kind"] = existing_attachment_kind
@@ -11006,51 +13067,61 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         combined_case_text, combined_source = _combined_gathering_case(context)
         context.user_data["case_text"] = combined_case_text
         context.user_data["case_input_source"] = combined_source
-        if not _gathering_case_has_draftable_context(context):
-            return await _show_gathering_context_request(update.message, context, combined_source)
         return await _show_gathering_ready_prompt(update.message, context)
 
     if chosen_form and context.user_data.get("awaiting_detail"):
         context.user_data["case_text"] = case_text
         context.user_data["case_input_source"] = input_source
-        if _attached_video_context_needs_more_detail(context, case_text):
-            await update.message.reply_text(
-                _video_context_detail_request(),
-                reply_markup=_KB_CANCEL,
-            )
-            return AWAIT_CASE_INPUT
         await update.effective_chat.send_action(constants.ChatAction.TYPING)
-        ack = await update.message.reply_text(f"🧩 Updating {_form_display_name(chosen_form)} draft…")
-        context.user_data["last_bot_msg_id"] = ack.message_id
-        context.user_data["last_bot_chat_id"] = ack.chat_id
+        # Retire the essentials-gap prompt (it sits before the doctor's new
+        # message) and send a fresh acknowledgement instead of editing it in
+        # place, so the transcript stays chronological.
+        await _retire_active_missing_essentials_prompt(context)
+        ack = await _send_latest_message(
+            update.message, context, f"🧩 Updating {_form_display_name(chosen_form)} draft…"
+        )
+        gate = await _essentials_gate_before_draft(ack, context, case_text, chosen_form)
+        if gate is not None:
+            _mark_missing_essentials_replay_done(context, update, gate)
+            return gate
         try:
             draft = await _analyse_selected_form(context, user_id, case_text, chosen_form)
         except asyncio.TimeoutError:
             await ack.edit_text("⏳ Template review timed out. Please try again.")
+            # A real failure — clear the replay guard so the doctor's retry
+            # of this same update is processed instead of short-circuited.
+            _mark_missing_essentials_replay_failed(context, update)
             return AWAIT_TEMPLATE_REVIEW
         except Exception as exc:
             logger.error("Template review refresh failed for %s: %s", chosen_form, exc, exc_info=True)
             await ack.edit_text("⚠️ Could not refresh that template.", reply_markup=_KB_CANCEL)
+            _mark_missing_essentials_replay_failed(context, update)
             return AWAIT_TEMPLATE_REVIEW
 
         if not _draft_has_useful_content(draft, chosen_form):
-            return await _ask_for_more_detail_before_draft(ack, context)
-        return await _show_draft_review(ack, context, draft, chosen_form)
+            result = await _ask_for_more_detail_before_draft(ack, context)
+            _mark_missing_essentials_replay_done(context, update, result)
+            return result
+        result = await _show_draft_review(ack, context, draft, chosen_form)
+        _mark_missing_essentials_replay_done(context, update, result)
+        return result
 
     active_msg_id = context.user_data.get("last_bot_msg_id")
     active_chat_id = context.user_data.get("last_bot_chat_id")
     active_status_id = context.user_data.get("status_msg_id")
     active_status_chat = context.user_data.get("status_msg_chat")
+    existing_attachments = _case_attachments(context)
     existing_attachment_path = context.user_data.get("attachment_path")
     existing_attachment_name = context.user_data.get("attachment_name")
     existing_attachment_kind = context.user_data.get("attachment_kind")
     _clear_case_review_state(context, keep_case=False)
     if attachment_path_to_save:
-        context.user_data["attachment_path"] = attachment_path_to_save
+        _add_case_attachment(
+            context, attachment_path_to_save, attachment_name_to_save, "document"
+        )
         context.user_data.pop("attachment_upload_confirmed", None)
-        context.user_data["attachment_name"] = attachment_name_to_save
-        context.user_data["attachment_kind"] = "document"
     elif existing_attachment_path:
+        context.user_data["attachments"] = existing_attachments
         context.user_data["attachment_path"] = existing_attachment_path
         context.user_data["attachment_name"] = existing_attachment_name
         context.user_data["attachment_kind"] = existing_attachment_kind
@@ -11144,7 +13215,7 @@ def _gathering_callback_matches_current_prompt(query, context: ContextTypes.DEFA
 
 
 async def _retire_stale_gathering_callback(query) -> None:
-    text = "⏳ That earlier Draft now button is no longer active. Use the latest capture prompt below."
+    text = "⏳ That earlier Draft button is no longer active. Use the latest capture prompt below."
     try:
         await query.edit_message_text(text)
     except Exception:
@@ -11283,8 +13354,6 @@ async def handle_gathering_input(update: Update, context: ContextTypes.DEFAULT_T
     combined_case_text, combined_source = _combined_gathering_case(context)
     context.user_data["case_text"] = combined_case_text
     context.user_data["case_input_source"] = combined_source
-    if not _gathering_case_has_draftable_context(context):
-        return await _show_gathering_context_request(update.message, context, combined_source)
     return await _show_gathering_ready_prompt(update.message, context)
 
 
@@ -11302,14 +13371,14 @@ async def handle_form_search_text(update: Update, context: ContextTypes.DEFAULT_
         label = FORM_BUTTON_LABELS.get(ft) or FORM_BUTTON_LABELS.get(base_ft_search) or _form_display_name(base_ft_search)
         if query_text in label.lower() or query_text in ft.lower():
             base_ft = ft.replace("_2021", "") if ft.endswith("_2021") else ft
-            emoji = FORM_EMOJIS.get(base_ft, "📄")
+            emoji = FORM_EMOJIS.get(ft) or FORM_EMOJIS.get(base_ft, "📋")
             matches.append(InlineKeyboardButton(
                 f"{emoji} {label}", callback_data=f"FORM|{ft}"
             ))
 
     if matches:
         rows = [matches[i:i+2] for i in range(0, len(matches), 2)]
-        rows.append([InlineKeyboardButton("⬅️ Back to categories", callback_data="FORM|show_all")])
+        rows.append([InlineKeyboardButton("🔙 Back", callback_data="FORM|show_all")])
         await update.message.reply_text(
             f"Found {len(matches)} form{'s' if len(matches) != 1 else ''} matching \"{update.message.text.strip()}\":",
             reply_markup=InlineKeyboardMarkup(rows),
@@ -11318,7 +13387,7 @@ async def handle_form_search_text(update: Update, context: ContextTypes.DEFAULT_
         await update.message.reply_text(
             "No forms matched — try another term.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⬅️ Back to categories", callback_data="FORM|show_all")]
+                [InlineKeyboardButton("🔙 Back", callback_data="FORM|show_all")]
             ]),
         )
     return AWAIT_FORM_CHOICE
@@ -11351,7 +13420,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         curriculum = _effective_curriculum(user_id)
         cur_label = "2025 curriculum" if curriculum == "2025" else "2021 curriculum"
         await query.edit_message_text(
-            f"Pick a category ({cur_label}):",
+            f"Browse supported forms ({cur_label}):",
             reply_markup=_build_category_picker_keyboard(user_id),
         )
         return AWAIT_FORM_CHOICE
@@ -11373,7 +13442,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text(
             "Type part of the form name to search:",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⬅️ Back to categories", callback_data="FORM|show_all")]
+                [InlineKeyboardButton("🔙 Back", callback_data="FORM|show_all")]
             ]),
         )
         return AWAIT_FORM_SEARCH
@@ -11386,7 +13455,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         effective = _effective_curriculum(user_id)
         cur_label = "2025 curriculum" if effective == "2025" else "2021 curriculum"
         await query.edit_message_text(
-            f"Pick a category ({cur_label}):",
+            f"Browse supported forms ({cur_label}):",
             reply_markup=_build_category_picker_keyboard(user_id),
         )
         return AWAIT_FORM_CHOICE
@@ -11417,7 +13486,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
             recommendations,
             curriculum=_effective_curriculum(update.effective_user.id),
         )
-        best = filtered[0] if filtered else None
+        best = next((rec for rec in filtered if getattr(rec, "uuid", None)), None)
         if not best:
             await query.edit_message_text(
                 "I couldn't find a best-fit form from the recommendations. Pick one manually:",
@@ -11451,38 +13520,64 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return ConversationHandler.END
 
-    context.user_data["chosen_form"] = form_type
-    context.user_data.pop("quick_improve_used", None)
-
-    await query.edit_message_text(
-        f"🧩 Reviewing {_form_display_name(form_type)} template…",
-        reply_markup=None,
-    )
+    # Fast repeated taps can deliver competing form callbacks from the same
+    # prompt while the first template review is still running. Claim the prompt
+    # synchronously before the next await so only one handler can choose a form,
+    # perform the model call, and render a draft. Telegram's identical-edit
+    # BadRequest is cosmetic, but competing draft generation is not.
+    message_id = getattr(getattr(query, "message", None), "message_id", None)
+    choice_key = str(message_id)
+    if context.user_data.get("form_choice_in_progress"):
+        return AWAIT_FORM_CHOICE
+    context.user_data["form_choice_in_progress"] = choice_key
 
     try:
-        draft = await _analyse_selected_form(context, update.effective_user.id, case_text, form_type)
-    except asyncio.TimeoutError:
-        logger.error("Template review timed out after 45s for %s", form_type)
-        await query.edit_message_text(
-            "⏳ Template review timed out. The model took too long — try again in a moment.",
-            reply_markup=_KB_RETRY_TEMPLATE,
+        context.user_data["chosen_form"] = form_type
+        context.user_data.pop("quick_improve_used", None)
+
+        await _safe_edit_text(
+            query.message,
+            f"🧩 Reviewing {_form_display_name(form_type)} template…",
+            reply_markup=None,
         )
-        return AWAIT_FORM_CHOICE
-    except Exception as e:
-        logger.error("Template review failed in form_choice: %s", e, exc_info=True)
-        if _is_transient_llm_error(e):
-            await query.edit_message_text(
-                "⏳ The drafting model is rate-limited or briefly unavailable. Try again in a moment.",
+
+        gate = await _essentials_gate_before_draft(query.message, context, case_text, form_type)
+        if gate is not None:
+            return gate
+
+        try:
+            draft = await _analyse_selected_form(context, update.effective_user.id, case_text, form_type)
+        except asyncio.TimeoutError:
+            logger.error("Template review timed out after 45s for %s", form_type)
+            await _safe_edit_text(
+                query.message,
+                "⏳ Template review timed out. The model took too long — try again in a moment.",
                 reply_markup=_KB_RETRY_TEMPLATE,
             )
             return AWAIT_FORM_CHOICE
-        await query.edit_message_text("⚠️ Could not review that template.", reply_markup=_KB_CANCEL)
-        return ConversationHandler.END
+        except Exception as e:
+            logger.error("Template review failed in form_choice: %s", e, exc_info=True)
+            if _is_transient_llm_error(e):
+                await _safe_edit_text(
+                    query.message,
+                    "⏳ The drafting model is rate-limited or briefly unavailable. Try again in a moment.",
+                    reply_markup=_KB_RETRY_TEMPLATE,
+                )
+                return AWAIT_FORM_CHOICE
+            await _safe_edit_text(
+                query.message,
+                "⚠️ Could not review that template.",
+                reply_markup=_KB_CANCEL,
+            )
+            return ConversationHandler.END
 
-    if not _draft_has_useful_content(draft, form_type):
-        return await _ask_for_more_detail_before_draft(query.message, context, form_type=form_type)
+        if not _draft_has_useful_content(draft, form_type):
+            return await _ask_for_more_detail_before_draft(query.message, context, form_type=form_type)
 
-    return await _show_draft_review(query.message, context, draft, form_type)
+        return await _show_draft_review(query.message, context, draft, form_type)
+    finally:
+        if context.user_data.get("form_choice_in_progress") == choice_key:
+            context.user_data.pop("form_choice_in_progress", None)
 
 
 _FIELD_FRIENDLY = {
@@ -11539,6 +13634,22 @@ def _friendly_field_name(key) -> str:
     return _FIELD_FRIENDLY.get(
         base, _FIELD_FRIENDLY.get(key_str, base.replace("_", " ").capitalize())
     )
+
+
+_CURRICULUM_GAP_MARKERS = ("curriculum", "key capabilit", "capabilit", "slo")
+
+
+def _prioritise_skipped_names(names: list[str]) -> list[str]:
+    """Put curriculum gaps first, because only the first three are shown.
+
+    A US_CASE filing reported "Location, Equipment used, Other comments and 1
+    other" — and that one other was the curriculum linkage, which had failed
+    entirely. An untagged portfolio entry is the gap a trainee most needs to
+    know about, and it was hidden purely because it sorted fourth.
+    """
+    curriculum = [n for n in names if any(m in n.lower() for m in _CURRICULUM_GAP_MARKERS)]
+    rest = [n for n in names if n not in curriculum]
+    return curriculum + rest
 
 
 def _friendly_skipped_names(skipped) -> list[str]:
@@ -11645,11 +13756,63 @@ def _build_field_edit_buttons(skipped: list) -> list[list[InlineKeyboardButton]]
         ):
             continue
         seen.add(key_str)
-        label = f"✏️ Edit {_friendly_field_name(key_str)}"
-        rows.append([InlineKeyboardButton(label[:64], callback_data=f"FIELD|{key_str}")])
+        rows.append([
+            InlineKeyboardButton(
+                f"✏️ Edit {_friendly_field_name(key_str)}"[:64],
+                callback_data=f"FIELD|{key_str}",
+            )
+        ])
         if len(rows) >= 5:
             break
     return rows
+
+
+# London EM / RCEM suggested document naming: Category-Grade-Description-Date.
+# Explicitly "not mandatory but merely a suggested naming system", so this is
+# applied to files the bot named itself (portfolio-image.jpg and friends) and
+# never to a filename the doctor chose — renaming their "ALS certificate.pdf"
+# would be the tool overruling them on a convention that is advisory.
+_KAIZEN_DOC_CATEGORIES = {
+    "US_CASE": "POCUS",
+    "PROCEDURAL_LOG": "Logbook",
+    "PROCEDURAL_LOG_ACCS": "Logbook",
+    "DOPS": "Logbook",
+    "DOPS_ACCS": "Logbook",
+    "TEACH_OBS": "Teaching",
+    "TEACH_CONFID": "Teaching",
+    "EDU_ACT": "Teaching",
+    "QIAT": "Quality improvement",
+    "AUDIT": "Quality improvement",
+    "FORMAL_COURSE": "Certificates",
+    "RESEARCH": "Research",
+    "MSF": "Feedback",
+}
+
+_BOT_ASSIGNED_NAME_RE = re.compile(r"^portfolio-(image|video)(-\d+)?\.\w+$", re.IGNORECASE)
+
+
+def _kaizen_document_name(original_name: str, form_type: str, training_level: str | None) -> str:
+    """Apply the suggested Kaizen naming convention to a bot-named file.
+
+    Produces "POCUS-Higher-Ultrasound Case Reflection-17-08-2026". The guidance
+    asks for the training year (ST4); the profile only records a stage
+    (HIGHER / INTERMEDIATE / ACCS), so the stage is used rather than inventing
+    a year the bot does not know.
+    """
+    name = os.path.basename(original_name or "")
+    if not _BOT_ASSIGNED_NAME_RE.match(name):
+        return original_name
+
+    suffix = os.path.splitext(name)[1]
+    category = _KAIZEN_DOC_CATEGORIES.get(schema_form_type(form_type or ""), "Other")
+    grade = (training_level or "").strip().title() or "Trainee"
+    described = public_form_name(form_type) or "Portfolio evidence"
+    stamp = datetime.now().strftime("%d-%m-%Y")
+    # Keep the per-file index. Several files on one case would otherwise share
+    # a name, which Kaizen shows identically and which defeats the filer's
+    # per-filename upload confirmation.
+    index = _BOT_ASSIGNED_NAME_RE.match(name).group(2) or ""
+    return f"{category}-{grade}-{described}-{stamp}{index}{suffix}"
 
 
 def _attachment_path_with_original_name(path: str, original_name: str) -> str:
@@ -11723,18 +13886,18 @@ async def handle_attachment_confirm(update: Update, context: ContextTypes.DEFAUL
 
     context.user_data["attachment_upload_confirmed"] = True
     if not keep:
-        for key in ("attachment_path", "attachment_name", "attachment_kind"):
-            context.user_data.pop(key, None)
+        # Declining drops every queued file, not just the most recent one —
+        # the prompt named them all, so the answer covers them all.
+        _clear_case_attachments(context)
 
     _audit_event(
         context,
         "decision_path",
         decision="attachment_upload_kept" if keep else "attachment_upload_dropped",
     )
-    try:
-        await query.edit_message_reply_markup(reply_markup=None)
-    except Exception:
-        pass
+    # Deliberately does not clear the keyboard here: handle_approval_approve
+    # disarms it as its first act, and doing it twice made Telegram reject the
+    # second, no-op edit and killed the filing.
     return await handle_approval_approve(update, context)
 
 
@@ -11765,11 +13928,22 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     context.user_data["filing_in_progress"] = True
 
     if query:
-        await query.answer()
+        try:
+            await query.answer()
+        except Exception:
+            logger.debug("callback answer failed (already answered)", exc_info=True)
 
-    # Disarm buttons immediately — prevents double-tap filing
+    # Disarm buttons immediately — prevents double-tap filing.
+    # Tolerant on purpose: when this is re-entered from the attachment-consent
+    # prompt the markup is already cleared, and Telegram rejects a no-op edit
+    # with "Message is not modified". That cosmetic failure used to propagate
+    # and abort the save, so the doctor saw "Something went wrong while filing"
+    # for a draft that was never attempted.
     if query:
-        await query.edit_message_reply_markup(reply_markup=None)
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            logger.debug("could not disarm buttons (already disarmed)", exc_info=True)
         source_message = query.message
     else:
         source_message = update.message
@@ -11796,7 +13970,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     if _set_reflection_detail_gate(context, draft):
         context.user_data.pop("filing_in_progress", None)
         context.user_data.pop("retry_filing_requested", None)
-        review_text = _format_draft_preview_for_context(draft, context) + _REPLY_HINT_SUFFIX
+        review_text = _format_draft_preview_for_context(draft, context) + _draft_reply_hint(context)
         if query:
             await _safe_edit_text(
                 source_message,
@@ -11811,6 +13985,31 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 parse_mode="Markdown",
             )
         return AWAIT_APPROVAL
+    # Reflection is covered above by the dedicated add-reflection button. A
+    # doctor can still edit a shown draft down to below the schema's other
+    # required fields (e.g. clearing the clinical setting) before tapping
+    # Save. Reuse the same completeness decision used before the preview, so
+    # a removed essential is caught here too instead of filing an incomplete
+    # draft, and the doctor is only asked for what is now actually missing.
+    pre_file_form_type = context.user_data.get("chosen_form") or _draft_form_type(draft)
+    pre_file_gaps = [
+        gap for gap in _pre_draft_completeness_gaps(context, draft, pre_file_form_type)
+        if gap["key"] != "reflection"
+    ]
+    if pre_file_gaps:
+        context.user_data.pop("filing_in_progress", None)
+        context.user_data.pop("retry_filing_requested", None)
+        context.user_data["awaiting_detail"] = True
+        gap_text = render_message(
+            "pre_draft_completeness_request",
+            items=_format_completeness_gap_items(pre_file_gaps),
+        )
+        if query:
+            await _safe_edit_text(source_message, gap_text, reply_markup=_KB_CANCEL)
+        else:
+            await _send_latest_message(source_message, context, gap_text, reply_markup=_KB_CANCEL)
+        return AWAIT_CASE_INPUT
+    filing_draft = _with_rcem_ai_declaration(draft)
     if _needs_filing_curriculum_choice(user_id):
         context.user_data.pop("filing_in_progress", None)
         context.user_data.pop("retry_filing_requested", None)
@@ -11826,10 +14025,10 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
 
     # Handle FormDraft (non-CBD forms)
     # Unified filing for ALL forms (CBD and non-CBD)
-    if isinstance(draft, FormDraft):
-        form_type = _filing_form_type_for_user(user_id, draft.form_type)
-        fields = draft.fields
-        curriculum_links = draft.fields.get("curriculum_links", [])
+    if isinstance(filing_draft, FormDraft):
+        form_type = _filing_form_type_for_user(user_id, filing_draft.form_type)
+        fields = filing_draft.fields
+        curriculum_links = filing_draft.fields.get("curriculum_links", [])
     else:
         # CBDData hard-codes form_type="CBD". When the user picked the 2021
         # variant via the category picker, chosen_form preserves that — route
@@ -11840,14 +14039,14 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             chosen_form if chosen_form in ("CBD", "CBD_2021") else "CBD",
         )
         fields = {
-            "date_of_encounter": draft.date_of_encounter,
-            "end_date": draft.date_of_encounter,
-            "date_of_event": draft.date_of_encounter,
-            "stage_of_training": draft.stage_of_training,
-            "clinical_reasoning": draft.clinical_reasoning,
-            "reflection": draft.reflection,
+            "date_of_encounter": filing_draft.date_of_encounter,
+            "end_date": filing_draft.date_of_encounter,
+            "date_of_event": filing_draft.date_of_encounter,
+            "stage_of_training": filing_draft.stage_of_training,
+            "clinical_reasoning": filing_draft.clinical_reasoning,
+            "reflection": filing_draft.reflection,
         }
-        curriculum_links = draft.curriculum_links or []
+        curriculum_links = filing_draft.curriculum_links or []
     _audit_event(
         context,
         "draft_payload",
@@ -11864,21 +14063,14 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
 
 
 
-    # Save local JSON backup
-    import json as _json
-    import pathlib
-    from datetime import date
-    try:
-        drafts_dir = pathlib.Path.home() / ".openclaw/data/portfolio-guru/drafts"
-        drafts_dir.mkdir(parents=True, exist_ok=True)
-        filename = f"{user_id}_{form_type}_{date.today()}.json"
-        with open(drafts_dir / filename, "w") as f:
-            _json.dump({"form_type": form_type, "fields": fields}, f, indent=2)
-    except OSError:
-        logger.warning("Local draft JSON backup failed; continuing with Kaizen filing", exc_info=True)
+    # Encrypted crash-recovery backup of the approved draft, deleted again as
+    # soon as Kaizen confirms the save. Fernet-encrypted and covered by /reset;
+    # see draft_backup.py for why this is never written in the clear.
+    import draft_backup
+    draft_backup.save(user_id, form_type, fields)
 
     # Save draft preview and data for later restore + amend feature
-    draft_preview_text = _format_draft_preview_for_context(draft, context, form_type) + _REPLY_HINT_SUFFIX
+    draft_preview_text = _format_draft_preview_for_context(draft, context, form_type) + _draft_reply_hint(context)
     amend_draft_data = _serialise_draft(draft)
     amend_case_text = context.user_data.get("case_text", "")
     amend_chosen_form_type = form_type
@@ -11894,7 +14086,12 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             decision="attachment_upload_confirm_needed",
             attachment_kind=context.user_data.get("attachment_kind"),
         )
-        attachment_name = context.user_data.get("attachment_name") or "that file"
+        queued = _case_attachments(context)
+        names = [str(item.get("name") or "that file") for item in queued]
+        if len(names) == 1:
+            attachment_name = names[0]
+        else:
+            attachment_name = f"{len(names)} files ({', '.join(names)})"
         context.user_data.pop("filing_in_progress", None)
         await _send_latest_message(
             source_message,
@@ -11933,20 +14130,39 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         ack = await source_message.reply_text(saving_text)
     _track_latest_message(context, ack)
 
-    # Retrieve attachment path and validate existence / support
-    attachment_path = context.user_data.get("attachment_path")
+    # Validate every queued file, not just the most recent. A case can carry
+    # several; filing only the last one was silent data loss from the doctor's
+    # point of view, because each upload had been acknowledged.
+    attachment_path = None
     attachment_skipped_reason = None
-    if attachment_path:
-        if not os.path.exists(attachment_path):
-            attachment_skipped_reason = "attachment (file missing)"
-            attachment_path = None
-        elif not is_supported_attachment(context.user_data.get("attachment_name", "")):
-            attachment_skipped_reason = "attachment (unsupported type)"
-            attachment_path = None
-        else:
-            attachment_path = _attachment_path_with_original_name(
-                attachment_path, context.user_data.get("attachment_name", "")
+    usable_paths: list[str] = []
+    dropped: list[str] = []
+    for item in _case_attachments(context):
+        path = item.get("path")
+        name = item.get("name") or ""
+        if not path or not os.path.exists(path):
+            dropped.append("missing")
+            continue
+        if not is_supported_attachment(name):
+            dropped.append("unsupported")
+            continue
+        usable_paths.append(
+            _attachment_path_with_original_name(
+                path,
+                _kaizen_document_name(name, form_type, get_training_level(user_id)),
             )
+        )
+
+    if usable_paths:
+        # A single file still goes down as a plain string so the filer, the
+        # router and every existing test see exactly what they did before.
+        attachment_path = usable_paths[0] if len(usable_paths) == 1 else usable_paths
+    if dropped:
+        attachment_skipped_reason = (
+            "attachment (file missing)"
+            if "missing" in dropped
+            else "attachment (unsupported type)"
+        )
 
     # Progress edits during the long filing wait so the user doesn't see a
     # static message for up to 5 minutes. Started here — immediately before
@@ -12030,9 +14246,11 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             "Tap 'Open Kaizen' to finish manually, or retry."
         )
         retry_keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")],
+            [
+                InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_filing"),
+                InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|reset"),
+            ],
             [InlineKeyboardButton("🔗 Open Kaizen", url=kaizen_url)],
-            [InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|reset")],
         ])
         try:
             await ack.edit_text(timeout_msg, reply_markup=retry_keyboard, parse_mode="Markdown")
@@ -12075,8 +14293,10 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         )
         # Keep draft data for retry — do NOT clear user_data
         retry_keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")],
-            [InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|reset")],
+            [
+                InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_filing"),
+                InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|reset"),
+            ],
         ])
         try:
             await ack.edit_text("❌ Filing failed. Try again or file another case.", reply_markup=retry_keyboard)
@@ -12267,6 +14487,14 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             logger.warning("Usage tracking failed", exc_info=True)
 
     if status == "success":
+        # Kaizen holds the evidence now, so the local crash-recovery copy of the
+        # clinical content has served its purpose and goes immediately.
+        try:
+            import draft_backup
+            draft_backup.discard(user_id, form_type)
+        except Exception:
+            logger.warning("Draft backup discard failed", exc_info=True)
+
         try:
             kcs = fields.get("key_capabilities") or fields.get("curriculum_links")
             if kcs:
@@ -12274,27 +14502,16 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         except Exception:
             logger.warning("KC coverage save failed", exc_info=True)
 
-        # Mirror the filed case to Supabase portfolio_cases so the web app's
-        # case browser can render it. Both the case_text and the structured
-        # extracted_fields are Fernet-encrypted (case_text here, fields inside
-        # mirror_case) with the same key used for credentials — no plaintext
-        # clinical content leaves the bot. See feedback-no-fabrication.
+        # Mirror the FACT of the filing — form type, status, Kaizen event id and
+        # RCEM taxonomy. The case narrative is deliberately not sent: Kaizen holds
+        # the evidence, and a second copy would make the mirror an Art. 9 store.
         try:
             from supabase_sync import mirror_case
-            from credentials import _fernet
-            case_text_encrypted = None
-            if filed_case_text:
-                try:
-                    case_text_encrypted = _fernet().encrypt(filed_case_text.encode())
-                except Exception:
-                    case_text_encrypted = None
             mirror_case(
                 user_id,
                 form_type=form_type,
                 status=status,
                 kaizen_event_id=result.get("event_id") or result.get("kaizen_event_id"),
-                case_text_encrypted=case_text_encrypted,
-                extracted_fields=fields,
                 curriculum_links=fields.get("curriculum_links") or curriculum_links or [],
                 key_capabilities=fields.get("key_capabilities") or [],
             )
@@ -12328,7 +14545,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             receipt_details.append(f"{filled_count} field{'s' if filled_count != 1 else ''} completed")
 
         details_section = ("\n" + "\n".join(receipt_details)) if receipt_details else ""
-        msg_header = f"✅ Saved! Your draft is ready on Kaizen.\n\n*{form_name}*{details_section}"
+        msg_header = f"✅ Saved! Your draft is ready on Kaizen.\n\n{form_name}{details_section}"
 
         extra_blocks = []
         if date_default_note:
@@ -12347,7 +14564,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             msg = msg_header
         status_line = "✅ Draft saved."
     elif status == "partial":
-        skipped_names = _friendly_skipped_names(skipped)
+        skipped_names = _prioritise_skipped_names(_friendly_skipped_names(skipped))
         if len(skipped_names) > 3:
             skipped_display = ", ".join(skipped_names[:3]) + f" and {len(skipped_names) - 3} other{'s' if len(skipped_names) - 3 != 1 else ''}"
         else:
@@ -12368,7 +14585,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
 
             msg_body = (
                 f"⚠️ Draft saved with some issues — please check Kaizen\n\n"
-                f"*{form_name}*\n"
+                f"{form_name}\n"
                 f"Filled: {fields_filled_str}.\n\n"
                 f"The draft may not have saved completely. Please check to verify before retrying."
             )
@@ -12396,9 +14613,14 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             else:
                 action_line = "Open Kaizen to complete the draft and assign your assessor."
 
+            # Plain text, not Markdown: this message is sent without a
+            # parse_mode, so the asterisks rendered literally as *Ultrasound
+            # Case Reflection*. Adding parse_mode instead would risk a failed
+            # send — form names and field labels carry underscores and
+            # brackets — and this is the one message that must always arrive.
             msg_header = (
                 f"📝 Draft saved on Kaizen, but needs a quick review!\n\n"
-                f"*{form_name}*\n"
+                f"{form_name}\n"
                 f"Completed: {fields_filled_str}.\n"
                 f"Remaining gaps: {skipped_display}.\n\n"
                 f"{action_line}"
@@ -12445,8 +14667,10 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             )
             end_keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔗 Reconnect Kaizen", callback_data="ACTION|setup")],
-                [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")],
-                [InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|reset")],
+                [
+                    InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_filing"),
+                    InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|reset"),
+                ],
             ])
             status_line = "❌ Filing stopped."
             context.user_data["last_filing_status"] = status
@@ -12495,7 +14719,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 "Tapping retry will try an alternative save method."
             )
             msg = f"❌ Filing didn't complete\n{form_name}\n\n{body}{details_suffix}"
-            rows = [[InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")]]
+            rows = [[InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_filing")]]
             if kaizen_url:
                 rows.append([InlineKeyboardButton("🔗 Open Kaizen", url=kaizen_url)])
             rows.append([
@@ -12516,7 +14740,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             )
             msg = f"❌ Filing didn't complete\n{form_name}\n\n{body}{details_suffix}"
             rows = _build_field_edit_buttons(skipped)
-            rows.append([InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")])
+            rows.append([InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_filing")])
             if kaizen_url:
                 rows.append([InlineKeyboardButton("🔗 Open Kaizen", url=kaizen_url)])
             rows.append([
@@ -12538,7 +14762,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 context.user_data["alternative_curriculum_offer"] = alternative_curriculum
                 rows.append([
                     InlineKeyboardButton(
-                        f"🔄 Try {alternative_curriculum} curriculum",
+                        f"🔄 Try {alternative_curriculum}",
                         callback_data=f"FILING_CURRICULUM|retry|{alternative_curriculum}",
                     )
                 ])
@@ -12561,7 +14785,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 else "Try again, or fill the form manually in your portfolio."
             )
             msg = f"❌ Filing didn't complete\n{form_name}\n\n{body}{details_suffix}"
-            rows = [[InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")]]
+            rows = [[InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_filing")]]
             if kaizen_url:
                 rows.append([InlineKeyboardButton("🔗 Open Kaizen", url=kaizen_url)])
             rows.append([
@@ -12612,7 +14836,7 @@ async def handle_approval_submit(update: Update, context: ContextTypes.DEFAULT_T
             "That earlier draft is no longer active.",
         )
     await query.message.reply_text(
-        "Portfolio Guru only saves Kaizen entries as drafts. Use Save as draft when you're ready.",
+        "Portfolio Guru only saves Kaizen entries as drafts. Use Save to Kaizen when you're ready.",
         reply_markup=_build_approval_keyboard(),
     )
     return AWAIT_APPROVAL
@@ -12630,7 +14854,7 @@ async def handle_review_draft(update: Update, context: ContextTypes.DEFAULT_TYPE
             "📝 Draft Review is included in Portfolio Guru Unlimited.\n\n"
             "Upgrade to unlock AI critique of your entries before filing — catches missed reflections, weak reasoning, and curriculum mismatches.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📊 Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
+                [InlineKeyboardButton("💳 Upgrade — £9.99/mo", callback_data="UPGRADE|pro_plus")],
             ]),
         )
         return AWAIT_APPROVAL
@@ -12752,8 +14976,6 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
     if query.data == "IMPROVE|used" or context.user_data.get("quick_improve_used"):
         await query.answer("Already improved once — save, edit, or cancel this draft.", show_alert=False)
         return AWAIT_APPROVAL
-    await query.edit_message_reply_markup(reply_markup=None)
-
     draft = _load_draft(context)
     if not draft:
         return await _resume_paused_flow(
@@ -12770,6 +14992,18 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=_active_draft_keyboard(context),
         )
         return AWAIT_APPROVAL
+
+    _set_reflection_detail_gate(context, draft)
+    if context.user_data.get("rcem_personal_reflection_confirmed") is not True:
+        context.user_data["awaiting_reflection_detail"] = True
+        await query.message.reply_text(
+            "Before AI can improve this, add your own learning point, interpretation, "
+            "or what you would do differently.",
+            reply_markup=_active_draft_keyboard(context),
+        )
+        return AWAIT_APPROVAL
+
+    await query.edit_message_reply_markup(reply_markup=None)
 
     ack = await query.message.reply_text("💡 Improving the reflection only…")
     case_text = context.user_data.get("case_text", "")
@@ -12799,6 +15033,7 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
                     current_draft=current_draft_text,
                     voice_profile_json=vp,
                     input_source=context.user_data.get("case_input_source", "text"),
+                    previous_key_capabilities=list(getattr(draft, "key_capabilities", None) or []),
                 ),
                 timeout=45,
             )
@@ -12848,7 +15083,7 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
     header = "💡 *Revised draft* — improved from the first version.\n\n"
     await _safe_edit_text(
         query.message,
-        header + preview + _REPLY_HINT_SUFFIX,
+        header + preview + _draft_reply_hint(context),
         reply_markup=_active_draft_keyboard(context),
         parse_mode="Markdown",
     )
@@ -12931,6 +15166,13 @@ async def handle_amend_draft(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return AWAIT_APPROVAL
 
     if action == "update_current":
+        if not _load_draft(context) or not context.user_data.get("case_text"):
+            await query.answer()
+            await query.message.reply_text(
+                "That draft is no longer available to update. No changes were saved. "
+                "Send a case to continue, or /cancel to return to the menu."
+            )
+            return AWAIT_CASE_INPUT
         await query.answer("Updating draft")
         pending = context.user_data.pop("amend_pending_feedback", "")
         return await _regenerate_active_draft_with_feedback(
@@ -13024,8 +15266,11 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
                 tmp_path = tmp.name
                 await photo_file.download_to_drive(tmp_path)
-                feedback = await extract_from_image(tmp_path)
-            await ack.edit_text("✏️ Regenerating draft with your feedback…")
+                feedback, removed_labels = await _read_image_text(tmp_path)
+            await ack.edit_text(
+                "✏️ Regenerating draft with your feedback…"
+                + _photo_redaction_note(removed_labels)
+            )
         except Exception as e:
             logger.error(f"Photo extraction in edit failed: {e}", exc_info=True)
             await ack.edit_text("⚠️ Couldn't read image. Type your feedback instead.")
@@ -13056,6 +15301,7 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 current_draft=current_draft_text,
                 voice_profile_json=vp,
                 input_source=context.user_data.get("case_input_source", "text"),
+                previous_key_capabilities=list(getattr(draft, "key_capabilities", None) or []),
             ), timeout=45)
         else:
             updated = await asyncio.wait_for(extract_form_data(
@@ -13075,7 +15321,7 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return AWAIT_APPROVAL
 
     preview = _format_draft_preview_for_context(updated, context)
-    await _safe_edit_text(ack, preview + _REPLY_HINT_SUFFIX, reply_markup=_active_draft_keyboard(context), parse_mode="Markdown")
+    await _safe_edit_text(ack, preview + _draft_reply_hint(context), reply_markup=_active_draft_keyboard(context), parse_mode="Markdown")
     return AWAIT_APPROVAL
 
 
@@ -13101,6 +15347,12 @@ def _current_text_flow_state(context, *, has_draft: bool, has_pending: bool) -> 
     if context.user_data.get("case_text"):
         return AWAIT_FORM_CHOICE
     return AWAIT_CASE_INPUT
+
+
+def _pending_document_name(context) -> str:
+    """Filename of the document this turn is about, pending or already read."""
+    pending = context.user_data.get("_pending_doc") or {}
+    return str(pending.get("name") or context.user_data.get("document_name") or "")
 
 
 def _current_text_flow_keyboard(context, *, has_draft: bool, has_pending: bool = False):
@@ -13129,8 +15381,23 @@ async def _answer_mid_flow_question(
         has_draft=has_draft,
         has_pending=has_pending,
     )
+    document_name = _pending_document_name(context)
+    # A stored certificate/award is not case substance. Answering a question
+    # about one must not send the doctor back to a form-choice step that only
+    # exists because the text was filed under "case_text".
+    if (
+        next_state == AWAIT_FORM_CHOICE
+        and classify_evidence_artifact(file_name=document_name, text=case_text).is_artifact
+    ):
+        next_state = AWAIT_CASE_INPUT
     try:
-        answer = style_grounded_answer(await answer_question(raw_text, case_context=case_text))
+        answer = style_grounded_answer(
+            await answer_question(
+                raw_text,
+                case_context=case_text,
+                document_name=document_name,
+            )
+        )
     except Exception:
         answer = (
             "I can help with portfolio forms, drafting, Kaizen setup, and how this "
@@ -13138,7 +15405,7 @@ async def _answer_mid_flow_question(
         )
 
     if has_draft:
-        continuation = "Your draft is ready above — tap Save as draft when ready."
+        continuation = "Your draft is ready above — select Save to Kaizen when ready."
     elif next_state == AWAIT_TEMPLATE_REVIEW:
         continuation = "Your template review is still open — use the buttons above to continue."
     elif next_state == AWAIT_FORM_CHOICE:
@@ -13239,7 +15506,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
             suffix = f"\n\nYour {pending_label} is still waiting above — choose how you want to use it."
             next_state = AWAIT_DOC_INTENT
         elif has_draft:
-            suffix = "\n\nYour draft is still ready above — tap *Save as draft* when you have reviewed it."
+            suffix = "\n\nYour draft is still ready above — select *Save to Kaizen* when you have reviewed it."
             next_state = AWAIT_APPROVAL
         elif has_pending:
             suffix = "\n\nYour case is still in progress — use the buttons above to continue."
@@ -13361,7 +15628,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
     if turn.kind is WorkflowTurnKind.CHAT:
         if has_draft:
             await update.message.reply_text(
-                "Still here — your draft is ready above. Tap *Save as draft* when ready, or *Edit* to change it.",
+                "Still here — your draft is ready above. Select *Save to Kaizen* when ready, or reply to change it.",
                 parse_mode="Markdown"
             )
             return AWAIT_APPROVAL
@@ -13477,7 +15744,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
                 preview = _format_draft_preview_for_context(draft, context, chosen_form)
                 ack_line = f"✏️ Updated: {summary}\n\n" if summary else "✏️ Draft updated.\n\n"
                 await update.message.reply_text(
-                    ack_line + preview + _REPLY_HINT_SUFFIX,
+                    ack_line + preview + _draft_reply_hint(context),
                     reply_markup=_active_draft_keyboard(context),
                     parse_mode="Markdown",
                 )
@@ -13540,12 +15807,12 @@ async def _show_unsigned_range_picker(target_message, context: ContextTypes.DEFA
     """Show the date-range picker for the unsigned-tickets scan."""
     context.user_data.pop("awaiting_unsigned_range", None)
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📅 Last 3 months", callback_data="UNSIGNED|3m"),
-         InlineKeyboardButton("📅 Last 6 months", callback_data="UNSIGNED|6m")],
-        [InlineKeyboardButton("📅 Last 12 months", callback_data="UNSIGNED|12m"),
-         InlineKeyboardButton("📅 All-time", callback_data="UNSIGNED|all")],
-        [InlineKeyboardButton("✏️ Custom range", callback_data="UNSIGNED|custom")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="UNSIGNED|cancel")],
+        [InlineKeyboardButton("📅 3 months", callback_data="UNSIGNED|3m"),
+         InlineKeyboardButton("📅 6 months", callback_data="UNSIGNED|6m")],
+        [InlineKeyboardButton("📅 12 months", callback_data="UNSIGNED|12m"),
+         InlineKeyboardButton("📅 All time", callback_data="UNSIGNED|all")],
+        [InlineKeyboardButton("✏️ Custom range", callback_data="UNSIGNED|custom"),
+         InlineKeyboardButton("❌ Cancel", callback_data="UNSIGNED|cancel")],
     ])
     await target_message.reply_text(
         "📅 Pick a date range for the unsigned-ticket scan.",
@@ -13599,7 +15866,9 @@ async def _run_unsigned_scan(
             timeout=90,
         )
     except asyncio.TimeoutError:
-        await msg.edit_text("⏱ Kaizen took too long to respond. Try again in a moment.")
+        # Same reasoning as the setup-flow timeout above: the cause may be
+        # local, so the copy states what happened rather than guessing why.
+        await msg.edit_text("⏱ The login check timed out before it finished. Try again in a moment.")
         return
     except Exception as exc:
         logger.warning("Unsigned scrape errored: %s", exc, exc_info=True)
@@ -13694,7 +15963,7 @@ async def unsigned_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             "📬 Unsigned ticket scanning is included in Portfolio Guru Unlimited.\n\n"
             "Upgrade to see all your pending assessments grouped by assessor, with chase guardrails (14-day cooldown, max 3 per assessor).",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📊 Upgrade to Unlimited", callback_data="UPGRADE|pro_plus")],
+                [InlineKeyboardButton("💳 Upgrade — £9.99/mo", callback_data="UPGRADE|pro_plus")],
             ]),
         )
         return
@@ -13741,7 +16010,7 @@ _CONSENT_PENDING_INPUT_KEY = "_consent_pending_input"
 
 def _build_consent_keyboard(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ I consent", callback_data=f"CONSENT|accept|{user_id}")],
+        [InlineKeyboardButton("🛡️ I consent", callback_data=f"CONSENT|accept|{user_id}")],
         [InlineKeyboardButton("❌ Not now", callback_data=f"CONSENT|decline|{user_id}")],
     ])
 
@@ -13877,8 +16146,9 @@ async def _resume_pending_consent_input(
             context.user_data["_pending_doc_context"] = caption
         await query.edit_message_text(
             "📷 Image received — how would you like to use it?\n\n"
-            "For ECGs, ultrasound, X-rays, wounds or procedure photos, "
-            "I won't interpret the image unless you add your own context.",
+            "Reading means pulling out any text — report wording, labels, notes. "
+            "For an ECG, ultrasound, X-ray or wound photo I won't interpret the "
+            "picture itself; tell me about the case in your own words.",
             reply_markup=_build_image_intent_keyboard(),
         )
         _track_latest_message(context, query.message)
@@ -13928,6 +16198,8 @@ async def _resume_pending_consent_input(
             context.user_data["_pending_doc_context"] = caption
         await query.edit_message_text(
             "🎞️ Video received — would you like to attach it to the Kaizen draft?\n\n"
+            "Kaizen keeps it exactly as you sent it, and you can't review a file "
+            "once it's on the draft — so check nothing identifying is visible.\n\n"
             "I won't interpret clinical videos. Send your own context or findings in text/voice.",
             reply_markup=_build_video_intent_keyboard(),
         )
@@ -13957,10 +16229,8 @@ async def _resume_pending_consent_input(
             )
             return AWAIT_CASE_INPUT
         context.user_data["_pending_doc"] = {"path": cached_path, "name": file_name}
-        await query.edit_message_text(
-            "📄 How would you like to use this document?",
-            reply_markup=_build_doc_intent_keyboard(),
-        )
+        intent_text, intent_markup = _document_intent_prompt(file_name)
+        await query.edit_message_text(intent_text, reply_markup=intent_markup)
         _track_latest_message(context, query.message)
         return AWAIT_DOC_INTENT
 
@@ -14131,9 +16401,21 @@ def build_application() -> Application:
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN env var not set")
 
+    # Refuse to start rather than serve cases through an off-region model. If
+    # the Vertex secrets failed to load, crash-looping here is what triggers
+    # deploy_mac.sh's automatic rollback; staying up would mean a live bot whose
+    # every case either fails or routes clinical text outside the UK.
+    from extractor import assert_eu_routing
+    assert_eu_routing()
+
     persistence_path = os.path.expanduser("~/.openclaw/data/portfolio-guru/bot_persistence")
     os.makedirs(os.path.dirname(persistence_path), exist_ok=True)
-    persistence = PicklePersistence(filepath=persistence_path)
+    # Clinical content stays in memory for the conversation and never reaches
+    # the pickle; see clinical_persistence.py. The one-shot purge repairs files
+    # written before that was true.
+    from clinical_persistence import ClinicalScrubbingPersistence, purge_existing_file
+    logger.info("Persistence clinical purge: %s", purge_existing_file(persistence_path))
+    persistence = ClinicalScrubbingPersistence(filepath=persistence_path)
 
     application = (
         Application.builder()
@@ -14174,6 +16456,11 @@ def build_application() -> Application:
                 MessageHandler(filters.VIDEO, handle_case_input),
                 MessageHandler(filters.Document.ALL, handle_case_input),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|continue_thin$"),
+                # The essentials gate can offer a different form from this
+                # state when the current one needs something the doctor
+                # cannot supply; without this the offer's own button would
+                # match no handler and be dropped.
+                CallbackQueryHandler(handle_form_choice, pattern=r"^FORM\|"),
             ],
             AWAIT_USERNAME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, setup_username),
@@ -14206,6 +16493,12 @@ def build_application() -> Application:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
                 MessageHandler(filters.VOICE, handle_pending_media_context),
                 MessageHandler(filters.AUDIO, handle_pending_media_context),
+                # Telegram delivers an album as separate updates. Without these
+                # three, the second and third files of a multi-file upload
+                # matched no handler in this state and were dropped silently.
+                MessageHandler(filters.PHOTO, handle_case_input),
+                MessageHandler(filters.VIDEO, handle_case_input),
+                MessageHandler(filters.Document.ALL, handle_case_input),
             ],
             AWAIT_FORM_CHOICE: [
                 CallbackQueryHandler(handle_document_intent, pattern=r"^DOCUSE\|"),
@@ -14258,7 +16551,7 @@ def build_application() -> Application:
                     handle_callback,
                     pattern=r"^FILING_CURRICULUM\|(?:select|retry)\|(?:2021|2025)$",
                 ),
-                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:add_reflection_detail|retry_filing)$"),
+                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:add_reflection_detail|retry_filing|back_to_missing)$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
                 MessageHandler(filters.VOICE, handle_approval_media_feedback),
@@ -14286,7 +16579,7 @@ def build_application() -> Application:
             CommandHandler("help", help_command),
             CommandHandler("settings", settings_command),
             CommandHandler("gather", gather_command),
-            CommandHandler("cancel", setup_cancel),
+            CommandHandler("cancel", cancel_command),
             CallbackQueryHandler(
                 handle_callback,
                 pattern=(
@@ -14329,7 +16622,6 @@ def build_application() -> Application:
     )
 
     # Register handlers
-    application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(CommandHandler("reset", reset_data))
     # /delete kept as a hidden, backwards-compatible alias for users who learned
     # it before the public command was consolidated to /reset. Not advertised in
@@ -14344,6 +16636,10 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("chase", chase_command))
     application.add_handler(CommandHandler("curriculum", curriculum_command))
     application.add_handler(CommandHandler("health", health_command))
+    # Deliberately absent from BOT_COMMANDS: the public menu is core-only, and
+    # /arcp is a once-a-cycle setup step. The health report names it at the
+    # moment it becomes relevant, which is better discovery than a menu entry.
+    application.add_handler(CommandHandler("arcp", arcp_command))
     application.add_handler(CommandHandler("upgrade", upgrade_command))
     application.add_handler(CommandHandler("plan", upgrade_command))
     application.add_handler(CommandHandler("settier", settier_command))
@@ -14377,7 +16673,7 @@ def build_application() -> Application:
     application.add_handler(
         CallbackQueryHandler(
             handle_action_button,
-            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|setup$|voice$|same_case_another$).+",
+            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|setup$|voice$|same_case_another$|retry_recommend$|retry_template$|back_to_missing$|retry_setup_login$).+",
         )
     )
     application.add_handler(CallbackQueryHandler(handle_feedback, pattern=r"^FEEDBACK\|"))
@@ -14442,6 +16738,10 @@ def build_application() -> Application:
     application.add_handler(voice_conv)
     application.add_handler(pathway_conv)
     application.add_handler(case_conv)
+    # Active conversations must see /cancel first so ConversationHandler can
+    # consume the END return and remove its persisted state. This standalone
+    # handler is only the idle fallback.
+    application.add_handler(CommandHandler("cancel", cancel_command))
     # Register the global SETLEVEL handler AFTER every conversation handler that
     # owns an AWAIT_TRAINING_LEVEL state — BOTH setup_conv AND case_conv. The
     # reset→setup flow runs inside case_conv (handle_case_input is a case_conv
@@ -14483,7 +16783,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
                     context,
                     "That older writing-style button is no longer active. Your setup is still saved — open Writing style and I'll rebuild it with you.",
                     reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("✍️ Open Writing style", callback_data="ACTION|voice")],
+                        [InlineKeyboardButton("✍️ Writing style", callback_data="ACTION|voice")],
                     ]),
                 )
                 return
@@ -14511,7 +16811,6 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         import ops_alert
         await ops_alert.notify_operator(
             getattr(context, "bot", None),
-            f"handler error: {str(context.error)[:300]}",
             key="handler_error",
         )
     except Exception:
@@ -14527,7 +16826,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         if draft:
             # We have a draft — offer retry + start fresh
             retry_keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Try again", callback_data="ACTION|retry_filing")],
+                [InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_filing")],
                 [InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|reset")],
             ])
             await _edit_last_bot_msg(
@@ -14596,6 +16895,11 @@ def main():
                 from retention import purge_expired_clinical_content
                 result = await asyncio.to_thread(purge_expired_clinical_content)
                 logger.info("Retention purge: %s", result)
+                # Orphaned draft backups: filings that never succeeded, so the
+                # discard-on-save path never ran for them.
+                import draft_backup
+                drafts = await asyncio.to_thread(draft_backup.purge_expired)
+                logger.info("Draft backup purge: %s", drafts)
             application.job_queue.run_repeating(_retention_job, interval=86400, first=120, name="retention")
             logger.info("Daily clinical-content retention purge scheduled")
     except Exception:
@@ -14632,8 +16936,19 @@ def main():
         logger.warning("Could not schedule Stripe reconciliation", exc_info=True)
 
     # Weekly portfolio digest — Sunday 20:00 UK time (handles BST/GMT).
-    # JobQueue.run_daily uses ISO weekdays: Monday=0 … Sunday=6.
+    #
+    # JobQueue.run_daily days are indexed from SUNDAY, not Monday: PTB maps them
+    # through _CRON_MAPPING = ("sun", "mon", "tue", "wed", "thu", "fri", "sat").
+    # The comment here previously claimed ISO weekdays (Monday=0), so days=(6,)
+    # sent the "Sunday" digest every Saturday — confirmed by the last-run stamp
+    # sitting on Sat 22 Aug 2026 — and the sign-off chase added on 2026-08-26
+    # was scheduled for Tuesday while its comment said Wednesday, which is why
+    # it never fired. Both corrected; SUNDAY/WEDNESDAY below are named so the
+    # next reader does not have to know the convention.
     from datetime import time as _dtime
+
+    # Named for readability; values follow PTB's Sunday-indexed mapping.
+    SUNDAY, WEDNESDAY = 0, 3
     try:
         from zoneinfo import ZoneInfo as _ZoneInfo
         _uk_tz = _ZoneInfo("Europe/London")
@@ -14642,9 +16957,25 @@ def main():
     application.job_queue.run_daily(
         weekly_push,
         time=_dtime(hour=20, minute=0, tzinfo=_uk_tz),
-        days=(6,),
+        days=(SUNDAY,),
         name="weekly_push",
     )
+
+    # Sign-off chase — Wednesday 19:00 UK, deliberately away from the Sunday
+    # digest so a user never gets two proactive messages in one evening.
+    # Off unless PG_ENABLE_SIGNOFF_CHASE is set: the job is not registered at
+    # all when disabled, so a beta user cannot receive an unsolicited message
+    # by accident.
+    if _signoff_chase_enabled():
+        application.job_queue.run_daily(
+            signoff_chase_push,
+            time=_dtime(hour=19, minute=0, tzinfo=_uk_tz),
+            days=(WEDNESDAY,),
+            name="signoff_chase",
+        )
+        logger.info("signoff_chase job registered (PG_ENABLE_SIGNOFF_CHASE set)")
+    else:
+        logger.info("signoff_chase disabled — set PG_ENABLE_SIGNOFF_CHASE=1 to enable")
 
     # Clinical Supervisor poll — read-only, inert unless there is at least
     # one user with cached kaizen_role=="assessor" AND credentials AND a

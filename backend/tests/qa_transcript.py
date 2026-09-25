@@ -11,8 +11,7 @@ This lane is the offline-only complement to the live Telethon harness in
 connection, and never needs ``TELEGRAM_LIVE_APPROVED`` — running it does not
 contact Telegram at all.
 
-Handler registration mirrors the offline PTB fixture in
-``tests/test_e2e_offline.py`` (keep them aligned).
+Handler registration comes directly from the production application builder.
 """
 
 from __future__ import annotations
@@ -22,24 +21,15 @@ import contextlib
 import dataclasses
 import datetime as dt
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from telegram import Document, Message, PhotoSize, Update, Voice
-from telegram.ext import (
-    Application,
-    CallbackQueryHandler,
-    CommandHandler,
-    ConversationHandler,
-    MessageHandler,
-    filters,
-)
-
 from tests.helpers import (
     BOT_USER,
-    OfflineRequest,
     make_callback_update,
     make_command_update,
     make_text_update,
@@ -145,7 +135,9 @@ class _ResponseCollector:
             "message_id": message_id,
             **kwargs,
         })
-        return True
+        message = self._make_fake_message(chat_id, text)
+        message.message_id = message_id
+        return message
 
     def drain(self) -> list[dict[str, Any]]:
         out = self.sent[:]
@@ -211,14 +203,8 @@ async def offline_application():
 
     collector = _ResponseCollector()
 
-    app = (
-        Application.builder()
-        .token("0:FAKE")
-        .updater(None)
-        .request(OfflineRequest())
-        .get_updates_request(OfflineRequest())
-        .build()
-    )
+    from tests.helpers import build_offline_application
+    app = build_offline_application()
 
     real_bot = app.bot
     real_bot._unfreeze()
@@ -228,6 +214,13 @@ async def offline_application():
 
     bot_cls = type(real_bot)
     patches = contextlib.ExitStack()
+    import tempfile
+    import pytest
+    from tests.helpers import isolate_bot_storage
+    scratch = patches.enter_context(tempfile.TemporaryDirectory(prefix="pg-offline-"))
+    isolated = patches.enter_context(pytest.MonkeyPatch.context())
+    isolate_bot_storage(isolated, Path(scratch),
+                        audit_path=os.environ.get("PORTFOLIO_GURU_DOGFOOD_AUDIT_PATH"))
 
     async def _send(_self, chat_id=None, text="", **kwargs):
         return await collector.send_message(chat_id=chat_id, text=text, **kwargs)
@@ -263,93 +256,6 @@ async def offline_application():
     patches.enter_context(patch.object(PhotoSize, "get_file", _get_file))
     patches.enter_context(patch.object(Voice, "get_file", _get_file))
     patches.enter_context(patch.object(Document, "get_file", _get_file))
-
-    case_conv = ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(
-                bot.handle_callback,
-                pattern=r"^ACTION\|(?:file|reset|cancel|add_detail|continue_thin)$",
-            ),
-            MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_case_input),
-            MessageHandler(filters.VOICE, bot.handle_case_input),
-            MessageHandler(filters.PHOTO, bot.handle_case_input),
-            MessageHandler(filters.Document.ALL, bot.handle_case_input),
-        ],
-        states={
-            bot.AWAIT_CASE_INPUT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_case_input),
-                MessageHandler(filters.VOICE, bot.handle_case_input),
-                MessageHandler(filters.PHOTO, bot.handle_case_input),
-                MessageHandler(filters.Document.ALL, bot.handle_case_input),
-                CallbackQueryHandler(bot.handle_callback, pattern=r"^ACTION\|add_detail$"),
-                CallbackQueryHandler(bot.handle_callback, pattern=r"^ACTION\|continue_thin$"),
-            ],
-            bot.AWAIT_DOC_INTENT: [
-                CallbackQueryHandler(bot.handle_document_intent, pattern=r"^DOCUSE\|"),
-                CallbackQueryHandler(bot.handle_callback, pattern=r"^CANCEL\|"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_mid_conversation_text),
-            ],
-            bot.AWAIT_FORM_CHOICE: [
-                CallbackQueryHandler(bot.handle_form_choice, pattern=r"^FORM\|"),
-                CallbackQueryHandler(bot.handle_callback, pattern=r"^CANCEL\|"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_mid_conversation_text),
-            ],
-            bot.AWAIT_TEMPLATE_REVIEW: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_template_review_text),
-                MessageHandler(filters.VOICE, bot.handle_case_input),
-                MessageHandler(filters.PHOTO, bot.handle_case_input),
-                MessageHandler(filters.Document.ALL, bot.handle_case_input),
-                CallbackQueryHandler(bot.handle_callback, pattern=r"^CASE\|"),
-                CallbackQueryHandler(bot.handle_form_choice, pattern=r"^FORM\|"),
-                CallbackQueryHandler(bot.handle_callback, pattern=r"^ACTION\|add_detail$"),
-                CallbackQueryHandler(bot.handle_callback, pattern=r"^ACTION\|continue_thin$"),
-                CallbackQueryHandler(bot.handle_callback, pattern=r"^CANCEL\|"),
-            ],
-            bot.AWAIT_APPROVAL: [
-                CallbackQueryHandler(bot.handle_approval_approve, pattern=r"^APPROVE\|"),
-                CallbackQueryHandler(bot.handle_approval_edit, pattern=r"^EDIT\|"),
-                CallbackQueryHandler(bot.handle_callback, pattern=r"^CANCEL\|"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_mid_conversation_text),
-            ],
-            bot.AWAIT_EDIT_FIELD: [
-                CallbackQueryHandler(bot.handle_edit_field, pattern=r"^FIELD\|"),
-                CallbackQueryHandler(bot.handle_callback, pattern=r"^CANCEL\|"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_mid_conversation_text),
-            ],
-            bot.AWAIT_EDIT_VALUE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_edit_value_with_intent),
-                MessageHandler(~filters.COMMAND & ~filters.TEXT, bot.handle_edit_value),
-                CallbackQueryHandler(bot.handle_callback, pattern=r"^CANCEL\|"),
-            ],
-        },
-        fallbacks=[
-            CommandHandler("start", bot.start),
-            CommandHandler("help", bot.help_command),
-            CommandHandler("settings", bot.settings_command),
-            CommandHandler("cancel", bot.setup_cancel),
-            CallbackQueryHandler(
-                bot.handle_callback,
-                pattern=r"^(?:INFO\|.*|CANCEL\|.*|ACTION\|(?:file|setup|reset|cancel|add_detail|continue_thin|retry_filing))$",
-            ),
-        ],
-        per_message=False,
-        allow_reentry=False,
-    )
-
-    app.add_handler(CommandHandler("start", bot.start))
-    app.add_handler(CommandHandler("settings", bot.settings_command))
-    app.add_handler(CommandHandler("cancel", bot.cancel_command))
-    app.add_handler(CommandHandler("help", bot.help_command))
-    app.add_handler(CallbackQueryHandler(bot.handle_set_curriculum, pattern=r"^SET_CURRICULUM\|"))
-    app.add_handler(CallbackQueryHandler(bot.handle_info_button, pattern=r"^INFO\|"))
-    app.add_handler(
-        CallbackQueryHandler(
-            bot.handle_action_button,
-            pattern=r"^ACTION\|(?!file$|reset$|cancel$|add_detail$|continue_thin$|retry_filing$).+",
-        )
-    )
-    app.add_handler(CallbackQueryHandler(bot.handle_set_level, pattern=r"^SETLEVEL\|"))
-    app.add_handler(case_conv)
 
     await app.initialize()
     try:
@@ -395,6 +301,13 @@ def _patch_extraction(monkeypatch_obj, case: CaseDefinition) -> None:
     async def fake_extract(*args, **kwargs):
         return draft
 
+    async def fake_assess_essentials(case_description, form_type, essentials, **kwargs):
+        # The golden cases are complete cases, so the essential-first gate
+        # judges them sufficient and the journey runs straight to the draft.
+        # Stubbed here for the same reason every other model call is: this
+        # harness must never reach a provider.
+        return {item["key"]: "present" for item in essentials}
+
     media_texts: dict[str, list[str]] = {
         "photo": [
             step.extracted_text
@@ -429,6 +342,7 @@ def _patch_extraction(monkeypatch_obj, case: CaseDefinition) -> None:
         return _pop_media_text("document")
 
     monkeypatch_obj.setattr("bot.recommend_form_types", fake_recommend)
+    monkeypatch_obj.setattr("bot.assess_form_essentials", fake_assess_essentials)
     monkeypatch_obj.setattr("bot.classify_intent", AsyncMock(return_value="case"))
     monkeypatch_obj.setattr(
         "bot.extract_explicit_form_type", lambda text, *, require_intent=True: None

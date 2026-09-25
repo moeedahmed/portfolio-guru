@@ -12,7 +12,36 @@
 - **Draft-only framing** — all entries are described as saved to Kaizen as drafts, never as filed or submitted. Supervisor submission is never automatic.
 - **Professional emoji only** — avoid decorative/consumer emoji (✨ sparkles, 🤖 robot, ⭐ stars, 🎉 party). Prefer functional emoji that signal message type (✅, ⚠️, 📋, 📤).
 - **Emoji headings, plain rows** — use one functional emoji on the message header, and on secondary section headings only when the section changes meaning. Do not put emojis on every row, sentence, metadata label, or body line.
-- **Button icons are separate** — button labels may use a compact functional emoji when it helps recognition. This does not mean the surrounding body rows also need emoji.
+- **Buttons carry outcomes** — the message explains the object and context; the button names the action or result. Every active action label starts with exactly one meaningful functional emoji. The icon must describe the action or object, never decorate it or imply success before success occurred.
+
+## Mobile Button Standard
+
+- Use the shortest unambiguous outcome wording after the icon. One word is appropriate only when the message and action make the object unmistakable: `📋 Forms`, `🔙 Back`, `🔄 Retry`, `✏️ Edit`.
+- One or two words after the icon is the normal range, not a target to minimise at any cost: `📋 Choose form`, `➕ New case`, `💭 Reflective log`, `✏️ Update draft`, `✍️ Writing style`.
+- Put at most two compact buttons in a row. Pack two related compact actions together; reserve a full row for a long label or a consequential action.
+- Identical actions use identical labels across journeys. Do not switch between variants such as `Try again` / `Retry` or `See all forms` / `Pick form manually`.
+- Do not repeat the object in the button when the message already names it. Prefer `🔙 Back` over `🔙 Back to settings`, and `✏️ Edit` over `✏️ Keep editing this draft`.
+- Do not use bare `Yes` / `No` where the outcome is safer. Use labels such as `Delete data` / `Keep data`.
+- Keep protected actions explicit even when that needs more than two words or a full row. This includes saving to Kaizen, payment or upgrade, consent, credential connection, deletion/reset, and opening an external page. Preserve every confirmation gate.
+- Form recommendations state the best fit in the message. The first row contains compact form choices with the existing form-specific icon, for example `🩺 CBD` and `💭 Reflective log`; the best-fit button keeps its existing action ID. Selecting any form starts drafting immediately, with no extra confirmation step.
+- Gathering does not promise a draft before the form is selected: use `📋 Choose form` and `❌ Discard case`, then show the recommended form choices.
+- Do not stack emoji prefixes or use decorative `⭐`, `✨`, `🤖`, or `🎉` in action labels. Reserve `✅` for a result that has actually succeeded; use an object/action icon for a choice that has not happened yet.
+
+Canonical compact labels:
+
+- `FORM|show_all` → `📋 Forms`
+- Reflective Practice Log form choice → `💭 Reflective log`
+- Finish gathering and show form choices → `📋 Choose form`
+- Discard the captured case → `❌ Discard case`
+- Abandon form selection and return to a fresh case → `🔄 Restart`
+- Back navigation → `🔙 Back`
+- Retry/recovery → `🔄 Retry`
+- Start another case → `➕ New case`
+- Draft refinement → `✏️ Edit` or `✏️ Improve`, according to the actual outcome
+- Cancel without an external effect → `❌ Cancel`
+- Kaizen draft save → `💾 Save to Kaizen`
+- Credential setup → `🔗 Connect Kaizen` or `🔗 Reconnect Kaizen`
+- External destinations → explicit labels such as `🔗 Open Kaizen` or `🔗 Open saved draft`
 
 ## Emoji Categories
 
@@ -58,38 +87,46 @@
 First capture:
 
 ```
-📥 Captured. Add anything else before I draft this?
+📥 Case captured.
+
+Send another anonymised message to add details.
+
+When you're ready, tap Choose form.
 ```
 
-Buttons: `✅ Draft now` · `❌ Cancel`
+Buttons: `📋 Choose form` · `❌ Discard case`
 
 Attachment-only capture:
 
 ```
 📎 Image attached.
 
-Add anonymised case details before I draft this.
+Add anonymised case details before choosing a form.
 
 For ECGs, ultrasound, X-rays, wounds or procedure images, send your own interpretation/context before drafting.
 ```
 
-Buttons: `✅ Draft now` · `❌ Cancel`
+Buttons: `📋 Choose form` · `❌ Discard case`
 
-If the user taps `✅ Draft now` before sending any readable case context, keep
+If the user selects `Choose form` before sending any readable case context, keep
 the attachment saved and ask for anonymised text or voice context instead of
 drafting from the attachment alone.
 
-When user taps ✅ Draft now, this message is edited in place to the full CAPTURED_ACK
+When the user selects `Choose form`, this message is edited in place to the full CAPTURED_ACK
 ("📥 Captured. I'll turn this into portfolio evidence…") and the keyboard is
 removed; the form recommendation arrives as a new message.
 
-When user taps ❌ Cancel, the captured case is discarded and the bot returns to
+When the user selects `Discard case`, the captured case is discarded and the bot returns to
 the standard ready state.
 
 After subsequent messages:
 
 ```
-📥 Noted. Add anything else before I draft this?
+📥 Case captured.
+
+Send another anonymised message to add details.
+
+When you're ready, tap Choose form.
 ```
 
 Completion prompt (when user says "done" or taps button):
@@ -97,6 +134,21 @@ Completion prompt (when user says "done" or taps button):
 ```
 📥 Ready for the next step.
 ```
+
+Form recommendation:
+
+```
+📋 Best fit: Case-Based Discussion
+
+- Case-Based Discussion: Best matches the clinical reasoning in this case.
+- Reflective Practice Log: Fits if the main purpose is personal learning.
+
+Select a form to draft it.
+```
+
+First row: `🩺 CBD` · `💭 Reflection`
+
+Second row: `📋 Forms` · `❌ Cancel`
 
 ## Example Existing Messages
 

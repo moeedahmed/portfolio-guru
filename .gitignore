@@ -1,6 +1,11 @@
 .env
 node_modules/
 venv/
+# The worktree bootstrap symlinks backend/venv and backend/.env at a shared
+# environment. "venv/" matches a directory, not a symlink, so without these
+# the links show as untracked in every worktree.
+backend/venv
+backend/.env
 __pycache__/
 .env.local
 
@@ -24,6 +29,10 @@ __pycache__/
 *.backup
 *.tmp
 *.scratch
+
+# Local release cards and operator attestations (scripts/release_loop.sh).
+# Release state is local proof, not shipped content.
+.release/
 
 # Local generated/debug artefacts
 .artifacts/

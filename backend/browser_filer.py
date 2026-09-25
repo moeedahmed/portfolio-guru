@@ -321,7 +321,7 @@ async def file_with_browser_use(
     browser_profile = BrowserProfile(
         headless=True,
         allowed_domains=allowed_domains,
-        cdp_url="http://localhost:18800",
+        cdp_url=os.environ.get("KAIZEN_CDP_URL", "http://localhost:18800"),
     )
 
     # Create LLM based on model choice

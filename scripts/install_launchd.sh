@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_DIR="${PORTFOLIO_GURU_APP_DIR:-/Users/moeedahmed/projects/portfolio-guru}"
+APP_DIR="${PORTFOLIO_GURU_APP_DIR:-/Users/moeedahmed/projects/portfolio-guru-live}"
 SERVICE_LABEL="${PORTFOLIO_GURU_SERVICE_LABEL:-com.portfolioguru.bot}"
 PLIST_PATH="${HOME}/Library/LaunchAgents/${SERVICE_LABEL}.plist"
 # start-bot.sh redirects the whole service (secrets, Chrome, webhook, bot) into
 # this one file, so launchd must point here too. Pointing launchd at a separate
 # path created a file that never received a byte — and a debugger tailing it got
 # months-old errors that read as current.
-BOT_LOG="${PORTFOLIO_GURU_BOT_LOG:-/tmp/portfolio-guru-bot.log}"
+BOT_LOG="${PORTFOLIO_GURU_BOT_LOG:-$HOME/.openclaw/logs/portfolio-guru/bot.log}"
 
 mkdir -p "$(dirname "$PLIST_PATH")"
 

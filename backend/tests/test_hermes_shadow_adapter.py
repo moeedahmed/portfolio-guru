@@ -112,10 +112,10 @@ def test_shadow_metadata_exposes_safe_form_options_without_reasons():
             "saved to Kaizen from this test bot."
         ),
         "actions": [
-            {"action_id": "FORM|CBD", "label": "CBD — medium confidence"}
+            {"action_id": "FORM|CBD", "label": "📋 CBD — medium confidence"}
         ],
         "telegram_button_rows": [
-            [{"text": "CBD — medium confidence", "callback_data": "FORM|CBD"}]
+            [{"text": "📋 CBD — medium confidence", "callback_data": "FORM|CBD"}]
         ],
     }
     assert result.metadata["recommendation"] == {

@@ -1,8 +1,25 @@
-# Portfolio Health + Pathway Guidance — Product Spec v2
+# Portfolio Health + Pathway Guidance — Product Spec v2.2
 
 **Status:** Product spec. Replaces the narrower ARCP Health design (now superseded).
-**Last updated:** 2026-06-30
+**Last updated:** 2026-09-03
 **Supersedes:** `docs/ARCP_HEALTH_DESIGN.md` — retained as historical design artefact.
+
+## Controlling Telegram UX decision (2026-09-03)
+
+The everyday `/health` journey is action-first and deliberately minimal. A
+doctor should understand one useful next step within five seconds: review
+older unfinished drafts they control. Awaiting sign-off is secondary. Trust limits
+stay concise, and system analysis or settings do not compete with those two
+actions.
+
+The queues preserve the existing 21-day inclusion filter. This is a neutral
+triage threshold for highlighting older workflow items, not an overdue rule;
+the counts do not claim to include every unfinished item.
+
+This decision controls the current Telegram Health presentation wherever older
+journey or surface descriptions in this document conflict with it. Assessment
+calculations, evidence ordering, queue membership and the underlying detail
+reports remain unchanged.
 
 ---
 
@@ -29,9 +46,9 @@ not an official readiness judgement. The report must disclose:
 - **Evidence window** — current implementation does not yet know the user's
   ARCP cycle month, LTFT extension, appraisal month, or target Portfolio
   Pathway application window.
-- **Confidence** — high only when a fresh Kaizen index and confirmed pathway
-  are present; lower when the report falls back to Portfolio Guru history or a
-  default pathway.
+- **Scan facts** — item count and source, refresh timestamp plus freshness or
+  partiality, and whether the view is an indexed Kaizen scan or a limited local
+  fallback. Do not collapse these separate facts into a confidence label.
 - **Inference boundary** — missing domains are inferred from visible evidence
   in the scan and must not be presented as an official ARCP, Portfolio Pathway,
   appraisal, or revalidation outcome.
@@ -69,6 +86,10 @@ Source checks on 2026-06-27:
   https://www.gmc-uk.org/registration-and-licensing/managing-your-registration/revalidation/guidance-on-supporting-information-for-revalidation/guidance-on-supporting-information-for-revalidation
 
 ## Status / copy consistency rule (2026-06-30)
+
+Scope note (2026-09-01): this rule governs the legacy LLM-narrative ARCP
+message only. The four `/health` views carry no score and no LLM narrative, so
+there is nothing to reconcile — see "No universal health score" below.
 
 The deterministic health score and the report's action copy must never
 contradict each other. The ARCP report merges the LLM narrative's free-text
@@ -115,7 +136,9 @@ profile.
 
 Portfolio Health and Pathway Readiness are two layers:
 
-**Portfolio Health** = the universal evidence tracker. It answers: "What evidence do I have? What's missing? What domains are thin?"
+**Portfolio Health** = the universal evidence tracker. It answers: "What did
+this scan see, what is unfinished, what can I act on myself, and what is waiting
+on somebody else?"
 
 **Pathway Guidance** = two RCEM views on the same Kaizen data:
 
@@ -214,16 +237,43 @@ Product decision, 2026-06-30:
 
 Portfolio Health knows nothing about ARCP dates, RCEM SLOs, CESR requirements, or training stages. It is pure evidence inventory. This is the key architectural difference from the original ARCP Health spec.
 
-### Health score
+### No universal health score (superseded 2026-09-01)
 
-A simple, universal health signal independent of any pathway:
+The universal layer previously carried a green/amber/red/grey signal. It no
+longer does, and `compute_health_assessment` no longer computes one.
 
-- **Green — Well covered:** evidence in 5–6 domains, balanced, recent items, regular cadence
-- **Amber — Needs attention:** 3–4 domains, some gaps, or ageing evidence
-- **Red — Thin:** ≤2 domains, large gaps, or mostly stale evidence
-- **Grey — Unknown:** not enough data entered yet
+A colour is a readiness claim, and this layer verifies nothing against any
+pathway's rules: the same evidence means different things to an ST4, a CESR
+applicant and an SAS doctor. What it can state honestly are facts about the
+scanned evidence — what is unfinished and since when, what each domain holds
+and how recently, how the portfolio compares with itself, and what the scan
+could not see. Those are what the views render.
 
-The health score is always shown with the concrete reasons. Never a label alone.
+Requirement counters still exist, but only where a **verified pathway overlay**
+supplies them (Layer 2), labelled as that pathway's own rule. With no overlay,
+nothing pathway-specific is rendered at all — an empty counter would read as an
+unmet requirement to a doctor whose pathway has no such rule.
+
+Related rules the universal layer holds to:
+
+- The default `What to do next` view shows `Review your drafts` first and
+  `Waiting on others` second, with their visible counts and no ranking,
+  coverage, curriculum, scan-detail or review-setting copy.
+- A partial or freshness-unconfirmed scan keeps one concise explicit
+  limitation on the default view rather than implying completeness.
+- Old evidence is named with its exact date and offered for review. Nothing is
+  called overdue or stale, and no chase is instructed: no scanned field carries
+  a deadline. Older drafts are neutrally described as potentially no longer
+  worth completing.
+- Coverage shows each of the six core category totals with last-12-month
+  activity in its legacy-compatible detail report. It does not issue a
+  largest-versus-smallest domain warning.
+- The denominator is explicit: evidence outside the six core categories stays
+  in the scanned-item total and is stated separately rather than disappearing.
+- Curriculum spread is computed over tagged items only. Tagged and untagged
+  scope is stated together, evidence types that cannot carry tags are named as
+  outside the comparison, and `12/12 SLOs represented` explicitly says that
+  presence does not assess adequacy.
 
 ---
 
@@ -298,30 +348,23 @@ Other pathways (GP, IMT, CST, SAS, foundation) will be added when Portfolio Guru
 
 ## User Journey
 
-### First-time setup
+### Everyday Health
 
-1. User opens Portfolio Health (`/health` or button)
-2. If no profile exists: "Welcome to Portfolio Health. I'll help you track your evidence and understand what's missing. Are you on a training programme or working toward CESR?"
-3. Pathway selector: Training (CCT) / CESR / Portfolio Pathway. ARCP is a
-   yearly review checkpoint inside the Training (CCT) pathway, not a
-   pathway in its own right.
-4. User selects pathway → optional details (training stage + ARCP date for trainees; target application window for CESR)
-5. Initial scan of existing PG activity populates evidence inventory
-6. Health summary shows: domain coverage, recent activity, pathway-specific readiness
+1. The doctor opens `/health` or the Portfolio Health button.
+2. Health refreshes read-only evidence when required, then opens `What to do
+   next`.
+3. `Review your drafts` is the first action and opens the doctor-owned draft
+   queue at its first page (`page 0` in the callback contract).
+4. `Waiting on others` opens the independent awaiting-sign-off queue at its
+   first page (`page 0` in the callback contract).
+5. `About` explains only the source, workflow-state provenance, scan limits,
+   automated-classification limit and read-only judgement boundary.
+6. Every queue and About returns directly to Health. Pagination never changes
+   the other queue's page.
 
-### Ongoing use
-
-- `/health` → quick summary with pathway overlay
-- `/health domains` → domain breakdown
-- `/health gaps` → what's missing, what to file next
-- `Add evidence` → manual entry of CPD, teaching, QI, leadership items
-- After each filing → health updates automatically (existing flow, enhanced)
-
-### Pathway switching
-
-- `/pathway` → select or change between ARCP and CESR views
-- Switching re-interprets the same evidence, no data loss
-- A CESR candidate who later enters training can switch to ARCP view
+Pathway selection, review-month settings and system analysis are outside this
+everyday journey. Existing typed commands and settings routes remain separate;
+switching a pathway still reinterprets the same evidence without deleting it.
 
 ---
 
@@ -398,13 +441,54 @@ next_actions              3–5 concrete suggested actions
 
 ### Telegram (MVP)
 
-- `/health` — compact summary card: health score, domain bar, top 2 gaps, next action
-- `/health domains` — domain breakdown with counts and dates
-- `/health gaps` — what's missing, ordered by impact
+- `/health` opens `What to do next`. Its text contains only:
+  - `Review your drafts — N`, explaining that these are unfinished items the
+    doctor controls and that older drafts may no longer be worth completing;
+  - `Waiting on others — N`, advising review only when follow-up is still
+    needed;
+  - one concise read-only planning-aid boundary; and
+  - one concise explicit partial/freshness limitation when applicable.
+- The exact landing keyboard is:
+  - first full-width row: `📝 Review drafts (N)`;
+  - second row: `⏳ Awaiting (N)` and `ℹ️ About`.
+- Draft and Awaiting queues open independently at their first page (`page 0` in
+  callback data), paginate independently at five items per page, and retain
+  direct Kaizen links. Their only
+  non-pagination control is `🔙 Health`.
+- `ℹ️ About` contains only the indexed/read-only source scope, the fact that
+  draft and awaiting counts come from visible Kaizen workflow states,
+  partial/stale limitations, the automated-classification limitation, the
+  no-edit/file/chase/delete boundary, and the fact that Health is not a formal
+  training or appraisal judgement. Its only control is `🔙 Health`.
+- Actions, More, Coverage, Curriculum, Scan info and Review month are absent
+  from new everyday navigation.
+
 - `/pathway` — select or change pathway
 - `Add evidence` button — quick manual entry flow
 - After each WPBA filing → "Evidence added to Portfolio Health. [View health]"
 - Weekly nudge (already exists) → enhanced with health context
+
+Navigation is contextual. Evidence views are rendered once per scan and stored,
+so a button press never re-derives them and paging cannot shift items between
+pages. Buttons on messages older than this layout remain safe: legacy Actions,
+combined `health_page`, `health_detail`, direct Coverage, Curriculum and Scan
+callbacks still render their stored reports where practical, but those detail
+views are legacy-only and offer only `🔙 Health`. An old `health_view|more`
+callback maps to the new About view and its single Back control instead of
+recreating the removed menu. A report this chat no longer holds offers
+`🔄 Refresh health` rather than a dead end.
+
+Legacy review-month callbacks and the typed `/arcp <month> <year>` route remain
+compatible. Selecting a month only previews it; the existing health-profile
+storage path is called only after explicit confirmation, and no selected month
+or year enters telemetry. These controls are not exposed through the new Health
+navigation.
+
+Health interaction telemetry uses the existing PHI-free funnel logger. It may
+record only allowlisted structural values for pane, queue, page and review-month
+selection/confirmation events. It does not retain the chosen month or year. It
+must never record message text, portfolio content, Kaizen links, credentials,
+or any new raw identifier.
 
 ### Future Web Dashboard
 
@@ -426,6 +510,9 @@ next_actions              3–5 concrete suggested actions
 - Pathway switching never deletes evidence.
 - No automated submission to Kaizen, GMC, deanery, or recruitment portal.
 - Clinical content, supervisor names, and patient details must not appear in analytics or health snapshots.
+- Health funnel events contain structural navigation/setup metadata only; no
+  message text, portfolio content, link, credential or new identifier is
+  permitted.
 
 ---
 

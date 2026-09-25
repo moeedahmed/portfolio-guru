@@ -414,12 +414,12 @@ async def _answer_whatsapp_side_question(text: str) -> str:
 
 def _make_gathering_captured_reply():
     from channel_actions import ChannelReply
-    from conversation_supervisor import DRAFT_NOW_ACTION
+    from conversation_supervisor import CHOOSE_FORM_ACTION
     from message_policy import render_message
 
     return ChannelReply(
         body=render_message("gathering_captured"),
-        actions=(DRAFT_NOW_ACTION,),
+        actions=(CHOOSE_FORM_ACTION,),
     )
 
 
@@ -490,7 +490,7 @@ async def _make_finish_reply(record: dict[str, Any] | None):
             body=(
                 "📋 Case details needed\n\n"
                 "I do not have a case captured for that option yet. Send "
-                "anonymised case details, then choose Draft now."
+                "anonymised case details, then choose a form."
             )
         )
     if record is not None and record.get("stage") == "recommended":

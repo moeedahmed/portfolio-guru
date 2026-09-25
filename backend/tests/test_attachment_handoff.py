@@ -18,6 +18,7 @@ from bot import (
     handle_mid_conversation_text,
 )
 from tests.bot_simulator import BotSimulator
+from message_policy import render_message
 from extractor import FormDraft
 from channel_actions import ChannelReply
 from conversation_supervisor import (
@@ -27,8 +28,34 @@ from conversation_supervisor import (
 from conversational_router import ConversationalIntent
 
 
+@pytest.fixture(autouse=True)
+def _isolate_portfolio_history(monkeypatch):
+    """Attachment plumbing must not depend on a developer's local case history."""
+    monkeypatch.setattr("bot.get_case_history", AsyncMock(return_value=[]))
+
+
 def _all_visible_text(sim: BotSimulator) -> str:
     return "\n".join(text for _, text, _ in sim.messages_sent if isinstance(text, str))
+
+
+def _fields_with_schema_essentials(form_type: str, overrides: dict) -> dict:
+    """Fill in a form's other schema-required fields around test-specific ones.
+
+    These tests only care about attachment-path plumbing, but the save
+    handler now checks the same completeness the preview already enforced —
+    a draft this thin would never legitimately have reached Save in the
+    product, so the fixture needs to look like one that would.
+    """
+    from form_schemas import FORM_SCHEMAS
+
+    schema = FORM_SCHEMAS.get(form_type, {})
+    fields = {
+        field["key"]: f"Test {field['label']}"
+        for field in schema.get("fields", [])
+        if field.get("required")
+    }
+    fields.update(overrides)
+    return fields
 
 
 @pytest.mark.asyncio
@@ -68,9 +95,9 @@ async def test_document_case_stores_attachment_path():
     assert os.path.exists(context.user_data["_pending_doc"]["path"])
     extract_mock.assert_not_called()
     buttons = sim.get_last_buttons()
-    assert ("📝 Read as case info", "DOCUSE|info") in buttons
-    assert ("📎 Attach only", "DOCUSE|attach") in buttons
-    assert ("📎 Read + attach", "DOCUSE|both") in buttons
+    assert ('📝 Use as case', "DOCUSE|info") in buttons
+    assert ('📎 Attach only', "DOCUSE|attach") in buttons
+    assert ('📎 Read + attach', "DOCUSE|both") in buttons
     assert "clinical-notes.pdf" not in _all_visible_text(sim)
     
     # Clean up the cached file
@@ -110,12 +137,14 @@ async def test_photo_case_stores_pending_image_and_asks_intent():
     assert context.user_data["_pending_doc"]["source_message_id"] == update.message.message_id
     assert context.user_data["_pending_doc"]["source_chat_type"] == "private"
     assert os.path.exists(context.user_data["_pending_doc"]["path"])
-    extract_mock.assert_not_called()
+    # The image is now read on arrival so the bot can tell whether there is
+    # any text to offer. Text was found here, so the choice is real and shown.
+    extract_mock.assert_called_once()
     buttons = sim.get_last_buttons()
-    assert ("📝 Use for drafting", "DOCUSE|info") in buttons
-    assert ("📎 Attach only", "DOCUSE|attach") in buttons
-    assert ("📎 Use + attach", "DOCUSE|both") in buttons
-    assert ("❌ Remove image", "DOCUSE|ignore") in buttons
+    assert ('📝 Read text', "DOCUSE|info") in buttons
+    assert ('📎 Attach only', "DOCUSE|attach") in buttons
+    assert ('📎 Read + attach', "DOCUSE|both") in buttons
+    assert ('❌ Remove', "DOCUSE|ignore") in buttons
 
     path = context.user_data["_pending_doc"]["path"]
     if os.path.exists(path):
@@ -152,14 +181,15 @@ async def test_video_case_stores_pending_video_and_asks_attach_intent():
          patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))):
         result = await handle_case_input(update, context)
 
-    assert result == AWAIT_DOC_INTENT
+    # A video has no text, so there is nothing to decide: it attaches and the
+    # bot asks for the one thing it actually needs, the doctor's account.
+    assert result == AWAIT_CASE_INPUT
     assert context.user_data["_pending_doc"]["kind"] == "video"
     assert context.user_data["_pending_doc"]["name"] == "portfolio-video.mp4"
     assert context.user_data["_pending_doc_context"] == update.message.caption
     assert os.path.exists(context.user_data["_pending_doc"]["path"])
-    buttons = sim.get_last_buttons()
-    assert ("📎 Attach video", "DOCUSE|attach") in buttons
-    assert ("❌ Remove video", "DOCUSE|ignore") in buttons
+    assert sim.get_last_buttons() == []
+    assert any("attached to this case" in t for _, t, _ in sim.messages_sent if t)
 
     path = context.user_data["_pending_doc"]["path"]
     if os.path.exists(path):
@@ -199,16 +229,14 @@ async def test_video_sent_as_document_uses_video_intent_not_voice_transcription(
          patch('bot.extract_from_document', new=AsyncMock()) as document_extract:
         result = await handle_case_input(update, context)
 
-    assert result == AWAIT_DOC_INTENT
+    assert result == AWAIT_CASE_INPUT
     transcribe_mock.assert_not_called()
     document_extract.assert_not_called()
     pending_doc = context.user_data["_pending_doc"]
     assert pending_doc["kind"] == "video"
     assert pending_doc["name"] == "portfolio-video.mp4"
     assert context.user_data["_pending_doc_context"] == update.message.caption
-    buttons = sim.get_last_buttons()
-    assert ("📎 Attach video", "DOCUSE|attach") in buttons
-    assert ("❌ Remove video", "DOCUSE|ignore") in buttons
+    assert sim.get_last_buttons() == []
     assert "Couldn't transcribe voice note" not in _all_visible_text(sim)
     assert "PXL_20260705_130629103.TS.mp4" not in _all_visible_text(sim)
 
@@ -330,10 +358,11 @@ async def test_document_attach_only_does_not_extract_and_waits_for_case_details(
     assert context.user_data["attachment_name"] == "evidence.pdf"
     assert "case_text" not in context.user_data
     assert sim.get_last_text().startswith("📎 Document attached.")
-    assert "Add anonymised case details before I draft this." in sim.get_last_text()
+    assert "Add anonymised case details" in sim.get_last_text()
+    assert "before choosing a form." in sim.get_last_text()
     assert sim.get_last_buttons() == [
-        ("✅ Draft now", "GATHER|done"),
-        ("❌ Cancel", "ACTION|cancel"),
+        ("📋 Choose form", "GATHER|done"),
+        ("❌ Discard case", "ACTION|cancel"),
     ]
     assert context.user_data["gathering_msg_id"] == update.callback_query.message.message_id
     assert "evidence.pdf" not in _all_visible_text(sim)
@@ -368,8 +397,8 @@ async def test_image_attach_only_does_not_extract_and_waits_for_case_details():
     assert sim.get_last_text().startswith("📎 Image attached.")
     assert "send your own interpretation/context" in sim.get_last_text()
     assert sim.get_last_buttons() == [
-        ("✅ Draft now", "GATHER|done"),
-        ("❌ Cancel", "ACTION|cancel"),
+        ("📋 Choose form", "GATHER|done"),
+        ("❌ Discard case", "ACTION|cancel"),
     ]
     assert context.user_data["gathering_msg_id"] == update.callback_query.message.message_id
     assert "portfolio-image.jpg" not in _all_visible_text(sim)
@@ -404,7 +433,7 @@ async def test_image_attach_only_prompt_rejoins_gathering_loop_on_next_text(monk
         kind=GatheringTurnKind.CONTINUE_GATHERING,
         intent=ConversationalIntent.NEW_CASE,
         add_to_case=True,
-        reply=ChannelReply(body="📥 Captured. Add anything else before I draft this?"),
+        reply=ChannelReply(body=render_message("gathering_captured")),
     )
     with patch("bot.decide_gathering_turn", new=AsyncMock(return_value=decision)):
         result = await handle_gathering_input(text_update, context)
@@ -415,10 +444,10 @@ async def test_image_attach_only_prompt_rejoins_gathering_loop_on_next_text(monk
     assert context.bot.edit_message_text.await_args.kwargs["reply_markup"] is None
     assert context.user_data["gathering_msg_id"] != attached_prompt_id
     assert context.user_data["attachment_path"] == temp_path
-    assert sim.get_last_text() == "📥 Captured. Add anything else before I draft this?"
+    assert sim.get_last_text() == render_message("gathering_captured")
     assert sim.get_last_buttons() == [
-        ("✅ Draft now", "GATHER|done"),
-        ("❌ Cancel", "ACTION|cancel"),
+        ("📋 Choose form", "GATHER|done"),
+        ("❌ Discard case", "ACTION|cancel"),
     ]
 
     if os.path.exists(temp_path):
@@ -487,8 +516,8 @@ async def test_video_attach_only_waits_for_user_context_without_extracting():
     assert sim.get_last_text().startswith("📎 Video attached.")
     assert "won't interpret clinical videos" in sim.get_last_text()
     assert sim.get_last_buttons() == [
-        ("✅ Draft now", "GATHER|done"),
-        ("❌ Cancel", "ACTION|cancel"),
+        ("📋 Choose form", "GATHER|done"),
+        ("❌ Discard case", "ACTION|cancel"),
     ]
     assert context.user_data["gathering_msg_id"] == update.callback_query.message.message_id
     assert "portfolio-video.mp4" not in _all_visible_text(sim)
@@ -498,7 +527,11 @@ async def test_video_attach_only_waits_for_user_context_without_extracting():
 
 
 @pytest.mark.asyncio
-async def test_video_attach_blocks_symptom_fragments_before_drafting():
+async def test_video_attach_no_longer_blocks_symptom_fragments_from_drafting():
+    """A video attachment must not gate drafting on the doctor re-describing
+    it in text — the old video-context refusal is gone. Real symptom text
+    sent afterwards keeps the attachment and reaches form recommendation
+    instead of being refused."""
     sim = BotSimulator()
     context = sim._make_context()
     attach_update = sim._make_callback_update("DOCUSE|attach")
@@ -520,22 +553,32 @@ async def test_video_attach_blocks_symptom_fragments_before_drafting():
         "shortness of breath, fever, fall. Turn that into a case"
     )
 
+    from extractor import FORM_UUIDS
+    from models import FormTypeRecommendation
+
+    recommendations = [
+        FormTypeRecommendation(
+            form_type="CBD",
+            rationale="Polytrauma case with multiple symptoms.",
+            uuid=FORM_UUIDS.get("CBD"),
+        )
+    ]
     with patch('bot.has_credentials', return_value=True), \
          patch('bot.consent.has_current_consent', new=AsyncMock(return_value=True)), \
          patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
          patch('bot.classify_intent', new=AsyncMock(return_value="case")), \
-         patch('bot.recommend_form_types', new=AsyncMock()) as recommend_mock:
+         patch('bot.recommend_form_types', new=AsyncMock(return_value=recommendations)) as recommend_mock, \
+         patch('bot.get_training_level', return_value='ST5'), \
+         patch('bot.get_curriculum', return_value='2025'):
         result = await handle_case_input(text_update, context)
 
-    assert result == AWAIT_CASE_INPUT
-    recommend_mock.assert_not_awaited()
+    assert result == AWAIT_FORM_CHOICE
+    recommend_mock.assert_awaited_once()
     assert context.user_data["attachment_path"] == temp_path
     assert context.user_data["attachment_name"] == "portfolio-video.mp4"
     assert context.user_data["attachment_kind"] == "video"
     text = _all_visible_text(sim)
-    assert "what the video shows" in text
-    assert "what you did or decided" in text
-    assert "Drafted" not in text
+    assert "what the video shows" not in text
 
     if os.path.exists(temp_path):
         os.unlink(temp_path)
@@ -643,6 +686,7 @@ async def test_attach_only_attachment_survives_next_text_case():
          patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
          patch('bot.get_training_level', return_value='ST5'), \
          patch('bot.get_curriculum', return_value='2025'), \
+         patch('bot.classify_intent', new=AsyncMock(return_value='case')), \
          patch('bot.recommend_form_types', new=AsyncMock(return_value=[])):
         result = await handle_case_input(update, context)
 
@@ -997,17 +1041,17 @@ async def test_filing_call_receives_attachment_path():
     context.user_data["chosen_form"] = "CBD"
     
     # Mock draft loading
-    draft = FormDraft(form_type="CBD", fields={
+    draft = FormDraft(form_type="CBD", fields=_fields_with_schema_essentials("CBD", {
         "date_of_encounter": "2026-05-27",
         "reflection": "test reflection"
-    })
-    
+    }))
+
     with patch('bot.get_credentials', return_value=("testuser", "testpass")), \
          patch('bot._load_draft', return_value=draft), \
          patch('bot.route_filing', new=AsyncMock(return_value={"status": "success", "filled": ["reflection", "attachment"], "skipped": []})) as route_mock, \
          patch('bot.record_case_filed', new=AsyncMock()), \
          patch('bot.check_can_file', new=AsyncMock(return_value=(True, 1, 10, 'free'))):
-         
+
         await handle_approval_approve(update, context)
 
     # Verify route_filing was called with a path renamed to the original
@@ -1049,10 +1093,10 @@ async def test_filing_call_accepts_video_attachment_path():
     context.user_data["attachment_kind"] = "video"
     context.user_data["chosen_form"] = "CBD"
 
-    draft = FormDraft(form_type="CBD", fields={
+    draft = FormDraft(form_type="CBD", fields=_fields_with_schema_essentials("CBD", {
         "date_of_encounter": "2026-05-27",
         "reflection": "I learned to document my own interpretation before attaching clinical videos.",
-    })
+    }))
 
     with patch('bot.get_credentials', return_value=("testuser", "testpass")), \
          patch('bot._load_draft', return_value=draft), \
@@ -1064,7 +1108,12 @@ async def test_filing_call_accepts_video_attachment_path():
     route_mock.assert_called_once()
     filed_path = route_mock.call_args[1].get("attachment_path")
     assert filed_path is not None
-    assert os.path.basename(filed_path) == "portfolio-video.mp4"
+    # Bot-named files are renamed to the suggested Kaizen convention on the
+    # way to the filer; a name the doctor chose is left alone (covered above).
+    basename = os.path.basename(filed_path)
+    assert basename.endswith(".mp4")
+    assert basename.count("-") >= 3, f"expected Category-Grade-Description-Date, got {basename}"
+    assert not basename.startswith("portfolio-video")
     assert "Attachment skipped" not in _all_visible_text(sim)
 
     if os.path.exists(temp_path):
@@ -1075,7 +1124,15 @@ async def test_filing_call_accepts_video_attachment_path():
 
 
 @pytest.mark.asyncio
-async def test_video_upload_reaches_filer_only_after_attach_yes():
+async def test_video_reaches_filer_without_a_second_consent_prompt():
+    """Consent for a video is taken at upload, not again after the draft.
+
+    This previously asserted a save-time prompt for every video. In use that
+    landed as the bot asking the same question twice — once when the video was
+    received ("would you like to attach it?") and again after the draft was
+    approved. The upload prompt now carries the retention warning, so the
+    save-time gate fires only on identifiers discovered after upload.
+    """
     import bot
 
     sim = BotSimulator()
@@ -1091,12 +1148,18 @@ async def test_video_upload_reaches_filer_only_after_attach_yes():
             "attachment_name": "portfolio-video.mp4",
             "attachment_kind": "video",
             "chosen_form": "US_CASE",
-            "case_text": "I performed a focused ultrasound and documented my own findings.",
+                "case_text": (
+                    "I performed a focused ultrasound and documented my own findings. "
+                    "I learned to record the findings contemporaneously and will do that next time."
+                ),
         }
     )
     draft = FormDraft(
         form_type="US_CASE",
-        fields={"reflection": "I will document my ultrasound findings contemporaneously."},
+        fields=_fields_with_schema_essentials(
+            "US_CASE",
+            {"reflection": "I will document my ultrasound findings contemporaneously."},
+        ),
     )
 
     with patch("bot.get_credentials", return_value=("testuser", "testpass")), \
@@ -1107,15 +1170,12 @@ async def test_video_upload_reaches_filer_only_after_attach_yes():
          })) as route_mock, \
          patch("bot.record_case_filed", new=AsyncMock()), \
          patch("bot.check_can_file", new=AsyncMock(return_value=(True, 1, 10, "free"))):
-        first_result = await handle_approval_approve(approve_update, context)
-        route_mock.assert_not_awaited()
-        assert first_result == AWAIT_APPROVAL
-        assert ("📎 Attach it anyway", "ATTACH|yes") in sim.get_last_buttons()
-
-        consent_update = sim._make_callback_update("ATTACH|yes")
-        await bot.handle_attachment_confirm(consent_update, context)
+        await handle_approval_approve(approve_update, context)
 
     route_mock.assert_awaited_once()
+    assert ("📎 Attach it anyway", "ATTACH|yes") not in sim.get_last_buttons(), (
+        "a video the doctor already chose to attach must not be re-queried"
+    )
 
     filed_path = route_mock.call_args[1].get("attachment_path")
     if os.path.exists(temp_path):
@@ -1202,6 +1262,7 @@ async def test_attachment_path_not_added_for_other_types(input_type):
          patch('bot.transcribe_voice', new=AsyncMock(return_value="clinical text")), \
          patch('bot.get_training_level', return_value='ST5'), \
          patch('bot.get_curriculum', return_value='2025'), \
+         patch('bot.classify_intent', new=AsyncMock(return_value='case')), \
          patch('bot.recommend_form_types', new=AsyncMock(return_value=[])):
         
         await handle_case_input(update, context)
@@ -1226,11 +1287,11 @@ async def test_filing_handles_missing_attachment_gracefully():
     context.user_data["chosen_form"] = "CBD"
     
     # Mock draft loading
-    draft = FormDraft(form_type="CBD", fields={
+    draft = FormDraft(form_type="CBD", fields=_fields_with_schema_essentials("CBD", {
         "date_of_encounter": "2026-05-27",
         "reflection": "test reflection"
-    })
-    
+    }))
+
     with patch('bot.get_credentials', return_value=("testuser", "testpass")), \
          patch('bot._load_draft', return_value=draft), \
          patch('bot.route_filing', new=AsyncMock(return_value={"status": "success", "filled": ["reflection"], "skipped": []})) as route_mock, \
@@ -1247,3 +1308,482 @@ async def test_filing_handles_missing_attachment_gracefully():
     final_text = _all_visible_text(sim)
     assert "📎 Attachment not added\nFile was no longer available. Draft saved without the attachment." in final_text
     assert "Attachment skipped" not in final_text
+
+
+# ── Multiple attachments on one case ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_every_attached_file_reaches_the_filer():
+    """Reported: sending several files attached only the last one, silently.
+
+    Each upload overwrote `attachment_path`, and because every upload had been
+    acknowledged in chat there was nothing to tell the doctor the rest had been
+    dropped.
+    """
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_callback_update("APPROVE|draft")
+
+    paths = []
+    for suffix in (".mp4", ".png", ".pdf"):
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+            f.write(b"bytes")
+            paths.append(f.name)
+
+    for path, kind in zip(paths, ("video", "image", "document")):
+        bot._add_case_attachment(context, path, os.path.basename(path), kind)
+    context.user_data.update({
+        "chosen_form": "US_CASE",
+        "case_text": (
+            "I performed the scan, escalated to cardiology, and documented my findings. "
+            "I learned to document sooner and will do that next time."
+        ),
+        "attachment_upload_confirmed": True,
+    })
+
+    draft = FormDraft(
+        form_type="US_CASE",
+        fields=_fields_with_schema_essentials("US_CASE", {"reflection": "I will document sooner."}),
+    )
+
+    with patch("bot.get_credentials", return_value=("u", "p")), \
+         patch("bot._load_draft", return_value=draft), \
+         patch("bot._needs_filing_curriculum_choice", return_value=False), \
+         patch("bot.route_filing", new=AsyncMock(return_value={
+             "status": "success", "filled": ["reflection", "attachment"], "skipped": []
+         })) as route_mock, \
+         patch("bot.record_case_filed", new=AsyncMock()), \
+         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 1, 10, "free"))):
+        await handle_approval_approve(update, context)
+
+    route_mock.assert_awaited_once()
+    filed = route_mock.call_args[1].get("attachment_path")
+    assert isinstance(filed, list), f"all three files must be filed, got {filed!r}"
+    assert len(filed) == 3
+
+    for path in paths:
+        if os.path.exists(path):
+            os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_a_single_attachment_still_files_as_a_plain_string():
+    """Keeps the existing contract for the common one-file case."""
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    update = sim._make_callback_update("APPROVE|draft")
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+        f.write(b"bytes")
+        path = f.name
+    bot._add_case_attachment(context, path, "notes.pdf", "document")
+    context.user_data.update({
+        "chosen_form": "CBD",
+        "case_text": (
+            "I led the assessment and escalated appropriately. "
+            "I learned to document the escalation decision more clearly next time."
+        ),
+        "attachment_upload_confirmed": True,
+    })
+
+    draft = FormDraft(
+        form_type="CBD",
+        fields=_fields_with_schema_essentials(
+            "CBD",
+            {"reflection": "I learned to document the escalation decision more clearly."},
+        ),
+    )
+
+    with patch("bot.get_credentials", return_value=("u", "p")), \
+         patch("bot._load_draft", return_value=draft), \
+         patch("bot._needs_filing_curriculum_choice", return_value=False), \
+         patch("bot.route_filing", new=AsyncMock(return_value={
+             "status": "success", "filled": ["reflection", "attachment"], "skipped": []
+         })) as route_mock, \
+         patch("bot.record_case_filed", new=AsyncMock()), \
+         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 1, 10, "free"))):
+        await handle_approval_approve(update, context)
+
+    filed = route_mock.call_args[1].get("attachment_path")
+    assert isinstance(filed, str)
+
+    if os.path.exists(path):
+        os.unlink(path)
+
+
+def test_queueing_the_same_file_twice_does_not_duplicate_it():
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+
+    assert bot._add_case_attachment(context, "/tmp/a.png", "a.png", "image") is True
+    assert bot._add_case_attachment(context, "/tmp/a.png", "a.png", "image") is False
+    assert len(bot._case_attachments(context)) == 1
+
+
+def test_a_pre_list_draft_still_reports_its_single_attachment():
+    """Drafts restored from persistence carry only the old singular keys."""
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data.update({
+        "attachment_path": "/tmp/legacy.pdf",
+        "attachment_name": "legacy.pdf",
+        "attachment_kind": "document",
+    })
+
+    items = bot._case_attachments(context)
+    assert [i["path"] for i in items] == ["/tmp/legacy.pdf"]
+
+
+# ── Albums (several files sent at once) ──────────────────────────────────────
+# Telegram delivers an album as separate updates sharing a media_group_id.
+# With one `_pending_doc` slot and no media handler in AWAIT_DOC_INTENT, the
+# second and third files matched nothing and were dropped without a word.
+
+
+def test_album_files_all_buffer_instead_of_overwriting():
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+
+    bot._queue_pending_media(context, {"path": "/tmp/a.mp4", "name": "a.mp4", "kind": "video"})
+    bot._queue_pending_media(context, {"path": "/tmp/b.mp4", "name": "b.mp4", "kind": "video"})
+    bot._queue_pending_media(context, {"path": "/tmp/c.jpg", "name": "c.jpg", "kind": "image"})
+
+    items = bot._pending_media_items(context)
+    assert [i["path"] for i in items] == ["/tmp/a.mp4", "/tmp/b.mp4", "/tmp/c.jpg"]
+    # The single-file body still reads the first item.
+    assert context.user_data["_pending_doc"]["path"] == "/tmp/a.mp4"
+
+
+def test_prompt_names_everything_that_arrived():
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    for path, kind in (("/tmp/a.mp4", "video"), ("/tmp/b.mp4", "video"), ("/tmp/c.jpg", "image")):
+        bot._queue_pending_media(context, {"path": path, "name": path, "kind": kind})
+
+    assert bot._describe_pending_media(context) == "2 videos and 1 image"
+    text = bot._pending_media_prompt_text(context, single="ignored")
+    assert "2 videos and 1 image" in text
+    assert "applies to all of them" in text
+
+
+def test_single_file_prompt_is_unchanged():
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    bot._queue_pending_media(context, {"path": "/tmp/a.mp4", "name": "a.mp4", "kind": "video"})
+
+    text = bot._pending_media_prompt_text(context, single="🎞️ Video received — attach it?")
+    assert text.startswith("🎞️ Video received — attach it?")
+
+
+def test_video_only_upload_never_offers_to_read_it():
+    """The bot refuses to interpret video, so it must not offer to."""
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    bot._queue_pending_media(context, {"path": "/tmp/a.mp4", "name": "a.mp4", "kind": "video"})
+    bot._queue_pending_media(context, {"path": "/tmp/b.mp4", "name": "b.mp4", "kind": "video"})
+
+    data = [b.callback_data for row in bot._build_pending_media_keyboard(context).inline_keyboard for b in row]
+    assert "DOCUSE|info" not in data
+    assert "DOCUSE|attach" in data
+
+
+def test_mixed_upload_offers_the_read_options():
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    bot._queue_pending_media(context, {"path": "/tmp/a.mp4", "name": "a.mp4", "kind": "video"})
+    bot._queue_pending_media(
+        context,
+        {"path": "/tmp/c.jpg", "name": "c.jpg", "kind": "image", "text": "Discharge summary: ..."},
+    )
+
+    data = [b.callback_data for row in bot._build_pending_media_keyboard(context).inline_keyboard for b in row]
+    assert "DOCUSE|info" in data
+
+
+def test_media_handlers_are_registered_in_the_intent_state():
+    """The actual cause of the drop: nothing in AWAIT_DOC_INTENT matched a
+    photo, video or document, so album siblings hit no handler at all."""
+    import inspect
+
+    import bot
+
+    source = inspect.getsource(bot.build_application)
+    intent_block = source.split("AWAIT_DOC_INTENT: [", 1)[1].split("]", 1)[0]
+    for expected in ("filters.PHOTO", "filters.VIDEO", "filters.Document.ALL"):
+        assert expected in intent_block, f"{expected} missing from AWAIT_DOC_INTENT"
+
+
+def test_later_files_get_distinct_names():
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+
+    first = bot._numbered_media_name(context, "portfolio-image", ".jpg")
+    bot._queue_pending_media(context, {"path": "/tmp/1.jpg", "name": first, "kind": "image"})
+    second = bot._numbered_media_name(context, "portfolio-image", ".jpg")
+
+    assert first == "portfolio-image.jpg"
+    assert second == "portfolio-image-2.jpg"
+
+
+def test_image_buttons_do_not_promise_interpretation():
+    """"Use for drafting" implied the bot would read an ECG or ultrasound.
+
+    It refuses to — it extracts text and asks the doctor for the clinical
+    account. The label has to match that, or the choice looks bigger than it is.
+    """
+    import bot
+
+    labels = [b.text for row in bot._build_image_intent_keyboard().inline_keyboard for b in row]
+    assert any("Read text" in label for label in labels)
+    assert not any("drafting" in label.lower() for label in labels)
+
+
+@pytest.mark.asyncio
+async def test_album_shows_one_prompt_that_updates_not_three():
+    """Three files produced three stacked prompts, each with live buttons —
+    "Video received", then "2 videos received", then "2 videos and 1 image".
+    Buffering the files was right; leaving three questions on screen was not.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.bot = MagicMock()
+    context.bot.edit_message_text = AsyncMock()
+
+    def _ack(message_id):
+        ack = MagicMock()
+        ack.chat_id = 99
+        ack.message_id = message_id
+        ack.edit_text = AsyncMock()
+        ack.delete = AsyncMock()
+        return ack
+
+    first, second, third = _ack(1), _ack(2), _ack(3)
+
+    bot._queue_pending_media(context, {"path": "/tmp/a.mp4", "name": "a.mp4", "kind": "video"})
+    await bot._show_pending_media_prompt(context, first, single="🎞️ Video received")
+
+    bot._queue_pending_media(context, {"path": "/tmp/b.mp4", "name": "b.mp4", "kind": "video"})
+    await bot._show_pending_media_prompt(context, second, single="🎞️ Video received")
+
+    bot._queue_pending_media(
+        context,
+        {"path": "/tmp/c.jpg", "name": "c.jpg", "kind": "image", "text": "Discharge summary"},
+    )
+    await bot._show_pending_media_prompt(context, third, single="📷 Image received")
+
+    # Only the first ack ever becomes a prompt.
+    first.edit_text.assert_awaited_once()
+    second.edit_text.assert_not_awaited()
+    third.edit_text.assert_not_awaited()
+
+    # The later acks are removed rather than left as stray messages.
+    second.delete.assert_awaited_once()
+    third.delete.assert_awaited_once()
+
+    # And the one surviving prompt was rewritten to describe everything.
+    assert context.bot.edit_message_text.await_count == 2
+    final = context.bot.edit_message_text.await_args.kwargs
+    assert final["message_id"] == 1
+    assert "2 videos and 1 image" in final["text"]
+
+
+@pytest.mark.asyncio
+async def test_prompt_reanchors_if_the_original_was_deleted():
+    """A deleted prompt must not swallow the file silently."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.bot = MagicMock()
+    context.bot.edit_message_text = AsyncMock(side_effect=Exception("message to edit not found"))
+    context.user_data["_pending_media_prompt"] = {"chat_id": 99, "message_id": 1}
+
+    ack = MagicMock()
+    ack.chat_id = 99
+    ack.message_id = 7
+    ack.edit_text = AsyncMock()
+    ack.delete = AsyncMock()
+
+    bot._queue_pending_media(context, {"path": "/tmp/a.mp4", "name": "a.mp4", "kind": "video"})
+    await bot._show_pending_media_prompt(context, ack, single="🎞️ Video received")
+
+    ack.edit_text.assert_awaited_once()
+    assert context.user_data["_pending_media_prompt"]["message_id"] == 7
+
+
+# ── Kaizen document naming (London EM / RCEM suggested convention) ────────────
+
+
+def test_bot_named_files_follow_the_suggested_convention():
+    """Category-Grade-Description-Date, per the RCEM/London guidance."""
+    import bot
+
+    name = bot._kaizen_document_name("portfolio-image.jpg", "US_CASE", "HIGHER")
+    assert name.startswith("POCUS-Higher-")
+    assert name.endswith(".jpg")
+
+
+def test_a_file_the_doctor_named_is_never_renamed():
+    """The convention is explicitly advisory. Overwriting a name the doctor
+    chose would be the tool overruling them on optional guidance."""
+    import bot
+
+    for original in ("ALS certificate.pdf", "Moeed KH A Kind Life.pdf", "scan.png"):
+        assert bot._kaizen_document_name(original, "US_CASE", "HIGHER") == original
+
+
+def test_several_files_on_one_case_keep_distinct_names():
+    """Identical names are indistinguishable in Kaizen and would defeat the
+    filer's per-filename upload confirmation."""
+    import bot
+
+    first = bot._kaizen_document_name("portfolio-image.jpg", "US_CASE", "HIGHER")
+    second = bot._kaizen_document_name("portfolio-image-2.jpg", "US_CASE", "HIGHER")
+    third = bot._kaizen_document_name("portfolio-video-3.mp4", "US_CASE", "HIGHER")
+    assert len({first, second, third}) == 3
+
+
+def test_unknown_form_falls_back_to_other_not_a_wrong_category():
+    import bot
+
+    name = bot._kaizen_document_name("portfolio-image.jpg", "REFLECT_LOG", None)
+    assert name.startswith("Other-")
+
+
+def test_draft_preview_does_not_repeat_one_marker_on_every_line():
+    """An ultrasound reflection rendered eight identical 📌 pins, because every
+    unmapped field fell back to the same default. A marker on everything marks
+    nothing."""
+    import inspect
+
+    import bot
+
+    source = inspect.getsource(bot._format_generic_draft)
+    assert 'FIELD_EMOJIS.get(key, "📌")' not in source
+
+
+# ── Files sent mid-conversation ──────────────────────────────────────────────
+# Only handle_case_input could attach anything. A clip sent after the form was
+# chosen, or once the draft was on screen, went to a handler that read it for
+# text and deleted it — so remembering a file late meant losing it silently.
+
+
+@pytest.mark.asyncio
+async def test_photo_sent_with_a_draft_on_screen_is_attached():
+    import bot
+    from models import CBDData
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data.update({
+        "case_text": "58M chest pain, I led the assessment and escalated.",
+        "case_input_source": "text",
+    })
+    bot._store_draft(context, CBDData(patient_presentation="Chest pain"))
+
+    update = sim._make_text_update('')
+    photo = MagicMock()
+    file_obj = MagicMock()
+    file_obj.download_to_drive = AsyncMock(
+        side_effect=lambda path: open(path, "wb").write(b"jpeg bytes")
+    )
+    photo.get_file = AsyncMock(return_value=file_obj)
+    update.message.photo = [photo]
+    update.message.text = None
+    update.message.caption = "the scan I mentioned"
+
+    with patch("bot.extract_from_image", new=AsyncMock(return_value="Findings")), \
+         patch("bot.extract_cbd_data", new=AsyncMock(return_value=CBDData(patient_presentation="Chest pain"))), \
+         patch("bot.get_voice_profile", return_value=None):
+        await bot.handle_approval_media_feedback(update, context)
+
+    queued = bot._case_attachments(context)
+    assert queued, "a photo sent with a draft on screen must still be attached"
+    assert queued[0]["kind"] == "image"
+
+    for item in queued:
+        if os.path.exists(item["path"]):
+            os.unlink(item["path"])
+
+
+@pytest.mark.asyncio
+async def test_document_sent_during_template_review_is_attached():
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data.update({"chosen_form": "CBD", "case_text": "Original case."})
+
+    update = sim._make_text_update('')
+    doc = MagicMock()
+    doc.file_name = "ecg-report.pdf"
+    file_obj = MagicMock()
+    file_obj.download_to_drive = AsyncMock(
+        side_effect=lambda path: open(path, "wb").write(b"%PDF-1.4")
+    )
+    doc.get_file = AsyncMock(return_value=file_obj)
+    update.message.document = doc
+    update.message.text = None
+
+    with patch("bot.extract_from_document", new=AsyncMock(return_value="Report text")), \
+         patch("bot._accumulate_and_refresh", new=AsyncMock(return_value=0)):
+        await bot.handle_template_review_media(update, context)
+
+    queued = bot._case_attachments(context)
+    assert [i["name"] for i in queued] == ["ecg-report.pdf"]
+
+    for item in queued:
+        if os.path.exists(item["path"]):
+            os.unlink(item["path"])
+
+
+def test_the_mid_conversation_helper_refuses_unsupported_types():
+    """Kaizen rejects them, so queuing one would report a phantom attachment."""
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+
+    with tempfile.NamedTemporaryFile(suffix=".xyz", delete=False) as f:
+        f.write(b"bytes")
+        path = f.name
+
+    assert bot._cache_and_queue_attachment(context, path, "notes.xyz", "document") is False
+    assert bot._case_attachments(context) == []
+    os.unlink(path)
+
+
+def test_a_vanished_temp_file_is_not_queued():
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    assert bot._cache_and_queue_attachment(context, "/tmp/gone.jpg", "gone.jpg", "image") is False
+    assert bot._case_attachments(context) == []

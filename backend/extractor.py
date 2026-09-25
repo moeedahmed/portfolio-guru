@@ -20,6 +20,10 @@ from privacy_guard import (
     model_person_names,
 )
 from message_policy import FLEXIBLE_REPLY_STYLE_ENVELOPE, render_message
+from evidence_artifact import (
+    evidence_artifact_answer,
+    looks_like_artifact_filing_question,
+)
 from model_config import gemini_three_five_flash_model
 from privacy_guard import deidentify_clinical_text
 import ai_telemetry
@@ -147,17 +151,59 @@ PROVIDERS = [
 ]
 
 
+def _non_eu_providers(providers):
+    """Providers that would send clinical text outside the UK/EEA."""
+    return [p for p in providers if p["type"] != "gemini"]
+
+
+def assert_eu_routing() -> None:
+    """Raise at STARTUP if clinical extraction would route off-region.
+
+    _select_providers raises too, but per-request: a deploy where the BWS
+    secrets failed to load would leave the bot up and every case failing with a
+    generic error. Failing here instead crash-loops the service, which is what
+    deploy_mac.sh's post-deploy smoke watches for, so the deploy rolls back to
+    the last known-good commit on its own.
+    """
+    _select_providers()
+
+
 def _select_providers(tier: str = ""):
     from gemini_client import use_vertex
+
     if use_vertex():
         # EU-only routing: never send clinical text to DeepSeek (China). Use the
         # Gemini provider, which _get_client()/make_client() route through Vertex
         # AI in an EU region.
         return [p for p in PROVIDERS if p["type"] == "gemini"]
+
+    # Fail closed. This branch means PG_USE_VERTEX/GCP_PROJECT_ID are not set,
+    # so a restart or a bad deploy would silently start routing special-category
+    # health data to a provider with no UK adequacy decision and no DPA. Refuse
+    # rather than fall back — losing extraction is an outage, and an outage is
+    # recoverable in a way an Art. 9 transfer is not.
+    blocked = _non_eu_providers(PROVIDERS)
+    if blocked and not _allow_non_eu_extraction():
+        raise RuntimeError(
+            "EU-only extraction guard: Vertex routing is off "
+            "(set PG_USE_VERTEX=1 and GCP_PROJECT_ID) and the configured "
+            f"providers include non-EU endpoints ({', '.join(p['name'] for p in blocked)}). "
+            "Refusing to send clinical text off-region. Set "
+            "PG_ALLOW_NON_EU_EXTRACTION=1 only for non-clinical local development."
+        )
     return PROVIDERS
 
 
-async def _generate(prompt, retries: int = 1, tier: str = "", purpose: str = "unspecified"):
+def _allow_non_eu_extraction() -> bool:
+    """Explicit, deliberate opt-out for local development and model bake-offs
+    run against non-clinical fixtures. Never set in production."""
+    return os.environ.get("PG_ALLOW_NON_EU_EXTRACTION", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
+async def _generate(prompt, retries: int = 1, tier: str = "", purpose: str = "unspecified",
+                    max_attempts: int | None = None):
     """Call the configured extractor LLM.
     Defaults to DeepSeek V4 Flash.
     Returns the response as a plain string.
@@ -169,6 +215,7 @@ async def _generate(prompt, retries: int = 1, tier: str = "", purpose: str = "un
     import time as _time
     loop = asyncio.get_event_loop()
     last_error = None
+    attempts = 0
     t0 = _time.monotonic()
 
     providers = _select_providers(tier)
@@ -189,6 +236,9 @@ async def _generate(prompt, retries: int = 1, tier: str = "", purpose: str = "un
         outcome = "success" if provider_index == 0 else "fallback"
 
         for attempt in range(retries + 1):
+            if max_attempts is not None and attempts >= max_attempts:
+                raise last_error or RuntimeError("Generation attempt budget exhausted")
+            attempts += 1
             try:
                 if provider["type"] == "gemini":
                     client = _get_client()
@@ -725,6 +775,9 @@ def extract_explicit_form_type(text: str, *, require_intent: bool = True) -> str
     1. PRIMARY phrases (e.g. "procedure log", "case-based discussion") are
        full-form names. If any appears anywhere in the text, that's a strong
        enough signal — return that form, no intent phrase required.
+    1b. PRIMARY word codes (e.g. "esle") are acronyms that name exactly one
+       form and mean nothing else in English. They match on a word boundary
+       only, and like the primary phrases they need no intent phrase.
     2. SECONDARY keys (e.g. "stat", "cbd") are short codes that only count
        when (a) an intent phrase is present and (b) the code appears as a
        whole word (word boundary), not as part of "statin"/"status"/etc.
@@ -755,11 +808,27 @@ def extract_explicit_form_type(text: str, *, require_intent: bool = True) -> str
         "US_CASE":      [
             "ultrasound case", "ultrasound log", "ultrasound logs", "us case", "pocus case"
         ],
-        "ESLE_ASSESS":  ["significant learning event"],
+        "ESLE_ASSESS":  [
+            "significant learning event",
+            # An ESLE *is* an (extended) supervised learning event, so the
+            # spelled-out name must name the form as reliably as the acronym.
+            "extended supervised learning event",
+            "emergency medicine supervised learning event",
+            "supervised learning event",
+        ],
         "COMPLAINT":    ["complaint reflection", "complaint form"],
         "SERIOUS_INC":  ["serious incident", "si reflection", "never event"],
         "EDU_ACT":      ["educational activity", "teaching attended"],
         "FORMAL_COURSE":["formal course", "atls course", "apls course", "als course", "epals"],
+    }
+
+    # Acronyms that name exactly one form and have no ordinary-English meaning,
+    # so they are as strong a signal as a full form name. Matched on a word
+    # boundary (never as a substring) and, like the primary phrases, without
+    # needing an intent phrase — "I did a 45-minute ESLE" names the form even
+    # though it contains no "do a"/"file a" wording.
+    primary_word_codes = {
+        "ESLE_ASSESS": ["esle", "esles"],
     }
 
     primary_hits = []
@@ -768,6 +837,11 @@ def extract_explicit_form_type(text: str, *, require_intent: bool = True) -> str
             idx = text_lower.find(kw)
             if idx != -1:
                 primary_hits.append((idx, len(kw), form_type))
+    for form_type, codes in primary_word_codes.items():
+        for code in codes:
+            match = re.search(rf'\b{re.escape(code)}\b', text_lower)
+            if match:
+                primary_hits.append((match.start(), len(code), form_type))
     if primary_hits:
         primary_hits.sort(key=lambda h: (h[0], -h[1]))
         return primary_hits[0][2]
@@ -1062,12 +1136,22 @@ def _looks_like_form_support_question(text_lower: str) -> bool:
     return questionish and any(_contains_standalone_term(text_lower, signal) for signal in support_signals)
 
 
-async def answer_question(text: str, case_context: str = "") -> str:
+async def answer_question(text: str, case_context: str = "", document_name: str = "") -> str:
     """Generate a helpful answer about the bot's capabilities.
 
     When case_context is provided and the question relates to form types,
     the answer is grounded in that specific case rather than being generic.
     """
+    # A question about a certificate or award ("record it as a reflection or
+    # just upload the file?") is answered deterministically. Sending it to the
+    # model produced invented Kaizen/ARCP rules and an unverified SLO mapping.
+    if looks_like_artifact_filing_question(
+        text,
+        case_context=case_context,
+        document_name=document_name,
+    ):
+        return evidence_artifact_answer()
+
     # If the user has an active case and is asking about forms/suggestions,
     # give a case-specific answer instead of a generic list
     if case_context:
@@ -1091,6 +1175,12 @@ Analyse the case and suggest the 2-3 best RCEM WPBA form types for THIS specific
 Available forms: CBD, DOPS, Mini-CEX, ACAT, LAT, ACAF, STAT, MSF, QIAT, JCF, Teaching, Procedural Log, SDL, Ultrasound Case, ESLE, Complaint, Serious Incident, Educational Activity, Formal Course.
 
 Be concise. For each suggestion give the form name and a one-line reason why it fits this case.
+
+Hard limits:
+- Suggest only from the list above. Never invent a form, and never claim a form does or does not exist on Kaizen.
+- Never map anything to an SLO, key capability, or curriculum number.
+- Never state RCEM, ARCP, deanery, or Kaizen platform rules, and never predict how a panel will treat evidence.
+- Never tell the user to upload a loose file to Kaizen; this product saves drafts of the forms listed above.
 
 {FLEXIBLE_REPLY_STYLE_ENVELOPE}"""
             text = await _generate(prompt, purpose="grounded_answer")
@@ -1227,45 +1317,119 @@ Answer concisely. If the question is about a specific form type, confirm it's su
     return sanitize_internal_form_codes(text.strip())
 
 
-async def assess_case_sufficiency(case_description: str) -> dict:
-    """Check if a case has enough detail for a quality portfolio entry.
-    Returns {"sufficient": True/False, "questions": ["...", "..."]}."""
-    prompt = f"""You are a medical portfolio assistant. A doctor has described a clinical case for their e-portfolio entry.
-Assess whether the description contains enough detail to write a high-quality entry.
+ESSENTIAL_PRESENT = "present"
+ESSENTIAL_MISSING = "missing"
+ESSENTIAL_UNAVAILABLE = "unavailable"
+_ESSENTIAL_STATUSES = frozenset({ESSENTIAL_PRESENT, ESSENTIAL_MISSING, ESSENTIAL_UNAVAILABLE})
 
-A sufficient case should mention most of:
-- What the patient presented with
-- What the doctor did (assessment, investigations, management)
-- Clinical reasoning (why they made those decisions)
-- What they learned or would do differently
 
-Case description:
+async def assess_form_essentials(
+    case_description: str,
+    form_type: str,
+    essentials: list[dict],
+    *,
+    input_source: str = "text",
+) -> dict[str, str]:
+    """Judge which of a form's genuinely essential details the case already has.
+
+    This is the one sufficiency judgement in the product: it reads the
+    doctor's own words against the requirements the caller derived from the
+    Kaizen schema, and returns a status per requirement key. It never invents
+    a requirement of its own, and it never writes portfolio content — the
+    drafting call stays separate and happens only once the essentials are
+    settled.
+
+    Returns ``{key: "present"|"missing"|"unavailable"}`` covering **every**
+    requested key exactly once. Anything less — unparseable, partial,
+    duplicated, padded with keys that were not asked about, or carrying an
+    unknown status — returns ``{}``, meaning "no judgement". Callers must
+    never read ``{}`` as "nothing missing": there is no safe way to draft
+    from a requirement that was never judged.
+    """
+    requirements = [
+        item for item in (essentials or [])
+        if str((item or {}).get("key") or "").strip()
+    ]
+    if not requirements or not str(case_description or "").strip():
+        return {}
+
+    lines = []
+    for item in requirements:
+        label = str(item.get("label") or item["key"]).strip()
+        description = str(item.get("description") or "").strip()
+        lines.append(f'- "{item["key"]}": {label}' + (f" — {description}" if description else ""))
+    schema = FORM_SCHEMAS.get(schema_form_type(form_type), {})
+    form_name = schema.get("name") or form_type
+
+    prompt = f"""You are checking whether a doctor's own case notes already contain the detail a UK RCEM portfolio form genuinely requires. You are NOT writing the portfolio entry.
+
+Form: {form_name} ({form_type})
+
+Required detail:
+{chr(10).join(lines)}
+
+Doctor's case notes (source of truth, {input_source}):
+<<<
 {case_description}
+>>>
 
-If the case has enough detail, return: {{"sufficient": true, "questions": []}}
-If the case is too thin, return: {{"sufficient": false, "questions": ["specific question 1", "specific question 2"]}}
+For each required item return exactly one status:
+- "present": the notes state it, or state it clearly enough in the doctor's own words that no invention is needed.
+- "unavailable": the notes explicitly say it is unknown, not recorded, not remembered, or does not apply.
+- "missing": anything else.
 
-Rules:
-- Ask 2-3 specific questions about what's missing - not generic "tell me more"
-- Questions should target the specific gaps: missing reasoning, missing outcome, missing reflection, etc.
-- Return ONLY the JSON. No explanation."""
+Judgement rules:
+- Judge only what the notes actually say. Typical practice is not evidence.
+- Attribution matters. "FAST was done" or "a CT was arranged" does not say who did it. An item about what THIS doctor did is present only if the notes say what this doctor did.
+- Specificity matters. An unspecified "CT" does not establish a body region, technique, or result.
+- A reflection item is present only if the doctor states their own learning, interpretation, reaction, or intended change of practice. Text that you could write for them does not count.
+- Do not add requirements. Judge only the items listed above.
 
-    text = await _generate(prompt, purpose="case_sufficiency")
-    raw = text.strip()
+Return ONLY JSON: {{"items": [{{"key": "...", "status": "..."}}]}}"""
+
+    text = await _generate(prompt, purpose="form_essentials_sufficiency")
+    raw = (text or "").strip()
     if raw.startswith("```"):
-        raw = raw.split("```")[1]
+        parts = raw.split("```")
+        raw = parts[1] if len(parts) > 1 else raw
         if raw.startswith("json"):
             raw = raw[4:]
     raw = raw.strip()
     try:
         data = json.loads(raw)
     except (json.JSONDecodeError, ValueError):
-        return {"sufficient": True, "questions": []}
-    if "sufficient" not in data:
-        data["sufficient"] = True
-    if "questions" not in data or not isinstance(data["questions"], list):
-        data["questions"] = []
-    return data
+        logger.warning("Essentials assessment returned unparseable JSON for %s", form_type)
+        return {}
+    items = data.get("items") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return {}
+
+    # A partial, duplicated, or padded answer is not a judgement — it is an
+    # unusable one. Returning the half of it that parsed would let a genuinely
+    # required detail through as "not mentioned as missing", so the whole
+    # response is rejected and the caller asks the doctor to retry instead.
+    wanted = {str(item["key"]) for item in requirements}
+    statuses: dict[str, str] = {}
+    for entry in items:
+        if not isinstance(entry, dict):
+            logger.warning("Essentials assessment for %s returned a malformed item", form_type)
+            return {}
+        key = str(entry.get("key") or "").strip()
+        status = str(entry.get("status") or "").strip().lower()
+        if key not in wanted or status not in _ESSENTIAL_STATUSES or key in statuses:
+            logger.warning(
+                "Essentials assessment for %s returned an unusable item (unknown key, "
+                "unknown status, or duplicate)", form_type,
+            )
+            return {}
+        statuses[key] = status
+    if set(statuses) != wanted:
+        logger.warning(
+            "Essentials assessment for %s covered %d of %d requirements",
+            form_type, len(statuses), len(wanted),
+        )
+        return {}
+    return statuses
 
 
 def _humanize_text(text: str) -> str:
@@ -1600,188 +1764,134 @@ def _prefer_dops_for_observed_procedure(
     return _dedupe_recommendations([dops, proc_log, *remaining])[:3]
 
 
+# The doctor names the event outright. An ESLE *is* an extended supervised
+# learning event, so either wording is a direct statement of form type.
+_ESLE_NAMED_RE = re.compile(
+    r"\besles?\b|\b(?:extended |emergency medicine )?supervised learning event"
+)
+
+# Shift/area-level responsibility: the doctor was leading, covering, in charge
+# of, or running a clinical area or a shift — the setting an ESLE assesses.
+# Deliberately requires a responsibility verb next to a named area/shift so an
+# ordinary single-patient case (which never says who was covering what) cannot
+# match.
+_ESLE_AREA_RE = re.compile(
+    r"\b(?:cover(?:ing|ed)?|lead(?:ing)?|led|running|ran|in charge of|"
+    r"co-?ordinat(?:ing|ed))\b[^.;]{0,40}?\b"
+    r"(?:majors|minors|resus(?:citation)?|the department|the floor|shop floor|"
+    r"the shift|the whole shift|the take|triage|the ed|the emergency department)\b"
+)
+
+# Being observed working across a shift rather than on one encounter.
+_ESLE_OBSERVED_RE = re.compile(
+    r"\b(?:observed|observing|watched|shadowed)\b[^.;]{0,40}?\b"
+    r"(?:my shift|the shift|me work|me working|the majors|the resus|"
+    r"the resuscitation area|the department|the shop floor)\b"
+    r"|\bsupernumerary\b"
+)
+
+
+def _has_supervised_shift_signal(case_description: str) -> bool:
+    """True when the text describes ESLE-shaped shift/area-level practice.
+
+    Three independent routes, any of which is enough: the doctor names an ESLE,
+    describes leading/covering/running a clinical area or shift, or describes
+    being observed across a shift rather than for one encounter.
+    """
+    text = f" {case_description or ''} ".lower()
+    return bool(
+        _ESLE_NAMED_RE.search(text)
+        or _ESLE_AREA_RE.search(text)
+        or _ESLE_OBSERVED_RE.search(text)
+    )
+
+
+def _ensure_esle_for_supervised_shift(
+    recommendations: list[FormTypeRecommendation],
+    case_description: str,
+) -> list[FormTypeRecommendation]:
+    """Keep ESLE on the table for shift/area-level supervision cases.
+
+    The recommender prompt is heavily biased against ESLE (a deliberate guard
+    against the word "learning" triggering it), and in practice that bias also
+    suppresses genuine ESLEs: a case describing covering majors and running a
+    queue came back as CBD + Reflective Log with ESLE absent. This adds
+    ESLE back without removing the model's picks — CBD can still be offered,
+    ESLE just must not be missing.
+    """
+    if not _has_supervised_shift_signal(case_description):
+        return recommendations
+    if any(
+        canonical_form_type(rec.form_type) == "ESLE_ASSESS"
+        for rec in recommendations
+    ):
+        return recommendations
+
+    named = bool(_ESLE_NAMED_RE.search(f" {case_description or ''} ".lower()))
+    esle = FormTypeRecommendation(
+        form_type="ESLE_ASSESS",
+        rationale=(
+            "You name an ESLE for this event."
+            if named else
+            "You describe leading, covering or being observed across a clinical "
+            "area or shift — the non-technical skills an ESLE assesses."
+        ),
+        uuid=FORM_UUIDS.get("ESLE_ASSESS"),
+    )
+    # A named ESLE leads. An inferred one slots in behind the model's best fit
+    # so an existing correct top pick (e.g. QIAT for a QI project) still leads
+    # and ESLE is simply never absent.
+    ordered = (
+        [esle, *recommendations] if named or not recommendations
+        else [recommendations[0], esle, *recommendations[1:]]
+    )
+    return _dedupe_recommendations(ordered)[:3]
+
+
 def _deterministic_recommend_form_types(
     case_description: str,
     input_source: str = "text",
 ) -> list[FormTypeRecommendation] | None:
-    """Return high-confidence form recommendations without an LLM.
+    """Return a form recommendation only when the user explicitly names one.
 
-    This pre-pass is deliberately conservative. It only handles cases where the
-    user has effectively named the portfolio event type or described an
-    unambiguous procedural/QI/course signal. General clinical cases continue to
-    the AI recommender.
+    Narrowed on 2026-09-18 (Moeed's decision). The clinical keyword pre-pass that
+    used to short-circuit here fired on a single word anywhere in the text
+    ("pocus", "chest drain", "life support") and picked a form while the model
+    never read the case. Those rules were removed rather than repaired: the AI
+    recommender already reads the same authoritative RCEM form definitions, so
+    form choice has one source of truth and no second keyword list to maintain.
+
+    Two non-clinical branches stay. A user who names the target form gets it
+    back directly, and a user who names their programme (ACCS) before describing
+    a procedure keeps the ACCS-specific form family, which the general
+    definitions do not cover.
     """
-    text = f" {case_description or ''} ".lower()
     recommendations: list[FormTypeRecommendation] = []
-
-    def add(form_type: str, rationale: str) -> None:
-        form_type = canonical_form_type(form_type)
-        if form_type not in {rec.form_type for rec in recommendations}:
-            recommendations.append(FormTypeRecommendation(
-                form_type=form_type,
-                rationale=rationale,
-                uuid=FORM_UUIDS.get(form_type),
-            ))
 
     explicit_form = _deterministic_explicit_form_request(case_description)
     if explicit_form:
-        add(
-            explicit_form,
-            f"The user explicitly asked for {public_form_name(explicit_form)}.",
-        )
+        form_type = canonical_form_type(explicit_form)
+        recommendations.append(FormTypeRecommendation(
+            form_type=form_type,
+            rationale=f"The user explicitly asked for {public_form_name(form_type)}.",
+            uuid=FORM_UUIDS.get(form_type),
+        ))
         return recommendations
 
-    image_source_has_text_context = (
-        _is_image_source(input_source)
-        and "context supplied with image" in text
-    )
-    if _is_image_source(input_source) and not image_source_has_text_context:
+    text = f" {case_description or ''} ".lower()
+    if _is_image_source(input_source) and "context supplied with image" not in text:
         return None
 
     accs_recommendation = _deterministic_accs_procedure_recommendation(case_description)
     if accs_recommendation:
         for form_type, rationale in accs_recommendation:
-            add(form_type, rationale)
-        return recommendations
-
-    if re.search(r"\b(completed|performed|undertook|conducted)\s+(an?\s+)?audit\b", text) and not _source_describes_qi_cycle(case_description):
-        add("AUDIT", "Audit activity is stated without a full QI change/re-audit cycle.")
-        return recommendations
-
-    if _has_qi_project_signal(case_description):
-        add(
-            "QIAT",
-            "QI/audit project with measurement and change; QIAT is the specific assessment form.",
-        )
-        if "teaching intervention" in text or "education intervention" in text:
-            add(
-                "TEACH",
-                "Teaching was described as an intervention within the QI/audit project.",
-            )
-        return recommendations
-
-    if re.search(r"\bjournal\s+club\b", text) and re.search(
-        r"\b(presented|led|presenting|discussed|appraised)\b", text
-    ):
-        add("JCF", "Journal club presentation or discussion described explicitly.")
-        return recommendations
-
-    course_patterns = (
-        r"\bals\b",
-        r"\batls\b",
-        r"\bapls\b",
-        r"\balso\s+course\b",
-        r"\badvanced life support in obstetrics\b",
-        r"\blife support\b",
-        r"\bformal course\b",
-        r"\bsimulation course\b",
-        r"\bleadership course\b",
-        r"\bcourse certificate\b",
-    )
-    if any(re.search(pattern, text) for pattern in course_patterns) and re.search(
-        r"\b(attended|completed|passed|certificate|certified|course)\b", text
-    ):
-        add("FORMAL_COURSE", "Formal course attendance/completion is stated explicitly.")
-        return recommendations
-
-    if any(term in text for term in ("pocus", "fast scan", "lung ultrasound", "cardiac echo", "ivc ultrasound")):
-        add("US_CASE", "Point-of-care ultrasound case is stated explicitly.")
-        return recommendations
-
-    if any(term in text for term in ("pdp goal", "personal development plan", "development plan")):
-        add("PDP", "Personal development plan goal and actions are stated explicitly.")
-        return recommendations
-
-    if any(
-        term in text
-        for term in (
-            "research study",
-            "research project",
-            "recruited patients",
-            "checked eligibility",
-            "obtained consent",
-            "gcp training",
-        )
-    ):
-        add("RESEARCH", "Research activity with recruitment/consent/study participation is stated explicitly.")
-        return recommendations
-
-    if re.search(r"\b(attended|attending|participated in|went to)\b", text) and any(
-        term in text
-        for term in (
-            "teaching day",
-            "teaching session",
-            "education day",
-            "educational activity",
-            "regional teaching",
-            "grand round",
-            "simulation day",
-        )
-    ):
-        add("EDU_ACT", "The trainee attended an educational activity as a learner.")
-        return recommendations
-
-    if any(
-        term in text
-        for term in (
-            "observed me teaching",
-            "observed my teaching",
-            "feedback on my teaching",
-            "teaching observation",
-            "consultant observed me teaching",
-        )
-    ):
-        add("TEACH_OBS", "Teaching was observed for feedback on the trainee's teaching skill.")
-        add("TEACH", "The same activity can also be recorded as teaching delivered.")
-        return recommendations
-
-    if _has_directly_observed_procedure_signal(case_description):
-        add(
-            "DOPS",
-            "Directly observed hands-on procedure with senior supervision; DOPS is the specific assessed-procedure form.",
-        )
-        add(
-            "PROC_LOG",
-            "The performed procedure can also be recorded in the procedural log.",
-        )
-        if any(term in text for term in ("feedback", "learning point", "reflected", "reflection")):
-            add(
-                "REFLECT_LOG",
-                "Feedback/reflection was included alongside the procedural assessment.",
-            )
-        return recommendations
-
-    performed_procedure = any(term in text for term in _OBSERVED_PROCEDURE_TERMS)
-    trainee_performed = re.search(
-        r"\b(i|trainee)\s+.*\b(performed|administered|inserted|reduced|completed|did)\b",
-        text,
-    )
-    if performed_procedure and trainee_performed:
-        add("PROC_LOG", "Trainee-performed procedure without a clear direct-assessment signal.")
-        return recommendations
-
-    formal_teaching = any(
-        term in text
-        for term in (
-            "formal teaching session",
-            "simulation teaching",
-            "lecture",
-            "tutorial",
-            "teaching session",
-        )
-    )
-    observed_teaching = any(
-        term in text
-        for term in (
-            "assessor observed",
-            "consultant observed",
-            "observed my teaching",
-            "feedback on my teaching",
-            "stat assessment",
-        )
-    )
-    if formal_teaching and observed_teaching:
-        add("STAT", "Formal teaching session with observation/assessment stated explicitly.")
+            canonical = canonical_form_type(form_type)
+            if canonical not in {rec.form_type for rec in recommendations}:
+                recommendations.append(FormTypeRecommendation(
+                    form_type=canonical,
+                    rationale=rationale,
+                    uuid=FORM_UUIDS.get(canonical),
+                ))
         return recommendations
 
     return None
@@ -1957,7 +2067,11 @@ ESLE (Extended Supervised Learning Event)
 - NOT for: Individual case write-ups. Not for single clinical encounters. Not for "learning from" a case.
   The word "learning" in a description does NOT trigger ESLE.
 - Suggest when: Description explicitly mentions shift-level observation, NTS feedback, a consultant
-  watching them work across a session, or the specific NTS domains listed above.
+  watching them work across a session, or the specific NTS domains listed above. ALSO suggest when
+  the trainee says they were covering, leading, running or in charge of a clinical area (majors,
+  resus, the shop floor) or the shift — prioritising patients, escalating, supervising juniors and
+  handing over are exactly the four NTS domains. If the trainee calls the event an ESLE or a
+  supervised learning event, ESLE must be in your list.
 
 MSF (Multi-Source Feedback)
 - Purpose: Collect 360-degree feedback on generic professional skills (communication, leadership,
@@ -2116,9 +2230,11 @@ MGMT_* (Management Portfolio forms — Rota, Complaint, Critical Incident, Risk,
    cognitive bias, professional development) — REFLECT_LOG is the PRIMARY suggestion, not CBD.
    CBD and REFLECT_LOG can both appear, but reflection-framed descriptions → REFLECT_LOG first.
 
-4. ESLE is one of the hardest to trigger correctly. Only suggest it if the description explicitly mentions
-   shift-level observation, a consultant watching across multiple cases/interactions, or NTS feedback.
-   A single case — however complex — does not warrant ESLE.
+4. ESLE needs a shift- or area-level event, not a keyword. Suggest it when the description mentions
+   shift-level observation, a consultant watching across multiple cases/interactions, NTS feedback,
+   or the trainee covering/leading/running/being in charge of a clinical area or the shift. A single
+   case — however complex — does not warrant ESLE on its own. But the word "learning" alone never
+   triggers ESLE, and a trainee who names an ESLE always gets one.
 
 5. Prefer specificity. If DOPS clearly applies, suggest DOPS over CBD. If US_CASE applies,
    suggest it over CBD. CBD is a fallback for case management when no more specific form fits.
@@ -2175,6 +2291,7 @@ MGMT_* (Management Portfolio forms — Rota, Complaint, Critical Incident, Risk,
         )
     recommendations = _prefer_dops_for_observed_procedure(recommendations, case_description)
     recommendations = _prefer_qiat_for_qi_project(recommendations, case_description)
+    recommendations = _ensure_esle_for_supervised_shift(recommendations, case_description)
 
     return recommendations
 
@@ -2609,6 +2726,32 @@ def _polish_qiat_fields(fields: dict, case_description: str) -> dict:
     return out
 
 
+def _polish_esle_fields(fields: dict, case_description: str) -> dict:
+    """Ground the required ESLE "Domains of performance" answer in the session.
+
+    Kaizen refuses to treat the draft as complete without this answer, but a
+    model list is only as good as the evidence behind it, so the claim is
+    re-checked against the session's own words (see esle_domains.py). When
+    nothing is evidenced the field stays empty and the normal missing-required
+    path asks the doctor rather than guessing on their behalf.
+    """
+    from esle_domains import resolve_esle_domains
+
+    out = dict(fields or {})
+    narrative = "\n".join(
+        str(value)
+        for key, value in out.items()
+        if key not in {"domains_of_performance", "curriculum_links", "key_capabilities"}
+        and isinstance(value, str)
+    )
+    out["domains_of_performance"] = resolve_esle_domains(
+        out.get("domains_of_performance"),
+        f"{case_description or ''}\n{narrative}",
+        doctor_text=case_description,
+    )
+    return out
+
+
 def _polish_acaf_fields(fields: dict, case_description: str) -> dict:
     """Move source-grounded learning into ACAF reflection when left blank."""
     out = dict(fields or {})
@@ -2832,8 +2975,7 @@ def _clinical_kc_supplement_codes(case_description: str) -> list[str]:
     ):
         add("SLO7 KC3")
 
-    if _case_contains_any(text, ("teach", "supervis", "feedback", "debrief")):
-        add("SLO9 KC1")
+    # Teaching requires actor-aware evidence from extraction, not keyword supplementation.
 
     # Core adult/paediatric assessment (SLO1/SLO5 KC1) is broad — it could be
     # argued for almost any clinical case. Only offer it as a rounding-out KC
@@ -2942,6 +3084,15 @@ def _guard_unsourced_exact_training_stage(fields: dict, schema: dict, source_tex
     return guarded
 
 
+# Source-fidelity bullets shared by every extraction prompt's grounding block.
+# They name the three ways a draft most often drifts away from what the doctor
+# actually wrote: taking over attribution, sharpening vague detail, and
+# supplying a reflection the doctor never had.
+_SOURCE_FIDELITY_RULES = """- Keep the doctor's own attribution. "FAST was done", "a CT was arranged", "bloods were sent" do not say who did it — never rewrite them as "I performed" or "I arranged" unless the source says so.
+- Keep the source's level of specificity. An unspecified "CT" stays an unspecified CT: never name a body region, technique, dose, or result the doctor did not state.
+- Never write a personal reflection the doctor did not supply. If the source contains no learning, interpretation, reaction, or intended change of practice, leave the reflection field blank."""
+
+
 _IMAGE_EXTRACTOR_GUARD = """
 ===== IMAGE-DERIVED INPUT GUARD (NON-NEGOTIABLE) =====
 The case description below was extracted from a photo/screenshot — it
@@ -3044,6 +3195,103 @@ Pre-preview quality check:
 """
 
 
+_KC_EDIT_DROP_FIELD = "dropped_key_capabilities"
+_KC_REVIEW_TIMEOUT_SECONDS = 8.0
+# CBD callers allow 45 seconds; reserve five for final normalisation/return.
+_KC_REVIEW_DEADLINE_SECONDS = 40.0
+
+
+def _canonical_kc(capability):
+    if not isinstance(capability, str):
+        return None
+    match = re.fullmatch(r"\s*(SLO[1-9]\d*)\s+(KC[1-9]\d*)(?:\s*:\s*\S.*)?\s*",
+                         capability, re.IGNORECASE | re.DOTALL)
+    if not match:
+        return None
+    return KC_FULL_TEXT.get(f"{match[1].upper()} {match[2].upper()}")
+
+
+def _canonical_kcs(capabilities, *, strict=False):
+    if not isinstance(capabilities, list):
+        raise ValueError("Invalid KC list")
+    result = []
+    for capability in capabilities:
+        canonical = _canonical_kc(capability)
+        if canonical is None and strict:
+            raise ValueError("Unknown or malformed KC")
+        value = canonical or capability
+        if value not in result:
+            result.append(value)
+    return result
+
+
+def _validated_kc_drop_claims(claims):
+    if not isinstance(claims, list):
+        return []
+    valid = []
+    for claim in claims:
+        if not isinstance(claim, dict):
+            continue
+        capability = _canonical_kc(claim.get("capability"))
+        reason = claim.get("reason")
+        if capability and isinstance(reason, str) and reason.strip():
+            valid.append({"capability": capability, "reason": reason.strip()})
+    return valid
+
+
+def _kc_identity(capability) -> str:
+    """Whitespace/case-insensitive comparison key for a Key Capability string."""
+    return " ".join(str(_canonical_kc(capability) or capability or "").split()).casefold()
+
+
+def _build_kc_edit_retention_instruction(previous_key_capabilities) -> str:
+    listed = "\n".join(f"- {kc}" for kc in previous_key_capabilities)
+    return f"""
+
+===== KEY CAPABILITIES ALREADY ON THIS DRAFT =====
+{listed}
+
+These were selected from the same clinical facts you are reading again now — the case description has not changed.
+- Add a Key Capability when the feedback newly evidences one.
+- Drop one of the capabilities listed above ONLY if the user's feedback asks to remove or change the curriculum links, or corrects or contradicts the clinical fact that capability rested on.
+- If you drop one, you MUST also return a top-level JSON field "{_KC_EDIT_DROP_FIELD}": a list of objects {{"capability": "<exact capability text from the list above>", "reason": "<the user's own words, or the corrected fact, that removes its support>"}}.
+- A capability you simply leave out, with no entry in that field, is restored automatically. Omitting one silently changes nothing.
+"""
+
+
+def _apply_kc_edit_retention(selected, previous_key_capabilities, drop_claims):
+    """Restore previously-selected Key Capabilities dropped without a stated reason.
+
+    On the edit path `case_description` is byte-identical to the one the original
+    draft was built from (bot.py keeps the case unchanged and puts the doctor's
+    reply in `edit_feedback`), so the facts that supported a capability are still
+    there unless the feedback removed that support. The model may still drop one,
+    but only by naming it with a reason in `dropped_key_capabilities`; a silent
+    re-roll over the same unchanged facts cannot lose a capability. Additions and
+    ordering of the model's own selection are left alone.
+    """
+    if not previous_key_capabilities:
+        return selected
+    justified = set()
+    if isinstance(drop_claims, list):
+        for claim in drop_claims:
+            if isinstance(claim, dict):
+                capability = claim.get("capability")
+                reason = str(claim.get("reason") or "").strip()
+            else:
+                capability, reason = claim, ""
+            if capability and reason:
+                justified.add(_kc_identity(capability))
+    kept = {_kc_identity(kc) for kc in selected}
+    restored = list(selected)
+    for previous in previous_key_capabilities:
+        identity = _kc_identity(previous)
+        if identity and identity not in kept and identity not in justified:
+            restored.append(previous)
+            kept.add(identity)
+    return restored
+
+
 async def extract_cbd_data(
     case_description: str,
     edit_feedback: str = "",
@@ -3052,6 +3300,7 @@ async def extract_cbd_data(
     leave_missing_blank: bool = True,
     preserve_original_content: bool = True,
     input_source: str = "text",
+    previous_key_capabilities=None,
 ) -> CBDData:
     """Extract structured CBD data from free-text case description.
 
@@ -3061,6 +3310,7 @@ async def extract_cbd_data(
     advanced-imaging narrative the LLM tries to inject is stripped before the
     user sees the draft.
     """
+    review_deadline = asyncio.get_running_loop().time() + _KC_REVIEW_DEADLINE_SECONDS
     case_description = await _prepare_case_description_for_model_async(case_description)
     missing_text_instruction = (
         'If a field cannot be filled from the case description, return an empty string "" for text/date/dropdown fields, null for nullable fields, and [] for list fields.'
@@ -3126,10 +3376,10 @@ KCs are what matter — SLOs are just grouping labels derived automatically from
 {RCEM_KC_MAP}
 
 INSTRUCTIONS:
-1. Read the full case description.
-2. For each SLO that is relevant to the case, read KC2, KC3, KC4... FIRST. Ask: does this case directly demonstrate THIS specific numbered capability?
+1. Before selecting anything, silently work through the FULL curriculum above against this specific case: for every SLO, ask what in the case (if anything) independently supports each of its KCs. Do this full pass in your own reasoning — do not skip SLOs just because an early one already matched, and do not stop at the first plausible KC. This reasoning is internal working only; it is not part of the JSON output.
+2. For each SLO that your pass above found relevant, read KC2, KC3, KC4... FIRST. Ask: does this case directly demonstrate THIS specific numbered capability?
 3. Only consider KC1 for an SLO after checking the higher KCs. KC1 is a broad fallback — only include it if the case demonstrates something KC2+ does not already cover for that SLO.
-4. Aim for 3 appropriate Key Capabilities by default — most substantive clinical cases genuinely demonstrate around 3. CAVEAT: select FEWER than 3 if fewer are genuinely supported, and NEVER pad with weak, broad or only-loosely-related KCs just to reach 3. Three strong KCs beat three including a filler.
+4. Select 3 appropriate Key Capabilities whenever the case supports three. This is the default, not an optional target. From your full pass, select independently and specifically supported KCs across the relevant curriculum; select more only when each additional capability is distinctly demonstrated. CAVEAT: select FEWER than 3 if fewer are genuinely supported, and NEVER pad, stretch, or include a weak/broad/only-loosely-related KC just to reach a count. Never invent a capability the case does not actually show. Three strong KCs beat three including a filler; one strong KC beats three where only one is real.
 5. Use the FULL KC text exactly as written above (including the "(2025 Update)" suffix).
 6. Format each as: "SLO_CODE KC_NUM: full description text (2025 Update)"
 
@@ -3138,11 +3388,11 @@ Do NOT select KC1 just because it "could apply". Only select KC1 if:
 - The case specifically demonstrates something unique to KC1 that KC2+ does not cover, OR
 - KC1 is the only KC for that SLO
 
-Examples of KC1 being WRONG: selecting SLO1 KC1 just because a patient was assessed. Selecting SLO2 KC1 just because a decision was made. These are true of every case — they add no specificity.
+Do not exclude a supported KC merely because it is KC1 or broad. SLO1 has only KC1: substantive adult ED assessment and management can support it. SLO2 KC1 requires evidence of supporting the team with safe clinical decisions, not merely a mention that a decision was made. Count these separately only when the case demonstrates their distinct work.
 Examples of KC1 being RIGHT: selecting SLO3 KC1 when the trainee performed airway management (KC1 is specific here). Selecting SLO10 KC1 when the trainee critically appraised evidence (only KC for research).
 
 HARD RULES — only select if DIRECTLY demonstrated:
-- Resuscitation KCs (SLO3): only if patient was actually resuscitated, intubated, arrested
+- Resuscitation KCs (SLO3): require actual management of the capability described. SLO3 KC3 covers management of life-threatening conditions, including emergency stabilisation and urgent treatment pathways; arrest or intubation is not required. A diagnosis alone is insufficient. Never infer airway procedures, circulatory support or team leadership that was not described.
 - Procedure KCs (SLO6): only if trainee personally performed a named procedure
 - Paediatric KCs (SLO5): only if patient was under 16
 - Shift leadership KCs (SLO8): only if trainee explicitly led/coordinated the shift
@@ -3171,6 +3421,7 @@ Write the reflection in direct, first-person clinical language:
 - Extract ONLY what the doctor explicitly stated or clearly implied. Never invent clinical details.
 - {missing_text_instruction}
 - Never add diagnoses, investigations, procedures, or clinical reasoning the doctor did not describe.
+{_SOURCE_FIDELITY_RULES}
 - It is better to leave a field sparse than to fabricate content. Doctors will reject inaccurate drafts.
 - Return ONLY the JSON. No explanation."""
     system_prompt += preserve_instruction
@@ -3196,6 +3447,10 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
 - British English spelling (recognised, organised, haemorrhage, paediatric)
 - Sound like a confident registrar writing after a shift, not an AI summarising a textbook
 """
+
+    previous_key_capabilities = [kc for kc in (previous_key_capabilities or []) if str(kc or "").strip()]
+    if edit_feedback and previous_key_capabilities:
+        system_prompt += _build_kc_edit_retention_instruction(previous_key_capabilities)
 
     prompt = f"{system_prompt}\n\nCase description:\n{case_description}"
     if edit_feedback and current_draft:
@@ -3227,6 +3482,50 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
         retry_raw = retry_raw.strip()
         data = json.loads(retry_raw)
 
+    # A short selection gets one full-curriculum AI review, never deterministic
+    # supplementation. The model may confirm fewer; a count cannot prove support.
+    selected_kcs = _canonical_kcs(_normalise_list_field(data.get("key_capabilities")))
+    data["key_capabilities"] = selected_kcs
+    review_budget = min(_KC_REVIEW_TIMEOUT_SECONDS,
+                        review_deadline - asyncio.get_running_loop().time())
+    if len({kc for kc in selected_kcs if _canonical_kc(kc)}) < 3 and review_budget > 0:
+        review_prompt = (
+            f"{prompt}\n\nPrevious extraction:\n{json.dumps(data)}\n\n"
+            "KC selection review: the previous extraction returned fewer than three "
+            "distinct Key Capabilities. Recheck the FULL curriculum against the "
+            "original case and any user feedback. Return the same JSON fields, "
+            "selecting three KCs when independently supported. If fewer are genuinely "
+            "supported, keep fewer; never invent evidence or pad the selection. "
+            "Preserve all non-curriculum fields and any justified KC removal claims."
+        )
+        try:
+            review_text = await asyncio.wait_for(
+                _generate(review_prompt, retries=0, max_attempts=1),
+                timeout=review_budget,
+            )
+            review_raw = review_text.strip()
+            if review_raw.startswith("```"):
+                review_raw = review_raw.split("```")[1]
+                if review_raw.startswith("json"):
+                    review_raw = review_raw[4:]
+            reviewed = json.loads(review_raw.strip())
+            reviewed_kcs = _canonical_kcs(reviewed.get("key_capabilities"), strict=True)
+            # Review claims may add exclusions, never erase the initial ones.
+            original_claims = data.get(_KC_EDIT_DROP_FIELD)
+            merged_claims = (list(original_claims) if isinstance(original_claims, list) else [])
+            merged_claims += _validated_kc_drop_claims(reviewed.get(_KC_EDIT_DROP_FIELD))
+            excluded = {_kc_identity(claim["capability"])
+                        for claim in _validated_kc_drop_claims(merged_claims)}
+            reviewed_kcs = [kc for kc in reviewed_kcs if _kc_identity(kc) not in excluded]
+        except Exception:
+            # Includes provider/timeout/shape errors; cancellation by the caller
+            # still propagates. Do not log provider output or clinical content.
+            logger.warning("Unusable CBD KC review; preserving original selection")
+        else:
+            # Adopt atomically, and only curriculum fields, after validation.
+            data["key_capabilities"] = reviewed_kcs
+            data[_KC_EDIT_DROP_FIELD] = merged_claims
+
     normalised = {
         "form_type": "CBD",
         "date_of_encounter": _normalise_text_field(data.get("date_of_encounter"), leave_missing_blank, ""),
@@ -3251,6 +3550,22 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
         "curriculum_links": _normalise_list_field(data.get("curriculum_links")),
         "key_capabilities": _normalise_list_field(data.get("key_capabilities")),
     }
+    if edit_feedback and previous_key_capabilities:
+        normalised["key_capabilities"] = _apply_kc_edit_retention(
+            normalised["key_capabilities"],
+            previous_key_capabilities,
+            data.get(_KC_EDIT_DROP_FIELD),
+        )
+    normalised["key_capabilities"] = _canonical_kcs(normalised["key_capabilities"])
+    # The model returns curriculum_links and key_capabilities as two separate
+    # JSON fields, which can drift apart (e.g. curriculum_links naming only
+    # one SLO while key_capabilities lists KCs across several). The preview
+    # hierarchy only renders a KC under an SLO already present in
+    # curriculum_links, so any drift silently drops KCs from what the doctor
+    # sees. Re-derive curriculum_links from the selected KCs so every KC is
+    # represented.
+    if normalised["key_capabilities"]:
+        normalised["curriculum_links"] = _derive_curriculum_links_from_kcs(normalised["key_capabilities"])
     normalised = _fill_blank_clinical_setting_from_source(
         normalised,
         case_description,
@@ -3455,6 +3770,7 @@ Rules:
 - Extract ONLY what the doctor explicitly stated or clearly implied. Never invent clinical details.
 - {missing_text_instruction}
 - Never add diagnoses, investigations, procedures, or clinical reasoning the doctor did not describe.
+{_SOURCE_FIDELITY_RULES}
 - It is better to leave a field sparse than to fabricate content. Doctors will reject inaccurate drafts.
 - Return ONLY the JSON object. No explanation.
 
@@ -3566,6 +3882,8 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
         normalised = _polish_qiat_fields(normalised, case_description)
     if schema_key == "ACAF":
         normalised = _polish_acaf_fields(normalised, case_description)
+    if schema_key == "ESLE_ASSESS":
+        normalised = _polish_esle_fields(normalised, case_description)
 
     # Apply humanizer to ALL narrative fields before user sees the draft
     normalised = _humanize_all_fields(normalised)

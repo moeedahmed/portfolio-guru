@@ -31,7 +31,7 @@ Then open the folder in Codex.
 
 Use this prompt:
 
-> First check git status. Do not work directly on main. If on main, create a new branch for this task. Make the smallest safe change. Run the backend tests before finishing. Commit the real source/doc changes only. Do not commit `.env`, credentials, local ticket dumps, backup files, browser profiles, or clinical/private artefacts. Push the branch to GitHub and summarise what changed.
+> First check git status. Do not work directly on main. If on main, create a new branch for this task. Make the smallest safe change. Run `bash scripts/verify_changed.sh` before finishing. Commit the real source/doc changes only. Do not commit `.env`, credentials, local ticket dumps, backup files, browser profiles, or clinical/private artefacts. Do not push or merge separately; prepare the one release card with `scripts/release_loop.sh` and summarise the exact SHA and card for approval.
 
 ## Before stopping work
 
@@ -39,11 +39,15 @@ Ask Codex to do:
 
 ```bash
 git status
-./scripts/preflight.sh
+bash scripts/verify_changed.sh
 git add <real files only>
 git commit -m "short clear message"
-git push -u origin HEAD
+scripts/release_loop.sh --surface telegram --mode prepare --risk telegram \
+  --effect "<one line about what changes for a doctor>" \
+  --live-target portfolio_guru_bot
 ```
+
+Review and approve the single card printed by `prepare`. The release loop then owns the exact-SHA push, CI, deployment, proof, unchanged resume and bounded rollback. See `docs/release-standard.md`; do not add a routine feature-branch push or PR.
 
 ## Never commit
 

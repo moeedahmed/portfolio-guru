@@ -1,13 +1,21 @@
-"""Time-based retention for durable clinical case content (launch checklist 1.5).
+"""Time-based retention for clinical case content (launch checklist 1.5).
 
-Data map (why this module is small): the only DURABLE store of clinical
-content is the Supabase ``portfolio_cases`` mirror — Fernet-encrypted
-``case_text_encrypted`` plus encrypted ``extracted_fields``. Everything else
-is transient or non-clinical:
+This module's original docstring claimed the Supabase mirror was the only
+durable store of clinical content. A live audit on 2026-08-24 found that was
+false on three counts, all now fixed elsewhere:
 
-- attachment/voice temp files are unlinked inline after processing (bot.py);
-- usage.db rows are RCEM taxonomy + timestamps, no patient detail;
-- conversation persistence holds at most the in-flight draft, cleared on save.
+- ``drafts/`` held plaintext case narrative that survived /reset entirely
+  (now encrypted, erased on save, TTL'd — see ``draft_backup.py``);
+- ``bot_persistence`` retained case text and drafts for 20 users indefinitely
+  (now scrubbed before it reaches disk — see ``clinical_persistence.py``);
+- ``dogfood-audit.ndjson`` held 44MB of readable narrative
+  (now restricted to operator and synthetic traffic).
+
+What remains true, and is what this purge covers: the Supabase mirror no longer
+carries clinical content at all (``supabase_sync.mirror_case`` discards it), so
+this purge is a backstop for rows written before that change. Attachment and
+voice temp files are still unlinked inline in bot.py, and usage.db rows are RCEM
+taxonomy plus timestamps with no patient detail.
 
 The purge NULLs the clinical payload of expired rows but keeps the row —
 ``form_type``/``status``/``created_at`` stay, so usage history and ARCP-health

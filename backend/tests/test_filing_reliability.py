@@ -620,3 +620,45 @@ async def test_third_concurrent_filing_queues_until_a_slot_frees(monkeypatch):
 
     assert max_active == 2  # the cap was never exceeded
     assert all(r["status"] == "success" for r in results)
+
+
+# ── Post-filing report honesty ───────────────────────────────────────────────
+
+
+def test_curriculum_gap_is_never_hidden_behind_and_n_others():
+    """A US_CASE filing reported "Location, Equipment used, Other comments and
+    1 other" — and that one other was the curriculum linkage, which had failed
+    entirely. Only the first three gaps are shown, so an untagged portfolio
+    entry stayed invisible purely because it sorted fourth.
+    """
+    from bot import _prioritise_skipped_names
+
+    names = ["Location", "Equipment used", "Other comments", "Curriculum links"]
+    ordered = _prioritise_skipped_names(names)
+
+    assert ordered[0] == "Curriculum links"
+    assert ", ".join(ordered[:3]).count("Curriculum links") == 1
+    # Nothing is dropped, only reordered.
+    assert sorted(ordered) == sorted(names)
+
+
+def test_ordering_is_stable_when_there_is_no_curriculum_gap():
+    from bot import _prioritise_skipped_names
+
+    names = ["Location", "Equipment used", "Other comments"]
+    assert _prioritise_skipped_names(names) == names
+
+
+def test_filing_report_carries_no_literal_markdown_asterisks():
+    """The report is sent without a parse_mode, so *Form Name* rendered as
+    literal asterisks. Adding parse_mode would risk a failed send on form
+    names containing underscores, and this message must always arrive."""
+    import inspect
+
+    import bot
+
+    source = inspect.getsource(bot)
+    assert '*{form_name}*' not in source, (
+        "form_name must not be wrapped in Markdown asterisks — the filing "
+        "report is sent as plain text"
+    )

@@ -656,6 +656,29 @@ DO NOT SELECT if:
 Over-selection is a bug. Under-selection is safer. Max ~4 KCs per case.
 ```
 
+### Deterministic supplement pass (second stage, no live model call)
+
+The rules above are the model's own selection. A second, deterministic pass —
+`_supplement_supported_key_capabilities` / `_clinical_kc_supplement_codes` in
+`extractor.py` — runs after extraction and adds narrow, keyword-matched KCs
+when the model under-tags a curriculum-tick form. The product default is to
+**aim for three genuinely supported KCs**, using fewer when the evidence is
+insufficient, never padding to a quota. Kaizen's available checkbox count
+is not a recommendation target.
+Teaching/supervision KCs are not added by keyword supplementation: keywords
+cannot reliably distinguish giving supervision from receiving it. Genuine
+teaching capabilities selected during evidence-grounded extraction are
+preserved. Regression coverage includes passive supervision, feedback received
+from a consultant, and preservation of an extracted teaching capability in
+`backend/tests/test_kc_quality.py`.
+
+Separately, `curriculum_links` must always be re-derived from the final
+`key_capabilities` list (`_derive_curriculum_links_from_kcs`), never trusted
+verbatim from the model — a model that selects KCs across several SLOs but
+only names one in `curriculum_links` causes the other KCs to silently vanish
+from the curriculum preview (`_format_curriculum_hierarchy` in `bot.py` only
+renders a KC under an SLO already present in `curriculum_links`).
+
 ---
 
 ## Data Flow
@@ -718,6 +741,55 @@ where the text lives, who can edit it, and what may flex by context.
 If a `CONVERSATIONAL` line repeats verbatim in more than one handler, prefer
 adding it to `message_policy.MESSAGE_TEMPLATES` rather than duplicating it.
 
+### Core invariants
+
+Four rules the message/button surface must never violate, regardless of
+which handler is involved:
+
+- **Chronology over in-place picker edits.** A prompt the doctor is
+  answering with a *new message* (essentials gap, source-detail retry) must
+  be retired and replaced with a fresh bubble after their reply — never
+  edited in place — so the transcript still reads in the order the doctor
+  sent things. Picker navigation (choosing a form, editing a field) has no
+  competing user message and is edited in place instead. The essentials-gap
+  prompt is bot-owned and fully resolved by the reply, so it is deleted
+  outright rather than left behind with an "Added ... see below" placeholder;
+  a delete refusal (not merely Telegram reporting it already gone) falls back
+  to stripping its keyboard and a minimal "Details received." acknowledgement.
+  See `_retire_active_missing_essentials_prompt` /
+  `_retire_active_source_detail_message` in `backend/bot.py`; proved by
+  `test_chronological_deletion_removes_prompt_without_boilerplate` and
+  `test_partial_answer_deletes_prompt_every_round`
+  (`backend/tests/test_missing_essentials_prompt_retirement.py`),
+  `test_resolved_gap_retires_prompt_and_sends_fresh_draft_after_reply`
+  (`backend/tests/test_pre_draft_completeness.py`) and
+  `test_source_detail_voice_retry_retires_previous_prompt`
+  (`backend/tests/test_gathering_mode.py`).
+- **One AI-use declaration in the reflection.** Do not repeat it in an AI
+  assistance footer or add a decorative divider. Necessary missing-reflection
+  safeguards remain. Media instructions separately describe supported formats
+  and interpretation limits truthfully; accepting video does not imply visual
+  interpretation. Covered by `backend/tests/test_rcem_ai_policy.py` and
+  `backend/tests/test_modality_clause_coverage.py`.
+- **Stale controls are recognised, never silently acted on.** A button
+  whose underlying state has moved on (a newer prompt replaced it, or the
+  flow it belonged to finished) must be detected via message-id/state
+  validation and answered with a "no longer active" recovery, never treated
+  as if it still applied to current state. See `_resume_paused_flow`,
+  `_gathering_callback_matches_current_prompt`,
+  `_is_retired_essentials_prompt_ref` in `backend/bot.py`; proved by
+  `test_stale_gather_done_callback_keeps_current_case`
+  (`backend/tests/test_gathering_mode.py`) and
+  `test_stale_cancel_after_new_draft_does_not_cancel_it`
+  (`backend/tests/test_missing_essentials_prompt_retirement.py`).
+- **Ordered journey acceptance.** Each conversation state only accepts the
+  input types valid for that state (see
+  [Media routing per state](#vocabulary-by-stage-new-case-flow)), and the
+  capture → recommend → draft → approve → save journey must be walked
+  end-to-end, in order, before a change is called done or release-ready —
+  see `backend/tests/test_flow_walker.py`, and the `verify_changed.sh` /
+  `verify_release.sh` gates required in `AGENTS.md` before either claim.
+
 ### Shape
 
 - One bot bubble per long async action. The first ack is edited in place as
@@ -752,10 +824,13 @@ conversation rather than retrying.
 
 Media routing per state (from `build_application`):
 
-- **New case** (`AWAIT_CASE_INPUT`): accepts text, voice, photo, document.
-  Video is **not** routed here — the Video column above is the canonical
-  Ack/Error wording for when video lands in a later state, not a new-case
-  surface.
+- **New case** (`AWAIT_CASE_INPUT`): accepts text, voice, photo, video,
+  document — `handle_case_input` is registered for `filters.VIDEO` in this
+  state (see `build_application`), so video is a genuine new-case surface,
+  not only a later-state one. `message_policy.MODALITY_CLAUSE` is the
+  canonical "what can I send" phrase for prompts shown in this state
+  (`file_case_prompt`, `pre_draft_completeness_request`); keep it in sync
+  with this table rather than re-deriving a separate list.
 - **Template review** (`AWAIT_TEMPLATE_REVIEW`): accepts text, voice,
   photo, video, document.
 - **Approval** (`AWAIT_APPROVAL`): accepts text, voice, photo, video,

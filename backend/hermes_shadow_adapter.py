@@ -237,7 +237,7 @@ def _form_reply(form_options: list[dict[str, str]]) -> dict[str, Any] | None:
         confidence = option.get("confidence")
         label = form_type if not confidence else f"{form_type} — {confidence} confidence"
         actions.append(
-            ChannelAction(action_id=f"FORM|{form_type}", label=label)
+            ChannelAction(action_id=f"FORM|{form_type}", label=f"📋 {label}")
         )
     if not actions:
         return None

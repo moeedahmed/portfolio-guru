@@ -3,12 +3,8 @@
   dict({
     'buttons': list([
       tuple(
-        '📤 Save as draft',
+        '💾 Save to Kaizen',
         'APPROVE|draft',
-      ),
-      tuple(
-        '💡 Improve reflection',
-        'IMPROVE|reflection',
       ),
       tuple(
         '❌ Cancel',
@@ -30,6 +26,8 @@
       💭 *Reflection of event:*
       I would involve the cath lab team earlier if the ECG remains dynamic.
       
+      AI was used to help structure and edit this reflection.
+      
       🎚️ *Level of Supervision:* Indirect
       
       📚 *Curriculum:*
@@ -37,10 +35,7 @@
         ↳ KC1: assessing & managing adult patients
       • *SLO2 — Clinical questions & safe decisions*
         ↳ KC1: supporting the team's safe decisions
-      
-      🤖 *AI use declaration* — saved with this entry:
-      AI was used to help structure and edit this entry. The content, accuracy and reflective insight are my own.
-      💡 This reflection is brief. Tap 'Improve reflection' if you'd like to expand it.
+      💡 This reflection is brief. Reply if you'd like to expand or change it.
       
       💬 Reply to refine this draft, or use the buttons below to save.
     ''',
@@ -50,7 +45,7 @@
   dict({
     'buttons': list([
       tuple(
-        '✅ Use best fit: CBD',
+        '🩺 CBD',
         'FORM|best',
       ),
       tuple(
@@ -58,21 +53,21 @@
         'FORM|ACAT',
       ),
       tuple(
-        '📋 See all forms',
+        '📋 Forms',
         'FORM|show_all',
       ),
       tuple(
-        '❌ Cancel',
+        '🔄 Restart',
         'CANCEL|form',
       ),
     ]),
     'text': '''
-      📋 Here are the forms that fit your case:
+      📋 Best fit: Case-Based Discussion
       
       - Case-Based Discussion: Best fit for a reflective clinical case. Strongest match for the main event.
       - Acute Care Assessment Tool: The case spans multiple patients across a shift.
       
-      Tap "Use best fit" for a quick draft, or select a different form below.
+      Select a form to draft it.
     ''',
   })
 # ---

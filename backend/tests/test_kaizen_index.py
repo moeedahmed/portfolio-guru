@@ -10,6 +10,7 @@ These tests are deliberately offline:
 from __future__ import annotations
 
 import importlib
+from datetime import date
 
 import pytest
 
@@ -328,3 +329,32 @@ def test_slo_coverage_from_evidence_rows_aggregates_across_rows(kaizen_index):
         _evidence_row(kaizen_index, id="c", linked_kc_tags=[]),
     ]
     assert kaizen_index.slo_coverage_from_evidence_rows(rows) == {1, 3, 12}
+
+
+# ── Date parsing and sign-off state ─────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("4 Sept, 2024", date(2024, 9, 4)),
+        ("8 Sep, 2026", date(2026, 9, 8)),
+        ("4 September, 2024", date(2024, 9, 4)),
+        ("27 May, 2026", date(2026, 5, 27)),
+    ],
+)
+def test_parse_kaizen_date_handles_every_month_spelling(kaizen_index, raw, expected):
+    """Kaizen writes "Sep" and "Sept". An unparsed date silently became today's
+    date, ageing stale evidence into fresh evidence — the one direction a
+    readiness tool must never err in."""
+    assert kaizen_index._parse_kaizen_date(raw) == expected
+    assert kaizen_index._parse_kaizen_date(raw) != date.today()
+
+
+def test_pending_signoff_counts_as_filed_not_drafted(kaizen_index):
+    """A pending item is in Kaizen awaiting someone else's response. Treating
+    it as a local draft understates evidence the doctor has already submitted."""
+    row = _evidence_row(kaizen_index, state="pending", id="pending-1")
+    item = kaizen_index.evidence_row_to_health_item(row)
+    assert item.status == "filed"
+    assert item.source == "kaizen_filed"

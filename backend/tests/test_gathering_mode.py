@@ -4,6 +4,7 @@ import pytest
 from telegram.error import BadRequest
 
 import bot
+from message_policy import render_message
 from bot import (
     AWAIT_CASE_INPUT,
     AWAIT_FORM_CHOICE,
@@ -56,7 +57,7 @@ async def test_gathering_mode_starts_collection_instead_of_recommending(monkeypa
     assert result == AWAIT_GATHERING
     assert process_case.await_count == 0
     assert context.user_data["gathering_case"]["parts"][0]["text"] == _FIRST_CASE
-    assert any("Captured" in message for _, message, _ in sim.messages_sent)
+    assert any("Case captured" in message for _, message, _ in sim.messages_sent)
 
 
 @pytest.mark.asyncio
@@ -125,7 +126,7 @@ async def test_gathering_mode_treats_detailed_airway_case_as_case_detail(monkeyp
     answer.assert_not_awaited()
     assert "airway management" in context.user_data["case_text"]
     assert "Leadership Assessment Tool" not in (sim.get_last_text() or "")
-    assert ("✅ Draft now", "GATHER|done") in sim.get_last_buttons()
+    assert ("📋 Choose form", "GATHER|done") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio
@@ -187,15 +188,18 @@ async def test_gathering_reply_offers_done_button(monkeypatch):
          patch("bot._process_case_text", new=AsyncMock(return_value=AWAIT_FORM_CHOICE)):
         await handle_case_input(update, context)
 
-    assert sim.messages_sent[-1][1] == "📥 Captured. Add anything else before I draft this?"
+    assert sim.messages_sent[-1][1] == render_message("gathering_captured")
     assert sim.get_last_buttons() == [
-        ("✅ Draft now", "GATHER|done"),
-        ("❌ Cancel", "ACTION|cancel"),
+        ("📋 Choose form", "GATHER|done"),
+        ("❌ Discard case", "ACTION|cancel"),
     ]
 
 
 @pytest.mark.asyncio
-async def test_weak_first_text_gets_context_gate_not_draft_button(monkeypatch):
+async def test_weak_first_text_still_offers_draft_button(monkeypatch):
+    """A sparse first message must not be refused for being sparse — the model
+    judges sufficiency, not a keyword/grounding gate. Gathering still offers
+    the doctor a way to add more or draft with what's there."""
     monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
     sim = BotSimulator()
     context = sim._make_context()
@@ -208,14 +212,17 @@ async def test_weak_first_text_gets_context_gate_not_draft_button(monkeypatch):
 
     assert result == AWAIT_GATHERING
     process_case.assert_not_awaited()
-    assert "More clinical context needed" in sim.get_last_text()
-    assert "presentation" in sim.get_last_text()
-    assert ("✅ Draft now", "GATHER|done") not in sim.get_last_buttons()
+    assert "More clinical context needed" not in sim.get_last_text()
+    assert "Case captured" in sim.get_last_text()
+    assert ("📋 Choose form", "GATHER|done") in sim.get_last_buttons()
     assert context.user_data["gathering_case"]["parts"][0]["text"].startswith("I saw a dog")
 
 
 @pytest.mark.asyncio
-async def test_gathering_switches_to_draft_button_once_context_is_grounded(monkeypatch):
+async def test_gathering_second_message_refreshes_ready_prompt(monkeypatch):
+    """A second gathering message still resends the ready-to-draft prompt —
+    it was never gated on grounding, so both the first and second message
+    show the same Choose form / Discard case offer."""
     monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
     sim = BotSimulator()
     context = sim._make_context()
@@ -226,7 +233,7 @@ async def test_gathering_switches_to_draft_button_once_context_is_grounded(monke
         result = await handle_case_input(first, context)
 
     assert result == AWAIT_GATHERING
-    assert "More clinical context needed" in sim.get_last_text()
+    assert "Case captured" in sim.get_last_text()
     first_prompt_id = context.user_data["last_bot_msg_id"]
 
     second = sim._make_text_update(
@@ -239,13 +246,12 @@ async def test_gathering_switches_to_draft_button_once_context_is_grounded(monke
 
     assert result == AWAIT_GATHERING
     assert context.user_data["last_bot_msg_id"] != first_prompt_id
-    assert "source_detail_prompt_refs" not in context.user_data
     assert any(kind == "bot_delete" for kind, _, _ in sim.messages_sent)
-    assert "Captured" in sim.get_last_text()
+    assert "Case captured" in sim.get_last_text()
     assert sim.messages_sent[-1][0] == "reply"
     assert sim.get_last_buttons() == [
-        ("✅ Draft now", "GATHER|done"),
-        ("❌ Cancel", "ACTION|cancel"),
+        ("📋 Choose form", "GATHER|done"),
+        ("❌ Discard case", "ACTION|cancel"),
     ]
 
 
@@ -262,7 +268,7 @@ async def test_gathering_ready_prompt_is_resent_below_new_case_detail(monkeypatc
 
     assert result == AWAIT_GATHERING
     first_ready_id = context.user_data["last_bot_msg_id"]
-    assert "Captured" in sim.get_last_text()
+    assert "Case captured" in sim.get_last_text()
 
     second = sim._make_text_update("I also documented consultant discussion and safety-netting.")
     result = await handle_gathering_input(second, context)
@@ -271,10 +277,10 @@ async def test_gathering_ready_prompt_is_resent_below_new_case_detail(monkeypatc
     assert context.user_data["last_bot_msg_id"] != first_ready_id
     assert any(kind == "bot_delete" for kind, _, _ in sim.messages_sent)
     assert sim.messages_sent[-1][0] == "reply"
-    assert sim.get_last_text() == "📥 Captured. Add anything else before I draft this?"
+    assert sim.get_last_text() == render_message("gathering_captured")
     assert sim.get_last_buttons() == [
-        ("✅ Draft now", "GATHER|done"),
-        ("❌ Cancel", "ACTION|cancel"),
+        ("📋 Choose form", "GATHER|done"),
+        ("❌ Discard case", "ACTION|cancel"),
     ]
 
 
@@ -364,29 +370,42 @@ async def test_gather_done_callback_finishes_case(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_voice_transcript_fragment_asks_for_grounding_before_recommendation(monkeypatch):
+async def test_voice_transcript_fragment_reaches_the_model_not_a_keyword_gate(monkeypatch):
+    """A sparse voice fragment is no longer refused for being sparse — it is
+    sent straight to recommend_form_types, which judges sufficiency."""
     sim = BotSimulator()
     context = sim._make_context()
     update = sim._make_text_update("done")
 
-    with patch("bot.recommend_form_types", new=AsyncMock()) as recommend:
+    from extractor import FORM_UUIDS
+    from models import FormTypeRecommendation
+
+    recommendations = [
+        FormTypeRecommendation(
+            form_type="PROC_LOG",
+            rationale="Procedural sedation fragment.",
+            uuid=FORM_UUIDS.get("PROC_LOG"),
+        )
+    ]
+    with patch("bot.recommend_form_types", new=AsyncMock(return_value=recommendations)) as recommend, \
+         patch("bot.get_training_level", return_value="ST5"), \
+         patch("bot.get_curriculum", return_value="2025"):
         result = await bot._process_case_text(
             update.message,
             context,
             update.effective_user.id,
-            "test case adult sedation chest pain maybe procedural log",
+            "sedated a patient for chest pain reduction",
             "voice",
         )
 
-    assert result == AWAIT_CASE_INPUT
-    recommend.assert_not_awaited()
-    assert context.user_data["awaiting_source_detail"] is True
-    assert "More clinical context needed" in sim.get_last_text()
-    assert "presentation" in sim.get_last_text()
+    assert result == AWAIT_FORM_CHOICE
+    recommend.assert_awaited_once()
+    assert "awaiting_source_detail" not in context.user_data
+    assert "More clinical context needed" not in sim.get_last_text()
 
 
 @pytest.mark.asyncio
-async def test_voice_transcript_explicit_procedural_log_fragment_does_not_open_draft_button(monkeypatch):
+async def test_voice_transcript_explicit_form_name_routes_to_form_choice(monkeypatch):
     sim = BotSimulator()
     context = sim._make_context()
     update = sim._make_text_update("done")
@@ -400,12 +419,10 @@ async def test_voice_transcript_explicit_procedural_log_fragment_does_not_open_d
             "voice",
         )
 
-    assert result == AWAIT_CASE_INPUT
+    assert result == AWAIT_FORM_CHOICE
     recommend.assert_not_awaited()
-    assert context.user_data.get("chosen_form") is None
-    assert ("✅ Draft Procedural Log", "FORM|PROC_LOG") not in sim.get_last_buttons()
-    assert "More clinical context needed" in sim.get_last_text()
-    assert "presentation" in sim.get_last_text()
+    assert context.user_data.get("chosen_form") == "PROC_LOG"
+    assert "More clinical context needed" not in sim.get_last_text()
 
 
 @pytest.mark.asyncio
@@ -442,7 +459,7 @@ async def test_grounded_voice_transcript_can_reach_recommendations(monkeypatch):
 
     assert result == AWAIT_FORM_CHOICE
     assert context.user_data.get("awaiting_source_detail") is None
-    assert ("✅ Use best fit: Procedural Log", "FORM|best") in sim.get_last_buttons()
+    assert ('🔬 Procedural Log', "FORM|best") in sim.get_last_buttons()
 
 
 def test_source_grounding_accepts_detailed_dog_bite_case_not_animal_story():
@@ -462,130 +479,11 @@ def test_source_grounding_accepts_detailed_dog_bite_case_not_animal_story():
 
 
 @pytest.mark.asyncio
-async def test_source_detail_voice_retry_retires_previous_prompt(monkeypatch):
+async def test_weak_voice_fragment_reaches_recommendations_not_a_context_gate(monkeypatch):
+    """The old per-source grounding gate for voice is gone: a weak voice
+    transcript still goes straight to the model, which decides sufficiency."""
     sim = BotSimulator()
     context = sim._make_context()
-    context.user_data["case_text"] = "I saw a dog and cat fight and the cat died."
-    context.user_data["case_input_source"] = "voice"
-    context.user_data["awaiting_source_detail"] = True
-    context.user_data["last_bot_msg_id"] = 123
-    context.user_data["last_bot_chat_id"] = sim.user_id
-    context.user_data["status_msg_id"] = 123
-    context.user_data["status_msg_chat"] = sim.user_id
-
-    update = _make_voice_update(sim)
-
-    with patch("bot.has_credentials", return_value=True), \
-         patch("bot.consent.has_current_consent", new=AsyncMock(return_value=True)), \
-         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 0, 10, "free"))), \
-         patch("bot.transcribe_voice", new=AsyncMock(return_value="Other cats came to take revenge and killed the dog.")), \
-         patch("bot.recommend_form_types", new=AsyncMock()) as recommend:
-        result = await handle_case_input(update, context)
-
-    assert result == AWAIT_CASE_INPUT
-    recommend.assert_not_awaited()
-    assert "Other cats came to take revenge" in context.user_data["case_text"]
-    edit_calls = context.bot.edit_message_text.await_args_list
-    assert any(call.kwargs.get("message_id") == 123 for call in edit_calls)
-    assert any("Added to this case" in call.kwargs.get("text", "") for call in edit_calls)
-    context.bot.delete_message.assert_awaited()
-    assert "More clinical context needed" in sim.get_last_text()
-
-
-@pytest.mark.asyncio
-async def test_repeated_weak_voice_notes_replace_source_detail_prompt(monkeypatch):
-    sim = BotSimulator()
-    context = sim._make_context()
-    context.user_data["gathering_mode"] = False
-    weak_transcripts = [
-        "I saw a dog and cat fight and the cat died.",
-        "Other cats came to take revenge and killed the dog.",
-        "The cats gathered again and made more noise near the road.",
-    ]
-
-    with patch("bot.has_credentials", return_value=True), \
-         patch("bot.consent.has_current_consent", new=AsyncMock(return_value=True)), \
-         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 0, 10, "free"))), \
-         patch("bot.transcribe_voice", new=AsyncMock(side_effect=weak_transcripts)), \
-         patch("bot.recommend_form_types", new=AsyncMock()) as recommend:
-        previous_prompt_ids: list[int] = []
-        for index, _ in enumerate(weak_transcripts):
-            result = await handle_case_input(_make_voice_update(sim), context)
-            assert result == AWAIT_CASE_INPUT
-            assert "More clinical context needed" in sim.get_last_text()
-            active_prompt_id = context.user_data["last_bot_msg_id"]
-            if index:
-                previous_id = previous_prompt_ids[-1]
-                edit_calls = context.bot.edit_message_text.await_args_list
-                assert any(
-                    call.kwargs.get("message_id") == previous_id
-                    and "Added to this case" in call.kwargs.get("text", "")
-                    and call.kwargs.get("reply_markup") is None
-                    for call in edit_calls
-                )
-                delete_calls = context.bot.delete_message.await_args_list
-                assert any(call.kwargs.get("message_id") == previous_id for call in delete_calls)
-            previous_prompt_ids.append(active_prompt_id)
-            assert context.user_data["source_detail_prompt_refs"] == [{
-                "message_id": active_prompt_id,
-                "chat_id": sim.user_id,
-            }]
-
-    recommend.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_repeating_same_source_detail_prompt_does_not_duplicate_on_not_modified(monkeypatch):
-    sim = BotSimulator()
-    context = sim._make_context()
-    context.user_data["last_bot_msg_id"] = 123
-    context.user_data["last_bot_chat_id"] = sim.user_id
-
-    async def not_modified_once(*args, **kwargs):
-        raise BadRequest("Message is not modified: specified new message content and reply markup are exactly the same")
-
-    context.bot.edit_message_text.side_effect = not_modified_once
-    update = sim._make_text_update("done")
-
-    result = await bot._process_case_text(
-        update.message,
-        context,
-        update.effective_user.id,
-        "test case adult sedation chest pain maybe procedural log",
-        "voice",
-    )
-
-    assert result == AWAIT_CASE_INPUT
-    assert sim.messages_sent == []
-    assert context.user_data["last_bot_msg_id"] == 123
-    assert context.user_data["source_detail_prompt_refs"] == [{
-        "message_id": 123,
-        "chat_id": sim.user_id,
-    }]
-
-
-@pytest.mark.asyncio
-async def test_source_detail_retry_dog_bite_case_can_reach_recommendations(monkeypatch):
-    sim = BotSimulator()
-    context = sim._make_context()
-    context.user_data["case_text"] = (
-        "I saw a dog and cat fight and the cat died.\n\n"
-        "Other cats came to take revenge and killed the dog.\n\n"
-        "There was a patient who was bitten by that injured dog."
-    )
-    context.user_data["case_input_source"] = "mixed"
-    context.user_data["awaiting_source_detail"] = True
-    context.user_data["last_bot_msg_id"] = 123
-    context.user_data["last_bot_chat_id"] = sim.user_id
-    context.user_data["status_msg_id"] = 123
-    context.user_data["status_msg_chat"] = sim.user_id
-
-    update = sim._make_text_update(
-        "The patient presented to ED with bites on the face and airway swelling. "
-        "I assessed the airway, gave antibiotics and tetanus cover, called anaesthetics, "
-        "and the patient was intubated in resus before transfer to ICU. My learning was "
-        "to escalate facial animal bites early because swelling can progress quickly."
-    )
 
     from extractor import FORM_UUIDS
     from models import FormTypeRecommendation
@@ -593,13 +491,15 @@ async def test_source_detail_retry_dog_bite_case_can_reach_recommendations(monke
     recommendations = [
         FormTypeRecommendation(
             form_type="CBD",
-            rationale="Grounded dog-bite airway case.",
+            rationale="Dog-bite fragment.",
             uuid=FORM_UUIDS.get("CBD"),
         )
     ]
+    update = _make_voice_update(sim)
     with patch("bot.has_credentials", return_value=True), \
          patch("bot.consent.has_current_consent", new=AsyncMock(return_value=True)), \
          patch("bot.check_can_file", new=AsyncMock(return_value=(True, 0, 10, "free"))), \
+         patch("bot.transcribe_voice", new=AsyncMock(return_value="I saw a dog and cat fight and the cat died.")), \
          patch("bot.recommend_form_types", new=AsyncMock(return_value=recommendations)) as recommend, \
          patch("bot.get_training_level", return_value="ST5"), \
          patch("bot.get_curriculum", return_value="2025"):
@@ -607,14 +507,49 @@ async def test_source_detail_retry_dog_bite_case_can_reach_recommendations(monke
 
     assert result == AWAIT_FORM_CHOICE
     recommend.assert_awaited_once()
-    assert context.user_data.get("awaiting_source_detail") is None
-    assert "intubated in resus" in context.user_data["case_text"]
-    assert ("✅ Use best fit: CBD", "FORM|best") in sim.get_last_buttons()
+    assert "awaiting_source_detail" not in context.user_data
+    assert "More clinical context needed" not in sim.get_last_text()
+
+
+@pytest.mark.asyncio
+async def test_no_source_detail_prompt_mechanism_remains_wired(monkeypatch):
+    """Regression: nothing in the live case-input path sets
+    awaiting_source_detail any more — the per-source grounding gate that used
+    to set it has been removed from every call path."""
+    sim = BotSimulator()
+    context = sim._make_context()
+
+    from extractor import FORM_UUIDS
+    from models import FormTypeRecommendation
+
+    recommendations = [
+        FormTypeRecommendation(
+            form_type="PROC_LOG",
+            rationale="Sparse fragment.",
+            uuid=FORM_UUIDS.get("PROC_LOG"),
+        )
+    ]
+    update = sim._make_text_update("done")
+    with patch("bot.recommend_form_types", new=AsyncMock(return_value=recommendations)) as recommend, \
+         patch("bot.get_training_level", return_value="ST5"), \
+         patch("bot.get_curriculum", return_value="2025"):
+        result = await bot._process_case_text(
+            update.message,
+            context,
+            update.effective_user.id,
+            "sedated a patient for chest pain reduction",
+            "voice",
+        )
+
+    assert result == AWAIT_FORM_CHOICE
+    recommend.assert_awaited_once()
+    assert "awaiting_source_detail" not in context.user_data
+    assert "source_detail_prompt_refs" not in context.user_data
 
 
 @pytest.mark.asyncio
 async def test_stale_gather_done_callback_keeps_current_case(monkeypatch):
-    """Old Draft now buttons must not finish the latest gathering case."""
+    """Old Draft buttons must not finish the latest gathering case."""
     monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
     sim = BotSimulator()
     context = sim._make_context()
@@ -632,7 +567,7 @@ async def test_stale_gather_done_callback_keeps_current_case(monkeypatch):
     assert "gathering_case" in context.user_data
     assert context.user_data["gathering_msg_id"] == 999
     update.callback_query.answer.assert_awaited()
-    assert "earlier Draft now button" in sim.get_last_text()
+    assert "earlier Draft button" in sim.get_last_text()
 
 
 @pytest.mark.asyncio
@@ -670,10 +605,10 @@ async def test_second_text_addition_keeps_both_buttons(monkeypatch):
     result = await handle_gathering_input(update, context)
 
     assert result == AWAIT_GATHERING
-    assert "Captured" in sim.get_last_text()
+    assert "Case captured" in sim.get_last_text()
     assert sim.get_last_buttons() == [
-        ("✅ Draft now", "GATHER|done"),
-        ("❌ Cancel", "ACTION|cancel"),
+        ("📋 Choose form", "GATHER|done"),
+        ("❌ Discard case", "ACTION|cancel"),
     ]
 
 
@@ -699,14 +634,14 @@ async def test_second_text_addition_disarms_previous_gathering_prompt(monkeypatc
     )
     assert context.user_data["gathering_msg_id"] != 123
     assert sim.get_last_buttons() == [
-        ("✅ Draft now", "GATHER|done"),
-        ("❌ Cancel", "ACTION|cancel"),
+        ("📋 Choose form", "GATHER|done"),
+        ("❌ Discard case", "ACTION|cancel"),
     ]
 
 
 @pytest.mark.asyncio
 async def test_voice_addition_disarms_previous_gathering_prompt(monkeypatch):
-    """A second voice note must not leave the previous Draft now button visible."""
+    """A second voice note must not leave the previous Draft button visible."""
     monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
     sim = BotSimulator()
     context = sim._make_context()
@@ -734,8 +669,8 @@ async def test_voice_addition_disarms_previous_gathering_prompt(monkeypatch):
         "chat_id": sim.user_id,
     }]
     assert sim.get_last_buttons() == [
-        ("✅ Draft now", "GATHER|done"),
-        ("❌ Cancel", "ACTION|cancel"),
+        ("📋 Choose form", "GATHER|done"),
+        ("❌ Discard case", "ACTION|cancel"),
     ]
 
 
@@ -779,8 +714,8 @@ async def test_gathering_prompt_idempotent_across_repeated_additions(monkeypatch
         "Reflection: I should escalate high-risk ACS cases earlier in future.",
     ]
     expected_buttons = [
-        ("✅ Draft now", "GATHER|done"),
-        ("❌ Cancel", "ACTION|cancel"),
+        ("📋 Choose form", "GATHER|done"),
+        ("❌ Discard case", "ACTION|cancel"),
     ]
     for text in additions:
         sim.clear_messages()
@@ -818,7 +753,7 @@ async def test_explicit_new_case_during_thin_detail_state_prompts_choice(monkeyp
     assert context.user_data["pending_new_case_text"].startswith("This is a new case")
     assert "current draft is still open" in sim.get_last_text()
     assert sim.get_last_buttons() == [
-        ("📋 Start new case", "CASE|new"),
-        ("✏️ Add to current draft", "CASE|improve"),
-        ("❌ Cancel current draft", "ACTION|cancel"),
+        ('➕ New case', "CASE|new"),
+        ('✏️ Add to draft', "CASE|improve"),
+        ('❌ Cancel', "ACTION|cancel"),
     ]

@@ -21,13 +21,16 @@ This installs the user launchd service:
 
 Logs:
 
-- Bot log: `/tmp/portfolio-guru-bot.log` — the only log. `start-bot.sh`
-  redirects the whole service into it, and launchd's stdout/stderr point at
-  the same file, so service-level start failures land here too.
-- Previous generation: `/tmp/portfolio-guru-bot.log.1` (rotated at 10 MB).
+- Bot log: `~/.openclaw/logs/portfolio-guru/bot.log` — the only log.
+  `start-bot.sh` redirects the whole service into it, and launchd's
+  stdout/stderr point at the same file, so service-level start failures land
+  here too.
+- Rotated at 10 MB, keeping 7 generations (`bot.log.1` … `bot.log.7`).
 
-`~/Library/Logs/portfolio-guru/` is no longer written to. Files still there
-are pre-2026-08 history — do not read them as current.
+Logs moved off `/tmp` on 2026-08-18. macOS purges `/tmp`, so a reboot destroyed
+the history exactly when it was most worth reading. Anything still in
+`/tmp/portfolio-guru-bot.log*` or `~/Library/Logs/portfolio-guru/` is old
+history — do not read it as current.
 
 ## Manual Deploy
 

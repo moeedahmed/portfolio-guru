@@ -40,6 +40,15 @@ _LEADING_EMOJI = re.compile(
 
 _DECORATIVE_EMOJI_RE = re.compile("[✨🤖🎉⭐]")
 
+# The one canonical list of genuinely supported input types for "send me
+# more" moments: initial capture (file_case_prompt), extending a case
+# (gathering_captured), missing essentials (pre_draft_completeness_request),
+# and attachment context (attachment_captured). Telegram's Reply-to-message
+# feature is never implied as required — this is about what media types are
+# accepted, not how to send them. Every template that names supported inputs
+# should reuse this phrase rather than drift into its own wording.
+MODALITY_CLAUSE = "text, voice/audio, photos, documents, or video with a description"
+
 
 class MessageClass(str, Enum):
     FIXED = "fixed"
@@ -108,7 +117,7 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         key="file_case_prompt",
         message_class=MessageClass.FIXED,
         text=(
-            "📥 Send what happened (text, voice, photo, or document).\n\n"
+            f"📥 Send what happened ({MODALITY_CLAUSE}).\n\n"
             "If you can, include the patient's presentation, your actions, the outcome, and any learning points."
         ),
     ),
@@ -131,22 +140,34 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         ),
         safety_critical=True,
     ),
-    "source_grounding_detail_request": MessageTemplate(
-        key="source_grounding_detail_request",
+    "pre_draft_completeness_request": MessageTemplate(
+        key="pre_draft_completeness_request",
         message_class=MessageClass.TEMPLATED,
         text=(
-            "📋 More clinical context needed\n\n"
-            "Could you share the presentation, what you did, the outcome, or what you learned?"
+            "📋 Before I draft this, I still need: {items}.\n\n"
+            f"Send it as {MODALITY_CLAUSE} and I'll add it to your case — "
+            "everything you've already sent is kept."
         ),
         safety_critical=True,
     ),
-    "photo_grounding_detail_request": MessageTemplate(
-        key="photo_grounding_detail_request",
+    "essentials_check_retry": MessageTemplate(
+        key="essentials_check_retry",
         message_class=MessageClass.TEMPLATED,
         text=(
-            "📋 I can read the text in that image, but it isn't your clinical context.\n\n"
-            "Tell me in your own words: what the case was, what you did or decided, "
-            "the outcome, and what you learned. I won't interpret the image for you."
+            "📋 I couldn't finish checking your case against the {form_name} "
+            "requirements just now, so I haven't drafted anything yet.\n\n"
+            "Your case is saved exactly as you sent it. Tap Retry, or send more "
+            f"detail ({MODALITY_CLAUSE}) and I'll check again."
+        ),
+        safety_critical=True,
+    ),
+    "essential_unavailable_change_form": MessageTemplate(
+        key="essential_unavailable_change_form",
+        message_class=MessageClass.TEMPLATED,
+        text=(
+            "📋 A {form_name} needs {items}, and that isn't available for this case.\n\n"
+            "I won't invent it or leave it out. Your case is saved — choose a different "
+            f"form below, or send the detail ({MODALITY_CLAUSE}) if you can get it."
         ),
         safety_critical=True,
     ),
@@ -184,6 +205,11 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         key="draft_reply_hint",
         message_class=MessageClass.FIXED,
         text="\n\n💬 Reply to refine this draft, or use the buttons below to save.",
+    ),
+    "draft_reply_hint_reflection_needed": MessageTemplate(
+        key="draft_reply_hint_reflection_needed",
+        message_class=MessageClass.FIXED,
+        text="\n\n💬 Reply to refine this draft with your own learning point, interpretation or intended practice change to unlock saving.",
     ),
     "capability_overview": MessageTemplate(
         key="capability_overview",
@@ -223,14 +249,18 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
     "gathering_captured": MessageTemplate(
         key="gathering_captured",
         message_class=MessageClass.FIXED,
-        text="📥 Captured. Add anything else before I draft this?",
+        text=(
+            "📥 Case captured.\n\n"
+            f"Send another anonymised message ({MODALITY_CLAUSE}) to add details.\n\n"
+            "When you're ready, tap Choose form."
+        ),
     ),
     "attachment_captured": MessageTemplate(
         key="attachment_captured",
         message_class=MessageClass.TEMPLATED,
         text=(
             "📎 {attachment_label} attached.\n\n"
-            "Add anonymised case details before I draft this.{context_note}"
+            f"Add anonymised case details ({MODALITY_CLAUSE}) before choosing a form.{{context_note}}"
         ),
     ),
     "gathering_continuation": MessageTemplate(

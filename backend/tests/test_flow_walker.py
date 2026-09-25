@@ -8,7 +8,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from telegram.ext import ConversationHandler
 
+import bot
 from tests.bot_simulator import BotSimulator
+
+
+@pytest.fixture(autouse=True)
+def _isolated_flow_storage(monkeypatch, tmp_path):
+    from tests.helpers import isolate_bot_storage
+    isolate_bot_storage(monkeypatch, tmp_path)
 
 
 SAMPLE_CASES = {
@@ -50,8 +57,11 @@ def thin_draft():
             "date_of_encounter": "2026-03-17",
             "clinical_setting": "ED",
             "patient_presentation": "Chest pain",
+            "stage_of_training": "Higher/ST4-ST6",
+            "trainee_role": "Assessed and managed the patient",
             "clinical_reasoning": "Managed as ACS.",
             "reflection": "Need faster ECG review.",
+            "level_of_supervision": "Indirect",
             "curriculum_links": ["SLO1"],
             "key_capabilities": ["SLO1 KC1: Assess and stabilise the patient"],
         },
@@ -201,7 +211,7 @@ class TestFlowWalker:
         answer.assert_not_awaited()
         assert context.user_data['case_text'] == case_text
         assert 'Leadership Assessment Tool is supported' not in (sim.get_last_text() or '')
-        assert 'fit your case' in (sim.get_last_text() or '').lower()
+        assert 'best fit:' in (sim.get_last_text() or '').lower()
 
     @pytest.mark.asyncio
     async def test_explicit_cbd_with_details_locks_requested_form_not_support_copy(self):
@@ -228,7 +238,7 @@ class TestFlowWalker:
         assert context.user_data['chosen_form'] == 'CBD'
         assert 'Case-Based Discussion' in (sim.get_last_text() or '')
         assert 'Leadership Assessment Tool is supported' not in (sim.get_last_text() or '')
-        assert ('✅ Draft Case-Based Discussion', 'FORM|CBD') in sim.get_last_buttons()
+        assert ('🩺 CBD', 'FORM|CBD') in sim.get_last_buttons()
         answer.assert_not_awaited()
         recommend.assert_not_awaited()
 
@@ -252,8 +262,8 @@ class TestFlowWalker:
         assert "/login" not in text
         assert "Safety notes:" in text
         assert "**" not in text
-        assert ("🔗 Connect Kaizen", "ACTION|setup") in sim.get_last_buttons()
-        assert ("⚙️ Settings", "ACTION|settings") in sim.get_last_buttons()
+        assert ('🔗 Connect Kaizen', "ACTION|setup") in sim.get_last_buttons()
+        assert ('⚙️ Settings', "ACTION|settings") in sim.get_last_buttons()
         answer.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -326,7 +336,7 @@ class TestFlowWalker:
         assert original_case in context.user_data['case_text']
         assert context.user_data.get('awaiting_detail') is not True
         assert 'Send rough notes' not in (sim.get_last_text() or '')
-        assert ('✅ Draft Case-Based Discussion', 'FORM|CBD') in sim.get_last_buttons()
+        assert ('🩺 CBD', 'FORM|CBD') in sim.get_last_buttons()
         recommend.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -352,7 +362,9 @@ class TestFlowWalker:
         recommend.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_form_choice_shows_partial_draft_first(self, thin_draft):
+    async def test_form_choice_shows_complete_draft_immediately(self, thin_draft):
+        """A draft with genuine reflection and every schema-required field goes
+        straight to preview: no pre-draft completeness question, Save present."""
         from bot import AWAIT_APPROVAL, handle_form_choice
 
         sim = BotSimulator()
@@ -365,7 +377,7 @@ class TestFlowWalker:
 
         assert result == AWAIT_APPROVAL
         button_data = {data for _, data in sim.get_last_buttons()}
-        assert {'APPROVE|draft', 'IMPROVE|reflection', 'CANCEL|draft'} <= button_data
+        assert set(button_data) == {'APPROVE|draft', 'CANCEL|draft'}
         assert 'ACTION|add_reflection_detail' not in button_data
         assert 'ACTION|continue_thin' not in button_data
         assert 'ACTION|back_to_missing' not in button_data
@@ -374,13 +386,110 @@ class TestFlowWalker:
         text = sim.get_last_text()
         assert 'Here is your Case-Based Discussion draft:' in text
         assert 'Review needed before saving' not in text
-        # Required-but-missing fields surface inline with the missing marker
-        # next to each field label; the universal gate at file-time catches
-        # them too. The verbose "🧩 Missing details" block has been removed.
-        assert 'Stage of Training' in text
         assert 'Missing details' not in text
         assert 'Missing required fields' not in text
         assert 'Blank fields are left blank rather than invented' not in text
+
+    @pytest.mark.asyncio
+    async def test_form_choice_never_asks_for_a_field_the_product_fills_itself(self, thin_draft):
+        """Stage of training comes from the saved portfolio profile, so a blank
+        one is never a question for the doctor: the draft is shown immediately
+        with Save available and no gap message."""
+        from bot import AWAIT_APPROVAL, handle_form_choice
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+
+        incomplete_draft = thin_draft.model_copy(
+            update={'fields': {**thin_draft.fields, 'stage_of_training': ''}}
+        )
+
+        essentials = {item['key'] for item in bot._form_essential_requirements('CBD')}
+        assert 'stage_of_training' not in essentials
+        statuses = {key: 'present' for key in essentials}
+
+        update = sim._make_callback_update('FORM|CBD')
+        with patch('bot.assess_form_essentials', new_callable=AsyncMock, return_value=statuses), \
+             patch('bot._analyse_selected_form', new_callable=AsyncMock, return_value=incomplete_draft):
+            result = await handle_form_choice(update, context)
+
+        assert result == AWAIT_APPROVAL
+        assert not any('I still need' in (text or '') for _, text, _ in sim.messages_sent)
+        text = sim.get_last_text()
+        assert 'Here is your Case-Based Discussion draft' in text
+        button_data = {data for _, data in sim.get_last_buttons()}
+        assert 'APPROVE|draft' in button_data
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('second_choice', ['FORM|best', 'FORM|ACAT'])
+    async def test_concurrent_form_choice_runs_one_template_review(
+        self, recommended_forms, thin_draft, second_choice
+    ):
+        """One prompt cannot launch duplicate or competing draft work."""
+        from bot import AWAIT_APPROVAL, AWAIT_FORM_CHOICE, handle_form_choice
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        context.user_data['form_recommendations'] = recommended_forms
+        first_update = sim._make_callback_update('FORM|best')
+        second_update = sim._make_callback_update(second_choice)
+        second_update.callback_query.message.message_id = (
+            first_update.callback_query.message.message_id
+        )
+
+        review_started = asyncio.Event()
+        release_review = asyncio.Event()
+
+        async def slow_review(*_args, **_kwargs):
+            review_started.set()
+            await release_review.wait()
+            return thin_draft
+
+        with patch('bot._analyse_selected_form', new=AsyncMock(side_effect=slow_review)) as analyse:
+            first = asyncio.create_task(handle_form_choice(first_update, context))
+            await asyncio.wait_for(review_started.wait(), timeout=5)
+
+            duplicate_result = await handle_form_choice(second_update, context)
+            assert duplicate_result == AWAIT_FORM_CHOICE
+            analyse.assert_awaited_once()
+
+            release_review.set()
+            assert await first == AWAIT_APPROVAL
+
+        analyse.assert_awaited_once()
+        assert context.user_data['chosen_form'] == 'CBD'
+        assert context.user_data.get('form_choice_in_progress') is None
+
+    @pytest.mark.asyncio
+    async def test_identical_form_progress_edit_does_not_abort_drafting(self, thin_draft):
+        """Telegram's already-achieved progress state is a harmless no-op."""
+        from telegram.error import BadRequest
+
+        from bot import AWAIT_APPROVAL, handle_form_choice
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        update = sim._make_callback_update('FORM|CBD')
+        update.callback_query.message.edit_text.side_effect = [
+            BadRequest(
+                'Message is not modified: specified new message content and '
+                'reply markup are exactly the same as current content'
+            ),
+            None,
+        ]
+
+        with patch(
+            'bot._analyse_selected_form',
+            new=AsyncMock(return_value=thin_draft),
+        ) as analyse:
+            result = await handle_form_choice(update, context)
+
+        assert result == AWAIT_APPROVAL
+        analyse.assert_awaited_once()
+        assert context.user_data.get('form_choice_in_progress') is None
 
     @pytest.mark.asyncio
     async def test_draft_preview_orders_body_before_reply_hint(self, thin_draft):
@@ -404,7 +513,11 @@ class TestFlowWalker:
 
         first_field_pos = text.index('📅')
         assert '📋 *Draft preview*' not in text
-        assert text.count(_DRAFT_DIVIDER) == 0
+        # No divider or 'AI assistance' footer: the AI-use declaration lives
+        # once, inline in the reflection field, and the retired 'Missing
+        # details' block must not reappear either.
+        assert _DRAFT_DIVIDER not in text
+        assert '🤖 *AI assistance*' not in text
         assert '🧩 *Missing details*' not in text
 
         curriculum_pos = text.index('📚 *Curriculum:*')
@@ -442,6 +555,8 @@ class TestFlowWalker:
 
         text = sim.get_last_text()
 
+        # No divider anywhere — there is no second block sandwiching the
+        # draft body, and no decorative separator before the reply hint.
         assert _DRAFT_DIVIDER not in text
         first_field_pos = text.index('📅')
         curriculum_pos = text.index('📚 *Curriculum:*')
@@ -463,6 +578,9 @@ class TestFlowWalker:
             fields={
                 'date_of_encounter': '2026-03-17',
                 'clinical_setting': 'ED',
+                'leadership_context': 'Busy majors shift with two juniors needing prioritisation help.',
+                'stage_of_training': 'Higher/ST4-ST6',
+                'clinical_reasoning': 'Directed the team through a surge in majors patients.',
                 'reflection': 'Led a busy shift; juniors needed prioritisation help.',
                 'curriculum_links': ['SLO11'],
                 'key_capabilities': ['SLO11 KC1: Lead a team safely'],
@@ -495,6 +613,8 @@ class TestFlowWalker:
 
         text = sim.get_last_text()
 
+        # No divider anywhere, including a leftover heavy divider around the
+        # sanitised rationale.
         assert _DRAFT_DIVIDER not in text
         assert "I've treated this as a Leadership Assessment Tool:" not in text
         # None of the internal/model-flavoured phrasing should reach the user.
@@ -545,7 +665,7 @@ class TestFlowWalker:
         text = sim.get_last_text()
         assert 'Self-directed Learning' in text
         assert 'clinical detail' not in text.lower()
-        assert ('✅ Draft Self-directed Learning Reflection', 'FORM|SDL') in sim.get_last_buttons()
+        assert ('📖 Self-directed Learning', 'FORM|SDL') in sim.get_last_buttons()
 
     @pytest.mark.asyncio
     async def test_detailed_self_directed_learning_reflection_opens_sdl_choice(self):
@@ -577,7 +697,7 @@ class TestFlowWalker:
         assert result == AWAIT_FORM_CHOICE
         text = sim.get_last_text()
         assert 'Self-directed Learning' in text
-        assert ('✅ Draft Self-directed Learning Reflection', 'FORM|SDL') in sim.get_last_buttons()
+        assert ('📖 Self-directed Learning', 'FORM|SDL') in sim.get_last_buttons()
 
     @pytest.mark.asyncio
     async def test_explicit_sdl_see_all_forms_back_restores_same_choice(self):
@@ -646,7 +766,7 @@ class TestFlowWalker:
 
         assert result == AWAIT_FORM_CHOICE
         assert 'rate-limited' in sim.get_last_text()
-        assert ('🔄 Try again', 'ACTION|retry_template') in sim.get_last_buttons()
+        assert ('🔄 Retry', 'ACTION|retry_template') in sim.get_last_buttons()
         assert context.user_data['chosen_form'] == 'MINI_CEX'
 
     @pytest.mark.asyncio
@@ -709,14 +829,49 @@ class TestFlowWalker:
 
         update = sim._make_callback_update('FORM|best')
         with patch('bot.get_curriculum', return_value='2025'), \
-             patch('bot._analyse_selected_form', new_callable=AsyncMock, return_value=thin_draft), \
+             patch('bot._analyse_selected_form', new_callable=AsyncMock, return_value=thin_draft) as analyse, \
              patch('bot._missing_template_fields', return_value=([], [], [])):
             result = await handle_form_choice(update, context)
 
         assert result == AWAIT_APPROVAL
+        analyse.assert_awaited_once()
         assert context.user_data['chosen_form'] == 'CBD'
         assert context.user_data['last_funnel_event'] == 'draft_shown'
-        assert {'APPROVE|draft', 'CANCEL|draft'} <= {data for _, data in sim.get_last_buttons()}
+        button_data = {data for _, data in sim.get_last_buttons()}
+        assert {'APPROVE|draft', 'CANCEL|draft'} <= button_data
+        assert 'ACTION|continue_thin' not in button_data
+
+    @pytest.mark.asyncio
+    async def test_best_fit_button_skips_unavailable_recommendations(self, thin_draft):
+        from bot import AWAIT_APPROVAL, handle_form_choice
+        from extractor import FORM_UUIDS
+        from models import FormTypeRecommendation
+
+        sim = BotSimulator()
+        context = sim._make_context()
+        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        context.user_data['form_recommendations'] = [
+            FormTypeRecommendation(
+                form_type='TEACH_OBS',
+                rationale='Unavailable candidate.',
+                uuid=None,
+            ),
+            FormTypeRecommendation(
+                form_type='CBD',
+                rationale='Available best fit.',
+                uuid=FORM_UUIDS['CBD'],
+            ),
+        ]
+
+        with patch('bot.get_curriculum', return_value='2025'), \
+             patch('bot._analyse_selected_form', new=AsyncMock(return_value=thin_draft)) as analyse:
+            result = await handle_form_choice(
+                sim._make_callback_update('FORM|best'), context
+            )
+
+        assert result == AWAIT_APPROVAL
+        assert context.user_data['chosen_form'] == 'CBD'
+        assert analyse.await_args.args[3] == 'CBD'
 
     @pytest.mark.asyncio
     async def test_template_review_fills_stage_from_saved_training_level(self):
@@ -819,17 +974,32 @@ class TestFlowWalker:
         assert draft.fields['clinical_setting'] == ''
         assert draft.fields['procedural_skill'] == ''
 
-    def test_draft_preview_omits_ai_reflection_check_by_default(self, thin_draft):
+    def test_draft_preview_declares_ai_use_by_default(self, thin_draft):
+        """The AI-use declaration lives once, inline in the reflection field.
+        There must be no second 'AI assistance' footer repeating it."""
         from bot import _format_draft_preview
+        from rcem_ai_policy import AI_USE_DECLARATION
 
         preview = _format_draft_preview(
             thin_draft,
             input_source='voice',
         )
 
-        assert 'AI reflection check' not in preview
+        assert AI_USE_DECLARATION in preview
+        assert 'AI assistance' not in preview
+        assert 'RCEM' not in preview
         assert 'Review needed before saving' not in preview
         assert 'Save as draft only runs after you review' not in preview
+
+    def test_draft_preview_has_no_divider_when_reflection_detail_not_needed(self, thin_draft):
+        """No decorative divider or duplicate AI-assistance footer should
+        appear when the doctor's own reflective input is already present."""
+        from bot import _DRAFT_DIVIDER, _format_draft_preview
+
+        preview = _format_draft_preview(thin_draft, input_source='voice')
+
+        assert _DRAFT_DIVIDER not in preview
+        assert '🤖 *AI assistance*' not in preview
 
     def test_draft_preview_never_quotes_raw_source_text(self, thin_draft):
         """The preview must describe the source type but never quote raw case text."""
@@ -850,7 +1020,7 @@ class TestFlowWalker:
 
         preview = _format_draft_preview_for_context(thin_draft, context, 'CBD')
 
-        assert 'Review needed before saving' in preview
+        assert 'Your reflection is needed before saving' in preview
         assert 'AI reflection check' not in preview
         assert 'Source cue' not in preview
         assert 'John Smith' not in preview
@@ -874,9 +1044,9 @@ class TestFlowWalker:
             for button in row
         }
 
-        assert 'Review needed before saving' in preview
+        assert 'Your reflection is needed before saving' in preview
         assert 'Add your own interpretation/reflection' in preview
-        assert 'ACTION|add_reflection_detail' in buttons
+        assert buttons == {'CANCEL|draft'}
         assert 'APPROVE|draft' not in buttons
 
     def test_image_with_user_context_can_show_save_when_reflection_is_useful(self, thin_draft):
@@ -912,12 +1082,14 @@ class TestFlowWalker:
 
     def test_draft_preview_safety_layer_can_be_omitted_for_llm_feedback(self, thin_draft):
         from bot import _format_draft_preview
+        from rcem_ai_policy import AI_USE_DECLARATION
 
         preview = _format_draft_preview(thin_draft, include_safety_layer=False)
 
         assert 'AI reflection check' not in preview
         assert 'Source cue' not in preview
         assert 'Save as draft only runs after you review' not in preview
+        assert AI_USE_DECLARATION not in preview
 
     @staticmethod
     def _assert_no_transparency_copy(current_draft: str) -> None:
@@ -1054,7 +1226,10 @@ class TestFlowWalker:
         sim = BotSimulator()
         update = sim._make_callback_update('IMPROVE|reflection')
         context = sim._make_context()
-        context.user_data['case_text'] = 'I completed ATLS and have a certificate.'
+        context.user_data['case_text'] = (
+            'I completed ATLS and learned to use a clearer primary survey under pressure. '
+            'I will use that structure when leading trauma assessments.'
+        )
         context.user_data['draft_data'] = {
             '_type': 'FORM',
             'form_type': 'FORMAL_COURSE',
@@ -1178,14 +1353,13 @@ class TestFlowWalker:
         assert revised_edits == []
 
         # The keyboard must be restored on the ORIGINAL draft message via a
-        # markup-only edit (text untouched). The improve button must still be
-        # present so the user can retry.
+        # markup-only edit (text untouched), keeping Save and Cancel available.
         markup_events = [m for m in sim.messages_sent if m[0] == 'markup' and m[2] is not None]
         assert markup_events, 'Original draft buttons were not restored after failure'
         last_markup = markup_events[-1][2]
         button_data = [b.callback_data for row in last_markup.inline_keyboard for b in row]
         assert 'APPROVE|draft' in button_data
-        assert 'IMPROVE|reflection' in button_data
+        assert set(button_data) == {'APPROVE|draft', 'CANCEL|draft'}
 
     @pytest.mark.asyncio
     async def test_all_forms_screen_has_navigation(self):
@@ -1242,6 +1416,85 @@ class TestFlowWalker:
         buttons = sim.get_last_buttons()
         assert ('📖 Self-directed Learning', 'FORM|SDL') in buttons
         assert all(label != '📖 SDL' for label, _ in buttons)
+
+    @pytest.mark.asyncio
+    async def test_legacy_reflective_and_procedural_category_slugs_still_route(self):
+        """Old buttons already sent to a trainee's chat before the label
+        rename (Reflective->Reflection, Procedural->Procedures) must keep
+        working — the callback_data slug is frozen independently of the
+        on-screen label."""
+        from bot import AWAIT_FORM_CHOICE, handle_form_choice
+
+        sim = BotSimulator()
+        context = sim._make_context()
+
+        with patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_curriculum', return_value='2025'):
+            result = await handle_form_choice(sim._make_callback_update('FORM|cat_REFLECTIVE'), context)
+            assert result == AWAIT_FORM_CHOICE
+            assert 'Reflection' in sim.get_last_text()
+            reflective_buttons = [d for _, d in sim.get_last_buttons()]
+            assert 'FORM|REFLECT_LOG' in reflective_buttons
+
+            result = await handle_form_choice(sim._make_callback_update('FORM|cat_PROCEDURAL'), context)
+            assert result == AWAIT_FORM_CHOICE
+            assert 'Procedures' in sim.get_last_text()
+            procedural_buttons = [d for _, d in sim.get_last_buttons()]
+            assert 'FORM|DOPS' in procedural_buttons
+
+    @pytest.mark.asyncio
+    async def test_invalid_category_slug_is_a_safe_no_op(self):
+        from bot import AWAIT_FORM_CHOICE, handle_form_choice
+
+        sim = BotSimulator()
+        context = sim._make_context()
+
+        result = await handle_form_choice(sim._make_callback_update('FORM|cat_BOGUS'), context)
+
+        assert result == AWAIT_FORM_CHOICE
+        assert sim.messages_sent == []
+
+    @pytest.mark.asyncio
+    async def test_repeated_category_tap_is_idempotent(self):
+        """Tapping the same category button twice in a row must not grow
+        state or change the rendered screen — pure re-render, no drafting."""
+        from bot import AWAIT_FORM_CHOICE, handle_form_choice
+
+        sim = BotSimulator()
+        context = sim._make_context()
+
+        with patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_curriculum', return_value='2025'):
+            first = await handle_form_choice(sim._make_callback_update('FORM|cat_CLINICAL'), context)
+            first_text = sim.get_last_text()
+            first_buttons = sim.get_last_buttons()
+
+            second = await handle_form_choice(sim._make_callback_update('FORM|cat_CLINICAL'), context)
+
+        assert first == AWAIT_FORM_CHOICE == second
+        assert sim.get_last_text() == first_text
+        assert sim.get_last_buttons() == first_buttons
+        assert len(sim.messages_sent) == 2  # one edit per tap, nothing extra queued
+
+    @pytest.mark.asyncio
+    async def test_category_navigation_edits_same_message_in_place(self):
+        """Recommendations <-> categories <-> forms must all edit the one
+        outstanding message, never send a fresh message (no chat clutter)."""
+        from bot import AWAIT_FORM_CHOICE, handle_form_choice
+
+        sim = BotSimulator()
+        context = sim._make_context()
+
+        with patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_curriculum', return_value='2025'):
+            await handle_form_choice(sim._make_callback_update('FORM|show_all'), context)
+            await handle_form_choice(sim._make_callback_update('FORM|cat_CLINICAL'), context)
+            await handle_form_choice(sim._make_callback_update('FORM|show_all'), context)
+
+        assert sim.messages_sent, "no messages captured"
+        assert all(kind == 'edit' for kind, _, _ in sim.messages_sent), (
+            f"category navigation sent a new message instead of editing: {sim.messages_sent}"
+        )
 
     @pytest.mark.asyncio
     async def test_search_returns_to_form_choice(self):
@@ -1519,7 +1772,7 @@ class TestFlowWalker:
         assert result == AWAIT_FORM_CHOICE
         assert 'It looks like you want to file a new case' not in sim.get_last_text()
         assert extra_text in context.user_data['case_text']
-        assert 'forms that fit your case' in sim.get_last_text()
+        assert 'best fit:' in sim.get_last_text().lower()
         assert sim.messages_sent[-1][0] == 'bot_edit'
 
     @pytest.mark.asyncio
@@ -1610,8 +1863,8 @@ class TestFlowWalker:
         assert 'case-based discussion' in text
         assert 'filing finished' not in sim.get_last_text().lower()
         buttons = sim.get_last_buttons()
-        # First button may be File another case or the amend button row
-        assert ('📋 File another case', 'ACTION|file') in buttons
+        # First button may be New case or the amend button row
+        assert ('➕ New case', 'ACTION|file') in buttons
         assert ('👍 It worked', 'FEEDBACK|good|CBD|success') not in buttons
         assert ("👎 Didn't work", 'FEEDBACK|bad|CBD|success') not in buttons
         assert ('🧰 More options', 'ACTION|post_file_more|CBD|success') not in buttons
@@ -1701,7 +1954,9 @@ class TestFlowWalker:
             'fields': thin_draft.fields,
             'uuid': thin_draft.uuid,
         }
-        context.user_data['last_amend_case_text'] = 'Original case text.'
+        context.user_data['last_amend_case_text'] = (
+            'Original case text. I learned to escalate earlier and will document the plan next time.'
+        )
         context.user_data['last_amend_chosen_form'] = thin_draft.form_type
         context.user_data['last_filing_status'] = 'partial'
         context.user_data['last_filing_form_name'] = 'Case-Based Discussion'
@@ -1763,6 +2018,7 @@ class TestFlowWalker:
                 'stage_of_training': 'Higher/ST4-ST6',
                 'clinical_setting': 'Emergency Department',
                 'procedure_name': 'DC cardioversion',
+                'procedural_skill': 'DC cardioversion',
                 'indication': (
                     'Unstable atrial fibrillation with rapid ventricular '
                     'response and hypotension despite initial fluid '
@@ -1864,7 +2120,7 @@ class TestFlowWalker:
         buttons = sim.get_last_buttons()
         assert ('👍 It worked', 'FEEDBACK|good|CBD|partial') not in buttons
         assert ("👎 Didn't work", 'FEEDBACK|bad|CBD|partial') not in buttons
-        assert ('📋 File another case', 'ACTION|file') in buttons
+        assert ('➕ New case', 'ACTION|file') in buttons
         assert ('❌ Cancel', 'ACTION|cancel') in buttons
         assert ('🧰 More options', 'ACTION|post_file_more|CBD|partial') not in buttons
         assert not any(label in {'💬 Something missing?', '⚙️ Settings', '🏠 Main menu'} for label, _ in buttons)
@@ -1911,7 +2167,9 @@ class TestFlowWalker:
         sim = BotSimulator()
         update = sim._make_callback_update('APPROVE|draft')
         context = sim._make_context()
-        context.user_data['case_text'] = 'DOPS cardioversion case'
+        context.user_data['case_text'] = (
+            'DOPS cardioversion case. I learned to rehearse the safety checks and will keep using closed-loop communication.'
+        )
         context.user_data['draft_data'] = {
             '_type': 'FORM',
             'form_type': dops_draft.form_type,
@@ -2009,7 +2267,10 @@ class TestFlowWalker:
         sim = BotSimulator()
         update = sim._make_callback_update('APPROVE|draft')
         context = sim._make_context()
-        context.user_data['case_text'] = 'Observed procedural sedation and ankle fracture reduction.'
+        context.user_data['case_text'] = (
+            'Observed procedural sedation and ankle fracture reduction. '
+            'I learned to make the team brief more explicit and will use it next time.'
+        )
         context.user_data['draft_data'] = {
             '_type': 'FORM',
             'form_type': dops_draft.form_type,
@@ -2070,8 +2331,8 @@ class TestFlowWalker:
         await handle_action_button(update, context)
 
         buttons = sim.get_last_buttons()
-        assert ('🔄 Try again', 'ACTION|retry_filing') in buttons
-        assert ('📋 File another case', 'ACTION|file') in buttons
+        assert ('🔄 Retry', 'ACTION|retry_filing') in buttons
+        assert ('➕ New case', 'ACTION|file') in buttons
         assert ('❌ Cancel', 'ACTION|cancel') in buttons
         assert ('💬 Something missing?', 'FILING|feedback|CBD') not in buttons
         assert ('🚩 Flag a missed field', 'FILING|feedback|CBD') not in buttons
@@ -2148,7 +2409,7 @@ class TestFlowWalker:
         assert recovery_line in text
         assert "Filing didn't complete" in text
         buttons = sim.get_last_buttons()
-        assert ('📋 File another case', 'ACTION|file') in buttons
+        assert ('➕ New case', 'ACTION|file') in buttons
         assert ('❌ Cancel', 'ACTION|cancel') in buttons
 
     @pytest.mark.asyncio
@@ -2179,8 +2440,8 @@ class TestFlowWalker:
         assert "Reconnect Kaizen" in text
         buttons = sim.get_last_buttons()
         assert ('🔗 Reconnect Kaizen', 'ACTION|setup') in buttons
-        assert ('🔄 Try again', 'ACTION|retry_filing') in buttons
-        assert ('📋 File another case', 'ACTION|reset') in buttons
+        assert ('🔄 Retry', 'ACTION|retry_filing') in buttons
+        assert ('➕ New case', 'ACTION|reset') in buttons
         # Draft must be preserved so Try again can pick it up
         assert context.user_data.get('draft_data') is not None
         assert context.user_data.get('force_reconnect') is True
@@ -2383,7 +2644,9 @@ class TestFlowWalker:
                 'fields': thin_draft.fields,
                 'uuid': thin_draft.uuid,
             },
-            'case_text': 'Original LAT flow-management case',
+            'case_text': (
+                'Original LAT flow-management case. I learned to state escalation thresholds earlier next time.'
+            ),
             'chosen_form': thin_draft.form_type,
         })
 
@@ -2411,10 +2674,10 @@ class TestFlowWalker:
         text = (sim.get_last_text() or '').lower()
         assert 'kept that draft open' in text
         buttons = sim.get_last_buttons()
-        assert ('🔄 Retry filing this draft', 'ACTION|retry_filing') in buttons
-        assert ('✏️ Keep editing this draft', 'CASE|improve') in buttons
-        assert ('📋 File another case', 'CASE|new') in buttons
-        assert ('❌ Cancel current draft', 'ACTION|cancel') in buttons
+        assert ('🔄 Retry', 'ACTION|retry_filing') in buttons
+        assert ('✏️ Edit', 'CASE|improve') in buttons
+        assert ('➕ New case', 'CASE|new') in buttons
+        assert ('❌ Cancel', 'ACTION|cancel') in buttons
 
     @pytest.mark.asyncio
     async def test_failed_filing_start_new_choice_processes_pending_text(self, thin_draft):
@@ -2478,8 +2741,8 @@ class TestFlowWalker:
         assert _has_retryable_failed_filing_draft(context) is False
 
     def test_draft_review_and_failed_filing_keyboards_are_distinct(self):
-        """The normal draft-review keyboard must never offer 'Retry filing this
-        draft' — that affordance belongs only to the failed-filing gate."""
+        """The normal draft-review keyboard must never offer Retry — that
+        affordance belongs only to the failed-filing gate."""
         from bot import (
             _build_approval_keyboard,
             _build_failed_filing_input_gate_keyboard,
@@ -2495,8 +2758,8 @@ class TestFlowWalker:
         review_labels = labels(_build_approval_keyboard())
         gate_labels = labels(_build_failed_filing_input_gate_keyboard())
 
-        assert not any('Retry filing' in label for label in review_labels)
-        assert any('Retry filing' in label for label in gate_labels)
+        assert '🔄 Retry' not in review_labels
+        assert '🔄 Retry' in gate_labels
 
     @pytest.mark.asyncio
     async def test_media_feedback_on_fresh_draft_skips_retry_gate(self, thin_draft):
@@ -2624,9 +2887,9 @@ class TestFlowWalker:
         assert result == AWAIT_APPROVAL
         assert context.user_data['amend_mode'] is True
         buttons = sim.get_last_buttons()
-        assert ('📤 Save updated draft', 'APPROVE|draft') in buttons
-        assert ('❌ Cancel amend', 'AMEND|cancel') in buttons
-        assert ('📋 File another case', 'ACTION|file') not in buttons
+        assert ('💾 Save to Kaizen', 'APPROVE|draft') in buttons
+        assert ('❌ Cancel', 'AMEND|cancel') in buttons
+        assert ('➕ New case', 'ACTION|file') not in buttons
 
         updated = thin_draft.model_copy(update={
             'fields': {**thin_draft.fields, 'reflection': 'Updated with leadership learning.'}
@@ -2645,8 +2908,8 @@ class TestFlowWalker:
         assert 'Original filed CBD context' in context.user_data['case_text']
         assert 'delegated nursing tasks' in context.user_data['case_text']
         buttons = sim.get_last_buttons()
-        assert ('📤 Save updated draft', 'APPROVE|draft') in buttons
-        assert ('📋 File another case', 'ACTION|file') not in buttons
+        assert ('💾 Save to Kaizen', 'APPROVE|draft') in buttons
+        assert ('➕ New case', 'ACTION|file') not in buttons
 
     @pytest.mark.asyncio
     async def test_amend_mode_explicit_new_case_requires_choice(self, thin_draft):
@@ -2675,8 +2938,8 @@ class TestFlowWalker:
         assert context.user_data['amend_pending_feedback'] == new_case_text
         assert 'update this draft or start a new case' in sim.get_last_text().lower()
         buttons = sim.get_last_buttons()
-        assert ('✏️ Update this draft', 'AMEND|update_current') in buttons
-        assert ('📋 Start a case', 'AMEND|start_new') in buttons
+        assert ('✏️ Update draft', 'AMEND|update_current') in buttons
+        assert ('➕ New case', 'AMEND|start_new') in buttons
 
         choice_update = sim._make_callback_update('AMEND|start_new')
         with patch('bot._process_case_text', new=AsyncMock(return_value=AWAIT_FORM_CHOICE)) as process_case:
@@ -2942,7 +3205,7 @@ class TestFlowWalker:
             await handle_case_input(update, context)
 
         text = sim.get_last_text() or ''
-        assert 'fit your case' in text.lower() or 'recommend' in text.lower() or 'matching forms' in text.lower()
+        assert 'best fit:' in text.lower() or 'recommend' in text.lower() or 'matching forms' in text.lower()
 
     @pytest.mark.asyncio
     async def test_wait_for_pictures_holds_case_bundle(self):
@@ -3198,7 +3461,7 @@ class TestFlowWalker:
         recommend.assert_not_awaited()
         assert context.user_data['chosen_form'] == 'MINI_CEX'
         assert 'pleuritic chest pain' in context.user_data['case_text']
-        assert ('✅ Draft Mini-Clinical Evaluation Exercise', 'FORM|MINI_CEX') in sim.get_last_buttons()
+        assert ('🏥 Mini-CEX', 'FORM|MINI_CEX') in sim.get_last_buttons()
 
         draft = FormDraft(
             form_type='MINI_CEX',
@@ -3222,30 +3485,58 @@ class TestFlowWalker:
         assert 'Here is your Mini-Clinical Evaluation Exercise draft:' in sim.get_last_text()
 
     @pytest.mark.asyncio
-    async def test_thin_input_blocked_before_extraction(self):
-        """A too-short non-clinical message routed into _process_case_text
-        must be blocked by the anti-fabrication gate — no recommender, no
-        extractor calls, and the user is asked for real clinical detail."""
+    async def test_genuinely_empty_input_blocked_before_extraction(self):
+        """The only automatic refusal left: fewer than 3 words and no
+        attachment. Neither the recommender nor the extractor fire."""
         from bot import _process_case_text
 
         sim = BotSimulator()
-        update = sim._make_text_update('please file a case')
+        update = sim._make_text_update('hi')
         context = sim._make_context()
         user_id = sim.user_id
 
         with patch('bot.recommend_form_types', new=AsyncMock()) as recommend, \
              patch('bot._analyse_selected_form', new=AsyncMock()) as analyse:
             result = await _process_case_text(
-                update.message, context, user_id, 'please file a case', 'text'
+                update.message, context, user_id, 'hi', 'text'
             )
 
         assert result == ConversationHandler.END
-        # Neither the recommender nor the extractor should fire — the input is
-        # below the minimum-content threshold.
         recommend.assert_not_awaited()
         analyse.assert_not_awaited()
         text = (sim.get_last_text() or '').lower()
         assert 'clinical detail' in text or 'what happened' in text
+
+    @pytest.mark.asyncio
+    async def test_short_but_nonempty_input_reaches_the_model_not_a_keyword_gate(self):
+        """A short phrase with no obvious clinical vocabulary is no longer
+        refused by a keyword/word-count heuristic — it goes to the model,
+        which decides whether there is anything to draft from."""
+        from bot import AWAIT_FORM_CHOICE, _process_case_text
+        from extractor import FORM_UUIDS
+        from models import FormTypeRecommendation
+
+        sim = BotSimulator()
+        update = sim._make_text_update('please file a case')
+        context = sim._make_context()
+        user_id = sim.user_id
+
+        recommendations = [
+            FormTypeRecommendation(
+                form_type="CBD",
+                rationale="Insufficient detail to recommend confidently.",
+                uuid=FORM_UUIDS.get("CBD"),
+            )
+        ]
+        with patch('bot.recommend_form_types', new=AsyncMock(return_value=recommendations)) as recommend, \
+             patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_curriculum', return_value='2025'):
+            result = await _process_case_text(
+                update.message, context, user_id, 'please file a case', 'text'
+            )
+
+        assert result == AWAIT_FORM_CHOICE
+        recommend.assert_awaited_once()
 
 
 class TestRecentPortfolioFixes:
@@ -3275,8 +3566,8 @@ class TestRecentPortfolioFixes:
 
         # After one use, the improve button is removed entirely
         assert ('Improved once ✅', 'IMPROVE|used') not in buttons
-        assert ('💡 Improve reflection', 'IMPROVE|reflection') not in buttons
-        assert ('📤 Save as draft', 'APPROVE|draft') in buttons
+        assert ('Improve', 'IMPROVE|reflection') not in buttons
+        assert ('💾 Save to Kaizen', 'APPROVE|draft') in buttons
 
     def test_dops_pre_file_guard_blocks_blank_voice_draft(self):
         from bot import _universal_pre_file_gate
@@ -3336,15 +3627,15 @@ class TestRecentPortfolioFixes:
         keyboard = _build_post_filing_keyboard('CBD', 'success', same_case_available=True)
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
 
-        assert ('💾 Save as another WBA', 'ACTION|same_case_another') in buttons
-        assert ('📋 File another case', 'ACTION|file') in buttons
+        assert ('📋 Another form', 'ACTION|same_case_another') in buttons
+        assert ('➕ New case', 'ACTION|file') in buttons
         assert [
             [(b.text, b.callback_data) for b in row]
             for row in keyboard.inline_keyboard
-        ][:2] == [
-            [('💾 Save as another WBA', 'ACTION|same_case_another')],
-            [('📋 File another case', 'ACTION|file')],
-        ]
+        ][:1] == [[
+            ('📋 Another form', 'ACTION|same_case_another'),
+            ('➕ New case', 'ACTION|file'),
+        ]]
 
     def test_post_filing_keyboard_puts_open_saved_draft_first(self):
         from bot import _build_post_filing_keyboard
@@ -3363,8 +3654,10 @@ class TestRecentPortfolioFixes:
         ]
 
         assert rows[0] == [('🔗 Open saved draft', None, saved_url)]
-        assert rows[1] == [('💾 Save as another WBA', 'ACTION|same_case_another', None)]
-        assert rows[2] == [('📋 File another case', 'ACTION|file', None)]
+        assert rows[1] == [
+            ('📋 Another form', 'ACTION|same_case_another', None),
+            ('➕ New case', 'ACTION|file', None),
+        ]
 
     def test_attachment_skip_receipt_reads_as_secondary_status(self):
         from bot import _format_attachment_status_line
@@ -3383,7 +3676,7 @@ class TestRecentPortfolioFixes:
         keyboard = _build_post_filing_keyboard('CBD', 'partial', same_case_available=True)
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
 
-        assert ('💾 Save as another WBA', 'ACTION|same_case_another') in buttons
+        assert ('📋 Another form', 'ACTION|same_case_another') in buttons
 
     def test_post_filing_keyboard_no_same_case_for_uncertain_partial(self):
         """Uncertain partial (partial + error) must NOT offer Same case
@@ -3393,8 +3686,8 @@ class TestRecentPortfolioFixes:
         keyboard = _build_post_filing_keyboard('CBD', 'partial', uncertain=True, same_case_available=True)
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
 
-        assert ('💾 Save as another WBA', 'ACTION|same_case_another') not in buttons
-        assert ('🔄 Try again', 'ACTION|retry_filing') in buttons
+        assert ('📋 Another form', 'ACTION|same_case_another') not in buttons
+        assert ('🔄 Retry', 'ACTION|retry_filing') in buttons
 
     def test_post_filing_keyboard_links_to_saved_draft_url_when_present(self):
         """When the filer captures the post-save Kaizen URL, the Open button
@@ -3416,7 +3709,7 @@ class TestRecentPortfolioFixes:
 
             assert ('🔗 Open saved draft', saved_url) in labelled_urls
             # No stale "Open in Kaizen" label that falsely promises to open the draft.
-            assert not any(text == '🔗 Open in Kaizen' for text, _ in labelled_urls)
+            assert not any(text == 'Open in Kaizen' for text, _ in labelled_urls)
             # The new-section URL (blank form) must not appear when we have a
             # real saved-draft URL.
             assert not any('events/new-section/' in url for _, url in labelled_urls)
@@ -3438,7 +3731,7 @@ class TestRecentPortfolioFixes:
         assert ('🔗 Open Kaizen', 'https://kaizenep.com/activities') in labelled_urls
         # No label claiming the button opens the saved draft, since it
         # actually opens the activities list.
-        assert not any(text == '🔗 Open saved draft' for text, _ in labelled_urls)
+        assert not any(text == 'Open saved draft' for text, _ in labelled_urls)
         # Critically: never link to the new-section URL on a saved draft —
         # that would open a blank form, which is the user-reported bug.
         assert not any('events/new-section/' in url for _, url in labelled_urls)
@@ -3607,7 +3900,7 @@ class TestRecentPortfolioFixes:
             for row in sim.messages_sent[-1][2].inline_keyboard
             if row
         ]
-        assert ('💾 Save as another WBA', 'ACTION|same_case_another') in buttons, (
+        assert ('📋 Another form', 'ACTION|same_case_another') in buttons, (
             f"Clean partial should surface 'Same case' button. Got: {buttons!r}"
         )
 
@@ -3625,8 +3918,11 @@ class TestRecentPortfolioFixes:
                 'date_of_encounter': '2026-03-17',
                 'clinical_setting': 'ED',
                 'patient_presentation': 'Chest pain',
+                'stage_of_training': 'Higher/ST4-ST6',
+                'trainee_role': 'Assessed and managed the patient',
                 'clinical_reasoning': 'Managed as ACS, escalated appropriately.',
                 'reflection': 'Need faster ECG review.',
+                'level_of_supervision': 'Indirect',
                 'curriculum_links': ['SLO1'],
                 'key_capabilities': ['SLO1 KC1: Assess and stabilise the patient'],
             },
@@ -3660,7 +3956,7 @@ class TestRecentPortfolioFixes:
             for row in sim.messages_sent[-1][2].inline_keyboard
             if row
         ]
-        assert ('💾 Save as another WBA', 'ACTION|same_case_another') in buttons, (
+        assert ('📋 Another form', 'ACTION|same_case_another') in buttons, (
             f"Success should surface 'Same case' button. Got: {buttons!r}"
         )
         """Successful save reads as a calm completion report with row-based
@@ -3675,8 +3971,11 @@ class TestRecentPortfolioFixes:
                 'date_of_encounter': '2026-03-17',
                 'clinical_setting': 'ED',
                 'patient_presentation': 'Chest pain',
+                'stage_of_training': 'Higher/ST4-ST6',
+                'trainee_role': 'Assessed and managed the patient',
                 'clinical_reasoning': 'Managed as ACS, escalated appropriately.',
                 'reflection': 'Need faster ECG review.',
+                'level_of_supervision': 'Indirect',
                 'curriculum_links': ['SLO1'],
                 'key_capabilities': ['SLO1 KC1: Assess and stabilise the patient'],
             },
@@ -3732,8 +4031,11 @@ class TestRecentPortfolioFixes:
                 'date_of_encounter': '',
                 'clinical_setting': 'ED',
                 'patient_presentation': 'Chest pain',
+                'stage_of_training': 'Higher/ST4-ST6',
+                'trainee_role': 'Assessed and managed the patient',
                 'clinical_reasoning': 'Managed as ACS.',
                 'reflection': 'Need faster ECG review.',
+                'level_of_supervision': 'Indirect',
                 'curriculum_links': ['SLO1'],
                 'key_capabilities': ['SLO1 KC1: Assess and stabilise the patient'],
             },
@@ -3933,7 +4235,7 @@ class TestRecentPortfolioFixes:
 
         assert result == AWAIT_FORM_CHOICE
         assert sim.messages_sent[-1][0] == 'bot_edit'
-        assert 'forms that fit your case' in sim.messages_sent[-1][1]
+        assert 'best fit:' in sim.messages_sent[-1][1].lower()
         assert 'Reusing the same case' not in sim.messages_sent[-1][1]
 
     @pytest.mark.asyncio
@@ -3972,7 +4274,7 @@ class TestRecentPortfolioFixes:
         assert result == AWAIT_FORM_CHOICE
         assert context.user_data['case_text'] == SAMPLE_CASES['valid']
         assert context.user_data['excluded_form_type'] == 'REFLECT_LOG'
-        assert 'Pick a category' in sim.get_last_text()
+        assert 'Browse supported forms' in sim.get_last_text()
 
     @pytest.mark.asyncio
     async def test_stale_form_selection_without_case_gives_restart_path(self):
@@ -4097,9 +4399,9 @@ class TestTrainingStageGroups:
         await handle_action_button(update, context)
 
         buttons = sim.get_last_buttons()
-        assert ('ACCS Profile', 'SETLEVEL|ACCS') in buttons
-        assert ('Intermediate Profile', 'SETLEVEL|INTERMEDIATE') in buttons
-        assert ('HST Profile', 'SETLEVEL|HIGHER') in buttons
+        assert ('🎓 ACCS', 'SETLEVEL|ACCS') in buttons
+        assert ('🎓 Intermediate profile', 'SETLEVEL|INTERMEDIATE') in buttons
+        assert ('🎓 HST', 'SETLEVEL|HIGHER') in buttons
 
     def test_settings_layout_prioritises_voice_profile(self):
         from bot import _settings_view_components
@@ -4110,7 +4412,7 @@ class TestTrainingStageGroups:
             text, keyboard = _settings_view_components(123)
 
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
-        assert ('✍️ Writing style: Not set', 'ACTION|voice') in buttons
+        assert ('✍️ Writing style', 'ACTION|voice') in buttons
         assert ('📋 Portfolio defaults', 'ACTION|portfolio_defaults') in buttons
         assert 'Helps drafts match your portfolio writing' in text
 
@@ -4209,7 +4511,16 @@ class TestImageOCRProgress:
         )
 
     @pytest.mark.asyncio
-    async def test_photo_upload_asks_for_intent_before_ocr(self):
+    async def test_photo_with_text_is_read_then_offers_the_choice(self):
+        """The image is read on arrival so the bot knows whether to ask at all.
+
+        This previously asserted the opposite — prompt first, read only after
+        the doctor chose. That order made "read text on it" appear for every
+        image, including ultrasounds and ECGs that carry no text, so the choice
+        had one real answer and was pure friction. Reading first costs the same
+        vision call the read path already paid for, and buys the ability to
+        skip the question entirely when there is nothing to read.
+        """
         from bot import AWAIT_DOC_INTENT, handle_case_input
 
         sim = BotSimulator()
@@ -4231,7 +4542,7 @@ class TestImageOCRProgress:
 
         ack_texts = [text for _, text, _ in sim.messages_sent if text]
         assert result == AWAIT_DOC_INTENT
-        extract_mock.assert_not_called()
+        extract_mock.assert_called_once()
         assert any("Receiving image" in t for t in ack_texts), (
             f"Expected initial 'Receiving image…' ack, got: {ack_texts}"
         )
@@ -4240,11 +4551,40 @@ class TestImageOCRProgress:
         )
         for text in ack_texts:
             assert "Still reading" not in text, (
-                f"Intent-first image upload must not emit 'Still reading…' — saw: {text!r}"
+                f"Image upload must not emit 'Still reading…' — saw: {text!r}"
             )
             assert "Receiving image…\n" not in text, (
                 f"Ack must not stack with extra lines — saw: {text!r}"
             )
+
+
+    @pytest.mark.asyncio
+    async def test_photo_without_text_skips_the_question_entirely(self):
+        """An ultrasound or ECG has no text, so there is nothing to decide."""
+        from bot import AWAIT_CASE_INPUT, handle_case_input
+
+        sim = BotSimulator()
+        context = sim._make_context()
+
+        photo_update = sim._make_text_update('')
+        photo = MagicMock()
+        file_obj = MagicMock()
+        file_obj.download_to_drive = AsyncMock()
+        photo.get_file = AsyncMock(return_value=file_obj)
+        photo_update.message.text = None
+        photo_update.message.photo = [photo]
+
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.extract_from_image', new=AsyncMock(return_value='NOT_CLINICAL')), \
+             patch('bot._process_case_text', new=AsyncMock()):
+            result = await handle_case_input(photo_update, context)
+
+        texts = [text for _, text, _ in sim.messages_sent if text]
+        assert result == AWAIT_CASE_INPUT
+        assert sim.get_last_buttons() == [], "nothing to read means nothing to ask"
+        assert any("attached to this case" in t for t in texts), texts
+        assert any("in your own words" in t for t in texts), texts
 
 
 class TestVideoGroundingGate:
@@ -4306,15 +4646,18 @@ class TestVideoGroundingGate:
 
 
 class TestPhotoGroundingGate:
-    """A photo's OCR text is the document talking, not the doctor.
+    """A photo of the doctor's own notes is a first-class case source.
 
-    Drafting from it alone produced a reflection the trainee never wrote, then
-    apologised for it in the preview. The ask must come *before* the draft.
+    The old per-source refusal (asking the doctor to re-describe a photo in
+    their own words before drafting) is gone: the vision extraction's output
+    is accepted as the case directly, no caption required.
     """
 
     @pytest.mark.asyncio
-    async def test_bare_photo_asks_for_context_instead_of_drafting(self):
-        from bot import AWAIT_CASE_INPUT, _process_case_text
+    async def test_bare_photo_is_accepted_as_the_case(self):
+        from bot import AWAIT_FORM_CHOICE, _process_case_text
+        from extractor import FORM_UUIDS
+        from models import FormTypeRecommendation
         from tests.bot_simulator import BotSimulator
 
         sim = BotSimulator()
@@ -4329,16 +4672,20 @@ class TestPhotoGroundingGate:
             'with SWMA. Patient attended ED. Technically difficult study, poor acoustic windows.'
         )
 
-        with patch('bot.recommend_form_types', new=AsyncMock()) as recommend_mock:
+        recommendations = [
+            FormTypeRecommendation(
+                form_type="CBD",
+                rationale="Echo report reviewed for a patient in ED.",
+                uuid=FORM_UUIDS.get("CBD"),
+            )
+        ]
+        with patch('bot.recommend_form_types', new=AsyncMock(return_value=recommendations)) as recommend_mock, \
+             patch('bot.get_training_level', return_value='ST5'), \
+             patch('bot.get_curriculum', return_value='2025'):
             result = await _process_case_text(message, context, 12345, ocr_text, 'photo')
 
-        prompts = [text for _, text, _ in sim.messages_sent if text]
-        assert result == AWAIT_CASE_INPUT
-        recommend_mock.assert_not_called(), 'A bare photo must never reach the recommender'
-        assert context.user_data.get('awaiting_source_detail') is True
-        assert any("isn't your clinical context" in t for t in prompts), (
-            f'Expected a request for the doctor\'s own context, got: {prompts}'
-        )
+        assert result == AWAIT_FORM_CHOICE
+        recommend_mock.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_photo_with_user_caption_proceeds_to_drafting(self):
@@ -4364,10 +4711,10 @@ class TestPhotoGroundingGate:
         recommend_mock.assert_called(), 'A photo with the doctor\'s own words must still draft'
 
     @pytest.mark.asyncio
-    async def test_photo_reply_to_image_origin_draft_asks_instead_of_redrafting(self):
-        """The reported failure: a case that began as a bare photo, with a draft
-        already on screen. Sending the same photo again re-ran extraction and
-        produced a fresh ungrounded draft instead of asking for context."""
+    async def test_photo_reply_to_image_origin_draft_redrafts_from_it(self):
+        """A second bare photo sent while a draft is on screen now re-runs
+        extraction like any other case-input source — no per-source refusal
+        stands between the doctor's photo and the redraft."""
         from bot import AWAIT_APPROVAL, _store_draft, handle_approval_media_feedback
         from models import CBDData
         from tests.bot_simulator import BotSimulator
@@ -4388,13 +4735,14 @@ class TestPhotoGroundingGate:
         update.message.text = None
         update.message.caption = None
 
+        redrafted = CBDData(patient_presentation='Poor acoustic windows on echo.')
         with patch('bot.extract_from_image', new=AsyncMock(return_value='Impression: mild concentric LVH. Poor acoustic windows.')), \
-             patch('bot.extract_cbd_data', new=AsyncMock()) as extract_mock, \
+             patch('bot.extract_cbd_data', new=AsyncMock(return_value=redrafted)) as extract_mock, \
              patch('bot.get_voice_profile', return_value=None):
             result = await handle_approval_media_feedback(update, context)
 
         assert result == AWAIT_APPROVAL
-        extract_mock.assert_not_awaited(), 'A second bare photo must not re-run extraction'
+        extract_mock.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_photo_reply_with_caption_still_updates_draft(self):
@@ -4520,7 +4868,7 @@ class TestMessageStandardCopy:
         assert result == AWAIT_FORM_CHOICE
         transcribe_mock.assert_awaited_once()
         assert context.user_data['case_input_source'] == 'voice'
-        assert 'fit your case' in (sim.get_last_text() or '').lower()
+        assert 'best fit:' in (sim.get_last_text() or '').lower()
         assert 'send a text message' not in (sim.get_last_text() or '').lower()
 
     @pytest.mark.asyncio
@@ -4553,7 +4901,7 @@ class TestMessageStandardCopy:
         assert captured_replies == []
         bot_edits = [text for kind, text, _ in sim.messages_sent if kind == 'bot_edit' and text]
         assert CAPTURED_ACK in bot_edits
-        assert 'fit your case' in (sim.get_last_text() or '').lower()
+        assert 'best fit:' in (sim.get_last_text() or '').lower()
 
     @pytest.mark.asyncio
     async def test_forwarded_voice_document_enters_new_case_flow(self, recommended_forms):
@@ -4585,7 +4933,7 @@ class TestMessageStandardCopy:
         assert result == AWAIT_FORM_CHOICE
         transcribe_mock.assert_awaited_once()
         assert context.user_data['case_input_source'] == 'voice'
-        assert 'fit your case' in (sim.get_last_text() or '').lower()
+        assert 'best fit:' in (sim.get_last_text() or '').lower()
         assert 'file type' not in (sim.get_last_text() or '').lower()
 
     @pytest.mark.asyncio
@@ -4789,9 +5137,9 @@ class TestVoiceProfileTwoPathFlow:
 
         assert result == AWAIT_VOICE_EXAMPLES
         buttons = sim.get_last_buttons()
-        assert ('📖 Learn from Kaizen entries', 'VOICE|path_kaizen') in buttons
-        assert ('✍️ Add examples manually', 'VOICE|path_manual') in buttons
-        assert ('🔙 Back to settings', 'VOICE|back_to_settings') in buttons
+        assert ('📖 Kaizen entries', 'VOICE|path_kaizen') in buttons
+        assert ('✍️ Manual examples', 'VOICE|path_manual') in buttons
+        assert ('🔙 Back', 'VOICE|back_to_settings') in buttons
         assert ('❌ Cancel', 'VOICE|cancel') not in buttons
         text = sim.get_last_text() or ''
         assert 'Writing style setup' in text
@@ -4817,9 +5165,9 @@ class TestVoiceProfileTwoPathFlow:
         update.callback_query.answer.assert_awaited_once()
         assert sim.messages_sent[-1][0] == 'bot_edit'
         buttons = sim.get_last_buttons()
-        assert ('📖 Learn from Kaizen entries', 'VOICE|path_kaizen') in buttons
-        assert ('✍️ Add examples manually', 'VOICE|path_manual') in buttons
-        assert ('🔙 Back to settings', 'VOICE|back_to_settings') in buttons
+        assert ('📖 Kaizen entries', 'VOICE|path_kaizen') in buttons
+        assert ('✍️ Manual examples', 'VOICE|path_manual') in buttons
+        assert ('🔙 Back', 'VOICE|back_to_settings') in buttons
 
     @pytest.mark.asyncio
     async def test_voice_command_for_existing_profile_offers_paths_and_remove(self):
@@ -4834,10 +5182,10 @@ class TestVoiceProfileTwoPathFlow:
 
         assert result == AWAIT_VOICE_EXAMPLES
         buttons = sim.get_last_buttons()
-        assert ('📖 Learn from Kaizen entries', 'VOICE|path_kaizen') in buttons
-        assert ('✍️ Add examples manually', 'VOICE|path_manual') in buttons
-        assert ('🗑️ Remove Profile', 'VOICE|remove') in buttons
-        assert ('🔙 Back to settings', 'VOICE|back_to_settings') in buttons
+        assert ('📖 Kaizen entries', 'VOICE|path_kaizen') in buttons
+        assert ('✍️ Manual examples', 'VOICE|path_manual') in buttons
+        assert ('🗑️ Remove profile', 'VOICE|remove') in buttons
+        assert ('🔙 Back', 'VOICE|back_to_settings') in buttons
         assert ('❌ Cancel', 'VOICE|cancel') not in buttons
 
     @pytest.mark.asyncio
@@ -4855,9 +5203,7 @@ class TestVoiceProfileTwoPathFlow:
         text = sim.get_last_text() or ''
         assert 'Add examples manually' in text
         assert 'Send 3-5 examples' in text
-        assert [
-            ('🔙 Back', 'VOICE|back_to_choice'),
-        ] in _last_button_rows(sim)
+        assert ('🔙 Back', 'VOICE|back_to_choice') in sim.get_last_buttons()
         # The Kaizen path gate must NOT be set from the manual path — those
         # are independent contracts.
         assert context.user_data.get('voice_kaizen_path_started') is None
@@ -4906,12 +5252,10 @@ class TestVoiceProfileTwoPathFlow:
 
         buttons = sim.get_last_buttons()
         assert ('✅ I consent — pick sample', 'VOICE|kaizen_consent') not in buttons
-        assert ('📋 Recent 10 entries', 'VOICE|kaizen_sample|recent_10') in buttons
-        assert ('📅 Last 6 months', 'VOICE|kaizen_sample|last_6m') in buttons
-        assert ('📅 Last 12 months', 'VOICE|kaizen_sample|last_12m') in buttons
-        assert [
-            ('🔙 Back', 'VOICE|back_to_choice'),
-        ] in _last_button_rows(sim)
+        assert ('📋 Recent 10', 'VOICE|kaizen_sample|recent_10') in buttons
+        assert ('📅 6 months', 'VOICE|kaizen_sample|last_6m') in buttons
+        assert ('📅 12 months', 'VOICE|kaizen_sample|last_12m') in buttons
+        assert ('🔙 Back', 'VOICE|back_to_choice') in buttons
         assert context.user_data.get('voice_kaizen_path_started') is True
 
     @pytest.mark.asyncio
@@ -4958,7 +5302,7 @@ class TestVoiceProfileTwoPathFlow:
         text = sim.get_last_text() or ''
         assert "isn't switched on yet" in text or 'manually' in text
         buttons = sim.get_last_buttons()
-        assert ('✍️ Add examples manually', 'VOICE|path_manual') in buttons
+        assert ('✍️ Manual examples', 'VOICE|path_manual') in buttons
 
     @pytest.mark.asyncio
     async def test_kaizen_login_required_offers_inline_reconnect(self):
@@ -4986,10 +5330,8 @@ class TestVoiceProfileTwoPathFlow:
         assert result == AWAIT_VOICE_EXAMPLES
         buttons = sim.get_last_buttons()
         assert ('🔗 Reconnect Kaizen', 'ACTION|setup') in buttons
-        assert ('✍️ Add examples manually', 'VOICE|path_manual') in buttons
-        assert [
-            ('🔙 Back', 'VOICE|back_to_choice'),
-        ] in _last_button_rows(sim)
+        assert ('✍️ Manual examples', 'VOICE|path_manual') in buttons
+        assert ('🔙 Back', 'VOICE|back_to_choice') in buttons
 
     @pytest.mark.asyncio
     async def test_build_voice_profile_activates_immediately_without_approval_gate(self):
@@ -5158,7 +5500,7 @@ class TestVoiceProfileTwoPathFlow:
         button_data = {data for _, data in buttons}
         # Old retry path must not reappear
         assert ('🔄 Try Again', 'VOICE|path_manual') not in buttons
-        assert ('🔄 Try again', 'VOICE|path_manual') not in buttons
+        assert ('🔄 Retry', 'VOICE|path_manual') not in buttons
         # Must offer a path back into voice setup without crashing
         assert 'ACTION|voice' in button_data
         # Must not echo the old "Does this sound like you?" framing
@@ -5288,6 +5630,6 @@ class TestVoiceProfileTwoPathFlow:
         assert result == AWAIT_VOICE_EXAMPLES
         assert context.user_data.get('voice_kaizen_path_started') is None
         buttons = sim.get_last_buttons()
-        assert ('📖 Learn from Kaizen entries', 'VOICE|path_kaizen') in buttons
-        assert ('✍️ Add examples manually', 'VOICE|path_manual') in buttons
-        assert ('🔙 Back to settings', 'VOICE|back_to_settings') in buttons
+        assert ('📖 Kaizen entries', 'VOICE|path_kaizen') in buttons
+        assert ('✍️ Manual examples', 'VOICE|path_manual') in buttons
+        assert ('🔙 Back', 'VOICE|back_to_settings') in buttons

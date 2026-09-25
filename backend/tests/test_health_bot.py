@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from telegram.error import BadRequest
@@ -71,6 +71,424 @@ async def test_safe_edit_text_retries_plain_text_when_markdown_is_invalid():
     assert target.edit_text.await_args_list[1].kwargs == {}
 
 
+@pytest.mark.asyncio
+async def test_safe_edit_text_swallows_identical_text_and_markup_bad_request():
+    import bot
+
+    target = SimpleNamespace(
+        edit_text=AsyncMock(
+            side_effect=BadRequest(
+                "Message is not modified: specified new message content and "
+                "reply markup are exactly the same as the current content"
+            )
+        )
+    )
+
+    assert await bot._safe_edit_text(target, "Same", reply_markup=None) is None
+    target.edit_text.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_safe_edit_text_reraises_other_bad_request():
+    import bot
+
+    target = SimpleNamespace(
+        edit_text=AsyncMock(side_effect=BadRequest("Chat not found"))
+    )
+
+    with pytest.raises(BadRequest, match="Chat not found"):
+        await bot._safe_edit_text(target, "Changed")
+
+
+def _seed_health_navigation(bot, context) -> None:
+    bot._store_health_report_context(
+        context,
+        views={
+            "priorities": "priorities",
+            "actions": "actions landing",
+            "about": "about",
+            "coverage": "coverage",
+            "curriculum": "curriculum",
+            "scan": "scan",
+        },
+        action_pages=["legacy page 1", "legacy page 2"],
+        action_queue_pages={
+            "draft": ["draft page 1", "draft page 2"],
+            "awaiting": ["awaiting page 1", "awaiting page 2"],
+        },
+        action_queue_totals={"draft": 7, "awaiting": 10},
+        needs_review_month=True,
+    )
+
+
+def _keyboard_rows(markup) -> list[list[tuple[str, str]]]:
+    return [
+        [(button.text, button.callback_data) for button in row]
+        for row in markup.inline_keyboard
+    ]
+
+
+def test_health_keyboards_are_contextual_in_every_view():
+    import bot
+
+    assert _keyboard_rows(
+        bot._health_view_keyboard(
+            "priorities",
+            queue_totals={"draft": 7, "awaiting": 10},
+            needs_review_month=True,
+        )
+    ) == [
+        [("📝 Review drafts (7)", "ACTION|health_queue|draft|0")],
+        [
+            ("⏳ Awaiting (10)", "ACTION|health_queue|awaiting|0"),
+            ("ℹ️ About", "ACTION|health_view|about"),
+        ],
+    ]
+    assert _keyboard_rows(
+        bot._health_view_keyboard(
+            "actions", queue_totals={"draft": 7, "awaiting": 10}
+        )
+    ) == [
+        [
+            ("📝 Drafts (7)", "ACTION|health_queue|draft|0"),
+            ("⏳ Awaiting (10)", "ACTION|health_queue|awaiting|0"),
+        ],
+        [("🔙 Health", "ACTION|health_view|priorities")],
+    ]
+    assert _keyboard_rows(
+        bot._health_view_keyboard(
+            "action_queue", page=1, page_count=3, queue="draft"
+        )
+    ) == [
+        [
+            ("⬅️ Previous", "ACTION|health_queue|draft|0"),
+            ("➡️ Next", "ACTION|health_queue|draft|2"),
+        ],
+        [("🔙 Health", "ACTION|health_view|priorities")],
+    ]
+    assert _keyboard_rows(bot._health_view_keyboard("about")) == [
+        [("🔙 Health", "ACTION|health_view|priorities")],
+    ]
+    assert _keyboard_rows(bot._health_view_keyboard("more")) == [
+        [("🔙 Health", "ACTION|health_view|priorities")],
+    ]
+    assert _keyboard_rows(bot._health_view_keyboard("coverage")) == [
+        [("🔙 Health", "ACTION|health_view|priorities")],
+    ]
+    assert _keyboard_rows(bot._health_view_keyboard("curriculum")) == [
+        [("🔙 Health", "ACTION|health_view|priorities")],
+    ]
+    assert _keyboard_rows(bot._health_view_keyboard("scan")) == [
+        [("🔙 Health", "ACTION|health_view|priorities")],
+    ]
+
+    # Empty queues are not rendered as buttons that can only fail on tap.
+    assert _keyboard_rows(
+        bot._health_view_keyboard(
+            "priorities", queue_totals={"draft": 0, "awaiting": 0}
+        )
+    ) == [[("ℹ️ About", "ACTION|health_view|about")]]
+    assert _keyboard_rows(
+        bot._health_view_keyboard(
+            "priorities", queue_totals={"draft": 0, "awaiting": 3}
+        )
+    ) == [[
+        ("⏳ Awaiting (3)", "ACTION|health_queue|awaiting|0"),
+        ("ℹ️ About", "ACTION|health_view|about"),
+    ]]
+    assert _keyboard_rows(
+        bot._health_view_keyboard(
+            "priorities", queue_totals={"draft": 2, "awaiting": 0}
+        )
+    ) == [
+        [("📝 Review drafts (2)", "ACTION|health_queue|draft|0")],
+        [("ℹ️ About", "ACTION|health_view|about")],
+    ]
+
+
+@pytest.mark.asyncio
+async def test_health_landing_callbacks_open_independent_paginated_queues(monkeypatch):
+    import bot
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+    _seed_health_navigation(bot, context)
+    track = Mock()
+    monkeypatch.setattr(bot, "_track_funnel_event", track)
+
+    landing = bot._health_view_payload(context, "priorities")
+    assert landing is not None
+    assert _keyboard_rows(landing[1]) == [
+        [("📝 Review drafts (7)", "ACTION|health_queue|draft|0")],
+        [
+            ("⏳ Awaiting (10)", "ACTION|health_queue|awaiting|0"),
+            ("ℹ️ About", "ACTION|health_view|about"),
+        ],
+    ]
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_queue|draft|1"), context
+    )
+    assert sim.get_last_text() == "draft page 2"
+    assert ("⬅️ Previous", "ACTION|health_queue|draft|0") in sim.get_last_buttons()
+    assert ("🔙 Health", "ACTION|health_view|priorities") in sim.get_last_buttons()
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_queue|awaiting|0"), context
+    )
+    assert sim.get_last_text() == "awaiting page 1"
+    assert ("➡️ Next", "ACTION|health_queue|awaiting|1") in sim.get_last_buttons()
+    assert context.user_data["last_health_report"]["queue_page"] == {
+        "draft": 1,
+        "awaiting": 0,
+    }
+    track.assert_any_call(
+        context,
+        "health_queue_selected",
+        update_last=False,
+        queue="awaiting",
+        page=0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_old_more_maps_to_about_and_legacy_detail_views_remain_safe():
+    import bot
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+    _seed_health_navigation(bot, context)
+
+    for callback, expected_text in (
+        ("ACTION|health_view|more", "about"),
+        ("ACTION|health_view|about", "about"),
+        ("ACTION|health_view|coverage", "coverage"),
+        ("ACTION|health_view|curriculum", "curriculum"),
+        ("ACTION|health_view|scan", "scan"),
+        ("ACTION|health_view|priorities", "priorities"),
+    ):
+        await bot.handle_action_button(sim._make_callback_update(callback), context)
+        assert sim.get_last_text() == expected_text
+        if callback != "ACTION|health_view|priorities":
+            assert sim.get_last_buttons() == [
+                ("🔙 Health", "ACTION|health_view|priorities")
+            ]
+
+
+@pytest.mark.asyncio
+async def test_legacy_health_page_callback_still_opens_stored_evidence():
+    import bot
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+    _seed_health_navigation(bot, context)
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_page|1"), context
+    )
+
+    assert sim.get_last_text() == "legacy page 2"
+
+
+@pytest.mark.asyncio
+async def test_legacy_health_view_and_detail_callbacks_keep_routing():
+    import bot
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+    _seed_health_navigation(bot, context)
+
+    for callback, expected_text in (
+        ("ACTION|health_view|coverage", "coverage"),
+        ("ACTION|health_view|scan", "scan"),
+        ("ACTION|health_detail|stuck", "actions landing"),
+        ("ACTION|health_detail|domains", "coverage"),
+        ("ACTION|health_detail|basis", "scan"),
+        ("ACTION|health_back_to_report", "priorities"),
+    ):
+        await bot.handle_action_button(sim._make_callback_update(callback), context)
+        assert sim.get_last_text() == expected_text
+
+
+@pytest.mark.asyncio
+async def test_expired_health_report_callback_offers_refresh_recovery():
+    import bot
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_view|coverage"), context
+    )
+
+    assert sim.get_last_text() == bot._HEALTH_REPORT_EXPIRED
+    assert sim.get_last_buttons() == [
+        ("🔄 Refresh health", "ACTION|health"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_review_month_selection_and_back_do_not_persist(monkeypatch):
+    import bot
+
+    profile = _profile(4242, Pathway.training_arcp)
+    saved: list[HealthProfile] = []
+    monkeypatch.setattr(bot, "_get_or_default_health_profile", lambda _user_id: profile)
+    monkeypatch.setattr(bot, "save_health_profile", saved.append)
+    track = Mock()
+    monkeypatch.setattr(bot, "_track_funnel_event", track)
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+    _seed_health_navigation(bot, context)
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_review_setup"), context
+    )
+    assert saved == []
+    assert ("🔙 Cancel", "ACTION|health_view|more") in sim.get_last_buttons()
+    month_callback = next(
+        callback
+        for _label, callback in sim.get_last_buttons()
+        if callback.startswith("ACTION|health_review_select|")
+    )
+
+    await bot.handle_action_button(sim._make_callback_update(month_callback), context)
+    assert saved == []
+    assert "Nothing has been saved yet" in sim.get_last_text()
+    assert any(
+        callback.startswith("ACTION|health_review_confirm|")
+        for _label, callback in sim.get_last_buttons()
+    )
+    assert ("🔙 Cancel", "ACTION|health_view|more") in sim.get_last_buttons()
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_view|more"), context
+    )
+    assert saved == []
+    assert sim.get_last_text() == "about"
+    track.assert_any_call(
+        context,
+        "health_review_month_setup",
+        update_last=False,
+    )
+    track.assert_any_call(
+        context,
+        "health_review_month_selected",
+        update_last=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_review_month_confirmation_persists_through_existing_profile_path(monkeypatch):
+    import bot
+
+    profile = _profile(4242, Pathway.training_arcp)
+    saved: list[HealthProfile] = []
+    track = Mock()
+    monkeypatch.setattr(bot, "_get_or_default_health_profile", lambda _user_id: profile)
+    monkeypatch.setattr(bot, "save_health_profile", saved.append)
+    monkeypatch.setattr(bot, "_track_funnel_event", track)
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_review_select|2026-10"), context
+    )
+    assert saved == []
+
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_review_confirm|2026-10"), context
+    )
+
+    assert len(saved) == 1
+    assert saved[0].pathway_config[bot.REVIEW_DATE_KEY] == "2026-10-01"
+    assert (
+        "🔙 Health",
+        "ACTION|health_view|priorities",
+    ) in sim.get_last_buttons()
+    track.assert_any_call(
+        context,
+        "health_review_month_confirmed",
+        update_last=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_arcp_command_remains_a_compatible_review_month_write_path(monkeypatch):
+    import bot
+
+    profile = _profile(4242, Pathway.training_arcp)
+    saved: list[HealthProfile] = []
+    monkeypatch.setattr(bot, "_get_or_default_health_profile", lambda _user_id: profile)
+    monkeypatch.setattr(bot, "save_health_profile", saved.append)
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+    context.args = ["Oct", "2026"]
+    await bot.arcp_command(sim._make_text_update("/arcp Oct 2026"), context)
+
+    assert saved[0].pathway_config[bot.REVIEW_DATE_KEY] == "2026-10-01"
+
+
+def test_health_funnel_metadata_allowlist_keeps_only_structural_fields(monkeypatch):
+    import sys
+    import bot
+
+    logged = Mock()
+    monkeypatch.setitem(sys.modules, "funnel_metrics", SimpleNamespace(log_event=logged))
+    monkeypatch.setattr(bot, "_audit_event", Mock())
+    context = SimpleNamespace(user_data={})
+
+    bot._track_funnel_event(
+        context,
+        "health_queue_selected",
+        update_last=False,
+        view="actions",
+        queue="draft",
+        page=1,
+        month=10,
+        year=2026,
+        review_month="2026-10",
+        message_text="private narrative",
+        portfolio_content="private portfolio content",
+        link="https://kaizen.example/private",
+        credential="secret",
+        raw_user_id="123",
+    )
+
+    assert logged.call_args.kwargs["metadata"] == {
+        "view": "actions",
+        "queue": "draft",
+        "page": 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_health_callback_seeds_user_identity_before_telemetry(monkeypatch):
+    import bot
+
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+    _seed_health_navigation(bot, context)
+    track = Mock()
+    monkeypatch.setattr(bot, "_track_funnel_event", track)
+
+    assert "_audit_user_id" not in context.user_data
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_view|coverage"), context
+    )
+
+    assert context.user_data["_audit_user_id"] == 4242
+    track.assert_any_call(
+        context,
+        "health_pane_selected",
+        update_last=False,
+        view="coverage",
+    )
+
+
 @pytest.fixture
 def isolated_health_store(tmp_path, monkeypatch):
     """Point the flat-file health store at a per-test path."""
@@ -109,8 +527,8 @@ async def test_pathway_command_saves_selected_pathway(isolated_health_store):
     assert "Current view: Training (CCT)" in text
     assert "Choose how /health should read your evidence" in text
     assert "Pick the pathway" not in text
-    assert ("Training (CCT)", "PATHWAY|training_arcp") in sim.get_last_buttons()
-    assert ("Portfolio (CESR)", "PATHWAY|cesr_portfolio") in sim.get_last_buttons()
+    assert ('🎓 Training (CCT)', "PATHWAY|training_arcp") in sim.get_last_buttons()
+    assert ('📁 Portfolio (CESR)', "PATHWAY|cesr_portfolio") in sim.get_last_buttons()
 
     result = await bot.handle_pathway_choice(
         sim._make_callback_update("PATHWAY|cesr_portfolio"),
@@ -140,11 +558,10 @@ def test_settings_shows_pathway_change_control(isolated_health_store, monkeypatc
 
     buttons = [(button.text, button.callback_data) for row in keyboard.inline_keyboard for button in row]
     assert "Training (CCT)" in text
-    assert ("📋 Portfolio defaults", "ACTION|portfolio_defaults") in buttons
+    assert ('📋 Portfolio defaults', "ACTION|portfolio_defaults") in buttons
     assert [[button.callback_data for button in row] for row in keyboard.inline_keyboard] == [
         ["ACTION|setup"],
-        ["ACTION|voice"],
-        ["ACTION|portfolio_defaults"],
+        ["ACTION|voice", "ACTION|portfolio_defaults"],
         ["ACTION|delete"],
     ]
 
@@ -170,12 +587,12 @@ async def test_settings_pathway_change_saves_and_returns_to_settings(isolated_he
         context,
     )
 
-    assert ("Training (CCT)", "PATHWAY_SETTINGS|training_arcp") in sim.get_last_buttons()
-    assert ("Portfolio (CESR)", "PATHWAY_SETTINGS|cesr_portfolio") in sim.get_last_buttons()
+    assert ('🎓 Training (CCT)', "PATHWAY_SETTINGS|training_arcp") in sim.get_last_buttons()
+    assert ('📁 Portfolio (CESR)', "PATHWAY_SETTINGS|cesr_portfolio") in sim.get_last_buttons()
     # The pathway picker is a section under Portfolio defaults, so its Back
     # button must return to the Portfolio defaults submenu, not main /settings.
-    assert ("🔙 Back to portfolio defaults", "ACTION|portfolio_defaults") in sim.get_last_buttons()
-    assert ("🔙 Back to settings", "ACTION|settings") not in sim.get_last_buttons()
+    assert ('🔙 Back', "ACTION|portfolio_defaults") in sim.get_last_buttons()
+    assert ('🔙 Back', "ACTION|settings") not in sim.get_last_buttons()
 
     result = await bot.handle_pathway_choice(
         sim._make_callback_update("PATHWAY_SETTINGS|cesr_portfolio"),
@@ -187,7 +604,7 @@ async def test_settings_pathway_change_saves_and_returns_to_settings(isolated_he
     assert stored is not None
     assert stored.pathway == Pathway.cesr_portfolio
     assert "Portfolio (CESR)" in sim.get_last_text()
-    assert ("📋 Portfolio defaults", "ACTION|portfolio_defaults") in sim.get_last_buttons()
+    assert ('📋 Portfolio defaults', "ACTION|portfolio_defaults") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio
@@ -209,9 +626,9 @@ async def test_portfolio_defaults_back_button_returns_to_settings(isolated_healt
     )
 
     buttons = sim.get_last_buttons()
-    assert ("🔙 Back to settings", "ACTION|settings") in buttons
+    assert ('🔙 Back', "ACTION|settings") in buttons
     # The submenu must not strand the user with a bare "Back" label.
-    assert ("🔙 Back", "ACTION|settings") not in buttons
+    assert ("Back", "ACTION|settings") not in buttons
 
 
 @pytest.mark.asyncio
@@ -229,8 +646,8 @@ async def test_change_level_back_button_returns_to_portfolio_defaults(monkeypatc
     )
 
     buttons = sim.get_last_buttons()
-    assert ("🔙 Back to portfolio defaults", "ACTION|portfolio_defaults") in buttons
-    assert ("🔙 Back to settings", "ACTION|settings") not in buttons
+    assert ('🔙 Back', "ACTION|portfolio_defaults") in buttons
+    assert ('🔙 Back', "ACTION|settings") not in buttons
 
 
 @pytest.mark.asyncio
@@ -248,8 +665,8 @@ async def test_change_curriculum_back_button_returns_to_portfolio_defaults(monke
     )
 
     buttons = sim.get_last_buttons()
-    assert ("🔙 Back to portfolio defaults", "ACTION|portfolio_defaults") in buttons
-    assert ("🔙 Back to settings", "ACTION|settings") not in buttons
+    assert ('🔙 Back', "ACTION|portfolio_defaults") in buttons
+    assert ('🔙 Back', "ACTION|settings") not in buttons
 
 
 @pytest.mark.asyncio
@@ -267,13 +684,13 @@ async def test_change_pathway_back_button_returns_to_portfolio_defaults(isolated
     )
 
     buttons = sim.get_last_buttons()
-    assert ("🔙 Back to portfolio defaults", "ACTION|portfolio_defaults") in buttons
-    assert ("🔙 Back to settings", "ACTION|settings") not in buttons
+    assert ('🔙 Back', "ACTION|portfolio_defaults") in buttons
+    assert ('🔙 Back', "ACTION|settings") not in buttons
 
 
 @pytest.mark.asyncio
-async def test_health_empty_state_clarifies_portfolio_guru_scope(monkeypatch):
-    """Empty state must say cases are absent in Portfolio Guru, not in Kaizen."""
+async def test_health_empty_state_clarifies_scan_scope_and_offers_next_routes(monkeypatch):
+    """Zero visible evidence still gets the normal action-first landing."""
     import bot
 
     user_id = 5150
@@ -282,22 +699,33 @@ async def test_health_empty_state_clarifies_portfolio_guru_scope(monkeypatch):
     monkeypatch.setattr(bot, "get_health_profile", lambda _user_id: _profile(user_id, Pathway.training_arcp))
     monkeypatch.setattr(bot, "get_training_level", lambda _user_id: "ST6")
 
-    sent: dict[str, str] = {}
+    sent: dict[str, object] = {}
 
     await bot._run_health_analysis(
         user_id=user_id,
         chat=SimpleNamespace(send_action=AsyncMock()),
         send_progress=AsyncMock(),
-        send_result=AsyncMock(side_effect=lambda text, reply_markup: sent.setdefault("text", text)),
+        send_result=AsyncMock(
+            side_effect=lambda text, reply_markup: sent.update(
+                text=text, reply_markup=reply_markup
+            )
+        ),
         send_photo_fn=AsyncMock(),
         fail_fn=AsyncMock(),
+        context_store=SimpleNamespace(user_data={}),
     )
 
     text = sent["text"]
-    assert "No Portfolio Guru cases filed yet" in text
-    assert "existing Kaizen cases aren't affected" in text
-    # Must not read as "you have no cases in Kaizen".
-    assert "No cases filed yet." not in text
+    assert isinstance(text, str)
+    assert text.startswith("*What to do next*")
+    assert "*No older unfinished items to review*" in text
+    assert "waiting long enough to be highlighted here" in text
+    assert "Partial scan: Portfolio Guru filings only" in text
+    keyboard = sent["reply_markup"]
+    assert isinstance(keyboard, bot.InlineKeyboardMarkup)
+    assert _keyboard_rows(keyboard) == [
+        [("ℹ️ About", "ACTION|health_view|about")],
+    ]
 
 
 @pytest.mark.asyncio
@@ -321,6 +749,7 @@ async def test_cesr_health_output_uses_deterministic_engine_without_llm(monkeypa
     monkeypatch.setattr(bot, "analyse_portfolio_health", analysis)
 
     sent: dict[str, str] = {}
+    store = SimpleNamespace(user_data={})
 
     await bot._run_health_analysis(
         user_id=user_id,
@@ -329,29 +758,27 @@ async def test_cesr_health_output_uses_deterministic_engine_without_llm(monkeypa
         send_result=AsyncMock(side_effect=lambda text, reply_markup: sent.setdefault("text", text)),
         send_photo_fn=AsyncMock(),
         fail_fn=AsyncMock(),
+        context_store=store,
     )
 
     text = sent["text"]
-    assert "*Portfolio Health — CESR / Portfolio Pathway*" in text
-    # No Kaizen index → limited scan, not a readiness verdict.
-    assert "Full Kaizen scan not available" in text
-    assert "Filing-history snapshot (limited scan)" in text
+    views = store.user_data["last_health_report"]["views"]
+    assert text.startswith("*What to do next*")
+    assert "*Portfolio Pathway requirement*" not in text
+    assert "WPBAs counted in this scan" not in text
     assert "Long-term CESR readiness:" not in text
     assert "🔴 Early" not in text
-    assert "WPBA progress toward 36" in text
-    assert "2/36" in text
-    assert "DOPS 1/12" in text
-    assert "Mini-CEX 0/12" in text
-    assert "CBD 1/12" in text
-    assert "This year's evidence plan" in text
-    assert "5-year evidence window" in text
-    assert "Evidence window:" in text
+    # No Kaizen index → a partial scan, disclosed on Priorities and in full on
+    # Scan info, never a readiness verdict.
+    assert "Partial scan: Portfolio Guru filings only" in text
+    assert "Limited view: based on Portfolio Guru filings only" in views["scan"]
+    assert "5-year evidence window" in views["scan"]
     assert "ARCP" not in text
     analysis.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_health_includes_activity_snapshot_without_sending_photo(monkeypatch):
+async def test_health_renders_one_message_without_sending_a_chart_photo(monkeypatch):
     import sys
     import bot
 
@@ -400,10 +827,8 @@ async def test_health_includes_activity_snapshot_without_sending_photo(monkeypat
         fail_fn=AsyncMock(),
     )
 
-    assert "*Portfolio Health — CESR / Portfolio Pathway*" in sent["text"]
-    assert "*Activity snapshot*" in sent["text"]
-    assert "Form mix: CBD 1, DOPS 1" in sent["text"]
-    assert "Curriculum coverage: 3/12" in sent["text"]
+    assert sent["text"].startswith("*What to do next*")
+    assert "*Portfolio Pathway requirement*" not in sent["text"]
     send_photo.assert_not_awaited()
 
 
@@ -429,6 +854,7 @@ async def test_arcp_health_falls_back_to_deterministic_output_when_llm_fails(mon
     monkeypatch.setattr(bot, "analyse_portfolio_health", fail_analysis)
 
     sent: dict[str, str] = {}
+    store = SimpleNamespace(user_data={})
     fail_fn = AsyncMock()
 
     await bot._run_health_analysis(
@@ -438,29 +864,27 @@ async def test_arcp_health_falls_back_to_deterministic_output_when_llm_fails(mon
         send_result=AsyncMock(side_effect=lambda text, reply_markup: sent.setdefault("text", text)),
         send_photo_fn=AsyncMock(),
         fail_fn=fail_fn,
+        context_store=store,
     )
 
     text = sent["text"]
-    assert "*Portfolio Health — Training (CCT) evidence scan*" in text
+    views = store.user_data["last_health_report"]["views"]
+    # The reading is deterministic, so an unavailable LLM is not a failure
+    # path: there is nothing to fall back from.
+    assert text.startswith("*What to do next*")
     assert "Training (ARCP)" not in text
-    assert "*Evidence basis*" in text
-    assert "Scanned: Portfolio Guru filing history only: 3 case(s) in last 6 months" in text
-    assert "Window: last 6 months of Portfolio Guru filings only; add your ARCP month to time this to your cycle" in text
-    assert "Confidence: low" in text
-    assert "AI ARCP narrative is temporarily unavailable" in text
-    # No Kaizen index → limited scan, not a red gap-level verdict.
-    assert "Full Kaizen scan not available" in text
-    assert "Filing-history snapshot (limited scan)" in text
-    assert "Evidence gap level:" not in text
-    assert "🔴 Red" not in text
-    assert "ARCP risk:" not in text
-    assert "Next 3 useful filing actions" in text
+    # A partial scan is disclosed and stops the view ranking anything.
+    assert "Partial scan: Portfolio Guru filings only" in text
+    assert "\n1. " not in text
+    assert "Scope: partial — the Kaizen index was unavailable" in views["scan"]
+    assert "Confidence:" not in views["scan"]
+    assert "Limited view: based on Portfolio Guru filings only" in views["scan"]
+    # No readiness verdict, in any of its old spellings.
+    for verdict in ("Well covered", "Needs attention", "Evidence gap level:", "ARCP risk:", "🔴 Red"):
+        assert verdict not in text
     assert "before ARCP" not in text
-    assert "Visible in this limited scan" in text
-    assert "Not seen in this limited scan" in text
-    assert "Already strong" not in text
-    assert "Missing domains" not in text
-    assert "Domain coverage:" not in text
+    assert "*Coverage*" in views["coverage"]
+    assert "CPD: none scanned" in views["coverage"]
     fail_fn.assert_not_called()
 
 
@@ -487,6 +911,7 @@ async def test_arcp_health_output_prioritises_action_plan_when_llm_succeeds(monk
     )
 
     sent: dict[str, str] = {}
+    store = SimpleNamespace(user_data={})
 
     await bot._run_health_analysis(
         user_id=user_id,
@@ -495,32 +920,22 @@ async def test_arcp_health_output_prioritises_action_plan_when_llm_succeeds(monk
         send_result=AsyncMock(side_effect=lambda text, reply_markup: sent.setdefault("text", text)),
         send_photo_fn=AsyncMock(),
         fail_fn=AsyncMock(),
+        context_store=store,
     )
 
     text = sent["text"]
-    assert "*Portfolio Health — Training (CCT) evidence scan*" in text
+    views = store.user_data["last_health_report"]["views"]
+    # An available LLM changes nothing: the views are computed from the
+    # evidence, so narrative and numbers cannot disagree.
+    assert text.startswith("*What to do next*")
+    assert "Book a supervisor review" not in text
     assert "Training (ARCP)" not in text
-    assert "*Evidence basis*" in text
-    assert "Scanned: Portfolio Guru filing history only: 3 case(s) in last 6 months" in text
-    assert "Window: last 6 months of Portfolio Guru filings only; add your ARCP month to time this to your cycle" in text
-    # No Kaizen index → limited scan, not a red gap-level verdict.
-    assert "Full Kaizen scan not available" in text
-    assert "Filing-history snapshot (limited scan)" in text
-    assert "Evidence gap level:" not in text
-    assert "🔴 Red" not in text
-    assert "ARCP risk:" not in text
-    assert "Next 3 useful filing actions" in text
+    assert "Partial scan: Portfolio Guru filings only" in text
+    assert "Evidence gap level:" not in text and "ARCP risk:" not in text
     assert "before ARCP" not in text
-    assert "Visible in this limited scan" in text
-    assert "Not seen in this limited scan" in text
-    assert "Already strong" not in text
-    assert "Missing domains" not in text
-    assert "CPD" in text
-    assert "QI" in text
-    assert "Form types:" not in text
-    assert "Domain coverage:" not in text
     assert "CESR" not in text
-    assert "yearly" not in text.lower()
+    assert "CPD" in views["coverage"] and "QI" in views["coverage"]
+    assert "Form types:" not in views["coverage"]
 
 
 # ── _pathway_for_detected_role / _autoset_health_pathway_from_role ───────────
@@ -825,6 +1240,7 @@ async def _run_health_capture(monkeypatch, user_id: int, pathway: Pathway) -> st
     )
 
     sent: dict[str, str] = {}
+    store = SimpleNamespace(user_data={})
 
     await bot._run_health_analysis(
         user_id=user_id,
@@ -833,8 +1249,9 @@ async def _run_health_capture(monkeypatch, user_id: int, pathway: Pathway) -> st
         send_result=AsyncMock(side_effect=lambda text, reply_markup: sent.setdefault("text", text)),
         send_photo_fn=AsyncMock(),
         fail_fn=AsyncMock(),
+        context_store=store,
     )
-    return sent["text"]
+    return sent["text"], store.user_data["last_health_report"]["views"]
 
 
 @pytest.mark.asyncio
@@ -856,6 +1273,7 @@ async def test_health_default_pathway_is_labelled_as_assumed(monkeypatch):
     )
 
     sent: dict[str, str] = {}
+    store = SimpleNamespace(user_data={})
 
     await bot._run_health_analysis(
         user_id=user_id,
@@ -864,64 +1282,65 @@ async def test_health_default_pathway_is_labelled_as_assumed(monkeypatch):
         send_result=AsyncMock(side_effect=lambda text, reply_markup: sent.setdefault("text", text)),
         send_photo_fn=AsyncMock(),
         fail_fn=AsyncMock(),
+        context_store=store,
     )
 
-    assert "Assumed pathway: Training (CCT) — change if wrong" in sent["text"]
-    assert "Pathway: default Training (CCT)" not in sent["text"]
+    # Health is pathway-agnostic, so the pathway — and the fact that it was
+    # assumed rather than chosen — belongs with the rest of the provenance.
+    scan = store.user_data["last_health_report"]["views"]["scan"]
+    assert "Assumed pathway: Training (CCT) — change if wrong" in scan
+    assert "Pathway: default Training (CCT)" not in scan
+    assert "pathway" not in sent["text"].lower()
 
 
 @pytest.mark.asyncio
 async def test_arcp_and_cesr_pathway_outputs_diverge_in_lead_framing(monkeypatch):
-    """Same evidence, different pathway. With no Kaizen index both lead with the
-    sync-needed banner, but their bodies still diverge: ARCP shows the next
-    useful filing actions; CESR shows a yearly evidence plan and WPBA progress.
-    """
-    arcp_text = await _run_health_capture(monkeypatch, 6001, Pathway.training_arcp)
-    cesr_text = await _run_health_capture(monkeypatch, 6002, Pathway.cesr_portfolio)
+    """Same evidence, different pathway. The universal views read the same
+    evidence the same way; only the verified pathway overlay differs, and with
+    no overlay nothing pathway-specific is rendered at all."""
+    arcp_text, arcp_views = await _run_health_capture(monkeypatch, 6001, Pathway.training_arcp)
+    cesr_text, cesr_views = await _run_health_capture(monkeypatch, 6002, Pathway.cesr_portfolio)
 
-    # Both lead with the limited-scan banner (no full verdict).
-    assert "Full Kaizen scan not available" in arcp_text
-    assert "Full Kaizen scan not available" in cesr_text
+    # Both disclose the partial scan, and neither claims a readiness level.
+    assert "Partial scan: Portfolio Guru filings only" in arcp_text
+    assert "Partial scan: Portfolio Guru filings only" in cesr_text
     assert "Evidence gap level:" not in arcp_text
     assert "Long-term CESR readiness:" not in cesr_text
 
-    # Training (CCT) pathway framing — ARCP is a checkpoint inside this pathway,
-    # not a standalone pathway label.
-    assert "Training (CCT) evidence scan" in arcp_text
-    assert "ARCP evidence review" not in arcp_text
-    assert "Training (ARCP)" not in arcp_text
-    assert "Next 3 useful filing actions" in arcp_text
-    # ARCP must NOT carry CESR / yearly-plan framing
+    # No verified overlay for Training (CCT): no counter, not an empty one.
+    assert "requirement" not in arcp_text
     assert "CESR" not in arcp_text
-    assert "this year" not in arcp_text.lower()
     assert "5-year" not in arcp_text.lower()
-    assert "yearly" not in arcp_text.lower()
+    assert "Training (CCT)" in arcp_views["scan"]
+    assert "Training (ARCP)" not in arcp_views["scan"]
 
-    # CESR framing
-    assert "CESR / Portfolio Pathway" in cesr_text
-    assert "This year's evidence plan" in cesr_text
-    assert "WPBA progress toward 36" in cesr_text
-    assert "5-year evidence window" in cesr_text
+    # CESR overlay stays available only through the legacy Scan info callback;
+    # it no longer competes with the everyday action-first landing.
+    assert "*Portfolio Pathway requirement*" not in cesr_text
+    assert "WPBAs counted in this scan" not in cesr_text
+    assert "*Portfolio Pathway requirement*" in cesr_views["scan"]
+    assert "WPBAs counted in this scan" in cesr_views["scan"]
+    assert "5-year evidence window" in cesr_views["scan"]
     # CESR must NOT carry ARCP-deadline framing
     assert "ARCP risk" not in cesr_text
-    assert "next ARCP" not in cesr_text.lower()
     assert "before ARCP" not in cesr_text
     assert "ARCP" not in cesr_text
 
 
 @pytest.mark.asyncio
 async def test_cesr_message_contains_long_term_and_domain_balance(monkeypatch):
-    cesr_text = await _run_health_capture(monkeypatch, 6003, Pathway.cesr_portfolio)
+    cesr_text, cesr_views = await _run_health_capture(monkeypatch, 6003, Pathway.cesr_portfolio)
 
-    assert "Domain balance" in cesr_text
-    # Limited scan (no Kaizen index) → "Not seen", not full-portfolio "Missing domains".
-    assert "Not seen in this limited scan" in cesr_text
-    assert "Missing domains" not in cesr_text
-    assert "consultant report" in cesr_text.lower()
-    # Long-term framing wording
-    assert "multi-year" in cesr_text or "long-term" in cesr_text.lower()
-    # Evidence-window framing present
-    assert "Evidence window:" in cesr_text
+    assert "WPBAs counted in this scan" not in cesr_text
+    # Legacy Scan info retains the counter and long-term expectations without
+    # putting system analysis in the everyday journey.
+    assert "WPBAs counted in this scan" in cesr_views["scan"]
+    assert "consultant report" in cesr_views["scan"].lower()
+    assert "multi-year" in cesr_views["scan"]
+    assert "5-year evidence window" in cesr_views["scan"]
+    # Domain totals belong to Coverage, not to the opening view.
+    assert "none scanned" in cesr_views["coverage"]
+    assert "Missing domains" not in cesr_views["coverage"]
 
 
 def test_health_paywall_copy_is_pathway_neutral():
@@ -959,8 +1378,8 @@ async def test_pathway_command_describes_arcp_as_checkpoint_not_pathway(isolated
     assert text.startswith("📊 Portfolio Health pathway")
     assert "Training (CCT)" in text
     assert ("CESR" in text) or ("Portfolio Pathway" in text)
-    assert ("Training (CCT)", "PATHWAY|training_arcp") in buttons
-    assert ("Portfolio (CESR)", "PATHWAY|cesr_portfolio") in buttons
+    assert ('🎓 Training (CCT)', "PATHWAY|training_arcp") in buttons
+    assert ('📁 Portfolio (CESR)', "PATHWAY|cesr_portfolio") in buttons
 
     # Forbidden framings — ARCP as a pathway label
     assert "Training (ARCP)" not in text
@@ -1167,10 +1586,9 @@ def test_reconcile_action_severity_is_noop_for_amber_and_red():
 # ── Evidence basis / Domain detail button-page copy ──────────────────────────
 
 
-def test_evidence_basis_shows_last_scanned_and_arcp_month_setup_prompt():
-    """The Evidence basis page must show a concise 'Last scanned' line when a
-    Kaizen index timestamp is available, and frame the missing ARCP month as a
-    setup prompt rather than a warning-like defect ('not set yet')."""
+def test_evidence_basis_shows_refresh_freshness_and_arcp_month_setup_prompt():
+    """Scan info dates the refresh and states its freshness precisely, while
+    framing the missing ARCP month as a setup prompt."""
     import bot
     from kaizen_index import IndexRunRow, KaizenSyncStatus
 
@@ -1198,9 +1616,57 @@ def test_evidence_basis_shows_last_scanned_and_arcp_month_setup_prompt():
     )
 
     assert context.startswith("*Evidence basis*")
-    assert "Last scanned: 2026-06-01 12:38 BST" in context
-    assert "add your ARCP month to time this to your cycle" in context
+    assert (
+        "Refresh: 2026-06-01 12:38 BST — older than 24 hours; recent activity may be missing"
+        in context
+    )
+    assert "Confidence:" not in context
+    # The prompt must name the command that sets it. It used to instruct
+    # doctors to add their ARCP month while offering no way to do so.
+    assert "set your review month with /arcp" in context
     assert "not set yet" not in context
+
+
+@pytest.mark.parametrize(
+    ("run_status", "expected"),
+    [
+        ("failed", "latest refresh failed; existing indexed evidence may be older"),
+        (
+            "drift",
+            "latest refresh stopped because the source changed unexpectedly; "
+            "existing indexed evidence may be older",
+        ),
+        (
+            "auth_required",
+            "latest refresh needs Kaizen reconnection; existing indexed evidence may be older",
+        ),
+        (
+            "running",
+            "latest refresh is still running; existing indexed evidence may be older",
+        ),
+    ],
+)
+def test_scan_info_names_unsuccessful_refresh_without_false_age(run_status, expected):
+    import bot
+    from kaizen_index import IndexRunRow, KaizenSyncStatus
+
+    status = KaizenSyncStatus(
+        last_run=IndexRunRow(
+            id=1,
+            user_id="4242",
+            started_at="2026-09-01T22:30:00",
+            finished_at="2026-09-01T22:38:00",
+            status=run_status,
+            rows_seen=412,
+            rows_written=0,
+            rows_drifted=1 if run_status == "drift" else 0,
+        ),
+        items_indexed=412,
+    )
+
+    line = bot._health_last_scanned_line(status)
+    assert expected in line
+    assert "older than 24 hours" not in line
 
 
 def test_evidence_basis_omits_last_scanned_when_no_sync_run():
@@ -1218,7 +1684,8 @@ def test_evidence_basis_omits_last_scanned_when_no_sync_run():
     )
 
     assert context.startswith("*Evidence basis*")
-    assert "Last scanned" not in context
+    assert "Refresh: no Kaizen refresh available; this is a partial local view" in context
+    assert "Confidence:" not in context
 
 
 def test_arcp_domain_detail_uses_visible_coverage_heading_and_title_case():

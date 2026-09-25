@@ -466,6 +466,18 @@ FORM_SCHEMAS = {
             {"key": "stage_of_training", "label": "Stage of Training", "type": "dropdown", "required": True,
              "options": ["Intermediate/ST3", "Higher/ST4-ST6", "PEM Sub-specialty", "ACCS ST1-ST2/CT1-CT2"]},
             {"key": "reflection",        "label": "Reflection",        "type": "text",     "required": True},
+            # Required on the live Kaizen form ("Which specific Domains of
+            # performance in this session would you like focused on in this
+            # ESLE?"). "All Domains" is exclusive — see esle_domains.py.
+            {"key": "domains_of_performance", "label": "Domains of performance to focus on",
+             "type": "multi_select", "required": True,
+             "options": ["All Domains", "Management & Supervision", "Teamwork & Cooperation",
+                         "Decision Making", "Situational Awareness"],
+             "description": ("Only the domains this session's own content evidences. Choose "
+                             "\"All Domains\" on its own when the session spans the whole "
+                             "department — never alongside individual domains. Return [] if "
+                             "the source does not show which domains were observed."),
+             "field_id": "7683f17f-cc85-47fe-b0fa-e6ad817f0045"},
             {"key": "curriculum_links",  "label": "Curriculum Links (SLOs)", "type": "kc_tick", "required": False},
             {"key": "key_capabilities",  "label": "Key Capabilities",  "type": "kc_tick",  "required": False},
         ]

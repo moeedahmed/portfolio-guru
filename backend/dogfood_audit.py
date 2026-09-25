@@ -6,6 +6,10 @@ summaries, media handling, prompt retirement, and Kaizen save outcomes.
 
 Clinical content is redacted and capped, but still readable enough to understand
 why a turn routed the way it did. Audit append failures never affect the user.
+
+Because the narrative stays readable, the log is restricted to traffic with no
+data subject to protect — synthetic fixtures and the operator's own dogfooding.
+Real beta users' turns are never written here; see ``_cohort_allowed``.
 """
 
 from __future__ import annotations
@@ -23,6 +27,9 @@ logger = logging.getLogger(__name__)
 
 _PATH_ENV = "PORTFOLIO_GURU_DOGFOOD_AUDIT_PATH"
 _DISABLED_ENV = "PORTFOLIO_GURU_DOGFOOD_AUDIT_DISABLED"
+_COHORT_ENV = "PORTFOLIO_GURU_DOGFOOD_AUDIT_COHORT"
+_MAX_BYTES_ENV = "PORTFOLIO_GURU_DOGFOOD_AUDIT_MAX_BYTES"
+_DEFAULT_MAX_BYTES = 64 * 1024 * 1024
 _MAX_TEXT_CHARS = 1800
 _MAX_FIELD_CHARS = 500
 
@@ -154,6 +161,55 @@ def summarise_draft_payload(draft_or_fields: Any, *, form_type: str | None = Non
     }
 
 
+def max_bytes() -> int:
+    try:
+        return max(1_000_000, int(os.environ.get(_MAX_BYTES_ENV, str(_DEFAULT_MAX_BYTES))))
+    except ValueError:
+        return _DEFAULT_MAX_BYTES
+
+
+def _rotate_if_oversized(path: pathlib.Path) -> bool:
+    """Roll the log over at a size cap, keeping exactly one previous generation.
+
+    This log reached 44 MB before anyone noticed, because nothing ever bounded
+    it. One generation is deliberate: enough to survive a rotation mid-session,
+    not enough to accumulate indefinitely.
+    """
+    try:
+        if path.stat().st_size < max_bytes():
+            return False
+    except OSError:
+        return False
+    try:
+        path.replace(path.with_suffix(path.suffix + ".1"))
+        return True
+    except OSError:
+        logger.debug("Dogfood audit rotation failed", exc_info=True)
+        return False
+
+
+def _cohort_allowed(user_id: int | str | None) -> bool:
+    """Whether this turn may be written to the audit trail.
+
+    The log keeps clinical narrative readable on purpose, so it is restricted to
+    traffic with no data subject to protect: synthetic fixtures and the operator
+    dogfooding his own portfolio. A real beta user's turn is dropped, as is an
+    unattributed one — we can't prove an unattributed turn isn't a beta user's,
+    and the default has to fail closed.
+
+    ``PORTFOLIO_GURU_DOGFOOD_AUDIT_COHORT=all`` restores the old
+    log-everything behaviour for offline harnesses that drive the stack with
+    mock users. It must never be set in production.
+    """
+    if os.environ.get(_COHORT_ENV, "").strip().lower() == "all":
+        return True
+    try:
+        from filing_attempt_log import is_operator_user, is_synthetic_user
+    except Exception:  # pragma: no cover - defensive; never log if unsure
+        return False
+    return is_synthetic_user(user_id) or is_operator_user(user_id)
+
+
 def record_event(
     event_type: str,
     *,
@@ -165,6 +221,8 @@ def record_event(
 ) -> dict[str, Any] | None:
     """Append a single audit event. Never raises into the caller."""
     if not _enabled():
+        return None
+    if not _cohort_allowed(user_id):
         return None
     record = {
         "ts": datetime.now(timezone.utc).isoformat(),
@@ -178,6 +236,7 @@ def record_event(
     path = log_path or default_log_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
+        _rotate_if_oversized(path)
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
     except OSError:

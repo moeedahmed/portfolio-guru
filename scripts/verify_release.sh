@@ -15,6 +15,15 @@
 
 set -euo pipefail
 
+# Same fixed throwaway values as the CI Tests job, scoped only to the full
+# offline pytest child. They are not exported and cannot reach deploy/runtime
+# or live-proof commands.
+OFFLINE_TEST_ENV=(
+  FERNET_SECRET_KEY=5Wv33F9sq99WGD2lEzwwd3J_JH5p6vxKdDiAwCWqoYQ=
+  TELEGRAM_BOT_TOKEN=fake
+  GOOGLE_API_KEY=fake
+)
+
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
 cd "$ROOT"
 
@@ -33,10 +42,10 @@ fi
 
 echo
 echo "--- Full offline pytest suite (matches CI Tests job) ---"
-"$PY" -m pytest tests/ -q --ignore=tests/test_e2e.py --ignore=tests/test_e2e_live.py
+env "${OFFLINE_TEST_ENV[@]}" "$PY" -m pytest tests/ -q --ignore=tests/test_e2e.py --ignore=tests/test_e2e_live.py
 
 echo
 echo "verify:release PASSED."
-echo "Note: this is the offline gate only. Live Telegram smoke ('-m live')"
-echo "and release closure/deploy remain separate, explicitly-approved steps"
-echo "-- see scripts/release_loop.sh."
+echo "Note: this is the offline gate only. Deployment, runtime identity and"
+echo "approved live proof remain outside this gate, but run together through"
+echo "the one exact-SHA release card in scripts/release_loop.sh."

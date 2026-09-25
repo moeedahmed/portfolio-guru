@@ -6,12 +6,44 @@ import os
 # Add backend to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+# The test process must see the same environment as the CI Tests job, whatever
+# backend/.env holds. Worktrees from scripts/new_worktree.sh link the shared real
+# .env, and bot.py / credentials.py load it at import time — so SUPABASE_URL and
+# the service-role key reached supabase_sync, which then tried the real mirror
+# and tripped the socket guard below (2026-09-23, 55 failures in a clean prepare).
+# This runs before any backend module is imported, so load_dotenv() is a no-op
+# for the whole session. Live/e2e tests read their Telethon credentials from the
+# shell, never from backend/.env, so they are unaffected.
+os.environ["PYTHON_DOTENV_DISABLED"] = "1"
+# CI has no Supabase configured; a shell that exports it must not turn the
+# best-effort mirror on. Tests that exercise the mirror set these themselves.
+for _name in ("SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"):
+    os.environ.pop(_name, None)
+# CI's throwaway values (.github/workflows/test.yml), for callers such as a
+# direct `scripts/preflight.sh` that no longer get a key from backend/.env.
+os.environ.setdefault("FERNET_SECRET_KEY", "5Wv33F9sq99WGD2lEzwwd3J_JH5p6vxKdDiAwCWqoYQ=")
+os.environ.setdefault("TELEGRAM_BOT_TOKEN", "fake")
+os.environ.setdefault("GOOGLE_API_KEY", "fake")
+
+
+@pytest.fixture(autouse=True)
+def _allow_non_eu_extraction_in_tests(monkeypatch):
+    """The offline suite drives the provider chain against mocks and fixtures,
+    never real clinical text, so the EU-only routing guard would otherwise make
+    every build_application() and _select_providers() call raise.
+
+    Production has no such opt-out: with PG_USE_VERTEX unset the bot refuses to
+    start. Tests that pin that behaviour delete this var in their own fixture.
+    """
+    monkeypatch.setenv("PG_ALLOW_NON_EU_EXTRACTION", "1")
+
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "e2e: end-to-end tests requiring Telegram credentials")
     config.addinivalue_line("markers", "live: live Telegram tests (requires personal account session)")
     config.addinivalue_line("markers", "kaizen: live Kaizen integration tests (requires credentials, manual only)")
     config.addinivalue_line("markers", "consent_gate: exercise the real Art 9 consent gate (opts out of the autouse consent bypass)")
+    config.addinivalue_line("markers", "essentials_gate: exercise the real essential-first sufficiency call (opts out of the autouse sufficient-case stub)")
 
 
 @pytest.fixture(autouse=True)
@@ -48,6 +80,32 @@ def _default_gathering_mode_off(monkeypatch):
     """
     monkeypatch.setenv("PG_GATHERING_MODE", "off")
     yield
+
+@pytest.fixture(autouse=True)
+def _default_essentials_judged_sufficient(request, monkeypatch):
+    """Default the essential-first sufficiency judgement to "case is complete".
+
+    Nothing in the offline suite may reach a provider, and the gate refuses to
+    draft from a case it could not judge — so without this every draft-path
+    test would stop at the retry prompt instead of exercising the behaviour it
+    was written for. This mirrors the other autouse defaults here: it stubs a
+    model call, it does not relax the rule. Tests that exercise the gate patch
+    `bot.assess_form_essentials` themselves, and their patch wins.
+    """
+    if request.node.get_closest_marker("essentials_gate"):
+        yield
+        return
+
+    async def _all_present(case_description, form_type, essentials, **kwargs):
+        return {item["key"]: "present" for item in essentials}
+
+    import bot
+    import extractor
+
+    monkeypatch.setattr(extractor, "assess_form_essentials", _all_present)
+    monkeypatch.setattr(bot, "assess_form_essentials", _all_present, raising=False)
+    yield
+
 
 @pytest.fixture(autouse=True)
 def _default_consent_granted(request, monkeypatch):
@@ -102,3 +160,32 @@ def mock_callback_update():
     update.callback_query.message = MagicMock()
     update.callback_query.message.text = "test"
     return update
+
+
+@pytest.fixture(autouse=True)
+def _offline_network_is_fail_closed(request, monkeypatch):
+    """An omitted provider stub must fail locally, never reach an external API."""
+    if request.node.get_closest_marker("live") or request.node.get_closest_marker("kaizen") or request.path.name in {"test_e2e.py", "test_e2e_live.py"}:
+        return
+    import socket
+    def refused(*args, **kwargs):
+        pytest.fail("Offline test attempted a socket connection; stub the external boundary")
+    monkeypatch.setattr(socket.socket, "connect", refused)
+    monkeypatch.setattr(socket.socket, "connect_ex", refused)
+    monkeypatch.setattr(socket, "getaddrinfo", refused)
+    # Navigation classification is a provider boundary, not the subject of legacy
+    # bot scenarios. Explicit navigation tests override this neutral response.
+    import bot
+    monkeypatch.setattr(bot, "classify_menu_intent", AsyncMock(return_value="ambiguous"))
+    monkeypatch.setattr(bot, "classify_intent", AsyncMock(return_value="case"))
+
+    # Chart rendering is real, but host font discovery is not a product contract.
+    # fc-list can hang in the clean macOS sandbox; Matplotlib handles OSError
+    # by using its bundled fonts and ordinary filesystem discovery instead.
+    import subprocess
+    check_output = subprocess.check_output
+    def local_output(args, *positional, **kwargs):
+        if isinstance(args, (list, tuple)) and args and args[0] in {"fc-list", "system_profiler"}:
+            raise FileNotFoundError("Host font discovery disabled in offline tests")
+        return check_output(args, *positional, **kwargs)
+    monkeypatch.setattr(subprocess, "check_output", local_output)

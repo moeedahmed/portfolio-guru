@@ -21,6 +21,16 @@
 
 set -euo pipefail
 
+# Fixed throwaway values for mocked/offline tests only. Scope them to the
+# pytest child so callers never need live credentials and later release,
+# runtime or live-proof steps cannot inherit them.
+OFFLINE_TEST_ENV=(
+  FERNET_SECRET_KEY=5Wv33F9sq99WGD2lEzwwd3J_JH5p6vxKdDiAwCWqoYQ=
+  TELEGRAM_BOT_TOKEN=fake
+  GOOGLE_API_KEY=fake
+  PYTHON_DOTENV_DISABLED=1
+)
+
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
 cd "$ROOT"
 
@@ -45,22 +55,31 @@ else
 fi
 
 JOURNEY_TESTS=(
+  # Whole-bot harness and aggregate contracts (fake clients only).
+  tests/test_telegram_live_harness.py
+  tests/test_whole_bot_explorer.py
+  tests/test_whole_bot_proof_safety.py
+  tests/test_release_proof_helpers.py
   # 1. Case capture -> extraction -> form recommendation
   tests/test_conversational_case_engine.py
   tests/test_deterministic_form_recommender.py
+  tests/test_esle_routing.py
   tests/test_form_recommender_per_shape.py
   tests/test_vnext_form_recommender.py
   # 2. Draft preview -> approval -> Kaizen draft save
+  tests/test_essential_first_gate.py
   tests/test_vnext_draft_preview.py
   # RCEM AI-use declaration must reach the filed entry and the approval preview
   tests/test_ai_declaration.py
   tests/test_filing_reliability.py
   tests/test_filing_attempt_log.py
   tests/test_curriculum_filing_recovery.py
+  tests/test_esle_domains.py
   # 3. Telegram channel contract / callback state safety
   tests/test_channel_contract.py
   tests/test_channel_reply_policy.py
   tests/test_channel_actions.py
+  tests/test_action_label_emoji_policy.py
   tests/test_controlled_flexibility.py
   tests/test_concurrent_user_isolation.py
   # 4. Consent / beta gating
@@ -77,11 +96,32 @@ JOURNEY_TESTS=(
   tests/test_privacy_guard_names.py
   tests/test_attachment_upload_consent.py
   tests/test_model_name_scrub.py
+  # 9. Disaster recovery — off-device backup must fail loudly, never silently.
+  #    A silent failure here costs every user's data and is invisible until the
+  #    day it matters (see the 53-night incident in scripts/restore_db.md).
+  tests/test_backup_offdevice.py
+  # 10. Portfolio Health scan + proactive sign-off chase. The scan feeds every
+  #     health verdict a doctor sees, and a truncated read invents evidence
+  #     gaps that do not exist. The chaser sends unsolicited messages, so a
+  #     regression here either spams doctors or goes silent about real stuck
+  #     evidence — both invisible until a user complains.
+  tests/test_kaizen_sync.py
+  tests/test_health_watch.py
+  tests/test_health_assessment.py
 )
 
 echo
 echo "--- Journey smoke: ${#JOURNEY_TESTS[@]} test files, offline/mocked only ---"
-"$PY" -m pytest "${JOURNEY_TESTS[@]}" -q
+env "${OFFLINE_TEST_ENV[@]}" "$PY" -m pytest "${JOURNEY_TESTS[@]}" -q
 
 echo
+WHOLE_ARTIFACTS="${WHOLE_BOT_ARTIFACT_DIR:-$ROOT/.artifacts/whole-bot-offline-proof}"
+mkdir -p "$WHOLE_ARTIFACTS"
+read -r -a WHOLE_TESTS <<< "$("$PY" -m tests.whole_bot_catalogue)"
+echo "--- Whole-bot catalogue: real callbacks, assertion-backed evidence ---"
+env "${OFFLINE_TEST_ENV[@]}" WHOLE_BOT_OBSERVATIONS="$WHOLE_ARTIFACTS/observations.json" \
+  WHOLE_BOT_CATALOGUE="$WHOLE_ARTIFACTS/catalogue.json" \
+  "$PY" -m pytest -p tests.whole_bot_audit "${WHOLE_TESTS[@]}" -q -m "not live and not kaizen" \
+  --junitxml="$WHOLE_ARTIFACTS/catalogue-tests.xml"
+
 echo "verify:changed PASSED."
