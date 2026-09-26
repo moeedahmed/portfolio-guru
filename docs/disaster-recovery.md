@@ -17,15 +17,16 @@ independent — do them in order and stop at the first one that fixes it.
 ### 1. Is the bot process running?
 
 ```bash
-launchctl print "gui/$(id -u)/com.portfolioguru.bot" | grep -E "state|pid"
+launchctl print "user/$(id -u)/com.portfolioguru.bot" | grep -E "state|pid"
 ```
 
-`state = running` with a pid means the process is alive. If it says anything
-else, or there is no pid:
+`state = running` with a pid means the process is alive. The bot runs in the
+`user/` domain (not `gui/`) so a desktop logout does not stop it. If it says
+anything else, or there is no pid:
 
 ```bash
-launchctl bootout "gui/$(id -u)" ~/Library/LaunchAgents/com.portfolioguru.bot.plist 2>/dev/null
-launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.portfolioguru.bot.plist
+launchctl bootout "user/$(id -u)" ~/Library/LaunchAgents/com.portfolioguru.bot.plist 2>/dev/null
+launchctl bootstrap "user/$(id -u)" ~/Library/LaunchAgents/com.portfolioguru.bot.plist
 ```
 
 Wait 30 seconds, then message the bot again.
@@ -48,8 +49,8 @@ If it broke right after a deploy, roll back to the previous commit:
 cd /Users/moeedahmed/projects/portfolio-guru
 git log --oneline -5          # find the commit before the bad one
 git reset --hard <that-commit>
-launchctl bootout "gui/$(id -u)" ~/Library/LaunchAgents/com.portfolioguru.bot.plist 2>/dev/null
-launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.portfolioguru.bot.plist
+launchctl bootout "user/$(id -u)" ~/Library/LaunchAgents/com.portfolioguru.bot.plist 2>/dev/null
+launchctl bootstrap "user/$(id -u)" ~/Library/LaunchAgents/com.portfolioguru.bot.plist
 ```
 
 `scripts/deploy_mac.sh` normally does this automatically when its post-deploy
@@ -135,14 +136,14 @@ The two worst failures here have both been failures of _silence_, not of
 crashing. Anything added to this system should be judged on whether it fails
 loudly.
 
-| Risk                               | What watches it                                      | Alerts via                                          |
-| ---------------------------------- | ---------------------------------------------------- | --------------------------------------------------- |
-| Bot process dies                   | launchd `KeepAlive` restarts it                      | — (automatic)                                       |
-| Bot alive but wedged (not polling) | 5-min heartbeat ping from `bot.py`                   | Healthchecks.io, if `PG_HEARTBEAT_URL` set          |
-| Bad deploy                         | post-deploy smoke + auto-rollback in `deploy_mac.sh` | CI turns red                                        |
-| Off-device backup fails            | upload verified + non-zero exit                      | Telegram, and Healthchecks.io `/fail`               |
+| Risk                               | What watches it                                      | Alerts via                                                     |
+| ---------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------- |
+| Bot process dies                   | launchd `KeepAlive` restarts it                      | — (automatic)                                                  |
+| Bot alive but wedged (not polling) | 5-min heartbeat ping from `bot.py`                   | Healthchecks.io, if `PG_HEARTBEAT_URL` set                     |
+| Bad deploy                         | post-deploy smoke + auto-rollback in `deploy_mac.sh` | CI turns red                                                   |
+| Off-device backup fails            | upload verified + non-zero exit                      | Telegram, and Healthchecks.io `/fail`                          |
 | Backup never runs at all           | absence of a ping                                    | Healthchecks.io, if `PG_BACKUP_HEALTHCHECK_URL_PRODUCTION` set |
-| Whole machine offline              | nothing on the machine can report this               | Healthchecks.io absence alerts                      |
+| Whole machine offline              | nothing on the machine can report this               | Healthchecks.io absence alerts                                 |
 
 The last row is the point of an external monitor: no check that runs _on_ the
 Mac Mini can tell you the Mac Mini is gone.

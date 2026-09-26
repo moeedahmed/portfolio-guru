@@ -28,7 +28,7 @@ git fetch origin main
 git log --oneline -5                       # find the last known-good commit
 git reset --hard <last-known-good-commit>
 cd backend && ./venv/bin/python3 -m pip install -q -r requirements.txt
-launchctl kickstart -k "gui/$(id -u)/com.portfolioguru.bot"
+launchctl kickstart -k "user/$(id -u)/com.portfolioguru.bot"
 tail -n 30 /tmp/portfolio-guru-bot.log      # confirm it boots on the expected commit
 ```
 

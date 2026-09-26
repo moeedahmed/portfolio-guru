@@ -17,7 +17,7 @@ snapshots plus the pickle/JSON state.
 
 1. **Stop the bot** so nothing writes while you restore:
    ```
-   launchctl bootout "gui/$(id -u)" ~/Library/LaunchAgents/com.portfolioguru.bot.plist
+   launchctl bootout "user/$(id -u)" ~/Library/LaunchAgents/com.portfolioguru.bot.plist
    ```
 2. **Pick the archive** (newest by default):
    ```
@@ -67,7 +67,7 @@ snapshots plus the pickle/JSON state.
 
 6. **Restart the bot:**
    ```
-   launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.portfolioguru.bot.plist
+   launchctl bootstrap "user/$(id -u)" ~/Library/LaunchAgents/com.portfolioguru.bot.plist
    ```
 
 ## Off-device protection (LIVE — verified 2026-08-18)

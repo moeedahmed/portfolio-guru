@@ -108,7 +108,7 @@ INTRO
 
 ask 1 "launchd service is up" \
 "On the Mac Mini, run:
-  launchctl print gui/\$(id -u)/com.portfolioguru.bot | head -25
+  launchctl print user/\$(id -u)/com.portfolioguru.bot | head -25
   scripts/verify_live_runtime.py
 Expect: a recent pid, LIVE_RUNTIME_OK, no last-exit-code loop, log paths reachable.
 Pass if the service is running and not crash-looping."

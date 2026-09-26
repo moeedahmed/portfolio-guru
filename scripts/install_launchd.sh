@@ -35,6 +35,14 @@ cat > "$PLIST_PATH" <<PLIST
   <key>KeepAlive</key>
   <true/>
 
+  <!-- Background lets it load in the user domain, so it outlives a desktop
+       logout; Aqua keeps a manual gui/ load working. -->
+  <key>LimitLoadToSessionType</key>
+  <array>
+    <string>Aqua</string>
+    <string>Background</string>
+  </array>
+
   <!-- On SIGTERM the bot finishes updates already running, including a Kaizen
        save of up to 300 s. launchd's default 20 s would kill it mid-save. -->
   <key>ExitTimeOut</key>
@@ -55,11 +63,14 @@ cat > "$PLIST_PATH" <<PLIST
 </plist>
 PLIST
 
+# The user domain, not gui/: see LAUNCHD_DOMAIN in scripts/deploy_mac.sh.
+LAUNCHD_DOMAIN="user/$(id -u)"
 launchctl bootout "gui/$(id -u)" "$PLIST_PATH" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$PLIST_PATH"
-launchctl enable "gui/$(id -u)/${SERVICE_LABEL}" 2>/dev/null || true
-launchctl kickstart -k "gui/$(id -u)/${SERVICE_LABEL}"
+launchctl bootout "$LAUNCHD_DOMAIN" "$PLIST_PATH" 2>/dev/null || true
+launchctl bootstrap "$LAUNCHD_DOMAIN" "$PLIST_PATH"
+launchctl enable "$LAUNCHD_DOMAIN/${SERVICE_LABEL}" 2>/dev/null || true
+launchctl kickstart -k "$LAUNCHD_DOMAIN/${SERVICE_LABEL}"
 
 echo "Installed and started ${SERVICE_LABEL}"
 echo "Plist: ${PLIST_PATH}"
-launchctl print "gui/$(id -u)/${SERVICE_LABEL}" | sed -n '1,25p'
+launchctl print "$LAUNCHD_DOMAIN/${SERVICE_LABEL}" | sed -n '1,25p'

@@ -111,7 +111,7 @@ Refuse to launch / pull launch if any of these are true:
    must return all-green or known-skipped only.
 2. `backend/filer_router.py` is missing routing entries for a form being
    shown to beta users (DOM map gap on a recommended form).
-3. `launchctl print gui/$(id -u)/com.portfolioguru.bot` shows the service
+3. `launchctl print user/$(id -u)/com.portfolioguru.bot` shows the service
    not running or a recent crash loop in
    `/tmp/portfolio-guru-bot.log`.
 4. Persistent Chrome session at `localhost:18800` is not reachable from the
@@ -133,7 +133,7 @@ Refuse to launch / pull launch if any of these are true:
 **Stop the bot (preserves logs and DB):**
 
 ```bash
-launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.portfolioguru.bot.plist"
+launchctl bootout "user/$(id -u)" "$HOME/Library/LaunchAgents/com.portfolioguru.bot.plist"
 ```
 
 The bot will not auto-restart until bootstrap is run again. Beta users will
@@ -142,8 +142,8 @@ see Telegram messages go undelivered (the bot is offline, not crashed).
 **Re-enable later:**
 
 ```bash
-launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.portfolioguru.bot.plist"
-launchctl enable "gui/$(id -u)/com.portfolioguru.bot" 2>/dev/null || true
+launchctl bootstrap "user/$(id -u)" "$HOME/Library/LaunchAgents/com.portfolioguru.bot.plist"
+launchctl enable "user/$(id -u)/com.portfolioguru.bot" 2>/dev/null || true
 ```
 
 **Pause GitHub auto-deploy (prevents next push to `main` from redeploying):**
@@ -179,7 +179,7 @@ Check on this cadence after each launch / re-launch:
 
 - `tail -F /tmp/portfolio-guru-bot.log` — startup commit/branch line,
   PTB poll start, no `Traceback` or `ERROR` lines.
-- `launchctl print gui/$(id -u)/com.portfolioguru.bot | head -25` —
+- `launchctl print user/$(id -u)/com.portfolioguru.bot | head -25` —
   pid present, recent start, no `last exit code != 0` loop.
 - Bot replies to `/start` from the operator account end-to-end.
 - One real text-case dogfood: see `scripts/dogfood_smoke.sh`.
