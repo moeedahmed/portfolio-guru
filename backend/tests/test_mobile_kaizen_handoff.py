@@ -718,6 +718,20 @@ def test_sign_in_page_has_password_manager_friendly_boxes():
     assert "password.value = ''" in HANDOFF_JS
 
 
+def test_tapping_sign_in_before_kaizen_has_loaded_is_remembered_not_ignored():
+    # 2026-09-26 live test: the first tap came before the RCEM page had loaded,
+    # hit a disabled button, and nothing happened.
+    from mobile_kaizen_handoff import HANDOFF_HTML, HANDOFF_JS
+
+    assert '<button id="signin" type="submit">' in HANDOFF_HTML
+    assert "['opening', 'queued', 'login'].includes(next)" in HANDOFF_JS
+    assert "pending = true;" in HANDOFF_JS
+    assert "if (pending && ready) { pending = false; submitCredentials(); }" in HANDOFF_JS
+    assert "You will be signed in as soon as it is ready." in HANDOFF_JS
+    # Status must sit under the button, not below the live view (off-screen on phones).
+    assert HANDOFF_HTML.index('id="status-card"') < HANDOFF_HTML.index('class="browser-shell"')
+
+
 @pytest.mark.asyncio
 async def test_submit_kaizen_login_uses_both_boxes_when_shown_together():
     from mobile_kaizen_handoff import submit_kaizen_login
@@ -754,4 +768,5 @@ async def test_submit_kaizen_login_uses_both_boxes_when_shown_together():
 
     await submit_kaizen_login(Page(), "doc", "pw")
 
-    assert actions == [("fill", "login"), ("fill", "password"), ("click", "submit")]
+    # Waits for the RCEM box first: kaizenep.com redirects after "load".
+    assert actions == [("wait", "login"), ("fill", "login"), ("fill", "password"), ("click", "submit")]

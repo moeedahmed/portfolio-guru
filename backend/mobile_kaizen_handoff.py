@@ -302,8 +302,10 @@ async def submit_kaizen_login(page: Any, username: str, password: str) -> None:
     submit = page.locator('button[type="submit"]').first
     login_box = page.locator('input[name="login"]')
     password_box = page.locator('input[name="password"]')
-    if await login_box.count():
-        await login_box.fill(username)
+    # kaizenep.com finishes loading before it redirects to the RCEM login, so
+    # an early tap used to type into nothing (2026-09-26). Wait for the box.
+    await login_box.wait_for(state="visible", timeout=20000)
+    await login_box.fill(username)
     if await password_box.count() and await password_box.is_visible():
         await password_box.fill(password)
         await submit.click()
@@ -935,9 +937,13 @@ HANDOFF_HTML = """<!doctype html>
       <input id="kz-username" name="username" type="text" inputmode="email" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" required>
       <label for="kz-password">Password</label>
       <input id="kz-password" name="password" type="password" autocomplete="current-password" required>
-      <button id="signin" type="submit" disabled>Sign in to Kaizen</button>
+      <button id="signin" type="submit">Sign in to Kaizen</button>
       <p class="hint">Use your password manager if you like. Your details go straight to Kaizen and are never stored.</p>
     </form>
+    <section id="status-card" class="status-card" aria-live="polite">
+      <strong id="status-title">Secure link ready</strong>
+      <span id="status-copy">Enter your Kaizen details above.</span>
+    </section>
     <p class="live-label">Live view of the real Kaizen page</p>
     <section class="browser-shell" aria-label="Temporary Kaizen browser">
       <div class="browser-bar"><span class="lock">●</span><span id="browser-label">Opening RCEM ePortfolio…</span></div>
@@ -952,10 +958,6 @@ HANDOFF_HTML = """<!doctype html>
       </div>
     </section>
     <input id="keyboard-bridge" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Type into the selected Kaizen field">
-    <section id="status-card" class="status-card" aria-live="polite">
-      <strong id="status-title">Secure link ready</strong>
-      <span id="status-copy">Tap the Kaizen field shown above, then type normally.</span>
-    </section>
     <p class="privacy">Your typing passes through this browser to reach Kaizen but is never written down or logged. Portfolio Guru only ever saves drafts and never submits anything to a supervisor.</p>
   </main>
   <script src="/handoff/app.js" defer></script>
@@ -993,7 +995,7 @@ button:last-child { background: #1c6b50; color: #fff; }
 .signin #signin { margin-top: 8px; background: #1c6b50; color: #fff; }
 .signin #signin:disabled { opacity: .55; }
 .signin .hint { margin: 4px 0 0; color: #607168; font-size: 12px; line-height: 1.4; }
-.live-label { margin: 0 4px 6px; color: #526158; font-size: 12px; }
+.live-label { margin: 14px 4px 6px; color: #526158; font-size: 12px; }
 .screen-wrap { max-height: 38vh; }
 .done .signin, .done .live-label { display: none; }
 .controls { display: none; }
@@ -1017,8 +1019,13 @@ HANDOFF_JS = r"""
   const username = document.getElementById('kz-username');
   const password = document.getElementById('kz-password');
   const signin = document.getElementById('signin');
+  // A tap before the RCEM page has loaded used to do nothing at all
+  // (2026-09-26). Now it is remembered and sent once Kaizen is ready.
+  let ready = false;
+  let pending = false;
   const setStatus = (next, message) => {
-    signin.disabled = next !== 'login';
+    ready = next === 'login';
+    signin.disabled = !['opening', 'queued', 'login'].includes(next);
     const states = {
       opening: ['Opening Kaizen', 'Preparing an isolated browser…'],
       queued: ['Browser queued', 'Another clinician is using the secure browser. Keep this page open.'],
@@ -1033,6 +1040,7 @@ HANDOFF_JS = r"""
     title.textContent = state[0];
     copy.textContent = message || state[1];
     if (next === 'complete' || next === 'failed' || next === 'expired') document.body.classList.add('done');
+    if (pending && ready) { pending = false; submitCredentials(); }
   };
 
   const send = payload => {
@@ -1113,12 +1121,26 @@ HANDOFF_JS = r"""
   document.getElementById('backspace').addEventListener('click', () => send({type: 'key', key: 'Backspace'}));
   document.getElementById('tab').addEventListener('click', () => { send({type: 'key', key: 'Tab'}); keyboard.focus({preventScroll: true}); });
   document.getElementById('enter').addEventListener('click', () => send({type: 'key', key: 'Enter'}));
-  form.addEventListener('submit', event => {
-    event.preventDefault();
-    if (signin.disabled || !username.value || !password.value) return;
+  function submitCredentials() {
     send({type: 'credentials', username: username.value, password: password.value});
     password.value = '';
     setStatus('signing_in');
+  }
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    if (signin.disabled) return;
+    if (!username.value || !password.value) {
+      copy.textContent = 'Enter your Kaizen username and password first.';
+      (username.value ? password : username).focus();
+      return;
+    }
+    if (!ready) {
+      pending = true;
+      title.textContent = 'Almost ready';
+      copy.textContent = 'Kaizen is still opening. You will be signed in as soon as it is ready.';
+      return;
+    }
+    submitCredentials();
   });
   exchange().catch(() => setStatus('failed', 'The secure link could not be opened. Return to Telegram and try again.'));
 })();
