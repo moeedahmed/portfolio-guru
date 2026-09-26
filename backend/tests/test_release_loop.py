@@ -272,7 +272,9 @@ def ship_harness(tmp_path):
     _write_executable(fake_bin / "git", _fake_git(fake_root, git_log, origin_state))
     _write_executable(
         fake_bin / "launchctl",
-        "#!/usr/bin/env bash\n[[ \"$1\" == print ]] && exit 0\nexit 1\n",
+        "#!/usr/bin/env bash\n"
+        "[[ \"$1 $2\" == \"print gui/\"* && -n \"${FAKE_LAUNCHCTL_NO_GUI:-}\" ]] && exit 113\n"
+        "[[ \"$1\" == print ]] && exit 0\nexit 1\n",
     )
 
     gh_runs = tmp_path / "gh-runs"
@@ -1226,6 +1228,16 @@ def test_ship_blocks_before_mutation_when_the_live_runtime_does_not_match_origin
     assert "FINAL_RELEASE_STATE=blocked" in result.stdout
     assert "push origin" not in ship_harness["git_log"].read_text()
     assert _card(ship_harness)["known_good_sha"] == PUSHED_SHA
+
+
+def test_ship_proves_runtime_from_a_session_outside_the_desktop_login(ship_harness):
+    """A session restarted in launchd's Background session cannot see the gui
+    domain; the runtime verifier finds the service's real domain itself, so
+    the loop must not pre-reject on a gui-only lookup."""
+    result = _ship(ship_harness, "internal", extra_env={"FAKE_LAUNCHCTL_NO_GUI": "1"})
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "FINAL_RELEASE_STATE=live" in result.stdout
 
 
 def test_ship_falls_back_to_public_actions_api_when_gh_is_not_authenticated(ship_harness):

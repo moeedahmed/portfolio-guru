@@ -897,7 +897,6 @@ prove_exact_live_runtime() {
     [[ "$(git rev-parse HEAD)" == "$sha" && "$(git rev-parse origin/main)" == "$sha" ]] || { warn "Local HEAD/origin/main no longer equal release SHA."; return 4; }
   fi
   command -v launchctl >/dev/null 2>&1 || { warn "Local launchd access unavailable."; return 4; }
-  launchctl print "gui/$(id -u)/com.portfolioguru.bot" >/dev/null 2>&1 || { warn "Portfolio Guru service is not locally accessible."; return 4; }
   [[ -x "$ROOT/scripts/verify_live_runtime.py" ]] || { warn "Runtime verifier unavailable."; return 4; }
   if ! output="$("$ROOT/scripts/verify_live_runtime.py" --expected-sha "$sha" 2>&1)"; then warn "Runtime verification failed: $output"; return 4; fi
   [[ "$output" == *"expected_sha=$sha"* && "$output" == *"checkout_sha=$sha"* && "$output" == *"runtime_sha=$sha"* ]] || { warn "Runtime verifier omitted exact stable SHA fields."; return 4; }
