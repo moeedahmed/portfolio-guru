@@ -1,7 +1,10 @@
+import re
+import sys
 import pytest
 import pytest_asyncio
 from telethon import TelegramClient
 from telethon.sessions import StringSession
+from tests.helpers import unstamp
 
 from tests.telegram_live_harness import (
     TelegramExchange,
@@ -59,46 +62,14 @@ async def test_e2e_start_shows_welcome(telethon_client):
 
 @pytest.mark.asyncio
 async def test_e2e_cbd_ready_draft_to_cancel_journey(telethon_client):
-    """The release gate's one live proof: a complete synthetic CBD case from a
-    clean state through to the ready draft and a clean Cancel.
+    """One synthetic draft-first case, one bounded supervision reply if needed,
+    then exact review controls, three distinct KCs and confirmed cancellation.
 
-    Reset the conversation first. This is the release gate's only live proof
-    and it runs on its own, so it inherits whatever state the chat was left
-    in — a half-finished /health, an open settings menu, a pending prompt. On
-    2026-08-27 the previous, first-screen-only version of this test failed for
-    exactly that reason, so it has to start from a clean state rather than
-    wherever the last human left off.
-
-    This traverses the full changed journey rather than stopping at the first
-    form-choice screen: explicit CBD detection, one bounded missing-essentials
-    round if the product's own essentials gate asks for one (a live run on
-    2026-09-22 showed clicking CBD can land on "Before I draft this, I still
-    need: Level of Supervision." instead of the ready draft directly), the
-    ready draft (asserting the exact `Save to Kaizen` + `Cancel` controls and
-    exactly three distinct visible KC child selections, parsed from the
-    actual rendered SLO->KC hierarchy rather than a wording-brittle regex),
-    and a clean Cancel. It never saves to Kaizen. The synthetic case below is
-    written to plainly demonstrate three separate capabilities (escalation,
-    team leadership, and communicating uncertainty); whether the live model
-    actually selects three distinct KCs for it is the evidence this test
-    produces for review, not a claim proven by the case text alone.
-
-    This is not a general flow engine: `classify_post_click_draft_state`
-    recognises exactly the two bounded states bot.py can show after the form
-    click (ready draft, or the Cancel-only missing-essentials prompt) and
-    fails closed — no generic retry loop — on anything else: an unexpected
-    button set, forbidden/error text, a repeated fingerprint (via
-    `wait_for_matching_message`'s timeout), or a second, different
-    missing-essentials round.
-
-    A transcript of every sent/received exchange (reset, case, form choice,
-    the missing-essentials round if one occurs, ready draft, cancellation) is
-    always written via `write_transcript_artifact` when
-    `TELEGRAM_E2E_ARTIFACT_DIR` is set — including whatever was captured so
-    far if the journey fails partway through — so a failed live run still
-    leaves evidence of what the bot actually said.
+    Never saves to Kaizen. A failed assertion also triggers /cancel cleanup,
+    and every captured exchange is retained on success or failure.
     """
     transcript: list[TelegramExchange] = []
+    cancel_confirmed = False
     try:
         async with telethon_client.conversation(BOT_USERNAME, timeout=60) as reset:
             await reset.send_message("/cancel")
@@ -177,10 +148,8 @@ async def test_e2e_cbd_ready_draft_to_cancel_journey(telethon_client):
         assert form_payload in {"FORM|CBD", "FORM|CBD_2021", "FORM|best"}, "Unreviewed clinical form control"
         await cbd_button.click()
 
-        # Wait for the first genuinely changed incoming message with no assumption
-        # that it is already the ready draft — bot.py's own essentials gate
-        # (_ask_for_missing_essentials) can insert one bounded "still need: Level
-        # of Supervision" round first, with only Cancel offered.
+        # Require a genuinely changed draft-first preview, including its gap
+        # list when the doctor has not supplied a required detail.
         post_click = await wait_for_matching_message(
             telethon_client,
             BOT_USERNAME,
@@ -201,10 +170,11 @@ async def test_e2e_cbd_ready_draft_to_cancel_journey(telethon_client):
 
         post_click_state = classify_post_click_draft_state(post_click)
 
-        if post_click_state == "missing_essentials":
-            assert "level of supervision" in (post_click.raw_text or "").lower(), (
-                "the only missing-essentials round this journey supplies detail for is "
-                f"Level of Supervision; got {post_click.raw_text!r}"
+        assert post_click_state != "missing_essentials", "expected a draft-first preview, not the retired ask-first prompt"
+        if post_click_state == "draft_with_gaps":
+            assert re.search(r"still needed:\s*level of supervision\.\s*reply", post_click.raw_text or "", re.IGNORECASE), (
+                "this bounded journey supplies only a missing Level of Supervision; "
+                f"got {post_click.raw_text!r}"
             )
             before_detail_reply = message_fingerprint(post_click)
             detail_text = (
@@ -224,7 +194,7 @@ async def test_e2e_cbd_ready_draft_to_cancel_journey(telethon_client):
             )
             transcript.append(
                 TelegramExchange(
-                    step="missing-essentials",
+                    step="draft-gaps",
                     action=f"send:{detail_text}",
                     received=ready_draft.raw_text or "",
                     buttons=button_texts(ready_draft),
@@ -237,7 +207,7 @@ async def test_e2e_cbd_ready_draft_to_cancel_journey(telethon_client):
         else:
             ready_draft = post_click
 
-        assert any((b.data.decode() if isinstance(b.data, bytes) else b.data) == "APPROVE|draft"
+        assert any(unstamp(b.data.decode() if isinstance(b.data, bytes) else b.data) == "APPROVE|draft"
                    for row in ready_draft.buttons for b in row), "Save boundary payload not observed"
         draft_buttons = button_texts(ready_draft)
         assert any("save to kaizen" in text.lower() for text in draft_buttons), draft_buttons
@@ -266,14 +236,14 @@ async def test_e2e_cbd_ready_draft_to_cancel_journey(telethon_client):
         assert cancel_button is not None, f"no Cancel button on ready draft: {draft_buttons!r}"
         clicked_cancel_button_text = cancel_button.text
         cancel_payload = cancel_button.data.decode() if isinstance(cancel_button.data, bytes) else cancel_button.data
-        assert cancel_payload in {"ACTION|cancel", "CANCEL|draft"}, "Protected or unknown control labelled Cancel"
+        assert unstamp(cancel_payload) in {"ACTION|cancel", "CANCEL|draft"}, "Protected or unknown control labelled Cancel"
         await cancel_button.click()
 
         cancelled = await wait_for_matching_message(
             telethon_client,
             BOT_USERNAME,
             60,
-            expect_text_any=("cancel",),
+            expect_text_any=("cancelled",),
             min_id=getattr(ready_draft, "id", None),
             reject_fingerprint=before_cancel_click,
         )
@@ -286,12 +256,33 @@ async def test_e2e_cbd_ready_draft_to_cancel_journey(telethon_client):
                 clicked_button=clicked_cancel_button_text,
             )
         )
-        assert "cancel" in (cancelled.raw_text or "").lower()
+        assert "cancelled" in (cancelled.raw_text or "").lower()
+        cancel_confirmed = True
     finally:
-        # Written on success and on failure alike, using whatever exchanges
-        # were captured before the exception — a `finally` re-raises the
-        # original failure unchanged once this returns.
-        write_transcript_artifact(transcript)
+        original_failure = sys.exception()
+        try:
+            if not cancel_confirmed:
+                cleanup = TelegramExchange(
+                    step="cleanup", action="send:/cancel",
+                    received="Cancellation unconfirmed; cleanup attempted.",
+                )
+                transcript.append(cleanup)
+                try:
+                    sent = await telethon_client.send_message(BOT_USERNAME, "/cancel")
+                    cleaned = await wait_for_matching_message(
+                        telethon_client, BOT_USERNAME, 60,
+                        expect_text_any=("cancelled",), min_id=sent.id,
+                    )
+                    assert "cancelled" in (cleaned.raw_text or "").lower(), "synthetic journey cleanup was not confirmed"
+                    cleanup.received = cleaned.raw_text or ""
+                    cleanup.buttons = button_texts(cleaned)
+                except Exception as cleanup_error:
+                    cleanup.received = f"Cancellation unconfirmed: {type(cleanup_error).__name__} during cleanup."
+                    if original_failure is None:
+                        raise
+                    original_failure.add_note(cleanup.received)
+        finally:
+            write_transcript_artifact(transcript)
 
 
 @pytest.mark.asyncio

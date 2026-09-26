@@ -593,3 +593,104 @@ async def test_wait_for_matching_message_reraises_non_transient_errors():
             timeout_seconds=1,
             expect_text_any=("anything",),
         )
+
+
+def test_draft_first_gap_preview_is_a_bounded_live_state():
+    message = _FakeMessage(
+        "Here is your Case-Based Discussion draft:\nCase narrative.\nStill needed: Level of Supervision. Reply with it.",
+        (("Save draft now, finish in Kaizen", "Cancel"),),
+    )
+    assert harness.classify_post_click_draft_state(message) == "draft_with_gaps"
+
+
+@pytest.mark.parametrize("text,buttons", [
+    ("Case narrative without a gap list", (("Save draft now, finish in Kaizen", "Cancel"),)),
+    ("Still needed: Level of Supervision.", (("Save draft now, finish in Kaizen", "Save to Kaizen", "Cancel"),)),
+    ("Still needed: Level of Supervision.", (("Save draft now, finish in Kaizen", "Retry"),)),
+])
+def test_gap_preview_classifier_rejects_incomplete_or_conflicting_controls(text, buttons):
+    with pytest.raises(AssertionError):
+        harness.classify_post_click_draft_state(_FakeMessage(text, buttons))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("gap", [False, True])
+async def test_focused_journey_handles_stamped_review_controls(monkeypatch, gap):
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+    from tests import test_e2e as journey
+
+    reset = _FakeMessage("Cancelled", message_id=1)
+    choice = _FakeMessage("Choose CBD", (("CBD",),), message_id=2)
+    choice.buttons[0][0].data = b"FORM|CBD"
+    choice.buttons[0][0].click = AsyncMock()
+    text = "Here is your draft:\n• SLO3 — Resuscitation\n  ↳ KC3: assessment\n  ↳ KC5: leadership\n• SLO7 — Complex situations\n  ↳ KC1: communication"
+    ready = _FakeMessage(text, (("Save to Kaizen", "Cancel"),), message_id=4)
+    for button, data in zip(ready.buttons[0], (b"APPROVE|draft|abc123", b"CANCEL|draft|abc123")):
+        button.data = data
+        button.click = AsyncMock()
+    incomplete = _FakeMessage(text + "\nStill needed: Level of Supervision. Reply with it.", (("Save draft now, finish in Kaizen", "Cancel"),), message_id=3)
+    for button, data in zip(incomplete.buttons[0], (b"APPROVE|draft|def456", b"CANCEL|draft|def456")):
+        button.data = data
+        button.click = AsyncMock()
+    cancelled = _FakeMessage("Cancelled", message_id=5)
+    send = AsyncMock()
+
+    @asynccontextmanager
+    async def conversation(*args, **kwargs):
+        yield SimpleNamespace(send_message=send, get_response=AsyncMock(return_value=reset))
+
+    client = SimpleNamespace(conversation=conversation, send_message=AsyncMock(return_value=_FakeMessage("/cancel", message_id=6)))
+    responses = [choice, incomplete, ready, cancelled] if gap else [choice, ready, cancelled]
+    monkeypatch.setattr(journey, "wait_for_matching_message", AsyncMock(side_effect=responses))
+    record = MagicMock()
+    monkeypatch.setattr(journey, "write_transcript_artifact", record)
+
+    await journey.test_e2e_cbd_ready_draft_to_cancel_journey(client)
+
+    ready.buttons[0][0].click.assert_not_awaited()
+    ready.buttons[0][1].click.assert_awaited_once()
+    client.send_message.assert_not_awaited(), "successful button cancellation needs no extra reset"
+    assert any("Level of supervision: indirect" in call.args[0] for call in send.await_args_list) == gap
+    assert record.call_args.args[0][-1].step == "cancel"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cleanup_failure", [None, "send", "wait"])
+async def test_focused_journey_cancels_even_when_draft_validation_fails(monkeypatch, cleanup_failure):
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+    from tests import test_e2e as journey
+
+    reset = _FakeMessage("Cancelled", message_id=1)
+    choice = _FakeMessage("Choose CBD", (("CBD",),), message_id=2)
+    choice.buttons[0][0].data = b"FORM|CBD"
+    choice.buttons[0][0].click = AsyncMock()
+    bad = _FakeMessage("Unexpected state", (("Retry",),), message_id=3)
+    cancelled = _FakeMessage("Cancelled", message_id=5)
+
+    @asynccontextmanager
+    async def conversation(*args, **kwargs):
+        yield SimpleNamespace(send_message=AsyncMock(), get_response=AsyncMock(return_value=reset))
+
+    client = SimpleNamespace(conversation=conversation, send_message=AsyncMock(return_value=_FakeMessage("/cancel", message_id=4)))
+    if cleanup_failure == "send":
+        client.send_message.side_effect = TimeoutError("cleanup send failed")
+    cleanup_response = TimeoutError("cleanup response timed out") if cleanup_failure == "wait" else cancelled
+    monkeypatch.setattr(journey, "wait_for_matching_message", AsyncMock(side_effect=[choice, bad, cleanup_response]))
+    record = MagicMock()
+    monkeypatch.setattr(journey, "write_transcript_artifact", record)
+
+    with pytest.raises(AssertionError, match="unexpected post-click state") as failure:
+        await journey.test_e2e_cbd_ready_draft_to_cancel_journey(client)
+
+    client.send_message.assert_awaited_once_with(journey.BOT_USERNAME, "/cancel")
+    assert record.call_args.args[0][-1].step == "cleanup"
+    if cleanup_failure:
+        assert "unconfirmed" in record.call_args.args[0][-1].received.lower()
+        assert "TimeoutError" in record.call_args.args[0][-1].received
+        assert any("cleanup" in note.lower() for note in failure.value.__notes__)
+    else:
+        assert "cancelled" in record.call_args.args[0][-1].received.lower()

@@ -160,33 +160,33 @@ def parse_visible_kc_selections(text: str) -> list[tuple[int, int]]:
 
 
 READY_DRAFT_BUTTON_TOKEN = "save to kaizen"
+GAP_DRAFT_BUTTON_TOKEN = "save draft now, finish in kaizen"
 MISSING_ESSENTIALS_TEXT_MARKER = "before i draft this, i still need"
 
 
 def classify_post_click_draft_state(message) -> str:
     """Classify the message the bot shows right after a form-choice click.
 
-    The only two bounded states this journey is allowed to see are the ready
-    draft (`_build_approval_keyboard` in bot.py: a Save button + "Cancel") and
-    the retired missing-essentials prompt. Since 25 Sep 2026 missing details
-    are listed inside the ready draft, so a live run should only ever see
-    "ready"; the second state stays recognised so an old prompt fails
-    loudly rather than being guessed at. Anything else — including a ready-looking message
-    that also carries the missing-essentials marker, or a missing-essentials
-    message with extra buttons — fails closed rather than being guessed at.
-    This is deliberately not a general flow engine: it recognises exactly
-    these two states and nothing further.
-
-    Returns "ready" or "missing_essentials"; raises AssertionError otherwise.
+    Current drafts have either a normal Save control or the explicit save-with-
+    gaps control and a closing gap list. The retired ask-first prompt remains
+    recognisable for diagnostics; the live journey must reject it. Contradictory
+    states fail closed; the journey separately verifies the ready controls.
     """
     received_lower = (getattr(message, "raw_text", "") or "").lower()
     buttons = button_texts(message)
     buttons_lower = [b.lower() for b in buttons]
 
     is_ready = any(READY_DRAFT_BUTTON_TOKEN in b for b in buttons_lower)
+    is_gap_draft = any(GAP_DRAFT_BUTTON_TOKEN in b for b in buttons_lower)
+    has_gap_list = "still needed:" in received_lower
     is_missing_essentials = MISSING_ESSENTIALS_TEXT_MARKER in received_lower
 
-    if is_ready and not is_missing_essentials:
+    if is_gap_draft and not is_ready and not is_missing_essentials:
+        if not has_gap_list or len(buttons_lower) != 2 or not any("cancel" in b for b in buttons_lower):
+            raise AssertionError("gap draft requires a gap list and exactly Save draft/Cancel controls")
+        return "draft_with_gaps"
+
+    if is_ready and not is_gap_draft and not is_missing_essentials and not has_gap_list:
         return "ready"
 
     if is_missing_essentials and not is_ready:
