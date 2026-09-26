@@ -6439,6 +6439,26 @@ def _kc_preview_summary(kc: str) -> str:
     return summary
 
 
+def _cbd_filing_fields(draft: CBDData) -> dict:
+    """Kaizen field payload for a CBDData draft.
+
+    The KC list must travel with it. Without ``key_capabilities`` the filer
+    falls back to ticking by bare SLO code, which ticks one KC per SLO: a
+    draft showing SLO3 KC3, SLO3 KC5 and SLO7 KC1 was filed with only two
+    boxes ticked, and post-filing QA had no KC list to catch the gap.
+    """
+    return {
+        "date_of_encounter": draft.date_of_encounter,
+        "end_date": draft.date_of_encounter,
+        "date_of_event": draft.date_of_encounter,
+        "stage_of_training": draft.stage_of_training,
+        "clinical_reasoning": draft.clinical_reasoning,
+        "reflection": draft.reflection,
+        "curriculum_links": list(draft.curriculum_links or []),
+        "key_capabilities": list(draft.key_capabilities or []),
+    }
+
+
 def _format_curriculum_hierarchy(curriculum_links, key_capabilities) -> str:
     """Render SLOs with their KCs nested underneath as a hierarchy."""
     import re as _re
@@ -14376,15 +14396,8 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             user_id,
             chosen_form if chosen_form in ("CBD", "CBD_2021") else "CBD",
         )
-        fields = {
-            "date_of_encounter": filing_draft.date_of_encounter,
-            "end_date": filing_draft.date_of_encounter,
-            "date_of_event": filing_draft.date_of_encounter,
-            "stage_of_training": filing_draft.stage_of_training,
-            "clinical_reasoning": filing_draft.clinical_reasoning,
-            "reflection": filing_draft.reflection,
-        }
-        curriculum_links = filing_draft.curriculum_links or []
+        fields = _cbd_filing_fields(filing_draft)
+        curriculum_links = fields["curriculum_links"]
     _audit_event(
         context,
         "draft_payload",
