@@ -685,7 +685,6 @@ _UNGATED_DRAFTING_CALLERS = {
     "_analyse_selected_form",
     # Post-preview refinements of an existing, already-gated draft.
     "handle_quick_improve",
-    "handle_edit_value",
 }
 
 
@@ -902,3 +901,97 @@ async def test_case_content_is_drafted_even_when_judged_missing():
     assert draft.clinical_setting == "Emergency Department"
     assert draft.clinical_reasoning.startswith("Collapse with vertigo")
     assert draft.trainee_role == "", "the doctor's own role is never assumed"
+
+
+@pytest.mark.asyncio
+async def test_plain_reflection_reply_becomes_evidence_before_reassessment():
+    """A reply to Still needed must reach the assessor, not only the drafter."""
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data.update(case_text=THIN_CASE, chosen_form="CBD", case_input_source="text")
+    bot._store_draft(context, _cbd_draft(reflection=""))
+    reflection = "I learned to review the ECG earlier and will escalate it sooner next time."
+
+    async def assess(source, *args, **kwargs):
+        return _all("CBD", ESSENTIAL_PRESENT, reflection=(
+            ESSENTIAL_PRESENT if reflection in source else ESSENTIAL_MISSING
+        ))
+
+    extract = AsyncMock(return_value=_cbd_draft(reflection=reflection))
+    with patch("bot.assess_form_essentials", new=AsyncMock(side_effect=assess)), \
+         patch("bot.classify_intent", new=AsyncMock(return_value="edit_detail")), \
+         patch("bot.extract_cbd_data", new=extract), \
+         patch("bot.get_voice_profile", return_value=""):
+        state = await bot.handle_mid_conversation_text(sim._make_text_update(reflection), context)
+
+    assert state == AWAIT_APPROVAL
+    assert reflection in context.user_data["case_text"]
+    assert bot._load_draft(context).fields["reflection"] == reflection
+    assert "reflection" not in {gap["key"] for gap in bot._draft_gaps(context)}
+    assert extract.await_args.args[0] == context.user_data["case_text"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("draft_shape", ["FORM", "CBD"])
+async def test_direct_correction_preserves_source_and_supports_both_draft_shapes(draft_shape):
+    from models import CBDData
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data.update(case_text=COMPLETE_CASE, chosen_form="CBD", case_input_source="text")
+    original = _cbd_draft() if draft_shape == "FORM" else CBDData(**CBD_FIELDS)
+    bot._store_draft(context, original)
+    correction = "Change the date to 2026-09-24."
+    updates = AsyncMock(return_value={"date_of_encounter": "2026-09-24"})
+
+    with patch("bot.classify_intent", new=AsyncMock(return_value="edit_detail")), \
+         patch("bot.extract_field_updates", new=updates):
+        state = await bot.handle_mid_conversation_text(sim._make_text_update(correction), context)
+
+    assert state == AWAIT_APPROVAL
+    assert bot._draft_fields_for_review(bot._load_draft(context))["date_of_encounter"] == "2026-09-24"
+    assert COMPLETE_CASE in context.user_data["case_text"]
+    assert correction in context.user_data["case_text"], "later regeneration must retain the doctor's correction"
+    assert updates.await_args.args[1]["clinical_reasoning"] == CBD_FIELDS["clinical_reasoning"]
+
+
+@pytest.mark.asyncio
+async def test_legacy_edit_reply_rechecks_gaps_and_blanks_unprovided_reflection():
+    """A resumed EDIT state must honour the same draft-first contract."""
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data.update(case_text=THIN_CASE, chosen_form="CBD", case_input_source="text")
+    bot._store_draft(context, _cbd_draft(reflection=""))
+    correction = "The registrar supervised indirectly."
+    assess = _assess(_all("CBD", ESSENTIAL_PRESENT, reflection=ESSENTIAL_MISSING))
+    extract = AsyncMock(return_value=_cbd_draft(reflection="Invented personal learning."))
+
+    with patch("bot.assess_form_essentials", new=assess), \
+         patch("bot.extract_cbd_data", new=extract), \
+         patch("bot.get_voice_profile", return_value=""):
+        state = await bot.handle_edit_value(sim._make_text_update(correction), context)
+
+    assert state == AWAIT_APPROVAL
+    assess.assert_awaited_once()
+    assert correction in assess.await_args.args[0]
+    assert bot._load_draft(context).fields["reflection"] == ""
+    assert correction in context.user_data["case_text"]
+
+
+@pytest.mark.asyncio
+async def test_cbd_clear_field_correction_keeps_a_loadable_draft():
+    from models import CBDData
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data.update(case_text=COMPLETE_CASE, chosen_form="CBD")
+    bot._store_draft(context, CBDData(**CBD_FIELDS))
+    with patch("bot.classify_intent", new=AsyncMock(return_value="edit_detail")), \
+         patch("bot.extract_field_updates", new=AsyncMock(return_value={"reflection": None})):
+        state = await bot.handle_mid_conversation_text(
+            sim._make_text_update("Clear the reflection; I want to rewrite it myself."), context,
+        )
+
+    assert state == AWAIT_APPROVAL
+    assert bot._load_draft(context).reflection == ""
+    assert "reflection" in {gap["key"] for gap in bot._draft_gaps(context)}

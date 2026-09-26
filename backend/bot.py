@@ -1384,7 +1384,12 @@ def _clear_filing_retry_state(context) -> None:
     not offered for a draft that never had a filing attempt. PicklePersistence
     keeps user_data across turns, so a stale 'failed'/'partial' status from an
     earlier case would otherwise make a brand-new draft look retryable."""
-    for key in ("last_filing_status", "last_filing_form_name", "last_filing_report"):
+    for key in (
+        "last_filing_status", "last_filing_form_name", "last_filing_report",
+        "awaiting_attachment_confirmation", "awaiting_filing_curriculum_choice",
+        "alternative_curriculum_offer", "alternative_curriculum_retry_requested",
+        "retry_filing_requested",
+    ):
         context.user_data.pop(key, None)
 
 
@@ -1395,7 +1400,11 @@ def _store_draft(context, draft):
     filing, so the retry affordance is cleared here. The genuine retry path
     restores `draft_data` directly via `_restore_retryable_draft` and never
     routes through this helper, so its status is preserved."""
-    context.user_data["draft_data"] = _serialise_draft(draft)
+    serialised = _serialise_draft(draft)
+    if context.user_data.get("draft_data") != serialised:
+        # Approval belongs to the preview the doctor saw, not a later edit.
+        context.user_data["case_token"] = secrets.token_hex(3)
+    context.user_data["draft_data"] = serialised
     _clear_filing_retry_state(context)
 
 
@@ -4683,7 +4692,8 @@ def _case_token(context) -> str:
 
     Old buttons stay in the chat. Without a stamp, a Cancel from an earlier case
     wiped the live one, and a second queued tap on Save filed the draft again.
-    The token is renewed when a save starts and disappears with the case.
+    The token is renewed when a draft changes or a save starts, and disappears
+    with the case.
     """
     token = context.user_data.get("case_token")
     if not token:
@@ -8076,8 +8086,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
     )
 
     if action == "retry_filing":
-        context.user_data["retry_filing_requested"] = True
-        return await handle_approval_approve(update, context)
+        return await handle_callback(update, context)
     if action == "pwl_reconnected":
         return await passwordless_reconnected(update, context)
 
@@ -11312,6 +11321,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return AWAIT_CASE_INPUT
 
     elif data == "ACTION|retry_filing":
+        if not _has_retryable_failed_filing_draft(context):
+            await query.answer("That retry is no longer active. Review the latest draft before saving.")
+            return None
         context.user_data["retry_filing_requested"] = True
         return await handle_approval_approve(update, context)
 
@@ -11998,6 +12010,7 @@ async def _regenerate_active_draft_with_feedback(
     *,
     append_to_case: bool = False,
     input_source: str = "text",
+    progress_message=None,
 ) -> int:
     """Regenerate an active approval draft using extra text or extracted media."""
     msg = update.message or update.callback_query.message
@@ -12020,7 +12033,7 @@ async def _regenerate_active_draft_with_feedback(
     if input_source in {"text", "voice", "audio"}:
         context.user_data["case_has_user_context"] = True
 
-    ack = await msg.reply_text("✏️ Regenerating draft with your extra information…")
+    ack = progress_message or await msg.reply_text("✏️ Regenerating draft with your extra information…")
 
     # Regenerating is drafting. An edit must not rebuild the draft from a case
     # whose essentials are known to be missing, so the same gate runs here on
@@ -14229,6 +14242,9 @@ async def handle_attachment_confirm(update: Update, context: ContextTypes.DEFAUL
     draft still saves, just without the file.
     """
     query = update.callback_query
+    if not context.user_data.pop("awaiting_attachment_confirmation", False):
+        await query.answer("That attachment choice is no longer active. Review the latest draft before saving.")
+        return None
     keep = query.data.split("|")[-1] == "yes"
     await query.answer("Attaching it." if keep else "Saving without the file.")
 
@@ -14402,6 +14418,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     # pass, so consent has to be settled before that pass starts.
     attachment_reason = _attachment_confirmation_reason(context)
     if attachment_reason:
+        context.user_data["awaiting_attachment_confirmation"] = True
         _audit_event(
             context,
             "decision_path",
@@ -14539,6 +14556,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     except asyncio.TimeoutError:
         typing_stop.set()
         progress_task.cancel()
+        context.user_data["last_filing_status"] = "failed"
         _log_filing_attempt(
             user_id=user_id,
             username=getattr(update.effective_user, "username", None),
@@ -14589,6 +14607,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     except Exception as e:
         typing_stop.set()
         progress_task.cancel()
+        context.user_data["last_filing_status"] = "failed"
         logger.error(f"Filer error for {form_type}: {e}", exc_info=True)
         _log_filing_attempt(
             user_id=user_id,
@@ -15645,43 +15664,14 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await msg.reply_text("💬 Send text, a voice note, or a photo with your feedback.")
         return AWAIT_EDIT_VALUE
 
-    try:
-        form_type = draft.form_type if isinstance(draft, FormDraft) else "CBD"
-        current_draft_text = _format_draft_preview(
-            draft,
-            include_safety_layer=False,
-        )
-        vp = get_voice_profile(update.effective_user.id) or ""
-
-        if form_type == "CBD":
-            updated = await asyncio.wait_for(extract_cbd_data(
-                case_text,
-                edit_feedback=feedback,
-                current_draft=current_draft_text,
-                voice_profile_json=vp,
-                input_source=context.user_data.get("case_input_source", "text"),
-                previous_key_capabilities=list(getattr(draft, "key_capabilities", None) or []),
-            ), timeout=45)
-        else:
-            updated = await asyncio.wait_for(extract_form_data(
-                case_text,
-                form_type,
-                edit_feedback=feedback,
-                current_draft=current_draft_text,
-                voice_profile_json=vp,
-                input_source=context.user_data.get("case_input_source", "text"),
-            ), timeout=45)
-        _store_draft(context, updated)
-    except asyncio.TimeoutError:
-        await ack.edit_text("⏳ Regeneration timed out.", reply_markup=_active_draft_keyboard(context))
-        return AWAIT_APPROVAL
-    except Exception as e:
-        await ack.edit_text("⚠️ Couldn't regenerate.", reply_markup=_active_draft_keyboard(context))
-        return AWAIT_APPROVAL
-
-    preview = _format_draft_preview_for_context(updated, context)
-    await _safe_edit_text(ack, preview + _draft_reply_hint(context), reply_markup=_active_draft_keyboard(context), parse_mode="Markdown")
-    return AWAIT_APPROVAL
+    return await _regenerate_active_draft_with_feedback(
+        update,
+        context,
+        feedback,
+        append_to_case=True,
+        input_source="voice" if voice else "photo" if photo else "text",
+        progress_message=ack,
+    )
 
 
 def _workflow_phase_for_text_turn(context, *, has_draft: bool, in_flow: bool) -> WorkflowPhase:
@@ -16088,7 +16078,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
             try:
                 updates = await extract_field_updates(
                     chosen_form or "",
-                    dict(draft.fields) if hasattr(draft, "fields") else {},
+                    dict(_draft_fields_for_review(draft)),
                     raw_text,
                 )
             except Exception:
@@ -16097,8 +16087,40 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
 
             summary = updates.pop("__summary__", "") if isinstance(updates, dict) else ""
             if updates:
-                for field_name, new_value in updates.items():
-                    draft.fields[field_name] = new_value
+                # Keep the doctor's correction as source evidence for later
+                # edits, and reassess it before accepting doctor-owned facts.
+                case_text = combine_case_inputs(case_text, [raw_text])
+                context.user_data["case_text"] = case_text
+                context.user_data["case_has_user_context"] = True
+                previous_source = context.user_data.get("case_input_source", "text")
+                context.user_data["case_input_source"] = "text" if previous_source == "text" else "mixed"
+                gate = await _essentials_gate_before_draft(
+                    update.message, context, case_text, chosen_form or "CBD", edit=False,
+                )
+                if gate is not None:
+                    return gate
+                if isinstance(draft, FormDraft):
+                    draft = FormDraft(
+                        form_type=draft.form_type, uuid=draft.uuid,
+                        fields={**draft.fields, **updates},
+                    )
+                else:
+                    # A model may use null to clear a field. Restore its
+                    # empty default and validate before replacing the draft.
+                    updates = {
+                        key: type(draft).model_fields[key].default if value is None else value
+                        for key, value in updates.items()
+                        if key in type(draft).model_fields
+                    }
+                    try:
+                        draft = type(draft).model_validate({**draft.model_dump(), **updates})
+                    except ValueError:
+                        await update.message.reply_text(
+                            "I couldn't apply that change. Your previous draft is unchanged; try rephrasing it.",
+                            reply_markup=_active_draft_keyboard(context),
+                        )
+                        return AWAIT_APPROVAL
+                draft = _blank_judged_missing_essentials(context, draft, case_text, chosen_form or "CBD")
                 _store_draft(context, draft)
                 _set_reflection_detail_gate(context, draft)
                 preview = _format_draft_preview_for_context(draft, context, chosen_form)
@@ -16114,7 +16136,9 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
         # Treat any text reply as edit feedback when we have a draft to refine.
         # (Explicit "new_case" intent still routes to the warning path below.)
         if has_draft and turn.kind in {WorkflowTurnKind.ENRICH, WorkflowTurnKind.EXPLICIT_EDIT} and case_text:
-            return await _regenerate_active_draft_with_feedback(update, context, raw_text)
+            return await _regenerate_active_draft_with_feedback(
+                update, context, raw_text, append_to_case=True,
+            )
 
         if has_pending and context.user_data.get("chosen_form") and turn.kind is WorkflowTurnKind.ENRICH:
             return await _accumulate_and_refresh(update, context, raw_text)

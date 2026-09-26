@@ -159,3 +159,62 @@ async def test_an_old_cancel_does_not_wipe_the_live_case():
     with patch("telegram.CallbackQuery.answer", new=AsyncMock()):
         assert await bot.handle_callback(make_callback_update("CANCEL|draft|0ld0ld"), context) is None
     assert context.user_data["case_text"] == CASE
+
+
+@pytest.mark.asyncio
+async def test_save_from_before_a_correction_cannot_approve_the_revised_draft():
+    from models import FormDraft
+    from tests.bot_simulator import BotSimulator
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["case_text"] = CASE
+    original = FormDraft(form_type="CBD", fields={"clinical_reasoning": "Original case summary."})
+    bot._store_draft(context, original)
+    save = next(d for d in _button_data(bot._build_approval_keyboard(context=context)) if d.startswith("APPROVE"))
+    bot._store_draft(context, FormDraft(form_type="CBD", fields={"clinical_reasoning": "Doctor's corrected summary."}))
+
+    with patch.object(bot, "get_credentials") as credentials, \
+         patch.object(bot, "route_filing", new=AsyncMock()) as filing:
+        result = await bot.handle_approval_approve(sim._make_callback_update(save), context)
+
+    assert result is None
+    credentials.assert_not_called()
+    filing.assert_not_awaited()
+    assert bot._load_draft(context).fields["clinical_reasoning"] == "Doctor's corrected summary."
+    current_save = next(d for d in _button_data(bot._build_approval_keyboard(context=context)) if d.startswith("APPROVE"))
+    assert current_save != save
+    assert not bot._is_stale_case_button(context, current_save)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("callback", [
+    "ATTACH|yes", "ATTACH|no", "FILING_CURRICULUM|select|2025",
+    "FILING_CURRICULUM|retry|2021", "ACTION|retry_filing",
+])
+async def test_edit_invalidates_pending_save_continuations(callback):
+    from models import FormDraft
+    from tests.bot_simulator import BotSimulator
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    bot._store_draft(context, FormDraft(form_type="CBD", fields={"clinical_reasoning": "Original."}))
+    context.user_data.update(
+        awaiting_attachment_confirmation=True,
+        awaiting_filing_curriculum_choice=True,
+        alternative_curriculum_offer="2021",
+        last_filing_status="failed",
+        attachment_path="/synthetic/report.pdf",
+    )
+    bot._store_draft(context, FormDraft(form_type="CBD", fields={"clinical_reasoning": "Corrected."}))
+    update = sim._make_callback_update(callback)
+    handler = bot.handle_attachment_confirm if callback.startswith("ATTACH|") else bot.handle_callback
+
+    with patch.object(bot, "handle_approval_approve", new=AsyncMock()) as approval, \
+         patch.object(bot, "store_curriculum") as curriculum:
+        await handler(update, context)
+
+    approval.assert_not_awaited()
+    curriculum.assert_not_called()
+    assert context.user_data["attachment_path"] == "/synthetic/report.pdf"
+    assert not context.user_data.get("attachment_upload_confirmed")

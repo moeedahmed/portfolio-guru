@@ -283,6 +283,12 @@ CASES: list[CaseDefinition] = [
                     "lactate 4.2. Sepsis six started, broad-spectrum antibiotics, "
                     "fluids, ICU discussion. Reflection: document escalation time."
                 ),
+                expect_text_any=("Image received",),
+                expect_button_any=("DOCUSE|info",),
+            ),
+            Step(
+                label="read-handwritten-text",
+                callback="DOCUSE|info",
                 expect_text_any=("Forms that fit", "Case-Based Discussion"),
                 expect_button_any=("FORM|best", "FORM|CBD"),
             ),
@@ -324,7 +330,7 @@ CASES: list[CaseDefinition] = [
                     "I delegated tasks, escalated early to the consultant and reflected "
                     "on team leadership."
                 ),
-                expect_text_any=("Forms that fit", "ACAT"),
+                expect_text_any=("Acute Care Assessment Tool",),
                 expect_button_any=("FORM|best", "FORM|ACAT"),
             ),
             Step(
@@ -361,6 +367,22 @@ CASES: list[CaseDefinition] = [
                     "Certificate of attendance: Ultrasound-guided vascular access "
                     "course, regional EM teaching day. Learning outcomes: probe "
                     "handling, sterile technique, complication awareness."
+                ),
+                expect_text_any=("certificate or award",),
+                expect_button_any=("DOCUSE|attach",),
+                forbid_text_any=("DOPS", "Mini-CEX", "ACAT"),
+            ),
+            Step(
+                label="attach-certificate",
+                callback="DOCUSE|attach",
+                expect_text_any=("attached",),
+            ),
+            Step(
+                label="describe-own-learning",
+                text=(
+                    "I attended an ultrasound-guided vascular access course. I practised "
+                    "probe handling and sterile technique. I learned to keep the needle tip "
+                    "in view and will apply this in supervised ED procedures."
                 ),
                 expect_text_any=("Forms that fit", "Self"),
                 expect_button_any=("FORM|best", "FORM|SDL"),

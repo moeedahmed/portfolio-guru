@@ -2609,6 +2609,8 @@ class TestFlowWalker:
             'uuid': thin_draft.uuid,
         }
 
+        context.user_data["last_filing_status"] = "failed"
+
         route_filing = AsyncMock(return_value={
             'status': 'success',
             'filled': ['date_of_encounter'],
@@ -2787,6 +2789,8 @@ class TestFlowWalker:
             'fields': thin_draft.fields,
             'uuid': thin_draft.uuid,
         }
+
+        context.user_data["last_filing_status"] = "failed"
 
         route_filing = AsyncMock(return_value={
             'status': 'success',

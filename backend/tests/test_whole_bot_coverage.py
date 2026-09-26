@@ -633,6 +633,8 @@ async def test_protected_save_controls_stop_at_verified_boundary(scenario, monke
         reflection="I learned to escalate earlier and will brief the team sooner next time.")
     app.user_data[TEST_USER.id].update(draft_data={"_type": "FORM", **draft.model_dump()},
         case_text="Synthetic case: I assessed chest pain and escalated. I learned to escalate earlier and will brief the team sooner next time.", chosen_form="MINI_CEX")
+    if payload.startswith("ATTACH|"):
+        app.user_data[TEST_USER.id]["awaiting_attachment_confirmation"] = True
     update = make_callback_update(payload)
     _prepare_update(update, app.bot)
     await app.process_update(update)
@@ -970,6 +972,10 @@ async def test_each_state_slot_dispatches_its_guard_or_effect(scenario, monkeypa
             payload, expected = next((p, e) for p, e in routes_by_input if slot.handler.pattern.match(p))
         else:
             payload, expected = routes[owner]
+        if owner == "handle_attachment_confirm":
+            # Exercise the existing missing-credentials boundary after a
+            # genuine pending confirmation. Stale answers are tested separately.
+            data["awaiting_attachment_confirmation"] = True
         update = make_callback_update(payload)
     else:
         update = input_samples(app.bot)[kind]

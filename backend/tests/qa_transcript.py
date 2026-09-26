@@ -115,12 +115,18 @@ class _ResponseCollector:
 
     def __init__(self) -> None:
         self.sent: list[dict[str, Any]] = []
+        self.errors: list[str] = []
 
     def _make_fake_message(self, chat_id, text):
         msg = MagicMock(spec=Message)
         msg.message_id = len(self.sent) + 5000
         msg.chat_id = chat_id
         msg.text = text
+        async def edit(text=None, **kwargs):
+            return await self.edit_message_text(
+                text=text, chat_id=chat_id, message_id=msg.message_id, **kwargs,
+            )
+        msg.edit_text = AsyncMock(side_effect=edit)
         return msg
 
     async def send_message(self, chat_id=None, text="", **kwargs):
@@ -205,6 +211,11 @@ async def offline_application():
 
     from tests.helpers import build_offline_application
     app = build_offline_application()
+
+    async def capture_handler_error(update, context):
+        collector.errors.append(type(context.error).__name__)
+
+    app.add_error_handler(capture_handler_error)
 
     real_bot = app.bot
     real_bot._unfreeze()
@@ -468,6 +479,7 @@ async def _run_step(app, collector, step: Step, user_id: int = 99999) -> StepObs
     action_meta, update = _build_update_for_step(step)
     _prepare_update(update, app.bot)
     collector.drain()
+    collector.errors.clear()
     obs = StepObservation(label=step.label, action=action_meta)
     try:
         await asyncio.wait_for(app.process_update(update), timeout=30)
@@ -483,6 +495,9 @@ async def _run_step(app, collector, step: Step, user_id: int = 99999) -> StepObs
         return obs
 
     drained = collector.drain()
+    if collector.errors:
+        obs.error = ", ".join(collector.errors)
+        obs.failures.append(f"handler error: {obs.error}")
     for record in drained:
         text = record.get("text") or ""
         markup = record.get("reply_markup")
@@ -539,6 +554,14 @@ async def run_case(case: CaseDefinition, monkeypatch_obj) -> CaseTranscript:
             transcript.steps.append(obs)
             if not obs.passed:
                 transcript.passed = False
+        final = transcript.steps[-1]
+        if not final.observed_draft or final.observed_draft.get("form_type") != case.draft_form_type:
+            final.failures.append(f"expected a {case.draft_form_type} draft at the end of the journey")
+        controls = {tuple(button["callback_data"].split("|")[:2]) for button in final.buttons}
+        if not {("APPROVE", "draft"), ("CANCEL", "draft")} <= controls:
+            final.failures.append("expected draft approval and cancellation controls")
+        final.passed = not final.failures
+        transcript.passed = all(step.passed for step in transcript.steps)
     return transcript
 
 

@@ -58,10 +58,8 @@ async def test_offline_qa_transcript_runs_all_golden_cases(monkeypatch):
     json_path, md_path = write_reports(transcripts, out_dir)
     print(f"\nTelegram QA transcript written:\n  {json_path}\n  {md_path}")
 
-    # At minimum, every case must produce at least one bot reply on the first
-    # step. Stricter per-step expectations are surfaced in the transcript as
-    # `failures` but do not fail the suite, because extractor mocks and form
-    # button labels can legitimately drift across UI iterations.
+    # Keep first-message diagnostics, and require every declared step below.
+    # A report containing failed journeys must never earn a passing test.
     for transcript in transcripts:
         first = transcript.steps[0]
         assert first.bot_messages, (
@@ -81,3 +79,40 @@ async def test_offline_qa_transcript_runs_all_golden_cases(monkeypatch):
     assert audit_counts["draft_payload"] >= 1
     assert audit_counts["bot_response"] >= 1
     assert audit_counts["media_document_flow"] >= 1
+    assert not failures, f"Failed offline journeys: {failures}; see {md_path}"
+
+
+async def test_transcript_rejects_a_failed_terminal_draft(monkeypatch):
+    from unittest.mock import AsyncMock
+    import bot
+    from tests import qa_transcript
+
+    case = next(case for case in CASES if case.case_id == "haris-intermediate-voice-acute-take")
+    patch_extraction = qa_transcript._patch_extraction
+
+    def fail_drafting(patcher, definition):
+        patch_extraction(patcher, definition)
+        patcher.setattr(bot, "extract_form_data", AsyncMock(side_effect=RuntimeError("Synthetic drafting failure")))
+
+    monkeypatch.setattr(qa_transcript, "_patch_extraction", fail_drafting)
+    transcript = await run_case(case, monkeypatch)
+
+    assert not transcript.passed
+    assert not transcript.steps[-1].passed
+    assert any("draft" in failure.lower() for failure in transcript.steps[-1].failures)
+
+
+async def test_transcript_rejects_a_handler_error_after_a_progress_reply():
+    from telegram.ext import CallbackQueryHandler
+    from tests.qa_transcript import Step, _run_step, offline_application
+
+    async def broken_handler(update, context):
+        await update.callback_query.message.reply_text("Reviewing this draft…")
+        raise RuntimeError("Synthetic handler failure")
+
+    async with offline_application() as (app, collector, _):
+        app.add_handler(CallbackQueryHandler(broken_handler, pattern=r"^TEST_FAILURE$"), group=-1)
+        result = await _run_step(app, collector, Step(label="broken-handler", callback="TEST_FAILURE"))
+
+    assert not result.passed
+    assert result.error == "RuntimeError"

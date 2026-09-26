@@ -106,7 +106,8 @@ class TestGateMechanics:
         import bot
 
         context = _context(
-            attachment_path="/tmp/f.jpg", attachment_name="f.jpg", attachment_kind="image"
+            attachment_path="/tmp/f.jpg", attachment_name="f.jpg", attachment_kind="image",
+            awaiting_attachment_confirmation=True,
         )
         update = MagicMock()
         update.callback_query.data = "ATTACH|no"
@@ -127,7 +128,8 @@ class TestGateMechanics:
         import bot
 
         context = _context(
-            attachment_path="/tmp/f.jpg", attachment_name="f.jpg", attachment_kind="image"
+            attachment_path="/tmp/f.jpg", attachment_name="f.jpg", attachment_kind="image",
+            awaiting_attachment_confirmation=True,
         )
         update = MagicMock()
         update.callback_query.data = "ATTACH|yes"

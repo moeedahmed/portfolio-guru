@@ -817,3 +817,145 @@ class TestOfflineE2E:
         # Should not raise — the bot should handle stale buttons gracefully
         await app.process_update(update)
         # No crash = success. Bot may or may not send a message depending on state.
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ending", ["cancel_button", "cancel_command", "approve"])
+async def test_draft_review_corrections_restart_and_explicit_exit(offline_app, monkeypatch, tmp_path, ending):
+    """Real handler dispatch, synthetic model results, encrypted restart round-trip.
+
+    The filing boundary is an AsyncMock: this never connects to Kaizen.
+    """
+    import json
+    import os
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    import bot
+    from clinical_persistence import ClinicalScrubbingPersistence
+    from models import CBDData, FormTypeRecommendation
+
+    app, collector = offline_app
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)  # production's default intake
+    monkeypatch.setattr(bot, "has_credentials", lambda uid: True)
+    monkeypatch.setattr(bot, "get_credentials", lambda uid: ("synthetic-user", "synthetic-password"))
+    monkeypatch.setattr(bot, "get_training_level", lambda uid: "ST5")
+    monkeypatch.setattr(bot, "get_curriculum", lambda uid: "2025")
+    monkeypatch.setattr(bot, "get_voice_profile", lambda uid: None)
+    monkeypatch.setattr(bot, "check_can_file", AsyncMock(return_value=(True, 0, 10, "free")))
+    monkeypatch.setattr(bot, "recommend_form_types", AsyncMock(return_value=[
+        FormTypeRecommendation(form_type="CBD", rationale="Synthetic discussion case", uuid=None),
+    ]))
+    monkeypatch.setattr(bot, "extract_explicit_form_type", lambda text, **kwargs: None)
+    monkeypatch.setattr(bot, "classify_intent", AsyncMock(return_value="edit_detail"))
+    monkeypatch.setattr(bot, "extract_field_updates", AsyncMock(return_value={}))
+    filing = AsyncMock(return_value={"status": "success", "filled": ["clinical_reasoning"], "skipped": [], "method": "synthetic"})
+    monkeypatch.setattr(bot, "route_filing", filing)
+
+    case = "Synthetic case: I assessed chest pain, reviewed the ECG and discussed it with the registrar."
+    reflection = "I learned to discuss uncertain ECG findings earlier and will do that next time."
+
+    async def assess(source, form_type, essentials, **kwargs):
+        return {item["key"]: (
+            bot.ESSENTIAL_MISSING if item["key"] in {"reflection", "level_of_supervision"}
+            and not (item["key"] == "reflection" and reflection in source)
+            else bot.ESSENTIAL_PRESENT
+        ) for item in essentials}
+
+    async def extract(source, **kwargs):
+        return CBDData(
+            patient_presentation="Chest pain", clinical_reasoning="Reviewed the ECG and discussed it with the registrar.",
+            trainee_role="Assessed the patient", clinical_setting="Emergency Department", stage_of_training="Higher/ST4-ST6",
+            reflection=reflection if reflection in source else "An invented reflection that must be blanked.",
+            level_of_supervision="Direct",  # deliberately guessed: must be blanked
+        )
+
+    monkeypatch.setattr(bot, "assess_form_essentials", AsyncMock(side_effect=assess))
+    monkeypatch.setattr(bot, "extract_cbd_data", AsyncMock(side_effect=extract))
+    data = app.user_data[TEST_USER.id]
+    ctx = SimpleNamespace(user_data=data)
+    records = []
+    output = Path(os.environ.get("DRAFT_REVIEW_TRANSCRIPT_DIR", str(tmp_path)))
+    output.mkdir(parents=True, exist_ok=True)
+
+    async def dispatch(label, update):
+        before = len(collector.sent)
+        _prepare_update(update, app.bot)
+        if update.callback_query and update.callback_query.data == "GATHER|done":
+            # A real tap belongs to the displayed capture prompt.
+            message = update.callback_query.message
+            message._unfreeze()
+            message.message_id = data["gathering_msg_id"]
+            message._freeze()
+        await app.process_update(update)
+        records.append({
+            "step": label,
+            "text": update.message.text if update.message else update.callback_query.data,
+            "replies": [{"text": item.get("text", ""), "buttons": [
+                {"text": button.text, "data": button.callback_data}
+                for row in getattr(item.get("reply_markup"), "inline_keyboard", []) for button in row
+            ]} for item in collector.sent[before:]],
+            "filing_calls": filing.await_count,
+            "case_retained": bool(data.get("case_text")),
+        })
+        (output / f"journey-{ending}.json").write_text(json.dumps(records, indent=2))
+
+    def button(prefix):
+        for item in reversed(collector.sent):
+            for row in getattr(item.get("reply_markup"), "inline_keyboard", []):
+                for candidate in row:
+                    if (candidate.callback_data or "").startswith(prefix):
+                        return candidate.callback_data
+        raise AssertionError(f"No {prefix} button in replies")
+
+    await dispatch("incomplete notes", make_text_update(case))
+    await dispatch("finish gathering", make_callback_update("GATHER|done"))
+    await dispatch("choose form", make_callback_update("FORM|CBD"))
+    first_save = button("APPROVE|draft")
+    assert bot._load_draft(ctx).reflection == ""
+    assert bot._load_draft(ctx).level_of_supervision is None
+    assert "Still needed:" in collector.texts[-1]
+    filing.assert_not_awaited()
+
+    await dispatch("supply own reflection", make_text_update(reflection))
+    assert bot._load_draft(ctx).reflection == reflection
+    assert reflection in data["case_text"]
+    assert bot._load_draft(ctx).level_of_supervision is None
+    await dispatch("repeat same detail", make_text_update(reflection))
+    assert bot._load_draft(ctx).reflection == reflection
+    filing.assert_not_awaited()
+
+    persistence_path = tmp_path / "restart-persistence"
+    persistence = ClinicalScrubbingPersistence(filepath=persistence_path)
+    await persistence.update_user_data(TEST_USER.id, dict(data))
+    await persistence.flush()
+    assert reflection.encode() not in persistence_path.read_bytes()
+    restored = (await ClinicalScrubbingPersistence(filepath=persistence_path).get_user_data())[TEST_USER.id]
+    data.clear()
+    data.update(restored)
+    assert case in data["case_text"] and reflection in data["case_text"]
+    assert bot._load_draft(ctx).reflection == reflection
+
+    await dispatch("stale approval after correction and restart", make_callback_update(first_save))
+    filing.assert_not_awaited()
+    current_save = button("APPROVE|draft")
+    if ending == "approve":
+        await dispatch("explicit current approval", make_callback_update(current_save))
+        filing.assert_awaited_once()
+        from inspect import signature
+        from filer_router import route_filing
+        payload = signature(route_filing).bind(**filing.await_args.kwargs)
+        payload.apply_defaults()
+        assert payload.arguments["submit"] is False
+        assert reflection in filing.await_args.kwargs["fields"]["reflection"]
+        await dispatch("repeat approval", make_callback_update(current_save))
+        filing.assert_awaited_once()
+    elif ending == "cancel_button":
+        await dispatch("cancel", make_callback_update(button("CANCEL|draft")))
+    else:
+        await dispatch("cancel", make_command_update("cancel"))
+    assert not data.get("draft_data") and not data.get("case_text")
+    if ending != "approve":
+        await dispatch("old save after cancellation", make_callback_update(current_save))
+        filing.assert_not_awaited()
+        assert not data.get("draft_data")
