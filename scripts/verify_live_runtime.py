@@ -46,13 +46,37 @@ def expected_commit(root: Path) -> str:
     return run_text(["git", "-C", str(root), "rev-parse", "HEAD"]).strip()
 
 
-def launchd_pid(service_label: str = DEFAULT_SERVICE_LABEL) -> int:
-    output = run_text(["launchctl", "print", f"gui/{os.getuid()}/{service_label}"])
+def launchd_service(service_label: str = DEFAULT_SERVICE_LABEL) -> tuple[str, int | None]:
+    """Resolve one existing owner; never move a service between domains."""
+    registrations = []
+    for kind in ("gui", "user"):
+        domain = f"{kind}/{os.getuid()}"
+        result = subprocess.run(
+            ["launchctl", "print", f"{domain}/{service_label}"],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+        )
+        if result.returncode != 0:
+            if "Could not find service" in result.stderr or "Could not find domain" in result.stderr:
+                continue
+            raise RuntimeError(f"Cannot inspect {domain}/{service_label}: {result.stderr.strip()}")
+        registrations.append((domain, result.stdout))
+    if len(registrations) != 1:
+        raise RuntimeError(f"Expected one registered {service_label} service, found {len(registrations)}")
+    domain, output = registrations[0]
     for line in output.splitlines():
         stripped = line.strip()
         if stripped.startswith("pid ="):
-            return int(stripped.split("=", 1)[1].strip())
-    raise RuntimeError(f"{service_label} has no launchd pid")
+            pid = int(stripped.split("=", 1)[1].strip())
+            if pid > 0:
+                return domain, pid
+    return domain, None
+
+
+def launchd_pid(service_label: str = DEFAULT_SERVICE_LABEL) -> int:
+    _domain, pid = launchd_service(service_label)
+    if pid is None:
+        raise RuntimeError(f"{service_label} has no launchd pid")
+    return pid
 
 
 def process_alive(pid: int) -> bool:
@@ -139,12 +163,21 @@ def check_runtime(
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--expected-sha", help="required exact full SHA for release proof")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--expected-sha", help="required exact full SHA for release proof")
+    mode.add_argument("--service-domain", action="store_true", help="print the single existing launchd owner for deployment")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.service_domain:
+        try:
+            domain, _pid = launchd_service(os.environ.get("PORTFOLIO_GURU_SERVICE_LABEL", DEFAULT_SERVICE_LABEL))
+            print(domain)
+            return 0
+        except (RuntimeError, ValueError) as exc:
+            return fail(str(exc))
     try:
         expected_sha = validate_expected_sha(args.expected_sha or os.environ.get("PORTFOLIO_GURU_EXPECTED_SHA"))
     except ValueError as exc:

@@ -74,3 +74,26 @@ separate boundary against filing anything on Kaizen unless explicitly authorised
 
 The development work can be closed after the local commit; live activation is
 a separate decision.
+
+## Subsequent release preparation
+
+Read-only inspection found the live beta service in `user/501`, with checkout,
+runtime and process identity matching the baseline. The old release verifier
+and deploy script assumed `gui/501`. The candidate now discovers exactly one
+existing service owner, preserves that domain during deployment and rollback,
+and refuses missing/ambiguous ownership or inspection errors before mutation.
+Owner discovery permits a stopped registered service; runtime proof still
+requires a live, matching PID and the exact checkout/runtime SHA.
+
+Fault injection also reproduced two deployment failure paths that escaped
+rollback: a failed runtime-verification command was followed by a success
+message, and bootstrap/query failures exited before reaching the rollback
+block. These failures now explicitly enter the existing rollback path.
+The focused deployment/runtime suite passed 28 tests and independent review
+found no remaining concrete blocker. Logs are under the local evidence
+directory's `release/` subdirectory. This section records release preparation,
+not a deployment or a new approval.
+
+The repaired candidate also passed the complete offline release gate:
+`verify:changed PASSED`, then 3,901 passed, 3 skipped, 18 deselected,
+3 snapshots passed, and `verify:release PASSED`.

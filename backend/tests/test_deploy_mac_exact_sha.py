@@ -59,7 +59,7 @@ def deploy_repo(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     commands = {
-        "launchctl": "#!/usr/bin/env bash\nif [[ \"$1\" == print ]]; then printf 'pid = %s\\n' \"$TEST_SERVICE_PID\"; fi\nexit 0\n",
+        "launchctl": "#!/usr/bin/env bash\nif [[ \"$1\" == print && \"$2\" == user/* ]]; then echo 'Could not find service' >&2; exit 113; fi\nif [[ \"$1\" == print ]]; then printf 'pid = %s\\n' \"$TEST_SERVICE_PID\"; fi\nexit 0\n",
         "pgrep": "#!/usr/bin/env bash\nexit 1\n",
         "lsof": "#!/usr/bin/env bash\nexit 1\n",
         "sleep": "#!/usr/bin/env bash\nexit 0\n",
@@ -134,3 +134,53 @@ def test_deploy_refuses_when_origin_main_is_not_expected_sha(deploy_repo):
     assert result.returncode != 0
     assert "origin/main" in result.stdout + result.stderr
     assert subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=app, text=True).strip() == initial
+
+
+@pytest.mark.parametrize("domain", ["gui", "user"])
+@pytest.mark.parametrize("failure", ["none", "verification", "bootstrap", "service_query"])
+def test_deploy_keeps_the_existing_service_domain(deploy_repo, domain, failure):
+    app, initial, expected, env = deploy_repo
+    env["DEPLOY_EXPECTED_SHA"] = expected
+    calls = app.parent / "launchctl-calls"
+    fake = Path(env["PATH"].split(":")[0]) / "launchctl"
+    fake.write_text(
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$*" >> "$TEST_LAUNCHCTL_CALLS"\n'
+        'count=0; [[ ! -f "$TEST_BOOTSTRAP_COUNT" ]] || count=$(cat "$TEST_BOOTSTRAP_COUNT")\n'
+        'if [[ "$1" == bootstrap ]]; then count=$((count + 1)); echo "$count" > "$TEST_BOOTSTRAP_COUNT"; fi\n'
+        'if [[ "$count" == 1 && "$TEST_DEPLOY_FAILURE" == bootstrap && "$1" == bootstrap ]]; then exit 1; fi\n'
+        'if [[ "$count" == 1 && "$TEST_DEPLOY_FAILURE" == service_query && "$1" == print ]]; then exit 1; fi\n'
+        'if [[ "$1" == print && "$2" != "$TEST_SERVICE_DOMAIN/"* ]]; then\n'
+        '  echo "Could not find service" >&2; exit 113\n'
+        'fi\n'
+        'if [[ "$1" == print ]]; then printf "pid = %s\\n" "$TEST_SERVICE_PID"; fi\n'
+        'exit 0\n'
+    )
+    env["TEST_LAUNCHCTL_CALLS"] = str(calls)
+    env["TEST_SERVICE_DOMAIN"] = f"{domain}/{os.getuid()}"
+    env["TEST_BOOTSTRAP_COUNT"] = str(app.parent / "bootstrap-count")
+    env["TEST_DEPLOY_FAILURE"] = failure
+    if failure == "verification":
+        (app / "scripts" / "verify_live_runtime.py").write_text("#!/usr/bin/env bash\nexit 1\n")
+    result = subprocess.run(["bash", str(SCRIPT)], cwd=app, env=env, capture_output=True, text=True)
+    assert result.returncode == (0 if failure == "none" else 1), result.stdout + result.stderr
+    assert subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=app, text=True).strip() == (expected if failure == "none" else initial)
+    mutations = [line for line in calls.read_text().splitlines() if line.startswith(("bootout ", "bootstrap ", "enable "))]
+    assert mutations
+    assert all(line.split()[1].startswith(env["TEST_SERVICE_DOMAIN"]) for line in mutations)
+
+
+@pytest.mark.parametrize("registered", [False, True])
+def test_deploy_refuses_missing_or_ambiguous_owner_before_mutating(deploy_repo, registered):
+    app, initial, expected, env = deploy_repo
+    env["DEPLOY_EXPECTED_SHA"] = expected
+    fake = Path(env["PATH"].split(":")[0]) / "launchctl"
+    calls = app.parent / "launchctl-calls"
+    env["TEST_LAUNCHCTL_CALLS"] = str(calls)
+    body = 'printf "pid = %s\\n" "$TEST_SERVICE_PID"; exit 0' if registered else 'echo "Could not find service" >&2; exit 113'
+    fake.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$TEST_LAUNCHCTL_CALLS"\n' + body + '\n')
+    result = subprocess.run(["bash", str(SCRIPT)], cwd=app, env=env, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "Expected one registered" in result.stderr
+    assert subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=app, text=True).strip() == initial
+    assert all(line.startswith("print ") for line in calls.read_text().splitlines())

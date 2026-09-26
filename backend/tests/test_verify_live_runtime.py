@@ -51,3 +51,52 @@ def test_exact_sha_mismatch_fails(monkeypatch, tmp_path, checkout, runtime):
     monkeypatch.setattr(verify, "process_alive", lambda _pid: True)
     with pytest.raises(RuntimeError, match="expected SHA"):
         verify.check_runtime(root=tmp_path, identity_path=identity, expected_sha=SHA)
+
+
+@pytest.mark.parametrize("domain", ["gui", "user"])
+def test_runtime_finds_the_single_registered_service_domain(monkeypatch, domain):
+    import subprocess
+
+    def run(args, **kwargs):
+        target = args[-1]
+        if target.startswith(domain + "/"):
+            return subprocess.CompletedProcess(args, 0, "state = running\npid = 42\n", "")
+        return subprocess.CompletedProcess(args, 113, "", "Could not find service")
+
+    monkeypatch.setattr(verify.subprocess, "run", run)
+    assert verify.launchd_pid() == 42
+
+
+def test_runtime_refuses_duplicate_service_registrations(monkeypatch):
+    import subprocess
+    monkeypatch.setattr(verify.subprocess, "run", lambda args, **kwargs: subprocess.CompletedProcess(args, 0, "pid = 42\n", ""))
+    with pytest.raises(RuntimeError, match="one registered"):
+        verify.launchd_pid()
+
+
+def test_runtime_does_not_treat_access_failure_as_an_absent_service(monkeypatch):
+    import subprocess
+    monkeypatch.setattr(verify.subprocess, "run", lambda args, **kwargs: subprocess.CompletedProcess(args, 1, "", "Permission denied"))
+    with pytest.raises(RuntimeError, match="Permission denied"):
+        verify.launchd_pid()
+
+
+def test_service_domain_query_is_not_runtime_proof(monkeypatch, capsys):
+    monkeypatch.setattr(verify, "launchd_service", lambda _label: ("user/501", 42))
+    assert verify.main(["--service-domain"]) == 0
+    assert capsys.readouterr().out == "user/501\n"
+
+
+def test_domain_discovery_can_recover_a_stopped_service_without_claiming_runtime_proof(monkeypatch, capsys):
+    import subprocess
+
+    def run(args, **kwargs):
+        if args[-1].startswith("user/"):
+            return subprocess.CompletedProcess(args, 0, "state = waiting\n", "")
+        return subprocess.CompletedProcess(args, 113, "", "Could not find service")
+
+    monkeypatch.setattr(verify.subprocess, "run", run)
+    assert verify.main(["--service-domain"]) == 0
+    assert capsys.readouterr().out == f"user/{verify.os.getuid()}\n"
+    with pytest.raises(RuntimeError, match="no launchd pid"):
+        verify.launchd_pid()
