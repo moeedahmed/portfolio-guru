@@ -619,9 +619,9 @@ class TestOfflineE2E:
         _prepare_update(update, app.bot)
         await app.process_update(update)
 
-        assert collector.texts == [expected, bot._KAIZEN_USERNAME_PROMPT]
+        # One message: the reset question becomes the all-clear plus the connect step.
+        assert collector.texts == [expected + "\n\n" + bot._KAIZEN_USERNAME_PROMPT]
         assert collector.sent[0].get("reply_markup") is None
-        assert collector.sent[1].get("reply_markup") is None
         assert user_data_is_purged()
         assert invalidated == [TEST_USER.id]
 
@@ -629,7 +629,7 @@ class TestOfflineE2E:
         update = make_callback_update("CONFIRM|reset", message_text=bot._RESET_CONFIRM_TEXT)
         _prepare_update(update, app.bot)
         await app.process_update(update)
-        assert collector.texts == [expected, bot._KAIZEN_USERNAME_PROMPT]
+        assert collector.texts == [expected + "\n\n" + bot._KAIZEN_USERNAME_PROMPT]
         assert "No stored data found" not in collector.texts[0]
 
         collector.sent.clear()

@@ -265,7 +265,7 @@ async def test_reset_confirm_button_offers_the_same_connect_choice(offered, monk
 
     assert state == bot.AWAIT_USERNAME
     assert _CHOICE in sim.get_last_buttons()
-    assert sim.get_last_text() == bot._CONNECT_CHOICE_TEXT
+    assert sim.get_last_text().endswith(bot._CONNECT_CHOICE_TEXT)
 
 
 @pytest.mark.asyncio
@@ -282,7 +282,7 @@ async def test_reset_ends_on_exactly_what_settings_connect_shows(offered, monkey
         settings_sim._make_callback_update("ACTION|setup"), settings_sim._make_context()
     )
 
-    assert reset_sim.get_last_text() == settings_sim.get_last_text()
+    assert reset_sim.get_last_text() == bot._DATA_CLEAR_TEXT + "\n\n" + settings_sim.get_last_text()
     assert reset_sim.get_last_buttons() == settings_sim.get_last_buttons()
 
 
@@ -297,7 +297,7 @@ async def test_reset_without_passwordless_still_asks_for_the_username(monkeypatc
     )
 
     assert _CHOICE not in sim.get_last_buttons()
-    assert sim.get_last_text() == bot._KAIZEN_USERNAME_PROMPT
+    assert sim.get_last_text() == bot._DATA_CLEAR_TEXT + "\n\n" + bot._KAIZEN_USERNAME_PROMPT
 
 
 def test_connect_prompt_is_only_built_by_the_shared_step():
@@ -317,3 +317,84 @@ def test_connect_prompt_is_only_built_by_the_shared_step():
             continue  # the definition itself
         owners.add(re.findall(r"^(?:async )?def (\w+)", before, re.M)[-1])
     assert owners <= allowed_owners, f"bare username prompt used in {owners - allowed_owners}"
+
+
+# --- Sign-in is one message that updates in place ----------------------------
+
+def _typed(sim, text):
+    update = sim._make_text_update(text)
+    update.message.delete = AsyncMock()
+    return update
+
+
+@pytest.mark.asyncio
+async def test_reset_to_password_step_stays_in_one_message(offered, monkeypatch):
+    """Delete data, then the email: every step edits the same message, and the
+    typed email is deleted like the password because both are sensitive."""
+    sim = BotSimulator()
+    context = sim._make_context()
+    monkeypatch.setattr(bot, "_perform_reset", AsyncMock())
+
+    await bot.handle_reset_confirm(sim._make_callback_update("CONFIRM|reset"), context)
+    email = _typed(sim, "doctor@nhs.net")
+    state = await bot.setup_username(email, context)
+
+    assert state == bot.AWAIT_PASSWORD
+    email.message.delete.assert_awaited_once()
+    assert not [kind for kind, _, _ in sim.messages_sent if kind in ("send", "reply")]
+    assert "Step 2 of 3" in sim.get_last_text()
+
+
+@pytest.mark.asyncio
+async def test_not_an_email_is_deleted_and_asked_again_in_place(offered, monkeypatch):
+    sim = BotSimulator()
+    context = sim._make_context()
+    monkeypatch.setattr(bot, "_perform_reset", AsyncMock())
+    await bot.handle_reset_confirm(sim._make_callback_update("CONFIRM|reset"), context)
+
+    typo = _typed(sim, "doctor at nhs")
+    state = await bot.setup_username(typo, context)
+
+    assert state == bot.AWAIT_USERNAME
+    typo.message.delete.assert_awaited_once()
+    assert sim.messages_sent[-1][0] == "bot_edit"
+    assert "doesn't look like an email" in sim.get_last_text()
+
+
+@pytest.mark.asyncio
+async def test_email_that_cannot_be_deleted_gets_a_fresh_prompt(offered, monkeypatch):
+    """If Telegram refuses the delete, don't edit a message above a visible email."""
+    sim = BotSimulator()
+    context = sim._make_context()
+    monkeypatch.setattr(bot, "_perform_reset", AsyncMock())
+    await bot.handle_reset_confirm(sim._make_callback_update("CONFIRM|reset"), context)
+
+    email = sim._make_text_update("doctor@nhs.net")
+    email.message.delete = AsyncMock(side_effect=RuntimeError("no rights"))
+    await bot.setup_username(email, context)
+
+    assert sim.messages_sent[-1][0] == "send"
+
+
+@pytest.mark.asyncio
+async def test_settings_connect_turns_the_settings_message_into_the_connect_step(offered):
+    sim = BotSimulator()
+    context = sim._make_context()
+    tap = sim._make_callback_update("ACTION|setup", message_text=bot._SETTINGS_TITLE + "\n\nKaizen: not connected")
+
+    await bot.setup_start(tap, context)
+
+    assert sim.messages_sent[-1][0] == "bot_edit"
+    assert not [kind for kind, _, _ in sim.messages_sent if kind in ("send", "reply")]
+    assert _CHOICE in sim.get_last_buttons()
+
+
+@pytest.mark.asyncio
+async def test_reconnect_on_another_message_keeps_that_message(offered):
+    """A Reconnect button on a draft must not overwrite the draft."""
+    sim = BotSimulator()
+    tap = sim._make_callback_update("ACTION|setup", message_text="📝 Your CBD draft")
+
+    await bot.setup_start(tap, sim._make_context())
+
+    assert sim.messages_sent[-1][0] == "send"
