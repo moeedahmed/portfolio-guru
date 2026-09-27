@@ -9,6 +9,14 @@ reading. This standard collapses that into a single decision he can actually
 make: he reads one card, approves its exact contents, and everything mechanical inside
 that unchanged envelope proceeds without asking again.
 
+Who approves: Moeed's standing instruction. When he has given the task, the
+agent prepares the card and approves it itself with the exact printed
+`<sha>:<digest>`, in the same run, then reports "done and live". The card,
+digest binding, proof and rollback mechanics are unchanged; only the tap is
+gone. He is still asked first when the effect deletes user data, changes stored
+keys or credentials, loses database data, or sends anything to real users or
+the public.
+
 It removes prompts, not boundaries. Nothing here weakens a live-send,
 credential, spend or supervisor-facing guard.
 
