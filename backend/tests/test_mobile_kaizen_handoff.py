@@ -185,7 +185,8 @@ def test_handoff_page_has_no_store_security_headers_and_mobile_controls():
     assert "Connect Kaizen" in response.text
     assert "browser-screen" in response.text
     assert "keyboard-bridge" in response.text
-    assert "does not store your password" in response.text
+    assert "Your password goes straight to Kaizen and is never stored" in response.text
+    assert "Why sign in?" in response.text
     # Never overclaim: typing does pass through our browser.
     assert "never see" not in response.text.lower()
 
@@ -724,7 +725,8 @@ def test_tapping_sign_in_before_kaizen_has_loaded_is_remembered_not_ignored():
     from mobile_kaizen_handoff import HANDOFF_HTML, HANDOFF_JS
 
     assert '<button id="signin" type="submit">' in HANDOFF_HTML
-    assert "['opening', 'queued', 'login'].includes(next)" in HANDOFF_JS
+    assert "signin.disabled = ['signing_in', 'saving', 'complete', 'failed', 'expired'].includes(next);" in HANDOFF_JS
+    assert "Sign in (Kaizen is opening…)" in HANDOFF_JS
     assert "pending = true;" in HANDOFF_JS
     assert "if (pending && ready) { pending = false; submitCredentials(); }" in HANDOFF_JS
     assert "You will be signed in as soon as it is ready." in HANDOFF_JS
@@ -770,3 +772,146 @@ async def test_submit_kaizen_login_uses_both_boxes_when_shown_together():
 
     # Waits for the RCEM box first: kaizenep.com redirects after "load".
     assert actions == [("wait", "login"), ("fill", "login"), ("fill", "password"), ("click", "submit")]
+
+
+# --- 2026-09-27: the bot confirms by itself, and a closed tab keeps the link ---
+
+def test_bot_can_ask_how_a_sign_in_link_ended_with_the_internal_key_only():
+    store = HandoffStore()
+    app = create_app(
+        store=store,
+        internal_key="local-only-key",
+        public_base_url="https://handoff.example.test",
+        secure_cookies=True,
+        browser_manager=None,
+    )
+    client = TestClient(app)
+    headers = {"X-Portfolio-Handoff-Key": "local-only-key"}
+    body = client.post("/internal/handoffs", headers=headers, json={"telegram_user_id": 4242}).json()
+    session_id = body["session_id"]
+
+    assert client.get(f"/internal/handoffs/{session_id}").status_code == 401
+    assert client.get(f"/internal/handoffs/{session_id}", headers=headers).json() == {"status": "created"}
+
+    store.complete(session_id, {"status": "connected"})
+    outcome = client.get(f"/internal/handoffs/{session_id}", headers=headers)
+    assert outcome.json() == {"status": "complete"}
+    assert "4242" not in outcome.text
+    assert client.get("/internal/handoffs/unknown", headers=headers).status_code == 404
+
+
+def test_closing_the_page_before_signing_in_lets_the_same_link_reopen():
+    store = HandoffStore()
+    created = store.create(_connect_request(1))
+    record = store.get_by_viewer_token(store.exchange(created.token))
+    assert store.claim_browser(record.session_id)
+
+    store.release(record.session_id)
+
+    assert store.get_by_viewer_token("old-viewer") is None
+    assert store.exchange(created.token)
+    assert store.get_by_id(created.session_id).request is not None
+
+
+def test_a_finished_link_cannot_be_released_back_open():
+    store = HandoffStore()
+    created = store.create(_connect_request(1))
+    store.exchange(created.token)
+    store.fail(created.session_id, "Too many sign-in attempts.")
+
+    store.release(created.session_id)
+
+    assert store.get_by_id(created.session_id).status == "failed"
+    assert store.exchange(created.token) is None
+
+
+@pytest.mark.asyncio
+async def test_page_closed_after_details_were_sent_still_ends_the_link():
+    from starlette.websockets import WebSocketDisconnect
+
+    class FakePage:
+        url = "https://eportfolio.rcem.ac.uk/login"
+        mouse = keyboard = None
+
+        async def set_viewport_size(self, viewport):
+            return None
+
+        async def goto(self, url, **kwargs):
+            return None
+
+        async def screenshot(self, **kwargs):
+            return b"x"
+
+    class Handle:
+        async def stop(self):
+            return None
+
+    async def connect_page():
+        return FakePage(), Handle()
+
+    async def fresh_socket(messages):
+        class Socket:
+            async def send_json(self, payload):
+                return None
+
+            async def receive_json(self):
+                if messages:
+                    return messages.pop(0)
+                raise WebSocketDisconnect()
+
+            async def close(self, code=None):
+                return None
+
+        return Socket()
+
+    async def submit(page, username, password):
+        return None
+
+    store = HandoffStore()
+    manager = MobileBrowserManager(connect_page=connect_page, submit_login=submit, screenshot_interval=0.01)
+
+    # Closed before any details: the link reopens.
+    created = store.create(_connect_request(1))
+    record = store.get_by_viewer_token(store.exchange(created.token))
+    await manager.serve(record, await fresh_socket([]), store)
+    assert record.status == "created"
+    assert store.exchange(created.token)
+
+    # Closed after details went to Kaizen: the link is finished.
+    record = store.get_by_id(created.session_id)
+    creds = [{"type": "credentials", "username": "doc@example.test", "password": "pw"}]
+    await manager.serve(record, await fresh_socket(creds), store)
+    assert record.status == "failed"
+
+
+def test_create_connect_link_returns_the_session_to_watch(monkeypatch, tmp_path):
+    import io
+    import json as _json
+    import urllib.request
+
+    import mobile_kaizen_handoff as handoff
+
+    key = tmp_path / "internal.key"
+    key.write_text("k" * 40)
+    monkeypatch.setenv("PG_KAIZEN_CONNECT_BROKER_URL", "http://127.0.0.1:8101")
+    seen = []
+
+    class Response(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def fake_urlopen(request, timeout):
+        seen.append((request.get_method(), request.full_url))
+        if request.get_method() == "POST":
+            return Response(_json.dumps({"url": "https://x.test/handoff#t", "expires_in_seconds": 600, "session_id": "s1"}).encode())
+        return Response(_json.dumps({"status": "complete"}).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    link = handoff.create_connect_link(4242, key_path=key)
+    assert link.session_id == "s1"
+    assert handoff.connect_link_status("s1", key_path=key) == "complete"
+    assert seen[-1] == ("GET", "http://127.0.0.1:8101/internal/handoffs/s1")

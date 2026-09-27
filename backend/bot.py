@@ -2339,32 +2339,60 @@ _KB_RETYPE_SETUP = InlineKeyboardMarkup([
 # the Connect Kaizen page (mobile_kaizen_handoff), and only the signed-in
 # session is kept. Kaizen ends it after about a day; the doctor then signs in
 # again when they next save. Offered only where kaizen_connection says so.
-_PASSWORDLESS_SETUP_OFFER = (
-    "\n\nPrefer not to share your password? Tap below and sign in to Kaizen "
-    "yourself instead. You'll need to sign in again about once a day, "
-    "usually when you save a draft."
+# Where the option is offered, /setup shows ONE message with both choices
+# side by side (2026-09-27: the old prompt plus a separate offer, then a new
+# message for every tap, overwhelmed doctors).
+_CONNECT_CHOICE_TEXT = (
+    "🔗 *Connect Kaizen*\n\n"
+    "I save your drafts into your Kaizen portfolio, so I need to sign in as you. "
+    "Choose how:\n\n"
+    "🔒 *Without sharing your password*\n"
+    "You sign in on a secure Kaizen page. It lasts about a day, then I'll send "
+    "you a new sign-in link.\n\n"
+    "🔑 *Share your password*\n"
+    "Stored encrypted (Fernet) and used only to sign in to Kaizen. "
+    "Stays connected."
 )
 _BTN_CONNECT_PASSWORDLESS = InlineKeyboardButton(
-    "🔒 Connect without sharing my password",
+    "🔒 Sign in without password",
     callback_data="ACTION|connect_passwordless",
 )
-_PASSWORDLESS_LINK_TEXT = (
-    "🔒 Sign in to Kaizen\n\n"
-    "1. Tap *Sign in to Kaizen* and sign in on the page that opens.\n"
-    "2. When it says *Kaizen connected*, come back here and tap *I've signed in*.\n\n"
-    "_The link works once and expires in 10 minutes. Portfolio Guru never stores "
-    "your password; it keeps only the signed-in session, which Kaizen ends after "
-    "about a day._"
+_BTN_CONNECT_PASSWORD = InlineKeyboardButton(
+    "🔑 Use my password",
+    callback_data="ACTION|setup_password",
 )
+_KB_CONNECT_CHOICE = InlineKeyboardMarkup([
+    [_BTN_CONNECT_PASSWORDLESS],
+    [_BTN_CONNECT_PASSWORD],
+    [_BTN_CANCEL],
+])
+_PASSWORDLESS_LINK_TEXT = (
+    "🔒 *Sign in to Kaizen*\n\n"
+    "Tap *Open Kaizen sign-in* and sign in on the page that opens. I'll confirm "
+    "here as soon as it works, so there's nothing else to tap.\n\n"
+    "_The link lasts 10 minutes. Your password goes straight to Kaizen and is "
+    "never stored; Kaizen ends the session after about a day._"
+)
+_PASSWORDLESS_LINK_ENDED_TEXT = (
+    "⌛ That sign-in link has expired or was closed before Kaizen connected.\n\n"
+    "Get a new link to try again."
+)
+_PASSWORDLESS_CONNECTED_AGAIN_TEXT = "✅ Kaizen connected again."
+# How often the bot asks the sign-in page whether the doctor has finished.
+_PASSWORDLESS_WATCH_SECONDS = 3
+# Kaizen can still be saving the session just after the link's own expiry.
+_PASSWORDLESS_WATCH_GRACE_SECONDS = 90
+# Consecutive failures to reach the sign-in page before falling back to the
+# "I've signed in" button.
+_PASSWORDLESS_WATCH_MAX_ERRORS = 5
 _PASSWORDLESS_UNAVAILABLE_TEXT = (
     "⚠️ The Kaizen sign-in page isn't available right now. Try again in a few "
     "minutes, or connect with your username and password instead."
 )
 _PASSWORDLESS_NOT_SIGNED_IN_TEXT = (
     "I can't see a Kaizen sign-in yet.\n\n"
-    "Tap *Sign in to Kaizen*, finish signing in until the page says "
-    "*Kaizen connected*, then tap *I've signed in*. If the link has expired, "
-    "tap *New link*."
+    "Tap *Open Kaizen sign-in* and finish signing in until the page says "
+    "*Kaizen connected*. If the link has expired, tap *New link*."
 )
 _PASSWORDLESS_FEATURE_UNAVAILABLE_TEXT = (
     "This feature needs a username-and-password connection, because it signs in "
@@ -2377,15 +2405,37 @@ _PASSWORDLESS_CHECK_FAILED_TEXT = (
 )
 
 
-def _passwordless_keyboard(url: str, *, done_action: str, link_action: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔒 Sign in to Kaizen", url=url)],
-        [InlineKeyboardButton("✅ I've signed in", callback_data=f"ACTION|{done_action}")],
-        [
-            InlineKeyboardButton("🔁 New link", callback_data=f"ACTION|{link_action}"),
-            _BTN_CANCEL,
-        ],
-    ])
+def _passwordless_keyboard(
+    url: str,
+    *,
+    done_action: str,
+    link_action: str,
+    watched: bool = True,
+) -> InlineKeyboardMarkup:
+    """The sign-in link message's buttons.
+
+    While the bot is watching the link it confirms by itself, so there is no
+    "I've signed in" button; that button returns only when the sign-in page
+    can't be asked. Setup also offers the password route instead.
+    """
+    rows = [[InlineKeyboardButton("🔒 Open Kaizen sign-in", url=url)]]
+    if not watched:
+        rows.append([InlineKeyboardButton("✅ I've signed in", callback_data=f"ACTION|{done_action}")])
+    if done_action == "passwordless_done":
+        rows.append([InlineKeyboardButton("🔑 Use my password instead", callback_data="ACTION|setup_password")])
+    if not watched:
+        rows.append([InlineKeyboardButton("🔁 New link", callback_data=f"ACTION|{link_action}"), _BTN_CANCEL])
+    else:
+        rows.append([_BTN_CANCEL])
+    return InlineKeyboardMarkup(rows)
+
+
+def _passwordless_ended_keyboard(link_action: str, *, setup: bool) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton("🔁 Get a new link", callback_data=f"ACTION|{link_action}")]]
+    if setup:
+        rows.append([_BTN_CONNECT_PASSWORD])
+    rows.append([_BTN_CANCEL])
+    return InlineKeyboardMarkup(rows)
 
 
 def _kaizen_connected(user_id: int) -> bool:
@@ -2523,9 +2573,13 @@ def _build_data_clear_keyboard() -> None:
 
 
 def _username_prompt_with_offer(user_id: int, prompt: str) -> tuple[str, InlineKeyboardMarkup | None]:
-    """Add the passwordless option to a username prompt where it's offered."""
+    """Where passwordless is offered, one message with both ways to connect.
+
+    Typing an email still works from that message: the state stays
+    AWAIT_USERNAME, and "Use my password" only asks for it explicitly.
+    """
     if kaizen_connection.passwordless_offered_to(user_id):
-        return prompt + _PASSWORDLESS_SETUP_OFFER, InlineKeyboardMarkup([[_BTN_CONNECT_PASSWORDLESS]])
+        return _CONNECT_CHOICE_TEXT, _KB_CONNECT_CHOICE
     return prompt, None
 
 
@@ -7314,21 +7368,271 @@ async def _finish_setup_after_connect(
     return ConversationHandler.END
 
 
+_KAIZEN_PASSWORD_ROUTE_PROMPT = (
+    "🔑 *Connect with your password*\n\n"
+    "What's your Kaizen username (email)?\n\n"
+    f"{_KAIZEN_USERNAME_PRIVACY_NOTE}"
+)
+_PWL_WATCH_KEY = "_pwl_watch"
+
+
+def _passwordless_watch_job_name(user_id: int) -> str:
+    return f"pwl-watch-{user_id}"
+
+
+def _stop_passwordless_watch(context, user_id: int) -> None:
+    """Forget the link being watched and stop asking the sign-in page."""
+    context.user_data.pop(_PWL_WATCH_KEY, None)
+    job_queue = getattr(context, "job_queue", None)
+    if job_queue is None:
+        return
+    try:
+        for job in job_queue.get_jobs_by_name(_passwordless_watch_job_name(user_id)):
+            job.schedule_removal()
+    except Exception:
+        logger.debug("Could not stop the passwordless watch", exc_info=True)
+
+
+def _reusable_passwordless_link(context, purpose: str):
+    """The link already sent, while it has a minute or more left.
+
+    Tapping the button twice used to issue a second link, which silently
+    cancelled the first one the doctor was using (2026-09-27).
+    """
+    watch = context.user_data.get(_PWL_WATCH_KEY)
+    if not watch or watch.get("purpose") != purpose:
+        return None
+    remaining = int(watch.get("expires_at", 0) - time.time())
+    if remaining < 60:
+        return None
+    return SimpleNamespace(url=watch["url"], expires_in_seconds=remaining, session_id=watch["session_id"])
+
+
+async def _passwordless_link_for(context, user_id: int, purpose: str):
+    link = _reusable_passwordless_link(context, purpose)
+    if link is not None:
+        return link
+    _stop_passwordless_watch(context, user_id)
+    return await _create_passwordless_link(user_id)
+
+
+def _watch_passwordless_link(context, user_id: int, chat_id: int, link, purpose: str) -> bool:
+    """Ask the sign-in page every few seconds until the doctor finishes.
+
+    Returns False when the link can't be watched (older sign-in service, no
+    job queue); the message then keeps its "I've signed in" button.
+    """
+    session_id = getattr(link, "session_id", "") or ""
+    job_queue = getattr(context, "job_queue", None)
+    if not session_id or job_queue is None:
+        return False
+    existing = context.user_data.get(_PWL_WATCH_KEY)
+    if existing and existing.get("session_id") == session_id:
+        return True
+    _stop_passwordless_watch(context, user_id)
+    context.user_data[_PWL_WATCH_KEY] = {
+        "session_id": session_id,
+        "url": link.url,
+        "expires_at": time.time() + int(link.expires_in_seconds),
+        "purpose": purpose,
+        "user_id": user_id,
+        "chat_id": chat_id,
+        "message_id": None,
+        "errors": 0,
+    }
+    job_queue.run_repeating(
+        _passwordless_watch_job,
+        interval=_PASSWORDLESS_WATCH_SECONDS,
+        first=_PASSWORDLESS_WATCH_SECONDS,
+        name=_passwordless_watch_job_name(user_id),
+        data={"session_id": session_id},
+        user_id=user_id,
+        chat_id=chat_id,
+    )
+    return True
+
+
+def _remember_watched_message(context, message, fallback=None) -> None:
+    """Note which message the watcher edits when the sign-in finishes.
+
+    An edit can come back as True rather than the Message (inline messages,
+    or no change), so the clicked message is the fallback.
+    """
+    watch = context.user_data.get(_PWL_WATCH_KEY)
+    if watch is None:
+        return
+    for candidate in (message, fallback):
+        if isinstance(getattr(candidate, "message_id", None), int):
+            watch["chat_id"] = getattr(candidate, "chat_id", watch["chat_id"])
+            watch["message_id"] = candidate.message_id
+            return
+
+
+class _WatchChat:
+    """Just enough of a Chat for the setup helpers to send a message."""
+
+    def __init__(self, bot, chat_id: int) -> None:
+        self.id = chat_id
+        self.type = "private"
+        self._bot = bot
+
+    async def send_message(self, text, reply_markup=None, parse_mode=None, **kwargs):
+        return await self._bot.send_message(
+            chat_id=self.id, text=text, reply_markup=reply_markup, parse_mode=parse_mode
+        )
+
+
+def _watch_update(context, watch: dict):
+    """A stand-in Update so setup can finish from the watch job."""
+    return SimpleNamespace(
+        effective_user=SimpleNamespace(id=watch["user_id"]),
+        effective_chat=_WatchChat(context.bot, watch["chat_id"]),
+        callback_query=None,
+        message=None,
+        effective_message=None,
+    )
+
+
+async def _edit_watched_message(context, watch: dict, text: str, reply_markup=None) -> None:
+    if not watch.get("message_id"):
+        await context.bot.send_message(
+            chat_id=watch["chat_id"], text=text, reply_markup=reply_markup, parse_mode="Markdown"
+        )
+        return
+    try:
+        await context.bot.edit_message_text(
+            chat_id=watch["chat_id"],
+            message_id=watch["message_id"],
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode="Markdown",
+        )
+    except Exception:
+        logger.debug("Could not edit the sign-in message", exc_info=True)
+
+
+async def _passwordless_watch_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """The bot notices the Kaizen sign-in by itself and says so in chat.
+
+    2026-09-27: after signing in and closing the page nothing happened in
+    Telegram until the doctor tapped "I've signed in", so they couldn't tell
+    whether Kaizen was connected.
+    """
+    from mobile_kaizen_handoff import ConnectLinkUnavailable, connect_link_status
+
+    job = context.job
+    watch = context.user_data.get(_PWL_WATCH_KEY)
+    if not watch or watch.get("session_id") != job.data["session_id"]:
+        job.schedule_removal()
+        return
+    setup = watch["purpose"] == "setup"
+    link_action = "passwordless_link" if setup else "pwl_reconnect"
+    if time.time() > watch["expires_at"] + _PASSWORDLESS_WATCH_GRACE_SECONDS:
+        status = "expired"
+    else:
+        try:
+            status = await asyncio.to_thread(connect_link_status, watch["session_id"])
+        except ConnectLinkUnavailable as exc:
+            watch["errors"] = watch.get("errors", 0) + 1
+            if watch["errors"] < _PASSWORDLESS_WATCH_MAX_ERRORS:
+                return
+            logger.warning("Stopped watching the Kaizen sign-in: %s", exc)
+            job.schedule_removal()
+            done_action = "passwordless_done" if setup else "pwl_reconnected"
+            await _edit_watched_message(
+                context,
+                watch,
+                _PASSWORDLESS_LINK_TEXT.replace(
+                    "I'll confirm here as soon as it works, so there's nothing else to tap.",
+                    "When the page says *Kaizen connected*, tap *I've signed in*.",
+                ),
+                _passwordless_keyboard(
+                    watch["url"], done_action=done_action, link_action=link_action, watched=False
+                ),
+            )
+            context.user_data.pop(_PWL_WATCH_KEY, None)
+            return
+        watch["errors"] = 0
+    if status in {"failed", "expired"}:
+        job.schedule_removal()
+        context.user_data.pop(_PWL_WATCH_KEY, None)
+        await _edit_watched_message(
+            context, watch, _PASSWORDLESS_LINK_ENDED_TEXT, _passwordless_ended_keyboard(link_action, setup=setup)
+        )
+        return
+    if status != "complete":
+        return
+    job.schedule_removal()
+    context.user_data.pop(_PWL_WATCH_KEY, None)
+    await _confirm_passwordless_connection(context, watch)
+
+
+async def _confirm_passwordless_connection(context, watch: dict) -> None:
+    user_id = watch["user_id"]
+    setup = watch["purpose"] == "setup"
+    await _edit_watched_message(context, watch, "✅ Signed in to Kaizen. Checking your portfolio…")
+    probe = await _probe_kept_kaizen_session(user_id)
+    if probe is False:
+        # The page saved a session but Kaizen won't open with it.
+        await _edit_watched_message(
+            context,
+            watch,
+            "⚠️ Kaizen signed you in but I couldn't open your portfolio with it. Try a new link.",
+            _passwordless_ended_keyboard("passwordless_link" if setup else "pwl_reconnect", setup=setup),
+        )
+        return
+    # The sign-in page already proved the session was kept; None only means
+    # Kaizen was slow to answer, so the role is asked for rather than guessed.
+    login_ok = probe if probe else True
+    if not setup:
+        if _load_draft(context):
+            await _edit_watched_message(
+                context,
+                watch,
+                _PASSWORDLESS_CONNECTED_AGAIN_TEXT + " Your draft is still waiting.",
+                InlineKeyboardMarkup([[
+                    InlineKeyboardButton("💾 Save the draft now", callback_data="ACTION|pwl_reconnected"),
+                ]]),
+            )
+        else:
+            await _edit_watched_message(
+                context,
+                watch,
+                _PASSWORDLESS_CONNECTED_AGAIN_TEXT + " Send your next case whenever you're ready.",
+            )
+        return
+    if has_credentials(user_id):
+        # The password is about to be deleted and we can't tell whether the
+        # doctor signed in to the same Kaizen account, so clear the previous
+        # account's local evidence exactly as an account switch does.
+        await _clear_local_portfolio_account_data(user_id, reason="kaizen_account_switch")
+    kaizen_connection.mark_passwordless(user_id)
+    if watch.get("message_id"):
+        context.user_data["_flow_anchor_setup"] = (watch["chat_id"], watch["message_id"])
+    await _finish_setup_after_connect(_watch_update(context, watch), context, login_ok)
+
+
 async def passwordless_setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Setup: send a Connect Kaizen link instead of asking for a password."""
+    """Setup: turn the connect message into a Kaizen sign-in link.
+
+    The same message is edited rather than a new one sent, a second tap
+    reuses the live link, and the bot then confirms the connection itself.
+    """
     query = update.callback_query
     user_id = update.effective_user.id
     if query:
         await query.answer()
-        await _retire_clicked_keyboard(query)
     if not kaizen_connection.passwordless_offered_to(user_id):
+        if query:
+            await _retire_clicked_keyboard(query)
         await _flow_msg(update, context, _KAIZEN_USERNAME_PROMPT, parse_mode="Markdown", flow_key="setup")
         return AWAIT_USERNAME
     context.user_data.pop("setup_username", None)
-    context.user_data["_setup_state_hint"] = "passwordless"
-    link = await _create_passwordless_link(user_id)
+    if query and query.message is not None:
+        context.user_data["_flow_anchor_setup"] = (query.message.chat_id, query.message.message_id)
+    link = await _passwordless_link_for(context, user_id, "setup")
     if link is None:
-        await _flow_msg(
+        await _flow_edit(
             update, context,
             _PASSWORDLESS_UNAVAILABLE_TEXT + "\n\n" + _KAIZEN_USERNAME_PROMPT,
             parse_mode="Markdown",
@@ -7336,21 +7640,43 @@ async def passwordless_setup_start(update: Update, context: ContextTypes.DEFAULT
         )
         context.user_data["_setup_state_hint"] = "username"
         return AWAIT_USERNAME
-    await _flow_msg(
+    watched = _watch_passwordless_link(context, user_id, update.effective_chat.id, link, "setup")
+    message = await _flow_edit(
         update, context,
         _PASSWORDLESS_LINK_TEXT,
         reply_markup=_passwordless_keyboard(
-            link.url, done_action="passwordless_done", link_action="passwordless_link"
+            link.url, done_action="passwordless_done", link_action="passwordless_link", watched=watched
         ),
         parse_mode="Markdown",
         flow_key="setup",
     )
-    return AWAIT_PASSWORDLESS
+    if not watched:
+        context.user_data["_setup_state_hint"] = "passwordless"
+        return AWAIT_PASSWORDLESS
+    _remember_watched_message(context, message, query.message if query else None)
+    # The bot confirms by itself, so nothing is left for the conversation to
+    # wait for; the doctor can carry on (or change their mind) freely.
+    context.user_data.pop("_setup_state_hint", None)
+    return ConversationHandler.END
 
 
 async def passwordless_setup_new_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Setup: the doctor's link expired or was used; send a fresh one."""
+    _stop_passwordless_watch(context, update.effective_user.id)
     return await passwordless_setup_start(update, context)
+
+
+async def setup_password_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Setup: the doctor chose to connect with their password."""
+    query = update.callback_query
+    await query.answer()
+    _stop_passwordless_watch(context, update.effective_user.id)
+    context.user_data.pop("setup_username", None)
+    context.user_data["_setup_state_hint"] = "username"
+    if query.message is not None:
+        context.user_data["_flow_anchor_setup"] = (query.message.chat_id, query.message.message_id)
+    await _flow_edit(update, context, _KAIZEN_PASSWORD_ROUTE_PROMPT, parse_mode="Markdown", flow_key="setup")
+    return AWAIT_USERNAME
 
 
 async def passwordless_setup_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -7393,20 +7719,24 @@ async def passwordless_reconnect(update: Update, context: ContextTypes.DEFAULT_T
 
     Works from anywhere (after a failed save, from settings); the draft being
     saved stays in place and is saved once the doctor has signed in again.
+    The bot confirms the sign-in by itself, as in setup.
     """
     query = update.callback_query
     user_id = update.effective_user.id
-    link = await _create_passwordless_link(user_id)
+    link = await _passwordless_link_for(context, user_id, "reconnect")
     if link is None:
         await query.message.reply_text(_PASSWORDLESS_UNAVAILABLE_TEXT)
         return
-    await query.message.reply_text(
+    watched = _watch_passwordless_link(context, user_id, update.effective_chat.id, link, "reconnect")
+    message = await query.message.reply_text(
         _PASSWORDLESS_LINK_TEXT,
         parse_mode="Markdown",
         reply_markup=_passwordless_keyboard(
-            link.url, done_action="pwl_reconnected", link_action="pwl_reconnect"
+            link.url, done_action="pwl_reconnected", link_action="pwl_reconnect", watched=watched
         ),
     )
+    if watched:
+        _remember_watched_message(context, message)
 
 
 async def passwordless_reconnected(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -16949,6 +17279,19 @@ async def privacy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 # === APPLICATION BUILDER ===
 
+class _DeferToConversation(CallbackQueryHandler):
+    """A button handler that steps aside while another conversation wants it."""
+
+    def __init__(self, conversation, callback, *, pattern):
+        super().__init__(callback, pattern=pattern)
+        self._conversation = conversation
+
+    def check_update(self, update):
+        if self._conversation.check_update(update):
+            return False
+        return super().check_update(update)
+
+
 def build_application() -> Application:
     """Build and return the Telegram bot Application with all handlers registered."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -17023,6 +17366,7 @@ def build_application() -> Application:
             AWAIT_USERNAME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, setup_username),
                 CallbackQueryHandler(passwordless_setup_start, pattern=r"^ACTION\|connect_passwordless$"),
+                CallbackQueryHandler(setup_password_start, pattern=r"^ACTION\|setup_password$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|cancel$"),
                 MessageHandler(~filters.TEXT & ~filters.COMMAND, _setup_wrong_input),
             ],
@@ -17171,17 +17515,23 @@ def build_application() -> Application:
         entry_points=[
             CommandHandler("setup", setup_start),
             CallbackQueryHandler(setup_start, pattern=r"^ACTION\|setup$"),
+            # The sign-in link message outlives the conversation (the bot
+            # confirms by itself), so its buttons work from anywhere; with
+            # allow_reentry they also serve setup's own waiting states. When
+            # the case conversation is the one waiting on them, it goes first,
+            # or it would be left stuck expecting a username.
+            _DeferToConversation(case_conv, setup_password_start, pattern=r"^ACTION\|setup_password$"),
+            _DeferToConversation(case_conv, passwordless_setup_start, pattern=r"^ACTION\|connect_passwordless$"),
+            _DeferToConversation(case_conv, passwordless_setup_new_link, pattern=r"^ACTION\|passwordless_link$"),
+            _DeferToConversation(case_conv, passwordless_setup_done, pattern=r"^ACTION\|passwordless_done$"),
         ],
         states={
             AWAIT_USERNAME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, setup_username),
-                CallbackQueryHandler(passwordless_setup_start, pattern=r"^ACTION\|connect_passwordless$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|cancel$"),
                 MessageHandler(~filters.TEXT & ~filters.COMMAND, _setup_wrong_input),
             ],
             AWAIT_PASSWORDLESS: [
-                CallbackQueryHandler(passwordless_setup_done, pattern=r"^ACTION\|passwordless_done$"),
-                CallbackQueryHandler(passwordless_setup_new_link, pattern=r"^ACTION\|passwordless_link$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|cancel$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, passwordless_awaiting_text),
             ],
@@ -17253,7 +17603,7 @@ def build_application() -> Application:
             handle_action_button,
             # Buttons that move the case conversation must reach case_conv, or
             # the state they return is thrown away (Retry left the case stuck).
-            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|setup$|voice$|same_case_another$|retry_recommend$|retry_template$|back_to_missing$|retry_setup_login$|connect_passwordless$|passwordless_done$|passwordless_link$|retry_filing$|pwl_reconnected$|add_reflection_detail$).+",
+            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|setup$|voice$|same_case_another$|retry_recommend$|retry_template$|back_to_missing$|retry_setup_login$|connect_passwordless$|setup_password$|passwordless_done$|passwordless_link$|retry_filing$|pwl_reconnected$|add_reflection_detail$).+",
         )
     )
     application.add_handler(CallbackQueryHandler(handle_feedback, pattern=r"^FEEDBACK\|"))
