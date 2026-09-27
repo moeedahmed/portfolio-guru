@@ -97,11 +97,14 @@ async def test_setup_is_one_message_with_both_ways_to_connect(harness):
     assert len(harness.outbox) == 1
     kind, text, markup = harness.outbox[0]
     assert kind == "send"
-    assert "Without sharing your password" in text and "about a day" in text
-    assert "Share your password" in text and "Fernet" in text and "Stays connected" in text
+    # Password first and recommended; password-free kept as the alternative.
+    assert text.index("Use your password (recommended)") < text.index("without sharing it")
+    assert "Stays connected" in text and "encrypted" in text and "/reset" in text
+    assert "about a day" in text
+    assert "Fernet" not in text
     assert _buttons(markup) == [
+        ("🔑 Use my password (recommended)", "ACTION|setup_password"),
         ("🔒 Sign in without password", "ACTION|connect_passwordless"),
-        ("🔑 Use my password", "ACTION|setup_password"),
         ("❌ Cancel", "ACTION|cancel"),
     ]
 

@@ -2681,24 +2681,25 @@ _CONNECT_CHOICE_TEXT = (
     "🔗 *Connect Kaizen*\n\n"
     "I save your drafts into your Kaizen portfolio, so I need to sign in as you. "
     "Choose how:\n\n"
-    "🔒 *Without sharing your password*\n"
+    "🔑 *Use your password (recommended)*\n"
+    "Stays connected: I sign back in to Kaizen by myself, so you won't be "
+    "interrupted. Your password is stored encrypted, used only to sign in to "
+    "Kaizen, and deleted whenever you use /reset.\n\n"
+    "🔒 *Or sign in without sharing it*\n"
     "You sign in on a secure Kaizen page. It lasts about a day, then I'll send "
-    "you a new sign-in link.\n\n"
-    "🔑 *Share your password*\n"
-    "Stored encrypted (Fernet) and used only to sign in to Kaizen. "
-    "Stays connected."
+    "you a new sign-in link."
 )
 _BTN_CONNECT_PASSWORDLESS = InlineKeyboardButton(
     "🔒 Sign in without password",
     callback_data="ACTION|connect_passwordless",
 )
 _BTN_CONNECT_PASSWORD = InlineKeyboardButton(
-    "🔑 Use my password",
+    "🔑 Use my password (recommended)",
     callback_data="ACTION|setup_password",
 )
 _KB_CONNECT_CHOICE = InlineKeyboardMarkup([
-    [_BTN_CONNECT_PASSWORDLESS],
     [_BTN_CONNECT_PASSWORD],
+    [_BTN_CONNECT_PASSWORDLESS],
     [_BTN_CANCEL],
 ])
 _PASSWORDLESS_LINK_TEXT = (

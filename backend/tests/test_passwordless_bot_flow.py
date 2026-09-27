@@ -71,7 +71,7 @@ async def test_setup_offers_passwordless_only_when_switched_on(monkeypatch):
     sim.clear_messages()
     await bot.setup_start(sim._make_text_update("/setup"), sim._make_context())
     assert ("🔒 Sign in without password", "ACTION|connect_passwordless") in sim.get_last_buttons()
-    assert "about a day" in sim.get_last_text() and "Fernet" in sim.get_last_text()
+    assert "about a day" in sim.get_last_text() and "encrypted" in sim.get_last_text()
 
 
 @pytest.mark.asyncio
