@@ -210,6 +210,26 @@ class HandoffStore:
             record.browser_active = True
             return True
 
+    def release(self, session_id: str) -> None:
+        """The page closed before any sign-in was tried: let the link reopen.
+
+        Closing the tab (or the phone dropping the connection) used to burn
+        the link, so the doctor had to go back to Telegram for a new one
+        (2026-09-27). Until details have been sent to Kaizen, the same link
+        simply opens a fresh browser again.
+        """
+        with self._lock:
+            record = self._records.get(session_id)
+            if record is None:
+                return
+            self._expire_if_needed(record)
+            if record.status in {"complete", "failed", "expired"}:
+                return
+            record.status = "created"
+            record.link_consumed = False
+            record.viewer_token_digest = None
+            record.browser_active = False
+
     def complete(self, session_id: str, result: dict[str, Any]) -> None:
         with self._lock:
             record = self._records[session_id]
@@ -463,7 +483,25 @@ def create_app(
         return {
             "url": f"{base_url}/handoff#{created.token}",
             "expires_in_seconds": int(store.ttl.total_seconds()),
+            "session_id": created.session_id,
         }
+
+    @app.get("/internal/handoffs/{session_id}")
+    async def handoff_outcome(
+        session_id: str,
+        supplied_key: str | None = Header(
+            default=None,
+            alias="X-Portfolio-Handoff-Key",
+        ),
+    ):
+        # The bot polls this to confirm the connection in Telegram by itself,
+        # instead of waiting for the doctor to tap "I've signed in".
+        if not supplied_key or not hmac.compare_digest(supplied_key, internal_key):
+            raise HTTPException(401, "unauthorised")
+        record = store.get_by_id(session_id)
+        if record is None:
+            raise HTTPException(404, "unknown handoff")
+        return {"status": record.status}
 
     @app.post("/api/handoff/exchange")
     async def exchange_handoff(request: ExchangeRequest):
@@ -582,6 +620,7 @@ class MobileBrowserManager:
         page = None
         playwright_handle = None
         handed_over = False
+        sign_in_attempts = 0
         try:
             await websocket.send_json({"type": "status", "status": "opening"})
             page, playwright_handle = await self._connect_page()
@@ -593,7 +632,6 @@ class MobileBrowserManager:
             await websocket.send_json({"type": "status", "status": "login"})
 
             receive_task = asyncio.create_task(websocket.receive_json())
-            sign_in_attempts = 0
             check_rejection_at: float | None = None
             loop = asyncio.get_running_loop()
             while store.clock() < record.expires_at:
@@ -680,7 +718,10 @@ class MobileBrowserManager:
 
             store.fail(record.session_id, "The Kaizen login window expired.")
         except WebSocketDisconnect:
-            store.fail(record.session_id, "The mobile login window was closed.")
+            if sign_in_attempts:
+                store.fail(record.session_id, "The mobile login window was closed.")
+            else:
+                store.release(record.session_id)
         except Exception as exc:
             # First line only: Playwright's reason (e.g. a missing browser
             # binary) without any page content or typed input.
@@ -816,6 +857,7 @@ class ConnectLinkUnavailable(RuntimeError):
 class ConnectLink:
     url: str
     expires_in_seconds: int
+    session_id: str = ""
 
 
 def connect_broker_url() -> str:
@@ -836,16 +878,7 @@ def create_connect_link(
     import urllib.error
     import urllib.request
 
-    broker = connect_broker_url()
-    if urlparse(broker).hostname not in {"127.0.0.1", "localhost"}:
-        raise ConnectLinkUnavailable("the connect service must be local")
-    path = key_path or Path(
-        os.environ.get("PG_MOBILE_HANDOFF_INTERNAL_KEY_FILE", str(DEFAULT_INTERNAL_KEY_FILE))
-    )
-    try:
-        key = path.expanduser().read_text(encoding="utf-8").strip()
-    except OSError as exc:
-        raise ConnectLinkUnavailable("the connect service is not set up") from exc
+    broker, key = _broker_and_key(key_path)
     request = urllib.request.Request(
         f"{broker}/internal/handoffs",
         data=json.dumps({"telegram_user_id": int(telegram_user_id)}).encode(),
@@ -859,7 +892,58 @@ def create_connect_link(
         raise ConnectLinkUnavailable(f"the connect service refused ({exc.code})") from exc
     except (urllib.error.URLError, OSError, ValueError) as exc:
         raise ConnectLinkUnavailable("the connect service is not running") from exc
-    return ConnectLink(url=str(body["url"]), expires_in_seconds=int(body["expires_in_seconds"]))
+    return ConnectLink(
+        url=str(body["url"]),
+        expires_in_seconds=int(body["expires_in_seconds"]),
+        session_id=str(body.get("session_id") or ""),
+    )
+
+
+def _broker_and_key(key_path: Path | None) -> tuple[str, str]:
+    broker = connect_broker_url()
+    if urlparse(broker).hostname not in {"127.0.0.1", "localhost"}:
+        raise ConnectLinkUnavailable("the connect service must be local")
+    path = key_path or Path(
+        os.environ.get("PG_MOBILE_HANDOFF_INTERNAL_KEY_FILE", str(DEFAULT_INTERNAL_KEY_FILE))
+    )
+    try:
+        key = path.expanduser().read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise ConnectLinkUnavailable("the connect service is not set up") from exc
+    return broker, key
+
+
+def connect_link_status(
+    session_id: str,
+    *,
+    key_path: Path | None = None,
+    timeout: float = 5.0,
+) -> str:
+    """Where a sign-in link has got to: ``complete``, ``failed``, ``expired``...
+
+    ``expired`` also covers a link the service no longer knows (it restarted).
+    Blocking; raises :class:`ConnectLinkUnavailable` when it can't be asked.
+    """
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    broker, key = _broker_and_key(key_path)
+    request = urllib.request.Request(
+        f"{broker}/internal/handoffs/{urllib.parse.quote(session_id, safe='')}",
+        headers={"X-Portfolio-Handoff-Key": key},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = json.loads(response.read())
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return "expired"
+        raise ConnectLinkUnavailable(f"the connect service refused ({exc.code})") from exc
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        raise ConnectLinkUnavailable("the connect service is not running") from exc
+    return str(body.get("status") or "")
 
 
 def ensure_internal_key(path: Path = DEFAULT_INTERNAL_KEY_FILE) -> str:
@@ -930,7 +1014,8 @@ HANDOFF_HTML = """<!doctype html>
     <section class="intro">
       <p class="eyebrow">PORTFOLIO GURU</p>
       <h1>Connect Kaizen</h1>
-      <p>Sign in to Kaizen yourself in this temporary, isolated browser. Portfolio Guru does not store your password &mdash; it keeps only the signed-in session, so it can save drafts until Kaizen logs you out.</p>
+      <p><strong>Why sign in?</strong> Portfolio Guru saves your drafts into your Kaizen portfolio, so it needs to be signed in as you.</p>
+      <p>Your password goes straight to Kaizen and is never stored. Portfolio Guru keeps only the signed-in session, which Kaizen ends after about a day. You'll get a new link in Telegram when that happens.</p>
     </section>
     <form id="signin-form" class="signin" autocomplete="on">
       <label for="kz-username">Kaizen username</label>
@@ -974,7 +1059,7 @@ main { width: min(100%, 520px); margin: 0 auto; padding: max(24px, env(safe-area
 .intro { padding: 4px 4px 16px; }
 .eyebrow { margin: 0 0 8px; color: #31705a; font-size: 12px; font-weight: 800; letter-spacing: .12em; }
 h1 { margin: 0 0 8px; font-size: clamp(29px, 8vw, 40px); line-height: 1.05; letter-spacing: -.035em; }
-.intro p:not(.eyebrow) { margin: 0; color: #45574e; font-size: 15px; line-height: 1.45; }
+.intro p:not(.eyebrow) { margin: 0 0 8px; color: #45574e; font-size: 15px; line-height: 1.45; }
 .browser-shell { overflow: hidden; border: 1px solid #c9d7ce; border-radius: 20px; background: #fff; box-shadow: 0 18px 50px rgba(26, 53, 40, .16); }
 .browser-bar { display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 14px; background: #f4f6f4; border-bottom: 1px solid #dce5df; color: #526158; font-size: 12px; }
 .lock { color: #318b69; font-size: 10px; }
@@ -1023,18 +1108,24 @@ HANDOFF_JS = r"""
   // (2026-09-26). Now it is remembered and sent once Kaizen is ready.
   let ready = false;
   let pending = false;
+  // The button stays tappable while Kaizen opens: a dim button with no
+  // reason given read as broken (2026-09-27). Its label says what's
+  // happening, and an early tap is kept until Kaizen is ready.
   const setStatus = (next, message) => {
     ready = next === 'login';
-    signin.disabled = !['opening', 'queued', 'login'].includes(next);
+    signin.disabled = ['signing_in', 'saving', 'complete', 'failed', 'expired'].includes(next);
+    signin.textContent = ['opening', 'queued'].includes(next)
+      ? 'Sign in (Kaizen is opening…)'
+      : 'Sign in to Kaizen';
     const states = {
-      opening: ['Opening Kaizen', 'Preparing an isolated browser…'],
+      opening: ['Opening Kaizen', 'This takes a few seconds. You can fill in your details now.'],
       queued: ['Browser queued', 'Another clinician is using the secure browser. Keep this page open.'],
       login: ['Sign in to Kaizen', 'Enter your Kaizen username and password above.'],
       signing_in: ['Signing in…', 'Kaizen is checking your details.'],
       saving: ['Login confirmed', 'Keeping your Kaizen session…'],
-      complete: ['Kaizen connected', 'You can close this page and return to Telegram.'],
-      failed: ['Connection stopped', message || 'Return to Telegram and request a new link.'],
-      expired: ['Link expired', 'Return to Telegram and request a new one-time link.'],
+      complete: ['Kaizen connected', 'Portfolio Guru is confirming it in Telegram now. You can close this page.'],
+      failed: ['Connection stopped', message || 'Go back to Telegram for a new link.'],
+      expired: ['Link expired', 'This link has been used or has expired. Go back to Telegram for a new one.'],
     };
     const state = states[next] || ['Working…', message || 'Please keep this page open.'];
     title.textContent = state[0];
@@ -1060,7 +1151,7 @@ HANDOFF_JS = r"""
       }
     };
     socket.onclose = () => {
-      if (!document.body.classList.contains('done')) setStatus('failed', 'The secure browser connection closed. Return to Telegram for a new link.');
+      if (!document.body.classList.contains('done')) setStatus('failed', 'The connection dropped. Tap the sign-in link in Telegram again to carry on.');
     };
   };
 
@@ -1079,7 +1170,14 @@ HANDOFF_JS = r"""
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({token}),
     });
-    if (!response.ok) { setStatus('expired'); return; }
+    if (!response.ok) {
+      // Opened twice (say, tapped again in Telegram): this browser may
+      // already hold the session from the first open.
+      const existing = await fetch('/api/handoff/status', {credentials: 'same-origin'});
+      if (existing.ok) { connect(); return; }
+      setStatus('expired');
+      return;
+    }
     connect();
   };
 

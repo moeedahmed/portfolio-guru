@@ -64,14 +64,14 @@ async def test_setup_offers_passwordless_only_when_switched_on(monkeypatch):
     monkeypatch.setattr(bot, "has_credentials", lambda uid: False)
 
     await bot.setup_start(sim._make_text_update("/setup"), sim._make_context())
-    assert ("🔒 Connect without sharing my password", "ACTION|connect_passwordless") not in sim.get_last_buttons()
+    assert ("🔒 Sign in without password", "ACTION|connect_passwordless") not in sim.get_last_buttons()
 
     monkeypatch.setenv("PG_ENABLE_PASSWORDLESS_CONNECT", "1")
     monkeypatch.setenv("PG_PASSWORDLESS_ALLOWLIST", str(sim.user_id))
     sim.clear_messages()
     await bot.setup_start(sim._make_text_update("/setup"), sim._make_context())
-    assert ("🔒 Connect without sharing my password", "ACTION|connect_passwordless") in sim.get_last_buttons()
-    assert "about once a day" in sim.get_last_text()
+    assert ("🔒 Sign in without password", "ACTION|connect_passwordless") in sim.get_last_buttons()
+    assert "about a day" in sim.get_last_text() and "Fernet" in sim.get_last_text()
 
 
 @pytest.mark.asyncio
@@ -89,7 +89,7 @@ async def test_choosing_passwordless_sends_a_one_time_sign_in_link(offered, monk
     urls = [b.url for row in markup.inline_keyboard for b in row if b.url]
     assert urls == ["https://connect.emgurus.com/handoff#token"]
     assert ("✅ I've signed in", "ACTION|passwordless_done") in sim.get_last_buttons()
-    assert "never stores" in sim.get_last_text()
+    assert "never stored" in sim.get_last_text()
 
 
 @pytest.mark.asyncio
