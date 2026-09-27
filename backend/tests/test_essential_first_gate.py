@@ -995,3 +995,27 @@ async def test_cbd_clear_field_correction_keeps_a_loadable_draft():
     assert state == AWAIT_APPROVAL
     assert bot._load_draft(context).reflection == ""
     assert "reflection" in {gap["key"] for gap in bot._draft_gaps(context)}
+
+
+@pytest.mark.asyncio
+async def test_draft_arrives_as_a_new_message_below_the_progress_line():
+    """Live DOPS run, 27 Sep 2026: the draft was edited into the older
+    "Reviewing…" message and Telegram did not redraw it until the doctor sent
+    /cancel. The draft must be a new message at the bottom of the chat."""
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["case_text"] = THIN_CASE
+
+    analyse = AsyncMock(return_value=_cbd_draft(reflection="", level_of_supervision=""))
+    statuses = _all("CBD", ESSENTIAL_PRESENT, reflection=ESSENTIAL_MISSING, level_of_supervision=ESSENTIAL_MISSING)
+    with patch("bot.assess_form_essentials", new=_assess(statuses)), \
+         patch("bot._analyse_selected_form", new=analyse):
+        result = await handle_form_choice(sim._make_callback_update("FORM|CBD"), context)
+
+    assert result == AWAIT_APPROVAL
+    kind, text, markup = sim.messages_sent[-1]
+    assert kind == "send", "the draft must be sent, not edited into an older message"
+    assert "still needed" in text.lower()
+    assert markup is not None
+    closing = [t for k, t, _ in sim.messages_sent[:-1] if k == "edit" and t]
+    assert closing and "draft ready below" in closing[-1]
