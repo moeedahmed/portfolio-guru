@@ -16,7 +16,7 @@ def payload_branch(payload):
     family = parts[0]
     if family == "FORM" and len(parts) == 2:
         return payload if parts[1] in {"best", "show_all", "back", "disabled"} else "FORM|cat_*" if parts[1].startswith("cat_") else "FORM|*"
-    if family in {"FIELD", "SETLEVEL", "SET_CURRICULUM", "SETUP_CURRICULUM", "PATHWAY", "PATHWAY_SETTINGS", "EDIT"}:
+    if family in {"FIELD", "SETLEVEL", "SET_CURRICULUM", "SETUP_CURRICULUM", "PATHWAY", "PATHWAY_SETTINGS", "EDIT", "REMIND"}:
         return family + "|*"
     if family in {"SUP", "CONSENT", "FILING_CURRICULUM", "FILING", "FEEDBACK"} and len(parts) >= 3:
         return "|".join(parts[:2]) + "|*"
@@ -47,7 +47,7 @@ def producer_digest():
     return hashlib.sha256(json.dumps(modules).encode()).hexdigest()
 
 
-PRODUCER_DIGEST = '5148bf027b144c7d8409d7ff41a06d3836fc81582e1a98029d9398e4c3849df5'
+PRODUCER_DIGEST = 'bf01be971f9d629fb55d5dc6dc0f2b042965fe046023c0c4d710ddad9301812f'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
@@ -69,7 +69,7 @@ UNSIGNED|all UNSIGNED|cancel UNSIGNED|custom UPGRADE|pro_plus VOICE|back_to_choi
 VOICE|done VOICE|kaizen_sample|last_12m VOICE|kaizen_sample|last_6m VOICE|kaizen_sample|recent_10 VOICE|more
 VOICE|path_kaizen VOICE|path_manual VOICE|remove APPROVE|submit REVIEW|draft IMPROVE|reflection EDIT|*
 FILING|feedback|* FEEDBACK|good|* FEEDBACK|bad|* FILING_CURRICULUM|retry|* FILING_CURRICULUM|select|*
-SETUP_CURRICULUM|* CHASE_LOG|cancel CHASE_LOG|*
+SETUP_CURRICULUM|* CHASE_LOG|cancel CHASE_LOG|* REMIND|*
 """.split())
 
 
@@ -193,7 +193,7 @@ def reviewed_units(slots):
     return dict(sorted(units.items()))
 
 
-CATALOGUE_DIGEST = '2c2cd31d7d536a2ca77f1d5c9c59687c0f4322dac8f4b748af17ebaa39e383ec'
+CATALOGUE_DIGEST = '429ea6dc3ca0ee24e8f5eded77b18d58dfb48534852f8d85c970fd7b51789f13'
 
 
 def requirements_digest(units):
