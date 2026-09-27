@@ -233,7 +233,7 @@ async def test_connect_buttons_on_the_connect_first_prompt_never_leave_a_case_st
     await harness.app.initialize()
     try:
         await harness.feed(make_text_update("Saw a 70-year-old with chest pain today"))
-        assert "Without sharing your password" in harness.outbox[-1][1]
+        assert "without sharing it" in harness.outbox[-1][1]
         key = (TEST_USER.id, TEST_USER.id)
         assert _case_conv(harness.app)._conversations.get(key) == bot.AWAIT_USERNAME
 
@@ -242,7 +242,7 @@ async def test_connect_buttons_on_the_connect_first_prompt_never_leave_a_case_st
         assert _case_conv(harness.app)._conversations.get(key) is None
 
         await harness.feed(make_text_update("Saw a 70-year-old with chest pain today"))
-        assert "Without sharing your password" in harness.outbox[-1][1]
+        assert "without sharing it" in harness.outbox[-1][1]
         await harness.feed(make_callback_update("ACTION|setup_password"))
         assert "Connect with your password" in harness.outbox[-1][1]
         assert _case_conv(harness.app)._conversations.get(key) == bot.AWAIT_USERNAME
