@@ -329,6 +329,32 @@ def candidates(signals: Signals, state: dict, today: date) -> list[Reminder]:
     return found
 
 
+# ── The doctor's own controls ───────────────────────────────────────────────
+
+
+def allows(state: dict, today: date, *, kind: Optional[str] = None) -> bool:
+    """Whether the doctor's reminder controls let a message of ``kind`` through.
+
+    Shared by every reminder path, including the Sunday check-in and the
+    sign-off chase that run when the daily check is off, so "Off" in /settings
+    means off everywhere. Urgent messages pass "Only urgent"; nothing passes
+    "Off" or a pause.
+    """
+    level = state.get("level") or LEVEL_NORMAL
+    if level == LEVEL_OFF:
+        return False
+    paused = _d(state.get("quiet_until"))
+    if paused and today <= paused:
+        return False
+    if kind != URGENT and level == LEVEL_URGENT:
+        return False
+    if kind is not None:
+        until = _d((state.get("muted") or {}).get(kind))
+        if until and until >= today:
+            return False
+    return True
+
+
 # ── The decision ────────────────────────────────────────────────────────────
 
 

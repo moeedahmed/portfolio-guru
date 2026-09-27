@@ -119,3 +119,85 @@ async def test_weekly_digest_falls_back_to_text_when_card_fails(monkeypatch, tmp
 
     fake_bot.send_photo.assert_not_awaited()
     fake_bot.send_message.assert_awaited_once()
+
+
+def _digest_setup(monkeypatch, tmp_path):
+    monkeypatch.setattr(bot, "data_path", lambda name: tmp_path / name)
+    monkeypatch.setenv("PORTFOLIO_GURU_PROACTIVE_PATH", str(tmp_path / "reminders.json"))
+    monkeypatch.setattr(bot, "get_all_active_users", AsyncMock(return_value=[42]))
+    monkeypatch.setattr(bot, "_proactive_owns", lambda _uid: False)
+    monkeypatch.setattr(bot, "_compute_weekly_stats", AsyncMock(return_value={"cases": 0, "gap": None}))
+    import portfolio_chart
+    monkeypatch.setattr(portfolio_chart, "generate_weekly_nudge_chart_async", AsyncMock(return_value=None))
+    return SimpleNamespace(send_photo=AsyncMock(), send_message=AsyncMock())
+
+
+@pytest.mark.asyncio
+async def test_weekly_digest_carries_a_turn_off_button(monkeypatch, tmp_path):
+    fake_bot = _digest_setup(monkeypatch, tmp_path)
+    await bot.weekly_push(SimpleNamespace(bot=fake_bot))
+    markup = fake_bot.send_message.await_args.kwargs["reply_markup"]
+    button = markup.inline_keyboard[0][0]
+    assert button.text == "🔕 Turn off these reminders"
+    assert button.callback_data == "REMIND|off"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", [
+    {"level": "off"},
+    {"level": "urgent"},
+    {"quiet_until": "2999-01-01"},
+])
+async def test_weekly_digest_respects_reminder_settings(monkeypatch, tmp_path, state):
+    import proactive_reminders as pr
+    fake_bot = _digest_setup(monkeypatch, tmp_path)
+    pr.save_state(42, {**pr.empty_state(), **state})
+    await bot.weekly_push(SimpleNamespace(bot=fake_bot))
+    fake_bot.send_message.assert_not_awaited()
+    fake_bot.send_photo.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_signoff_chase_respects_reminders_off(monkeypatch, tmp_path):
+    import proactive_reminders as pr
+    import health_watch
+    monkeypatch.setattr(bot, "data_path", lambda name: tmp_path / name)
+    monkeypatch.setenv("PORTFOLIO_GURU_PROACTIVE_PATH", str(tmp_path / "reminders.json"))
+    monkeypatch.setattr(bot, "get_all_active_users", AsyncMock(return_value=[42]))
+    monkeypatch.setattr(bot, "_proactive_owns", lambda _uid: False)
+    monkeypatch.setattr(bot, "_kaizen_connected", lambda _uid: False)
+    monkeypatch.setattr(health_watch, "detect_changes", AsyncMock())
+    monkeypatch.setattr(health_watch, "format_change_report", lambda _c: "news")
+    pr.save_state(42, {**pr.empty_state(), "level": "off"})
+    fake_bot = SimpleNamespace(send_message=AsyncMock())
+    await bot.signoff_chase_push(SimpleNamespace(bot=fake_bot))
+    fake_bot.send_message.assert_not_awaited()
+
+
+def test_settings_shows_reminders_line_and_button(monkeypatch, tmp_path):
+    import proactive_reminders as pr
+    monkeypatch.setenv("PORTFOLIO_GURU_PROACTIVE_PATH", str(tmp_path / "reminders.json"))
+    monkeypatch.delenv("PG_ENABLE_PROACTIVE", raising=False)
+    text, keyboard = bot._settings_view_components(42)
+    assert "Reminders: On" in text
+    assert any(b.callback_data == "REMIND|menu" for row in keyboard.inline_keyboard for b in row)
+    pr.save_state(42, {**pr.empty_state(), "level": "off"})
+    text, _ = bot._settings_view_components(42)
+    assert "Reminders: Off" in text
+    view, kb = bot._reminder_settings_view(42)
+    assert "Currently: Off." in view
+    assert [b.callback_data for b in kb.inline_keyboard[0]] == ["REMIND|on", "REMIND|level|off"]
+
+
+def test_allows_honours_every_control():
+    from datetime import date
+    import proactive_reminders as pr
+    today = date(2026, 9, 28)
+    base = pr.empty_state()
+    assert pr.allows(base, today, kind="digest")
+    assert not pr.allows({**base, "level": "off"}, today, kind="urgent")
+    assert not pr.allows({**base, "level": "urgent"}, today, kind="digest")
+    assert pr.allows({**base, "level": "urgent"}, today, kind="urgent")
+    assert not pr.allows({**base, "quiet_until": "2026-10-01"}, today, kind="urgent")
+    assert pr.allows({**base, "quiet_until": "2026-09-27"}, today, kind="digest")
+    assert not pr.allows({**base, "muted": {"digest": "2026-10-10"}}, today, kind="digest")

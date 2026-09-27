@@ -566,6 +566,7 @@ def test_settings_shows_pathway_change_control(isolated_health_store, monkeypatc
     assert [[button.callback_data for button in row] for row in keyboard.inline_keyboard] == [
         ["ACTION|setup"],
         ["ACTION|voice", "ACTION|portfolio_defaults"],
+        ["REMIND|menu"],
         ["ACTION|delete"],
     ]
 

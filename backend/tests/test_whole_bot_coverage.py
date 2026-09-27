@@ -622,6 +622,21 @@ async def test_reminder_controls_touch_only_local_reminder_state(scenario, monke
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("payload,level", [("REMIND|off", "off"), ("REMIND|on", "normal")])
+async def test_reminder_on_off_switch(scenario, monkeypatch, tmp_path, payload, level):
+    import proactive_reminders
+    monkeypatch.setenv("PORTFOLIO_GURU_PROACTIVE_PATH", str(tmp_path / "reminders.json"))
+    proactive_reminders.save_state(TEST_USER.id, {**proactive_reminders.empty_state(), "level": "urgent"})
+    app, collector, draft, filing, errors = scenario
+    update = make_callback_update(payload)
+    _prepare_update(update, app.bot)
+    await app.process_update(update)
+    assert not errors
+    filing.assert_not_awaited()
+    assert proactive_reminders.load_state(TEST_USER.id)["level"] == level
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("sentiment", ["good", "bad"])
 async def test_feedback_stubs_credentials_and_external_record(scenario, monkeypatch, sentiment):
     import builtins

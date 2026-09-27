@@ -704,6 +704,41 @@ def _build_weekly_digest_text(stats: dict) -> str:
     )
 
 
+REMINDERS_OFF_TEXT = "🔕 Reminders are off.\n\nTurn them back on any time in /settings."
+
+
+def _reminders_allow(user_id, *, kind: str | None = None) -> bool:
+    """The doctor's /settings reminder choice, checked by every reminder job."""
+    import proactive_reminders as pr
+    from datetime import date as _date
+
+    return pr.allows(pr.load_state(user_id), _date.today(), kind=kind)
+
+
+def _reminders_status_label(user_id) -> str:
+    """One word for the /settings summary line."""
+    import proactive_reminders as pr
+    from datetime import date as _date
+
+    state = pr.load_state(user_id)
+    level = state.get("level") or pr.LEVEL_NORMAL
+    if level == pr.LEVEL_OFF:
+        return "Off"
+    paused = state.get("quiet_until")
+    if paused and str(paused) >= _date.today().isoformat():
+        return "Paused"
+    if level == pr.LEVEL_URGENT:
+        return "Only urgent"
+    return "On"
+
+
+def _checkin_keyboard() -> InlineKeyboardMarkup:
+    """The Sunday check-in's one control: stop it without hunting for settings."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔕 Turn off these reminders", callback_data="REMIND|off")],
+    ])
+
+
 async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send the weekly portfolio digest (chart + summary) to active users.
 
@@ -733,6 +768,8 @@ async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
         if _proactive_owns(user_id):
             continue  # the daily check decides whether this user hears anything
         try:
+            if not _reminders_allow(user_id, kind="digest"):
+                continue  # the doctor turned reminders off in /settings
             stats = await _compute_weekly_stats(user_id)
             text = _build_weekly_digest_text(stats)
 
@@ -752,7 +789,12 @@ async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
             if chart_path:
                 try:
                     with open(chart_path, "rb") as fh:
-                        await context.bot.send_photo(chat_id=user_id, photo=fh, caption=text)
+                        await context.bot.send_photo(
+                            chat_id=user_id,
+                            photo=fh,
+                            caption=text,
+                            reply_markup=_checkin_keyboard(),
+                        )
                     photo_sent = True
                 except Exception as e:
                     logger.warning("weekly_push chart send failed for %s: %s", user_id, e)
@@ -766,6 +808,7 @@ async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
                 await context.bot.send_message(
                     chat_id=user_id,
                     text=text,
+                    reply_markup=_checkin_keyboard(),
                 )
             sent += 1
         except Exception as e:
@@ -883,6 +926,9 @@ async def signoff_chase_push(context: ContextTypes.DEFAULT_TYPE) -> None:
             if _proactive_owns(user_id):
                 continue  # stuck sign-offs are part of the daily check for them
             try:
+                if not _reminders_allow(user_id, kind="urgent"):
+                    skipped += 1
+                    continue  # reminders off or paused in /settings
                 # Change detection needs current data. Without a refresh the
                 # watcher could never learn that an assessor signed something
                 # off, and would only ever repeat what the last /health saw.
@@ -1243,6 +1289,22 @@ def _reminder_settings_view(user_id: int):
     from datetime import date as _date
 
     state = pr.load_state(user_id)
+    if not _proactive_enabled():
+        # Only the Sunday check-in runs, so offer a plain on/off switch.
+        text = (
+            "🔔 *Reminders*\n\n"
+            f"Currently: {_reminders_status_label(user_id)}.\n\n"
+            "On: a short portfolio check-in on Sunday evenings.\n"
+            "Off: no reminder messages."
+        )
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🔔 On", callback_data="REMIND|on"),
+                InlineKeyboardButton("🔕 Off", callback_data="REMIND|level|off"),
+            ],
+            [InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")],
+        ])
+        return text, keyboard
     level = _REMINDER_LEVEL_LABELS.get(state.get("level") or "normal", "Normal")
     paused = state.get("quiet_until")
     paused_line = ""
@@ -1293,7 +1355,23 @@ async def handle_reminder_callback(update: Update, context: ContextTypes.DEFAULT
         except Exception:
             pass
         return
-    if action == "level" and value in pr.LEVELS:
+    if action == "off":
+        # From the check-in itself: stop now, confirm, and say how to undo.
+        state["level"] = pr.LEVEL_OFF
+        pr.save_state(user_id, state)
+        await query.answer("Reminders turned off.")
+        try:
+            await query.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await context.bot.send_message(chat_id=user_id, text=REMINDERS_OFF_TEXT)
+        return
+    if action == "on":
+        state["level"] = pr.LEVEL_NORMAL
+        state["quiet_until"] = None
+        pr.save_state(user_id, state)
+        await query.answer("Reminders: On")
+    elif action == "level" and value in pr.LEVELS:
         state["level"] = value
         pr.save_state(user_id, state)
         await query.answer(f"Reminders: {_REMINDER_LEVEL_LABELS[value]}")
@@ -4662,13 +4740,13 @@ def _settings_view_components(
         ],
         [InlineKeyboardButton("🔄 Reset data", callback_data="ACTION|delete")],
     ]
-    if _proactive_enabled():
-        buttons.insert(-1, [InlineKeyboardButton("🔔 Reminders", callback_data="REMIND|menu")])
+    buttons.insert(-1, [InlineKeyboardButton("🔔 Reminders", callback_data="REMIND|menu")])
     text = (
         f"{_SETTINGS_TITLE}\n\n"
         f"{plan_block}"
         f"Writing style: {voice_status}\n"
-        f"Portfolio defaults: {portfolio_defaults_summary}"
+        f"Portfolio defaults: {portfolio_defaults_summary}\n"
+        f"Reminders: {_reminders_status_label(user_id)}"
     )
     return text, InlineKeyboardMarkup(buttons)
 
