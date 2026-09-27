@@ -11,6 +11,7 @@ import sys
 import shutil
 import tempfile
 import time
+from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
@@ -1551,6 +1552,7 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
             "current_draft",
             "pending_new_case_text",
             "excluded_form_type",
+            "excluded_form_types",
             "quick_improve_used",
             "amend_mode",
             "amend_pending_feedback",
@@ -2566,6 +2568,8 @@ def _restore_last_filed_case_context(context) -> bool:
     filed_form = context.user_data.get("last_filed_form_type")
     if filed_form and not context.user_data.get("excluded_form_type"):
         context.user_data["excluded_form_type"] = filed_form
+    if not context.user_data.get("excluded_form_types"):
+        context.user_data["excluded_form_types"] = _filed_form_types_for_last_case(context)
     return True
 
 
@@ -2670,7 +2674,7 @@ async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE
                     ),
                     timeout=30,
                 )
-                excluded_form = _normalise_form_type(context.user_data.get("excluded_form_type", ""))
+                excluded_form = _excluded_form_types(context)
                 recommendations = _filter_recommendations_for_allowed_forms(
                     recommendations,
                     allowed_forms,
@@ -3074,7 +3078,7 @@ def _filter_recommendations_for_allowed_forms(
     allowed_forms,
     case_text: str = "",
     *,
-    excluded_form: str = "",
+    excluded_form: str | Iterable[str] = "",
 ):
     """Filter recommendations and keep QI/audit work from falling into Teaching.
 
@@ -3090,13 +3094,13 @@ def _filter_recommendations_for_allowed_forms(
     previous "Nothing left to recommend" dead-end into a sensible default
     rather than a guess.
     """
-    excluded = _normalise_form_type(excluded_form)
+    excluded = _normalised_form_set(excluded_form)
     allowed = set(allowed_forms)
     filtered = [
         r for r in recommendations
-        if r.form_type in allowed and _normalise_form_type(r.form_type) != excluded
+        if r.form_type in allowed and _normalise_form_type(r.form_type) not in excluded
     ]
-    qiat_available = "QIAT" in allowed and excluded != "QIAT"
+    qiat_available = "QIAT" in allowed and "QIAT" not in excluded
     first_available = filtered[0].form_type if filtered else ""
     if (
         qiat_available
@@ -3178,7 +3182,7 @@ def _profile_blocked_fallback_recommendations(original_recs, allowed, excluded):
             continue
         if form_type not in allowed:
             continue
-        if _normalise_form_type(form_type) == excluded:
+        if _normalise_form_type(form_type) in excluded:
             continue
         seen.add(form_type)
         fallbacks.append(FormTypeRecommendation(
@@ -5020,6 +5024,31 @@ def _build_edit_field_keyboard(draft=None):
 
 def _normalise_form_type(form_type: str) -> str:
     return form_type[:-5] if form_type.endswith("_2021") else form_type
+
+
+def _normalised_form_set(forms) -> set[str]:
+    if isinstance(forms, str):
+        forms = [forms]
+    return {_normalise_form_type(ft) for ft in (forms or []) if ft}
+
+
+def _excluded_form_types(context) -> set[str]:
+    """Base form types already filed for the case that is being reused."""
+    return _normalised_form_set(
+        [
+            *(context.user_data.get("excluded_form_types") or []),
+            context.user_data.get("excluded_form_type") or "",
+        ]
+    )
+
+
+def _filed_form_types_for_last_case(context) -> list[str]:
+    """Every form saved from the last filed case, oldest first."""
+    filed = list(context.user_data.get("last_filed_form_types") or [])
+    last = context.user_data.get("last_filed_form_type")
+    if last and last not in filed:
+        filed.append(last)
+    return filed
 
 
 def _draft_form_type(draft) -> str:
@@ -8048,6 +8077,9 @@ async def handle_same_case_another(update: Update, context: ContextTypes.DEFAULT
         or context.user_data.get("excluded_form_type")
         or ""
     )
+    filed_forms = _filed_form_types_for_last_case(context) or (
+        [filed_form] if filed_form else []
+    )
     if not case_text:
         await query.message.reply_text(
             "That same-case shortcut has expired. Send the case again, or start a new case and I’ll draft the next WPBA.",
@@ -8061,6 +8093,7 @@ async def handle_same_case_another(update: Update, context: ContextTypes.DEFAULT
             del context.user_data[key]
     context.user_data["case_text"] = case_text
     context.user_data["excluded_form_type"] = filed_form
+    context.user_data["excluded_form_types"] = filed_forms
 
     ack = await query.message.reply_text(
         "🔁 Reusing the same case. Finding other WPBA options…"
@@ -10985,6 +11018,7 @@ async def _handle_reuse_request(update: Update, context: ContextTypes.DEFAULT_TY
         return ConversationHandler.END
 
     filed_form = context.user_data.get("last_filed_form_type", "")
+    filed_forms = _filed_form_types_for_last_case(context)
     # The reuse phrase IS the intent — match form codes without the standard
     # intent-phrase gate so "use the same case for DOPS" picks up DOPS.
     explicit_form = extract_explicit_form_type(raw_text, require_intent=False)
@@ -10994,7 +11028,9 @@ async def _handle_reuse_request(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data["case_text"] = last_case
     context.user_data["last_filed_case_text"] = last_case
     context.user_data["last_filed_form_type"] = filed_form
+    context.user_data["last_filed_form_types"] = filed_forms
     context.user_data["excluded_form_type"] = filed_form
+    context.user_data["excluded_form_types"] = filed_forms
 
     if explicit_form:
         context.user_data["chosen_form"] = explicit_form
@@ -11048,6 +11084,18 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
     context.user_data.pop("awaiting_source_detail", None)
 
     explicit_form = extract_explicit_form_type(case_text)
+    if explicit_form and _normalise_form_type(explicit_form) in _excluded_form_types(context):
+        # "Another form" reuses the filed case text verbatim, so a request
+        # like "file this as a CBD" would otherwise re-pick the form that was
+        # just saved. Fall through to recommendations, which skip it.
+        _audit_event(
+            context,
+            "decision_path",
+            decision="explicit_form_already_filed",
+            form_type=explicit_form,
+            input_source=input_source,
+        )
+        explicit_form = None
     if explicit_form:
         context.user_data["chosen_form"] = explicit_form
         _audit_event(
@@ -11106,7 +11154,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
             recommend_form_types(case_text, input_source=input_source),
             timeout=30,
         )
-        excluded_form = _normalise_form_type(context.user_data.get("excluded_form_type", ""))
+        excluded_form = _excluded_form_types(context)
         recommendations = _filter_recommendations_for_allowed_forms(
             recommendations,
             allowed_forms,
@@ -12413,7 +12461,7 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
                 ),
                 timeout=30,
             )
-            excluded_form = _normalise_form_type(context.user_data.get("excluded_form_type", ""))
+            excluded_form = _excluded_form_types(context)
             recommendations = _filter_recommendations_for_allowed_forms(
                 recommendations,
                 allowed_forms,
@@ -13860,8 +13908,8 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         form_type = data.split("|")[1]
         _track_funnel_event(context, "form_chosen", form_type=form_type)
 
-    excluded_form = _normalise_form_type(context.user_data.get("excluded_form_type", ""))
-    if excluded_form and _normalise_form_type(form_type) == excluded_form:
+    excluded_form = _excluded_form_types(context)
+    if _normalise_form_type(form_type) in excluded_form:
         await query.answer("You already filed that WPBA for this case — choose a different type.", show_alert=True)
         return AWAIT_FORM_CHOICE
 
@@ -14796,10 +14844,17 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         )
     filed_case_text = context.user_data.get("case_text", "")
     if status in ("success", "partial") and not uncertain_save:
+        # Forms already saved from this same case (set by "Another form") plus
+        # this one, so the next "Another form" skips all of them.
+        filed_forms_for_case = [
+            *(context.user_data.get("excluded_form_types") or []),
+            form_type,
+        ]
         context.user_data.clear()
         if filed_case_text:
             context.user_data["last_filed_case_text"] = filed_case_text
             context.user_data["last_filed_form_type"] = form_type
+            context.user_data["last_filed_form_types"] = list(dict.fromkeys(filed_forms_for_case))
         # Store amend data after clear so it's available for the button
         context.user_data["last_draft_preview"] = draft_preview_text
         context.user_data["last_amend_draft"] = amend_draft_data
