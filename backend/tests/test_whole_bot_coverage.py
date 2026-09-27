@@ -963,6 +963,7 @@ async def test_each_state_slot_dispatches_its_guard_or_effect(scenario, monkeypa
             "passwordless_setup_start": ("ACTION|connect_passwordless", bot.AWAIT_USERNAME),
             "passwordless_setup_new_link": ("ACTION|passwordless_link", bot.AWAIT_USERNAME),
             "passwordless_setup_done": ("ACTION|passwordless_done", bot.AWAIT_PASSWORDLESS),
+            "setup_password_start": ("ACTION|setup_password", bot.AWAIT_USERNAME),
         }
         if owner == "handle_callback":
             routes_by_input = [("ACTION|cancel", -1), ("CANCEL|draft", -1),

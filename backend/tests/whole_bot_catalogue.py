@@ -47,9 +47,9 @@ def producer_digest():
     return hashlib.sha256(json.dumps(modules).encode()).hexdigest()
 
 
-PRODUCER_DIGEST = 'bbf8a7766f10e111f5afbe11463751383d47faf79888ffed8e40b82f71ccf337'
+PRODUCER_DIGEST = 'f2dd4cc1b3381fce16a4f042536520b57906c27bc27dfee81171abc5f2c8fc37'
 CALLBACK_BRANCHES = set("""
-ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected
+ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
 ACTION|change_pathway ACTION|confirm_refresh_for_health ACTION|confirm_refresh_portfolio ACTION|continue_thin
 ACTION|delete ACTION|file ACTION|health ACTION|health_limited ACTION|health_page|*
@@ -112,6 +112,7 @@ def state_expectation(slot, kind):
         "passwordless_setup_start": ("ACTION|connect_passwordless", 0),
         "passwordless_setup_new_link": ("ACTION|passwordless_link", 0),
         "passwordless_setup_done": ("ACTION|passwordless_done", 15),
+        "setup_password_start": ("ACTION|setup_password", 0),
         "setup_training_level": ("SETLEVEL|ST5", -1),
         "setup_curriculum": ("SETUP_CURRICULUM|2025", -1),
         "gather_done_callback": ("GATHER|done", -1),
@@ -192,7 +193,7 @@ def reviewed_units(slots):
     return dict(sorted(units.items()))
 
 
-CATALOGUE_DIGEST = 'd20bbed6498aba762716056ad4aa47766a56da6995a446c4b0795258b961d779'
+CATALOGUE_DIGEST = '865f8b633b0603c7855eac441cc1e9d179c80a15ae5e86e25d11670a1ed16440'
 
 
 def requirements_digest(units):
