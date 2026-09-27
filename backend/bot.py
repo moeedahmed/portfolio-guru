@@ -3743,19 +3743,19 @@ def _format_kaizen_sync_row(status: KaizenSyncStatus | None) -> str | None:
         started_dt = _parse_sync_timestamp(started_at)
         if started_dt and datetime.now(UTC) - started_dt > _KAIZEN_SYNC_RUNNING_STALE_AFTER:
             return (
-                f"Kaizen evidence: sync timed out after starting {pretty_started}. "
-                f"Items indexed: {status.items_indexed}"
+                f"Kaizen evidence: sync timed out ({pretty_started}) · "
+                f"{status.items_indexed} items"
             )
         return (
-            f"Kaizen evidence: syncing now, started {pretty_started}. "
-            f"Items indexed: {status.items_indexed}"
+            f"Kaizen evidence: syncing now (since {pretty_started}) · "
+            f"{status.items_indexed} items"
         )
     when = (last_run.finished_at or last_run.started_at or "").strip()
     pretty_when = _format_user_local_timestamp(when)
     status_label = _KAIZEN_SYNC_STATUS_LABELS.get(last_run.status, last_run.status)
     return (
-        f"Kaizen evidence: {status_label} {pretty_when}. "
-        f"Items indexed: {status.items_indexed}"
+        f"Kaizen evidence: {status_label} {pretty_when} · "
+        f"{status.items_indexed} items"
     )
 
 

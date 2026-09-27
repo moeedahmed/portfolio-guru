@@ -407,7 +407,7 @@ def test_settings_includes_kaizen_sync_status_when_status_provided(
 
     assert "Kaizen evidence" in text
     assert "2026-06-01 12:38 BST" in text
-    assert "Items indexed: 412" in text
+    assert "412 items" in text
     assert "synced" in text
     assert "(ok)" not in text
 
@@ -447,7 +447,7 @@ def test_settings_shows_running_sync_as_temporary_in_progress(
     )
 
     assert "Kaizen evidence: syncing now" in text
-    assert "Items indexed: 12" in text
+    assert "12 items" in text
 
 
 def test_settings_shows_stale_running_sync_as_timed_out(
@@ -481,7 +481,7 @@ def test_settings_shows_stale_running_sync_as_timed_out(
 
     assert "Kaizen evidence: sync timed out" in text
     assert "running" not in text
-    assert "Items indexed: 12" in text
+    assert "12 items" in text
 
 
 def test_settings_makes_portfolio_health_primary_and_hides_manual_sync(
