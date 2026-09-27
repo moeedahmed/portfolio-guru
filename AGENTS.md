@@ -43,6 +43,10 @@ Core product edge: this is not a generic AI writing tool. Doctors can already dr
 - Snapshot updates: `cd backend && venv/bin/python3 -m pytest tests/ -v --snapshot-update` only after intentional bot-message changes.
 - CI/deploy: pushes to `main` run GitHub Actions tests and the Mac Mini deploy workflow; local feature branches do not automatically deploy.
 
+## Bot Message Standard
+
+Every message a doctor sees follows `docs/message-standard.md`: one emoji lead line, at most about three short lines, one clear next step, and a length budget per kind (confirmation, prompt, error, menu, explainer). Shorten without dropping safety facts (draft-only, approval before Kaizen save, never submits to a supervisor, credentials encrypted and deleted with /reset). New templates and `*_TEXT`/`*_MSG` constants must be classified in `backend/tests/test_message_standard.py`, which enforces the budgets.
+
 ## Filing Routing Discipline
 
 Single source: `backend/filer_router.py` selects the method per form type.

@@ -2623,7 +2623,7 @@ _BTN_CONTINUE_THIN = InlineKeyboardButton("📄 Show draft", callback_data="ACTI
 _BTN_BACK_TO_MISSING = InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_missing")
 _DATA_CLEAR_TEXT = (
     "✅ Your Portfolio Guru data is clear.\n\n"
-    "Your local Portfolio Guru details have been removed. Cases already saved in Kaizen are unaffected."
+    "Cases already saved in Kaizen are unaffected."
 )
 _KAIZEN_USERNAME_PRIVACY_NOTE = (
     "🔒 _I'll store it encrypted and use it only to connect to Kaizen and save drafts you approve._"
