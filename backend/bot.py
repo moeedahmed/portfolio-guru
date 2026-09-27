@@ -745,10 +745,15 @@ async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
             except Exception as e:
                 logger.warning("weekly_push chart generation failed for %s: %s", user_id, e)
 
+            # One message per user: the card carries the text as its caption.
+            # Sending the card and the text separately read as a duplicate
+            # nudge to testers (beta feedback, 27 Sep 2026).
+            photo_sent = False
             if chart_path:
                 try:
                     with open(chart_path, "rb") as fh:
-                        await context.bot.send_photo(chat_id=user_id, photo=fh)
+                        await context.bot.send_photo(chat_id=user_id, photo=fh, caption=text)
+                    photo_sent = True
                 except Exception as e:
                     logger.warning("weekly_push chart send failed for %s: %s", user_id, e)
                 finally:
@@ -757,10 +762,11 @@ async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
                     except OSError:
                         pass
 
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=text,
-            )
+            if not photo_sent:
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=text,
+                )
             sent += 1
         except Exception as e:
             logger.warning("weekly_push failed for %s: %s", user_id, e)
@@ -1865,6 +1871,7 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
     """Clear transient case-review flags while optionally preserving the stored case text."""
     for key in (
         "awaiting_detail",
+        "awaiting_detail_at",
         "attachment_upload_confirmed",
         "case_input_source",
         "case_has_user_context",
@@ -2415,6 +2422,40 @@ def _looks_like_new_case_start(text: str) -> bool:
         "procedure",
     )
     return len(text.split()) >= 25 and sum(1 for marker in clinical_markers if marker in lowered) >= 2
+
+
+# An open draft waiting for more detail goes quiet after this long. A message
+# arriving later is not assumed to be more detail: a doctor replying to a
+# weekly check-in days later had "let me get on with my work" appended to an
+# old Reflective Practice Log draft (beta feedback, 27 Sep 2026).
+OPEN_DRAFT_STALE_SECONDS = 6 * 60 * 60
+
+
+def _open_draft_is_stale(context) -> bool:
+    """True when the draft awaiting detail has been untouched for too long."""
+    started = context.user_data.get("awaiting_detail_at")
+    if not isinstance(started, (int, float)):
+        return False
+    return time.time() - started > OPEN_DRAFT_STALE_SECONDS
+
+
+def _stamp_undated_open_drafts(all_user_data) -> int:
+    """Mark drafts restored from before the staleness check as old.
+
+    Their age is unknown, so the next message is asked about rather than
+    silently added: a tap costs less than editing a draft with an unrelated
+    reply. Runs once at startup over the restored user data.
+    """
+    stamped = 0
+    for user_data in (all_user_data or {}).values():
+        if (
+            user_data.get("awaiting_detail")
+            and user_data.get("chosen_form")
+            and not isinstance(user_data.get("awaiting_detail_at"), (int, float))
+        ):
+            user_data["awaiting_detail_at"] = 0.0
+            stamped += 1
+    return stamped
 
 
 def _pending_case_bundle_is_stale(context) -> bool:
@@ -5360,6 +5401,22 @@ async def _show_open_case_new_case_gate(
     return AWAIT_TEMPLATE_REVIEW
 
 
+async def _show_stale_open_draft_gate(target, context, incoming_text: str) -> int:
+    """Ask before adding a message to a draft that has sat open for hours.
+
+    Uses the same buttons as the new-case gate, so nothing changes in the
+    draft until the doctor says this message belongs to it.
+    """
+    context.user_data["pending_new_case_text"] = (incoming_text or "").strip()
+    form_name = _form_display_name(context.user_data.get("chosen_form", ""))
+    prompt_text = (
+        f"Your {form_name} draft from earlier is still open.\n\n"
+        "Add this message to it, or start a separate case?"
+    )
+    await target.reply_text(prompt_text, reply_markup=_build_open_case_new_case_keyboard())
+    return AWAIT_TEMPLATE_REVIEW
+
+
 async def _show_failed_filing_input_gate(
     target,
     context,
@@ -6646,6 +6703,7 @@ async def _ask_to_retry_essentials_check(
     """
     context.user_data["chosen_form"] = form_type
     context.user_data["awaiting_detail"] = True
+    context.user_data["awaiting_detail_at"] = time.time()
     _audit_event(
         context,
         "decision_path",
@@ -6684,6 +6742,7 @@ async def _offer_change_form_for_unavailable_essentials(
     """
     context.user_data["chosen_form"] = form_type
     context.user_data["awaiting_detail"] = True
+    context.user_data["awaiting_detail_at"] = time.time()
     _audit_event(
         context,
         "decision_path",
@@ -11774,6 +11833,7 @@ async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: in
     _store_pending_draft(context, draft)
     context.user_data["chosen_form"] = form_type
     context.user_data["awaiting_detail"] = True
+    context.user_data["awaiting_detail_at"] = time.time()
     _audit_event(
         context,
         "draft_payload",
@@ -13524,6 +13584,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 )
             context.user_data["chosen_form"] = explicit_start_form
             context.user_data["awaiting_detail"] = True
+            context.user_data["awaiting_detail_at"] = time.time()
             await update.message.reply_text(_explicit_form_detail_request_text(explicit_start_form))
             return AWAIT_CASE_INPUT
         if explicit_start_form:
@@ -14184,6 +14245,16 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         and _looks_like_explicit_new_case_request(case_text)
     ):
         gate_result = await _show_open_case_new_case_gate(update.message, context, case_text)
+        _mark_missing_essentials_replay_done(context, update, gate_result)
+        return gate_result
+
+    if (
+        context.user_data.get("awaiting_detail")
+        and context.user_data.get("chosen_form")
+        and bool(getattr(update.message, "text", None))
+        and _open_draft_is_stale(context)
+    ):
+        gate_result = await _show_stale_open_draft_gate(update.message, context, case_text)
         _mark_missing_essentials_replay_done(context, update, gate_result)
         return gate_result
 
@@ -18311,6 +18382,12 @@ def main():
 
     # Register commands so they appear in Telegram's "/" menu
     async def post_init(app):
+        try:
+            stamped = _stamp_undated_open_drafts(app.user_data)
+            if stamped:
+                logger.info("Marked %d restored open drafts as stale", stamped)
+        except Exception:
+            logger.warning("Could not stamp restored open drafts", exc_info=True)
         await app.bot.set_my_commands(BOT_COMMANDS)
         # Set bot description (shown on profile page before starting)
         try:
