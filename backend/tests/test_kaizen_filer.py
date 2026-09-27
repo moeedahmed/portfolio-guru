@@ -1496,6 +1496,39 @@ async def test_a_tree_that_never_renders_is_reported_not_swallowed():
     assert await _await_curriculum_tree(page) is False
 
 
+@pytest.mark.asyncio
+async def test_a_missing_tree_logs_what_the_page_showed(caplog):
+    """A month of "did not render" warnings (mostly *_2021 forms) carried no
+    detail to diagnose them from. The timeout now records a read-only probe of
+    the page: kz-tree count, SLO-looking nodes, Add Tags presence."""
+    import logging
+
+    import kaizen_form_filer as kff
+
+    page = MagicMock()
+    page.wait_for_function = AsyncMock(side_effect=Exception("timeout"))
+    page.evaluate = AsyncMock(
+        return_value={"kz_trees": 0, "slo_nodes": [], "add_tags": True}
+    )
+
+    with caplog.at_level(logging.WARNING, logger="kaizen_form_filer"):
+        assert await kff._await_curriculum_tree(page) is False
+
+    page.evaluate.assert_awaited_once_with(kff.CURRICULUM_PAGE_PROBE_JS)
+    assert "page showed" in caplog.text and "'add_tags': True" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_failing_probe_never_aborts_the_filing():
+    import kaizen_form_filer as kff
+
+    page = MagicMock()
+    page.wait_for_function = AsyncMock(side_effect=Exception("timeout"))
+    page.evaluate = AsyncMock(side_effect=Exception("page closed"))
+
+    assert await kff._await_curriculum_tree(page) is False
+
+
 def test_both_expand_loops_wait_first():
     """Two call sites expand the tree; a wait on only one leaves the race."""
     import inspect

@@ -1619,6 +1619,43 @@ SLO_ANCHORS_PRESENT_JS = (
 )
 
 
+# What the page showed when the SLO anchors never appeared. The bare timeout
+# warning said only that the tree was missing, which left a month of failures
+# (mostly the *_2021 forms) with nothing to diagnose them from: whether a
+# kz-tree existed at all, what its SLO headings were called, or whether the
+# page had fallen back to Add Tags. Read-only; returns a small summary.
+CURRICULUM_PAGE_PROBE_JS = """() => {
+    function short(s) { return (s || '').replace(/\\s+/g, ' ').trim().slice(0, 80); }
+    var trees = document.querySelectorAll('[kz-tree], kz-tree');
+    var sloNodes = [];
+    var all = document.querySelectorAll('a, span, label, li, div, button');
+    for (var i = 0; i < all.length && sloNodes.length < 6; i++) {
+        var el = all[i];
+        if (el.children.length > 2) continue;
+        var t = short(el.textContent);
+        if (/SLO\\s*\\d/i.test(t)) {
+            sloNodes.push(el.tagName.toLowerCase() + '.' + short(el.className) + ' | ' + t);
+        }
+    }
+    var labels = [];
+    for (var j = 0; j < trees.length && labels.length < 4; j++) {
+        var holder = trees[j].closest('[id]');
+        labels.push((holder ? holder.id : '') + ' | ' + short(trees[j].textContent).slice(0, 60));
+    }
+    var addTags = Array.from(document.querySelectorAll('a, button')).some(function(b) {
+        return /add\\s*tags?/i.test(b.textContent || '');
+    });
+    return {
+        url: location.pathname,
+        kz_trees: trees.length,
+        tree_heads: labels,
+        slo_nodes: sloNodes,
+        add_tags: addTags,
+        checkboxes: document.querySelectorAll('input[type="checkbox"]').length,
+    };
+}"""
+
+
 async def _await_curriculum_tree(page: Page, timeout_ms: int = 15000) -> bool:
     """Wait for the SLO anchors to exist. False means they never rendered."""
     try:
@@ -1629,6 +1666,11 @@ async def _await_curriculum_tree(page: Page, timeout_ms: int = 15000) -> bool:
             "Curriculum tree did not render within %dms — SLO expansion will fail",
             timeout_ms,
         )
+        try:
+            probe = await page.evaluate(CURRICULUM_PAGE_PROBE_JS)
+            logger.warning("Curriculum tree missing — page showed: %s", probe)
+        except Exception as exc:
+            logger.warning("Curriculum tree missing — page probe failed: %s", exc)
         return False
 
 
