@@ -7,7 +7,7 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>/Users/moeedahmed/projects/portfolio-guru/scripts/backup_db.sh</string>
+    <string>/Users/moeedahmed/projects/portfolio-guru-live/scripts/backup_db.sh</string>
   </array>
   <!-- PG_BACKUP_REMOTE is the OFF-DEVICE target. An empty value here does NOT
        mean "local only" — backup_db.sh reads it with `${PG_BACKUP_REMOTE:-...}`,
@@ -15,7 +15,9 @@
        plist says what actually happens.
        CLOUDSDK_PYTHON is load-bearing: launchd's minimal PATH makes gcloud pick
        macOS system Python 3.9, which crashes it (CommandLoadFailure). That is
-       what silently broke every off-device upload from 2026-06-26 to 2026-08-17. -->
+       what silently broke every off-device upload from 2026-06-26 to 2026-08-17.
+       The job runs the live checkout's script (kept on main by deploys), not the
+       dev checkout, which may sit on an unmerged branch. -->
   <key>EnvironmentVariables</key>
   <dict>
     <key>PG_BACKUP_REMOTE</key>
@@ -23,7 +25,9 @@
     <key>PG_BACKUP_RETAIN_DAYS</key>
     <string>30</string>
     <key>CLOUDSDK_PYTHON</key>
-    <string>/opt/homebrew/bin/python3.12</string>
+    <string>/Users/moeedahmed/homebrew/bin/python3.12</string>
+    <key>PATH</key>
+    <string>/Users/moeedahmed/homebrew/bin:/Users/moeedahmed/homebrew/share/google-cloud-sdk/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
   <key>StartCalendarInterval</key>
   <dict>

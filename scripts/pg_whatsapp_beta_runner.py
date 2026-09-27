@@ -188,6 +188,7 @@ def _missing_env(env: Mapping[str, str]) -> list[str]:
 def _bws_bin() -> str:
     for candidate in (
         Path("/Users/moeedahmed/.cargo/bin/bws"),
+        Path("/Users/moeedahmed/homebrew/bin/bws"),
         Path("/opt/homebrew/bin/bws"),
     ):
         if candidate.exists():

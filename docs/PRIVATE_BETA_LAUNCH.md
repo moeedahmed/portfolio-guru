@@ -154,7 +154,7 @@ cd ~/actions-runner-portfolio-guru
 ```
 
 Resume with `./svc.sh start`. The runner service is
-`actions.runner.moeedahmed-portfolio-guru.mac-mini-portfolio-guru`.
+`actions.runner.moeedahmed-portfolio-guru.hub-portfolio-guru`.
 
 **Hard revert a bad commit on `main` (only if a deploy shipped a broken cut):**
 

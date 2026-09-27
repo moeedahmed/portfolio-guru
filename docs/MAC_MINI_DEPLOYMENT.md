@@ -1,8 +1,9 @@
 # Mac Mini Deployment
 
-Portfolio Guru runs from a clean deployment checkout on the Mac Mini:
+Portfolio Guru runs from a clean deployment checkout on the Mac Mini
+(`Moeeds-Mac-mini` since 2026-09-27; the old `Moeed-Mac-mini` is retired):
 
-`/Users/moeedahmed/projects/portfolio-guru`
+`/Users/moeedahmed/projects/portfolio-guru-live`
 
 GitHub is the source of truth. Do not edit the live checkout directly.
 
@@ -11,7 +12,7 @@ GitHub is the source of truth. Do not edit the live checkout directly.
 On the Mac Mini:
 
 ```bash
-cd /Users/moeedahmed/projects/portfolio-guru
+cd /Users/moeedahmed/projects/portfolio-guru-live
 bash scripts/install_launchd.sh
 ```
 
@@ -48,9 +49,9 @@ The workflow `.github/workflows/deploy-mac.yml` runs on pushes to `main`.
 It runs on the Mac Mini self-hosted GitHub Actions runner:
 
 - Runner directory: `~/actions-runner-portfolio-guru`
-- Runner name: `mac-mini-portfolio-guru`
+- Runner name: `hub-portfolio-guru` (the old `mac-mini-portfolio-guru` was unregistered on 2026-09-27)
 - Runner labels: `self-hosted`, `macOS`, `ARM64`, `portfolio-guru`, `mac-mini`
-- Runner service: `actions.runner.moeedahmed-portfolio-guru.mac-mini-portfolio-guru`
+- Runner service: `actions.runner.moeedahmed-portfolio-guru.hub-portfolio-guru`
 
 No SSH deployment secrets are required. The previous SSH approach would not work
 reliably with the Mac Mini's Tailscale-only `100.x` address because GitHub-hosted

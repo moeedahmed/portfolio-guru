@@ -35,8 +35,17 @@ REMOTE_DEST="${PG_BACKUP_REMOTE:-gs://portfolio-guru-eu-backups}"
 RETAIN_DAYS="${PG_BACKUP_RETAIN_DAYS:-30}"
 
 # Resolve tool paths (launchd runs with a minimal PATH).
-GCLOUD="$(command -v gcloud || echo /opt/homebrew/bin/gcloud)"
-GPG="$(command -v gpg || echo /opt/homebrew/bin/gpg)"
+# Homebrew lives in ~/homebrew on the current Mac mini and /opt/homebrew on
+# the old one; check both so a missing PATH entry cannot break the backup.
+_brew_tool() {
+  command -v "$1" 2>/dev/null && return 0
+  for _dir in "$HOME/homebrew/bin" /opt/homebrew/bin; do
+    if [ -x "$_dir/$1" ]; then echo "$_dir/$1"; return 0; fi
+  done
+  echo "$1"
+}
+GCLOUD="$(_brew_tool gcloud)"
+GPG="$(_brew_tool gpg)"
 BWS_BIN="$(command -v bws || echo "$HOME/.cargo/bin/bws")"
 
 # gcloud needs Python >= 3.10. Under launchd's minimal PATH it otherwise picks
@@ -44,8 +53,10 @@ BWS_BIN="$(command -v bws || echo "$HOME/.cargo/bin/bws")"
 # how every off-device upload silently failed between 2026-06-26 and 2026-08-17.
 # Pin an interpreter we have verified, rather than trusting PATH order.
 if [ -z "${CLOUDSDK_PYTHON:-}" ]; then
-  for _py in /opt/homebrew/bin/python3.12 /opt/homebrew/bin/python3.13 \
-             /opt/homebrew/bin/python3.11 /opt/homebrew/bin/python3 /usr/bin/python3; do
+  for _py in "$HOME/homebrew/bin/python3.12" "$HOME/homebrew/bin/python3.14" \
+             /opt/homebrew/bin/python3.12 /opt/homebrew/bin/python3.13 \
+             /opt/homebrew/bin/python3.11 "$HOME/homebrew/bin/python3" \
+             /opt/homebrew/bin/python3 /usr/bin/python3; do
     if [ -x "$_py" ] && "$_py" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
       CLOUDSDK_PYTHON="$_py"
       break
