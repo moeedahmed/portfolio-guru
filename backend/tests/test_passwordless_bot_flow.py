@@ -232,3 +232,65 @@ async def test_unsigned_explains_it_needs_a_password_connection(passwordless_use
     await bot.unsigned_command(sim._make_text_update("/unsigned"), sim._make_context())
 
     assert "needs a username-and-password connection" in sim.get_last_text()
+
+
+# --- One shared first step -------------------------------------------------------
+
+_CHOICE = ("🔒 Sign in without password", "ACTION|connect_passwordless")
+
+
+@pytest.mark.asyncio
+async def test_reset_offers_the_same_connect_choice_as_setup(offered, monkeypatch):
+    """/reset must start sign-in from the shared step, not its own username prompt."""
+    sim = BotSimulator()
+    monkeypatch.setattr(bot, "_perform_reset", AsyncMock())
+
+    state = await bot.reset_data(sim._make_text_update("/reset"), sim._make_context())
+
+    assert state == bot.AWAIT_USERNAME
+    assert _CHOICE in sim.get_last_buttons()
+    assert sim.get_last_text() == bot._CONNECT_CHOICE_TEXT
+
+
+@pytest.mark.asyncio
+async def test_reset_confirm_button_offers_the_same_connect_choice(offered, monkeypatch):
+    sim = BotSimulator()
+    monkeypatch.setattr(bot, "_perform_reset", AsyncMock())
+    monkeypatch.setattr(bot, "_safe_edit_text", AsyncMock(), raising=False)
+
+    state = await bot.handle_reset_confirm(
+        sim._make_callback_update("CONFIRM|reset"), sim._make_context()
+    )
+
+    assert state == bot.AWAIT_USERNAME
+    assert _CHOICE in sim.get_last_buttons()
+
+
+@pytest.mark.asyncio
+async def test_reset_without_passwordless_still_asks_for_the_username(monkeypatch):
+    sim = BotSimulator()
+    monkeypatch.setattr(bot, "_perform_reset", AsyncMock())
+
+    await bot.reset_data(sim._make_text_update("/reset"), sim._make_context())
+
+    assert _CHOICE not in sim.get_last_buttons()
+    assert sim.get_last_text() == bot._KAIZEN_USERNAME_PROMPT
+
+
+def test_connect_prompt_is_only_built_by_the_shared_step():
+    """Guard: a new route must call _connect_kaizen_prompt, not send the bare
+    username prompt, or passwordless users lose the choice again. The only bare
+    uses are the fallbacks for when passwordless is off or its page is down."""
+    import inspect
+    import re
+
+    source = inspect.getsource(bot)
+    uses = [m.start() for m in re.finditer(r"\b_KAIZEN_USERNAME_PROMPT\b", source)]
+    allowed_owners = {"_connect_kaizen_prompt", "passwordless_setup_start"}
+    owners = set()
+    for pos in uses:
+        before = source[:pos]
+        if source[before.rfind("\n") + 1:].startswith("_KAIZEN_USERNAME_PROMPT = "):
+            continue  # the definition itself
+        owners.add(re.findall(r"^(?:async )?def (\w+)", before, re.M)[-1])
+    assert owners <= allowed_owners, f"bare username prompt used in {owners - allowed_owners}"

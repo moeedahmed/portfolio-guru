@@ -2970,8 +2970,18 @@ def _username_prompt_with_offer(user_id: int, prompt: str) -> tuple[str, InlineK
     return prompt, None
 
 
+def _connect_kaizen_prompt(user_id: int) -> tuple[str, InlineKeyboardMarkup | None]:
+    """The one "connect Kaizen" first step every route starts from.
+
+    /setup, /reset, the Connect Kaizen button and a lost retry all begin here,
+    so a doctor offered the passwordless route always sees the same choice
+    rather than whichever username prompt that route happened to build.
+    """
+    return _username_prompt_with_offer(user_id, _KAIZEN_USERNAME_PROMPT)
+
+
 async def _send_start_setup_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    text, markup = _username_prompt_with_offer(update.effective_user.id, _KAIZEN_USERNAME_PROMPT)
+    text, markup = _connect_kaizen_prompt(update.effective_user.id)
     await update.message.reply_text(text, parse_mode="Markdown", reply_markup=markup)
     context.user_data["_setup_state_hint"] = "username"
     return AWAIT_USERNAME
@@ -7453,7 +7463,7 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         await _retire_clicked_keyboard(query)
     _flow_done(context, "setup")  # fresh start — drop any stale anchor
     context.user_data["_setup_state_hint"] = "username"
-    text, markup = _username_prompt_with_offer(update.effective_user.id, _KAIZEN_USERNAME_PROMPT)
+    text, markup = _connect_kaizen_prompt(update.effective_user.id)
     await _flow_msg(
         update, context,
         text,
@@ -8249,10 +8259,12 @@ async def setup_retry_login(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     pending = _load_setup_retry_credentials(context)
     if pending is None:
+        text, markup = _connect_kaizen_prompt(update.effective_user.id)
         await _flow_msg(
             update,
             context,
-            _KAIZEN_USERNAME_PROMPT,
+            text,
+            reply_markup=markup,
             parse_mode="Markdown",
             flow_key="setup",
         )
@@ -9841,7 +9853,8 @@ async def handle_reset_confirm(update: Update, context: ContextTypes.DEFAULT_TYP
         _DATA_CLEAR_TEXT,
         reply_markup=_build_data_clear_keyboard(),
     )
-    await query.message.reply_text(_KAIZEN_USERNAME_PROMPT, parse_mode="Markdown")
+    text, markup = _connect_kaizen_prompt(update.effective_user.id)
+    await query.message.reply_text(text, parse_mode="Markdown", reply_markup=markup)
     return AWAIT_USERNAME
 
 
