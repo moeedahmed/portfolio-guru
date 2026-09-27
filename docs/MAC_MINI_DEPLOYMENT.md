@@ -1,7 +1,11 @@
 # Mac Mini Deployment
 
-Portfolio Guru runs from a clean deployment checkout on the Mac Mini
-(`Moeeds-Mac-mini` since 2026-09-27; the old `Moeed-Mac-mini` is retired):
+Portfolio Guru runs from a clean deployment checkout on the LIVE Mac mini
+(Tailscale `100.110.205.88`, the machine running `com.portfolioguru.bot` and
+runner `hub-portfolio-guru`). The SPARE Mac mini (Tailscale `100.79.220.124`,
+SSH alias `old-mac`) is retired: never run the bot there. Machine names change
+often, so check the current one with `scutil --get ComputerName` or
+`tailscale status` rather than trusting a stored name:
 
 `/Users/moeedahmed/projects/portfolio-guru-live`
 
