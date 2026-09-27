@@ -17841,6 +17841,12 @@ async def privacy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await update.message.reply_text(
         "🔐 Privacy & consent\n\n"
         f"{status_line}\n\n"
+        "• Case notes are health data. I only draft from them with your explicit consent (UK GDPR Art. 9).\n"
+        "• Before your case reaches the AI, I remove common identifiers: NHS, hospital and record numbers, "
+        "dates of birth, phone numbers, emails, postcodes, addresses, titled names (Mr, Mrs, Dr) and named "
+        "hospitals and wards. Other names can slip through, so you remain responsible for leaving patient "
+        "identifiers out.\n"
+        "• Files you attach go to Kaizen exactly as sent, so check them for identifiers first.\n"
         "• When drafting, the anonymised case details you provide are processed by Google Gemini via Vertex AI in the UK (London region).\n"
         "• Kaizen credentials are stored encrypted and never shared with the AI model.\n"
         + (
@@ -17850,7 +17856,6 @@ async def privacy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             else ""
         )
         + "• Drafts only — nothing is ever submitted to a supervisor.\n"
-        "• You are responsible for anonymising patients before sending.\n"
         "• /reset withdraws consent and erases Portfolio Guru's stored data (UK GDPR Art. 17)."
     )
 

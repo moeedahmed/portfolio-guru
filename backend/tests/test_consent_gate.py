@@ -767,7 +767,11 @@ def test_current_consent_copy_uses_precise_ai_processing_wording():
 
     assert "may use your case notes" not in consent.CONSENT_TEXT
     assert "EU (London)" not in consent.CONSENT_TEXT
-    assert "When drafting" in consent.CONSENT_TEXT
-    assert "anonymised case details you provide" in consent.CONSENT_TEXT
-    assert "Vertex AI in the UK (London region)" in consent.CONSENT_TEXT
+    assert "Anonymised details go to Google Gemini on Vertex AI, UK (London)" in consent.CONSENT_TEXT
     assert "Portfolio Guru's stored data" in consent.CONSENT_TEXT
+    # The bot strips identifiers itself, but only the common patterns: the
+    # doctor's own duty must stay, worded so it doesn't overclaim either way.
+    assert "leave out patient identifiers" in consent.CONSENT_TEXT
+    assert "not all" in consent.CONSENT_TEXT
+    for fact in ("health data", "encrypted", "Drafts only", "/reset", "GMC-registered", "/privacy"):
+        assert fact in consent.CONSENT_TEXT
