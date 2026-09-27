@@ -784,19 +784,19 @@ class TestOfflineE2E:
                 assert "Back to settings" not in sent["text"]
 
         # Step 5: Outside setup conversation, clicking SETLEVEL|SAS
-        # should hit the global handle_set_level and show "Back to settings".
+        # should hit the global handle_set_level, with Back to Portfolio defaults.
         collector.sent.clear()
         update5 = make_callback_update("SETLEVEL|SAS")
         _prepare_update(update5, app.bot)
         await app.process_update(update5)
 
         assert any("Portfolio set to" in t for t in collector.texts)
-        # Verify it has "Back to settings" button
+        # Back returns to Portfolio defaults, where the choice was offered
         last_sent = collector.sent[-1]
         keyboard = last_sent.get("reply_markup")
         assert keyboard is not None
         flat_buttons = [btn.callback_data for row in keyboard.inline_keyboard for btn in row]
-        assert "ACTION|settings" in flat_buttons
+        assert "ACTION|portfolio_defaults" in flat_buttons
 
     async def test_stale_button_handled_gracefully(self, offline_app, monkeypatch):
         """Tap a button from an old conversation → bot handles without crashing."""
