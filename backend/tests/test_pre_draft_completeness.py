@@ -495,10 +495,10 @@ async def test_exact_deidentified_screenshot_learning_sentence_accepted_in_previ
 
 
 @pytest.mark.asyncio
-async def test_edit_failure_on_remaining_gap_preserves_merged_answer_and_raises():
+async def test_edit_failure_on_remaining_gap_preserves_merged_answer_and_still_sends_draft():
     """If Telegram genuinely fails to edit the fresh acknowledgement message
     with the still-outstanding gap (not the harmless 'message not modified'
-    case), the failure must not be swallowed as a false success. The user's
+    case), the draft must still reach the doctor as a new message. The user's
     partial answer is merged into ``case_text`` before the edit is even
     attempted, so it — and the still-active gate — must survive the failed
     edit rather than being lost or silently reported as done."""
@@ -537,10 +537,13 @@ async def test_edit_failure_on_remaining_gap_preserves_merged_answer_and_raises(
 
     patches = _common_patches()
     with patches[0], patches[1], patches[2], patch("bot._analyse_selected_form", new=analyse):
-        with pytest.raises(BadRequest):
-            await handle_case_input(followup_update, context)
+        await handle_case_input(followup_update, context)
 
     assert call_count["n"] == 1
+    # The draft is now sent as a new message (27 Sep 2026), so a failed edit
+    # of the progress line is not a false success: the draft still arrives.
+    last_kind, last_text, _ = sim.messages_sent[-1]
+    assert last_kind == "send" and "still needed" in last_text.lower()
     # The old prompt was still retired (deleted) before the failure.
     actions = [action for action, _, _ in sim.messages_sent]
     assert "bot_delete" in actions
