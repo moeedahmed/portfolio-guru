@@ -1,6 +1,8 @@
 from datetime import UTC, date, datetime
 from typing import Any
 
+from pathway_checklist import compute_cesr_checklist
+
 from health_models import (
     CORE_DOMAINS,
     EvidenceItem,
@@ -183,6 +185,8 @@ def compute_next_actions(items: list[EvidenceItem], pathway: Pathway) -> list[st
     if pathway == Pathway.training_arcp:
         actions.append("File a CBD from a recent supervised case")
         actions.append("Add evidence before your next ARCP review")
+    elif pathway == Pathway.appraisal_only:
+        actions.append("Before your appraisal: add CPD, QI and a reflection from this year")
     else:
         actions.append("This year: build toward 12 DOPS, 12 Mini-CEX, and 12 CBD entries for CESR")
         actions.append("Over the next 3–12 months: add structured consultant reports and CPD for CESR")
@@ -268,28 +272,28 @@ def _dedupe(values: list[str]) -> list[str]:
 
 def _compute_pathway_readiness(items: list[EvidenceItem], pathway: Pathway) -> dict[str, object]:
     filed_or_better = {"filed", "reviewed", "accepted"}
-    wpba_items = [item for item in items if item.evidence_type == "wpba"]
     recent_items = [item for item in items if _age_days(item) < RECENT_DAYS]
 
-    if pathway == Pathway.training_arcp:
+    if pathway != Pathway.cesr_portfolio:
         return {
             "pathway": pathway.value,
             "filed_evidence_count": sum(1 for item in items if item.status in filed_or_better),
             "recent_evidence_count": len(recent_items),
         }
 
-    dops_count = sum(1 for item in wpba_items if item.form_type == "DOPS")
-    mini_cex_count = sum(1 for item in wpba_items if item.form_type == "MINI_CEX")
-    cbd_count = sum(1 for item in wpba_items if item.form_type == "CBD")
+    # GMC Portfolio Pathway: signed-off DOPS, Mini-CEX and CBD from the last
+    # six years, capped at 12 of each. Other WPBA types and ESLEs don't count.
+    cesr = compute_cesr_checklist(items, today=date.today())
+    breakdown = cesr.wpba_counts
 
     return {
         "pathway": pathway.value,
-        "wpba_count": len(wpba_items),
-        "wpba_target": 36,
+        "wpba_count": cesr.wpba_counted,
+        "wpba_target": cesr.wpba_target,
         "wpba_breakdown": {
-            "dops": dops_count,
-            "mini_cex": mini_cex_count,
-            "cbd": cbd_count,
+            "dops": breakdown["DOPS"],
+            "mini_cex": breakdown["MINI_CEX"],
+            "cbd": breakdown["CBD"],
         },
         "recent_evidence_count": len(recent_items),
     }

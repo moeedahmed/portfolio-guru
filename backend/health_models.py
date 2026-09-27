@@ -34,6 +34,7 @@ CORE_DOMAINS: tuple["HealthDomain", ...] = (
 class Pathway(str, Enum):
     training_arcp = "training_arcp"
     cesr_portfolio = "cesr_portfolio"
+    appraisal_only = "appraisal_only"
 
 
 class HealthScore(str, Enum):

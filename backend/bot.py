@@ -51,10 +51,17 @@ from health_report import (
     format_about,
     format_action_queue,
     format_actions,
+    format_arcp_landing,
     format_coverage,
     format_curriculum,
+    format_portfolio_landing,
     format_priorities,
     format_scan_info,
+)
+from pathway_checklist import (
+    compute_appraisal_checklist,
+    compute_arcp_checklist,
+    compute_cesr_checklist,
 )
 from health_profile_store import get_health_profile, save_health_profile, delete_health_profile
 from kaizen_index import (
@@ -3434,6 +3441,7 @@ def _health_view_keyboard(
     queue: str | None = None,
     queue_totals: dict[str, int] | None = None,
     needs_review_month: bool = False,
+    route_guess: str | None = None,
 ) -> InlineKeyboardMarkup:
     """Show only the controls that are useful from the current Health view.
 
@@ -3444,6 +3452,11 @@ def _health_view_keyboard(
     rows: list[list[InlineKeyboardButton]] = []
 
     if view == "priorities":
+        if route_guess:
+            try:
+                rows.extend(_route_confirm_rows(Pathway(route_guess)))
+            except ValueError:
+                pass
         totals = queue_totals or {}
         draft_total = int(totals.get("draft", 0))
         awaiting_total = int(totals.get("awaiting", 0))
@@ -3457,6 +3470,10 @@ def _health_view_keyboard(
             secondary.append(InlineKeyboardButton(
                 f"⏳ Awaiting ({awaiting_total})",
                 callback_data="ACTION|health_queue|awaiting|0",
+            ))
+        if needs_review_month:
+            secondary.append(InlineKeyboardButton(
+                "📅 Set review month", callback_data="ACTION|health_review_setup"
             ))
         secondary.append(InlineKeyboardButton(
             "ℹ️ About", callback_data="ACTION|health_view|about"
@@ -3747,6 +3764,89 @@ def _save_review_month(user_id: int, review_month) -> None:
     )
 
 
+ROUTE_CONFIRMED_KEY = "route_confirmed_on"
+
+# What each /health route asks for as its deadline month.
+_ROUTE_DEADLINE_NAME = {
+    Pathway.training_arcp: "ARCP",
+    Pathway.cesr_portfolio: "appraisal",
+    Pathway.appraisal_only: "appraisal",
+}
+
+
+def _route_needs_confirm(profile, today) -> bool:
+    """Guess, then confirm: ask until the doctor has confirmed their route.
+
+    A trainee is asked again once the ARCP month they set has passed, since
+    the next year may bring a new stage, CCT or a move out of training.
+    """
+    raw = (getattr(profile, "pathway_config", None) or {}).get(ROUTE_CONFIRMED_KEY)
+    if not raw:
+        return True
+    try:
+        confirmed_on = datetime.fromisoformat(str(raw)).date()
+    except ValueError:
+        return True
+    review = _stored_review_date(profile)
+    return bool(
+        profile.pathway == Pathway.training_arcp
+        and review is not None
+        and review < today.replace(day=1)
+        and confirmed_on <= review
+    )
+
+
+def _save_confirmed_route(user_id: int, pathway: Pathway) -> None:
+    """Save the route the doctor chose and stamp it as confirmed today."""
+    profile = get_health_profile(user_id)
+    now = datetime.now(UTC)
+    config = dict(profile.pathway_config or {}) if profile else {}
+    config[ROUTE_CONFIRMED_KEY] = now.date().isoformat()
+    save_health_profile(
+        HealthProfile(
+            user_id=str(user_id),
+            pathway=pathway,
+            pathway_config=config,
+            created_at=profile.created_at if profile else now,
+            updated_at=now,
+        )
+    )
+
+
+def _route_confirm_line(pathway: Pathway) -> str:
+    if pathway == Pathway.training_arcp:
+        return "🧭 *Is this you?* This looks like a training portfolio. Tap your route once."
+    return (
+        "🧭 *Is this you?* Are you preparing a Portfolio Pathway application, "
+        "or just keeping up with appraisal? Tap once."
+    )
+
+
+def _route_confirm_rows(pathway: Pathway) -> list[list[InlineKeyboardButton]]:
+    """One tap sets the route and goes straight to its deadline month."""
+    def data(route: Pathway) -> str:
+        return f"ACTION|health_route_set|{route.value}"
+
+    # (as the guess, as an alternative) for each route; the guess leads.
+    buttons = {
+        Pathway.training_arcp: (
+            InlineKeyboardButton("✅ Trainee", callback_data=data(Pathway.training_arcp)),
+            InlineKeyboardButton("🎓 Trainee", callback_data=data(Pathway.training_arcp)),
+        ),
+        Pathway.cesr_portfolio: (
+            InlineKeyboardButton("✅ Portfolio Pathway", callback_data=data(Pathway.cesr_portfolio)),
+            InlineKeyboardButton("📁 Portfolio Pathway", callback_data=data(Pathway.cesr_portfolio)),
+        ),
+        Pathway.appraisal_only: (
+            InlineKeyboardButton("✅ Appraisal only", callback_data=data(Pathway.appraisal_only)),
+            InlineKeyboardButton("🗂 Appraisal only", callback_data=data(Pathway.appraisal_only)),
+        ),
+    }
+    return [[buttons[pathway][0]] + [
+        pair[1] for route, pair in buttons.items() if route != pathway
+    ]]
+
+
 def _health_review_month_picker_keyboard(reference=None) -> InlineKeyboardMarkup:
     """The next twelve calendar months; tapping one only previews it."""
     from datetime import date as _date
@@ -3829,6 +3929,7 @@ def _store_health_report_context(
     action_queue_pages: dict[str, list[str]],
     action_queue_totals: dict[str, int],
     needs_review_month: bool,
+    route_guess: str | None = None,
 ) -> None:
     """Remember the rendered views so the navigation buttons have something to show.
 
@@ -3847,6 +3948,7 @@ def _store_health_report_context(
         "action_queue_totals": action_queue_totals,
         "queue_page": {"draft": 0, "awaiting": 0},
         "needs_review_month": needs_review_month,
+        "route_guess": route_guess,
     }
 
 
@@ -3897,7 +3999,10 @@ def _health_view_payload(
         if text is None:
             return None
         return text, _health_view_keyboard(
-            "priorities", queue_totals=queue_totals
+            "priorities",
+            queue_totals=queue_totals,
+            needs_review_month=bool(report.get("needs_review_month")),
+            route_guess=report.get("route_guess"),
         )
 
     if view == "about":
@@ -8332,9 +8437,23 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return ConversationHandler.END
 
-    elif action == "health_review_setup":
-        current = _stored_review_date(_get_or_default_health_profile(user_id))
+    elif action == "health_review_setup" or action.startswith("health_route_set|"):
+        intro = ""
+        if action.startswith("health_route_set|"):
+            try:
+                chosen = Pathway(action.rsplit("|", 1)[-1])
+            except ValueError:
+                await _safe_edit_text(
+                    query.message, "⚠️ That option is no longer valid. Use /pathway."
+                )
+                return ConversationHandler.END
+            _save_confirmed_route(user_id, chosen)
+            _track_funnel_event(context, "health_route_confirmed", update_last=False)
+            intro = f"✅ Route set: *{_pathway_label(chosen)}*.\n\n"
+        profile_now = _get_or_default_health_profile(user_id)
+        current = _stored_review_date(profile_now)
         shown = current.strftime("%B %Y") if current else "not set"
+        deadline = _ROUTE_DEADLINE_NAME.get(profile_now.pathway, "review")
         _track_funnel_event(
             context,
             "health_review_month_setup",
@@ -8342,8 +8461,9 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         await _safe_edit_text(
             query.message,
-            f"📅 *Review month*\n\nCurrently: {shown}\n\n"
-            "Choose the month of your next ARCP or review. Selecting a month "
+            f"{intro}📅 *{deadline[:1].upper()}{deadline[1:]} month*"
+            f"\n\nCurrently: {shown}\n\n"
+            f"Choose the month of your next {deadline}. Selecting a month "
             "only previews it; nothing changes until you tap Confirm.\n\n"
             "_Cancel returns to Health without changing the current setting._",
             parse_mode="Markdown",
@@ -8393,12 +8513,14 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         await _safe_edit_text(
             query.message,
             f"✅ Review month set to *{parsed.strftime('%B %Y')}*.\n\n"
-            "Return to Health.",
+            "Refresh Health to see your deadline and checklist for it.",
             parse_mode="Markdown",
+            # The stored landing was rendered without this month, so a
+            # refresh is the only route that shows the new deadline.
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton(
-                    "🔙 Health",
-                    callback_data="ACTION|health_view|priorities",
+                    "🔄 Refresh health",
+                    callback_data="ACTION|health",
                 )
             ]]),
         )
@@ -9420,15 +9542,44 @@ async def _run_health_analysis(
 
     # Every evidence view is rendered here, once, from one assessment. A
     # button press then only reads what this scan already decided.
-    priorities_text = format_priorities(
-        assessment,
-        month_label=_dt_module.now().strftime("%B %Y"),
-        review_date=review_date,
-        limited_view=limited_view,
-        partial_scan=scan_is_partial,
-        scan_is_fresh=scan_is_fresh,
-        pathway_readiness=snapshot.pathway_readiness,
+    # The landing is the checklist this doctor is actually judged on: the
+    # RCEM ARCP year for trainees, the GMC appraisal and Portfolio Pathway
+    # minimums for everyone else. The review month doubles as the ARCP or
+    # appraisal month.
+    today = _dt_module.now().date()
+    if profile.pathway in (Pathway.cesr_portfolio, Pathway.appraisal_only):
+        priorities_text = format_portfolio_landing(
+            assessment,
+            compute_appraisal_checklist(
+                evidence_items, today=today, review_date=review_date
+            ),
+            compute_cesr_checklist(evidence_items, today=today)
+            if profile.pathway == Pathway.cesr_portfolio
+            else None,
+            today=today,
+            limited_view=limited_view,
+            partial_scan=scan_is_partial,
+            scan_is_fresh=scan_is_fresh,
+        )
+    else:
+        priorities_text = format_arcp_landing(
+            assessment,
+            compute_arcp_checklist(
+                evidence_items,
+                today=today,
+                review_date=review_date,
+                training_level=training_level,
+            ),
+            today=today,
+            limited_view=limited_view,
+            partial_scan=scan_is_partial,
+            scan_is_fresh=scan_is_fresh,
+        )
+    route_guess = (
+        profile.pathway.value if _route_needs_confirm(profile, today) else None
     )
+    if route_guess:
+        priorities_text = f"{priorities_text}\n\n{_route_confirm_line(profile.pathway)}"
     await send_progress()
     evidence_basis = _format_health_evidence_context(
         source=evidence_source,
@@ -9479,6 +9630,7 @@ async def _run_health_analysis(
             action_queue_pages=action_queue_pages,
             action_queue_totals=action_queue_totals,
             needs_review_month=review_month_needs_setup,
+            route_guess=route_guess,
         )
     await send_result(
         priorities_text,
@@ -9486,76 +9638,9 @@ async def _run_health_analysis(
             "priorities",
             queue_totals=action_queue_totals,
             needs_review_month=review_month_needs_setup,
+            route_guess=route_guess,
         ),
     )
-    return
-
-    evidence_context = _format_health_evidence_context(
-        source=evidence_source,
-        evidence_count=len(evidence_items),
-        history_count=len(history),
-        profile_is_default=profile_is_default,
-        sync_status=sync_status,
-        pathway=profile.pathway,
-    )
-
-    await send_progress()
-
-    from datetime import datetime as _dt
-    month_label = _dt.now().strftime("%B %Y")
-
-    if profile.pathway == Pathway.cesr_portfolio:
-        msg = _format_cesr_health_message(
-            snapshot, history, month_label, evidence_context, limited_view=limited_view
-        )
-        msg = await _append_health_activity_snapshot(msg, user_id, history, training_level, limited_view=limited_view)
-        await send_result(msg, _health_view_keyboard("priorities"))
-        return
-
-    try:
-        analysis = await asyncio.wait_for(
-            analyse_portfolio_health(history, training_level), timeout=45
-        )
-    except asyncio.TimeoutError:
-        logger.warning("Portfolio health analysis timed out (45s)")
-        msg = _format_arcp_deterministic_health_message(
-            snapshot,
-            history,
-            month_label,
-            level_note,
-            evidence_context,
-            "AI ARCP narrative timed out; deterministic health is shown below.",
-            limited_view=limited_view,
-        )
-        msg = await _append_health_activity_snapshot(msg, user_id, history, training_level, limited_view=limited_view)
-        await send_result(msg, _health_view_keyboard("priorities"))
-        return
-    except Exception as e:
-        logger.error(f"Portfolio health analysis failed: {e}", exc_info=True)
-        msg = _format_arcp_deterministic_health_message(
-            snapshot,
-            history,
-            month_label,
-            level_note,
-            evidence_context,
-            "AI ARCP narrative is temporarily unavailable; deterministic health is shown below.",
-            limited_view=limited_view,
-        )
-        msg = await _append_health_activity_snapshot(msg, user_id, history, training_level, limited_view=limited_view)
-        await send_result(msg, _health_view_keyboard("priorities"))
-        return
-
-    msg = _format_arcp_action_plan_message(
-        snapshot=snapshot,
-        history=history,
-        month_label=month_label,
-        level_note=level_note,
-        evidence_context=evidence_context,
-        analysis=analysis,
-        limited_view=limited_view,
-    )
-    msg = await _append_health_activity_snapshot(msg, user_id, history, training_level, limited_view=limited_view)
-    await send_result(msg, _health_view_keyboard("priorities"))
 
 
 async def _run_health_with_optional_kaizen_sync(
@@ -9689,10 +9774,18 @@ def _autoset_health_pathway_from_role(user_id: int, detected_role: str) -> Pathw
     from datetime import UTC, datetime
     now = datetime.now(UTC)
     existing = get_health_profile(user_id)
+    config = dict(existing.pathway_config or {}) if existing else {}
+    if existing and config.get(ROUTE_CONFIRMED_KEY):
+        # Kaizen can't tell Portfolio Pathway from appraisal only, so a
+        # confirmed non-trainee route survives reconnects. A switch between
+        # trainee and non-trainee is a real change: take the guess, ask again.
+        if (existing.pathway == Pathway.training_arcp) == (pathway == Pathway.training_arcp):
+            return existing.pathway
+        config.pop(ROUTE_CONFIRMED_KEY, None)
     profile = HealthProfile(
         user_id=str(user_id),
         pathway=pathway,
-        pathway_config=existing.pathway_config if existing else {},
+        pathway_config=config,
         created_at=existing.created_at if existing else now,
         updated_at=now,
     )
@@ -9701,7 +9794,10 @@ def _autoset_health_pathway_from_role(user_id: int, detected_role: str) -> Pathw
 
 
 def _pathway_label(pathway: Pathway) -> str:
-    return "Portfolio (CESR)" if pathway == Pathway.cesr_portfolio else "Training (CCT)"
+    return {
+        Pathway.cesr_portfolio: "Portfolio Pathway (CESR)",
+        Pathway.appraisal_only: "Appraisal only",
+    }.get(pathway, "Training (CCT)")
 
 
 def _build_pathway_keyboard(*, from_settings: bool = False) -> InlineKeyboardMarkup:
@@ -9709,8 +9805,9 @@ def _build_pathway_keyboard(*, from_settings: bool = False) -> InlineKeyboardMar
     rows = [
         [
             InlineKeyboardButton("🎓 Training (CCT)", callback_data=f"{prefix}|{Pathway.training_arcp.value}"),
-            InlineKeyboardButton("📁 Portfolio (CESR)", callback_data=f"{prefix}|{Pathway.cesr_portfolio.value}"),
+            InlineKeyboardButton("📁 Portfolio Pathway", callback_data=f"{prefix}|{Pathway.cesr_portfolio.value}"),
         ],
+        [InlineKeyboardButton("🗂 Appraisal only", callback_data=f"{prefix}|{Pathway.appraisal_only.value}")],
     ]
     if from_settings:
         rows.append([InlineKeyboardButton("🔙 Back", callback_data="ACTION|portfolio_defaults")])
@@ -9729,8 +9826,9 @@ async def pathway_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         "📊 Portfolio Health pathway\n\n"
         f"Current view: {_pathway_label(profile.pathway)}\n\n"
         "Choose how /health should read your evidence:\n"
-        "• Training (CCT): includes ARCP review planning.\n"
-        "• Portfolio (CESR): long-term specialist-registration evidence.",
+        "• Training (CCT): your yearly ARCP review checklist.\n"
+        "• Portfolio Pathway: appraisal plus CESR evidence counts.\n"
+        "• Appraisal only: what to bring to your next appraisal.",
         reply_markup=_build_pathway_keyboard(),
     )
     return AWAIT_PATHWAY
@@ -9747,17 +9845,8 @@ async def handle_pathway_choice(update: Update, context: ContextTypes.DEFAULT_TY
         await query.edit_message_text("⚠️ Unknown pathway. Use /settings to try again.")
         return ConversationHandler.END
 
-    from datetime import UTC, datetime
-    now = datetime.now(UTC)
-    current = get_health_profile(update.effective_user.id)
-    profile = HealthProfile(
-        user_id=str(update.effective_user.id),
-        pathway=pathway,
-        pathway_config=current.pathway_config if current else {},
-        created_at=current.created_at if current else now,
-        updated_at=now,
-    )
-    save_health_profile(profile)
+    # A manual choice is a confirmation, so /health stops asking.
+    _save_confirmed_route(update.effective_user.id, pathway)
     if from_settings:
         try:
             used = await get_cases_this_month(update.effective_user.id)
@@ -9981,6 +10070,10 @@ def _health_last_scanned_line(sync_status: KaizenSyncStatus | None) -> str:
 
 
 def _health_window_label(pathway: Pathway, source: str) -> str:
+    if pathway == Pathway.appraisal_only:
+        if source == "kaizen_index":
+            return "all indexed Kaizen evidence currently stored; set your appraisal month to time this"
+        return "last 6 months of Portfolio Guru filings only; not enough for an appraisal summary"
     if pathway == Pathway.cesr_portfolio:
         if source == "kaizen_index":
             return "all indexed Kaizen evidence currently stored; CESR still needs a formal multi-year evidence map"

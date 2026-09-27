@@ -141,6 +141,7 @@ def test_health_keyboards_are_contextual_in_every_view():
         [("📝 Review drafts (7)", "ACTION|health_queue|draft|0")],
         [
             ("⏳ Awaiting (10)", "ACTION|health_queue|awaiting|0"),
+            ("📅 Set review month", "ACTION|health_review_setup"),
             ("ℹ️ About", "ACTION|health_view|about"),
         ],
     ]
@@ -222,6 +223,7 @@ async def test_health_landing_callbacks_open_independent_paginated_queues(monkey
         [("📝 Review drafts (7)", "ACTION|health_queue|draft|0")],
         [
             ("⏳ Awaiting (10)", "ACTION|health_queue|awaiting|0"),
+            ("📅 Set review month", "ACTION|health_review_setup"),
             ("ℹ️ About", "ACTION|health_view|about"),
         ],
     ]
@@ -405,8 +407,8 @@ async def test_review_month_confirmation_persists_through_existing_profile_path(
     assert len(saved) == 1
     assert saved[0].pathway_config[bot.REVIEW_DATE_KEY] == "2026-10-01"
     assert (
-        "🔙 Health",
-        "ACTION|health_view|priorities",
+        "🔄 Refresh health",
+        "ACTION|health",
     ) in sim.get_last_buttons()
     track.assert_any_call(
         context,
@@ -528,7 +530,7 @@ async def test_pathway_command_saves_selected_pathway(isolated_health_store):
     assert "Choose how /health should read your evidence" in text
     assert "Pick the pathway" not in text
     assert ('🎓 Training (CCT)', "PATHWAY|training_arcp") in sim.get_last_buttons()
-    assert ('📁 Portfolio (CESR)', "PATHWAY|cesr_portfolio") in sim.get_last_buttons()
+    assert ('📁 Portfolio Pathway', "PATHWAY|cesr_portfolio") in sim.get_last_buttons()
 
     result = await bot.handle_pathway_choice(
         sim._make_callback_update("PATHWAY|cesr_portfolio"),
@@ -539,7 +541,9 @@ async def test_pathway_command_saves_selected_pathway(isolated_health_store):
     stored = health_profile_store.get_health_profile(sim.user_id)
     assert stored is not None
     assert stored.pathway == Pathway.cesr_portfolio
-    assert "Portfolio (CESR)" in sim.get_last_text()
+    assert "Portfolio Pathway (CESR)" in sim.get_last_text()
+    # Choosing by hand counts as confirming, so /health stops asking.
+    assert not bot._route_needs_confirm(stored, datetime.now(UTC).date())
 
 
 def test_settings_shows_pathway_change_control(isolated_health_store, monkeypatch):
@@ -588,7 +592,7 @@ async def test_settings_pathway_change_saves_and_returns_to_settings(isolated_he
     )
 
     assert ('🎓 Training (CCT)', "PATHWAY_SETTINGS|training_arcp") in sim.get_last_buttons()
-    assert ('📁 Portfolio (CESR)', "PATHWAY_SETTINGS|cesr_portfolio") in sim.get_last_buttons()
+    assert ('📁 Portfolio Pathway', "PATHWAY_SETTINGS|cesr_portfolio") in sim.get_last_buttons()
     # The pathway picker is a section under Portfolio defaults, so its Back
     # button must return to the Portfolio defaults submenu, not main /settings.
     assert ('🔙 Back', "ACTION|portfolio_defaults") in sim.get_last_buttons()
@@ -603,7 +607,7 @@ async def test_settings_pathway_change_saves_and_returns_to_settings(isolated_he
     stored = health_profile_store.get_health_profile(sim.user_id)
     assert stored is not None
     assert stored.pathway == Pathway.cesr_portfolio
-    assert "Portfolio (CESR)" in sim.get_last_text()
+    assert "Portfolio Pathway (CESR)" in sim.get_last_text()
     assert ('📋 Portfolio defaults', "ACTION|portfolio_defaults") in sim.get_last_buttons()
 
 
@@ -717,14 +721,23 @@ async def test_health_empty_state_clarifies_scan_scope_and_offers_next_routes(mo
 
     text = sent["text"]
     assert isinstance(text, str)
-    assert text.startswith("*What to do next*")
-    assert "*No older unfinished items to review*" in text
-    assert "waiting long enough to be highlighted here" in text
+    assert text.startswith("📊 *ARCP readiness*")
+    assert "Older than 3 weeks" not in text
     assert "Partial scan: Portfolio Guru filings only" in text
     keyboard = sent["reply_markup"]
     assert isinstance(keyboard, bot.InlineKeyboardMarkup)
+    # A doctor who has never confirmed their route is asked once, in one tap.
+    assert "Is this you?" in text
     assert _keyboard_rows(keyboard) == [
-        [("ℹ️ About", "ACTION|health_view|about")],
+        [
+            ("✅ Trainee", "ACTION|health_route_set|training_arcp"),
+            ("📁 Portfolio Pathway", "ACTION|health_route_set|cesr_portfolio"),
+            ("🗂 Appraisal only", "ACTION|health_route_set|appraisal_only"),
+        ],
+        [
+            ("📅 Set review month", "ACTION|health_review_setup"),
+            ("ℹ️ About", "ACTION|health_view|about"),
+        ],
     ]
 
 
@@ -763,7 +776,7 @@ async def test_cesr_health_output_uses_deterministic_engine_without_llm(monkeypa
 
     text = sent["text"]
     views = store.user_data["last_health_report"]["views"]
-    assert text.startswith("*What to do next*")
+    assert text.startswith("📊 *Appraisal and Portfolio Pathway*")
     assert "*Portfolio Pathway requirement*" not in text
     assert "WPBAs counted in this scan" not in text
     assert "Long-term CESR readiness:" not in text
@@ -772,7 +785,7 @@ async def test_cesr_health_output_uses_deterministic_engine_without_llm(monkeypa
     # Scan info, never a readiness verdict.
     assert "Partial scan: Portfolio Guru filings only" in text
     assert "Limited view: based on Portfolio Guru filings only" in views["scan"]
-    assert "5-year evidence window" in views["scan"]
+    assert "6-year evidence window" in views["scan"]
     assert "ARCP" not in text
     analysis.assert_not_called()
 
@@ -827,7 +840,7 @@ async def test_health_renders_one_message_without_sending_a_chart_photo(monkeypa
         fail_fn=AsyncMock(),
     )
 
-    assert sent["text"].startswith("*What to do next*")
+    assert sent["text"].startswith("📊 *Appraisal and Portfolio Pathway*")
     assert "*Portfolio Pathway requirement*" not in sent["text"]
     send_photo.assert_not_awaited()
 
@@ -871,7 +884,7 @@ async def test_arcp_health_falls_back_to_deterministic_output_when_llm_fails(mon
     views = store.user_data["last_health_report"]["views"]
     # The reading is deterministic, so an unavailable LLM is not a failure
     # path: there is nothing to fall back from.
-    assert text.startswith("*What to do next*")
+    assert text.startswith("📊 *ARCP readiness*")
     assert "Training (ARCP)" not in text
     # A partial scan is disclosed and stops the view ranking anything.
     assert "Partial scan: Portfolio Guru filings only" in text
@@ -927,7 +940,7 @@ async def test_arcp_health_output_prioritises_action_plan_when_llm_succeeds(monk
     views = store.user_data["last_health_report"]["views"]
     # An available LLM changes nothing: the views are computed from the
     # evidence, so narrative and numbers cannot disagree.
-    assert text.startswith("*What to do next*")
+    assert text.startswith("📊 *ARCP readiness*")
     assert "Book a supervisor review" not in text
     assert "Training (ARCP)" not in text
     assert "Partial scan: Portfolio Guru filings only" in text
@@ -1320,7 +1333,7 @@ async def test_arcp_and_cesr_pathway_outputs_diverge_in_lead_framing(monkeypatch
     assert "WPBAs counted in this scan" not in cesr_text
     assert "*Portfolio Pathway requirement*" in cesr_views["scan"]
     assert "WPBAs counted in this scan" in cesr_views["scan"]
-    assert "5-year evidence window" in cesr_views["scan"]
+    assert "6-year evidence window" in cesr_views["scan"]
     # CESR must NOT carry ARCP-deadline framing
     assert "ARCP risk" not in cesr_text
     assert "before ARCP" not in cesr_text
@@ -1337,7 +1350,7 @@ async def test_cesr_message_contains_long_term_and_domain_balance(monkeypatch):
     assert "WPBAs counted in this scan" in cesr_views["scan"]
     assert "consultant report" in cesr_views["scan"].lower()
     assert "multi-year" in cesr_views["scan"]
-    assert "5-year evidence window" in cesr_views["scan"]
+    assert "6-year evidence window" in cesr_views["scan"]
     # Domain totals belong to Coverage, not to the opening view.
     assert "none scanned" in cesr_views["coverage"]
     assert "Missing domains" not in cesr_views["coverage"]
@@ -1379,7 +1392,7 @@ async def test_pathway_command_describes_arcp_as_checkpoint_not_pathway(isolated
     assert "Training (CCT)" in text
     assert ("CESR" in text) or ("Portfolio Pathway" in text)
     assert ('🎓 Training (CCT)', "PATHWAY|training_arcp") in buttons
-    assert ('📁 Portfolio (CESR)', "PATHWAY|cesr_portfolio") in buttons
+    assert ('📁 Portfolio Pathway', "PATHWAY|cesr_portfolio") in buttons
 
     # Forbidden framings — ARCP as a pathway label
     assert "Training (ARCP)" not in text
@@ -2004,3 +2017,58 @@ async def test_weekly_nudge_chart_renders_from_the_real_stats_shape(monkeypatch,
     monkeypatch.chdir(tmp_path)
     path = await portfolio_chart.generate_weekly_nudge_chart_async(4242)
     assert os.path.exists(path) and os.path.getsize(path) > 0
+
+
+# ── Guess, then confirm the route ───────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_one_tap_route_choice_saves_it_and_asks_for_the_appraisal_month(isolated_health_store):
+    import bot
+    health_profile_store = isolated_health_store
+
+    sim = BotSimulator(user_id=4244)
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_route_set|appraisal_only"),
+        sim._make_context(),
+    )
+
+    stored = health_profile_store.get_health_profile(sim.user_id)
+    assert stored.pathway == Pathway.appraisal_only
+    assert not bot._route_needs_confirm(stored, datetime.now(UTC).date())
+    text = sim.get_last_text()
+    assert "Route set: *Appraisal only*" in text
+    assert "Choose the month of your next appraisal" in text
+    assert any(data.startswith("ACTION|health_review_select|") for _, data in sim.get_last_buttons())
+
+
+def test_trainee_is_asked_again_once_their_arcp_month_has_passed():
+    import bot
+    from datetime import date
+
+    profile = _profile(1, Pathway.training_arcp)
+    profile.pathway_config.update({
+        bot.ROUTE_CONFIRMED_KEY: "2026-01-10",
+        bot.REVIEW_DATE_KEY: "2026-06-01",
+    })
+    assert not bot._route_needs_confirm(profile, date(2026, 5, 20))
+    assert bot._route_needs_confirm(profile, date(2026, 7, 2))
+
+    profile.pathway_config[bot.ROUTE_CONFIRMED_KEY] = "2026-07-02"
+    assert not bot._route_needs_confirm(profile, date(2026, 7, 3))
+
+
+def test_reconnecting_keeps_a_confirmed_non_trainee_route(isolated_health_store, monkeypatch):
+    import bot
+    health_profile_store = isolated_health_store
+
+    bot._save_confirmed_route(4245, Pathway.appraisal_only)
+    # Kaizen reads every non-trainee as the Portfolio Pathway; the doctor's
+    # own answer wins.
+    assert bot._autoset_health_pathway_from_role(4245, "sas") == Pathway.appraisal_only
+    assert health_profile_store.get_health_profile(4245).pathway == Pathway.appraisal_only
+
+    # Moving into training is a real change: take it, and ask again.
+    assert bot._autoset_health_pathway_from_role(4245, "hst") == Pathway.training_arcp
+    stored = health_profile_store.get_health_profile(4245)
+    assert bot._route_needs_confirm(stored, datetime.now(UTC).date())

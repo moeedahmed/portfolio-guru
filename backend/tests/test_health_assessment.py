@@ -735,7 +735,7 @@ def test_scan_info_holds_the_fuller_pathway_expectations():
     _, training = _scan_info(_balanced())
 
     assert "ESLEs across core specialties" in cesr
-    assert "5-year evidence window" in cesr
+    assert "6-year evidence window" in cesr
     assert "ESLEs" not in training
 
 

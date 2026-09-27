@@ -29,7 +29,7 @@ def payload_branch(payload):
     if family == "ACTION" and len(parts) > 2:
         if parts[1] == "health_queue":
             return "|".join(parts[:3]) + "|*"
-        if parts[1] in {"health_page", "health_review_select", "health_review_confirm", "post_file_more"}:
+        if parts[1] in {"health_page", "health_review_select", "health_review_confirm", "health_route_set", "post_file_more"}:
             return "|".join(parts[:2]) + "|*"
     return payload
 
@@ -47,14 +47,14 @@ def producer_digest():
     return hashlib.sha256(json.dumps(modules).encode()).hexdigest()
 
 
-PRODUCER_DIGEST = '03beaefdfc74174e9ac97e7aa2fabfb4438bbecc44efeab1b845a7f2eb27aeef'
+PRODUCER_DIGEST = '7f80b55b12dd180855e275a6886f7fb8285bf4f6b405dc1157c7dbbd04b4742c'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
 ACTION|change_pathway ACTION|confirm_refresh_for_health ACTION|confirm_refresh_portfolio ACTION|continue_thin
 ACTION|delete ACTION|file ACTION|health ACTION|health_limited ACTION|health_page|*
 ACTION|health_queue|awaiting|* ACTION|health_queue|draft|* ACTION|health_review_confirm|*
-ACTION|health_review_select|* ACTION|health_review_setup ACTION|health_view|about ACTION|health_view|more
+ACTION|health_review_select|* ACTION|health_review_setup ACTION|health_route_set|* ACTION|health_view|about ACTION|health_view|more
 ACTION|health_view|priorities ACTION|portfolio_defaults ACTION|refresh_portfolio ACTION|reset
 ACTION|retry_filing ACTION|retry_recommend ACTION|retry_setup_login ACTION|retry_template
 ACTION|same_case_another ACTION|settings ACTION|setup ACTION|voice AMEND|cancel AMEND|cancel_choice
@@ -192,7 +192,7 @@ def reviewed_units(slots):
     return dict(sorted(units.items()))
 
 
-CATALOGUE_DIGEST = 'd20bbed6498aba762716056ad4aa47766a56da6995a446c4b0795258b961d779'
+CATALOGUE_DIGEST = 'b399986d1f077fc1a2f095f1027a34946c28a4dce4f5bd5ae81e9d472e2f0aa2'
 
 
 def requirements_digest(units):

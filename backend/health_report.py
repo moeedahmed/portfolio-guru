@@ -289,7 +289,7 @@ def _pathway_counter(readiness: Optional[dict]) -> list[str]:
                 for key, label in (("dops", "DOPS"), ("mini_cex", "Mini-CEX"), ("cbd", "CBD"))
             )
         )
-    lines.append("_RCEM's stated minimum. Confirm against current guidance._")
+    lines.append("_Signed-off DOPS, Mini-CEX and CBD, capped at 12 each (GMC guidance)._")
     return lines + [""]
 
 
@@ -380,6 +380,244 @@ def format_priorities(
         lines.extend([notice, ""])
     lines.append(SAFETY_LINE)
     return "\n".join(lines).strip()
+
+
+# ── Pathway landings ────────────────────────────────────────────────────────
+
+# One phone screen: three actions, each tied to a named requirement.
+DO_NEXT_LIMIT = 3
+
+
+def _weeks_until(target: date, today: date) -> str:
+    days = (target - today).days
+    weeks = days // 7
+    return f"{weeks} weeks" if weeks >= 2 else f"{days} days"
+
+
+def _chase_action(assessment: HealthAssessment) -> Optional[str]:
+    """The oldest item waiting on someone else, as one action."""
+    if not assessment.stuck_awaiting:
+        return None
+    oldest = min(assessment.stuck_awaiting, key=lambda s: s.event_date)
+    name = form_label(oldest.form_type, fallback=None) if oldest.form_type else oldest.title
+    return (
+        f"Chase your {name} from {oldest.event_date.strftime('%-d %b %Y')} "
+        "if it still needs signing"
+    )
+
+
+def _do_next(
+    pathway_actions: list[str], assessment: HealthAssessment, *, incomplete_scan: bool
+) -> list[str]:
+    # A partial scan can't tell a missing item from an unscanned one, so it
+    # ranks nothing: the gaps above may be the scan's, not the portfolio's.
+    if incomplete_scan:
+        return ["_Gaps above may just be unscanned. Run a full Kaizen scan before acting on them._", ""]
+    actions = list(pathway_actions)
+    chase = _chase_action(assessment)
+    if chase:
+        actions.insert(min(1, len(actions)), chase)
+    actions = actions[:DO_NEXT_LIMIT]
+    if not actions:
+        return []
+    lines = ["*Do next*"]
+    lines.extend(f"{n}. {text}" for n, text in enumerate(actions, 1))
+    return lines + [""]
+
+
+def _queue_line(assessment: HealthAssessment) -> list[str]:
+    drafts = len(assessment.stuck_drafts)
+    awaiting = len(assessment.stuck_awaiting)
+    if not drafts and not awaiting:
+        return []
+    parts = []
+    if drafts:
+        parts.append(f"{drafts} draft{'s' if drafts != 1 else ''}")
+    if awaiting:
+        parts.append(f"{awaiting} awaiting sign-off")
+    return [f"Older than 3 weeks: {' and '.join(parts)} (buttons below).", ""]
+
+
+def _landing_footer(
+    assessment: HealthAssessment,
+    *,
+    limited_view: bool,
+    partial_scan: bool,
+    scan_is_fresh: bool,
+) -> list[str]:
+    lines = _queue_line(assessment)
+    notice = _scan_notice(
+        limited_view=limited_view, partial_scan=partial_scan, scan_is_fresh=scan_is_fresh
+    )
+    if notice:
+        lines.extend([notice, ""])
+    lines.append(
+        f"_From {assessment.total_items} Kaizen items. "
+        + SAFETY_LINE.strip("_")
+        + "_"
+    )
+    return lines
+
+
+def _tick(ok: bool) -> str:
+    return "✅" if ok else "⬜"
+
+
+def format_arcp_landing(
+    assessment: HealthAssessment,
+    checklist,
+    *,
+    today: date,
+    limited_view: bool = False,
+    partial_scan: bool = False,
+    scan_is_fresh: bool = True,
+) -> str:
+    """Trainee landing: this year against the RCEM ARCP checklist."""
+    lines = ["📊 *ARCP readiness*"]
+    deadline = checklist.evidence_deadline
+    if deadline and deadline >= today:
+        lines.append(
+            f"Evidence due {deadline.strftime('%-d %b %Y')} "
+            f"({_weeks_until(deadline, today)}), 2 weeks before your "
+            f"{checklist.review_date.strftime('%B')} panel"
+        )
+    elif deadline:
+        lines.append(
+            f"Your {checklist.review_date.strftime('%B %Y')} ARCP has passed. "
+            "Set the next one with 📅 below."
+        )
+    else:
+        lines.append("No ARCP month set, so this counts the last 12 months.")
+    lines.extend(["", "*This year (signed off)*"])
+
+    if checklist.msf and checklist.msf_late:
+        msf = f"⚠️ MSF done {checklist.msf_first_date.strftime('%b %Y')}, after month 6"
+    elif checklist.msf:
+        msf = f"✅ MSF {checklist.msf_first_date.strftime('%b %Y')}"
+    elif checklist.msf_overdue:
+        msf = "⚠️ MSF not seen, and it's due in the first 6 months"
+    else:
+        msf = "⬜ MSF"
+    lines.append(
+        f"{msf} · {_tick(checklist.supervisor_reports > 0)} Supervisor report"
+        f" · {_tick(checklist.esr > 0)} ESR"
+    )
+    esle_mark = "✅" if checklist.esles >= checklist.esle_target else "⬜"
+    lines.append(
+        f"{esle_mark} ESLEs {checklist.esles}/{checklist.esle_target} "
+        "(one must be PEM: check this)"
+    )
+    if checklist.slos_without_evidence:
+        slos = ", ".join(str(s) for s in checklist.slos_without_evidence)
+        lines.append(f"⬜ SLOs with no assessed evidence: {slos}")
+    else:
+        lines.append("✅ Assessed evidence linked to every SLO")
+    lines.extend([
+        "_Form R and SLO6 procedure sign-offs aren't visible to this scan._",
+        "",
+    ])
+
+    lines.extend(_do_next(
+        checklist.actions, assessment, incomplete_scan=limited_view or partial_scan
+    ))
+    lines.extend(_landing_footer(
+        assessment,
+        limited_view=limited_view,
+        partial_scan=partial_scan,
+        scan_is_fresh=scan_is_fresh,
+    ))
+    return "\n".join(lines).strip()
+
+
+def format_portfolio_landing(
+    assessment: HealthAssessment,
+    appraisal,
+    cesr,
+    *,
+    today: date,
+    limited_view: bool = False,
+    partial_scan: bool = False,
+    scan_is_fresh: bool = True,
+) -> str:
+    """Non-trainee landing: the next appraisal, then the Portfolio Pathway.
+
+    ``cesr`` of ``None`` is the appraisal-only route (SAS and other
+    non-trainees not applying): the Pathway section is left out entirely.
+    """
+    lines = [
+        "📊 *Appraisal and Portfolio Pathway*" if cesr else "📊 *Appraisal readiness*"
+    ]
+    review = appraisal.review_date
+    appraisal_soon = False
+    if review and review >= today.replace(day=1):
+        lines.append(
+            f"Appraisal {review.strftime('%B %Y')} ({_weeks_until(review, today)})"
+        )
+        appraisal_soon = (review - today).days <= 84
+    else:
+        lines.append("No appraisal month set. Add it with 📅 below.")
+
+    lines.extend(["", "*Before your appraisal (last 12 months)*"])
+    lines.append(
+        f"{_tick(appraisal.cpd > 0)} CPD {appraisal.cpd}"
+        f" · {_tick(appraisal.qi > 0)} QI {appraisal.qi}"
+        f" · {_tick(appraisal.colleague_feedback_5y > 0)} Colleague feedback"
+    )
+    lines.append(
+        f"Significant events {appraisal.significant_events}"
+        f" · Complaints/compliments {appraisal.complaints_compliments}"
+        " (declare any, even if none are filed)"
+    )
+    lines.extend(["_Patient feedback and CPD hours aren't visible to this scan._", ""])
+    if cesr:
+        lines.extend(_pathway_section(cesr))
+
+    # A near appraisal leads; otherwise the Pathway gap does.
+    cesr_actions = cesr.actions if cesr else []
+    ordered = (
+        appraisal.actions + cesr_actions
+        if appraisal_soon or not cesr
+        else cesr_actions + appraisal.actions
+    )
+    lines.extend(_do_next(
+        ordered, assessment, incomplete_scan=limited_view or partial_scan
+    ))
+    lines.extend(_landing_footer(
+        assessment,
+        limited_view=limited_view,
+        partial_scan=partial_scan,
+        scan_is_fresh=scan_is_fresh,
+    ))
+    return "\n".join(lines).strip()
+
+
+def _pathway_section(cesr) -> list[str]:
+    lines = ["*Portfolio Pathway (signed off, last 6 years)*"]
+    per_type = " · ".join(
+        f"{label} {min(cesr.wpba_counts[code], 12)}/12"
+        + (" ✅" if cesr.wpba_counts[code] >= 12 else "")
+        for code, label in (("DOPS", "DOPS"), ("MINI_CEX", "Mini-CEX"), ("CBD", "CBD"))
+    )
+    lines.append(f"WPBAs {cesr.wpba_counted}/{cesr.wpba_target}: {per_type}")
+    lines.append(
+        f"ESLEs {cesr.esles_3y}/6 in 3 years · {cesr.esles_12m}/3 in last 12 months"
+    )
+    lines.append(
+        f"Reflective cases {cesr.reflections_counted}/{cesr.reflections_target}"
+        f" (this year {cesr.reflections_by_year[0]}/50)"
+    )
+    lines.append(f"{_tick(cesr.msf_12m > 0)} MSF in last 12 months")
+    if cesr.expiring_soon:
+        lines.append(
+            f"⚠️ {cesr.expiring_soon} "
+            f"{'item leaves' if cesr.expiring_soon == 1 else 'items leave'} the 6-year window by {cesr.expiry_by.strftime('%b %Y')}"
+        )
+    lines.extend([
+        "_Only EM WPBAs count, and cases need 20+ acute medicine and 20+ "
+        "paediatric: the scan can't check either._",
+        "",
+    ])
+    return lines
 
 
 # ── About ───────────────────────────────────────────────────────────────────
@@ -562,7 +800,7 @@ def _pathway_expectations(readiness: Optional[dict]) -> list[str]:
         "*Portfolio Pathway expectations*",
         "Beyond WPBAs: structured consultant reports, ESLEs across core "
         "specialties, CPD with reflection, and QI work.",
-        "_A 5-year evidence window is the usual expectation, and this is a "
+        "_A 6-year evidence window applies (GMC guidance), and this is a "
         "multi-year build rather than an annual cycle — explain any gaps._",
         "",
     ]

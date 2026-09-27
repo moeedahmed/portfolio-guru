@@ -244,7 +244,7 @@ async def test_run_health_analysis_uses_indexed_source_when_history_empty(
     )
 
     text = sent["text"]
-    assert text.startswith("*What to do next*")
+    assert text.startswith("📊 *Appraisal and Portfolio Pathway*")
     # Provenance moved into Scan info; the counted evidence is still stated
     # there, so a doctor knows how much this was read from.
     assert "1 visible evidence item(s)" in store.user_data["last_health_report"]["views"]["scan"]
@@ -1139,7 +1139,7 @@ def test_action_queue_pager_appears_only_where_there_is_another_page():
     assert all(len(data.encode()) <= 64 for _text, data in first + middle + last)
 
 
-def test_review_month_and_removed_detail_controls_are_absent_from_everyday_health():
+def test_review_month_route_shows_only_when_the_month_is_missing_or_passed():
     import bot
 
     with_route = _buttons(bot._health_view_keyboard("priorities", needs_review_month=True))
@@ -1149,7 +1149,9 @@ def test_review_month_and_removed_detail_controls_are_absent_from_everyday_healt
     ))
     old_more = _buttons(bot._health_view_keyboard("more"))
 
-    assert not any(data == "ACTION|health_review_setup" for _text, data in with_route)
+    # The ARCP deadline and appraisal countdown depend on it, so the landing
+    # offers the month only while it is missing or has passed.
+    assert ("📅 Set review month", "ACTION|health_review_setup") in with_route
     assert not any(data == "ACTION|health_review_setup" for _text, data in without)
     assert landing == [
         ("📝 Review drafts (2)", "ACTION|health_queue|draft|0"),
