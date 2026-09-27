@@ -551,7 +551,7 @@ async def test_successful_setup_prompts_consent_before_ready_state(tmp_consent_d
     assert "Step 3 of 3" in text
     assert "Case notes are health data" in text
     assert "By tapping I consent" in text
-    assert "Full details: /privacy" in text
+    assert "More: /privacy" in text
     assert bot.consent.CONSENT_VERSION not in text
     assert "has not been processed" not in text
     assert context.user_data["_consent_prompt_pending"] is True
@@ -675,7 +675,7 @@ async def test_start_continues_step_3_when_setup_consent_pending(tmp_consent_db)
     assert "Step 3 of 3" in text
     assert "Case notes are health data" in text
     assert "By tapping I consent" in text
-    assert "Full details: /privacy" in text
+    assert "More: /privacy" in text
     assert "Portfolio Guru is ready" not in text
     assert bot.consent.CONSENT_VERSION not in text
     assert ("🛡️ I consent", f"CONSENT|accept|{sim.user_id}") in sim.get_last_buttons()
