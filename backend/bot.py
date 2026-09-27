@@ -2004,9 +2004,7 @@ _SUBMIT_INQUIRY_RE = re.compile(
 
 _DRAFT_ONLY_CLARIFICATION = (
     "Portfolio Guru saves Kaizen entries as *drafts only*. "
-    "No supervisor request, sign-off, or submission is ever made automatically.\n\n"
-    "You review the draft here, then save it. "
-    "Supervisor assignment happens separately in Kaizen when you're ready."
+    "No supervisor request is ever sent automatically; you do that in Kaizen when ready."
 )
 
 
@@ -3974,10 +3972,8 @@ _HEALTH_REPORT_VERSION = 2
 
 _HEALTH_ABOUT_FALLBACK = (
     "ℹ️ *About Portfolio Health*\n\n"
-    "Source: this older report has no current read-only scan details.\n"
-    "Freshness unconfirmed: recent Kaizen activity may be missing.\n\n"
-    "Counts highlight older Kaizen workflow items visible to its scan, not every unfinished item.\n"
-    "Automated classification can be wrong; check the linked Kaizen item if something looks wrong.\n"
+    "This older report may miss recent Kaizen activity, and sorting can be wrong. "
+    "Check the linked Kaizen item if something looks off.\n\n"
     "Portfolio Health does not edit, file, chase or delete anything.\n\n"
     "_Read-only planning aid, not a formal training or appraisal judgement._"
 )
@@ -4277,10 +4273,8 @@ async def arcp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         shown = current.strftime("%B %Y") if current else "not set"
         await update.message.reply_text(
             f"\U0001F4C5 *Review date*\n\nCurrently: {shown}\n\n"
-            "Set it with the month of your next ARCP or review, for example:\n"
-            "`/arcp Oct 2026`\n\n"
-            "_Portfolio Health uses it to count down and to time reminders. "
-            "The month is enough — no day needed._",
+            "Send the month of your next ARCP or review:\n"
+            "`/arcp Oct 2026`",
             parse_mode="Markdown",
         )
         return
@@ -7349,7 +7343,7 @@ async def _leave_setup_for_case(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data.pop("_setup_state_hint", None)
     _flow_done(context, "setup")
     await update.message.reply_text(
-        "That looks like a case rather than your Kaizen login, so I've stopped the Kaizen setup. "
+        "🛑 That looks like a case, not your Kaizen login, so I've stopped the Kaizen setup. "
         "Please send the case again."
     )
     return ConversationHandler.END
@@ -8248,32 +8242,27 @@ async def setup_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 VOICE_CHOICE_FRESH_COPY = (
     "🗣️ *Writing style setup*\n\n"
-    "Drafts can match your portfolio writing style. Choose a source:\n\n"
-    "📖 *Learn from Kaizen entries* — read-only review of previous portfolio entries "
-    "to learn tone and structure. I won't create, edit, submit, sign, or share anything.\n\n"
-    "✍️ *Add examples manually* — paste, photo, or voice-note 3-5 of your own portfolio entries."
+    "Drafts can match how you write. Choose a source:\n\n"
+    "📖 *Kaizen entries*: read-only, I won't create, change or submit anything.\n"
+    "✍️ *Manual examples*: send 3-5 of your own entries."
 )
 
 VOICE_CHOICE_REBUILD_COPY = (
-    "✍️ Your writing style profile is active. Drafts are styled to match your portfolio writing.\n\n"
+    "✍️ Your writing style is active.\n\n"
     "Want to rebuild it? Pick a source:"
 )
 
 VOICE_MANUAL_INTRO_COPY = (
     "✍️ *Add examples manually*\n\n"
-    "Send 3-5 examples of real portfolio writing. Best examples are reflections or WPBA text you would actually submit.\n\n"
-    "You can send:\n"
-    "• pasted text — best quality\n"
-    "• screenshots/photos — I'll extract the text\n"
-    "• voice notes — useful, but pasted examples are cleaner\n\n"
-    "I'll learn your tone, structure, reflection depth and phrasing. Send the first example now."
+    "Send 3-5 examples of reflections or WPBA entries you'd actually submit. "
+    "Pasted text works best; photos and voice notes also work.\n\n"
+    "Send the first example now."
 )
 
 VOICE_KAIZEN_SAMPLE_COPY = (
     "📚 *Pick a sample size*\n\n"
-    "Bigger samples give a steadier voice match. This stays read-only: I'll only read existing portfolio entries — "
-    "no creating, editing, submitting, signing, or sharing.\n\n"
-    "Choose how far back I should look:"
+    "Bigger samples match your style better. It's read-only: no creating, editing, submitting or sharing.\n\n"
+    "How far back should I look?"
 )
 
 
@@ -9012,7 +9001,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         if tier != "pro_plus":
             await query.message.reply_text(
                 "📬 Unsigned ticket scanning is included in Portfolio Guru Unlimited.\n\n"
-                "Upgrade to see all your pending assessments grouped by assessor, with chase guardrails (14-day cooldown, max 3 per assessor).",
+                "Upgrade to see all your pending assessments in one place.",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("💳 Upgrade — £9.99/mo", callback_data="UPGRADE|pro_plus")],
                 ]),
@@ -9484,7 +9473,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         # backwards-compatibility with reset buttons in old chat history; the
         # user-facing copy and the public command are both "reset".
         await query.message.edit_text(
-            "⚠️ This resets Portfolio Guru — it clears your saved Kaizen login, portfolio, pathway and curriculum choice, voice profile, and local filing history and Portfolio Health evidence. It does not affect cases already saved in Kaizen. Are you sure?",
+            "⚠️ Reset Portfolio Guru?\n\nThis clears your Kaizen login, settings, writing style and history here. Cases already saved in Kaizen are unaffected.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🗑️ Delete data", callback_data="CONFIRM|reset")],
                 [InlineKeyboardButton("🛡️ Keep data", callback_data="ACTION|cancel")],
@@ -9909,7 +9898,7 @@ async def handle_upgrade_button(update: Update, context: ContextTypes.DEFAULT_TY
         logger.error("Stripe checkout failed: %s", e)
         await _flow_edit(
             update, context,
-            f"⚠️ Payment setup unavailable right now. Contact support or try /settier for testing.",
+            "⚠️ Payment setup is unavailable right now. Nothing was charged. Please try again later or contact support.",
             flow_key="upgrade",
         )
         _flow_done(context, "upgrade")
@@ -11159,9 +11148,8 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not await _health_gate_check(user_id):
         await update.message.reply_text(
             "📊 Portfolio Health is included in Portfolio Guru Unlimited.\n\n"
-            "Upgrade to get monthly portfolio evidence review tailored to "
-            "your Training (CCT) pathway (ARCP evidence review) or "
-            "CESR / Portfolio Pathway view.",
+            "Upgrade for a monthly evidence review for your ARCP, "
+            "CESR or appraisal.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("💳 Upgrade — £9.99/mo", callback_data="UPGRADE|pro_plus")],
             ]),
@@ -12689,8 +12677,8 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
         if mode == "both":
             if is_image_attachment:
                 await query.edit_message_text(
-                    "📎 This image will still be attached, but I won't draft from the image alone.\n\n"
-                    "For ECGs, ultrasound, X-rays, wounds or procedure photos, send your own interpretation/context and I'll draft from that."
+                    "📎 I'll attach this image, but won't draft from it alone.\n\n"
+                    "Send your own interpretation of the case and I'll draft from that."
                 )
                 return AWAIT_CASE_INPUT
             await query.edit_message_text(
@@ -13463,7 +13451,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if not allowed:
         limit_msg = await update.message.reply_text(
             f"📊 You've used all {limit} free cases this month.\n\n"
-            "Upgrade to Portfolio Guru Unlimited (£9.99/mo) for unlimited filing and premium features — or wait until next month.",
+            "Upgrade to Portfolio Guru Unlimited (£9.99/mo) for unlimited filing, or wait until next month.",
             reply_markup=InlineKeyboardMarkup(_upgrade_buttons(tier)),
         )
         # Store as upgrade flow anchor so the upgrade button edits this message in place
@@ -15882,9 +15870,8 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             msg = (
                 f"❌ Filing didn't complete\n"
                 f"{form_name}\n\n"
-                "Your Kaizen session has expired. Tap 'Reconnect Kaizen' to "
-                "re-enter your credentials, or try again if it was a "
-                "temporary issue."
+                "Your Kaizen session has expired, but your draft is kept. "
+                "Tap 'Reconnect Kaizen' to sign in again, or try again."
             )
             end_keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔗 Reconnect Kaizen", callback_data="ACTION|setup")],
@@ -16073,7 +16060,7 @@ async def handle_review_draft(update: Update, context: ContextTypes.DEFAULT_TYPE
     if tier == "free":
         await query.message.reply_text(
             "📝 Draft Review is included in Portfolio Guru Unlimited.\n\n"
-            "Upgrade to unlock AI critique of your entries before filing — catches missed reflections, weak reasoning, and curriculum mismatches.",
+            "Upgrade to get feedback on your draft before you save it.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("💳 Upgrade — £9.99/mo", callback_data="UPGRADE|pro_plus")],
             ]),
@@ -17191,7 +17178,7 @@ async def unsigned_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if tier != "pro_plus":
         await update.message.reply_text(
             "📬 Unsigned ticket scanning is included in Portfolio Guru Unlimited.\n\n"
-            "Upgrade to see all your pending assessments grouped by assessor, with chase guardrails (14-day cooldown, max 3 per assessor).",
+            "Upgrade to see all your pending assessments in one place.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("💳 Upgrade — £9.99/mo", callback_data="UPGRADE|pro_plus")],
             ]),
@@ -17376,9 +17363,8 @@ async def _resume_pending_consent_input(
             context.user_data["_pending_doc_context"] = caption
         await query.edit_message_text(
             "📷 Image received — how would you like to use it?\n\n"
-            "Reading means pulling out any text — report wording, labels, notes. "
-            "For an ECG, ultrasound, X-ray or wound photo I won't interpret the "
-            "picture itself; tell me about the case in your own words.",
+            "I can read text in it (reports, labels, notes). I won't interpret "
+            "ECGs, scans or wounds, so describe the case in your own words.",
             reply_markup=_build_image_intent_keyboard(),
         )
         _track_latest_message(context, query.message)
@@ -17428,9 +17414,8 @@ async def _resume_pending_consent_input(
             context.user_data["_pending_doc_context"] = caption
         await query.edit_message_text(
             "🎞️ Video received — would you like to attach it to the Kaizen draft?\n\n"
-            "Kaizen keeps it exactly as you sent it, and you can't review a file "
-            "once it's on the draft — so check nothing identifying is visible.\n\n"
-            "I won't interpret clinical videos. Send your own context or findings in text/voice.",
+            "Check nothing identifying is visible: it can't be reviewed once on the draft.\n\n"
+            "I won't interpret clinical videos, so describe the case yourself.",
             reply_markup=_build_video_intent_keyboard(),
         )
         _track_latest_message(context, query.message)

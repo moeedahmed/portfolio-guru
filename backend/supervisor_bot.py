@@ -76,8 +76,8 @@ _LATER_TEXT = (
     "👌 Keeping it on your queue. Tap *Open* whenever you're ready to read it."
 )
 _STALE_TEXT = (
-    "This notification is no longer active — the bot was restarted or the "
-    "queue has moved on. The next supervisor poll will refresh your tickets."
+    "⌛ This notification is no longer active. Your tickets will refresh "
+    "on the next check."
 )
 _CDP_DOWN_TEXT = (
     "⚠️ Couldn't reach Kaizen right now. Try Open again in a moment."
@@ -95,7 +95,7 @@ _TRANSCRIBE_FAILED_TEXT = (
 )
 _DRAFT_CANCELLED_TEXT = (
     "❌ Draft discarded. Nothing was saved to Kaizen.\n"
-    "The ticket is still on your queue — tap *Open* on a future notification to start again."
+    "Tap *Open* on a future notification to start again."
 )
 _DRAFT_MISSING_TEXT = (
     "That earlier draft has expired. Tap *Open* on a fresh notification to start again."
@@ -112,10 +112,9 @@ _FORM_TYPE_UNKNOWN_TEXT = (
 )
 _SAVE_DRAFT_REQUEST_TEXT = (
     "📤 *Save the assessor draft on Kaizen?*\n\n"
-    "I'll open the named ticket, fill the reviewed assessor fields, and tap "
-    "*Save as draft* — and nothing else. I will *not* submit, sign, approve, "
-    "send, or delete. You can review and submit the draft yourself on Kaizen.\n\n"
-    "Tap *Yes, save as draft* to proceed or *Cancel* to keep the draft local only."
+    "I'll fill the reviewed fields and tap *Save as draft*, nothing else. "
+    "I will *not* submit, sign, approve, send, or delete.\n\n"
+    "You review and submit it yourself on Kaizen."
 )
 _SAVE_DRAFT_BLOCKED_TEXT = (
     "⚠️ I can't save this draft live: {reason}.\n"
@@ -124,8 +123,7 @@ _SAVE_DRAFT_BLOCKED_TEXT = (
 _SAVE_DRAFT_RUNNING_TEXT = "⏳ Saving the assessor draft on Kaizen…"
 _SAVE_DRAFT_OK_TEXT = (
     "✅ *Saved as a draft in Kaizen.*\n"
-    "{count} assessor field(s) filled. Open the ticket on Kaizen to submit it "
-    "yourself when you're ready."
+    "{count} field(s) filled. Submit it yourself on Kaizen when ready."
 )
 _SAVE_DRAFT_FAILED_TEXT = (
     "❌ *Couldn't save the assessor draft on Kaizen.*\n"
