@@ -398,3 +398,45 @@ async def test_reconnect_on_another_message_keeps_that_message(offered):
     await bot.setup_start(tap, sim._make_context())
 
     assert sim.messages_sent[-1][0] == "send"
+
+
+# --- No-password sign-in still detects the portfolio --------------------------
+
+@pytest.mark.asyncio
+async def test_kept_session_probe_reads_the_portfolio_from_the_dashboard(monkeypatch):
+    """The kept session lands on Activities; the portfolio is read from the dashboard."""
+    import kaizen_form_filer
+
+    visited = []
+
+    class _Locator:
+        async def inner_text(self, timeout=None):
+            return "dashboard body" if visited and visited[-1].endswith("/dashboard") else "activities body"
+
+    class _Page:
+        context = None
+
+        async def goto(self, url, **kwargs):
+            visited.append(url)
+
+        async def title(self):
+            return "Kaizen"
+
+        def locator(self, selector):
+            return _Locator()
+
+    async def _cached(page, user_id):
+        visited.append("https://kaizenep.com/activities")
+        return True
+
+    seen = []
+    monkeypatch.setattr(bot.kaizen_connection, "has_kept_session", lambda uid: True)
+    monkeypatch.setattr(kaizen_form_filer, "_connect_cdp", AsyncMock(return_value=(_Page(), None)))
+    monkeypatch.setattr(kaizen_form_filer, "use_cached_session", _cached)
+    monkeypatch.setattr(bot.asyncio, "sleep", AsyncMock())
+    import engine.portfoliotypes.base as base
+    monkeypatch.setattr(base, "detect_portfolio_type", lambda title, body: seen.append(body) or "hst")
+
+    assert await bot._probe_kept_kaizen_session(12345) == "hst"
+    assert visited[-1] == bot._KAIZEN_DASHBOARD_URL
+    assert seen == ["dashboard body"]

@@ -1028,6 +1028,7 @@ HANDOFF_HTML = """<!doctype html>
     <section id="status-card" class="status-card" aria-live="polite">
       <strong id="status-title">Secure link ready</strong>
       <span id="status-copy">Enter your Kaizen details above.</span>
+      <a id="back-to-telegram" class="back-to-telegram" href="https://t.me/portfolio_guru_bot" hidden>Back to Telegram</a>
     </section>
     <p class="live-label">Live view of the real Kaizen page</p>
     <section class="browser-shell" aria-label="Temporary Kaizen browser">
@@ -1086,6 +1087,8 @@ button:last-child { background: #1c6b50; color: #fff; }
 .controls { display: none; }
 .done .browser-shell { display: none; }
 .done .status-card { margin-top: 28px; padding: 24px; }
+.back-to-telegram { display: block; margin-top: 14px; padding: 13px 16px; border-radius: 12px; background: #fff; color: #173f31; font-size: 15px; font-weight: 800; text-align: center; text-decoration: none; }
+.back-to-telegram[hidden] { display: none; }
 @media (max-height: 700px) { .screen-wrap { max-height: 52vh; } .intro p:not(.eyebrow) { font-size: 13px; } }
 """
 
@@ -1097,6 +1100,8 @@ HANDOFF_JS = r"""
   const keyboard = document.getElementById('keyboard-bridge');
   const title = document.getElementById('status-title');
   const copy = document.getElementById('status-copy');
+  const backToTelegram = document.getElementById('back-to-telegram');
+  let closeTried = false;
   let socket;
   let pointerStart;
 
@@ -1123,14 +1128,25 @@ HANDOFF_JS = r"""
       login: ['Sign in to Kaizen', 'Enter your Kaizen username and password above.'],
       signing_in: ['Signing in…', 'Kaizen is checking your details.'],
       saving: ['Login confirmed', 'Keeping your Kaizen session…'],
-      complete: ['Kaizen connected', 'Portfolio Guru is confirming it in Telegram now. You can close this page.'],
+      complete: ['Kaizen connected', 'Portfolio Guru is confirming it in Telegram now.'],
       failed: ['Connection stopped', message || 'Go back to Telegram for a new link.'],
       expired: ['Link expired', 'This link has been used or has expired. Go back to Telegram for a new one.'],
     };
     const state = states[next] || ['Working…', message || 'Please keep this page open.'];
     title.textContent = state[0];
     copy.textContent = message || state[1];
-    if (next === 'complete' || next === 'failed' || next === 'expired') document.body.classList.add('done');
+    if (next === 'complete' || next === 'failed' || next === 'expired') {
+      document.body.classList.add('done');
+      // Every ending sends the doctor back to the bot chat (2026-09-28): the
+      // page had no way back after "Kaizen connected".
+      backToTelegram.hidden = false;
+    }
+    if (next === 'complete' && !closeTried) {
+      // Browsers only let a page close itself when a script opened it, so
+      // this works in some in-app browsers; elsewhere the button stays.
+      closeTried = true;
+      setTimeout(() => { try { window.close(); } catch (e) {} }, 2500);
+    }
     if (pending && ready) { pending = false; submitCredentials(); }
   };
 
