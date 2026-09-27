@@ -4216,7 +4216,7 @@ Their last 3 months of activity:
 - Counts by assessment type: {counts}
 - Assessment types seen in the last 6 weeks: {sorted(recent_types) or 'none other than what was just filed'}
 
-Write ONE friendly, concrete sentence under 25 words. Use full assessment names, not internal form codes. Either acknowledge their progress on the assessment type they just filed, or point out a specific gap they should consider next. No sycophancy, no exclamation marks, no repeating the raw count number. Just the sentence, no quotes."""
+Write ONE friendly, concrete sentence under 25 words. Use full assessment names, not internal form codes. Either acknowledge their progress on the assessment type they just filed, or point out a specific gap to look for in a future case. This is about their portfolio overall, not the case they just filed: never suggest filing another assessment from this same case, and phrase any gap as something to capture on a future shift. No sycophancy, no exclamation marks, no repeating the raw count number. Just the sentence, no quotes."""
 
     try:
         text = (await _generate(prompt)).strip().strip('"').strip("'").strip()
