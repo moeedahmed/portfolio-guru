@@ -98,10 +98,12 @@ async def test_setup_is_one_message_with_both_ways_to_connect(harness):
     kind, text, markup = harness.outbox[0]
     assert kind == "send"
     # Password first and recommended; password-free kept as the alternative.
-    assert text.index("Use your password (recommended)") < text.index("without sharing it")
+    assert text.index("Password (recommended)") < text.index("No password")
     assert "Stays connected" in text and "encrypted" in text and "/reset" in text
     assert "about a day" in text
     assert "Fernet" not in text
+    # Kept short enough to scan in a few seconds.
+    assert len(text.splitlines()) <= 9
     assert _buttons(markup) == [
         ("🔑 Use my password (recommended)", "ACTION|setup_password"),
         ("🔒 Sign in without password", "ACTION|connect_passwordless"),
@@ -233,7 +235,7 @@ async def test_connect_buttons_on_the_connect_first_prompt_never_leave_a_case_st
     await harness.app.initialize()
     try:
         await harness.feed(make_text_update("Saw a 70-year-old with chest pain today"))
-        assert "without sharing it" in harness.outbox[-1][1]
+        assert "No password" in harness.outbox[-1][1]
         key = (TEST_USER.id, TEST_USER.id)
         assert _case_conv(harness.app)._conversations.get(key) == bot.AWAIT_USERNAME
 
@@ -242,7 +244,7 @@ async def test_connect_buttons_on_the_connect_first_prompt_never_leave_a_case_st
         assert _case_conv(harness.app)._conversations.get(key) is None
 
         await harness.feed(make_text_update("Saw a 70-year-old with chest pain today"))
-        assert "without sharing it" in harness.outbox[-1][1]
+        assert "No password" in harness.outbox[-1][1]
         await harness.feed(make_callback_update("ACTION|setup_password"))
         assert "Connect with your password" in harness.outbox[-1][1]
         assert _case_conv(harness.app)._conversations.get(key) == bot.AWAIT_USERNAME

@@ -2679,15 +2679,11 @@ _KB_RETYPE_SETUP = InlineKeyboardMarkup([
 # message for every tap, overwhelmed doctors).
 _CONNECT_CHOICE_TEXT = (
     "🔗 *Connect Kaizen*\n\n"
-    "I save your drafts into your Kaizen portfolio, so I need to sign in as you. "
-    "Choose how:\n\n"
-    "🔑 *Use your password (recommended)*\n"
-    "Stays connected: I sign back in to Kaizen by myself, so you won't be "
-    "interrupted. Your password is stored encrypted, used only to sign in to "
-    "Kaizen, and deleted whenever you use /reset.\n\n"
-    "🔒 *Or sign in without sharing it*\n"
-    "You sign in on a secure Kaizen page. It lasts about a day, then I'll send "
-    "you a new sign-in link."
+    "I need to sign in to Kaizen to save your drafts.\n\n"
+    "🔑 *Password (recommended)*\n"
+    "Stays connected. Stored encrypted, deleted with /reset.\n\n"
+    "🔒 *No password*\n"
+    "Sign in on Kaizen's page. Lasts about a day."
 )
 _BTN_CONNECT_PASSWORDLESS = InlineKeyboardButton(
     "🔒 Sign in without password",
@@ -2704,14 +2700,11 @@ _KB_CONNECT_CHOICE = InlineKeyboardMarkup([
 ])
 _PASSWORDLESS_LINK_TEXT = (
     "🔒 *Sign in to Kaizen*\n\n"
-    "Tap *Open Kaizen sign-in* and sign in on the page that opens. I'll confirm "
-    "here as soon as it works, so there's nothing else to tap.\n\n"
-    "_The link lasts 10 minutes. Your password goes straight to Kaizen and is "
-    "never stored; Kaizen ends the session after about a day._"
+    "Tap *Open Kaizen sign-in*. I'll confirm here as soon as it works.\n\n"
+    "_Link lasts 10 minutes. Password never stored; session lasts about a day._"
 )
 _PASSWORDLESS_LINK_ENDED_TEXT = (
-    "⌛ That sign-in link has expired or was closed before Kaizen connected.\n\n"
-    "Get a new link to try again."
+    "⌛ That sign-in link expired before Kaizen connected. Get a new link to try again."
 )
 _PASSWORDLESS_CONNECTED_AGAIN_TEXT = "✅ Kaizen connected again."
 # How often the bot asks the sign-in page whether the doctor has finished.
@@ -2731,9 +2724,8 @@ _PASSWORDLESS_NOT_SIGNED_IN_TEXT = (
     "*Kaizen connected*. If the link has expired, tap *New link*."
 )
 _PASSWORDLESS_FEATURE_UNAVAILABLE_TEXT = (
-    "This feature needs a username-and-password connection, because it signs in "
-    "to Kaizen on its own. You're connected without sharing your password, so "
-    "it isn't available yet. Saving drafts and /health work as normal."
+    "This needs a username-and-password connection, because it signs in to Kaizen by itself. "
+    "Saving drafts and /health still work as normal."
 )
 _PASSWORDLESS_CHECK_FAILED_TEXT = (
     "⚠️ I couldn't reach Kaizen to check just now. Tap *I've signed in* again "
@@ -4559,7 +4551,6 @@ def _settings_view_components(
     voice_profile = get_voice_profile(user_id)
     voice_status = "Active" if voice_profile else "Not set"
     voice_cta = "Writing style"
-    voice_hint = "Helps drafts match your portfolio writing." if not voice_profile else "Drafts already use your writing style."
 
     plan_lines = []
     if connected is False:
@@ -4600,9 +4591,7 @@ def _settings_view_components(
         f"⚙️ Settings\n\n"
         f"{plan_block}"
         f"Writing style: {voice_status}\n"
-        f"   {voice_hint}\n\n"
-        f"Portfolio defaults: {portfolio_defaults_summary}\n\n"
-        f"Pick what you want to change."
+        f"Portfolio defaults: {portfolio_defaults_summary}"
     )
     return text, InlineKeyboardMarkup(buttons)
 
@@ -9752,9 +9741,7 @@ async def _clear_local_portfolio_account_data(user_id: int, *, reason: str) -> d
 
 HELP_MSG = f"""📖 *Portfolio Guru help*
 
-Send an anonymised case as text, voice, photo, video, or document.
-
-Portfolio Guru will suggest the best portfolio form, prepare a draft, and ask before saving anything to Kaizen.
+Send an anonymised case (text, voice, photo, video, or document). I'll draft the right form and ask before saving anything to Kaizen.
 
 *Commands:*
 {_format_public_commands()}"""
@@ -9767,12 +9754,9 @@ async def link_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     args = context.args or []
     if not args:
         await update.message.reply_text(
-            "To link your bot to your EM Gurus Hub account:\n\n"
-            "1. Open https://emgurus.com/portfolio\n"
-            "2. Sign in and tap 'Link Telegram'\n"
-            "3. Copy the code shown there\n"
-            "4. Send `/link <code>` here\n\n"
-            "After linking, your portfolio data is visible at emgurus.com/portfolio.",
+            "To link your EM Gurus Hub account:\n\n"
+            "1. Open https://emgurus.com/portfolio and tap 'Link Telegram'\n"
+            "2. Send `/link <code>` here with the code shown",
             parse_mode="Markdown",
             disable_web_page_preview=True,
         )

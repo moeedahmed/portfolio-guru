@@ -71,8 +71,8 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         message_class=MessageClass.FIXED,
         text=(
             "👋 Welcome to Portfolio Guru!\n\n"
-            "Just send your rough case notes (text, voice, photo, or document). "
-            "I'll draft the right RCEM form for you to review and approve before anything is saved to Kaizen."
+            "Send rough case notes (text, voice, photo, or document). "
+            "I'll draft the right RCEM form. Nothing is saved to Kaizen until you approve."
         ),
         safety_critical=True,
     ),
@@ -80,8 +80,8 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         key="welcome_connected",
         message_class=MessageClass.FIXED,
         text=(
-            "🩺 Ready when you are!\n\n"
-            "Send over any anonymised case (text, voice, photo, or document) to get started."
+            "🩺 Ready when you are.\n\n"
+            "Send an anonymised case (text, voice, photo, or document)."
         ),
         safety_critical=True,
     ),
@@ -106,9 +106,9 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         key="what_is_this",
         message_class=MessageClass.FIXED,
         text=(
-            "🩺 I help you draft RCEM portfolio forms directly from your case notes.\n\n"
-            "Flow: send case → pick form → review draft → save to Kaizen.\n\n"
-            "I'll never invent details, and missing fields stay blank for you to complete. "
+            "🩺 I turn your case notes into RCEM portfolio drafts.\n\n"
+            "Send case → pick form → review draft → save to Kaizen.\n\n"
+            "I never invent details; gaps stay blank. "
             "Nothing is filed without your approval, and supervisor submission is always manual."
         ),
         safety_critical=True,
@@ -118,15 +118,14 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         message_class=MessageClass.FIXED,
         text=(
             f"📥 Send what happened ({MODALITY_CLAUSE}).\n\n"
-            "If you can, include the patient's presentation, your actions, the outcome, and any learning points."
+            "Ideally: presentation, what you did, outcome, learning."
         ),
     ),
     "captured_ack": MessageTemplate(
         key="captured_ack",
         message_class=MessageClass.FIXED,
         text=(
-            "📥 *Captured.* I'm turning this into a draft and will flag any gaps. "
-            "You'll review everything before it goes to Kaizen."
+            "📥 *Captured.* Drafting now. You'll review it before it goes to Kaizen."
         ),
         safety_critical=True,
         parse_mode="Markdown",
@@ -136,7 +135,7 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         message_class=MessageClass.FIXED,
         text=(
             "📋 I need a bit more clinical detail before drafting.\n\n"
-            "Could you share the presentation, what you did, the outcome, or what you learned?"
+            "Add the presentation, what you did, the outcome, or what you learned."
         ),
         safety_critical=True,
     ),
@@ -144,10 +143,10 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         key="essentials_check_retry",
         message_class=MessageClass.TEMPLATED,
         text=(
-            "📋 I couldn't finish checking your case against the {form_name} "
-            "requirements just now, so I haven't drafted anything yet.\n\n"
+            "📋 I couldn't finish checking your case against the {form_name} just now. "
+            "Nothing drafted yet.\n\n"
             "Your case is saved exactly as you sent it. Tap Retry, or send more "
-            f"detail ({MODALITY_CLAUSE}) and I'll check again."
+            f"detail ({MODALITY_CLAUSE})."
         ),
         safety_critical=True,
     ),
@@ -156,8 +155,8 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         message_class=MessageClass.TEMPLATED,
         text=(
             "📋 A {form_name} needs {items}, and that isn't available for this case.\n\n"
-            "I won't invent it or leave it out. Your case is saved — choose a different "
-            f"form below, or send the detail ({MODALITY_CLAUSE}) if you can get it."
+            "I won't invent it. Your case is saved. Choose a different "
+            f"form below, or send the detail ({MODALITY_CLAUSE})."
         ),
         safety_critical=True,
     ),
@@ -165,8 +164,8 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         key="thin_sdl_detail_request",
         message_class=MessageClass.FIXED,
         text=(
-            "📖 Send over details for your self-directed learning reflection.\n\n"
-            "Just tell me what you read or watched, your key learning points, and how it will change your practice."
+            "📖 Tell me about your self-directed learning reflection.\n\n"
+            "What you read or watched, key learning, and how it changes your practice."
         ),
         safety_critical=True,
     ),
@@ -186,8 +185,8 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         key="photo_privacy_nudge",
         message_class=MessageClass.FIXED,
         text=(
-            "\n\n🔒 Privacy check\nThis was extracted from a photo. "
-            "Please double check that all patient-identifiable details (like names, NHS numbers, DOBs, or addresses) are removed."
+            "\n\n🔒 Privacy check: this came from a photo. "
+            "Check names, NHS numbers, DOBs, or addresses are removed."
         ),
         safety_critical=True,
     ),
@@ -210,9 +209,8 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         text=(
             "🩺 Portfolio Guru turns your case notes into RCEM portfolio drafts. I can:\n"
             "• collect a case across several messages\n"
-            "• keep what you send separate from chat, so nothing is invented\n"
             "• recommend the best-fit WPBA form\n"
-            "• show the draft for review before anything is saved\n\n"
+            "• show the draft before anything is saved\n\n"
             "Nothing goes to Kaizen until you approve it."
         ),
         safety_critical=True,
@@ -222,15 +220,13 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         message_class=MessageClass.FIXED,
         text=(
             "🔗 Connect Kaizen\n\n"
-            "Use the secure setup flow before you ask me to save drafts.\n\n"
-            "1. Tap Connect Kaizen below. If you do not see the button, send /start "
-            "and choose Connect Kaizen.\n"
-            "2. Send your Kaizen username, then your password, in the private setup flow.\n"
-            "3. Wait for the connection check to pass, then send an anonymised case.\n\n"
+            "Use the secure setup before saving drafts:\n"
+            "1. Tap Connect Kaizen below (or send /start and choose it).\n"
+            "2. Pick password (recommended) or password-free sign-in.\n"
+            "3. Send an anonymised case.\n\n"
             "Safety notes:\n"
             "• Kaizen credentials are encrypted and not shown back in chat.\n"
-            "• I only save Kaizen drafts after you review and approve them.\n"
-            "• I never submit anything to a supervisor."
+            "• I only save drafts after you review and approve them, and never submit to a supervisor."
         ),
         safety_critical=True,
     ),
@@ -275,8 +271,8 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
         message_class=MessageClass.FIXED,
         text=(
             "🩺 I can’t advise on medication doses, prescribing, diagnosis, or treatment. "
-            "Use your local ED prescribing guidance and senior/pharmacy support. "
-            "I can help turn anonymised case notes into a portfolio draft, with clinical decisions documented as your own."
+            "Use your local ED prescribing guidance and senior/pharmacy support.\n\n"
+            "I can turn anonymised case notes into a portfolio draft."
         ),
         safety_critical=True,
     ),

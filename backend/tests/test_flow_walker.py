@@ -4413,7 +4413,10 @@ class TestTrainingStageGroups:
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
         assert ('✍️ Writing style', 'ACTION|voice') in buttons
         assert ('📋 Portfolio defaults', 'ACTION|portfolio_defaults') in buttons
-        assert 'Helps drafts match your portfolio writing' in text
+        assert 'Writing style: Not set' in text
+        # Helper sentences were cut so the page scans in seconds (2026-09-27).
+        assert 'Helps drafts match' not in text
+        assert 'Pick what you want to change' not in text
 
 
 class TestImageOCRProgress:
