@@ -250,3 +250,63 @@ async def test_connect_buttons_on_the_connect_first_prompt_never_leave_a_case_st
         assert _case_conv(harness.app)._conversations.get(key) == bot.AWAIT_USERNAME
     finally:
         await harness.app.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_a_sign_in_finishing_after_reset_does_not_reconnect(harness, monkeypatch):
+    """/reset wipes the watch while Kaizen is still being asked: the late
+    "complete" must not mark the wiped account connected."""
+    import mobile_kaizen_handoff
+
+    monkeypatch.setattr(bot, "_probe_kept_kaizen_session", AsyncMock(return_value="hst"))
+    monkeypatch.setattr(bot.kaizen_connection, "mark_passwordless", MagicMock())
+    await harness.app.initialize()
+    try:
+        await harness.feed(make_command_update("setup"))
+        await harness.feed(make_callback_update("ACTION|connect_passwordless"))
+        job = harness.app.job_queue.get_jobs_by_name(f"pwl-watch-{TEST_USER.id}")[0]
+        context = CallbackContext.from_job(job, harness.app)
+
+        def status_during_reset(session_id):
+            context.user_data.clear()  # /reset lands mid-check
+            return "complete"
+
+        monkeypatch.setattr(mobile_kaizen_handoff, "connect_link_status", status_during_reset)
+        harness.outbox.clear()
+        await bot._passwordless_watch_job(context)
+    finally:
+        await harness.app.shutdown()
+
+    bot.kaizen_connection.mark_passwordless.assert_not_called()
+    assert harness.outbox == []
+
+
+@pytest.mark.asyncio
+async def test_portfolio_pick_after_no_password_sign_in_ends_setup_normally(harness, monkeypatch):
+    """The pick used to land on Settings' handler: "Portfolio set" with a Back
+    to Settings, instead of setup's "send your case" ending."""
+    import mobile_kaizen_handoff
+
+    monkeypatch.setattr(mobile_kaizen_handoff, "connect_link_status", lambda session_id: "complete")
+    monkeypatch.setattr(bot, "_probe_kept_kaizen_session", AsyncMock(return_value="unknown"))
+    monkeypatch.setattr(bot.consent, "has_current_consent", AsyncMock(return_value=True))
+    monkeypatch.setattr(bot.kaizen_connection, "mark_passwordless", MagicMock())
+    monkeypatch.setattr(bot, "store_training_level", MagicMock())
+    monkeypatch.setattr(bot, "store_curriculum", MagicMock())
+    await harness.app.initialize()
+    try:
+        await harness.feed(make_command_update("setup"))
+        await harness.feed(make_callback_update("ACTION|connect_passwordless"))
+        job = harness.app.job_queue.get_jobs_by_name(f"pwl-watch-{TEST_USER.id}")[0]
+        await bot._passwordless_watch_job(CallbackContext.from_job(job, harness.app))
+        assert "Which Kaizen portfolio" in harness.outbox[-1][1]
+
+        harness.outbox.clear()
+        await harness.feed(make_callback_update("SETLEVEL|HIGHER"))
+    finally:
+        await harness.app.shutdown()
+
+    _, text, markup = harness.outbox[-1]
+    assert "Kaizen connected" in text
+    assert bot.render_message("welcome_connected") in text
+    assert markup is None or ("🔙 Back", "ACTION|settings") not in _buttons(markup)

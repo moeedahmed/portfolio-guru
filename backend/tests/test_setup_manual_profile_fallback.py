@@ -121,11 +121,12 @@ async def test_setup_training_level_ends_setup_conv_for_every_manual_button(
 
 
 @pytest.mark.asyncio
-async def test_handle_set_level_still_routes_back_to_settings_outside_setup(
+async def test_handle_set_level_routes_back_to_portfolio_defaults_outside_setup(
     mock_callback_update, mock_context, monkeypatch
 ):
-    """The /settings → change portfolio path keeps a compact Back button
-    whose callback returns to settings. Pin the route rather than verbose copy
+    """The /settings → Portfolio defaults → change portfolio path keeps a
+    compact Back button that returns to Portfolio defaults, the step it came
+    from. Pin the route rather than verbose copy
     so the mobile label can stay concise without losing the round-trip.
     """
     import bot
@@ -141,15 +142,15 @@ async def test_handle_set_level_still_routes_back_to_settings_outside_setup(
     markup = call.kwargs.get("reply_markup")
     assert markup is not None, (
         "handle_set_level dropped its reply_markup — without it the user "
-        "has no path back to /settings."
+        "has no path back to Portfolio defaults."
     )
     buttons = [
         (btn.text, btn.callback_data)
         for row in markup.inline_keyboard
         for btn in row
     ]
-    assert ('🔙 Back', "ACTION|settings") in buttons, (
-        f"handle_set_level lost its settings return route: {buttons!r}"
+    assert ('🔙 Back', "ACTION|portfolio_defaults") in buttons, (
+        f"handle_set_level lost its Portfolio defaults return route: {buttons!r}"
     )
 
 

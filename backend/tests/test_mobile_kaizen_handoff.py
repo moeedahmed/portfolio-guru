@@ -915,3 +915,12 @@ def test_create_connect_link_returns_the_session_to_watch(monkeypatch, tmp_path)
     assert link.session_id == "s1"
     assert handoff.connect_link_status("s1", key_path=key) == "complete"
     assert seen[-1] == ("GET", "http://127.0.0.1:8101/internal/handoffs/s1")
+
+
+def test_finished_page_offers_a_way_back_to_telegram():
+    from mobile_kaizen_handoff import HANDOFF_HTML, HANDOFF_JS
+
+    assert 'href="https://t.me/portfolio_guru_bot"' in HANDOFF_HTML
+    assert "Back to Telegram" in HANDOFF_HTML
+    assert "backToTelegram.hidden = false" in HANDOFF_JS
+    assert "window.close()" in HANDOFF_JS

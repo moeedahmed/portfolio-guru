@@ -2935,6 +2935,9 @@ async def _create_passwordless_link(user_id: int):
         return None
 
 
+_KAIZEN_DASHBOARD_URL = "https://kaizenep.com/dashboard"
+
+
 async def _probe_kept_kaizen_session(user_id: int) -> bool | str | None:
     """Open Kaizen with the kept session and read the portfolio type.
 
@@ -2958,6 +2961,15 @@ async def _probe_kept_kaizen_session(user_id: int) -> bool | str | None:
         browser_context = getattr(page, "context", None)
         if not await asyncio.wait_for(use_cached_session(page, user_id), timeout=60):
             return False
+        # The kept session opens on Activities, which doesn't name the
+        # portfolio; the dashboard does, and it's where the password check
+        # reads it. Without this every no-password sign-in asked for the
+        # portfolio by hand (2026-09-27).
+        try:
+            await page.goto(_KAIZEN_DASHBOARD_URL, wait_until="load", timeout=15000)
+            await asyncio.sleep(3)
+        except Exception:
+            logger.info("Kaizen dashboard did not open for the portfolio check", exc_info=True)
         try:
             title = await page.title()
         except Exception:
@@ -7947,6 +7959,10 @@ async def _finish_setup_after_connect(
             flow_key="setup",
         )
     else:
+        # A no-password sign-in finishes from a background check, outside the
+        # setup conversation, so the pick lands on the Settings handler. This
+        # flag sends it back to setup's ending instead (2026-09-27).
+        context.user_data[_SETUP_LEVEL_PENDING_KEY] = True
         await _flow_edit(
             update, context,
             "✅ Kaizen connected! I couldn't auto-detect your portfolio.\n\nWhich Kaizen portfolio applies to you?",
@@ -8153,6 +8169,11 @@ async def _passwordless_watch_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             context.user_data.pop(_PWL_WATCH_KEY, None)
             return
         watch["errors"] = 0
+    if context.user_data.get(_PWL_WATCH_KEY) is not watch:
+        # /reset (or a new link) replaced this watch while Kaizen was being
+        # asked; a sign-in finishing now must not reconnect the wiped account.
+        job.schedule_removal()
+        return
     if status in {"failed", "expired"}:
         job.schedule_removal()
         context.user_data.pop(_PWL_WATCH_KEY, None)
@@ -8423,6 +8444,9 @@ async def setup_retry_login(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return await _complete_setup_login(update, context, username, password, login_ok)
 
 
+_SETUP_LEVEL_PENDING_KEY = "_setup_level_pending"
+
+
 async def setup_training_level(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Manual portfolio-profile pick after auto-detect couldn't classify the
     Kaizen role. Mirror the auto-detect success path: confirm Kaizen
@@ -8439,6 +8463,7 @@ async def setup_training_level(update: Update, context: ContextTypes.DEFAULT_TYP
     if not get_curriculum(user_id):
         store_curriculum(user_id, _default_curriculum_for_training_level(level))
     context.user_data.pop("_setup_state_hint", None)
+    context.user_data.pop(_SETUP_LEVEL_PENDING_KEY, None)
     if not await consent.has_current_consent(user_id):
         return await _prompt_consent(
             update,
@@ -11544,6 +11569,9 @@ async def handle_set_curriculum(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def handle_set_level(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle SETLEVEL| callback from settings → change portfolio profile."""
+    if context.user_data.get(_SETUP_LEVEL_PENDING_KEY):
+        await setup_training_level(update, context)
+        return
     query = update.callback_query
     await query.answer()
     level = query.data.split("|")[1]
@@ -11552,7 +11580,8 @@ async def handle_set_level(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await query.edit_message_text(
         f"✅ Portfolio set to {_training_level_label(level)}.",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")],
+            # Back returns to Portfolio defaults, where the choice was offered.
+            [InlineKeyboardButton("🔙 Back", callback_data="ACTION|portfolio_defaults")],
         ]),
     )
 
