@@ -2982,7 +2982,7 @@ def _connect_kaizen_prompt(user_id: int) -> tuple[str, InlineKeyboardMarkup | No
 
 async def _send_start_setup_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     text, markup = _connect_kaizen_prompt(update.effective_user.id)
-    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=markup)
+    await _flow_msg(update, context, text, reply_markup=markup, parse_mode="Markdown", flow_key="setup")
     context.user_data["_setup_state_hint"] = "username"
     return AWAIT_USERNAME
 
@@ -4653,12 +4653,15 @@ def _settings_view_components(
     if _proactive_enabled():
         buttons.insert(-1, [InlineKeyboardButton("🔔 Reminders", callback_data="REMIND|menu")])
     text = (
-        f"⚙️ Settings\n\n"
+        f"{_SETTINGS_TITLE}\n\n"
         f"{plan_block}"
         f"Writing style: {voice_status}\n"
         f"Portfolio defaults: {portfolio_defaults_summary}"
     )
     return text, InlineKeyboardMarkup(buttons)
+
+
+_SETTINGS_TITLE = "⚙️ Settings"
 
 
 def _build_welcome_keyboard(connected: bool = False):
@@ -7458,13 +7461,22 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         return ConversationHandler.END
 
     # Can be triggered by command or callback. Anchor the setup flow message.
+    _flow_done(context, "setup")  # fresh start — drop any stale anchor
+    in_place = False
     if query:
         await query.answer()
-        await _retire_clicked_keyboard(query)
-    _flow_done(context, "setup")  # fresh start — drop any stale anchor
+        # Settings turns into the connect step in place, so the sign-in is one
+        # message from the tap to connected. Buttons on other messages (a
+        # draft's Reconnect, say) keep that message and start a new one below.
+        clicked = query.message
+        if clicked is not None and (getattr(clicked, "text", None) or "").startswith(_SETTINGS_TITLE):
+            context.user_data["_flow_anchor_setup"] = (clicked.chat_id, clicked.message_id)
+            in_place = True
+        else:
+            await _retire_clicked_keyboard(query)
     context.user_data["_setup_state_hint"] = "username"
     text, markup = _connect_kaizen_prompt(update.effective_user.id)
-    await _flow_msg(
+    await (_flow_edit if in_place else _flow_msg)(
         update, context,
         text,
         reply_markup=markup,
@@ -7496,20 +7508,39 @@ async def _leave_setup_for_case(update: Update, context: ContextTypes.DEFAULT_TY
     return ConversationHandler.END
 
 
+async def _delete_typed_setup_reply(update: Update) -> bool:
+    """Delete the doctor's typed email, like the password: both are sensitive.
+
+    Once it's gone the setup message can move on in place, so the sign-in
+    stays one message that updates rather than a trail of step prompts.
+    """
+    try:
+        await update.message.delete()
+        return True
+    except Exception:
+        logger.debug("Could not delete the typed setup reply", exc_info=True)
+        return False
+
+
 async def setup_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     text = update.message.text.strip()
     if _looks_like_case_not_credential(text, min_words=8, min_chars=60):
         return await _leave_setup_for_case(update, context)
+    deleted = await _delete_typed_setup_reply(update)
     if "@" not in text or "." not in text:
-        await _flow_msg(update, context, "⚠️ That doesn't look like an email. What's your Kaizen username?", flow_key="setup")
+        send = _flow_edit if deleted else _flow_msg
+        await send(update, context, "⚠️ That doesn't look like an email. What's your Kaizen username?", flow_key="setup")
         return AWAIT_USERNAME
-    return await _prompt_kaizen_password(update, context, text)
+    return await _prompt_kaizen_password(update, context, text, in_place=deleted)
 
 
-async def _prompt_kaizen_password(update: Update, context: ContextTypes.DEFAULT_TYPE, username: str) -> int:
+async def _prompt_kaizen_password(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, username: str, *, in_place: bool = False
+) -> int:
     context.user_data["setup_username"] = username
     context.user_data["_setup_state_hint"] = "password"
-    await _flow_msg(
+    send = _flow_edit if in_place else _flow_msg
+    await send(
         update, context,
         "🔐 Step 2 of 3: verify your login\n\n"
         "What's your Kaizen password?\n\n"
@@ -9849,12 +9880,19 @@ async def handle_reset_confirm(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     await _perform_reset(update.effective_user.id, context)
-    await query.message.edit_text(
-        _DATA_CLEAR_TEXT,
-        reply_markup=_build_data_clear_keyboard(),
-    )
+    # One message: the reset question becomes the all-clear plus the same
+    # connect step Settings shows, and sign-in carries on editing it.
     text, markup = _connect_kaizen_prompt(update.effective_user.id)
-    await query.message.reply_text(text, parse_mode="Markdown", reply_markup=markup)
+    if query.message is not None:
+        context.user_data["_flow_anchor_setup"] = (query.message.chat_id, query.message.message_id)
+    context.user_data["_setup_state_hint"] = "username"
+    await _flow_edit(
+        update, context,
+        _DATA_CLEAR_TEXT + "\n\n" + text,
+        reply_markup=markup,
+        parse_mode="Markdown",
+        flow_key="setup",
+    )
     return AWAIT_USERNAME
 
 
