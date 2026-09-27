@@ -729,6 +729,8 @@ async def weekly_push(context: ContextTypes.DEFAULT_TYPE) -> None:
     failed = 0
 
     for user_id in users:
+        if _proactive_owns(user_id):
+            continue  # the daily check decides whether this user hears anything
         try:
             stats = await _compute_weekly_stats(user_id)
             text = _build_weekly_digest_text(stats)
@@ -871,6 +873,8 @@ async def signoff_chase_push(context: ContextTypes.DEFAULT_TYPE) -> None:
                 seen = {}
 
         for user_id in _signoff_chase_audience(await get_all_active_users()):
+            if _proactive_owns(user_id):
+                continue  # stuck sign-offs are part of the daily check for them
             try:
                 # Change detection needs current data. Without a refresh the
                 # watcher could never learn that an assessor signed something
@@ -968,6 +972,337 @@ async def signoff_chase_push(context: ContextTypes.DEFAULT_TYPE) -> None:
     # feature's success signal is silence, so a dead job and a clean portfolio
     # look identical from the outside — only this ping tells them apart.
     ops_alert.ping_check(heartbeat_url)
+
+
+# ── Proactive reminders (tiered daily check) ────────────────────────────────
+#
+# One evening check per doctor that usually sends nothing. The rules live in
+# proactive_reminders.py; this is only the plumbing that feeds it the same
+# checklists /health shows and delivers what it decides. Off unless
+# PG_ENABLE_PROACTIVE is set, the same fail-closed shape as the sign-off chase.
+
+PROACTIVE_MAX_REFRESH_PER_RUN = SIGNOFF_CHASE_MAX_REFRESH_PER_RUN
+
+
+def _proactive_enabled() -> bool:
+    return os.environ.get("PG_ENABLE_PROACTIVE", "").strip() not in ("", "0", "false", "False")
+
+
+def _proactive_dry_run() -> bool:
+    """Decide and log, but send nothing: the first week of the rollout."""
+    return os.environ.get("PG_PROACTIVE_DRY_RUN", "").strip() not in ("", "0", "false", "False")
+
+
+def _proactive_audience(user_ids: list) -> list:
+    """PG_PROACTIVE_USER_IDS narrows the check to named portfolios first."""
+    raw = os.environ.get("PG_PROACTIVE_USER_IDS", "").strip()
+    if not raw:
+        return list(user_ids)
+    allowed = {part.strip() for part in raw.split(",") if part.strip()}
+    return [user_id for user_id in user_ids if str(user_id) in allowed]
+
+
+def _proactive_owns(user_id) -> bool:
+    """True when the daily check, not the old weekly jobs, speaks to this user.
+
+    The Sunday digest and the Wednesday chase become candidates inside the
+    daily check, so a user it covers must not also get them separately.
+    """
+    return (
+        _proactive_enabled()
+        and not _proactive_dry_run()
+        and bool(_proactive_audience([user_id]))
+    )
+
+
+def _note_reminder_engagement(user_id: int) -> None:
+    """The doctor is using the bot: reset the ignored count, hold non-urgent news."""
+    if not _proactive_enabled():
+        return
+    import proactive_reminders as pr
+    from datetime import date as _date
+
+    try:
+        pr.save_state(user_id, pr.record_engaged(pr.load_state(user_id), _date.today()))
+    except Exception as exc:  # pragma: no cover - never break the caller
+        logger.warning("Could not record reminder engagement for %s: %s", user_id, exc)
+
+
+def _checklist_actions(profile, items, today, training_level) -> tuple[str, ...]:
+    """The "do next" lines of the checklist /health opens on for this route."""
+    review_date = _stored_review_date(profile)
+    if profile.pathway == Pathway.cesr_portfolio:
+        return tuple(
+            compute_cesr_checklist(items, today=today).actions
+            + compute_appraisal_checklist(items, today=today, review_date=review_date).actions
+        )
+    if profile.pathway == Pathway.appraisal_only:
+        return tuple(
+            compute_appraisal_checklist(items, today=today, review_date=review_date).actions
+        )
+    return tuple(
+        compute_arcp_checklist(
+            items, today=today, review_date=review_date, training_level=training_level or "HIGHER"
+        ).actions
+    )
+
+
+async def _proactive_signals(user_id: int, state: dict, today):
+    """Gather what the daily check needs, from the same sources as /health."""
+    from datetime import datetime as _dt
+
+    import proactive_reminders as pr
+    from health_watch import detect_changes, find_stuck_signoffs, format_change_report
+    from form_labels import form_label
+
+    profile = _get_or_default_health_profile(user_id)
+    items, _history, source = await _resolve_health_evidence(user_id)
+
+    scan_date = None
+    status = await _safe_kaizen_sync_status(user_id)
+    last_run = getattr(status, "last_run", None)
+    finished = (getattr(last_run, "finished_at", None) or "").strip()
+    if source == "kaizen_index" and finished:
+        try:
+            scan_date = _dt.fromisoformat(finished.replace("Z", "+00:00")).date()
+        except ValueError:
+            scan_date = None
+
+    # Without a Kaizen scan the checklist would be counting only what was
+    # filed through the bot, so it states no gaps as fact.
+    has_index = source == "kaizen_index"
+    actions = (
+        _checklist_actions(profile, items, today, get_training_level(user_id))
+        if has_index
+        else ()
+    )
+
+    since = None
+    if state.get("changes_since"):
+        try:
+            since = _dt.fromisoformat(str(state["changes_since"]))
+        except ValueError:
+            since = None
+    change_text = None
+    stuck_alerts: tuple = ()
+    if has_index:
+        change_text = format_change_report(await detect_changes(user_id, since=since))
+        stuck = await find_stuck_signoffs(user_id, min_days=pr.URGENT_STUCK_DAYS, today=today)
+        stuck_alerts = tuple(
+            pr.StuckAlert(
+                key=str(item.id),
+                label=f"{form_label(item.event_type, fallback=item.event_type)} from "
+                f"{item.event_date.strftime('%-d %b %Y')}",
+                days_waiting=item.days_waiting,
+            )
+            for item in stuck
+            if item.waits_on_someone_else
+        )
+
+    return pr.Signals(
+        deadline_name=_ROUTE_DEADLINE_NAME.get(profile.pathway, "review"),
+        review_month=_stored_review_date(profile),
+        actions=actions,
+        change_text=change_text,
+        stuck_alerts=stuck_alerts,
+        cesr_expiring=(
+            pr.cesr_expiring_count(items, today)
+            if has_index and profile.pathway == Pathway.cesr_portfolio
+            else 0
+        ),
+        scan_date=scan_date,
+    )
+
+
+def _reminder_keyboard(kind: str) -> InlineKeyboardMarkup:
+    import proactive_reminders as pr
+
+    first = (
+        InlineKeyboardButton("📅 Set next month", callback_data="ACTION|health_review_setup")
+        if kind == pr.AFTER
+        else InlineKeyboardButton("📊 Portfolio health", callback_data="ACTION|health")
+    )
+    return InlineKeyboardMarkup([
+        [first, InlineKeyboardButton("🔕 Less like this", callback_data=f"REMIND|mute|{kind}")],
+        [InlineKeyboardButton("⚙️ Reminder settings", callback_data="REMIND|menu")],
+    ])
+
+
+async def proactive_tick(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """The daily "should I speak?" check. Most evenings it sends nothing."""
+    import json as _json
+    from datetime import UTC, date as _date, datetime
+
+    import ops_alert
+    import proactive_reminders as pr
+
+    heartbeat_url = os.environ.get("PG_PROACTIVE_HEALTHCHECK_URL", "")
+    sentinel = str(data_path("proactive_last_run"))
+    os.makedirs(os.path.dirname(sentinel), exist_ok=True)
+    now = time.time()
+    if os.path.exists(sentinel):
+        try:
+            last_run = float(open(sentinel).read().strip())
+        except (OSError, ValueError):
+            last_run = 0.0
+        if now - last_run < 20 * 3600:
+            logger.info("proactive_tick skipped — ran %.1f hours ago", (now - last_run) / 3600)
+            return
+    with open(sentinel, "w") as fh:
+        fh.write(str(now))
+
+    dry_run = _proactive_dry_run()
+    today = _date.today()
+    logger.info("proactive_tick starting%s", " (dry run)" if dry_run else "")
+    ops_alert.ping_check(heartbeat_url, "/start")
+    sent = quiet = failed = refreshed = 0
+    try:
+        for user_id in _proactive_audience(await get_all_active_users()):
+            try:
+                if (
+                    refreshed < PROACTIVE_MAX_REFRESH_PER_RUN
+                    and _kaizen_connected(user_id)
+                    and await _health_needs_kaizen_refresh(user_id)
+                ):
+                    refreshed += 1
+                    try:
+                        await asyncio.wait_for(
+                            sync_kaizen_portfolio_index_for_user(user_id),
+                            timeout=SIGNOFF_CHASE_REFRESH_TIMEOUT_S,
+                        )
+                    except Exception as exc:
+                        logger.warning("proactive_tick refresh failed for %s: %s", user_id, exc)
+
+                state = pr.load_state(user_id)
+                signals = await _proactive_signals(user_id, state, today)
+                reminder = pr.decide(signals, state, today)
+                if reminder is None:
+                    quiet += 1
+                    continue
+                logger.info(
+                    "Portfolio Guru funnel event=proactive_%s user_id=%s kind=%s tier=%s",
+                    "would_send" if dry_run else "sent",
+                    user_id,
+                    reminder.kind,
+                    pr.tier_for(signals.review_month, today),
+                )
+                if dry_run:
+                    logger.info("proactive_tick dry run text for %s:\n%s", user_id, reminder.text)
+                    continue
+
+                text = reminder.text
+                if pr.is_first_reminder(state):
+                    text += (
+                        "\n\n_I'll only message when something matters, more often "
+                        "as your deadline gets close. Change this any time below._"
+                    )
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=text,
+                    parse_mode="Markdown",
+                    reply_markup=_reminder_keyboard(reminder.kind),
+                )
+                state = pr.record_sent(state, reminder, today)
+                if reminder.carries_changes:
+                    state["changes_since"] = datetime.now(UTC).isoformat()
+                pr.save_state(user_id, state)
+                sent += 1
+            except Exception as exc:
+                logger.warning("proactive_tick failed for %s: %s", user_id, exc)
+                failed += 1
+    except Exception:
+        logger.error("proactive_tick aborted", exc_info=True)
+        ops_alert.ping_check(heartbeat_url, "/fail")
+        raise
+
+    logger.info(
+        "proactive_tick complete: %d sent, %d quiet, %d failed, %d refreshed",
+        sent, quiet, failed, refreshed,
+    )
+    # Silence is the normal outcome, so only this ping tells a quiet evening
+    # from a dead job.
+    ops_alert.ping_check(heartbeat_url)
+
+
+_REMINDER_LEVEL_LABELS = {
+    "normal": "Normal",
+    "urgent": "Only urgent",
+    "off": "Off",
+}
+
+
+def _reminder_settings_view(user_id: int):
+    import proactive_reminders as pr
+    from datetime import date as _date
+
+    state = pr.load_state(user_id)
+    level = _REMINDER_LEVEL_LABELS.get(state.get("level") or "normal", "Normal")
+    paused = state.get("quiet_until")
+    paused_line = ""
+    if paused and str(paused) >= _date.today().isoformat():
+        paused_line = f"\nPaused until {_date.fromisoformat(str(paused)).strftime('%-d %b')}."
+    text = (
+        "🔔 *Reminders*\n\n"
+        f"Currently: {level}.{paused_line}\n\n"
+        "Normal: at most 2 a month, weekly in the last 3 months before your "
+        "ARCP or appraisal, and twice a week in the last 4 weeks.\n"
+        "Only urgent: just things like evidence waiting months for sign-off."
+    )
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🔔 Normal", callback_data="REMIND|level|normal"),
+            InlineKeyboardButton("⚠️ Only urgent", callback_data="REMIND|level|urgent"),
+        ],
+        [
+            InlineKeyboardButton("🔕 Off", callback_data="REMIND|level|off"),
+            InlineKeyboardButton("⏸️ Pause 2 weeks", callback_data="REMIND|pause|14"),
+        ],
+        [InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")],
+    ])
+    return text, keyboard
+
+
+async def handle_reminder_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Reminder controls: Less like this, level, pause, and the settings view."""
+    import proactive_reminders as pr
+    from datetime import date as _date, timedelta as _td
+
+    query = update.callback_query
+    user_id = update.effective_user.id
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    value = parts[2] if len(parts) > 2 else ""
+    today = _date.today()
+    state = pr.record_engaged(pr.load_state(user_id), today)
+
+    if action == "mute" and value in pr.KINDS:
+        muted = dict(state.get("muted") or {})
+        muted[value] = (today + _td(days=pr.MUTE_DAYS)).isoformat()
+        state["muted"] = muted
+        pr.save_state(user_id, state)
+        await query.answer("Got it: none of these for 30 days.")
+        try:
+            await query.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        return
+    if action == "level" and value in pr.LEVELS:
+        state["level"] = value
+        pr.save_state(user_id, state)
+        await query.answer(f"Reminders: {_REMINDER_LEVEL_LABELS[value]}")
+    elif action == "pause" and value == "14":
+        state["quiet_until"] = (today + _td(days=14)).isoformat()
+        pr.save_state(user_id, state)
+        await query.answer("Paused for 2 weeks.")
+    elif action == "menu":
+        pr.save_state(user_id, state)
+        await query.answer()
+    else:
+        await query.answer("That button has expired. Open /settings for reminders.")
+        return
+
+    text, keyboard = _reminder_settings_view(user_id)
+    await _safe_edit_text(query.message, text, parse_mode="Markdown", reply_markup=keyboard)
 
 
 async def _edit_last_bot_msg(context, chat_id, text, reply_markup=None, parse_mode=None):
@@ -4200,6 +4535,8 @@ def _settings_view_components(
         ],
         [InlineKeyboardButton("🔄 Reset data", callback_data="ACTION|delete")],
     ]
+    if _proactive_enabled():
+        buttons.insert(-1, [InlineKeyboardButton("🔔 Reminders", callback_data="REMIND|menu")])
     text = (
         f"⚙️ Settings\n\n"
         f"{plan_block}"
@@ -8983,6 +9320,12 @@ async def _clear_local_portfolio_account_data(user_id: int, *, reason: str) -> d
     except Exception:
         logger.warning("Could not clear health profile for %s", reason, exc_info=True)
     try:
+        import proactive_reminders
+        proactive_reminders.delete_state(user_id)
+        cleared["reminder_state"] = 1
+    except Exception:
+        logger.warning("Could not clear reminder state for %s", reason, exc_info=True)
+    try:
         from kaizen_form_filer import invalidate_session_cache
         cleared["session_cache"] = invalidate_session_cache(user_id)
     except Exception:
@@ -9502,6 +9845,7 @@ async def _run_health_analysis(
       - fail_fn(text): render an error after the analysis call fails
     """
     logger.info("Portfolio Guru funnel event=health_viewed user_id=%s", user_id)
+    _note_reminder_engagement(user_id)
     await chat.send_action(constants.ChatAction.TYPING)
 
     stored_profile = get_health_profile(user_id)
@@ -17172,6 +17516,7 @@ def build_application() -> Application:
     # global handler still services the /settings flow.
     application.add_handler(CallbackQueryHandler(handle_pathway_choice, pattern=r"^PATHWAY_SETTINGS\|"))
     application.add_handler(CallbackQueryHandler(handle_chase_log, pattern=r"^CHASE_LOG\|"))
+    application.add_handler(CallbackQueryHandler(handle_reminder_callback, pattern=r"^REMIND\|"))
     # Top-level handlers that must work regardless of conversation state
     application.add_handler(CallbackQueryHandler(handle_info_button, pattern=r"^INFO\|"))
     # Inline reset confirmation. Accepts the legacy CONFIRM|delete payload so
@@ -17517,6 +17862,18 @@ def main():
         logger.info("signoff_chase job registered (PG_ENABLE_SIGNOFF_CHASE set)")
     else:
         logger.info("signoff_chase disabled — set PG_ENABLE_SIGNOFF_CHASE=1 to enable")
+
+    # Proactive reminders — one check every evening at 19:00 UK that usually
+    # sends nothing. Not registered at all unless PG_ENABLE_PROACTIVE is set.
+    if _proactive_enabled():
+        application.job_queue.run_daily(
+            proactive_tick,
+            time=_dtime(hour=19, minute=0, tzinfo=_uk_tz),
+            name="proactive_tick",
+        )
+        logger.info("proactive_tick job registered%s", " (dry run)" if _proactive_dry_run() else "")
+    else:
+        logger.info("proactive_tick disabled — set PG_ENABLE_PROACTIVE=1 to enable")
 
     # Clinical Supervisor poll — read-only, inert unless there is at least
     # one user with cached kaizen_role=="assessor" AND credentials AND a

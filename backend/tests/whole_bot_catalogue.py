@@ -16,7 +16,7 @@ def payload_branch(payload):
     family = parts[0]
     if family == "FORM" and len(parts) == 2:
         return payload if parts[1] in {"best", "show_all", "back", "disabled"} else "FORM|cat_*" if parts[1].startswith("cat_") else "FORM|*"
-    if family in {"FIELD", "SETLEVEL", "SET_CURRICULUM", "SETUP_CURRICULUM", "PATHWAY", "PATHWAY_SETTINGS", "EDIT"}:
+    if family in {"FIELD", "SETLEVEL", "SET_CURRICULUM", "SETUP_CURRICULUM", "PATHWAY", "PATHWAY_SETTINGS", "EDIT", "REMIND"}:
         return family + "|*"
     if family in {"SUP", "CONSENT", "FILING_CURRICULUM", "FILING", "FEEDBACK"} and len(parts) >= 3:
         return "|".join(parts[:2]) + "|*"
@@ -47,7 +47,7 @@ def producer_digest():
     return hashlib.sha256(json.dumps(modules).encode()).hexdigest()
 
 
-PRODUCER_DIGEST = '7f80b55b12dd180855e275a6886f7fb8285bf4f6b405dc1157c7dbbd04b4742c'
+PRODUCER_DIGEST = 'eeb17b6cac4b61f26a7eb3748dfdad6d87a9b7b7b6d4075d6116a733cf18a523'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
@@ -69,7 +69,7 @@ UNSIGNED|all UNSIGNED|cancel UNSIGNED|custom UPGRADE|pro_plus VOICE|back_to_choi
 VOICE|done VOICE|kaizen_sample|last_12m VOICE|kaizen_sample|last_6m VOICE|kaizen_sample|recent_10 VOICE|more
 VOICE|path_kaizen VOICE|path_manual VOICE|remove APPROVE|submit REVIEW|draft IMPROVE|reflection EDIT|*
 FILING|feedback|* FEEDBACK|good|* FEEDBACK|bad|* FILING_CURRICULUM|retry|* FILING_CURRICULUM|select|*
-SETUP_CURRICULUM|* CHASE_LOG|cancel CHASE_LOG|*
+SETUP_CURRICULUM|* CHASE_LOG|cancel CHASE_LOG|* REMIND|*
 """.split())
 
 
@@ -192,7 +192,7 @@ def reviewed_units(slots):
     return dict(sorted(units.items()))
 
 
-CATALOGUE_DIGEST = 'b399986d1f077fc1a2f095f1027a34946c28a4dce4f5bd5ae81e9d472e2f0aa2'
+CATALOGUE_DIGEST = '155c512d53bceaf222be71307bd63cdcdb64cf3499c2103764f7203c61b8a546'
 
 
 def requirements_digest(units):

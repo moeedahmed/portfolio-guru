@@ -30,7 +30,7 @@ PROTECTED = re.compile(
     r"ACTION\|(?:setup|retry_setup_login|retry_filing|confirm_refresh_portfolio|confirm_refresh_for_health)|"
     r"ACTION\|health_review_confirm\|[^|]+|"
     r"(?:SETLEVEL|SET_CURRICULUM|SETUP_CURRICULUM|PATHWAY|PATHWAY_SETTINGS|CONSENT|"
-    r"FILING_CURRICULUM|FEEDBACK|FILING|PUSHBACK|CHASE_LOG|SUP)\|.+|"
+    r"FILING_CURRICULUM|FEEDBACK|FILING|PUSHBACK|CHASE_LOG|SUP|REMIND)\|.+|"
     r"VOICE\|(?:done|remove|preview_accept|kaizen_sample\|.+)|ATTACH\|(?:yes|no))"
 )
 PROTECTED_DYNAMIC = re.compile(

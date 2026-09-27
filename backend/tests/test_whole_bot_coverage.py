@@ -596,6 +596,22 @@ async def test_chase_controls_use_only_stubbed_local_record(scenario, monkeypatc
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("payload", ["REMIND|menu", "REMIND|level|urgent", "REMIND|mute|digest", "REMIND|bogus"])
+async def test_reminder_controls_touch_only_local_reminder_state(scenario, monkeypatch, tmp_path, payload):
+    import proactive_reminders
+    monkeypatch.setenv("PORTFOLIO_GURU_PROACTIVE_PATH", str(tmp_path / "reminders.json"))
+    app, collector, draft, filing, errors = scenario
+    update = make_callback_update(payload)
+    _prepare_update(update, app.bot)
+    await app.process_update(update)
+    assert not errors
+    filing.assert_not_awaited()
+    state = proactive_reminders.load_state(TEST_USER.id)
+    assert state["level"] == ("urgent" if payload == "REMIND|level|urgent" else "normal")
+    assert ("digest" in state["muted"]) == (payload == "REMIND|mute|digest")
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("sentiment", ["good", "bad"])
 async def test_feedback_stubs_credentials_and_external_record(scenario, monkeypatch, sentiment):
     import builtins
