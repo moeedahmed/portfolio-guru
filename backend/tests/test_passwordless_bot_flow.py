@@ -240,16 +240,17 @@ _CHOICE = ("🔒 Sign in without password", "ACTION|connect_passwordless")
 
 
 @pytest.mark.asyncio
-async def test_reset_offers_the_same_connect_choice_as_setup(offered, monkeypatch):
-    """/reset must start sign-in from the shared step, not its own username prompt."""
+async def test_reset_asks_first_and_wipes_nothing_yet(offered, monkeypatch):
+    """/reset only asks; the wipe and the connect step come from the Delete button."""
     sim = BotSimulator()
-    monkeypatch.setattr(bot, "_perform_reset", AsyncMock())
+    wipe = AsyncMock()
+    monkeypatch.setattr(bot, "_perform_reset", wipe)
 
-    state = await bot.reset_data(sim._make_text_update("/reset"), sim._make_context())
+    await bot.reset_data(sim._make_text_update("/reset"), sim._make_context())
 
-    assert state == bot.AWAIT_USERNAME
-    assert _CHOICE in sim.get_last_buttons()
-    assert sim.get_last_text() == bot._CONNECT_CHOICE_TEXT
+    wipe.assert_not_awaited()
+    assert sim.get_last_text() == bot._RESET_CONFIRM_TEXT
+    assert ("🗑️ Delete data", "CONFIRM|reset") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio
@@ -264,14 +265,36 @@ async def test_reset_confirm_button_offers_the_same_connect_choice(offered, monk
 
     assert state == bot.AWAIT_USERNAME
     assert _CHOICE in sim.get_last_buttons()
+    assert sim.get_last_text() == bot._CONNECT_CHOICE_TEXT
+
+
+@pytest.mark.asyncio
+async def test_reset_ends_on_exactly_what_settings_connect_shows(offered, monkeypatch):
+    """After Delete, the doctor sees the same message and buttons as Settings > Connect Kaizen."""
+    monkeypatch.setattr(bot, "_perform_reset", AsyncMock())
+    monkeypatch.setattr(bot, "_safe_edit_text", AsyncMock(), raising=False)
+    reset_sim = BotSimulator()
+    await bot.handle_reset_confirm(
+        reset_sim._make_callback_update("CONFIRM|reset"), reset_sim._make_context()
+    )
+    settings_sim = BotSimulator()
+    await bot.setup_start(
+        settings_sim._make_callback_update("ACTION|setup"), settings_sim._make_context()
+    )
+
+    assert reset_sim.get_last_text() == settings_sim.get_last_text()
+    assert reset_sim.get_last_buttons() == settings_sim.get_last_buttons()
 
 
 @pytest.mark.asyncio
 async def test_reset_without_passwordless_still_asks_for_the_username(monkeypatch):
     sim = BotSimulator()
     monkeypatch.setattr(bot, "_perform_reset", AsyncMock())
+    monkeypatch.setattr(bot, "_safe_edit_text", AsyncMock(), raising=False)
 
-    await bot.reset_data(sim._make_text_update("/reset"), sim._make_context())
+    await bot.handle_reset_confirm(
+        sim._make_callback_update("CONFIRM|reset"), sim._make_context()
+    )
 
     assert _CHOICE not in sim.get_last_buttons()
     assert sim.get_last_text() == bot._KAIZEN_USERNAME_PROMPT
