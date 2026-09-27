@@ -8,21 +8,21 @@ This screen must appear **before** the user can send their first case, must requ
 
 ---
 
-**Consent before your first case**
+**Consent before your first case** (version `2026-09-27.v5`; exact shipped text in `consent-versions/`)
 
-Case notes are health data. Please confirm before Portfolio Guru drafts from them:
+Case notes are health data. Please confirm:
 
-- You will only send anonymised case details.
-- When drafting, Portfolio Guru sends the anonymised case details you provide to Google Gemini via Vertex AI in the UK (London region).
-- Your Kaizen login is stored encrypted and is not sent to the AI model.
-- Portfolio Guru saves drafts only. It never submits to a supervisor.
-- You can withdraw consent and erase Portfolio Guru's stored data any time with `/reset`.
+- You'll leave out patient identifiers (I strip common ones, not all).
+- Anonymised details go to Google Gemini on Vertex AI, UK (London), to draft.
+- Your Kaizen login is encrypted, never sent to the AI.
+- Drafts only, never submitted to a supervisor.
+- `/reset` withdraws consent and erases Portfolio Guru's stored data.
 
-By tapping **"I consent"**, you confirm you're a **GMC-registered doctor** using this for your own training record.
+By tapping **"I consent"**, you confirm you're a **GMC-registered doctor** using this for your own training record. More: `/privacy`
 
 [ I consent ] [ Not now ]
 
-_Full details: `/privacy`._
+_v5 shortened the screen to the message standard. The longer explanation (which identifiers the bot removes automatically, that names without a title can slip through, that attached files reach Kaizen unchanged, the Art 9 basis) moved to `/privacy`._
 
 ---
 

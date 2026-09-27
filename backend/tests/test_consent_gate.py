@@ -551,7 +551,7 @@ async def test_successful_setup_prompts_consent_before_ready_state(tmp_consent_d
     assert "Step 3 of 3" in text
     assert "Case notes are health data" in text
     assert "By tapping I consent" in text
-    assert "Full details: /privacy" in text
+    assert "More: /privacy" in text
     assert bot.consent.CONSENT_VERSION not in text
     assert "has not been processed" not in text
     assert context.user_data["_consent_prompt_pending"] is True
@@ -675,7 +675,7 @@ async def test_start_continues_step_3_when_setup_consent_pending(tmp_consent_db)
     assert "Step 3 of 3" in text
     assert "Case notes are health data" in text
     assert "By tapping I consent" in text
-    assert "Full details: /privacy" in text
+    assert "More: /privacy" in text
     assert "Portfolio Guru is ready" not in text
     assert bot.consent.CONSENT_VERSION not in text
     assert ("🛡️ I consent", f"CONSENT|accept|{sim.user_id}") in sim.get_last_buttons()
@@ -767,7 +767,11 @@ def test_current_consent_copy_uses_precise_ai_processing_wording():
 
     assert "may use your case notes" not in consent.CONSENT_TEXT
     assert "EU (London)" not in consent.CONSENT_TEXT
-    assert "When drafting" in consent.CONSENT_TEXT
-    assert "anonymised case details you provide" in consent.CONSENT_TEXT
-    assert "Vertex AI in the UK (London region)" in consent.CONSENT_TEXT
+    assert "Anonymised details go to Google Gemini on Vertex AI, UK (London)" in consent.CONSENT_TEXT
     assert "Portfolio Guru's stored data" in consent.CONSENT_TEXT
+    # The bot strips identifiers itself, but only the common patterns: the
+    # doctor's own duty must stay, worded so it doesn't overclaim either way.
+    assert "leave out patient identifiers" in consent.CONSENT_TEXT
+    assert "not all" in consent.CONSENT_TEXT
+    for fact in ("health data", "encrypted", "Drafts only", "/reset", "GMC-registered", "/privacy"):
+        assert fact in consent.CONSENT_TEXT
