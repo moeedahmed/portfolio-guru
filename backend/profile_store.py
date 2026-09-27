@@ -16,6 +16,20 @@ DATABASE_URL = os.environ.get(
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 
 
+def _sqlite_file_path() -> str | None:
+    """The file behind this SQLite database, or None when it lives in memory.
+
+    Read from the parsed URL, not by string-stripping "sqlite:///": an
+    in-memory URL such as "sqlite://" would otherwise become the relative
+    path "sqlite://", and opening that creates a stray file called "sqlite:"
+    in the working directory.
+    """
+    database = engine.url.database
+    if not database or database == ":memory:" or database.startswith("file::memory:"):
+        return None
+    return database
+
+
 class UserProfile(SQLModel, table=True):
     __tablename__ = "userprofile"
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -41,8 +55,9 @@ class UserProfile(SQLModel, table=True):
 
 def init_profile_db():
     import pathlib
-    db_path = DATABASE_URL.replace("sqlite:///", "")
-    pathlib.Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    db_path = _sqlite_file_path()
+    if db_path:
+        pathlib.Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     SQLModel.metadata.create_all(engine)
     # Migrate: add columns that create_all won't alter on existing tables.
     _migrate_add_column("curriculum", "TEXT")
@@ -53,7 +68,9 @@ def init_profile_db():
 def _migrate_add_column(column_name: str, column_type: str) -> None:
     """Add a column to userprofile if it doesn't exist (SQLite migration)."""
     import sqlite3
-    db_path = DATABASE_URL.replace("sqlite:///", "")
+    db_path = _sqlite_file_path()
+    if not db_path:
+        return  # in-memory: create_all already built the current schema
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.execute("PRAGMA table_info(userprofile)")
