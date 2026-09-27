@@ -17118,6 +17118,19 @@ async def privacy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 # === APPLICATION BUILDER ===
 
+class _DeferToConversation(CallbackQueryHandler):
+    """A button handler that steps aside while another conversation wants it."""
+
+    def __init__(self, conversation, callback, *, pattern):
+        super().__init__(callback, pattern=pattern)
+        self._conversation = conversation
+
+    def check_update(self, update):
+        if self._conversation.check_update(update):
+            return False
+        return super().check_update(update)
+
+
 def build_application() -> Application:
     """Build and return the Telegram bot Application with all handlers registered."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -17342,23 +17355,22 @@ def build_application() -> Application:
             CommandHandler("setup", setup_start),
             CallbackQueryHandler(setup_start, pattern=r"^ACTION\|setup$"),
             # The sign-in link message outlives the conversation (the bot
-            # confirms by itself), so its buttons must work from anywhere.
-            CallbackQueryHandler(setup_password_start, pattern=r"^ACTION\|setup_password$"),
-            CallbackQueryHandler(passwordless_setup_start, pattern=r"^ACTION\|connect_passwordless$"),
-            CallbackQueryHandler(passwordless_setup_new_link, pattern=r"^ACTION\|passwordless_link$"),
-            CallbackQueryHandler(passwordless_setup_done, pattern=r"^ACTION\|passwordless_done$"),
+            # confirms by itself), so its buttons work from anywhere; with
+            # allow_reentry they also serve setup's own waiting states. When
+            # the case conversation is the one waiting on them, it goes first,
+            # or it would be left stuck expecting a username.
+            _DeferToConversation(case_conv, setup_password_start, pattern=r"^ACTION\|setup_password$"),
+            _DeferToConversation(case_conv, passwordless_setup_start, pattern=r"^ACTION\|connect_passwordless$"),
+            _DeferToConversation(case_conv, passwordless_setup_new_link, pattern=r"^ACTION\|passwordless_link$"),
+            _DeferToConversation(case_conv, passwordless_setup_done, pattern=r"^ACTION\|passwordless_done$"),
         ],
         states={
             AWAIT_USERNAME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, setup_username),
-                CallbackQueryHandler(passwordless_setup_start, pattern=r"^ACTION\|connect_passwordless$"),
-                CallbackQueryHandler(setup_password_start, pattern=r"^ACTION\|setup_password$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|cancel$"),
                 MessageHandler(~filters.TEXT & ~filters.COMMAND, _setup_wrong_input),
             ],
             AWAIT_PASSWORDLESS: [
-                CallbackQueryHandler(passwordless_setup_done, pattern=r"^ACTION\|passwordless_done$"),
-                CallbackQueryHandler(passwordless_setup_new_link, pattern=r"^ACTION\|passwordless_link$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|cancel$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, passwordless_awaiting_text),
             ],

@@ -47,7 +47,7 @@ def producer_digest():
     return hashlib.sha256(json.dumps(modules).encode()).hexdigest()
 
 
-PRODUCER_DIGEST = '03beaefdfc74174e9ac97e7aa2fabfb4438bbecc44efeab1b845a7f2eb27aeef'
+PRODUCER_DIGEST = '74087d2bddc72fc87fabd0f8b1a3c746e34d0aa4ebee297f95bd3bfd93ba298f'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
@@ -193,7 +193,7 @@ def reviewed_units(slots):
     return dict(sorted(units.items()))
 
 
-CATALOGUE_DIGEST = 'd20bbed6498aba762716056ad4aa47766a56da6995a446c4b0795258b961d779'
+CATALOGUE_DIGEST = '865f8b633b0603c7855eac441cc1e9d179c80a15ae5e86e25d11670a1ed16440'
 
 
 def requirements_digest(units):

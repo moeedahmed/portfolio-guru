@@ -211,3 +211,37 @@ async def test_choosing_the_password_route_then_typing_an_email_asks_for_the_pas
         await harness.app.shutdown()
 
     assert any("password" in text.lower() for _, text, _ in harness.outbox)
+
+
+def _case_conv(app):
+    from telegram.ext import ConversationHandler
+
+    return next(h for h in app.handlers[0] if isinstance(h, ConversationHandler) and h.name == "case_conv")
+
+
+@pytest.mark.asyncio
+async def test_connect_buttons_on_the_connect_first_prompt_never_leave_a_case_stuck(harness):
+    """A doctor who sends a case before connecting gets the same choice card.
+
+    Its buttons must be answered by the case conversation that showed it; if
+    /setup took them, the case conversation would sit waiting for a username
+    and swallow the doctor's next case as one.
+    """
+    await harness.app.initialize()
+    try:
+        await harness.feed(make_text_update("Saw a 70-year-old with chest pain today"))
+        assert "Without sharing your password" in harness.outbox[-1][1]
+        key = (TEST_USER.id, TEST_USER.id)
+        assert _case_conv(harness.app)._conversations.get(key) == bot.AWAIT_USERNAME
+
+        await harness.feed(make_callback_update("ACTION|connect_passwordless"))
+        assert "I'll confirm here as soon as it works" in harness.outbox[-1][1]
+        assert _case_conv(harness.app)._conversations.get(key) is None
+
+        await harness.feed(make_text_update("Saw a 70-year-old with chest pain today"))
+        assert "Without sharing your password" in harness.outbox[-1][1]
+        await harness.feed(make_callback_update("ACTION|setup_password"))
+        assert "Connect with your password" in harness.outbox[-1][1]
+        assert _case_conv(harness.app)._conversations.get(key) == bot.AWAIT_USERNAME
+    finally:
+        await harness.app.shutdown()
