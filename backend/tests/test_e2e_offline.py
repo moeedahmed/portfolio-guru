@@ -590,43 +590,30 @@ class TestOfflineE2E:
 
         seed_user()
 
-        update = make_command_update("reset")
-        _prepare_update(update, app.bot)
-        await app.process_update(update)
+        # /reset and the hidden /delete alias ask first, like Settings does:
+        # nothing is wiped until the Delete button is tapped.
+        for command in ("reset", "delete"):
+            collector.sent.clear()
+            update = make_command_update(command)
+            _prepare_update(update, app.bot)
+            await app.process_update(update)
 
-        assert collector.texts == [expected, bot._KAIZEN_USERNAME_PROMPT]
-        assert "No stored data found" not in collector.texts[0]
-        assert "What is stored?" not in collector.texts[0]
-        assert collector.sent[0].get("reply_markup") is None
-        assert collector.sent[1].get("reply_markup") is None
-        assert invalidated == [TEST_USER.id]
-        assert user_data_is_purged()
+            assert collector.texts == [bot._RESET_CONFIRM_TEXT]
+            buttons = [b.callback_data for row in collector.sent[0]["reply_markup"].inline_keyboard for b in row]
+            assert buttons == ["CONFIRM|reset", "CONFIRM|keep"]
+            assert invalidated == []
+            assert not user_data_is_purged()
 
-        # Repeated /reset stays idempotent.
+        # Keep data changes nothing.
         collector.sent.clear()
-        update = make_command_update("reset")
+        update = make_callback_update("CONFIRM|keep", message_text=bot._RESET_CONFIRM_TEXT)
         _prepare_update(update, app.bot)
         await app.process_update(update)
+        assert collector.texts == [bot._RESET_KEPT_TEXT]
+        assert not user_data_is_purged()
 
-        assert collector.texts == [expected, bot._KAIZEN_USERNAME_PROMPT]
-        assert "No stored data found" not in collector.texts[0]
-        assert collector.sent[0].get("reply_markup") is None
-        assert collector.sent[1].get("reply_markup") is None
-
-        # Hidden /delete alias performs the same purge.
-        seed_user()
-        collector.sent.clear()
-        update = make_command_update("delete")
-        _prepare_update(update, app.bot)
-        await app.process_update(update)
-
-        assert collector.texts == [expected, bot._KAIZEN_USERNAME_PROMPT]
-        assert collector.sent[0].get("reply_markup") is None
-        assert collector.sent[1].get("reply_markup") is None
-        assert user_data_is_purged()
-
-        # Inline reset confirmation button completes the purge in place.
-        seed_user()
+        # Delete data completes the purge in place, and repeating it stays
+        # idempotent.
         collector.sent.clear()
         update = make_callback_update("CONFIRM|reset", message_text="⚠️ This resets Portfolio Guru — are you sure?")
         _prepare_update(update, app.bot)
@@ -636,6 +623,14 @@ class TestOfflineE2E:
         assert collector.sent[0].get("reply_markup") is None
         assert collector.sent[1].get("reply_markup") is None
         assert user_data_is_purged()
+        assert invalidated == [TEST_USER.id]
+
+        collector.sent.clear()
+        update = make_callback_update("CONFIRM|reset", message_text=bot._RESET_CONFIRM_TEXT)
+        _prepare_update(update, app.bot)
+        await app.process_update(update)
+        assert collector.texts == [expected, bot._KAIZEN_USERNAME_PROMPT]
+        assert "No stored data found" not in collector.texts[0]
 
         collector.sent.clear()
         update = make_callback_update("INFO|stored_after_delete", message_text=expected)

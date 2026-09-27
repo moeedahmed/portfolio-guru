@@ -83,8 +83,9 @@ async def stripe_webhook(request: Request):
         except Exception:
             logger.debug("operator alert failed", exc_info=True)
 
-    # On upgrade, notify user via Telegram
-    if result.get("action") == "upgraded" and TELEGRAM_BOT_TOKEN:
+    # On upgrade, notify user via Telegram — once, when the plan actually
+    # changes. Renewal invoices also report "upgraded" but must stay silent.
+    if result.get("action") == "upgraded" and result.get("newly_upgraded") and TELEGRAM_BOT_TOKEN:
         user_id = result["user_id"]
         tier_label = "Pro" if result["tier"] == "pro" else "Portfolio Guru Unlimited"
         text = f"🎉 Welcome to {tier_label}! Your upgrade is active.\n\nSend a case to get started."

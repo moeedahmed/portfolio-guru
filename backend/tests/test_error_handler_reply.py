@@ -17,7 +17,7 @@ def _buttons(markup):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("saving, expected", [
-    (True, "check your Kaizen drafts"),
+    (True, "Check your Kaizen drafts first"),
     (False, "Nothing was saved"),
 ])
 async def test_error_reply_is_new_honest_and_never_saves(saving, expected):

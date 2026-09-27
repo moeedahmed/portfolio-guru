@@ -95,6 +95,15 @@ async def test_command_dispatch_receipt(offline_app, monkeypatch, tmp_path, cove
             update = make_command_update(command)
             _prepare_update(update, app.bot)
             await app.process_update(update)
+            key = coverage.observed[-1][0]
+            slot = next(s for s in coverage.slots if s.key == key)
+            if command in {"reset", "delete"}:
+                # The command only asks; the wipe happens on the confirm tap.
+                assert any(bot._RESET_CONFIRM_TEXT in text for text in collector.texts), command
+                reset_mirror.assert_not_called()
+                confirm = make_callback_update("CONFIRM|reset")
+                _prepare_update(confirm, app.bot)
+                await app.process_update(confirm)
             assert not errors, command
             expected = COMMAND_EXPECTATIONS[command]
             assert any(expected in text for text in collector.texts), command
@@ -104,8 +113,6 @@ async def test_command_dispatch_receipt(offline_app, monkeypatch, tmp_path, cove
                                for slot in coverage.slots)
             if command == "beta":
                 assert any(m["chat_id"] == bot.ADMIN_USER_ID for m in collector.sent)
-            key = coverage.observed[-1][0]
-            slot = next(s for s in coverage.slots if s.key == key)
             if command in {"reset", "delete"}:
                 reset_mirror.assert_called_once_with(TEST_USER.id)
                 with Session(credentials.engine) as session:
@@ -409,6 +416,9 @@ async def test_checkout_reaches_stubbed_final_boundary(scenario, monkeypatch):
     app, collector, draft, filing, errors = scenario
     checkout = AsyncMock(return_value="https://checkout.stripe.com/synthetic")
     monkeypatch.setattr("stripe_handler.create_checkout_session", checkout)
+    # Checkout is only offered to someone not already paying.
+    import bot
+    monkeypatch.setattr(bot, "get_user_tier", AsyncMock(return_value="free"))
     update = make_callback_update("UPGRADE|pro_plus")
     _prepare_update(update, app.bot)
     await app.process_update(update)

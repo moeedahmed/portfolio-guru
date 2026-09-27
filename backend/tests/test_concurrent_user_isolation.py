@@ -58,6 +58,7 @@ def test_retryable_last_filed_case_state_isolated_between_users():
 
     user_a.user_data.update({
         "last_filing_status": "partial",
+        "last_filing_uncertain": True,
         "last_amend_draft": {
             "_type": "FORM",
             "form_type": "CBD",
@@ -69,6 +70,7 @@ def test_retryable_last_filed_case_state_isolated_between_users():
     })
     user_b.user_data.update({
         "last_filing_status": "partial",
+        "last_filing_uncertain": True,
         "last_amend_draft": {
             "_type": "FORM",
             "form_type": "DOPS",

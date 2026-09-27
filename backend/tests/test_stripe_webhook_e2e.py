@@ -96,6 +96,45 @@ def test_checkout_completed_webhook_flips_tier_via_http(client, monkeypatch):
     assert tier == "pro_plus"
 
 
+def test_upgrade_welcome_sent_once_not_on_renewal(client, monkeypatch):
+    """Checkout then a renewal invoice: the welcome message goes out once."""
+    sent = []
+
+    async def _fake_send(user_id, text):
+        sent.append((user_id, text))
+
+    monkeypatch.setattr(webhook_server, "TELEGRAM_BOT_TOKEN", "fake")
+    monkeypatch.setattr(webhook_server, "_send_telegram_message", _fake_send)
+    monkeypatch.setattr(
+        stripe_handler.stripe.Subscription, "retrieve", lambda subscription_id: _subscription(),
+    )
+    monkeypatch.setattr(stripe_handler, "get_user_by_stripe_customer", _async_return(42))
+    events = [
+        {"id": "evt_checkout", "type": "checkout.session.completed",
+         "data": {"object": {"metadata": {"telegram_user_id": "42"},
+                             "customer": "cus_test", "subscription": "sub_test"}}},
+        {"id": "evt_first_invoice", "type": "invoice.paid",
+         "data": {"object": {"subscription": "sub_test", "customer": "cus_test"}}},
+        {"id": "evt_renewal_invoice", "type": "invoice.paid",
+         "data": {"object": {"subscription": "sub_test", "customer": "cus_test"}}},
+    ]
+    for event in events:
+        monkeypatch.setattr(
+            stripe_handler.stripe.Webhook, "construct_event",
+            lambda payload, sig, secret, _event=event: _event,
+        )
+        resp = client.post("/webhook/stripe", headers={"stripe-signature": "test-sig"}, content=b"{}")
+        assert resp.json() == {"status": "ok", "action": "upgraded"}
+
+    assert [user_id for user_id, _ in sent] == [42]
+
+
+def _async_return(value):
+    async def _inner(*args, **kwargs):
+        return value
+    return _inner
+
+
 def test_invoice_payment_failed_webhook_downgrades_tier_via_http(client, monkeypatch):
     """End-to-end through FastAPI: failed invoice downgrades the user."""
     import asyncio

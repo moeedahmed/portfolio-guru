@@ -1737,9 +1737,27 @@ def _clear_filing_retry_state(context) -> None:
         "last_filing_status", "last_filing_form_name", "last_filing_report",
         "awaiting_attachment_confirmation", "awaiting_filing_curriculum_choice",
         "alternative_curriculum_offer", "alternative_curriculum_retry_requested",
-        "retry_filing_requested",
+        "retry_filing_requested", "last_filing_uncertain",
     ):
         context.user_data.pop(key, None)
+
+
+def _last_filing_retryable(context) -> bool:
+    """A retry is offered only when the last save failed or may not have
+    landed. A clean partial save IS a saved Kaizen draft (with gaps), so
+    re-running it would open a second draft beside the first."""
+    status = context.user_data.get("last_filing_status")
+    return status == "failed" or (
+        status == "partial" and bool(context.user_data.get("last_filing_uncertain"))
+    )
+
+
+def _last_filing_saved(context) -> bool:
+    """The last save landed in Kaizen: success, or a clean partial save."""
+    status = context.user_data.get("last_filing_status")
+    return status == "success" or (
+        status == "partial" and not context.user_data.get("last_filing_uncertain")
+    )
 
 
 def _store_draft(context, draft):
@@ -1781,8 +1799,7 @@ def _restore_retryable_draft(context) -> bool:
     """If the active draft is gone but the last filing was partial/failed, restore
     the saved `last_amend_*` snapshot into `draft_data` so a retry approval can
     file it again. Returns True when a draft is restored."""
-    status = context.user_data.get("last_filing_status")
-    if status not in {"partial", "failed"}:
+    if not _last_filing_retryable(context):
         return False
     if context.user_data.get("draft_data"):
         return False
@@ -1904,9 +1921,11 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
             "excluded_form_types",
             "quick_improve_used",
             "amend_mode",
+            "amend_draft_url",
             "amend_pending_feedback",
             "last_draft_preview",
             "last_amend_draft",
+            "last_amend_draft_url",
             "last_amend_case_text",
             "last_amend_chosen_form",
             "last_bot_msg_id",
@@ -2168,6 +2187,7 @@ async def _handle_incomplete_draft_complaint(message, context) -> int | None:
 
     form_type = form_type or getattr(draft, "form_type", None) or "CBD"
     context.user_data["amend_mode"] = True
+    context.user_data["amend_draft_url"] = context.user_data.get("last_amend_draft_url")
     context.user_data["quick_improve_used"] = False
 
     missing_required, missing_optional, _ = _missing_template_fields(draft, form_type)
@@ -5278,7 +5298,7 @@ def _build_doc_intent_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("📎 Read + attach", callback_data="DOCUSE|both"),
-            InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|doc_intent"),
+            InlineKeyboardButton("❌ Remove", callback_data="DOCUSE|ignore"),
         ],
     ])
 
@@ -5293,7 +5313,7 @@ def _build_evidence_artifact_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📎 Attach as evidence", callback_data="DOCUSE|attach"),
-            InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|doc_intent"),
+            InlineKeyboardButton("❌ Remove", callback_data="DOCUSE|ignore"),
         ],
     ])
 
@@ -5350,9 +5370,41 @@ def _build_amend_new_case_choice_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def _already_saved_text(context) -> str:
+    form_name = context.user_data.get("last_filing_form_name") or "That draft"
+    return f"✅ {form_name} is already saved to Kaizen as a draft. Send a new case when you're ready."
+
+
+_FILING_UNCERTAIN_TEXT = (
+    "⚠️ Kaizen didn't confirm the save, so it may have saved anyway.\n\n"
+    "Check your Kaizen drafts first. Tap Retry only if it isn't there."
+)
+
+
+def _build_uncertain_filing_keyboard() -> InlineKeyboardMarkup:
+    """One keyboard for every save whose outcome is unknown (timeout, crash)."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔗 Check Kaizen drafts", url="https://kaizenep.com/activities")],
+        [
+            InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_filing"),
+            InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|reset"),
+        ],
+    ])
+
+
+def _draft_url_to_reuse(context, retrying: bool) -> str | None:
+    """The one Kaizen draft a save may reopen: the failed attempt's own draft
+    on Retry, or the already-saved draft being amended. Otherwise a new form."""
+    if retrying:
+        return context.user_data.get("kaizen_draft_url")
+    if context.user_data.get("amend_mode"):
+        return context.user_data.get("amend_draft_url")
+    return None
+
+
 def _has_retryable_failed_filing_draft(context) -> bool:
     """True when a failed/uncertain filing left a draft active for retry."""
-    if context.user_data.get("last_filing_status") not in {"failed", "partial"}:
+    if not _last_filing_retryable(context):
         return False
     return bool(_load_draft(context) or _restore_retryable_draft(context))
 
@@ -5380,6 +5432,12 @@ def _build_open_case_new_case_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+_OPEN_CASE_CHOICE_TEXT = (
+    "📝 You already have a case open.\n\n"
+    "Add this to it, or start a separate case?"
+)
+
+
 async def _show_open_case_new_case_gate(
     target,
     context,
@@ -5392,6 +5450,8 @@ async def _show_open_case_new_case_gate(
     prompt_text = (
         "This looks like a new case, but your current draft is still open.\n\n"
         "Start a separate case, or add this detail to the current draft?"
+        if context.user_data.get("draft_data") or context.user_data.get("chosen_form")
+        else _OPEN_CASE_CHOICE_TEXT
     )
     markup = _build_open_case_new_case_keyboard()
     if edit:
@@ -7267,6 +7327,11 @@ def _format_generic_draft(draft: FormDraft) -> str:
 
 # === COMMAND HANDLERS ===
 
+_PAYMENT_ACTIVE_TEXT = "✅ Portfolio Guru Unlimited is on. Carry on where you left off."
+_PAYMENT_PENDING_TEXT = "⏳ Payment received. I'll confirm here once Unlimited is switched on."
+_PAYMENT_CANCELLED_TEXT = "↩️ Payment cancelled. Nothing was charged."
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle /start — welcome message + deep links.
 
@@ -7280,6 +7345,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if context.user_data.get(dedup_key) == update.update_id:
         # Already handled this /start update — skip duplicate
         return ConversationHandler.END
+
+    # Coming back from the Stripe payment page is not a fresh start: keep any
+    # open case or draft and stay in the current step (None keeps the state).
+    if context.args and context.args[0].lower() in ("upgraded", "cancelled"):
+        context.user_data[dedup_key] = update.update_id
+        if context.args[0].lower() == "cancelled":
+            text = _PAYMENT_CANCELLED_TEXT
+        elif await get_user_tier(update.effective_user.id) == "pro_plus":
+            text = _PAYMENT_ACTIVE_TEXT
+        else:
+            text = _PAYMENT_PENDING_TEXT
+        await update.message.reply_text(text)
+        return None
 
     # Capture an in-flight setup-to-consent continuation BEFORE we wipe transient
     # state. Only a user who just cleared Steps 1-2 and is sitting on the
@@ -8940,6 +9018,13 @@ async def handle_same_case_another(update: Update, context: ContextTypes.DEFAULT
         )
         return ConversationHandler.END
 
+    # An old "same case" button must not wipe a newer case that is still open.
+    open_case = (context.user_data.get("case_text") or "").strip()
+    last_filed = (context.user_data.get("last_filed_case_text") or "").strip()
+    if open_case and last_filed and open_case != last_filed:
+        await _retire_clicked_keyboard(query)
+        return await _resume_paused_flow(update, context, "📝 You already have a newer case open.")
+
     # Selective cleanup — preserve conversation handler state keys
     for key in list(context.user_data.keys()):
         if key not in ("case_text", "excluded_form_type"):
@@ -9532,11 +9617,8 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         # backwards-compatibility with reset buttons in old chat history; the
         # user-facing copy and the public command are both "reset".
         await query.message.edit_text(
-            "⚠️ Reset Portfolio Guru?\n\nThis clears your Kaizen login, settings, writing style and history here. Cases already saved in Kaizen are unaffected.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🗑️ Delete data", callback_data="CONFIRM|reset")],
-                [InlineKeyboardButton("🛡️ Keep data", callback_data="ACTION|cancel")],
-            ])
+            _RESET_CONFIRM_TEXT,
+            reply_markup=_build_reset_confirm_keyboard(),
         )
 
 
@@ -9714,17 +9796,38 @@ async def _perform_reset(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> No
         logger.warning("Could not clear Supabase mirror on reset", exc_info=True)
 
 
-async def reset_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle /reset (and the hidden /delete backwards-compat alias) — wipe all
-    local Portfolio Guru state for this user and prompt them to reconnect
-    Kaizen. Cases already saved in Kaizen are unaffected."""
-    await _perform_reset(update.effective_user.id, context)
+_RESET_CONFIRM_TEXT = (
+    "⚠️ Reset Portfolio Guru?\n\n"
+    "This clears your Kaizen login, settings and history here. "
+    "Cases already saved in Kaizen are unaffected."
+)
+_RESET_KEPT_TEXT = "🛡️ Kept. Nothing was deleted."
+
+
+def _build_reset_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🗑️ Delete data", callback_data="CONFIRM|reset")],
+        [InlineKeyboardButton("🛡️ Keep data", callback_data="CONFIRM|keep")],
+    ])
+
+
+async def reset_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /reset (and the hidden /delete backwards-compat alias).
+
+    Asks first, exactly like Settings > Reset data: the wipe itself runs only
+    from the Delete button (handle_reset_confirm). Keep changes nothing.
+    """
     await update.message.reply_text(
-        _DATA_CLEAR_TEXT,
-        reply_markup=_build_data_clear_keyboard(),
+        _RESET_CONFIRM_TEXT,
+        reply_markup=_build_reset_confirm_keyboard(),
     )
-    await update.message.reply_text(_KAIZEN_USERNAME_PROMPT, parse_mode="Markdown")
-    return AWAIT_USERNAME
+
+
+async def handle_reset_keep(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Keep data on the reset question: touch nothing, including an open draft."""
+    query = update.callback_query
+    await query.answer()
+    await query.message.edit_text(_RESET_KEPT_TEXT)
 
 
 async def handle_reset_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -9888,6 +9991,12 @@ def _upgrade_buttons(current_tier: str) -> list:
     ]
 
 
+_ALREADY_UNLIMITED_TEXT = (
+    "✅ You're already on Portfolio Guru Unlimited.\n\n"
+    "Nothing more to pay. Send a case whenever you're ready."
+)
+
+
 async def upgrade_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle /upgrade and /plan — show current tier and upgrade options."""
     user_id = update.effective_user.id
@@ -9899,13 +10008,7 @@ async def upgrade_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     _flow_done(context, "upgrade")  # fresh start — drop any stale anchor
 
     if tier == "pro_plus":
-        await _flow_msg(
-            update, context,
-            "You're on Portfolio Guru Unlimited.\n\n"
-            "Unlimited Kaizen WPBA filing, AI extraction, draft review, "
-            "Portfolio Health, and unsigned-ticket scanning.",
-            flow_key="upgrade",
-        )
+        await _flow_msg(update, context, _ALREADY_UNLIMITED_TEXT, flow_key="upgrade")
         _flow_done(context, "upgrade")
         return ConversationHandler.END
 
@@ -9939,6 +10042,13 @@ async def handle_upgrade_button(update: Update, context: ContextTypes.DEFAULT_TY
     if tier == "pro":
         tier = "pro_plus"
     tier_label = "Portfolio Guru Unlimited"
+
+    # An old Upgrade button tapped by someone already paying must not open a
+    # second checkout (and so a second subscription).
+    if await get_user_tier(update.effective_user.id) == "pro_plus":
+        await _flow_edit(update, context, _ALREADY_UNLIMITED_TEXT, flow_key="upgrade")
+        _flow_done(context, "upgrade")
+        return
 
     try:
         from stripe_handler import create_checkout_session
@@ -12207,12 +12317,19 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         case_text = context.user_data.get("case_text", "")
         user_id = update.effective_user.id
         if case_text:
-            return await _process_case_text(query.message, context, user_id, case_text, "retry")
+            await _retire_clicked_keyboard(query)
+            source = context.user_data.get("case_input_source") or "retry"
+            return await _process_case_text(query.message, context, user_id, case_text, source)
         await query.edit_message_text("No case text found. Please send a new case.")
         return AWAIT_CASE_INPUT
 
     elif data == "ACTION|retry_filing":
         if not _has_retryable_failed_filing_draft(context):
+            if _last_filing_saved(context) and not _load_draft(context):
+                await query.answer("Already saved to Kaizen as a draft.")
+                await _retire_clicked_keyboard(query)
+                await query.message.reply_text(_already_saved_text(context))
+                return None
             await query.answer("That retry is no longer active. Review the latest draft before saving.")
             return None
         context.user_data["retry_filing_requested"] = True
@@ -12328,6 +12445,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("DOCUSE|"):
         return await handle_document_intent(update, context)
 
+    elif data == "CANCEL|doc_intent" and context.user_data.get("_pending_doc"):
+        # Older document prompts said Cancel, which wiped the whole case. Like
+        # every other file prompt, it now removes just that file.
+        return await handle_document_intent(update, context, mode="ignore")
+
     elif data.startswith("FORM|"):
         return await handle_form_choice(update, context)
 
@@ -12420,11 +12542,52 @@ def _detach_pending_video_prompt(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def handle_pending_media_context(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Let voice/audio advance a pending video without changing image/document choices."""
-    if _pending_media_label(context) != "video":
+    """Let voice/audio advance a pending video without changing image/document choices.
+
+    With an image or document choice waiting, a voice note is kept as extra
+    context exactly like typed text is, instead of being dropped silently.
+    """
+    pending_label = _pending_media_label(context)
+    if pending_label != "video":
+        spoken = await _transcribe_voice_message(update.message)
+        if not spoken:
+            await update.message.reply_text(
+                f"⚠️ Couldn't read that voice note. Your {pending_label or 'file'} choice is still waiting above."
+            )
+            return AWAIT_DOC_INTENT
+        existing = context.user_data.get("_pending_doc_context", "").strip()
+        context.user_data["_pending_doc_context"] = f"{existing}\n\n{spoken}".strip() if existing else spoken
+        await update.message.reply_text(_pending_media_context_kept_text(pending_label or "file"))
         return AWAIT_DOC_INTENT
     _detach_pending_video_prompt(context)
     return await handle_case_input(update, context)
+
+
+def _pending_media_context_kept_text(pending_label: str) -> str:
+    return (
+        f"I've kept that as extra context. Your {pending_label} choice is still pending - "
+        "use the buttons above to choose whether to use it for drafting, attach it, or both."
+    )
+
+
+async def _transcribe_voice_message(message) -> str | None:
+    """Transcribe a voice/audio message; None when it can't be read."""
+    voice_media = _voice_media_from_message(message)
+    if not voice_media:
+        return None
+    tmp_path = None
+    try:
+        voice_file = await voice_media.get_file()
+        with tempfile.NamedTemporaryFile(suffix=_voice_media_suffix(voice_media), delete=False) as tmp:
+            tmp_path = tmp.name
+        await voice_file.download_to_drive(tmp_path)
+        return (await transcribe_voice(tmp_path) or "").strip() or None
+    except Exception:
+        logger.warning("Voice note transcription failed", exc_info=True)
+        return None
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 async def _document_followup_refresh_draft(
@@ -12462,11 +12625,12 @@ async def _document_followup_refresh_draft(
     return await _show_draft_review(query.message, context, draft, chosen_form)
 
 
-async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, mode: str | None = None) -> int:
     """Apply the user's explicit file/image intent: read, attach, both, or remove."""
     query = update.callback_query
     await query.answer()
-    mode = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else ""
+    if mode is None:
+        mode = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else ""
     _remember_audit_user(context, update)
     content_state = _content_state_while_media_pending(context)
     pending_items = _pending_media_items(context)
@@ -13534,11 +13698,8 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 return await handle_approval_approve(update, context)
             if _restore_retryable_draft(context):
                 return await handle_approval_approve(update, context)
-            if context.user_data.get("last_filing_status") == "success":
-                form_name = context.user_data.get("last_filing_form_name", "that draft")
-                await update.message.reply_text(
-                    f"✅ {form_name} was already saved to Kaizen as a draft. Send a new case when you're ready."
-                )
+            if _last_filing_saved(context):
+                await update.message.reply_text(_already_saved_text(context))
                 return ConversationHandler.END
 
         if _is_recent_filing_status_question(raw_text) and context.user_data.get("last_filing_status"):
@@ -14303,6 +14464,18 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 parse_mode="Markdown",
             )
         return AWAIT_CASE_INPUT
+
+    # A voice note while form suggestions are showing gets the same choice a
+    # typed message does; it used to replace the open case without a word.
+    if (
+        input_source == "voice"
+        and not source_detail_retry
+        and context.user_data.get("form_recommendations")
+        and context.user_data.get("case_text")
+        and not context.user_data.get("awaiting_detail")
+        and not _gathering_case_active(context)
+    ):
+        return await _show_open_case_new_case_gate(update.message, context, case_text)
 
     chosen_form = context.user_data.get("chosen_form")
     if (
@@ -15437,7 +15610,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 curriculum_links=curriculum_links,
                 form_name=form_name,
                 # Retry reopens only the exact draft the last attempt reached.
-                reuse_draft_url=context.user_data.get("kaizen_draft_url") if reuse_existing_draft else None,
+                reuse_draft_url=_draft_url_to_reuse(context, reuse_existing_draft),
                 attachment_path=attachment_path,
                 telegram_user_id=user_id,
             ),
@@ -15476,26 +15649,16 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             reason="timeout",
             user_id=user_id,
         )
-        kaizen_url = f"https://kaizenep.com/events/new-section/{FORM_UUIDS.get(form_type, '')}" if FORM_UUIDS.get(form_type) else "https://kaizenep.com/activities"
-        timeout_msg = (
-            "⏱ Filing took too long — Kaizen may be slow right now. "
-            "Tap 'Open Kaizen' to finish manually, or retry."
-        )
-        retry_keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_filing"),
-                InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|reset"),
-            ],
-            [InlineKeyboardButton("🔗 Open Kaizen", url=kaizen_url)],
-        ])
+        # The filer was cancelled mid-save, so Kaizen may already hold an
+        # autosaved draft this bot has no address for: the same warning as
+        # an exception, so a blind Retry doesn't make a second draft.
         try:
-            await ack.edit_text(timeout_msg, reply_markup=retry_keyboard, parse_mode="Markdown")
+            await ack.edit_text(_FILING_UNCERTAIN_TEXT, reply_markup=_build_uncertain_filing_keyboard())
         except Exception:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text=timeout_msg,
-                reply_markup=retry_keyboard,
-                parse_mode="Markdown",
+                text=_FILING_UNCERTAIN_TEXT,
+                reply_markup=_build_uncertain_filing_keyboard(),
             )
         # Keep draft so user can retry without re-typing the case
         return AWAIT_APPROVAL
@@ -15529,19 +15692,13 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             user_id=user_id,
         )
         # Keep draft data for retry — do NOT clear user_data
-        retry_keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_filing"),
-                InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|reset"),
-            ],
-        ])
         try:
-            await ack.edit_text("❌ Filing failed. Try again or file another case.", reply_markup=retry_keyboard)
+            await ack.edit_text(_FILING_UNCERTAIN_TEXT, reply_markup=_build_uncertain_filing_keyboard())
         except Exception:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text="❌ Filing failed. Try again or file another case.",
-                reply_markup=retry_keyboard,
+                text=_FILING_UNCERTAIN_TEXT,
+                reply_markup=_build_uncertain_filing_keyboard(),
             )
         return AWAIT_APPROVAL  # Stay in approval state so retry can pick up draft
     finally:
@@ -15707,6 +15864,9 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         context.user_data["last_amend_draft"] = amend_draft_data
         context.user_data["last_amend_case_text"] = amend_case_text
         context.user_data["last_amend_chosen_form"] = amend_chosen_form_type
+        # Amending later updates this same Kaizen draft instead of adding one.
+        if result.get("draft_url"):
+            context.user_data["last_amend_draft_url"] = result["draft_url"]
         _track_funnel_event(context, "draft_saved", form_type=form_type)
 
     # Only treat the post-save URL as a real draft link when the save itself
@@ -16075,6 +16235,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             status_line = "❌ Filing stopped."
 
     context.user_data["last_filing_status"] = status
+    context.user_data["last_filing_uncertain"] = uncertain_save
     context.user_data["last_filing_form_name"] = form_name
     context.user_data["last_filing_report"] = msg
 
@@ -16425,6 +16586,7 @@ async def handle_amend_draft(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.answer("Amend cancelled")
         for key in (
             "amend_mode",
+            "amend_draft_url",
             "draft_data",
             "case_text",
             "chosen_form",
@@ -16489,13 +16651,14 @@ async def handle_amend_draft(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data["chosen_form"] = amend_form
     context.user_data["draft_data"] = amend_draft
     context.user_data["amend_mode"] = True
+    context.user_data["amend_draft_url"] = context.user_data.get("last_amend_draft_url")
     context.user_data["quick_improve_used"] = False
 
     # Show the draft and enter approval state
     draft = _load_draft(context)
     preview = _format_draft_preview_for_context(draft, context, amend_form)
     await query.message.reply_text(
-        "✏️ *Amending this draft.* Send changes, then tap *Save updated draft* or *Cancel amend*.\n\n"
+        "✏️ *Amending this draft.* Send changes, then tap *Save to Kaizen* to update it, or *Cancel*.\n\n"
         + preview,
         reply_markup=_build_amend_keyboard(improved_once=False, context=context),
         parse_mode="Markdown",
@@ -16733,10 +16896,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
         context.user_data["_pending_doc_context"] = (
             f"{existing}\n\n{raw_text}".strip() if existing else raw_text
         )
-        await update.message.reply_text(
-            f"I've kept that as extra context. Your {pending_label} choice is still pending - "
-            "use the buttons above to choose whether to use it for drafting, attach it, or both."
-        )
+        await update.message.reply_text(_pending_media_context_kept_text(pending_label))
         return AWAIT_DOC_INTENT
 
     if context.user_data.pop("awaiting_reflection_detail", False) and has_draft and case_text:
@@ -16808,11 +16968,8 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
     # Check if we're in a state with an active draft
     amend_mode = bool(context.user_data.get("amend_mode") and has_draft)
 
-    if _is_text_filing_approval(raw_text) and context.user_data.get("last_filing_status") == "success":
-        form_name = context.user_data.get("last_filing_form_name", "that draft")
-        await update.message.reply_text(
-            f"✅ {form_name} was already saved to Kaizen as a draft. Send a new case when you're ready."
-        )
+    if _is_text_filing_approval(raw_text) and _last_filing_saved(context) and not has_draft:
+        await update.message.reply_text(_already_saved_text(context))
         return ConversationHandler.END
 
     if _is_recent_filing_status_question(raw_text) and context.user_data.get("last_filing_status"):
@@ -18004,6 +18161,7 @@ def build_application() -> Application:
     # Inline reset confirmation. Accepts the legacy CONFIRM|delete payload so
     # reset buttons in old chat history still complete.
     application.add_handler(CallbackQueryHandler(handle_reset_confirm, pattern=r"^CONFIRM\|(?:reset|delete)$"))
+    application.add_handler(CallbackQueryHandler(handle_reset_keep, pattern=r"^CONFIRM\|keep$"))
     # Consent decisions must work regardless of conversation state — the gate
     # ends the conversation, so the accept/decline tap arrives outside it.
     application.add_handler(CallbackQueryHandler(handle_consent_callback, pattern=r"^CONSENT\|"))
@@ -18196,10 +18354,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         was_saving = bool(user_data.pop("filing_in_progress", False))
         draft = _load_draft(context) if user_data else None
         if was_saving:
-            text = (
-                "Something went wrong while saving to Kaizen. Please check your Kaizen drafts "
-                "before trying again, in case it saved. Your draft is still here."
-            )
+            text = _FILING_UNCERTAIN_TEXT
         elif draft:
             text = "Something went wrong on my side. Nothing was saved to Kaizen and your draft is still here."
         else:

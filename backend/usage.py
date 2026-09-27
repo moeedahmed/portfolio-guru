@@ -321,10 +321,21 @@ async def get_stripe_ids_for_user(telegram_user_id: int) -> tuple[str | None, st
             return (row[0], row[1]) if row else (None, None)
 
 
-async def set_user_tier(user_id: int, tier: str, stripe_customer_id: str = None, stripe_subscription_id: str = None):
-    """Set or update a user's subscription tier."""
+async def set_user_tier(user_id: int, tier: str, stripe_customer_id: str = None, stripe_subscription_id: str = None) -> str | None:
+    """Set or update a user's subscription tier.
+
+    Returns the tier stored before this write (None for a new user), read in
+    the same write transaction so concurrent webhooks cannot both see "free".
+    """
     await _ensure_db()
     async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("BEGIN IMMEDIATE")
+        async with db.execute(
+            "SELECT tier FROM user_profiles WHERE telegram_user_id = ?",
+            (user_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        previous_tier = row[0] if row else None
         await db.execute(
             """INSERT INTO user_profiles (telegram_user_id, tier, stripe_customer_id, stripe_subscription_id)
                VALUES (?, ?, ?, ?)
@@ -342,6 +353,7 @@ async def set_user_tier(user_id: int, tier: str, stripe_customer_id: str = None,
         mirror_tier(user_id, tier, stripe_customer_id=stripe_customer_id, stripe_subscription_id=stripe_subscription_id)
     except Exception:
         pass
+    return previous_tier
 
 
 async def has_processed_stripe_event(event_id: str) -> bool:

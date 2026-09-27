@@ -60,7 +60,7 @@ def registration_digest(slots):
 
 # Reviewed registration shape: adding/reordering a slot requires a new exercised
 # scenario, not an automatically regenerated approval manifest.
-REGISTRATION_DIGEST = "c1135821483730e3fa513ecd4a2ccdcabb7ef3e83cc52950cfe603b1b86e2a24"
+REGISTRATION_DIGEST = "8e39260f662cd30dc6cfe2b4a140c1d1b0f314787cec32b4492eb85c7a89aaa7"
 CATEGORIES = {
     name: category for category, names in {
         "admin": "assignbeta_command beta_command filingreport_command funnelreport_command listusers_command setbeta_command settier_command",
@@ -75,7 +75,7 @@ CATEGORIES = {
             handle_form_choice handle_form_search_text handle_gathering_input handle_info_button
             handle_mid_conversation_text handle_pathway_choice handle_pending_media_context
             handle_pushback handle_quick_improve handle_review_draft handle_same_case_another
-            handle_set_curriculum handle_set_level handle_supervisor_callback handle_template_review_media
+            handle_reset_keep handle_set_curriculum handle_set_level handle_supervisor_callback handle_template_review_media
             handle_template_review_text handle_unsigned_range_pick handle_reminder_callback health_command help_command link_command
             pathway_command privacy_command settings_command setup_cancel setup_curriculum
             setup_start setup_training_level setup_username start unsigned_command upgrade_command

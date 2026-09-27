@@ -757,3 +757,46 @@ async def test_explicit_new_case_during_thin_detail_state_prompts_choice(monkeyp
         ('✏️ Add to draft', "CASE|improve"),
         ('❌ Cancel', "ACTION|cancel"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_voice_note_while_forms_are_suggested_asks_before_replacing_case(monkeypatch):
+    """Route audit 2026-09-27: text here asks 'add or new case?'; a voice note
+    used to replace the open case silently. Both now get the same choice."""
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["case_text"] = _FIRST_CASE
+    context.user_data["form_recommendations"] = [{"form_type": "CBD"}]
+    update = _make_voice_update(sim)
+
+    process_case = AsyncMock(return_value=AWAIT_FORM_CHOICE)
+    with patch("bot.has_credentials", return_value=True), \
+         patch("bot.consent.has_current_consent", new=AsyncMock(return_value=True)), \
+         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 0, 10, "free"))), \
+         patch("bot.transcribe_voice", new=AsyncMock(return_value="A new patient with a wrist fracture.")), \
+         patch("bot._process_case_text", new=process_case):
+        result = await handle_case_input(update, context)
+
+    assert result == AWAIT_TEMPLATE_REVIEW
+    process_case.assert_not_awaited()
+    assert context.user_data["case_text"] == _FIRST_CASE
+    assert context.user_data["pending_new_case_text"] == "A new patient with a wrist fracture."
+    assert sim.get_last_text() == bot._OPEN_CASE_CHOICE_TEXT
+    assert [data for _, data in sim.get_last_buttons()] == ["CASE|new", "CASE|improve", "ACTION|cancel"]
+
+
+@pytest.mark.asyncio
+async def test_voice_note_while_image_choice_waits_is_kept_like_text():
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["_pending_doc"] = {"path": "/tmp/x.jpg", "name": "x.jpg", "kind": "image"}
+    update = _make_voice_update(sim)
+
+    with patch("bot._pending_media_label", return_value="image"), \
+         patch("bot.transcribe_voice", new=AsyncMock(return_value="This is the ECG from resus.")):
+        result = await bot.handle_pending_media_context(update, context)
+
+    assert result == bot.AWAIT_DOC_INTENT
+    assert context.user_data["_pending_doc_context"] == "This is the ECG from resus."
+    assert sim.get_last_text() == bot._pending_media_context_kept_text("image")

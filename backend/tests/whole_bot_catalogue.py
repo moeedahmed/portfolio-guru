@@ -47,7 +47,7 @@ def producer_digest():
     return hashlib.sha256(json.dumps(modules).encode()).hexdigest()
 
 
-PRODUCER_DIGEST = '81c76f915c653f4c86b05a99171c3951179518d48e60a5f63a5db300371f0d39'
+PRODUCER_DIGEST = 'c758485775993b310b0a1bc50b97946f6c6eac8e6c64adca60e1ba0af2018e59'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
@@ -59,7 +59,7 @@ ACTION|health_view|priorities ACTION|portfolio_defaults ACTION|refresh_portfolio
 ACTION|retry_filing ACTION|retry_recommend ACTION|retry_setup_login ACTION|retry_template
 ACTION|same_case_another ACTION|settings ACTION|setup ACTION|voice AMEND|cancel AMEND|cancel_choice
 AMEND|start_new AMEND|update_current APPROVE|draft ATTACH|no ATTACH|yes CANCEL|doc_intent CANCEL|draft
-CANCEL|edit CANCEL|form CASE|improve CASE|new CONFIRM|reset CONSENT|accept|* CONSENT|decline|* DOCUSE|attach
+CANCEL|edit CANCEL|form CASE|improve CASE|new CONFIRM|keep CONFIRM|reset CONSENT|accept|* CONSENT|decline|* DOCUSE|attach
 DOCUSE|both DOCUSE|ignore DOCUSE|info FIELD|* FORM|* FORM|back FORM|best FORM|cat_* FORM|disabled
 FORM|show_all GATHER|done INFO|what PATHWAY_SETTINGS|* PATHWAY|* PUSHBACK|*|curriculum_links
 PUSHBACK|*|date_of_encounter PUSHBACK|*|key_capabilities PUSHBACK|*|other PUSHBACK|*|reflection SETLEVEL|*
@@ -193,7 +193,7 @@ def reviewed_units(slots):
     return dict(sorted(units.items()))
 
 
-CATALOGUE_DIGEST = '429ea6dc3ca0ee24e8f5eded77b18d58dfb48534852f8d85c970fd7b51789f13'
+CATALOGUE_DIGEST = '72f470f04eea512648a7a1f7ccdb1571048c77a49d8c9a16b900ec7c62de4b30'
 
 
 def requirements_digest(units):

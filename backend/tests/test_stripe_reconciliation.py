@@ -36,7 +36,7 @@ async def test_invoice_paid_reactivates_user(monkeypatch):
              "data": {"object": {"subscription": "sub_9", "customer": "cus_9"}}}
     result = await stripe_handler._handle_constructed_event(event, "invoice.paid")
 
-    assert result == {"action": "upgraded", "user_id": 42, "tier": "pro_plus"}
+    assert result == {"action": "upgraded", "user_id": 42, "tier": "pro_plus", "newly_upgraded": True}
     assert set_calls and set_calls[0][0] == (42, "pro_plus")
 
 
@@ -48,7 +48,7 @@ async def test_reconcile_active_subscription_sets_tier(monkeypatch):
                         lambda sid: _Sub("active", "price_plus"))
 
     result = await stripe_handler.reconcile_subscription(7)
-    assert result == {"action": "upgraded", "user_id": 7, "tier": "pro_plus"}
+    assert result == {"action": "upgraded", "user_id": 7, "tier": "pro_plus", "newly_upgraded": True}
 
 
 async def test_reconcile_canceled_downgrades(monkeypatch):

@@ -49,7 +49,7 @@ async def test_checkout_completed_upgrades_to_unlimited_and_stores_stripe_ids(st
         "checkout.session.completed",
     )
 
-    assert result == {"action": "upgraded", "user_id": 12345, "tier": "pro_plus"}
+    assert result == {"action": "upgraded", "user_id": 12345, "tier": "pro_plus", "newly_upgraded": True}
     assert await usage.get_user_tier(12345) == "pro_plus"
     assert await usage.get_user_by_stripe_customer("cus_123") == 12345
     assert await usage.get_user_by_stripe_subscription("sub_123") == 12345

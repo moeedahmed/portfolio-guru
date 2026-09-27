@@ -25,6 +25,12 @@ ACTIVE_SUBSCRIPTION_STATUSES = {"active", "trialing"}
 INACTIVE_SUBSCRIPTION_STATUSES = {"past_due", "unpaid", "canceled", "incomplete_expired"}
 
 
+def _is_newly_paid(previous_tier: str | None) -> bool:
+    """True when a paid tier replaces free/none, so the welcome is sent once
+    per upgrade rather than on every renewal invoice."""
+    return (previous_tier or "free") == "free"
+
+
 class StripeBillingConfigError(RuntimeError):
     """Raised when billing is configured in a mode that can charge users incorrectly."""
 
@@ -129,11 +135,12 @@ async def _handle_constructed_event(event, event_type: str | None) -> dict:
         tier = _tier_from_price(price_id)
         if tier is None:
             return {"action": "error", "user_id": user_id, "error": "unknown subscription price"}
-        await set_user_tier(user_id, tier,
-                           stripe_customer_id=_get(session, "customer"),
-                           stripe_subscription_id=subscription_id)
+        previous_tier = await set_user_tier(user_id, tier,
+                                            stripe_customer_id=_get(session, "customer"),
+                                            stripe_subscription_id=subscription_id)
         logger.info("Portfolio Guru funnel event=checkout_completed user_id=%s tier=%s", user_id, tier)
-        return {"action": "upgraded", "user_id": user_id, "tier": tier}
+        return {"action": "upgraded", "user_id": user_id, "tier": tier,
+                "newly_upgraded": _is_newly_paid(previous_tier)}
 
     if event_type == "customer.subscription.deleted":
         subscription = obj
@@ -220,8 +227,9 @@ async def _apply_subscription_to_user(user_id: int, subscription) -> dict:
         tier = _tier_from_price(price_id)
         if tier is None:
             return {"action": "error", "user_id": user_id, "error": "unknown subscription price"}
-        await set_user_tier(user_id, tier, stripe_customer_id=customer_id, stripe_subscription_id=subscription_id)
-        return {"action": "upgraded", "user_id": user_id, "tier": tier}
+        previous_tier = await set_user_tier(user_id, tier, stripe_customer_id=customer_id, stripe_subscription_id=subscription_id)
+        return {"action": "upgraded", "user_id": user_id, "tier": tier,
+                "newly_upgraded": _is_newly_paid(previous_tier)}
     if status in INACTIVE_SUBSCRIPTION_STATUSES:
         await set_user_tier(user_id, "free", stripe_customer_id=customer_id, stripe_subscription_id=subscription_id)
         return {"action": "downgraded", "user_id": user_id, "reason": f"subscription_{status}"}

@@ -1952,6 +1952,8 @@ class TestFlowWalker:
         )
         context.user_data['last_amend_chosen_form'] = thin_draft.form_type
         context.user_data['last_filing_status'] = 'partial'
+        # Partial with an error: the save may not have landed, so it retries.
+        context.user_data['last_filing_uncertain'] = True
         context.user_data['last_filing_form_name'] = 'Case-Based Discussion'
 
         route_filing_mock = AsyncMock(return_value={
@@ -1970,6 +1972,39 @@ class TestFlowWalker:
         route_filing_mock.assert_awaited()
         assert result == ConversationHandler.END
         assert context.user_data['last_filing_status'] == 'success'
+
+    @pytest.mark.asyncio
+    async def test_text_retry_after_clean_partial_save_does_not_file_again(self, thin_draft):
+        """A clean partial save is already a Kaizen draft: 'try again' must not
+        open a second one beside it."""
+        from bot import handle_case_input
+
+        sim = BotSimulator()
+        update = sim._make_text_update('try again')
+        context = sim._make_context()
+        context.user_data['last_amend_draft'] = {
+            '_type': 'FORM',
+            'form_type': thin_draft.form_type,
+            'fields': thin_draft.fields,
+            'uuid': thin_draft.uuid,
+        }
+        context.user_data['last_amend_case_text'] = 'Original case text.'
+        context.user_data['last_amend_chosen_form'] = thin_draft.form_type
+        context.user_data['last_filing_status'] = 'partial'
+        context.user_data['last_filing_uncertain'] = False
+        context.user_data['last_filing_form_name'] = 'Case-Based Discussion'
+
+        route_filing_mock = AsyncMock()
+        with patch('bot.has_credentials', return_value=True), \
+             patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))), \
+             patch('bot.get_credentials', return_value=('user', 'pass')), \
+             patch('bot.route_filing', new=route_filing_mock), \
+             patch('bot.recommend_form_types', new=AsyncMock(return_value=[])):
+            result = await handle_case_input(update, context)
+
+        route_filing_mock.assert_not_awaited()
+        assert result == ConversationHandler.END
+        assert 'already saved to Kaizen' in sim.get_last_text()
 
     @pytest.mark.asyncio
     async def test_recent_filing_question_reports_saved_status(self):
