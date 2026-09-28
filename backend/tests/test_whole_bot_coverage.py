@@ -827,7 +827,7 @@ async def test_retry_setup_login_dispatches_password_state(scenario, monkeypatch
     await app.process_update(update)
     assert not errors
     if has_pending:
-        assert any("Login failed" in text for text in collector.texts)
+        assert any("didn't accept that email and password" in text for text in collector.texts)
         login.assert_awaited_once_with("synthetic@example.invalid", "synthetic-password")
     else:
         assert bot._KAIZEN_USERNAME_PROMPT in collector.texts

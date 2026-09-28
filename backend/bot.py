@@ -2801,11 +2801,6 @@ _KB_RETRY_SETUP = InlineKeyboardMarkup([
     [_BTN_CANCEL],
 ])
 
-_KB_RETYPE_SETUP = InlineKeyboardMarkup([
-    [InlineKeyboardButton("🔄 Retry", callback_data="ACTION|setup")],
-    [_BTN_CANCEL],
-])
-
 # --- Passwordless Kaizen connection ------------------------------------------
 # Opt-in alternative to storing a password: the doctor signs in to Kaizen on
 # the Connect Kaizen page (mobile_kaizen_handoff), and only the signed-in
@@ -2835,6 +2830,25 @@ _KB_CONNECT_CHOICE = InlineKeyboardMarkup([
     [_BTN_CONNECT_PASSWORDLESS],
     [_BTN_CANCEL],
 ])
+# Kaizen turned the typed email and password down. The doctor stays on the
+# same connect message and can type their email again straight away; where
+# passwordless is offered, that way in sits right under it (2026-09-28: the
+# old "Select Retry, or type your Kaizen email" step reached doctors who were
+# never shown the connect choice).
+_LOGIN_REJECTED_TEXT = (
+    "❌ *Kaizen didn't accept that email and password.*\n\n"
+    "Type your Kaizen email to try again."
+)
+
+
+def _login_rejected_prompt(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
+    rows = []
+    if kaizen_connection.passwordless_offered_to(user_id):
+        rows.append([_BTN_CONNECT_PASSWORDLESS])
+    rows.append([_BTN_CANCEL])
+    return _LOGIN_REJECTED_TEXT, InlineKeyboardMarkup(rows)
+
+
 _PASSWORDLESS_LINK_TEXT = (
     "🔒 *Sign in to Kaizen*\n\n"
     "Tap *Open Kaizen sign-in*. I'll confirm here as soon as it works.\n\n"
@@ -7872,16 +7886,7 @@ async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         progress_task.cancel()
 
     if not login_ok:
-        await _flow_edit(
-            update, context,
-            "❌ Login failed — please check your username and password.\n\n"
-            "Select Retry, or type your Kaizen email below.",
-            reply_markup=_KB_RETYPE_SETUP,
-            flow_key="setup",
-        )
-        _clear_setup_retry_credentials(context)
-        context.user_data.pop("setup_username", None)
-        return AWAIT_USERNAME
+        return await _show_login_rejected(update, context)
 
     return await _complete_setup_login(update, context, username, password, login_ok)
 
@@ -8406,6 +8411,18 @@ async def passwordless_reconnected(update: Update, context: ContextTypes.DEFAULT
     return None
 
 
+async def _show_login_rejected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Kaizen rejected the login: back to the email step on the same message."""
+    text, markup = _login_rejected_prompt(update.effective_user.id)
+    await _flow_edit(
+        update, context, text, reply_markup=markup, parse_mode="Markdown", flow_key="setup",
+    )
+    _clear_setup_retry_credentials(context)
+    context.user_data.pop("setup_username", None)
+    context.user_data["_setup_state_hint"] = "username"
+    return AWAIT_USERNAME
+
+
 async def setup_retry_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -8452,17 +8469,7 @@ async def setup_retry_login(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return AWAIT_PASSWORD
 
     if not login_ok:
-        await _flow_edit(
-            update,
-            context,
-            "❌ Login failed — please check your username and password.\n\n"
-            "Select Retry, or type your Kaizen email below.",
-            reply_markup=_KB_RETYPE_SETUP,
-            flow_key="setup",
-        )
-        _clear_setup_retry_credentials(context)
-        context.user_data.pop("setup_username", None)
-        return AWAIT_USERNAME
+        return await _show_login_rejected(update, context)
 
     return await _complete_setup_login(update, context, username, password, login_ok)
 

@@ -70,6 +70,7 @@ CONSTANT_KINDS = {
     "_FILING_UNCERTAIN_TEXT": "error",
     "_OPEN_CASE_CHOICE_TEXT": "prompt",
     "_CONNECT_CHOICE_TEXT": "menu",
+    "_LOGIN_REJECTED_TEXT": "error",
     "_DATA_CLEAR_TEXT": "confirmation",
     "_IMAGE_STILL_READING_TEXT": "confirmation",
     "_KAIZEN_PASSWORD_ROUTE_PROMPT": "prompt",

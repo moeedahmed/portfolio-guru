@@ -215,9 +215,8 @@ async def test_setup_password_credential_failure_shows_login_failed(monkeypatch)
     assert result == AWAIT_USERNAME
     store_creds.assert_not_called()
     last = sim.get_last_text().lower()
-    assert "login failed" in last
+    assert "didn't accept that email and password" in last
     assert "couldn't reach" not in last  # explicitly NOT the infra copy
-    assert ('🔄 Retry', "ACTION|setup") in sim.get_last_buttons()
     assert ('❌ Cancel', "ACTION|cancel") in sim.get_last_buttons()
 
 

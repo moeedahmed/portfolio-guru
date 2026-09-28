@@ -310,3 +310,50 @@ async def test_portfolio_pick_after_no_password_sign_in_ends_setup_normally(harn
     assert "Kaizen connected" in text
     assert bot.render_message("welcome_connected") in text
     assert markup is None or ("🔙 Back", "ACTION|settings") not in _buttons(markup)
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_login_after_start_goes_back_to_the_email_step(harness, monkeypatch):
+    """2026-09-28 (Moeed): /start, then a wrong password, showed the old
+    "Login failed — Select Retry, or type your Kaizen email" step. Now the same
+    message asks for the email again, with the password-free way in under it."""
+    monkeypatch.setattr(bot, "_test_kaizen_login", AsyncMock(return_value=False))
+    await harness.app.initialize()
+    try:
+        await harness.feed(make_command_update("start"))
+        await harness.feed(make_callback_update("ACTION|setup_password"))
+        await harness.feed(make_text_update("doctor@example.test"))
+        await harness.feed(make_text_update("wrong-password"))
+        kind, text, markup = harness.outbox[-1]
+        harness.outbox.clear()
+        await harness.feed(make_text_update("doctor@example.test"))
+    finally:
+        await harness.app.shutdown()
+
+    assert kind == "edit"
+    assert "didn't accept that email and password" in text
+    assert "Type your Kaizen email" in text
+    assert "Login failed" not in text and "Select Retry" not in text
+    assert _buttons(markup) == [
+        ("🔒 Sign in without password", "ACTION|connect_passwordless"),
+        ("❌ Cancel", "ACTION|cancel"),
+    ]
+    # Typing the email again carries straight on to the password.
+    assert any("password" in t.lower() for _, t, _ in harness.outbox)
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_login_without_the_password_free_option_offers_cancel_only(harness, monkeypatch):
+    monkeypatch.setenv("PG_PASSWORDLESS_ALLOWLIST", "")
+    monkeypatch.setattr(bot, "_test_kaizen_login", AsyncMock(return_value=False))
+    await harness.app.initialize()
+    try:
+        await harness.feed(make_command_update("start"))
+        await harness.feed(make_text_update("doctor@example.test"))
+        await harness.feed(make_text_update("wrong-password"))
+    finally:
+        await harness.app.shutdown()
+
+    _, text, markup = harness.outbox[-1]
+    assert "didn't accept that email and password" in text
+    assert _buttons(markup) == [("❌ Cancel", "ACTION|cancel")]
