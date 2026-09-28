@@ -8,7 +8,7 @@ Usage:
     BU_CDP_WS=ws://localhost:9222/... python3 extract_portfolio.py
 
 Or via browser-harness:
-    BU_CDP_WS=ws://localhost:9222/... browser-harness -c 'exec(open("agent-workspace/domain-skills/kaizen-rcem/extract_portfolio.py").read())'
+    BU_CDP_WS=ws://localhost:9222/... browser-harness <<< 'exec(open("agent-workspace/domain-skills/kaizen-rcem/extract_portfolio.py").read())'
 """
 
 import json, os, sys, time

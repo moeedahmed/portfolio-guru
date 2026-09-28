@@ -133,11 +133,11 @@ class BrowserUseHarnessAdapter(BrowserAdapter):
             return False
 
     def execute(self, python_code: str) -> str:
-        """Run Python code via browser-harness -c. Returns stdout."""
+        """Run Python code via browser-harness (script on stdin). Returns stdout."""
         import subprocess
         env = os.environ.copy()
         result = subprocess.run(
-            [self._harness_path, "-c", python_code],
+            [self._harness_path], input=python_code,
             capture_output=True, text=True, timeout=60,
             env=env
         )

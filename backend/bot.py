@@ -3987,6 +3987,7 @@ def _health_view_keyboard(
     queue_totals: dict[str, int] | None = None,
     needs_review_month: bool = False,
     route_guess: str | None = None,
+    slo_map: bool = False,
 ) -> InlineKeyboardMarkup:
     """Show only the controls that are useful from the current Health view.
 
@@ -4023,6 +4024,10 @@ def _health_view_keyboard(
         if needs_review_month and not route_rows:
             everyday.append(InlineKeyboardButton(
                 "📅 Review month", callback_data="ACTION|health_review_setup"
+            ))
+        if slo_map:
+            everyday.append(InlineKeyboardButton(
+                "🎯 SLO map", callback_data="ACTION|health_view|curriculum"
             ))
         everyday.append(InlineKeyboardButton(
             "ℹ️ About", callback_data="ACTION|health_view|about"
@@ -4479,6 +4484,7 @@ def _store_health_report_context(
     action_queue_totals: dict[str, int],
     needs_review_month: bool,
     route_guess: str | None = None,
+    slo_map: bool = False,
 ) -> None:
     """Remember the rendered views so the navigation buttons have something to show.
 
@@ -4498,6 +4504,7 @@ def _store_health_report_context(
         "queue_page": {"draft": 0, "awaiting": 0},
         "needs_review_month": needs_review_month,
         "route_guess": route_guess,
+        "slo_map": slo_map,
     }
 
 
@@ -4552,6 +4559,7 @@ def _health_view_payload(
             queue_totals=queue_totals,
             needs_review_month=bool(report.get("needs_review_month")),
             route_guess=report.get("route_guess"),
+            slo_map=bool(report.get("slo_map")) and "curriculum" in views,
         )
 
     if view == "about":
@@ -8555,13 +8563,6 @@ VOICE_MANUAL_INTRO_COPY = (
     "Send the first example now."
 )
 
-VOICE_KAIZEN_SAMPLE_COPY = (
-    "📚 *Pick a sample size*\n\n"
-    "Bigger samples match your style better. It's read-only: no creating, editing, submitting or sharing.\n\n"
-    "How far back should I look?"
-)
-
-
 def _voice_choice_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
@@ -8580,19 +8581,6 @@ def _voice_rebuild_keyboard() -> InlineKeyboardMarkup:
         ],
         [InlineKeyboardButton("🗑️ Remove profile", callback_data="VOICE|remove")],
         [InlineKeyboardButton("🔙 Back", callback_data="VOICE|back_to_settings")],
-    ])
-
-
-def _voice_kaizen_sample_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("📋 Recent 10", callback_data="VOICE|kaizen_sample|recent_10"),
-            InlineKeyboardButton("📅 6 months", callback_data="VOICE|kaizen_sample|last_6m"),
-        ],
-        [
-            InlineKeyboardButton("📅 12 months", callback_data="VOICE|kaizen_sample|last_12m"),
-            InlineKeyboardButton("🔙 Back", callback_data="VOICE|back_to_choice"),
-        ],
     ])
 
 
@@ -8711,17 +8699,12 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
 
         if data == "VOICE|path_kaizen":
             context.user_data["voice_kaizen_path_started"] = True
-            await _flow_edit(
-                update, context,
-                VOICE_KAIZEN_SAMPLE_COPY,
-                parse_mode="Markdown",
-                reply_markup=_voice_kaizen_sample_keyboard(),
-                flow_key="voice",
-            )
-            return AWAIT_VOICE_EXAMPLES
+            return await _voice_run_kaizen_sample(update, context)
 
         if data.startswith("VOICE|kaizen_sample|"):
-            return await _voice_run_kaizen_sample(update, context, data)
+            # Stale sample-size button from before 2026-09-28: the size picker
+            # is gone, so honour it as the one recent-entries read.
+            return await _voice_run_kaizen_sample(update, context)
 
         if data == "VOICE|preview_accept":
             # New flow activates the profile immediately inside
@@ -8913,48 +8896,36 @@ async def voice_collect_example(update: Update, context: ContextTypes.DEFAULT_TY
 async def _voice_run_kaizen_sample(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
-    callback_data: str,
 ) -> int:
-    """Invoke the read-only Kaizen sampler for the chosen window.
+    """Read the user's recent Kaizen entries (read-only) and learn their style.
 
     Honours the path gate so a stale button can never bypass the user's
-    Kaizen-learning choice. Calls into ``voice_sampler.sample_kaizen_entries`` which is
-    isolated from any live Kaizen action.
+    Kaizen-learning choice. Calls into ``voice_sampler.sample_kaizen_entries``,
+    which reads as this user and never changes anything in Kaizen.
     """
     from voice_sampler import (
+        RECONNECT_REASONS,
         SamplerStatus,
-        WINDOW_LABELS,
-        parse_window,
         sample_kaizen_entries,
     )
 
     if not context.user_data.get("voice_kaizen_path_started"):
         await _flow_edit(
             update, context,
-            "⚠️ That sample option is no longer active. Pick a voice source again:",
+            "⚠️ That option is no longer active. Pick a voice source again:",
             reply_markup=_voice_choice_keyboard(),
-            flow_key="voice",
-        )
-        return AWAIT_VOICE_EXAMPLES
-
-    token = callback_data.split("|", 2)[-1]
-    window = parse_window(token)
-    if window is None:
-        await _flow_edit(
-            update, context,
-            "⚠️ That sample option is no longer valid. Pick again:",
-            reply_markup=_voice_kaizen_sample_keyboard(),
             flow_key="voice",
         )
         return AWAIT_VOICE_EXAMPLES
 
     await _flow_edit(
         update, context,
-        f"🔍 Reading {WINDOW_LABELS[window]} — read-only, no changes…",
+        "🔍 Reading your recent Kaizen entries. This takes about a minute, "
+        "and nothing in Kaizen is changed…",
         flow_key="voice",
     )
 
-    result = await sample_kaizen_entries(update.effective_user.id, window)
+    result = await sample_kaizen_entries(update.effective_user.id)
 
     if result.status == SamplerStatus.OK and result.has_samples:
         context.user_data["voice_examples"] = list(result.samples)
@@ -8964,8 +8935,8 @@ async def _voice_run_kaizen_sample(
 
     if result.status == SamplerStatus.NO_SAMPLES:
         body = (
-            f"📭 I couldn't find any entries in the {WINDOW_LABELS[window]} window. "
-            "Try a wider window or add examples manually."
+            "📭 I couldn't find any written entries in your recent Kaizen portfolio. "
+            "Add 3-5 examples manually instead."
         )
     else:
         body = result.message or (
@@ -8973,19 +8944,7 @@ async def _voice_run_kaizen_sample(
         )
 
     rows = []
-    passwordless = _is_passwordless_user(update.effective_user.id)
-    if passwordless and getattr(result, "reason", None) == "credentials_missing":
-        body = (
-            "Learning from your previous Kaizen entries needs a username-and-password "
-            "connection, so it isn't available when you connect without sharing your "
-            "password. You can add 3-5 examples manually instead."
-        )
-    elif getattr(result, "reason", None) in {
-        "login_required",
-        "credentials_missing",
-        "credentials_unavailable",
-        "credentials_rejected",
-    }:
+    if getattr(result, "reason", None) in RECONNECT_REASONS:
         rows.append([InlineKeyboardButton("🔗 Reconnect Kaizen", callback_data="ACTION|setup")])
     rows.extend([
         [
@@ -10686,6 +10645,9 @@ async def _run_health_analysis(
         "draft": len(assessment.stuck_drafts),
         "awaiting": len(assessment.stuck_awaiting),
     }
+    # Curriculum SLOs matter for training and Portfolio Pathway evidence, not
+    # for an appraisal-only doctor.
+    slo_map = profile.pathway != Pathway.appraisal_only
     if context_store is not None:
         _store_health_report_context(
             context_store,
@@ -10695,6 +10657,7 @@ async def _run_health_analysis(
             action_queue_totals=action_queue_totals,
             needs_review_month=review_month_needs_setup,
             route_guess=route_guess,
+            slo_map=slo_map,
         )
     await send_result(
         priorities_text,
@@ -10703,6 +10666,7 @@ async def _run_health_analysis(
             queue_totals=action_queue_totals,
             needs_review_month=review_month_needs_setup,
             route_guess=route_guess,
+            slo_map=slo_map,
         ),
     )
 

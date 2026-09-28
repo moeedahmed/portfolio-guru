@@ -231,9 +231,30 @@ def test_health_keyboards_are_contextual_in_every_view():
         ],
         [("ℹ️ About", "ACTION|health_view|about")],
     ]
+    # Trainees and Portfolio Pathway doctors get the SLO map back as a
+    # drill-down; the everyday actions stay in pairs.
+    slo_rows = _keyboard_rows(
+        bot._health_view_keyboard(
+            "priorities",
+            queue_totals={"draft": 7, "awaiting": 20},
+            needs_review_month=True,
+            slo_map=True,
+        )
+    )
+    assert slo_rows == [
+        [
+            ("📝 Drafts (7)", "ACTION|health_queue|draft|0"),
+            ("⏳ Awaiting (20)", "ACTION|health_queue|awaiting|0"),
+        ],
+        [
+            ("📅 Review month", "ACTION|health_review_setup"),
+            ("🎯 SLO map", "ACTION|health_view|curriculum"),
+        ],
+        [("ℹ️ About", "ACTION|health_view|about")],
+    ]
     # No row is crowded: at most two buttons, and paired labels stay short
     # enough to show in full on a phone.
-    for row in route_rows:
+    for row in route_rows + slo_rows:
         assert len(row) <= 2
         if len(row) == 2:
             assert all(len(text) <= 21 for text, _data in row), row
@@ -768,7 +789,10 @@ async def test_health_empty_state_clarifies_scan_scope_and_offers_next_routes(mo
             ("📁 Portfolio Pathway", "ACTION|health_route_set|cesr_portfolio"),
             ("🗂 Appraisal only", "ACTION|health_route_set|appraisal_only"),
         ],
-        [("ℹ️ About", "ACTION|health_view|about")],
+        [
+            ("🎯 SLO map", "ACTION|health_view|curriculum"),
+            ("ℹ️ About", "ACTION|health_view|about"),
+        ],
     ]
 
 

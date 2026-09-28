@@ -727,7 +727,7 @@ def format_coverage(
 
 def format_curriculum(assessment: HealthAssessment) -> str:
     """Tagged curriculum spread as an optional Coverage drill-down."""
-    lines = ["🏷️ *Curriculum tags*", ""]
+    lines = ["🎯 *SLO map*", ""]
     block = _curriculum_block(assessment)
     if block and block[0] == "*Curriculum tags*":
         block = block[1:]

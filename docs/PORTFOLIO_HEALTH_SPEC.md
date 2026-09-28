@@ -454,7 +454,9 @@ next_actions              3–5 concrete suggested actions
     and the two alternatives on the next (tapping one opens the month picker);
   - then the everyday actions in pairs: `📝 Drafts (N)`, `⏳ Awaiting (N)`,
     `📅 Review month` (only when missing or passed and no route question is
-    showing), then `ℹ️ About`. Empty queues are omitted.
+    showing), `🎯 SLO map` (training and Portfolio Pathway routes, not
+    appraisal only; opens the curriculum spread), then `ℹ️ About`. Empty
+    queues are omitted.
 - Draft and Awaiting queues open independently at their first page (`page 0` in
   callback data), paginate independently at five items per page, and retain
   direct Kaizen links. Their only
@@ -464,8 +466,9 @@ next_actions              3–5 concrete suggested actions
   partial/stale limitations, the automated-classification limitation, the
   no-edit/file/chase/delete boundary, and the fact that Health is not a formal
   training or appraisal judgement. Its only control is `🔙 Health`.
-- Actions, More, Coverage, Curriculum, Scan info and Review month are absent
-  from new everyday navigation.
+- Actions, More, Coverage and Scan info are absent from new everyday
+  navigation; Curriculum returns only as `🎯 SLO map`, and Review month only
+  when it is missing or has passed.
 
 - `/pathway` — select or change pathway
 - `Add evidence` button — quick manual entry flow
