@@ -514,11 +514,14 @@ def test_settings_makes_portfolio_health_primary_and_hides_manual_sync(
         "ACTION|delete",
     ])
     assert [[button.callback_data for button in row] for row in keyboard.inline_keyboard] == [
-        ["ACTION|setup"],
-        ["ACTION|voice", "ACTION|portfolio_defaults"],
-        ["REMIND|menu"],
+        ["ACTION|setup", "ACTION|voice"],
+        ["ACTION|portfolio_defaults", "REMIND|menu"],
         ["ACTION|delete"],
     ]
+    # Paired buttons must stay short enough to fit side by side on a phone.
+    for row in keyboard.inline_keyboard:
+        if len(row) == 2:
+            assert all(len(button.text) <= 21 for button in row), [b.text for b in row]
 
     assert "ACTION|health" not in flat
     assert "ACTION|refresh_portfolio" not in flat

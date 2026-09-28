@@ -564,9 +564,8 @@ def test_settings_shows_pathway_change_control(isolated_health_store, monkeypatc
     assert "Training (CCT)" in text
     assert ('📋 Portfolio defaults', "ACTION|portfolio_defaults") in buttons
     assert [[button.callback_data for button in row] for row in keyboard.inline_keyboard] == [
-        ["ACTION|setup"],
-        ["ACTION|voice", "ACTION|portfolio_defaults"],
-        ["REMIND|menu"],
+        ["ACTION|setup", "ACTION|voice"],
+        ["ACTION|portfolio_defaults", "REMIND|menu"],
         ["ACTION|delete"],
     ]
 
