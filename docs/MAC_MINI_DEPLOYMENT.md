@@ -70,6 +70,14 @@ cd ~/actions-runner-portfolio-guru
 
 The workflow runs directly on the Mac Mini and executes `scripts/deploy_mac.sh`.
 
+Close-together pushes are safe. Every push whose Tests pass gets its own deploy
+run; deploys take turns on the Mac Mini, and each one deploys its tested commit
+only if that is newer than what is live (a commit a newer deploy already
+includes finishes green with `SUPERSEDED_BY=<live sha>`). So the newest tested
+`main` is always the last to land, and no thread needs to wait for others
+before pushing. To check a push is live, confirm the live checkout contains it
+(`git merge-base --is-ancestor <sha> HEAD` in the live checkout).
+
 ## Runtime Proof
 
 On startup, `backend/bot.py` logs the live git commit and branch before polling starts.

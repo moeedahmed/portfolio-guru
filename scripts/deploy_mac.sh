@@ -21,15 +21,23 @@ fi
 DEPLOY_SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LAUNCHD_DOMAIN="$(python3 "$DEPLOY_SCRIPT_ROOT/verify_live_runtime.py" --service-domain)"
 
-if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+# Deploys take turns rather than failing: a later deploy waits for the running
+# one, then re-reads what is live before deciding anything.
+LOCK_WAIT_SECONDS="${PORTFOLIO_GURU_DEPLOY_LOCK_WAIT_SECONDS:-1800}"
+lock_waited=0
+until mkdir "$LOCK_DIR" 2>/dev/null; do
   if [[ -f "$LOCK_DIR/pid" ]] && ! kill -0 "$(cat "$LOCK_DIR/pid")" 2>/dev/null; then
     rm -rf "$LOCK_DIR"
-    mkdir "$LOCK_DIR"
-  else
-    echo "ERROR: another Portfolio Guru deploy is already running."
+    continue
+  fi
+  if [[ "$lock_waited" -ge "$LOCK_WAIT_SECONDS" ]]; then
+    echo "ERROR: another Portfolio Guru deploy is still running after ${LOCK_WAIT_SECONDS}s."
     exit 1
   fi
-fi
+  [[ "$lock_waited" -eq 0 ]] && echo "Another deploy is running; waiting for it to finish."
+  sleep 5
+  lock_waited=$((lock_waited + 5))
+done
 echo "$$" > "$LOCK_DIR/pid"
 cleanup_lock() {
   rm -rf "$LOCK_DIR"
@@ -54,13 +62,26 @@ fi
 
 git fetch origin main
 ORIGIN_MAIN="$(git rev-parse origin/main)"
-if [[ "$ORIGIN_MAIN" != "$DEPLOY_EXPECTED_SHA" ]]; then
-  echo "ERROR: origin/main=$ORIGIN_MAIN does not equal DEPLOY_EXPECTED_SHA=$DEPLOY_EXPECTED_SHA."
+# Main may have moved on while this SHA's tests ran; that newer push gets its
+# own tested deploy. This SHA only has to be on main, and it is deployed only
+# if it is newer than what is live, so an older deploy never overwrites a newer
+# one and the newest tested main is always the last to land.
+if ! git merge-base --is-ancestor "$DEPLOY_EXPECTED_SHA" "$ORIGIN_MAIN" 2>/dev/null; then
+  echo "ERROR: DEPLOY_EXPECTED_SHA=$DEPLOY_EXPECTED_SHA is not on origin/main=$ORIGIN_MAIN."
   exit 1
 fi
 git checkout main
 # Capture the currently-deployed main commit as the rollback target BEFORE we move.
 PREV_COMMIT="$(git rev-parse HEAD)"
+if [[ "$PREV_COMMIT" != "$DEPLOY_EXPECTED_SHA" ]] && git merge-base --is-ancestor "$DEPLOY_EXPECTED_SHA" "$PREV_COMMIT"; then
+  echo "Live commit $(git rev-parse --short "$PREV_COMMIT") already includes $DEPLOY_EXPECTED_SHA (a newer deploy landed first)."
+  if ! "$APP_DIR/scripts/verify_live_runtime.py"; then
+    echo "ERROR: live runtime identity verification failed."
+    exit 1
+  fi
+  echo "SUPERSEDED_BY=$PREV_COMMIT"
+  exit 0
+fi
 echo "Last known-good commit (rollback target): $(git rev-parse --short "$PREV_COMMIT")"
 if ! git merge-base --is-ancestor HEAD "$DEPLOY_EXPECTED_SHA"; then
   echo "ERROR: expected SHA is not a safe fast-forward from current HEAD."
