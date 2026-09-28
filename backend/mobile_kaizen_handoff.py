@@ -336,6 +336,66 @@ async def submit_kaizen_login(page: Any, username: str, password: str) -> None:
     await submit.click()
 
 
+# Where Kaizen's own login boxes sit, so the page can lay real, typeable boxes
+# exactly over them on the live picture (2026-09-28). Same selectors as
+# ``submit_kaizen_login``. Only geometry comes back, never page content.
+_FIELD_BOXES_SCRIPT = """() => {
+  const wanted = {
+    login: 'input[name="login"]',
+    password: 'input[name="password"]',
+    submit: 'button[type="submit"]',
+  };
+  const boxes = {};
+  for (const [name, selector] of Object.entries(wanted)) {
+    const el = document.querySelector(selector);
+    if (!el) continue;
+    const r = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    if (r.width < 8 || r.height < 8 || style.visibility === 'hidden' || style.display === 'none') continue;
+    boxes[name] = {x: r.left, y: r.top, width: r.width, height: r.height};
+  }
+  return boxes;
+}"""
+
+
+def normalise_field_boxes(
+    raw: Any,
+    *,
+    width: int = VIEWPORT_WIDTH,
+    height: int = VIEWPORT_HEIGHT,
+) -> dict[str, dict[str, float]]:
+    """Keep only well-formed boxes that sit fully inside the live picture."""
+    boxes: dict[str, dict[str, float]] = {}
+    if not isinstance(raw, dict):
+        return boxes
+    for name in ("login", "password", "submit"):
+        box = raw.get(name)
+        if not isinstance(box, dict):
+            continue
+        try:
+            x, y = float(box["x"]), float(box["y"])
+            w, h = float(box["width"]), float(box["height"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if w <= 0 or h <= 0 or x < 0 or y < 0 or x + w > width or y + h > height:
+            continue
+        boxes[name] = {
+            "x": round(x, 1),
+            "y": round(y, 1),
+            "width": round(w, 1),
+            "height": round(h, 1),
+        }
+    return boxes
+
+
+async def kaizen_field_boxes(page: Any) -> dict[str, dict[str, float]]:
+    try:
+        return normalise_field_boxes(await page.evaluate(_FIELD_BOXES_SCRIPT))
+    except Exception:
+        # Mid-navigation, or not a login page: no boxes this frame.
+        return {}
+
+
 def normalise_browser_input(
     message: Any,
     *,
@@ -580,6 +640,7 @@ class MobileBrowserManager:
         keep_session: Callable[[HandoffRecord, Any, Any], Any] | None = None,
         submit_login: Callable[[Any, str, str], Any] | None = None,
         login_rejected: Callable[[Any], Any] | None = None,
+        field_boxes: Callable[[Any], Any] | None = None,
         max_concurrent_browsers: int = 2,
     ) -> None:
         self.login_url = login_url
@@ -588,6 +649,7 @@ class MobileBrowserManager:
         self._keep_session = keep_session or self._default_keep_session
         self._submit_login = submit_login or submit_kaizen_login
         self._login_rejected = login_rejected or _kaizen_login_rejected
+        self._field_boxes = field_boxes or kaizen_field_boxes
         self._browser_slots = asyncio.Semaphore(max(1, max_concurrent_browsers))
 
     async def serve(
@@ -664,12 +726,14 @@ class MobileBrowserManager:
                         quality=68,
                         animations="disabled",
                     )
+                    fields = await self._field_boxes(page)
                     await websocket.send_json(
                         {
                             "type": "frame",
                             "data": base64.b64encode(screenshot).decode(),
                             "width": VIEWPORT_WIDTH,
                             "height": VIEWPORT_HEIGHT,
+                            "fields": fields,
                         }
                     )
                 except Exception:
@@ -1010,41 +1074,38 @@ HANDOFF_HTML = """<!doctype html>
   <link rel="stylesheet" href="/handoff/app.css">
 </head>
 <body>
+  <header class="topbar">
+    <span class="lock" aria-hidden="true">🔒</span>
+    <span>This is Kaizen's real sign-in page, opened by <strong>Portfolio Guru</strong>. Your password is never stored.</span>
+  </header>
   <main>
-    <section class="intro">
-      <p class="eyebrow">PORTFOLIO GURU</p>
-      <h1>Connect Kaizen</h1>
-      <p><strong>Why sign in?</strong> Portfolio Guru saves your drafts into your Kaizen portfolio, so it needs to be signed in as you.</p>
-      <p>Your password goes straight to Kaizen and is never stored. Portfolio Guru keeps only the signed-in session, which Kaizen ends after about a day. You'll get a new link in Telegram when that happens.</p>
+    <section id="stage" class="stage" aria-label="Kaizen's sign-in page, live">
+      <img id="browser-screen" alt="Kaizen's sign-in page, live" draggable="false">
+      <div id="loading" role="status" aria-live="polite">Opening Kaizen's sign-in page…</div>
+      <form id="kaizen-form" class="kaizen-form" autocomplete="on" hidden>
+        <input id="kz-live-username" name="username" type="text" inputmode="email" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Enter your username" aria-label="Kaizen username">
+        <input id="kz-live-password" name="password" type="password" autocomplete="current-password" aria-label="Kaizen password">
+        <button id="kz-live-submit" type="submit" aria-label="Log in to Kaizen"></button>
+      </form>
     </section>
-    <form id="signin-form" class="signin" autocomplete="on">
-      <label for="kz-username">Kaizen username</label>
-      <input id="kz-username" name="username" type="text" inputmode="email" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" required>
-      <label for="kz-password">Password</label>
-      <input id="kz-password" name="password" type="password" autocomplete="current-password" required>
-      <button id="signin" type="submit">Sign in to Kaizen</button>
-      <p class="hint">Use your password manager if you like. Your details go straight to Kaizen and are never stored.</p>
-    </form>
-    <section id="status-card" class="status-card" aria-live="polite">
-      <strong id="status-title">Secure link ready</strong>
-      <span id="status-copy">Enter your Kaizen details above.</span>
+    <section id="status-card" class="status-card" aria-live="polite" hidden>
+      <strong id="status-title">Opening Kaizen</strong>
+      <span id="status-copy">This takes a few seconds.</span>
       <a id="back-to-telegram" class="back-to-telegram" href="https://t.me/portfolio_guru_bot" hidden>Back to Telegram</a>
     </section>
-    <p class="live-label">Live view of the real Kaizen page</p>
-    <section class="browser-shell" aria-label="Temporary Kaizen browser">
-      <div class="browser-bar"><span class="lock">●</span><span id="browser-label">Opening RCEM ePortfolio…</span></div>
-      <div class="screen-wrap">
-        <img id="browser-screen" alt="Live Kaizen login browser" draggable="false">
-        <div id="loading" role="status" aria-live="polite">Preparing your secure browser…</div>
-      </div>
-      <div class="controls">
-        <button id="backspace" type="button" aria-label="Delete previous character">⌫</button>
-        <button id="tab" type="button">Next field</button>
-        <button id="enter" type="button">Continue</button>
-      </div>
-    </section>
-    <input id="keyboard-bridge" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Type into the selected Kaizen field">
-    <p class="privacy">Your typing passes through this browser to reach Kaizen but is never written down or logged. Portfolio Guru only ever saves drafts and never submits anything to a supervisor.</p>
+    <form id="signin-form" class="signin" autocomplete="on">
+      <p class="signin-note">Kaizen's boxes not showing? Sign in here instead.</p>
+      <label for="kz-username">Kaizen username</label>
+      <input id="kz-username" name="username" type="text" inputmode="email" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <label for="kz-password">Password</label>
+      <input id="kz-password" name="password" type="password" autocomplete="current-password">
+      <button id="signin" type="submit">Sign in to Kaizen</button>
+    </form>
+    <details class="why">
+      <summary>Why sign in here?</summary>
+      <p>Portfolio Guru saves your drafts into your Kaizen portfolio, so it needs to be signed in as you. Your password goes straight to Kaizen and is never stored. Portfolio Guru keeps only the signed-in session, which Kaizen ends after about a day.</p>
+      <p>Your typing passes through Portfolio Guru's secure browser to reach Kaizen but is never written down or logged. Portfolio Guru only ever saves drafts and never submits anything to a supervisor.</p>
+    </details>
   </main>
   <script src="/handoff/app.js" defer></script>
 </body>
@@ -1053,43 +1114,41 @@ HANDOFF_HTML = """<!doctype html>
 
 
 HANDOFF_CSS = """
-:root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #eef2ee; color: #102019; }
+:root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #102019; --bar: 44px; }
 * { box-sizing: border-box; }
-body { margin: 0; min-height: 100vh; background: radial-gradient(circle at top, #f8fbf8 0, #e7eee9 55%, #dde7e0 100%); }
-main { width: min(100%, 520px); margin: 0 auto; padding: max(24px, env(safe-area-inset-top)) 16px max(28px, env(safe-area-inset-bottom)); }
-.intro { padding: 4px 4px 16px; }
-.eyebrow { margin: 0 0 8px; color: #31705a; font-size: 12px; font-weight: 800; letter-spacing: .12em; }
-h1 { margin: 0 0 8px; font-size: clamp(29px, 8vw, 40px); line-height: 1.05; letter-spacing: -.035em; }
-.intro p:not(.eyebrow) { margin: 0 0 8px; color: #45574e; font-size: 15px; line-height: 1.45; }
-.browser-shell { overflow: hidden; border: 1px solid #c9d7ce; border-radius: 20px; background: #fff; box-shadow: 0 18px 50px rgba(26, 53, 40, .16); }
-.browser-bar { display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 14px; background: #f4f6f4; border-bottom: 1px solid #dce5df; color: #526158; font-size: 12px; }
-.lock { color: #318b69; font-size: 10px; }
-.screen-wrap { position: relative; width: 100%; aspect-ratio: 430 / 850; max-height: 62vh; overflow: hidden; background: #f7f8f7; touch-action: none; }
+body { margin: 0; min-height: 100vh; background: #1d2327; }
+.topbar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px; min-height: var(--bar); padding: max(6px, env(safe-area-inset-top)) 12px 6px; background: #f4f6f4; border-bottom: 1px solid #d5ddd8; color: #3c4a42; font-size: 12px; line-height: 1.3; }
+.topbar .lock { font-size: 13px; }
+main { display: flex; flex-direction: column; width: 100%; margin: 0 auto; padding: 0 0 max(20px, env(safe-area-inset-bottom)); }
+.stage { position: relative; width: min(100vw, calc((100dvh - var(--bar)) * 430 / 850)); aspect-ratio: 430 / 850; margin: 0 auto; overflow: hidden; background: #f7f8f7; touch-action: none; }
 #browser-screen { display: block; width: 100%; height: 100%; object-fit: contain; user-select: none; -webkit-user-select: none; }
 #loading { position: absolute; inset: 0; display: grid; place-items: center; padding: 30px; background: #f7f8f7; color: #4d5c53; text-align: center; }
 #loading[hidden] { display: none; }
-.controls { display: grid; grid-template-columns: 62px 1fr 1fr; gap: 8px; padding: 10px; border-top: 1px solid #e0e7e2; background: #f8faf8; }
-button { min-height: 44px; border: 0; border-radius: 12px; padding: 0 13px; background: #e3ebe6; color: #183127; font: inherit; font-size: 14px; font-weight: 700; }
-button:last-child { background: #1c6b50; color: #fff; }
-#keyboard-bridge { position: fixed; left: -10000px; top: 0; width: 1px; height: 1px; opacity: .01; }
-.status-card { display: flex; flex-direction: column; gap: 3px; margin-top: 14px; padding: 14px 16px; border-radius: 15px; background: #173f31; color: #fff; }
+.kaizen-form[hidden] { display: none; }
+.kaizen-form input, .kaizen-form button { position: absolute; margin: 0; }
+.kaizen-form input { padding: 0 4%; border: 1px solid #8a959c; border-radius: 4px; background: #fff; color: #1b1f22; font: inherit; font-size: 16px; touch-action: manipulation; }
+.kaizen-form input:focus { outline: 2px solid #2d6f8e; outline-offset: 0; }
+.kaizen-form button { min-height: 0; padding: 0; border: 0; border-radius: 4px; background: transparent; touch-action: manipulation; }
+.kaizen-form button:active { background: rgba(0, 0, 0, .18); }
+.status-card { position: fixed; left: 12px; right: 12px; bottom: max(12px, env(safe-area-inset-bottom)); z-index: 6; display: flex; flex-direction: column; gap: 3px; max-width: 496px; margin: 0 auto; padding: 14px 16px; border-radius: 15px; background: #173f31; color: #fff; box-shadow: 0 10px 30px rgba(0, 0, 0, .3); }
+.done .status-card { position: static; width: min(100% - 24px, 496px); }
+.status-card[hidden] { display: none; }
 .status-card span { color: #d8e7df; font-size: 13px; line-height: 1.4; }
-.privacy { margin: 13px 4px 0; color: #607168; font-size: 12px; line-height: 1.45; }
-.signin { display: grid; gap: 6px; margin: 4px 0 14px; padding: 16px; border: 1px solid #c9d7ce; border-radius: 16px; background: #fff; }
+.signin { display: none; gap: 6px; width: min(100% - 24px, 496px); margin: 12px auto 0; padding: 16px; border-radius: 16px; background: #fff; }
+.classic .signin { display: grid; order: -1; }
+.classic .stage { width: min(100vw, calc(38dvh * 430 / 850)); margin-top: 12px; }
+.signin-note { margin: 0 0 4px; color: #45574e; font-size: 13px; }
 .signin label { color: #183127; font-size: 14px; font-weight: 700; }
 .signin input { min-height: 46px; padding: 0 12px; border: 1px solid #b9c9bf; border-radius: 10px; font: inherit; font-size: 16px; color: #102019; background: #fbfcfb; }
+button { min-height: 44px; border: 0; border-radius: 12px; padding: 0 13px; font: inherit; font-size: 14px; font-weight: 700; }
 .signin #signin { margin-top: 8px; background: #1c6b50; color: #fff; }
 .signin #signin:disabled { opacity: .55; }
-.signin .hint { margin: 4px 0 0; color: #607168; font-size: 12px; line-height: 1.4; }
-.live-label { margin: 14px 4px 6px; color: #526158; font-size: 12px; }
-.screen-wrap { max-height: 38vh; }
-.done .signin, .done .live-label { display: none; }
-.controls { display: none; }
-.done .browser-shell { display: none; }
+.why { width: min(100% - 24px, 496px); margin: 12px auto 0; color: #cfd8d3; font-size: 13px; line-height: 1.45; }
+.why summary { cursor: pointer; font-weight: 700; }
+.done .stage, .done .signin, .done .topbar { display: none; }
 .done .status-card { margin-top: 28px; padding: 24px; }
 .back-to-telegram { display: block; margin-top: 14px; padding: 13px 16px; border-radius: 12px; background: #fff; color: #173f31; font-size: 15px; font-weight: 800; text-align: center; text-decoration: none; }
 .back-to-telegram[hidden] { display: none; }
-@media (max-height: 700px) { .screen-wrap { max-height: 52vh; } .intro p:not(.eyebrow) { font-size: 13px; } }
 """
 
 
@@ -1097,35 +1156,54 @@ HANDOFF_JS = r"""
 (() => {
   const screen = document.getElementById('browser-screen');
   const loading = document.getElementById('loading');
-  const keyboard = document.getElementById('keyboard-bridge');
+  const statusCard = document.getElementById('status-card');
   const title = document.getElementById('status-title');
   const copy = document.getElementById('status-copy');
   const backToTelegram = document.getElementById('back-to-telegram');
   let closeTried = false;
   let socket;
   let pointerStart;
+  let status = 'opening';
 
+  // Kaizen's own login page fills the screen, and real boxes sit exactly
+  // over its username and password boxes (2026-09-28). Real, visible boxes
+  // keep the phone keyboard open and let password managers fill them; the
+  // first version typed through a hidden off-screen box and Android dropped
+  // the keyboard (2026-09-25).
+  const liveForm = document.getElementById('kaizen-form');
+  const liveUsername = document.getElementById('kz-live-username');
+  const livePassword = document.getElementById('kz-live-password');
+  const liveSubmit = document.getElementById('kz-live-submit');
+  let liveBoxes = false;
+  let noBoxesSince = null;
+
+  // The backup: plain boxes under the picture, for when Kaizen's boxes
+  // can't be found (its page changed, or it is slow).
   const form = document.getElementById('signin-form');
   const username = document.getElementById('kz-username');
   const password = document.getElementById('kz-password');
   const signin = document.getElementById('signin');
+  const CLASSIC_AFTER_MS = 6000;
   // A tap before the RCEM page has loaded used to do nothing at all
   // (2026-09-26). Now it is remembered and sent once Kaizen is ready.
   let ready = false;
   let pending = false;
+  let pendingDetails = null;
   // The button stays tappable while Kaizen opens: a dim button with no
   // reason given read as broken (2026-09-27). Its label says what's
   // happening, and an early tap is kept until Kaizen is ready.
   const setStatus = (next, message) => {
+    status = next;
     ready = next === 'login';
     signin.disabled = ['signing_in', 'saving', 'complete', 'failed', 'expired'].includes(next);
+    liveSubmit.disabled = signin.disabled;
     signin.textContent = ['opening', 'queued'].includes(next)
       ? 'Sign in (Kaizen is opening…)'
       : 'Sign in to Kaizen';
     const states = {
-      opening: ['Opening Kaizen', 'This takes a few seconds. You can fill in your details now.'],
+      opening: ['Opening Kaizen', 'This takes a few seconds.'],
       queued: ['Browser queued', 'Another clinician is using the secure browser. Keep this page open.'],
-      login: ['Sign in to Kaizen', 'Enter your Kaizen username and password above.'],
+      login: ['Sign in to Kaizen', 'Enter your Kaizen username and password.'],
       signing_in: ['Signing in…', 'Kaizen is checking your details.'],
       saving: ['Login confirmed', 'Keeping your Kaizen session…'],
       complete: ['Kaizen connected', 'Portfolio Guru is confirming it in Telegram now.'],
@@ -1135,8 +1213,12 @@ HANDOFF_JS = r"""
     const state = states[next] || ['Working…', message || 'Please keep this page open.'];
     title.textContent = state[0];
     copy.textContent = message || state[1];
+    // Kaizen's page speaks for itself while the doctor types; the card
+    // only shows news (progress, a refusal, the ending).
+    statusCard.hidden = next === 'login' && !message && liveBoxes;
     if (next === 'complete' || next === 'failed' || next === 'expired') {
       document.body.classList.add('done');
+      statusCard.hidden = false;
       // Every ending sends the doctor back to the bot chat (2026-09-28): the
       // page had no way back after "Kaizen connected".
       backToTelegram.hidden = false;
@@ -1154,6 +1236,33 @@ HANDOFF_JS = r"""
     if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(payload));
   };
 
+  const place = (el, box) => {
+    el.style.left = `${box.x / 430 * 100}%`;
+    el.style.top = `${box.y / 850 * 100}%`;
+    el.style.width = `${box.width / 430 * 100}%`;
+    el.style.height = `${box.height / 850 * 100}%`;
+  };
+
+  const showBoxes = fields => {
+    const usable = fields && fields.login && fields.password;
+    if (usable) {
+      place(liveUsername, fields.login);
+      place(livePassword, fields.password);
+      liveSubmit.hidden = !fields.submit;
+      if (fields.submit) place(liveSubmit, fields.submit);
+      noBoxesSince = null;
+    } else if (status === 'login' && noBoxesSince === null) {
+      noBoxesSince = Date.now();
+    }
+    // Never pull the boxes away from under a doctor mid-typing.
+    const typing = liveBoxes && [liveUsername, livePassword].includes(document.activeElement);
+    liveBoxes = Boolean(usable) || typing;
+    liveForm.hidden = !liveBoxes;
+    if (liveBoxes) document.body.classList.remove('classic');
+    else if (noBoxesSince !== null && Date.now() - noBoxesSince > CLASSIC_AFTER_MS) document.body.classList.add('classic');
+    if (status === 'login' && !copy.dataset.message) statusCard.hidden = liveBoxes;
+  };
+
   const connect = () => {
     const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
     socket = new WebSocket(`${scheme}//${location.host}/handoff/ws`);
@@ -1162,7 +1271,9 @@ HANDOFF_JS = r"""
       if (message.type === 'frame') {
         screen.src = `data:image/jpeg;base64,${message.data}`;
         loading.hidden = true;
+        if (!['signing_in', 'saving'].includes(status)) showBoxes(message.fields);
       } else if (message.type === 'status') {
+        copy.dataset.message = message.message ? '1' : '';
         setStatus(message.status, message.message);
       }
     };
@@ -1197,8 +1308,9 @@ HANDOFF_JS = r"""
     connect();
   };
 
-  // The image is drawn with object-fit: contain, so on wide or short screens
-  // it is letterboxed inside its box. Map taps to the drawn image only.
+  // Map taps on the picture (outside the boxes) to the Kaizen page, for its
+  // other buttons and links. Math.min(box.width / 430, box.height / 850)
+  // keeps this right even if the picture is ever letterboxed.
   const point = event => {
     const touch = event.touches ? event.touches[0] : event;
     const box = screen.getBoundingClientRect();
@@ -1218,43 +1330,45 @@ HANDOFF_JS = r"""
     if (Math.abs(delta) > 28) send({type: 'scroll', delta_y: -delta * 4});
     else {
       const at = point(event);
-      if (at) { send({type: 'click', ...at}); keyboard.focus({preventScroll: true}); }
+      if (at) send({type: 'click', ...at});
     }
     pointerStart = null;
   });
-  keyboard.addEventListener('input', () => {
-    if (keyboard.value) send({type: 'text', text: keyboard.value.slice(0, 128)});
-    keyboard.value = '';
-  });
-  keyboard.addEventListener('keydown', event => {
-    if (['Backspace', 'Enter', 'Tab', 'Escape'].includes(event.key)) {
-      event.preventDefault();
-      send({type: 'key', key: event.key});
-    }
-  });
-  document.getElementById('backspace').addEventListener('click', () => send({type: 'key', key: 'Backspace'}));
-  document.getElementById('tab').addEventListener('click', () => { send({type: 'key', key: 'Tab'}); keyboard.focus({preventScroll: true}); });
-  document.getElementById('enter').addEventListener('click', () => send({type: 'key', key: 'Enter'}));
+
   function submitCredentials() {
-    send({type: 'credentials', username: username.value, password: password.value});
+    const details = pendingDetails || {username: username.value, password: password.value};
+    pendingDetails = null;
+    send({type: 'credentials', username: details.username, password: details.password});
     password.value = '';
+    livePassword.value = '';
+    livePassword.blur();
     setStatus('signing_in');
   }
-  form.addEventListener('submit', event => {
-    event.preventDefault();
+  const trySignIn = (user, pass, focusUser, focusPass) => {
     if (signin.disabled) return;
-    if (!username.value || !password.value) {
+    if (!user.value || !pass.value) {
       copy.textContent = 'Enter your Kaizen username and password first.';
-      (username.value ? password : username).focus();
+      statusCard.hidden = false;
+      (user.value ? focusPass : focusUser).focus();
       return;
     }
+    pendingDetails = {username: user.value, password: pass.value};
     if (!ready) {
       pending = true;
       title.textContent = 'Almost ready';
       copy.textContent = 'Kaizen is still opening. You will be signed in as soon as it is ready.';
+      statusCard.hidden = false;
       return;
     }
     submitCredentials();
+  };
+  liveForm.addEventListener('submit', event => {
+    event.preventDefault();
+    trySignIn(liveUsername, livePassword, liveUsername, livePassword);
+  });
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    trySignIn(username, password, username, password);
   });
   exchange().catch(() => setStatus('failed', 'The secure link could not be opened. Return to Telegram and try again.'));
 })();

@@ -184,9 +184,14 @@ def test_handoff_page_has_no_store_security_headers_and_mobile_controls():
     assert "default-src 'self'" in response.headers["content-security-policy"]
     assert "Connect Kaizen" in response.text
     assert "browser-screen" in response.text
-    assert "keyboard-bridge" in response.text
+    # Typing goes into real boxes over Kaizen's own, never a hidden box:
+    # Android dropped the keyboard for the hidden one (2026-09-25).
+    assert "kaizen-form" in response.text
+    assert "keyboard-bridge" not in response.text
     assert "Your password goes straight to Kaizen and is never stored" in response.text
-    assert "Why sign in?" in response.text
+    assert "Why sign in here?" in response.text
+    # Honest about who opened the page: no pretending to be Kaizen.
+    assert "opened by <strong>Portfolio Guru</strong>" in response.text
     # Never overclaim: typing does pass through our browser.
     assert "never see" not in response.text.lower()
 
@@ -730,8 +735,9 @@ def test_tapping_sign_in_before_kaizen_has_loaded_is_remembered_not_ignored():
     assert "pending = true;" in HANDOFF_JS
     assert "if (pending && ready) { pending = false; submitCredentials(); }" in HANDOFF_JS
     assert "You will be signed in as soon as it is ready." in HANDOFF_JS
-    # Status must sit under the button, not below the live view (off-screen on phones).
-    assert HANDOFF_HTML.index('id="status-card"') < HANDOFF_HTML.index('class="browser-shell"')
+    # Status floats over the page, so it is never off-screen below the live view.
+    from mobile_kaizen_handoff import HANDOFF_CSS
+    assert ".status-card { position: fixed;" in HANDOFF_CSS
 
 
 @pytest.mark.asyncio
@@ -924,3 +930,80 @@ def test_finished_page_offers_a_way_back_to_telegram():
     assert "Back to Telegram" in HANDOFF_HTML
     assert "backToTelegram.hidden = false" in HANDOFF_JS
     assert "window.close()" in HANDOFF_JS
+
+
+# --- Full-screen Kaizen page with real boxes over Kaizen's own (2026-09-28) ---
+
+
+def test_live_boxes_sit_over_kaizen_and_suit_password_managers():
+    from mobile_kaizen_handoff import HANDOFF_HTML, HANDOFF_JS
+
+    live_form = HANDOFF_HTML[HANDOFF_HTML.index('id="kaizen-form"'):]
+    live_form = live_form[: live_form.index("</form>")]
+    assert 'autocomplete="username"' in live_form
+    assert 'type="password" autocomplete="current-password"' in live_form
+    # Placed from the geometry the server sends with every frame.
+    assert "showBoxes(message.fields)" in HANDOFF_JS
+    assert "livePassword.value = '';" in HANDOFF_JS
+    # Backup boxes appear only when Kaizen's can't be found.
+    assert "document.body.classList.add('classic')" in HANDOFF_JS
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (
+            {"login": {"x": 32, "y": 236.59, "width": 366, "height": 42}},
+            {"login": {"x": 32.0, "y": 236.6, "width": 366.0, "height": 42.0}},
+        ),
+        # Off the picture, empty, malformed or unknown: dropped.
+        ({"login": {"x": 32, "y": 900, "width": 366, "height": 42}}, {}),
+        ({"password": {"x": 0, "y": 0, "width": 0, "height": 42}}, {}),
+        ({"submit": {"x": "a", "y": 0, "width": 10, "height": 10}}, {}),
+        ({"secret": {"x": 1, "y": 1, "width": 10, "height": 10}}, {}),
+        ("not a dict", {}),
+    ],
+)
+def test_field_boxes_are_bounded_to_the_live_picture(raw, expected):
+    from mobile_kaizen_handoff import normalise_field_boxes
+
+    assert normalise_field_boxes(raw) == expected
+
+
+@pytest.mark.asyncio
+async def test_each_frame_carries_where_kaizens_boxes_are():
+    import mobile_kaizen_handoff as handoff
+
+    page, socket, pw = _sign_in_fakes([])
+    boxes = {"login": {"x": 32.0, "y": 236.6, "width": 366.0, "height": 42.0}}
+
+    async def connect_page():
+        return page, pw
+
+    async def field_boxes(p):
+        return boxes
+
+    store = handoff.HandoffStore(ttl=timedelta(seconds=0.3))
+    created = store.create({"telegram_user_id": 7, "subject_key": "k"})
+    store.exchange(created.token)
+    record = store.get_by_id(created.session_id)
+    manager = handoff.MobileBrowserManager(
+        connect_page=connect_page,
+        field_boxes=field_boxes,
+        screenshot_interval=0.05,
+    )
+    await manager.serve(record, socket, store)
+
+    frames = [m for m in socket.sent if m.get("type") == "frame"]
+    assert frames and all(frame["fields"] == boxes for frame in frames)
+
+
+@pytest.mark.asyncio
+async def test_field_boxes_fail_quietly_mid_navigation():
+    from mobile_kaizen_handoff import kaizen_field_boxes
+
+    class Navigating:
+        async def evaluate(self, script):
+            raise RuntimeError("Execution context was destroyed")
+
+    assert await kaizen_field_boxes(Navigating()) == {}
