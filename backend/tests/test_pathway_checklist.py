@@ -168,6 +168,34 @@ def test_cesr_esle_windows_and_reflections_by_year():
     assert check.reflections_counted == 70
 
 
+def test_cesr_counts_paediatric_reflections_by_slo_5_tag():
+    reflect = dict(evidence_type="reflection_log")
+    items = (
+        _many("REFLECT_LOG", 8, days_ago=50, slos=(5,), **reflect)
+        + _many("REFLECT_LOG", 4, days_ago=700, slos=(1, 5), **reflect)
+        + _many("REFLECT_LOG", 5, days_ago=50, slos=(1,), **reflect)  # not paeds
+        + _many("REFLECT_LOG", 3, days_ago=50, slos=(5,), state="pending", **reflect)
+        + _many("REFLECT_LOG", 2, days_ago=365 * 3 + 30, slos=(5,), **reflect)
+        + _many("CBD", 6, slos=(5,))  # PEM WPBAs are not reflective cases
+    )
+    check = compute_cesr_checklist(items, today=TODAY)
+    assert (check.paeds_reflections, check.paeds_reflections_target) == (12, 20)
+    assert "Log 8 more paediatric reflective cases, linked to SLO 5" in check.actions
+
+    items += _many("REFLECT_LOG", 8, days_ago=10, slos=(5,), **reflect)
+    check = compute_cesr_checklist(items, today=TODAY)
+    assert check.paeds_reflections == 20
+    assert not any("paediatric" in a for a in check.actions)
+
+
+def test_cesr_wpba_tags_never_exclude_assessments():
+    # SLO 3/4/5 tags can't tell an anaesthetics, ICM or paediatrics post from
+    # EM resus or PEM work, so tagged assessments still count.
+    items = _many("CBD", 4, slos=(3,)) + _many("DOPS", 4, slos=(4,)) + _many("MINI_CEX", 4, slos=(5,))
+    check = compute_cesr_checklist(items, today=TODAY)
+    assert check.wpba_counted == 12
+
+
 def test_cesr_warns_about_evidence_leaving_the_window():
     items = _many("CBD", 3, days_ago=365 * 6 - 30) + _many("CBD", 2, days_ago=100)
     assert compute_cesr_checklist(items, today=TODAY).expiring_soon == 3
@@ -203,6 +231,10 @@ def test_portfolio_landing_shows_appraisal_then_pathway():
     assert "CBD 12/12 ✅" in text
     assert "Patient feedback" in text
     assert "Add 12 Mini-CEX, 7 DOPS" in text
+    assert "⬜ Paediatric cases 0/20 (linked to SLO 5)" in text
+    assert "anaesthetics, ICM, acute medicine or paediatric posts" in text
+    assert "20+ acute medicine cases" in text
+    assert "✅ Paediatric" not in text and "Acute medicine cases" not in text
 
 
 def test_appraisal_only_landing_leaves_out_the_portfolio_pathway():

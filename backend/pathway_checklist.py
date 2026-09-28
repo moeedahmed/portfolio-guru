@@ -12,7 +12,13 @@ what the Kaizen index can see.
 * Portfolio Pathway (GMC Specialty Specific Guidance: Emergency Medicine,
   updated Feb 2025): six-year window; 36 WPBAs as 12 DOPS, 12 Mini-CEX and 12
   CBD; six ESLEs in the last three years, three in the last twelve months;
-  fifty reflective cases a year for three years; MSF in the last year.
+  fifty reflective cases a year for three years, at least 20 of them
+  paediatric and 20 acute medicine; MSF in the last year.
+  The 36 exclude assessments from anaesthetics, ICM, acute medicine and
+  paediatric posts. Kaizen's SLO tags can't separate those from EM work (an
+  EM resus CBD sits under SLO 3, a PEM one under SLO 5), so all are counted
+  and the doctor is asked to check. Paediatric reflective cases are filed
+  under SLO 5, so a reflective log tagged SLO 5 is counted as paediatric.
 * Appraisal (GMC supporting information for revalidation): CPD, quality
   improvement, significant events, feedback from colleagues and patients, and
   complaints and compliments.
@@ -55,6 +61,8 @@ CESR_ESLE_3Y_TARGET = 6
 CESR_ESLE_12M_TARGET = 3
 CESR_REFLECTIONS_PER_YEAR = 50
 CESR_REFLECTION_YEARS = 3
+CESR_PAEDS_REFLECTIONS_TARGET = 20
+CESR_PAEDS_SLO = 5
 # Warn about evidence that will fall out of the six-year window this soon.
 CESR_EXPIRY_LOOKAHEAD_DAYS = 183
 
@@ -222,6 +230,8 @@ class CesrChecklist:
     reflections_by_year: tuple[int, ...]  # most recent year first
     reflections_counted: int  # capped at 50 per year
     reflections_target: int
+    paeds_reflections: int  # reflective logs tagged SLO 5, last 3 years
+    paeds_reflections_target: int
     msf_12m: int
     expiring_soon: int
     expiry_by: date
@@ -257,6 +267,14 @@ def compute_cesr_checklist(items: list[EvidenceItem], *, today: date) -> CesrChe
             )
         )
     reflections_counted = sum(min(n, CESR_REFLECTIONS_PER_YEAR) for n in reflections)
+    reflections_start = today - timedelta(days=365 * CESR_REFLECTION_YEARS)
+    paeds = sum(
+        1
+        for i in done
+        if _form(i) == "REFLECT_LOG"
+        and CESR_PAEDS_SLO in i.slo_numbers
+        and reflections_start < i.event_date <= today
+    )
 
     msf_12m = _count(done, frozenset({"MSF"}), last_year, today)
     expiry_by = today + timedelta(days=CESR_EXPIRY_LOOKAHEAD_DAYS)
@@ -286,7 +304,12 @@ def compute_cesr_checklist(items: list[EvidenceItem], *, today: date) -> CesrChe
     if reflections[0] < CESR_REFLECTIONS_PER_YEAR:
         actions.append(
             f"Log {CESR_REFLECTIONS_PER_YEAR - reflections[0]} more reflective "
-            "cases this year, including acute medicine and paediatric cases"
+            "cases this year, including acute medicine cases"
+        )
+    if paeds < CESR_PAEDS_REFLECTIONS_TARGET:
+        actions.append(
+            f"Log {CESR_PAEDS_REFLECTIONS_TARGET - paeds} more paediatric "
+            "reflective cases, linked to SLO 5"
         )
     if not msf_12m:
         actions.append("Start an MSF; the GMC wants one from the last 12 months")
@@ -301,6 +324,8 @@ def compute_cesr_checklist(items: list[EvidenceItem], *, today: date) -> CesrChe
         reflections_by_year=tuple(reflections),
         reflections_counted=reflections_counted,
         reflections_target=CESR_REFLECTIONS_PER_YEAR * CESR_REFLECTION_YEARS,
+        paeds_reflections=paeds,
+        paeds_reflections_target=CESR_PAEDS_REFLECTIONS_TARGET,
         msf_12m=msf_12m,
         expiring_soon=expiring,
         expiry_by=expiry_by,

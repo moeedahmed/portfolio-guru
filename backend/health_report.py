@@ -606,6 +606,11 @@ def _pathway_section(cesr) -> list[str]:
         f"Reflective cases {cesr.reflections_counted}/{cesr.reflections_target}"
         f" (this year {cesr.reflections_by_year[0]}/50)"
     )
+    lines.append(
+        f"{_tick(cesr.paeds_reflections >= cesr.paeds_reflections_target)} "
+        f"Paediatric cases {cesr.paeds_reflections}/{cesr.paeds_reflections_target}"
+        " (linked to SLO 5)"
+    )
     lines.append(f"{_tick(cesr.msf_12m > 0)} MSF in last 12 months")
     if cesr.expiring_soon:
         lines.append(
@@ -613,8 +618,10 @@ def _pathway_section(cesr) -> list[str]:
             f"{'item leaves' if cesr.expiring_soon == 1 else 'items leave'} the 6-year window by {cesr.expiry_by.strftime('%b %Y')}"
         )
     lines.extend([
-        "_Only EM WPBAs count, and cases need 20+ acute medicine and 20+ "
-        "paediatric: the scan can't check either._",
+        "_Check yourself: WPBAs from anaesthetics, ICM, acute medicine or "
+        "paediatric posts don't count toward the 36._",
+        "_Check yourself: you need 20+ acute medicine cases; the scan can't "
+        "tell them apart._",
         "",
     ])
     return lines
