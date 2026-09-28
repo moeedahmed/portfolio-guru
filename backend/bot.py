@@ -9118,6 +9118,10 @@ async def handle_info_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # Post-reset state is stable and idempotent: the storage explainer here
     # must describe what is not retained after /reset, and Back must return
     # to the exact same all-clear card rather than the generic product explainer.
+    if query.data.startswith("INFO|privacy_"):
+        await _show_privacy_layer(query, update.effective_user.id, context)
+        return
+
     if query.data == "INFO|stored_after_delete":
         await query.message.edit_text(
             _DATA_CLEAR_TEXT,
@@ -12380,6 +12384,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         update.effective_user.id,
         _case_review_state_snapshot(context),
     )
+
+    if data.startswith("INFO|privacy_"):
+        await query.answer()
+        await _show_privacy_layer(query, update.effective_user.id, context)
+        return None
 
     if data.startswith("INFO|"):
         await query.answer()
@@ -17970,8 +17979,15 @@ async def handle_consent_callback(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def privacy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/privacy — show consent status, processing summary, and withdrawal path."""
-    status = await consent.get_consent_status(update.effective_user.id)
+    """/privacy — show consent status, the privacy notice, and withdrawal path."""
+    await update.message.reply_text(
+        await _privacy_summary(update.effective_user.id, context),
+        reply_markup=_privacy_keyboard(details=False),
+    )
+
+
+async def _privacy_summary(user_id: int, context) -> str:
+    status = await consent.get_consent_status(user_id)
     has_pending_prompt = bool(context.user_data.get(_CONSENT_PROMPT_PENDING_KEY))
     if status and status["action"] in ("granted", "re-granted"):
         status_line = f"✅ Consent recorded on {status['at']} UTC."
@@ -17988,26 +18004,75 @@ async def privacy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         status_line = (
             "No consent recorded yet. The notice appears before your first case."
         )
-    await update.message.reply_text(
-        "🔐 Privacy & consent\n\n"
-        f"{status_line}\n\n"
-        "• Case notes are health data. I only draft from them with your explicit consent (UK GDPR Art. 9).\n"
-        "• Before your case reaches the AI, I remove common identifiers: NHS, hospital and record numbers, "
-        "dates of birth, phone numbers, emails, postcodes, addresses, titled names (Mr, Mrs, Dr) and named "
-        "hospitals and wards. Other names can slip through, so you remain responsible for leaving patient "
-        "identifiers out.\n"
-        "• Files you attach go to Kaizen exactly as sent, so check them for identifiers first.\n"
-        "• When drafting, the anonymised case details you provide are processed by Google Gemini via Vertex AI in the UK (London region).\n"
-        "• Kaizen credentials are stored encrypted and never shared with the AI model.\n"
-        + (
-            "• Or connect without sharing your password: you sign in to Kaizen yourself and only "
-            "the signed-in session is kept, encrypted, until Kaizen ends it (about a day).\n"
-            if kaizen_connection.passwordless_offered_to(update.effective_user.id)
-            else ""
+    return f"🔐 Privacy & consent\n\n{status_line}\n\n{_PRIVACY_SUMMARY_TEXT}"
+
+
+# /privacy is a UK GDPR privacy notice in two layers: a summary that fits one
+# phone screen, and a details card behind a button. Together they must keep
+# every point the notice needs (who, what, why, lawful basis, recipients,
+# retention, rights, erasure, complaints); test_privacy_notice.py pins them.
+# Keep in step with docs/legal/privacy-policy.md and the consent wording.
+_PRIVACY_SUMMARY_TEXT = (
+    "• Who: EM Gurus runs Portfolio Guru and is responsible for your data.\n"
+    "• What: your case notes (health data), Kaizen login and account details.\n"
+    "• Why: to draft your RCEM forms, only with your explicit consent.\n"
+    "• Shared with: Google Gemini on Vertex AI, UK (London), to draft; "
+    "Kaizen, when you approve a save.\n"
+    "• Kaizen login encrypted, never sent to the AI.\n"
+    "• Drafts only, never submitted to a supervisor.\n"
+    "• /reset withdraws consent and erases your data.\n\n"
+    "More detail covers what I strip, how long I keep data and your rights."
+)
+
+_PRIVACY_DETAILS_TEXT = (
+    "🔐 Privacy details\n\n"
+    "Stripped before the AI: NHS, hospital and record numbers, dates of birth, "
+    "phone numbers, emails, postcodes, addresses, titled names (Mr, Mrs, Dr), "
+    "hospitals and wards. Other names can slip through, so leave patient "
+    "identifiers out.\n\n"
+    "Files you attach go to Kaizen unchanged, so check them first.\n\n"
+    "Kept: a case in progress for 24 hours at most. Voice and attachment files "
+    "are deleted once read. No case text is kept beyond 180 days.\n\n"
+    "Lawful basis: your explicit consent (UK GDPR Art. 9(2)(a)) and providing "
+    "the service you signed up for (Art. 6(1)(b)).\n\n"
+    "Your rights: see, correct, restrict, move or erase your data. /reset "
+    "withdraws consent and erases it. You can complain to the ICO: "
+    "ico.org.uk/make-a-complaint"
+)
+
+_PRIVACY_PASSWORDLESS_LINE = (
+    "\n\nNo-password option: you sign in to Kaizen yourself and I keep only the "
+    "signed-in session, encrypted, until Kaizen ends it (about a day)."
+)
+
+
+def _privacy_keyboard(*, details: bool) -> InlineKeyboardMarkup:
+    if details:
+        button = InlineKeyboardButton("🔙 Back", callback_data="INFO|privacy_summary")
+    else:
+        button = InlineKeyboardButton("🔎 More detail", callback_data="INFO|privacy_details")
+    return InlineKeyboardMarkup([[button]])
+
+
+def _privacy_details_text(user_id: int) -> str:
+    text = _PRIVACY_DETAILS_TEXT
+    if kaizen_connection.passwordless_offered_to(user_id):
+        head, rights = text.split("\n\nLawful basis:", 1)
+        text = f"{head}{_PRIVACY_PASSWORDLESS_LINE}\n\nLawful basis:{rights}"
+    return text
+
+
+async def _show_privacy_layer(query, user_id: int, context) -> None:
+    """Swap the /privacy card between its summary and details layers."""
+    if query.data == "INFO|privacy_details":
+        await query.message.edit_text(
+            _privacy_details_text(user_id), reply_markup=_privacy_keyboard(details=True)
         )
-        + "• Drafts only — nothing is ever submitted to a supervisor.\n"
-        "• /reset withdraws consent and erases Portfolio Guru's stored data (UK GDPR Art. 17)."
-    )
+    else:
+        await query.message.edit_text(
+            await _privacy_summary(user_id, context),
+            reply_markup=_privacy_keyboard(details=False),
+        )
 
 
 # === APPLICATION BUILDER ===
