@@ -484,6 +484,31 @@ async def test_privacy_reports_pending_consent_prompt(tmp_consent_db):
 
 @pytest.mark.consent_gate
 @pytest.mark.asyncio
+async def test_privacy_more_detail_and_back_buttons(tmp_consent_db):
+    """/privacy is a summary with a More detail button; Back returns to it
+    with the consent status still shown."""
+    from bot import handle_info_button, privacy_command
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    await privacy_command(sim._make_text_update("/privacy"), context)
+
+    details = sim._make_callback_update("INFO|privacy_details")
+    await handle_info_button(details, context)
+    text = details.callback_query.message.edit_text.call_args.args[0]
+    assert text.startswith("🔐 Privacy details")
+    assert "Art. 9(2)(a)" in text and "ico.org.uk" in text
+
+    back = sim._make_callback_update("INFO|privacy_summary")
+    await handle_info_button(back, context)
+    text = back.callback_query.message.edit_text.call_args.args[0]
+    assert text.startswith("🔐 Privacy & consent")
+    assert "No consent recorded yet" in text
+    assert "/reset withdraws consent and erases your data" in text
+
+
+@pytest.mark.consent_gate
+@pytest.mark.asyncio
 async def test_legacy_review_button_opens_full_consent_notice(tmp_consent_db):
     """Old already-sent setup cards may still carry CONSENT|review buttons.
     Keep them safe, but do not show that button in new prompts."""
