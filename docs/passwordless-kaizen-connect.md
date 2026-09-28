@@ -11,9 +11,12 @@ is the main way a password leaks, so this option never holds one.
 
 ## What the user sees
 
-- `/setup`, `/start` and the "connect first" prompt ask for the Kaizen
-  username as before, with a second button: **🔒 Connect without sharing my
-  password**, and the line "you'll need to sign in again about once a day".
+- `/setup`, `/start` and the "connect first" prompt show one Connect Kaizen
+  choice: **🔑 Save my login (recommended)** (email and password stored
+  encrypted) or **🔒 Don't save my login** (sign in on Kaizen's page; lasts about
+  a day). The choice is about whether the login is kept, not the password alone:
+  keystrokes still pass through our isolated browser, so the honest claim is
+  "not kept", never "we never see it".
 - That button sends **Sign in to Kaizen** (opens `connect.emgurus.com`) and
   **I've signed in**. The bot believes "I've signed in" only after it has opened
   Kaizen with the kept session, and reads the portfolio type as the password

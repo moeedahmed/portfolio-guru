@@ -222,7 +222,7 @@ MESSAGE_TEMPLATES: dict[str, MessageTemplate] = {
             "🔗 Connect Kaizen\n\n"
             "Use the secure setup before saving drafts:\n"
             "1. Tap Connect Kaizen below (or send /start and choose it).\n"
-            "2. Pick password (recommended) or password-free sign-in.\n"
+            "2. Pick Save my login (recommended) or Don't save my login.\n"
             "3. Send an anonymised case.\n\n"
             "Safety notes:\n"
             "• Kaizen credentials are encrypted and not shown back in chat.\n"
