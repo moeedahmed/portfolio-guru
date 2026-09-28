@@ -54,7 +54,7 @@ ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculu
 ACTION|change_pathway ACTION|confirm_refresh_for_health ACTION|confirm_refresh_portfolio ACTION|continue_thin
 ACTION|delete ACTION|file ACTION|health ACTION|health_limited ACTION|health_page|*
 ACTION|health_queue|awaiting|* ACTION|health_queue|draft|* ACTION|health_review_confirm|*
-ACTION|health_review_select|* ACTION|health_review_setup ACTION|health_route_set|* ACTION|health_view|about ACTION|health_view|more
+ACTION|health_review_select|* ACTION|health_review_setup ACTION|health_route_set|* ACTION|health_view|about ACTION|health_view|curriculum ACTION|health_view|more
 ACTION|health_view|priorities ACTION|portfolio_defaults ACTION|refresh_portfolio ACTION|reset
 ACTION|retry_filing ACTION|retry_recommend ACTION|retry_setup_login ACTION|retry_template
 ACTION|same_case_another ACTION|settings ACTION|setup ACTION|voice AMEND|cancel AMEND|cancel_choice
@@ -193,7 +193,7 @@ def reviewed_units(slots):
     return dict(sorted(units.items()))
 
 
-CATALOGUE_DIGEST = '265224c8f49138cbe18956b23f2839cca81f6d424882a50f7efd9cf39d4e5342'
+CATALOGUE_DIGEST = '81f1c7376c2ecbf1df8b435a25858394dbbd75f333fd558b10b99f9aca362ed7'
 
 
 def requirements_digest(units):

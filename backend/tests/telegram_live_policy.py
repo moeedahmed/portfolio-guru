@@ -34,7 +34,7 @@ PROTECTED = re.compile(
     r"VOICE\|(?:done|remove|preview_accept|kaizen_sample\|.+)|ATTACH\|(?:yes|no))"
 )
 PROTECTED_DYNAMIC = re.compile(
-    r"ACTION\|(?:health_view\|(?:about|more|priorities|coverage|actions|scan|legacy_actions)|"
+    r"ACTION\|(?:health_view\|(?:about|more|priorities|coverage|curriculum|actions|scan|legacy_actions)|"
     r"health_queue\|(?:awaiting|draft)\|[0-9]+|health_page\|[0-9]+|"
     r"health_detail\|(?:stuck|domains|basis)|health_review_select\|[0-9]{4}-(?:0[1-9]|1[0-2]))"
 )
