@@ -118,7 +118,7 @@ def test_deploy_refuses_non_full_expected_sha_before_checkout_mutation(deploy_re
     assert subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=app, text=True).strip() == initial
 
 
-def test_deploy_updates_only_to_exact_origin_main_sha(deploy_repo):
+def test_deploy_updates_to_exact_tested_sha(deploy_repo):
     app, _initial, expected, env = deploy_repo
     env["DEPLOY_EXPECTED_SHA"] = expected
     result = subprocess.run(["bash", str(SCRIPT)], cwd=app, env=env, capture_output=True, text=True)
@@ -127,13 +127,77 @@ def test_deploy_updates_only_to_exact_origin_main_sha(deploy_repo):
     assert f"DEPLOYED_SHA={expected}" in result.stdout
 
 
-def test_deploy_refuses_when_origin_main_is_not_expected_sha(deploy_repo):
+def test_deploy_refuses_sha_that_is_not_on_origin_main(deploy_repo):
     app, initial, _expected, env = deploy_repo
     env["DEPLOY_EXPECTED_SHA"] = "f" * 40
     result = subprocess.run(["bash", str(SCRIPT)], cwd=app, env=env, capture_output=True, text=True)
     assert result.returncode != 0
     assert "origin/main" in result.stdout + result.stderr
     assert subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=app, text=True).strip() == initial
+
+
+def _push_newer_main(app: Path) -> str:
+    seed = app.parent / "seed"
+    newer = _commit(seed, "newer")
+    _run(["git", "push", "origin", "main"], cwd=seed)
+    return newer
+
+
+def test_deploy_lands_tested_sha_even_after_main_moved_on(deploy_repo):
+    """Main moving during this SHA's tests must not fail its deploy (the old
+    exact-tip check did, so close-together releases starved each other)."""
+    app, _initial, expected, env = deploy_repo
+    _push_newer_main(app)
+    env["DEPLOY_EXPECTED_SHA"] = expected
+    result = subprocess.run(["bash", str(SCRIPT)], cwd=app, env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=app, text=True).strip() == expected
+
+
+def test_older_deploy_after_newer_one_succeeds_without_rolling_back(deploy_repo):
+    app, _initial, expected, env = deploy_repo
+    newer = _push_newer_main(app)
+    env["DEPLOY_EXPECTED_SHA"] = newer
+    first = subprocess.run(["bash", str(SCRIPT)], cwd=app, env=env, capture_output=True, text=True)
+    assert first.returncode == 0, first.stdout + first.stderr
+
+    calls = app.parent / "launchctl-calls"
+    fake = Path(env["PATH"].split(":")[0]) / "launchctl"
+    fake.write_text(
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$TEST_LAUNCHCTL_CALLS"\n'
+        'if [[ "$1" == print && "$2" == user/* ]]; then echo "Could not find service" >&2; exit 113; fi\n'
+        'if [[ "$1" == print ]]; then printf "pid = %s\\n" "$TEST_SERVICE_PID"; fi\nexit 0\n'
+    )
+    env["TEST_LAUNCHCTL_CALLS"] = str(calls)
+    env["DEPLOY_EXPECTED_SHA"] = expected
+    second = subprocess.run(["bash", str(SCRIPT)], cwd=app, env=env, capture_output=True, text=True)
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert f"SUPERSEDED_BY={newer}" in second.stdout
+    assert subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=app, text=True).strip() == newer
+    assert not [line for line in calls.read_text().splitlines() if not line.startswith("print ")]
+
+
+def test_deploy_waits_for_a_running_deploy_instead_of_failing(deploy_repo):
+    app, initial, expected, env = deploy_repo
+    lock = Path(env["PORTFOLIO_GURU_DEPLOY_LOCK"])
+    lock.mkdir()
+    (lock / "pid").write_text(str(os.getpid()))
+    env["DEPLOY_EXPECTED_SHA"] = expected
+    env["PORTFOLIO_GURU_DEPLOY_LOCK_WAIT_SECONDS"] = "10"
+    result = subprocess.run(["bash", str(SCRIPT)], cwd=app, env=env, capture_output=True, text=True)
+    assert result.returncode == 1
+    assert "waiting for it to finish" in result.stdout
+    assert "still running after 10s" in result.stdout
+    assert subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=app, text=True).strip() == initial
+
+    (lock / "pid").write_text("999999")  # holder died: its stale lock is taken over
+    result = subprocess.run(["bash", str(SCRIPT)], cwd=app, env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=app, text=True).strip() == expected
+
+
+def test_workflow_does_not_cancel_queued_deploys():
+    assert "concurrency:" not in WORKFLOW.read_text()
 
 
 @pytest.mark.parametrize("domain", ["gui", "user"])

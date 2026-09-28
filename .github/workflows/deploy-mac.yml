@@ -12,9 +12,10 @@ on:
         required: true
         type: string
 
-concurrency:
-  group: deploy-mac-mini
-  cancel-in-progress: false
+# No workflow concurrency group: GitHub would cancel every queued deploy but
+# the newest, leaving those SHAs with no successful deploy run. Every tested
+# SHA gets its own run instead; deploy_mac.sh makes them take turns on the
+# Mac Mini and skips any SHA a newer deploy already includes.
 
 jobs:
   deploy:
