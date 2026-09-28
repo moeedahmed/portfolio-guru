@@ -416,8 +416,8 @@ async def test_privacy_reports_grant_after_accepting(tmp_consent_db):
     assert "waiting for your choice" not in text  # pending flag was cleared
     assert "may use your case notes" not in text
     assert "EU (London)" not in text
-    assert "Vertex AI in the UK (London region)" in text
-    assert "Portfolio Guru's stored data" in text
+    assert "Vertex AI, UK (London)" in text
+    assert "/reset withdraws consent and erases your data" in text
 
 
 @pytest.mark.consent_gate

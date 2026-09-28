@@ -47,7 +47,7 @@ def producer_digest():
     return hashlib.sha256(json.dumps(modules).encode()).hexdigest()
 
 
-PRODUCER_DIGEST = 'ce3de5416a35d0f7b6bfe3c7192bc250e2a6e89a13a6f5de7180d1458f724906'
+PRODUCER_DIGEST = '32084fcde3085d45216ea92156673aac4c56f8327b03418c1fcc1ae3730c61cb'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
@@ -61,7 +61,7 @@ ACTION|same_case_another ACTION|settings ACTION|setup ACTION|voice AMEND|cancel 
 AMEND|start_new AMEND|update_current APPROVE|draft ATTACH|no ATTACH|yes CANCEL|doc_intent CANCEL|draft
 CANCEL|edit CANCEL|form CASE|improve CASE|new CONFIRM|keep CONFIRM|reset CONSENT|accept|* CONSENT|decline|* DOCUSE|attach
 DOCUSE|both DOCUSE|ignore DOCUSE|info FIELD|* FORM|* FORM|back FORM|best FORM|cat_* FORM|disabled
-FORM|show_all GATHER|done INFO|what PATHWAY_SETTINGS|* PATHWAY|* PUSHBACK|*|curriculum_links
+FORM|show_all GATHER|done INFO|privacy_details INFO|privacy_summary INFO|what PATHWAY_SETTINGS|* PATHWAY|* PUSHBACK|*|curriculum_links
 PUSHBACK|*|date_of_encounter PUSHBACK|*|key_capabilities PUSHBACK|*|other PUSHBACK|*|reflection SETLEVEL|*
 SET_CURRICULUM|* SUP|cancel-draft|* SUP|confirm-save-draft|* SUP|later|* SUP|open|* SUP|prepare-writeback|*
 SUP|recapture|* SUP|request-save-draft|* SUP|review|* SUP|skip|* UNSIGNED|12m UNSIGNED|3m UNSIGNED|6m
@@ -193,7 +193,7 @@ def reviewed_units(slots):
     return dict(sorted(units.items()))
 
 
-CATALOGUE_DIGEST = '72f470f04eea512648a7a1f7ccdb1571048c77a49d8c9a16b900ec7c62de4b30'
+CATALOGUE_DIGEST = '265224c8f49138cbe18956b23f2839cca81f6d424882a50f7efd9cf39d4e5342'
 
 
 def requirements_digest(units):
