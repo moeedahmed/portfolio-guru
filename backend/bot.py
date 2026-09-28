@@ -2813,17 +2813,17 @@ _KB_RETRY_SETUP = InlineKeyboardMarkup([
 _CONNECT_CHOICE_TEXT = (
     "🔗 *Connect Kaizen*\n\n"
     "I need to sign in to Kaizen to save your drafts.\n\n"
-    "🔑 *Save my login (recommended)*\n"
-    "Stays connected. Email and password stored encrypted, deleted with /reset.\n\n"
-    "🔒 *Don't save my login*\n"
-    "Sign in on Kaizen's page. Email and password not kept. Lasts about a day."
+    "🔑 *Share my login (recommended)*\n"
+    "Type your email and password here. Stays connected. Stored encrypted, deleted with /reset.\n\n"
+    "🔒 *Sign in on Kaizen's page*\n"
+    "Not in this chat, and your login isn't stored. Lasts about a day."
 )
 _BTN_CONNECT_PASSWORDLESS = InlineKeyboardButton(
-    "🔒 Don't save my login",
+    "🔒 Sign in on Kaizen's page",
     callback_data="ACTION|connect_passwordless",
 )
 _BTN_CONNECT_PASSWORD = InlineKeyboardButton(
-    "🔑 Save my login (recommended)",
+    "🔑 Share my login (recommended)",
     callback_data="ACTION|setup_password",
 )
 _KB_CONNECT_CHOICE = InlineKeyboardMarkup([
@@ -2853,7 +2853,7 @@ def _login_rejected_prompt(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
 _PASSWORDLESS_LINK_TEXT = (
     "🔒 *Sign in to Kaizen*\n\n"
     "Tap *Open Kaizen sign-in*. I'll confirm here as soon as it works.\n\n"
-    "_Link lasts 10 minutes. Email and password not kept; sign-in lasts about a day._"
+    "_Link lasts 10 minutes. Your login isn't stored; sign-in lasts about a day._"
 )
 _PASSWORDLESS_LINK_ENDED_TEXT = (
     "⌛ That sign-in link expired before Kaizen connected. Get a new link to try again."
@@ -2868,7 +2868,7 @@ _PASSWORDLESS_WATCH_GRACE_SECONDS = 90
 _PASSWORDLESS_WATCH_MAX_ERRORS = 5
 _PASSWORDLESS_UNAVAILABLE_TEXT = (
     "⚠️ The Kaizen sign-in page isn't available right now. Try again in a few "
-    "minutes, or choose *Save my login* instead."
+    "minutes, or choose *Share my login* instead."
 )
 _PASSWORDLESS_NOT_SIGNED_IN_TEXT = (
     "I can't see a Kaizen sign-in yet.\n\n"
@@ -2876,7 +2876,7 @@ _PASSWORDLESS_NOT_SIGNED_IN_TEXT = (
     "*Kaizen connected*. If the link has expired, tap *New link*."
 )
 _PASSWORDLESS_FEATURE_UNAVAILABLE_TEXT = (
-    "This needs a saved Kaizen login, because it signs in to Kaizen by itself. "
+    "This needs your Kaizen login shared with me, because it signs in to Kaizen by itself. "
     "Saving drafts and /health still work as normal."
 )
 _PASSWORDLESS_CHECK_FAILED_TEXT = (
@@ -2902,7 +2902,7 @@ def _passwordless_keyboard(
     if not watched:
         rows.append([InlineKeyboardButton("✅ I've signed in", callback_data=f"ACTION|{done_action}")])
     if done_action == "passwordless_done":
-        rows.append([InlineKeyboardButton("🔑 Save my login instead", callback_data="ACTION|setup_password")])
+        rows.append([InlineKeyboardButton("🔑 Share my login instead", callback_data="ACTION|setup_password")])
     if not watched:
         rows.append([InlineKeyboardButton("🔁 New link", callback_data=f"ACTION|{link_action}"), _BTN_CANCEL])
     else:
@@ -3068,7 +3068,7 @@ def _username_prompt_with_offer(user_id: int, prompt: str) -> tuple[str, InlineK
     """Where passwordless is offered, one message with both ways to connect.
 
     Typing an email still works from that message: the state stays
-    AWAIT_USERNAME, and "Save my login" only asks for it explicitly.
+    AWAIT_USERNAME, and "Share my login" only asks for it explicitly.
     """
     if kaizen_connection.passwordless_offered_to(user_id):
         return _CONNECT_CHOICE_TEXT, _KB_CONNECT_CHOICE
@@ -8020,7 +8020,7 @@ async def _finish_setup_after_connect(
 
 
 _KAIZEN_PASSWORD_ROUTE_PROMPT = (
-    "🔑 *Save my Kaizen login*\n\n"
+    "🔑 *Share my Kaizen login*\n\n"
     "What's your Kaizen username (email)?\n\n"
     f"{_KAIZEN_USERNAME_PRIVACY_NOTE}"
 )
@@ -16252,8 +16252,8 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             msg = (
                 f"🔒 Kaizen has signed you out\n"
                 f"{form_name}\n\n"
-                "This happens about once a day when you don't save your Kaizen "
-                "login. Your draft is kept. Tap below to sign in again "
+                "This happens about once a day when you sign in on Kaizen's "
+                "page. Your draft is kept. Tap below to sign in again "
                 "and I'll save it."
             )
             end_keyboard = InlineKeyboardMarkup([
@@ -18056,8 +18056,8 @@ _PRIVACY_DETAILS_TEXT = (
 )
 
 _PRIVACY_PASSWORDLESS_LINE = (
-    "\n\nDon't save my login: you sign in on Kaizen's page, your email and password "
-    "are not kept, and I keep only the "
+    "\n\nSign in on Kaizen's page: you sign in there, not in this chat. Your login "
+    "isn't stored; I keep only the "
     "signed-in session, encrypted, until Kaizen ends it (about a day)."
 )
 

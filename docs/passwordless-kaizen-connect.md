@@ -12,11 +12,12 @@ is the main way a password leaks, so this option never holds one.
 ## What the user sees
 
 - `/setup`, `/start` and the "connect first" prompt show one Connect Kaizen
-  choice: **🔑 Save my login (recommended)** (email and password stored
-  encrypted) or **🔒 Don't save my login** (sign in on Kaizen's page; lasts about
-  a day). The choice is about whether the login is kept, not the password alone:
-  keystrokes still pass through our isolated browser, so the honest claim is
-  "not kept", never "we never see it".
+  choice: **🔑 Share my login (recommended)** (email and password typed in
+  chat, stored encrypted) or **🔒 Sign in on Kaizen's page** (not in chat, login
+  not stored; lasts about a day). The choice is about whether the doctor shares
+  their login with the bot, not the password alone. Keystrokes on the Kaizen page
+  still pass through our isolated browser, so the honest claim is "not in this
+  chat, not stored", never "we never see it".
 - That button sends **Sign in to Kaizen** (opens `connect.emgurus.com`) and
   **I've signed in**. The bot believes "I've signed in" only after it has opened
   Kaizen with the kept session, and reads the portfolio type as the password

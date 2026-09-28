@@ -98,15 +98,15 @@ async def test_setup_is_one_message_with_both_ways_to_connect(harness):
     kind, text, markup = harness.outbox[0]
     assert kind == "send"
     # Password first and recommended; password-free kept as the alternative.
-    assert text.index("Save my login (recommended)") < text.index("Don't save my login")
+    assert text.index("Share my login (recommended)") < text.index("Sign in on Kaizen's page")
     assert "Stays connected" in text and "encrypted" in text and "/reset" in text
     assert "about a day" in text
     assert "Fernet" not in text
     # Kept short enough to scan in a few seconds.
     assert len(text.splitlines()) <= 9
     assert _buttons(markup) == [
-        ("🔑 Save my login (recommended)", "ACTION|setup_password"),
-        ("🔒 Don't save my login", "ACTION|connect_passwordless"),
+        ("🔑 Share my login (recommended)", "ACTION|setup_password"),
+        ("🔒 Sign in on Kaizen's page", "ACTION|connect_passwordless"),
         ("❌ Cancel", "ACTION|cancel"),
     ]
 
@@ -129,7 +129,7 @@ async def test_tapping_sign_in_twice_edits_one_message_and_keeps_one_link(harnes
     assert "I'll confirm here as soon as it works" in text
     assert _buttons(markup) == [
         ("🔒 Open Kaizen sign-in", "https://connect.test/handoff#t1"),
-        ("🔑 Save my login instead", "ACTION|setup_password"),
+        ("🔑 Share my login instead", "ACTION|setup_password"),
         ("❌ Cancel", "ACTION|cancel"),
     ]
     assert len(jobs) == 1
@@ -206,7 +206,7 @@ async def test_choosing_the_password_route_then_typing_an_email_asks_for_the_pas
         await harness.feed(make_command_update("setup"))
         await harness.feed(make_callback_update("ACTION|connect_passwordless"))
         await harness.feed(make_callback_update("ACTION|setup_password"))
-        assert "Save my Kaizen login" in harness.outbox[-1][1]
+        assert "Share my Kaizen login" in harness.outbox[-1][1]
         assert harness.app.job_queue.get_jobs_by_name(f"pwl-watch-{TEST_USER.id}") == () or all(
             job.removed for job in harness.app.job_queue.get_jobs_by_name(f"pwl-watch-{TEST_USER.id}")
         )
@@ -235,7 +235,7 @@ async def test_connect_buttons_on_the_connect_first_prompt_never_leave_a_case_st
     await harness.app.initialize()
     try:
         await harness.feed(make_text_update("Saw a 70-year-old with chest pain today"))
-        assert "Don't save my login" in harness.outbox[-1][1]
+        assert "Sign in on Kaizen's page" in harness.outbox[-1][1]
         key = (TEST_USER.id, TEST_USER.id)
         assert _case_conv(harness.app)._conversations.get(key) == bot.AWAIT_USERNAME
 
@@ -244,9 +244,9 @@ async def test_connect_buttons_on_the_connect_first_prompt_never_leave_a_case_st
         assert _case_conv(harness.app)._conversations.get(key) is None
 
         await harness.feed(make_text_update("Saw a 70-year-old with chest pain today"))
-        assert "Don't save my login" in harness.outbox[-1][1]
+        assert "Sign in on Kaizen's page" in harness.outbox[-1][1]
         await harness.feed(make_callback_update("ACTION|setup_password"))
-        assert "Save my Kaizen login" in harness.outbox[-1][1]
+        assert "Share my Kaizen login" in harness.outbox[-1][1]
         assert _case_conv(harness.app)._conversations.get(key) == bot.AWAIT_USERNAME
     finally:
         await harness.app.shutdown()
@@ -335,7 +335,7 @@ async def test_a_rejected_login_after_start_goes_back_to_the_email_step(harness,
     assert "Type your Kaizen email" in text
     assert "Login failed" not in text and "Select Retry" not in text
     assert _buttons(markup) == [
-        ("🔒 Don't save my login", "ACTION|connect_passwordless"),
+        ("🔒 Sign in on Kaizen's page", "ACTION|connect_passwordless"),
         ("❌ Cancel", "ACTION|cancel"),
     ]
     # Typing the email again carries straight on to the password.

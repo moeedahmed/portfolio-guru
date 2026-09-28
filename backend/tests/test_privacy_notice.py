@@ -89,8 +89,8 @@ async def test_more_detail_then_back_swaps_layers():
 
 def test_passwordless_line_only_when_offered():
     with patch.object(bot.kaizen_connection, "passwordless_offered_to", return_value=False):
-        assert "Don't save my login: " not in bot._privacy_details_text(1)
+        assert "Sign in on Kaizen's page: " not in bot._privacy_details_text(1)
     with patch.object(bot.kaizen_connection, "passwordless_offered_to", return_value=True):
         text = bot._privacy_details_text(1)
-    assert "Don't save my login: " in text
-    assert text.index("Don't save my login: ") < text.index("Lawful basis")
+    assert "Sign in on Kaizen's page: " in text
+    assert text.index("Sign in on Kaizen's page: ") < text.index("Lawful basis")
