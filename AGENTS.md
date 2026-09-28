@@ -1,5 +1,7 @@
 # Portfolio Guru — AGENTS.md (Claude Code Project Context)
 
+**Read `docs/PRODUCT_BRIEF.md` first**: the product vision, users, principles, scope, dated decision log and open questions. This file is the engineering how; the brief is the product why.
+
 ## Identity
 
 Portfolio Guru automates e-portfolio filing for UK EM trainees. A doctor sends a clinical case via Telegram (text, voice, photo, document); the bot extracts structured WPBA data, recommends/accepts a form type, previews a draft, then saves a Kaizen draft on approval. Supervisor submission is never automatic.
@@ -136,6 +138,7 @@ Complete the current task with the minimum sufficient change.
 - Finish with only necessary files changed and no debug code, backup copies, scratch files, or dead paths.
 
 <!-- product-standard:start (master copy: moeedahmed/skills skills/product-standard; edit there, not here) -->
+
 ## EM Gurus product standard
 
 Applies to every EM Gurus product. Where this file says something stricter above, the stricter rule wins.
@@ -146,4 +149,5 @@ Applies to every EM Gurus product. Where this file says something stricter above
 - **Reliability:** keep a health check, error alerts and a known rollback path (last good version plus the exact command). If a release fails its checks or live proof, roll back or fix forward in the same run and say which.
 - **Messages to Moeed:** first line is the point, plain English, short bullets. When done, give a short summary and close your own thread.
 - **Marketing voice:** anything written as Moeed or for the public follows the `moeed-voice` skill; posting or sending it still needs his yes.
+
 <!-- product-standard:end -->
