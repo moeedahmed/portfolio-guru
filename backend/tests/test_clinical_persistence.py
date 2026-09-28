@@ -95,7 +95,61 @@ async def test_case_in_progress_survives_a_restart_encrypted(tmp_path):
     restored = (await cp.ClinicalScrubbingPersistence(filepath=path).get_user_data())[4242]
     assert restored["case_text"] == CASE
     assert restored["draft_data"]["clinical_reasoning"] == CASE
-    assert "last_filed_case_text" not in restored, "filed-case history stays memory-only"
+    assert "last_filed_case_text" not in restored, "an undated filed case is not restored"
+    assert "last_amend_case_text" not in restored, "amend history stays memory-only"
+
+
+@pytest.mark.asyncio
+async def test_last_filed_case_survives_a_restart_for_another_form(tmp_path):
+    """A release restart made "Another form" on a draft saved minutes
+    earlier say the case had expired (2026-09-28)."""
+    from datetime import datetime, timezone
+
+    path = tmp_path / "bot_persistence"
+    filed = {
+        "last_filed_case_text": CASE,
+        "last_filed_at": datetime.now(timezone.utc),
+        "last_filed_form_type": "DOPS",
+        "last_amend_draft": {"fields": {"reflection": CASE}},
+    }
+    persistence = cp.ClinicalScrubbingPersistence(filepath=path)
+    await persistence.update_user_data(4242, filed)
+    await persistence.flush()
+
+    assert CASE.encode() not in path.read_bytes(), "pickle stays free of case text"
+    for f in cp.working_case_dir().iterdir():
+        assert CASE.encode() not in f.read_bytes(), "filed case must be encrypted"
+
+    restored = (await cp.ClinicalScrubbingPersistence(filepath=path).get_user_data())[4242]
+    assert restored["last_filed_case_text"] == CASE
+    assert "last_amend_draft" not in restored
+
+
+def test_last_filed_case_expires_after_ttl_even_if_file_is_fresh():
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    cp.save_working_case(7, {
+        "last_filed_case_text": CASE,
+        "last_filed_at": now - timedelta(hours=25),
+        "case_text": "newer case in progress",
+    })
+
+    restored = cp.load_working_cases(now=now)[7]
+    assert "last_filed_case_text" not in restored
+    assert "last_filed_at" not in restored
+    assert restored["case_text"] == "newer case in progress"
+
+
+def test_reset_erases_the_last_filed_case():
+    from datetime import datetime, timezone
+
+    cp.save_working_case(4242, {
+        "last_filed_case_text": CASE,
+        "last_filed_at": datetime.now(timezone.utc),
+    })
+    assert cp.purge_working_case(4242) == 1
+    assert cp.load_working_cases() == {}
 
 
 @pytest.mark.asyncio

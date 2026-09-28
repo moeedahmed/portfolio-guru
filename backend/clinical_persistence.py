@@ -25,6 +25,12 @@ filed-case history — are kept across a restart in a per-user Fernet file that
 fails closed without a key, expires after ``PG_WORKING_CASE_TTL_HOURS``
 (default 24), disappears as soon as the case is filed or cancelled (the keys
 leave ``user_data``), and is erased by ``/reset``.
+
+The last filed case is the one exception to memory-only history (Moeed's
+decision, 2026-09-28): a restart for a release made "Another form" on a draft
+saved minutes earlier say the case had expired. ``FILED_CASE_KEYS`` ride in the
+same encrypted file and are dropped on load once ``last_filed_at`` is older
+than the same TTL, however recently the file itself was rewritten.
 """
 from __future__ import annotations
 
@@ -87,6 +93,10 @@ WORKING_CASE_KEYS: frozenset[str] = frozenset({
     "form_recommendations",
     "form_recommendations_text",
 })
+# The last filed case, kept so "Another form" survives a restart. Expires
+# ``PG_WORKING_CASE_TTL_HOURS`` after ``last_filed_at`` (a UTC datetime).
+FILED_CASE_KEYS: frozenset[str] = frozenset({"last_filed_case_text", "last_filed_at"})
+_RESTART_KEYS = WORKING_CASE_KEYS | FILED_CASE_KEYS
 # In-flight guards that only mean something while this process runs. Written
 # to disk they outlived a crash and blocked every later Save ("Already saving").
 TRANSIENT_USER_DATA_KEYS: frozenset[str] = frozenset({"filing_in_progress", "form_choice_in_progress"})
@@ -116,7 +126,9 @@ def save_working_case(user_id: int, data: dict[str, Any] | None) -> None:
     Never raises: losing restart recovery is recoverable, a crashed flush or a
     plaintext fallback is not.
     """
-    working = {k: v for k, v in (data or {}).items() if k in WORKING_CASE_KEYS}
+    working = {k: v for k, v in (data or {}).items() if k in _RESTART_KEYS}
+    if "last_filed_case_text" not in working:
+        working.pop("last_filed_at", None)
     path = _working_case_file(user_id)
     if not working:
         path.unlink(missing_ok=True)
@@ -157,10 +169,22 @@ def load_working_cases(now: datetime | None = None) -> dict[int, dict[str, Any]]
             logger.warning("Working case %s unreadable; removing", path.name, exc_info=True)
             fresh, payload = False, None
         if fresh:
-            restored[int(stem)] = payload["data"]
+            data = _drop_stale_filed_case(payload["data"], now)
+            if data:
+                restored[int(stem)] = data
         else:
             path.unlink(missing_ok=True)
     return restored
+
+
+def _drop_stale_filed_case(data: dict[str, Any], now: datetime) -> dict[str, Any]:
+    """Remove the last filed case once it is older than the TTL (or undated)."""
+    filed_at = data.get("last_filed_at")
+    if "last_filed_case_text" in data and not (
+        isinstance(filed_at, datetime) and now - filed_at <= _working_case_ttl()
+    ):
+        data = {k: v for k, v in data.items() if k not in FILED_CASE_KEYS}
+    return data
 
 
 def purge_working_case(user_id: int) -> int:
@@ -240,6 +264,7 @@ def purge_existing_file(path) -> dict[str, Any]:
 __all__ = [
     "CLINICAL_USER_DATA_KEYS",
     "ClinicalScrubbingPersistence",
+    "FILED_CASE_KEYS",
     "WORKING_CASE_KEYS",
     "load_working_cases",
     "purge_existing_file",

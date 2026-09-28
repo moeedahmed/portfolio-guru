@@ -5658,6 +5658,12 @@ def _build_post_review_keyboard(improved_once: bool = False, context=None):
 
 
 _POST_FILING_SAME_CASE_LABEL = "📋 Another form"
+# Filed cases are kept 24 hours (encrypted) across restarts, so this shows
+# only after that, or after /reset.
+_SAME_CASE_GONE_TEXT = (
+    "⏳ I no longer have that case saved.\n"
+    "Send it again and I’ll draft the next form."
+)
 _POST_FILING_NEW_CASE_LABEL = "➕ New case"
 
 
@@ -9144,8 +9150,10 @@ async def handle_same_case_another(update: Update, context: ContextTypes.DEFAULT
     )
     if not case_text:
         await query.message.reply_text(
-            "That same-case shortcut has expired. Send the case again, or start a new case and I’ll draft the next WPBA.",
-            reply_markup=_build_next_step_keyboard(user_id),
+            _SAME_CASE_GONE_TEXT,
+            reply_markup=_build_next_step_keyboard(user_id) or InlineKeyboardMarkup(
+                [[InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file")]]
+            ),
         )
         return ConversationHandler.END
 
@@ -12120,6 +12128,7 @@ async def _handle_reuse_request(update: Update, context: ContextTypes.DEFAULT_TY
 
     filed_form = context.user_data.get("last_filed_form_type", "")
     filed_forms = _filed_form_types_for_last_case(context)
+    filed_at = context.user_data.get("last_filed_at")
     # The reuse phrase IS the intent — match form codes without the standard
     # intent-phrase gate so "use the same case for DOPS" picks up DOPS.
     explicit_form = extract_explicit_form_type(raw_text, require_intent=False)
@@ -12128,6 +12137,8 @@ async def _handle_reuse_request(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data.clear()
     context.user_data["case_text"] = last_case
     context.user_data["last_filed_case_text"] = last_case
+    if filed_at:
+        context.user_data["last_filed_at"] = filed_at
     context.user_data["last_filed_form_type"] = filed_form
     context.user_data["last_filed_form_types"] = filed_forms
     context.user_data["excluded_form_type"] = filed_form
@@ -16010,6 +16021,8 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         context.user_data.clear()
         if filed_case_text:
             context.user_data["last_filed_case_text"] = filed_case_text
+            # Dates the encrypted restart copy so it expires on its own.
+            context.user_data["last_filed_at"] = datetime.now(UTC)
             context.user_data["last_filed_form_type"] = form_type
             context.user_data["last_filed_form_types"] = list(dict.fromkeys(filed_forms_for_case))
         # Store amend data after clear so it's available for the button

@@ -4286,8 +4286,8 @@ class TestRecentPortfolioFixes:
 
         assert result == ConversationHandler.END
         text = sim.get_last_text()
-        assert 'same-case shortcut has expired' in text
-        assert 'Send the case again' in text
+        assert 'no longer have that case saved' in text
+        assert 'Send it again' in text
         assert 'no longer available here' not in text
 
     @pytest.mark.asyncio
