@@ -178,11 +178,11 @@ export PG_SIGNOFF_CHASE_HEALTHCHECK_URL
 # re-listing and began reporting only what moved. Set to empty to disable.
 export PG_ENABLE_SIGNOFF_CHASE="${PG_ENABLE_SIGNOFF_CHASE:-1}"
 export PG_SIGNOFF_CHASE_USER_IDS="${PG_SIGNOFF_CHASE_USER_IDS:-}"
-# "Connect without sharing your password". Starts with the operator only;
-# set the allowlist to * to offer it to everyone, or the flag to empty to
-# switch the option (and its sign-in page) off.
+# "Connect without sharing your password". Offered to everyone since
+# 2026-09-28 (Moeed's decision); set the allowlist to comma-separated ids to
+# narrow it, or the flag to empty to switch the option (and its sign-in page) off.
 export PG_ENABLE_PASSWORDLESS_CONNECT="${PG_ENABLE_PASSWORDLESS_CONNECT:-1}"
-export PG_PASSWORDLESS_ALLOWLIST="${PG_PASSWORDLESS_ALLOWLIST:-6912896590}"
+export PG_PASSWORDLESS_ALLOWLIST="${PG_PASSWORDLESS_ALLOWLIST:-*}"
 if [ -n "$PG_ENABLE_SIGNOFF_CHASE" ]; then
   echo "Sign-off chase: ENABLED${PG_SIGNOFF_CHASE_USER_IDS:+ (users: $PG_SIGNOFF_CHASE_USER_IDS)}"
 else

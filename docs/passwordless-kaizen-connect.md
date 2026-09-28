@@ -69,7 +69,7 @@ short-lived credential, protected like stored passwords.
 ## Rollout
 
 - `PG_ENABLE_PASSWORDLESS_CONNECT` (default on in `run_local.sh`) and
-  `PG_PASSWORDLESS_ALLOWLIST` (default: the operator only; `*` for everyone).
+  `PG_PASSWORDLESS_ALLOWLIST` (default `*`, everyone, since 2026-09-28 on Moeed's decision; set comma-separated ids to narrow it).
 - Needs `connect.emgurus.com → http://127.0.0.1:8101` on the Cloudflare tunnel.
 - Legal drafts (`docs/legal/privacy-policy.md`, `docs/legal/dpia.md`) carry
   «REVIEW» paragraphs for the solicitor review that gates the wider beta.
