@@ -4728,19 +4728,24 @@ def _settings_view_components(
         plan_lines.append(kaizen_row)
     plan_block = ("\n".join(plan_lines) + "\n\n") if plan_lines else ""
 
-    setup_button_label = "Connect Kaizen" if connected is False else "Update Kaizen login"
+    # Short enough to sit beside another button on a phone screen.
+    setup_button_label = "Connect Kaizen" if connected is False else "Kaizen login"
 
     portfolio_defaults_summary = f"{training_level} · {pathway_label} · {curriculum_label}"
 
+    # Everyday settings in an even two-per-row grid; Reset data alone on the
+    # last row because it is the one destructive choice.
     buttons: list[list[InlineKeyboardButton]] = [
-        [InlineKeyboardButton(f"🔗 {setup_button_label}", callback_data="ACTION|setup")],
         [
+            InlineKeyboardButton(f"🔗 {setup_button_label}", callback_data="ACTION|setup"),
             InlineKeyboardButton(f"✍️ {voice_cta}", callback_data="ACTION|voice"),
+        ],
+        [
             InlineKeyboardButton("📋 Portfolio defaults", callback_data="ACTION|portfolio_defaults"),
+            InlineKeyboardButton("🔔 Reminders", callback_data="REMIND|menu"),
         ],
         [InlineKeyboardButton("🔄 Reset data", callback_data="ACTION|delete")],
     ]
-    buttons.insert(-1, [InlineKeyboardButton("🔔 Reminders", callback_data="REMIND|menu")])
     text = (
         f"{_SETTINGS_TITLE}\n\n"
         f"{plan_block}"
@@ -7545,7 +7550,7 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             return AWAIT_PASSWORD
 
     # /setup command guard: connected users get settings; explicit button
-    # clicks (Update Kaizen login / Connect Kaizen) always start setup.
+    # clicks (Kaizen login / Connect Kaizen) always start setup.
     if not query and _kaizen_connected(update.effective_user.id):
         await settings_command(update, context)
         return ConversationHandler.END
