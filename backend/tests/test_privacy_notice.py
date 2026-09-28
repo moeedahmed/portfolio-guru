@@ -38,7 +38,7 @@ DETAILS_FACTS = (
     "correct, restrict, move or erase",  # rights
     "/reset",
     "ico.org.uk/make-a-complaint",  # complaints
-    "portfolio@solvorolabs.com",  # privacy contact
+    "portfolio@emgurus.com",  # privacy contact
 )
 
 

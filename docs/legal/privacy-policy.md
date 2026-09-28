@@ -18,7 +18,7 @@ The data controller for your personal data is:
 - **Trading name:** Portfolio Guru, an EM Gurus product.
 - **Legal entity:** «REVIEW: confirm the exact legal entity that is the controller — e.g. "EM Gurus Ltd" (company number), a sole trader operating as "EM Gurus", or the founder personally. The controller named here must match Companies House / HMRC registration and the entity that holds the Stripe and Google Cloud accounts.»
 - **Registered address:** «REVIEW: insert registered/correspondence address required for an ICO-compliant notice.»
-- **Contact for privacy matters:** portfolio@solvorolabs.com
+- **Contact for privacy matters:** portfolio@emgurus.com
 - **Data Protection Officer:** «REVIEW: a DPO is not strictly mandatory for an organisation of this size under Art 37, but given large-scale processing of special-category health data a DPO (or a documented decision that one is not required, plus a named privacy lead) is strongly advisable. State the outcome here.»
 - **ICO registration:** «REVIEW: the controller must pay the ICO data protection fee and register. Insert ICO registration number once obtained.»
 
@@ -141,7 +141,7 @@ Under UK GDPR you have the right to:
 
 ### How to exercise your rights
 
-Contact us at portfolio@solvorolabs.com. In-bot, you can use «REVIEW: confirm/define commands, e.g. /delete or /forgetme, and /export». We will respond within **one month** as required by UK GDPR. We may ask you to verify your identity.
+Contact us at portfolio@emgurus.com. In-bot, you can use «REVIEW: confirm/define commands, e.g. /delete or /forgetme, and /export». We will respond within **one month** as required by UK GDPR. We may ask you to verify your identity.
 
 ---
 

@@ -18011,7 +18011,7 @@ _PRIVACY_DETAILS_TEXT = (
     "the service you signed up for (Art. 6(1)(b)).\n\n"
     "Your rights: see, correct, restrict, move or erase your data. /reset "
     "withdraws consent and erases it. Privacy questions: "
-    "portfolio@solvorolabs.com. You can complain to the ICO: "
+    "portfolio@emgurus.com. You can complain to the ICO: "
     "ico.org.uk/make-a-complaint"
 )
 
