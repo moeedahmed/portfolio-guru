@@ -138,10 +138,12 @@ def test_health_keyboards_are_contextual_in_every_view():
             needs_review_month=True,
         )
     ) == [
-        [("📝 Review drafts (7)", "ACTION|health_queue|draft|0")],
         [
+            ("📝 Drafts (7)", "ACTION|health_queue|draft|0"),
             ("⏳ Awaiting (10)", "ACTION|health_queue|awaiting|0"),
-            ("📅 Set review month", "ACTION|health_review_setup"),
+        ],
+        [
+            ("📅 Review month", "ACTION|health_review_setup"),
             ("ℹ️ About", "ACTION|health_view|about"),
         ],
     ]
@@ -201,10 +203,40 @@ def test_health_keyboards_are_contextual_in_every_view():
         bot._health_view_keyboard(
             "priorities", queue_totals={"draft": 2, "awaiting": 0}
         )
-    ) == [
-        [("📝 Review drafts (2)", "ACTION|health_queue|draft|0")],
+    ) == [[
+        ("📝 Drafts (2)", "ACTION|health_queue|draft|0"),
+        ("ℹ️ About", "ACTION|health_view|about"),
+    ]]
+
+    # The one-time route question gets its own rows under the text asking it
+    # (guess alone, alternatives paired). Tapping a route opens the month
+    # picker, so the month button waits until it is answered.
+    route_rows = _keyboard_rows(
+        bot._health_view_keyboard(
+            "priorities",
+            queue_totals={"draft": 7, "awaiting": 20},
+            needs_review_month=True,
+            route_guess="training_arcp",
+        )
+    )
+    assert route_rows == [
+        [("✅ Trainee", "ACTION|health_route_set|training_arcp")],
+        [
+            ("📁 Portfolio Pathway", "ACTION|health_route_set|cesr_portfolio"),
+            ("🗂 Appraisal only", "ACTION|health_route_set|appraisal_only"),
+        ],
+        [
+            ("📝 Drafts (7)", "ACTION|health_queue|draft|0"),
+            ("⏳ Awaiting (20)", "ACTION|health_queue|awaiting|0"),
+        ],
         [("ℹ️ About", "ACTION|health_view|about")],
     ]
+    # No row is crowded: at most two buttons, and paired labels stay short
+    # enough to show in full on a phone.
+    for row in route_rows:
+        assert len(row) <= 2
+        if len(row) == 2:
+            assert all(len(text) <= 21 for text, _data in row), row
 
 
 @pytest.mark.asyncio
@@ -220,10 +252,12 @@ async def test_health_landing_callbacks_open_independent_paginated_queues(monkey
     landing = bot._health_view_payload(context, "priorities")
     assert landing is not None
     assert _keyboard_rows(landing[1]) == [
-        [("📝 Review drafts (7)", "ACTION|health_queue|draft|0")],
         [
+            ("📝 Drafts (7)", "ACTION|health_queue|draft|0"),
             ("⏳ Awaiting (10)", "ACTION|health_queue|awaiting|0"),
-            ("📅 Set review month", "ACTION|health_review_setup"),
+        ],
+        [
+            ("📅 Review month", "ACTION|health_review_setup"),
             ("ℹ️ About", "ACTION|health_view|about"),
         ],
     ]
@@ -729,15 +763,12 @@ async def test_health_empty_state_clarifies_scan_scope_and_offers_next_routes(mo
     # A doctor who has never confirmed their route is asked once, in one tap.
     assert "Is this you?" in text
     assert _keyboard_rows(keyboard) == [
+        [("✅ Trainee", "ACTION|health_route_set|training_arcp")],
         [
-            ("✅ Trainee", "ACTION|health_route_set|training_arcp"),
             ("📁 Portfolio Pathway", "ACTION|health_route_set|cesr_portfolio"),
             ("🗂 Appraisal only", "ACTION|health_route_set|appraisal_only"),
         ],
-        [
-            ("📅 Set review month", "ACTION|health_review_setup"),
-            ("ℹ️ About", "ACTION|health_view|about"),
-        ],
+        [("ℹ️ About", "ACTION|health_view|about")],
     ]
 
 

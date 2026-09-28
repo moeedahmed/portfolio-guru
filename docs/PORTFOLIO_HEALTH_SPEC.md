@@ -448,9 +448,13 @@ next_actions              3–5 concrete suggested actions
     needed;
   - one concise read-only planning-aid boundary; and
   - one concise explicit partial/freshness limitation when applicable.
-- The exact landing keyboard is:
-  - first full-width row: `📝 Review drafts (N)`;
-  - second row: `⏳ Awaiting (N)` and `ℹ️ About`.
+- The landing keyboard has at most two buttons per row, with labels short
+  enough to show in full on a phone:
+  - while the route is unconfirmed, the guessed route alone on the first row
+    and the two alternatives on the next (tapping one opens the month picker);
+  - then the everyday actions in pairs: `📝 Drafts (N)`, `⏳ Awaiting (N)`,
+    `📅 Review month` (only when missing or passed and no route question is
+    showing), then `ℹ️ About`. Empty queues are omitted.
 - Draft and Awaiting queues open independently at their first page (`page 0` in
   callback data), paginate independently at five items per page, and retain
   direct Kaizen links. Their only

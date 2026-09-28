@@ -3997,33 +3997,40 @@ def _health_view_keyboard(
     rows: list[list[InlineKeyboardButton]] = []
 
     if view == "priorities":
+        route_rows: list[list[InlineKeyboardButton]] = []
         if route_guess:
             try:
-                rows.extend(_route_confirm_rows(Pathway(route_guess)))
+                route_rows = _route_confirm_rows(Pathway(route_guess))
             except ValueError:
                 pass
         totals = queue_totals or {}
         draft_total = int(totals.get("draft", 0))
         awaiting_total = int(totals.get("awaiting", 0))
+        # Everyday actions go two per row so every label shows in full on a
+        # phone. Tapping a route already opens the month picker, so the
+        # month button waits until the route question has been answered.
+        everyday: list[InlineKeyboardButton] = []
         if draft_total:
-            rows.append([InlineKeyboardButton(
-                f"📝 Review drafts ({draft_total})",
+            everyday.append(InlineKeyboardButton(
+                f"📝 Drafts ({draft_total})",
                 callback_data="ACTION|health_queue|draft|0",
-            )])
-        secondary: list[InlineKeyboardButton] = []
+            ))
         if awaiting_total:
-            secondary.append(InlineKeyboardButton(
+            everyday.append(InlineKeyboardButton(
                 f"⏳ Awaiting ({awaiting_total})",
                 callback_data="ACTION|health_queue|awaiting|0",
             ))
-        if needs_review_month:
-            secondary.append(InlineKeyboardButton(
-                "📅 Set review month", callback_data="ACTION|health_review_setup"
+        if needs_review_month and not route_rows:
+            everyday.append(InlineKeyboardButton(
+                "📅 Review month", callback_data="ACTION|health_review_setup"
             ))
-        secondary.append(InlineKeyboardButton(
+        everyday.append(InlineKeyboardButton(
             "ℹ️ About", callback_data="ACTION|health_view|about"
         ))
-        rows.append(secondary)
+        # The one-time route answer sits right under the question that asks
+        # it, above the everyday actions.
+        rows.extend(route_rows)
+        rows.extend(everyday[index:index + 2] for index in range(0, len(everyday), 2))
 
     elif view == "actions" and queue_totals is not None:
         totals = queue_totals or {}
@@ -4385,7 +4392,8 @@ def _route_confirm_rows(pathway: Pathway) -> list[list[InlineKeyboardButton]]:
             InlineKeyboardButton("🗂 Appraisal only", callback_data=data(Pathway.appraisal_only)),
         ),
     }
-    return [[buttons[pathway][0]] + [
+    # The guess gets its own row; the two alternatives share the next one.
+    return [[buttons[pathway][0]], [
         pair[1] for route, pair in buttons.items() if route != pathway
     ]]
 

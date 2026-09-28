@@ -1156,10 +1156,10 @@ def test_review_month_route_shows_only_when_the_month_is_missing_or_passed():
 
     # The ARCP deadline and appraisal countdown depend on it, so the landing
     # offers the month only while it is missing or has passed.
-    assert ("📅 Set review month", "ACTION|health_review_setup") in with_route
+    assert ("📅 Review month", "ACTION|health_review_setup") in with_route
     assert not any(data == "ACTION|health_review_setup" for _text, data in without)
     assert landing == [
-        ("📝 Review drafts (2)", "ACTION|health_queue|draft|0"),
+        ("📝 Drafts (2)", "ACTION|health_queue|draft|0"),
         ("⏳ Awaiting (3)", "ACTION|health_queue|awaiting|0"),
         ("ℹ️ About", "ACTION|health_view|about"),
     ]
