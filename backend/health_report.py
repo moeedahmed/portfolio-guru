@@ -33,6 +33,7 @@ descriptions hold patient detail.
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from typing import Optional
 
@@ -97,13 +98,15 @@ def actions_page_count(
 GROUP_HEADINGS = {
     "draft": (
         "Older drafts",
-        "Started by you, still incomplete, and highlighted after waiting.",
+        "Started by you, not yet finished.",
     ),
     "awaiting": (
-        "Older items awaiting sign-off",
-        "Submitted, waiting for someone else, and highlighted after waiting.",
+        "Awaiting sign-off",
+        "Submitted, waiting for someone else to sign.",
     ),
 }
+
+QUEUE_EMOJI = {"draft": "📝", "awaiting": "⏳"}
 
 QUEUE_LABELS = {
     "draft": "older drafts",
@@ -139,10 +142,7 @@ def action_queue_page_count(
 def _old_item_note(items: list[StuckEvidence]) -> Optional[str]:
     if not any(item.days_waiting > REVIEW_AFTER_DAYS for item in items):
         return None
-    return (
-        "_Entries dated more than a year ago are worth reviewing before "
-        "acting: some will no longer be worth completing._"
-    )
+    return "_Some are over a year old: check they're still needed._"
 
 
 def format_action_queue(
@@ -158,7 +158,7 @@ def format_action_queue(
     label = QUEUE_LABELS[queue]
     if not items:
         return (
-            f"📌 *{heading}*\n\n"
+            f"{QUEUE_EMOJI[queue]} *{heading}*\n\n"
             f"No {label} were highlighted in this scan."
         )
 
@@ -167,19 +167,19 @@ def format_action_queue(
     start = page * page_size
     window = items[start:start + page_size]
 
+    # The heading already carries the total, so the subtitle only adds the
+    # page when there is more than one.
+    subtitle = note if pages == 1 else f"{note} Page {page + 1} of {pages}."
     lines = [
-        f"📌 *{heading} — {len(items)}*",
-        f"Showing {start + 1}–{start + len(window)} of {len(items)} {label}",
-        f"_{note}_",
+        f"{QUEUE_EMOJI[queue]} *{heading} — {len(items)}*",
+        subtitle,
         "",
     ]
     lines.extend(_describe(item) for item in window)
-    lines.append("")
 
     old_note = _old_item_note(window)
     if old_note:
-        lines.append(old_note)
-    lines.append("_Nothing is chased, submitted, edited or deleted for you._")
+        lines.extend(["", old_note])
     return "\n".join(lines).strip()
 
 
@@ -623,6 +623,37 @@ def _pathway_section(cesr) -> list[str]:
 # ── About ───────────────────────────────────────────────────────────────────
 
 
+def _about_facts(basis: str, *, limited_view: bool) -> list[str]:
+    """Turn the stored evidence basis into a few plain lines.
+
+    The basis is written for Scan info; About only needs how much was read,
+    when, and whether the scan was partial.
+    """
+    facts: list[str] = []
+    partial = False
+    for line in basis.strip().splitlines():
+        if line.startswith("Scanned:"):
+            count = re.search(r"(\d+) visible evidence item", line)
+            n = count.group(1) if count else None
+            if "filing history only" in line:
+                facts.append(
+                    f"Read {n} items filed through Portfolio Guru only."
+                    if n else "Read items filed through Portfolio Guru only."
+                )
+            else:
+                facts.append(f"Read {n} items from your Kaizen." if n else line)
+        elif line.startswith("Refresh:"):
+            facts.append("Last refresh: " + line[len("Refresh:"):].strip())
+        elif line.startswith("Scope:") and "partial" in line.lower():
+            partial = True
+            detail = line[len("Scope:"):].strip()
+            detail = detail.split("—", 1)[1].strip() if "—" in detail else detail
+            facts.append(f"Partial scan: {detail}.")
+    if limited_view and not partial:
+        facts.append("Partial scan: the full Kaizen index was unavailable.")
+    return facts
+
+
 def format_about(
     *,
     basis: str,
@@ -630,15 +661,8 @@ def format_about(
     scan_is_fresh: bool = True,
 ) -> str:
     """Concise provenance and limits for the everyday Health journey."""
-    facts = [
-        line
-        for line in basis.strip().splitlines()
-        if line.startswith(("Scanned:", "Refresh:", "Scope:"))
-    ]
+    facts = _about_facts(basis, limited_view=limited_view)
     joined = " ".join(facts).lower()
-    if limited_view and "partial" not in joined:
-        facts.append("Scope: partial — the full Kaizen index was unavailable")
-        joined = " ".join(facts).lower()
     if not scan_is_fresh and not any(
         marker in joined
         for marker in (
@@ -658,14 +682,13 @@ def format_about(
         )
 
     lines = ["ℹ️ *About Portfolio Health*", ""]
-    lines.extend(facts or ["Source: no scan provenance is available for this report."])
+    lines.extend(facts or ["No scan details are available for this report."])
     lines.extend([
         "",
-        "Counts highlight older Kaizen workflow items visible to this scan, not every unfinished item.",
-        "Automated classification can be wrong; check the linked Kaizen item if something looks wrong.",
-        "Portfolio Health does not edit, file, chase or delete anything.",
-        "",
-        SAFETY_LINE,
+        "• It only reads Kaizen. It never edits, files, chases or deletes.",
+        "• It can misread an item, so open it in Kaizen to check.",
+        "• It lists older unfinished items it can see, not every one.",
+        "• A planning aid, not a formal training or appraisal judgement.",
     ])
     return "\n".join(lines).strip()
 
@@ -726,68 +749,58 @@ def format_coverage(
 
 
 def format_curriculum(assessment: HealthAssessment) -> str:
-    """Tagged curriculum spread as an optional Coverage drill-down."""
-    lines = ["🎯 *SLO map*", ""]
-    block = _curriculum_block(assessment)
-    if block and block[0] == "*Curriculum tags*":
-        block = block[1:]
-    lines.extend(block)
-    lines.append(
-        "_This describes tagged evidence visible to the scan. It is not a "
-        "curriculum requirement, minimum or ARCP outcome._"
-    )
-    return "\n".join(lines).strip()
-
-
-def _curriculum_block(assessment: HealthAssessment) -> list[str]:
-    """Curriculum spread, stated as counts over tagged items only.
+    """Tagged curriculum spread as a short, scannable drill-down.
 
     "12/12 SLOs covered" is technically true of a portfolio holding 298 tags
     against one outcome and 13 against another. The count is the finding — and
     so is how much of the portfolio the count could not see.
     """
     counts = assessment.slo_counts
-    if not counts:
-        return [
-            "*Curriculum tags*",
-            "0/12 SLOs represented across 0 tagged items. Presence does not "
-            "assess adequacy.",
-            f"_Untagged: {assessment.untagged_items} usually-taggable item(s) "
-            "are excluded from this view. Evidence types that cannot carry "
-            "tags are outside it._",
-            "",
-        ]
-    ranked = sorted(counts.items(), key=lambda kv: kv[1])
-    strongest_slo, strongest = ranked[-1]
-    lines = [
-        "*Curriculum tags*",
-        f"{len(counts)}/12 SLOs represented across "
-        f"{assessment.tagged_items} tagged item(s). Presence does not assess adequacy.",
-    ]
-    spread = f"Largest SLO{strongest_slo} ({strongest})"
-    # With one tagged outcome the largest is also the smallest, and printing it
-    # twice reads as two findings.
-    smallest = [f"SLO{slo} ({count})" for slo, count in ranked[:-1][:3]]
-    if smallest:
-        spread += f" · smallest {' · '.join(smallest)}"
-    lines.append(spread)
-    if assessment.untagged_items:
-        # Untagged items are invisible to this view. Saying so stops a doctor
-        # reading a small SLO as a gap when the evidence may simply be
-        # untagged. Name the forms: a count says there is a problem, the forms
-        # say where to go and fix it.
-        worst = sorted(assessment.untagged_by_form.items(), key=lambda kv: -kv[1])[:3]
-        where = ", ".join(f"{form_label(form)} {count}" for form, count in worst)
+    lines = ["🎯 *SLO map*"]
+    if counts:
         lines.append(
-            f"_Untagged: {assessment.untagged_items} item(s) of a form you tag "
-            f"elsewhere carry no tag — {where}. They may not count toward "
-            "curriculum coverage and are excluded from this view._"
+            f"{len(counts)} of 12 SLOs have tagged evidence, "
+            f"from {assessment.tagged_items} tagged items."
         )
     else:
+        lines.append("No tagged evidence yet, so there is no SLO spread to show.")
+    lines.append("")
+
+    if counts:
+        ranked = sorted(counts.items(), key=lambda kv: kv[1])
+        strongest_slo, strongest = ranked[-1]
+        lines.append(f"*Most:* SLO{strongest_slo} ({strongest})")
+        # With one tagged outcome the most is also the fewest, and printing it
+        # twice reads as two findings.
+        fewest = [f"SLO{slo} ({count})" for slo, count in ranked[:-1][:3]]
+        if fewest:
+            lines.append(f"*Fewest:* {', '.join(fewest)}")
+        missing = [f"SLO{slo}" for slo in range(1, 13) if slo not in counts]
+        if missing:
+            lines.append(f"*None yet:* {', '.join(missing)}")
+
+    # Untagged items are invisible to this view. Saying so stops a doctor
+    # reading a small SLO as a gap when the evidence may simply be untagged.
+    # Name the forms: a count says there is a problem, the forms say where to
+    # go and fix it.
+    untagged = assessment.untagged_items
+    if untagged:
+        worst = sorted(assessment.untagged_by_form.items(), key=lambda kv: -kv[1])[:3]
+        where = ", ".join(f"{form_label(form)} {count}" for form, count in worst)
+        noun = "item" if untagged == 1 else "items"
+        detail = f" ({where})" if where else ""
         lines.append(
-            "_Untagged: 0 items of a form you tag elsewhere are missing tags._"
+            f"*Untagged:* {untagged} {noun}{detail}, which may not count toward any SLO"
         )
-    return lines + [""]
+    else:
+        lines.append("*Untagged:* none")
+
+    lines.extend([
+        "",
+        "_Counts tags only. More tags doesn't mean enough evidence, and this "
+        "isn't an ARCP outcome._",
+    ])
+    return "\n".join(lines).strip()
 
 
 # ── Scan info ───────────────────────────────────────────────────────────────

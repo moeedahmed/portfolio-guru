@@ -412,8 +412,11 @@ def test_actions_shows_the_visible_range_of_a_bounded_page():
     second = format_action_queue(assessment, "awaiting", page=1)
 
     assert action_queue_page_count(assessment, "awaiting") == 2
-    assert "Showing 1–5 of 10 older items awaiting sign-off" in first
-    assert "Showing 6–10 of 10 older items awaiting sign-off" in second
+    assert "*Awaiting sign-off — 10*" in first
+    assert "Page 1 of 2." in first
+    assert "Page 2 of 2." in second
+    # The heading carries the total once; no second "Showing … of 10" line.
+    assert "Showing" not in first
     assert first.count("\n• ") == 5
 
 
@@ -451,12 +454,17 @@ def test_actions_separates_awaiting_from_your_own_drafts():
     drafts = format_action_queue(assessment, "draft", page=0)
     awaiting = format_action_queue(assessment, "awaiting", page=0)
 
-    assert landing.index("*Older drafts — 7*") < landing.index("*Older items awaiting sign-off — 10*")
+    assert landing.index("*Older drafts — 7*") < landing.index("*Awaiting sign-off — 10*")
     assert landing.count("\n• ") == 6  # Up to three direct-linked examples per queue.
     assert "*Older drafts — 7*" in drafts
-    assert "Started by you, still incomplete, and highlighted after waiting." in drafts
-    assert "*Older items awaiting sign-off — 10*" in awaiting
-    assert "Submitted, waiting for someone else, and highlighted after waiting." in awaiting
+    assert "Started by you, not yet finished." in drafts
+    assert "*Awaiting sign-off — 10*" in awaiting
+    assert "Submitted, waiting for someone else to sign." in awaiting
+    # The read-only boundary lives on the main screen and About, not on
+    # every queue page.
+    for page in (drafts, awaiting):
+        assert "Nothing is chased" not in page
+        assert "planning aid" not in page
 
 
 def test_actions_names_items_by_form_and_exact_date_without_deadline_language():
@@ -478,10 +486,10 @@ def test_actions_names_items_by_form_and_exact_date_without_deadline_language():
     assert "Journal Club" in text and "JCF" not in text
     for word in ("overdue", "days waiting", "Chase", "neglected"):
         assert word not in text
-    assert "worth reviewing before acting" in text
+    assert "over a year old: check they're still needed" in text
     # The only mention of chasing is the boundary: Portfolio Guru does not.
     boundary = "_Nothing is chased, submitted, edited or deleted for you._"
-    assert boundary in text and "chas" not in text.replace(boundary, "")
+    assert "chas" not in text.replace(boundary, "")
 
 
 def test_actions_link_every_item_to_kaizen():
@@ -514,12 +522,12 @@ def test_action_queues_paginate_independently_at_five_per_page():
 
     assert action_queue_page_count(assessment, "draft") == 2
     assert action_queue_page_count(assessment, "awaiting") == 2
-    assert "Showing 6–7 of 7 older drafts" in format_action_queue(
-        assessment, "draft", page=1
-    )
-    assert "Showing 6–10 of 10 older items awaiting sign-off" in format_action_queue(
-        assessment, "awaiting", page=1
-    )
+    drafts_2 = format_action_queue(assessment, "draft", page=1)
+    awaiting_2 = format_action_queue(assessment, "awaiting", page=1)
+    assert "*Older drafts — 7*" in drafts_2 and "Page 2 of 2." in drafts_2
+    assert drafts_2.count("\n• ") == 2
+    assert "*Awaiting sign-off — 10*" in awaiting_2 and "Page 2 of 2." in awaiting_2
+    assert awaiting_2.count("\n• ") == 5
 
 
 # ── Coverage ────────────────────────────────────────────────────────────────
@@ -590,9 +598,11 @@ def test_curriculum_spread_reports_counts_over_tagged_items_only():
 
     assert assessment.slo_counts == {6: 40, 10: 3}
     assert assessment.tagged_items == 43
-    assert "2/12 SLOs represented across 43 tagged item(s)" in curriculum
-    assert "Largest SLO6 (40)" in curriculum
-    assert "SLO10 (3)" in curriculum
+    assert "2 of 12 SLOs have tagged evidence, from 43 tagged items." in curriculum
+    assert "*Most:* SLO6 (40)" in curriculum
+    assert "*Fewest:* SLO10 (3)" in curriculum
+    assert "*None yet:* SLO1, SLO2, SLO3" in curriculum
+    assert "item(s)" not in curriculum
 
 
 def test_twelve_of_twelve_slos_does_not_claim_curriculum_adequacy():
@@ -601,9 +611,12 @@ def test_twelve_of_twelve_slos_does_not_claim_curriculum_adequacy():
     _, coverage = _coverage(items)
     _, curriculum = _curriculum(items)
 
+    assert "12/12 SLOs represented" in coverage
+    assert "presence does not assess adequacy" in coverage.lower()
+    assert "12 of 12 SLOs have tagged evidence" in curriculum
+    assert "More tags doesn't mean enough evidence" in curriculum
+    assert "None yet" not in curriculum
     for text in (coverage, curriculum):
-        assert "12/12 SLOs represented" in text
-        assert "presence does not assess adequacy" in text.lower()
         assert "12/12 SLOs covered" not in text
 
 
@@ -616,14 +629,14 @@ def test_untagged_items_are_disclosed_not_silently_dropped():
 
     # All six are CBDs and one is tagged, so the other five are a real gap.
     assert assessment.untagged_items == 5
-    assert "Untagged: 5 item(s)" in curriculum
-    assert "may not count toward curriculum coverage" in curriculum
+    assert "*Untagged:* 5 items (" in curriculum
+    assert "may not count toward any SLO" in curriculum
 
 
 def test_untagged_count_is_stated_even_when_it_is_zero():
     items = [_tagged([6], ident=f"a-{n}") for n in range(4)]
     _, curriculum = _curriculum(items)
-    assert "Untagged: 0 items" in curriculum
+    assert "*Untagged:* none" in curriculum
 
 
 def test_untagged_count_excludes_forms_that_never_carry_tags():
@@ -746,13 +759,18 @@ def test_about_contains_only_the_information_needed_to_trust_health():
     text = _about(_balanced())
 
     assert text.startswith("ℹ️ *About Portfolio Health*")
-    assert "Read-only Kaizen index: 12 visible evidence item(s)" in text
-    assert "Counts highlight older Kaizen workflow items" in text
-    assert "not every unfinished item" in text
-    assert "Automated classification can be wrong" in text
-    assert "does not edit, file, chase or delete anything" in text
-    assert "not a formal training or appraisal judgement" in text
-    for removed in ("Domains — total", "Curriculum tags", "Review timing", "WPBAs"):
+    assert "Read 12 items from your Kaizen." in text
+    assert "Last refresh: 26 Aug 2026 09:00 — fresh within 24 hours" in text
+    assert "not every one" in text
+    assert "It can misread an item" in text
+    assert "never edits, files, chases or deletes" in text
+    # Said once, not twice.
+    assert text.count("not a formal training or appraisal judgement") == 1
+    # A full scan's scope is the default and is jargon to a doctor.
+    for removed in (
+        "Domains — total", "Curriculum tags", "Review timing", "WPBAs",
+        "Read-only Kaizen index", "Scope:", "item(s)",
+    ):
         assert removed not in text
 
 
@@ -771,5 +789,6 @@ def test_about_keeps_partial_and_unconfirmed_freshness_limits_explicit():
     stale = format_about(basis=BASIS, scan_is_fresh=False)
 
     assert "partial" in partial.lower()
-    assert "Kaizen index was unavailable" in partial
+    assert "Partial scan: the Kaizen index was unavailable." in partial
+    assert "Read 3 items filed through Portfolio Guru only." in partial
     assert "Freshness unconfirmed: recent Kaizen activity may be missing" in stale

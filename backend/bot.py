@@ -4065,11 +4065,13 @@ def _health_view_keyboard(
                 "➡️ Next",
                 callback_data=f"ACTION|health_queue|{queue}|{page + 1}",
             ))
-        if pager:
-            rows.append(pager)
-        rows.append([
-            InlineKeyboardButton("🔙 Health", callback_data="ACTION|health_view|priorities")
-        ])
+        back = InlineKeyboardButton("🔙 Health", callback_data="ACTION|health_view|priorities")
+        # Back shares the pager row when it fits: two buttons per row keep
+        # every label whole on a phone.
+        if len(pager) < 2:
+            rows.append(pager + [back])
+        else:
+            rows.extend([pager, [back]])
 
     # Direct callers and buttons sent before V2.1 used one combined page
     # number. Keep their previous/next route alive while new reports pass

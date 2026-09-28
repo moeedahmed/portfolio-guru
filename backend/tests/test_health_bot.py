@@ -169,6 +169,27 @@ def test_health_keyboards_are_contextual_in_every_view():
         ],
         [("🔙 Health", "ACTION|health_view|priorities")],
     ]
+    # First and last pages have one pager button, so Back shares its row.
+    assert _keyboard_rows(
+        bot._health_view_keyboard(
+            "action_queue", page=0, page_count=2, queue="awaiting"
+        )
+    ) == [
+        [
+            ("➡️ Next", "ACTION|health_queue|awaiting|1"),
+            ("🔙 Health", "ACTION|health_view|priorities"),
+        ],
+    ]
+    assert _keyboard_rows(
+        bot._health_view_keyboard(
+            "action_queue", page=1, page_count=2, queue="awaiting"
+        )
+    ) == [
+        [
+            ("⬅️ Previous", "ACTION|health_queue|awaiting|0"),
+            ("🔙 Health", "ACTION|health_view|priorities"),
+        ],
+    ]
     assert _keyboard_rows(bot._health_view_keyboard("about")) == [
         [("🔙 Health", "ACTION|health_view|priorities")],
     ]
