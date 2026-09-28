@@ -24,6 +24,7 @@ from store import store_credentials, get_credentials, has_credentials, init
 import kaizen_connection
 from extractor import extract_cbd_data, extract_form_data, recommend_form_types, classify_intent, classify_menu_intent, answer_question, extract_explicit_form_type, is_reuse_request, review_draft, analyse_portfolio_health, summarise_recent_activity, generate_nudge_copy, extract_field_updates, compose_filing_recovery_copy, combine_case_inputs, _has_qi_project_signal, schema_form_type, assess_form_essentials, ESSENTIAL_PRESENT, ESSENTIAL_MISSING, ESSENTIAL_UNAVAILABLE
 from usage import record_case_filed, get_cases_this_month, check_can_file, get_user_tier, set_user_tier, get_case_history, TIER_LIMITS, get_all_active_users, get_cases_this_week, is_beta_tester, set_beta_tester, save_kc_coverage, delete_portfolio_evidence
+from usage import has_unlimited_access, payments_enabled
 from data_paths import data_path
 from update_processor import PerUserUpdateProcessor
 # Module-attribute access (consent.fn) rather than from-imports: test_smoke
@@ -9280,8 +9281,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]])
             )
             return ConversationHandler.END
-        tier = await get_user_tier(user_id)
-        if tier != "pro_plus":
+        if not await has_unlimited_access(user_id):
             await query.message.reply_text(
                 "📬 Unsigned ticket scanning is included in Portfolio Guru Unlimited.\n\n"
                 "Upgrade to see all your pending assessments in one place.",
@@ -10131,12 +10131,17 @@ def _upgrade_buttons(current_tier: str) -> list:
     Single paid tier: Unlimited. The legacy Pro tier is no longer offered to
     new users, so anyone below Unlimited sees one upgrade target.
     """
-    if current_tier == "pro_plus":
+    if current_tier == "pro_plus" or not payments_enabled():
         return []
     return [
         [InlineKeyboardButton("💳 Upgrade — £9.99/mo", callback_data="UPGRADE|pro_plus")],
     ]
 
+
+_BETA_PLAN_TEXT = (
+    "🧪 You're in the Portfolio Guru beta.\n\n"
+    "It's free and unlimited while we test. Send a case whenever you're ready."
+)
 
 _ALREADY_UNLIMITED_TEXT = (
     "✅ You're already on Portfolio Guru Unlimited.\n\n"
@@ -10153,6 +10158,12 @@ async def upgrade_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     limit_str = "unlimited" if limit == -1 else str(limit)
 
     _flow_done(context, "upgrade")  # fresh start — drop any stale anchor
+
+    if not payments_enabled():
+        # Beta: nothing to buy. Existing subscriptions are left untouched.
+        await _flow_msg(update, context, _BETA_PLAN_TEXT, flow_key="upgrade")
+        _flow_done(context, "upgrade")
+        return ConversationHandler.END
 
     if tier == "pro_plus":
         await _flow_msg(update, context, _ALREADY_UNLIMITED_TEXT, flow_key="upgrade")
@@ -10189,6 +10200,12 @@ async def handle_upgrade_button(update: Update, context: ContextTypes.DEFAULT_TY
     if tier == "pro":
         tier = "pro_plus"
     tier_label = "Portfolio Guru Unlimited"
+
+    # An old Upgrade button tapped during the beta opens nothing to pay for.
+    if not payments_enabled():
+        await _flow_edit(update, context, _BETA_PLAN_TEXT, flow_key="upgrade")
+        _flow_done(context, "upgrade")
+        return
 
     # An old Upgrade button tapped by someone already paying must not open a
     # second checkout (and so a second subscription).
@@ -10282,6 +10299,11 @@ async def beta_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     """Handle /beta — request beta tester access."""
     user_id = update.effective_user.id
     username = update.effective_user.username or ""
+
+    if not payments_enabled():
+        # Everyone is already in the beta, so there is nothing to request.
+        await update.message.reply_text(_BETA_PLAN_TEXT)
+        return ConversationHandler.END
 
     # Check if already on an upgraded plan
     tier = await get_user_tier(user_id)
@@ -10462,13 +10484,13 @@ async def assignbeta_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try:
         await context.bot.send_message(
             chat_id=target_id,
-            text="✅ You've been upgraded to Portfolio Guru Beta. You can now file up to 100 cases per month.",
+            text="✅ You've been upgraded to Portfolio Guru Beta. You can now file as many cases as you like.",
         )
     except Exception:
         logger.warning("Could not notify user %s about beta approval", target_id)
 
     await update.message.reply_text(
-        f"✅ @{username} upgraded to 100 cases/month. They've been notified."
+        f"✅ @{username} upgraded to beta. They've been notified."
     )
     return ConversationHandler.END
 
@@ -11456,8 +11478,7 @@ def _wpba_count_from_history(history: list[dict]) -> int:
 
 async def _health_gate_check(user_id: int) -> bool:
     """Check if user can access health. Returns True if allowed."""
-    tier = await get_user_tier(user_id)
-    return tier == "pro_plus" or await is_beta_tester(user_id)
+    return await has_unlimited_access(user_id)
 
 
 async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -16455,7 +16476,7 @@ async def handle_review_draft(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # Gate: Unlimited (and legacy Pro subscribers, who already paid for it).
     tier = await get_user_tier(update.effective_user.id)
-    if tier == "free":
+    if tier == "free" and not await is_beta_tester(update.effective_user.id):
         await query.message.reply_text(
             "📝 Draft Review is included in Portfolio Guru Unlimited.\n\n"
             "Upgrade to get feedback on your draft before you save it.",
@@ -17568,8 +17589,7 @@ async def unsigned_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         return
 
-    tier = await get_user_tier(user_id)
-    if tier != "pro_plus":
+    if not await has_unlimited_access(user_id):
         await update.message.reply_text(
             "📬 Unsigned ticket scanning is included in Portfolio Guru Unlimited.\n\n"
             "Upgrade to see all your pending assessments in one place.",

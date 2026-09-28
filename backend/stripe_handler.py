@@ -10,6 +10,7 @@ from usage import (
     get_user_by_stripe_subscription,
     has_processed_stripe_event,
     mark_stripe_event_processed,
+    payments_enabled,
     set_user_tier,
 )
 
@@ -23,6 +24,10 @@ PRO_PLUS_PRICE_ID = os.environ.get("STRIPE_PRO_PLUS_PRICE_ID")
 
 ACTIVE_SUBSCRIPTION_STATUSES = {"active", "trialing"}
 INACTIVE_SUBSCRIPTION_STATUSES = {"past_due", "unpaid", "canceled", "incomplete_expired"}
+
+
+class PaymentsDisabledError(RuntimeError):
+    """Raised when a new checkout is requested while payments are switched off."""
 
 
 def _is_newly_paid(previous_tier: str | None) -> bool:
@@ -85,6 +90,8 @@ async def create_checkout_session(
     (used when the upgrade flow starts inside the bot). Web callers pass
     their own URLs so the user lands back on the hub dashboard.
     """
+    if not payments_enabled():
+        raise PaymentsDisabledError("Payments are switched off during the beta")
     price_id = PRO_PRICE_ID if tier == "pro" else PRO_PLUS_PRICE_ID
     session = stripe.checkout.Session.create(
         mode="subscription",

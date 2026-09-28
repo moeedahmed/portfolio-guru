@@ -61,6 +61,8 @@ def coverage_run():
 async def test_command_dispatch_receipt(offline_app, monkeypatch, tmp_path, coverage_run):
     import bot
     app, collector = offline_app
+    # Exercise the paid-plan command paths; the beta default has its own tests.
+    monkeypatch.setenv("PG_PAYMENTS_ENABLED", "1")
     monkeypatch.setattr(bot, "has_credentials", lambda uid: False)
     import credentials
     from sqlmodel import Session, select
@@ -414,6 +416,7 @@ async def test_unsigned_range_has_observed_destination(scenario, monkeypatch, ch
 @pytest.mark.asyncio
 async def test_checkout_reaches_stubbed_final_boundary(scenario, monkeypatch):
     app, collector, draft, filing, errors = scenario
+    monkeypatch.setenv("PG_PAYMENTS_ENABLED", "1")
     checkout = AsyncMock(return_value="https://checkout.stripe.com/synthetic")
     monkeypatch.setattr("stripe_handler.create_checkout_session", checkout)
     # Checkout is only offered to someone not already paying.

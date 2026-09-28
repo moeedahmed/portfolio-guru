@@ -20,6 +20,16 @@ from channel_actions import ChannelAction, ChannelReply
 from conversational_router import ConversationalIntent, route_message
 from message_policy import render_message, style_grounded_answer
 from portfolio_first_contact import classify_first_contact, first_contact_reply
+from usage import payments_enabled
+
+
+def _plan_summary_text() -> str:
+    if not payments_enabled():
+        return "Portfolio Guru is in beta, so it's free and unlimited for now."
+    return (
+        "The free plan includes 5 cases a month. Portfolio Guru Unlimited "
+        "is £9.99/month for unlimited filing and premium features."
+    )
 
 
 CONNECT_KAIZEN_ACTION = ChannelAction(
@@ -113,8 +123,7 @@ def select_deterministic_reply(
     if intent is ConversationalIntent.ACCOUNT_OR_BILLING:
         return ChannelReply(
             body=style_grounded_answer(
-                "The free plan includes 5 cases a month. Portfolio Guru Unlimited "
-                "is £9.99/month for unlimited filing and premium features.\n\n"
+                _plan_summary_text() + "\n\n"
                 "For account, access, billing or subscription changes, use the main "
                 "Portfolio Guru account/support flow rather than chat. I will not ask "
                 "for payment details or Kaizen credentials here."

@@ -41,7 +41,8 @@ def _context(user_data: dict | None = None):
 # --- Payments ---------------------------------------------------------------
 
 
-async def test_upgrade_button_for_paying_user_opens_no_checkout():
+async def test_upgrade_button_for_paying_user_opens_no_checkout(monkeypatch):
+    monkeypatch.setenv("PG_PAYMENTS_ENABLED", "1")
     update = _callback_update("UPGRADE|pro_plus")
     context = _context()
     checkout = AsyncMock(return_value="https://checkout.example")
@@ -54,7 +55,8 @@ async def test_upgrade_button_for_paying_user_opens_no_checkout():
     assert flow_edit.await_args.args[2] == bot._ALREADY_UNLIMITED_TEXT
 
 
-async def test_upgrade_button_for_free_user_still_opens_checkout():
+async def test_upgrade_button_for_free_user_still_opens_checkout(monkeypatch):
+    monkeypatch.setenv("PG_PAYMENTS_ENABLED", "1")
     update = _callback_update("UPGRADE|pro_plus")
     context = _context()
     checkout = AsyncMock(return_value="https://checkout.example")

@@ -61,6 +61,7 @@ CONSTANT_KINDS = {
     "WELCOME_MSG_CONNECTED": "prompt",
     "WHAT_IS_THIS_MSG": "explainer",
     "_ALREADY_UNLIMITED_TEXT": "confirmation",
+    "_BETA_PLAN_TEXT": "confirmation",
     "_PAYMENT_ACTIVE_TEXT": "confirmation",
     "_PAYMENT_PENDING_TEXT": "confirmation",
     "_PAYMENT_CANCELLED_TEXT": "confirmation",

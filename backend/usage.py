@@ -25,6 +25,17 @@ TIER_LIMITS = {
 }
 
 
+def payments_enabled() -> bool:
+    """Whether paid plans are switched on.
+
+    Until public launch every user is a beta user with unlimited use
+    (Moeed, 2026-09-28), so payments are off unless ``PG_PAYMENTS_ENABLED=1``.
+    Existing Stripe subscriptions still renew and cancel normally; only new
+    checkouts, upgrade prompts and usage caps are switched off.
+    """
+    return os.environ.get("PG_PAYMENTS_ENABLED", "").strip() == "1"
+
+
 async def _ensure_db():
     """Create tables if they don't exist."""
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -196,7 +207,12 @@ async def get_monthly_limit(tier: str) -> int:
 
 
 async def is_beta_tester(user_id: int) -> bool:
-    """Return True if the user has the beta_tester unlimited override."""
+    """Return True if the user has the beta_tester unlimited override.
+
+    While payments are off, every user is a beta user.
+    """
+    if not payments_enabled():
+        return True
     await _ensure_db()
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
@@ -221,6 +237,13 @@ async def set_beta_tester(user_id: int, is_beta: bool) -> None:
             (user_id, flag),
         )
         await db.commit()
+
+
+async def has_unlimited_access(user_id: int) -> bool:
+    """True for Unlimited subscribers and beta users (everyone while payments are off)."""
+    if await is_beta_tester(user_id):
+        return True
+    return await get_user_tier(user_id) == "pro_plus"
 
 
 async def check_can_file(user_id: int) -> tuple:

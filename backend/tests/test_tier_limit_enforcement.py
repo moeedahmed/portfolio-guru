@@ -21,6 +21,12 @@ from tests.bot_simulator import BotSimulator
 # ─── usage.check_can_file counts real usage ──────────────────────────────
 
 
+@pytest.fixture(autouse=True)
+def _payments_on(monkeypatch):
+    # These tests cover the paid plans; the beta default is in test_open_beta.py.
+    monkeypatch.setenv("PG_PAYMENTS_ENABLED", "1")
+
+
 @pytest.fixture
 def tmp_usage_db(tmp_path, monkeypatch):
     import usage

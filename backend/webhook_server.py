@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from fastapi import FastAPI, Request, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from stripe_handler import handle_webhook_event, create_checkout_session
+from stripe_handler import handle_webhook_event, create_checkout_session, PaymentsDisabledError
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +188,8 @@ async def create_checkout(
             success_url="https://emgurus.com/portfolio/dashboard?upgraded=1",
             cancel_url="https://emgurus.com/portfolio/dashboard?upgrade=cancelled",
         )
+    except PaymentsDisabledError:
+        raise HTTPException(status_code=403, detail="Payments are switched off during the beta")
     except Exception as exc:
         logger.error("Stripe checkout creation failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=502, detail="Stripe checkout creation failed")

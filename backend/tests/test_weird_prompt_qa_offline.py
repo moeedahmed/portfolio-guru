@@ -120,7 +120,7 @@ PROMPTS: tuple[WeirdPromptCase, ...] = (
     WeirdPromptCase(
         label="pricing",
         prompt="How much does this cost?",
-        expect_text_any=("5 cases", "£9.99/month"),
+        expect_text_any=("in beta", "free and unlimited"),
         forbid_text_any=("Draft now", "Captured.", "Add anything else", "completely free"),
         category="product-help",
     ),

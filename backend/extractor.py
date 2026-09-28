@@ -27,6 +27,7 @@ from evidence_artifact import (
 from model_config import gemini_three_five_flash_model
 from privacy_guard import deidentify_clinical_text
 import ai_telemetry
+from usage import payments_enabled
 
 # RCEM Higher EM Curriculum (2025 Update) — Exact Kaizen checkbox labels
 # Source: Live Kaizen CBD form screenshot (verified 2026-03-08)
@@ -1200,6 +1201,8 @@ Hard limits:
         )
     if _looks_like_pricing_question(text_lower):
         return (
+            "🧪 Portfolio Guru is in beta, so it's free and unlimited for now."
+            if not payments_enabled() else
             "💳 The free plan includes 5 cases a month. Portfolio Guru Unlimited is £9.99/month for unlimited filing and premium features."
         )
     if any(

@@ -166,6 +166,7 @@ async def test_answer_question_pricing_copy_is_not_free_hallucination(monkeypatc
     import extractor
 
     monkeypatch.setattr(extractor, "_get_client", lambda: object())
+    monkeypatch.setenv("PG_PAYMENTS_ENABLED", "1")
 
     answer = await extractor.answer_question("How much does this cost?")
 

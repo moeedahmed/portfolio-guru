@@ -187,6 +187,8 @@ def test_create_checkout_session_returns_url(client, monkeypatch):
     """End-to-end: valid JWT + linked user -> Stripe URL returned to caller."""
     import asyncio
 
+    monkeypatch.setenv("PG_PAYMENTS_ENABLED", "1")
+
     # Make the linked user known in the bot's SQLite store so set_user_tier
     # can find the customer later (not strictly required for this test, but
     # mirrors the production flow).
